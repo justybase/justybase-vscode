@@ -80,6 +80,73 @@ async function loginWithTestData(page: Page): Promise<void> {
   await button.click();
 }
 
+async function connectionIdByName(page: Page, profileName: string): Promise<string> {
+  return page.evaluate(async name => {
+    const response = await fetch('/api/connections', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`Could not load connection profiles (${response.status}).`);
+    const profiles = await response.json() as Array<{ id?: unknown; name?: unknown }>;
+    const profile = profiles.find(item => item.name === name);
+    if (!profile || typeof profile.id !== 'string') throw new Error(`Connection profile ${name} was not returned by the API.`);
+    return profile.id;
+  }, profileName);
+}
+
+/** Execute a guarded schema mutation and wait for the real query event terminal. */
+async function executeWriteStatement(page: Page, connectionId: string, sql: string): Promise<void> {
+  const outcome = await page.evaluate(async input => {
+    const csrfCookie = document.cookie.split('; ').find(cookie => cookie.startsWith('justybase_csrf='));
+    const csrf = csrfCookie?.slice('justybase_csrf='.length);
+    if (!csrf) throw new Error('The browser session did not expose a CSRF token.');
+    const postJson = async (url: string, body: unknown): Promise<Record<string, unknown>> => {
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-justybase-csrf': decodeURIComponent(csrf) },
+        body: JSON.stringify(body),
+      });
+      const text = await response.text();
+      let payload: Record<string, unknown> = {};
+      try { payload = JSON.parse(text) as Record<string, unknown>; } catch { /* error below carries the status */ }
+      if (!response.ok) throw new Error(`${url} failed (${response.status}): ${String(payload.message ?? text).slice(0, 300)}`);
+      return payload;
+    };
+    const preview = await postJson('/api/query/preview', { connectionId: input.connectionId, database: ':memory:', sql: input.sql, mode: 'single' });
+    const started = await postJson('/api/query', {
+      connectionId: input.connectionId,
+      database: ':memory:',
+      sql: input.sql,
+      mode: 'single',
+      writeConfirmed: true,
+      writePreviewToken: preview.previewToken,
+    });
+    if (typeof started.queryId !== 'string') throw new Error('The schema mutation did not return a query id.');
+    return await new Promise<{ status: string; message?: string }>((resolve, reject) => {
+      const socket = new WebSocket(`${location.origin.replace(/^http/iu, 'ws')}/api/ws`);
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        socket.close();
+        callback();
+      };
+      const timer = window.setTimeout(() => finish(() => reject(new Error('Timed out waiting for the schema mutation event.'))), 30_000);
+      socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'subscribe', queryId: started.queryId })));
+      socket.addEventListener('message', event => {
+        const payload = JSON.parse(String(event.data)) as { type?: string; status?: string; message?: string };
+        if (payload.type === 'error') finish(() => reject(new Error(payload.message ?? 'The schema mutation failed.')));
+        if (payload.type === 'batch-complete') finish(() => resolve({ status: payload.status ?? 'unknown', message: payload.message }));
+      });
+      socket.addEventListener('error', () => finish(() => reject(new Error('The schema mutation WebSocket failed.'))));
+    });
+  }, { connectionId, sql });
+  expect(outcome.status, outcome.message).toBe('complete');
+}
+
+async function monacoDocumentText(page: Page): Promise<string> {
+  return (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ');
+}
+
 test.describe('deterministic SQLite API-backed web workspace', () => {
   test('runs a controlled fixture through authentication, connection, result, and history @web-api', async ({ page }) => {
     const profileName = `Playwright SQLite ${Date.now()}`;
@@ -208,6 +275,64 @@ SELECT 3, 'SQLITE_FIXTURE'`;
 });
 
 test.describe('shared React web workspace', () => {
+  test('opens and copies reconstructed SQLite table/view DDL from the schema explorer @web-shared', async ({ page }) => {
+    const profileName = `Shared DDL SQLite ${Date.now()}`;
+    const tableName = `pw_ddl_table_${Date.now()}`;
+    const viewName = `pw_ddl_view_${Date.now()}`;
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
+    await loginWithTestData(page);
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
+    await page.locator('.shared-sidebar-heading button[aria-label="Add connection"]').click();
+    const dialog = page.getByRole('dialog', { name: 'Add connection' });
+    await dialog.getByLabel('Database type').selectOption('sqlite');
+    await dialog.getByLabel('Profile name').fill(profileName);
+    await dialog.locator('#connection-database').fill(':memory:');
+    await dialog.getByLabel('User').fill('local');
+    await dialog.locator('input[type="checkbox"]').uncheck();
+    await dialog.getByRole('button', { name: 'Add connection', exact: true }).click();
+    await expect(page.getByRole('button', { name: profileName, exact: true })).toBeVisible();
+
+    const connectionId = await connectionIdByName(page, profileName);
+    await executeWriteStatement(page, connectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`);
+    await executeWriteStatement(page, connectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`);
+
+    const schema = page.getByRole('tree', { name: 'Schema' });
+    await page.getByRole('button', { name: 'Refresh schema' }).click();
+    const search = page.getByRole('textbox', { name: 'Search schema' });
+    await search.fill(tableName);
+    const tableNode = schema.getByRole('treeitem').filter({ hasText: tableName }).first();
+    await expect(tableNode).toBeVisible({ timeout: 30_000 });
+    await tableNode.click({ button: 'right' });
+    const tableMenu = page.getByRole('menu', { name: `Actions for ${tableName}` });
+    await expect(tableMenu).toBeVisible();
+    await tableMenu.getByRole('menuitem', { name: 'Copy DDL', exact: true }).click();
+    await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain(`CREATE TABLE main.${tableName}`);
+    await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
+
+    await tableNode.click({ button: 'right' });
+    await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Open DDL', exact: true }).click();
+    await expect(page.getByRole('tab', { name: `DDL · ${tableName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
+    await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain('label TEXT');
+    await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL opened' })).toBeVisible();
+
+    await search.fill(viewName);
+    const viewNode = schema.getByRole('treeitem').filter({ hasText: viewName }).first();
+    await expect(viewNode).toBeVisible({ timeout: 30_000 });
+    await viewNode.click({ button: 'right' });
+    const viewMenu = page.getByRole('menu', { name: `Actions for ${viewName}` });
+    await viewMenu.getByRole('menuitem', { name: 'Copy DDL', exact: true }).click();
+    await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
+    await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
+
+    await viewNode.click({ button: 'right' });
+    await page.getByRole('menu', { name: `Actions for ${viewName}` }).getByRole('menuitem', { name: 'Open DDL', exact: true }).click();
+    await expect(page.getByRole('tab', { name: `DDL · ${viewName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
+  });
+
   test('uses the shared authoring and Result Grid contract in a real browser @web-shared', async ({ page }) => {
     const profileName = `Shared SQLite ${Date.now()}`;
     const fixtureQuery = `WITH RECURSIVE seq(value) AS (

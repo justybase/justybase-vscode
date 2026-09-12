@@ -738,6 +738,27 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, [api, openSharedDocument, selectedConnection]);
 
+  const copySchemaDdl = useCallback(async (node: SchemaTreeNode): Promise<void> => {
+    if (node.kind !== 'object' || !selectedConnection || !node.schema) return;
+    try {
+      const result = await api.ddl({
+        connectionId: selectedConnection.id,
+        database: node.database ?? selectedConnection.database,
+        schema: node.schema,
+        objectName: node.objectName ?? node.label,
+        objectType: node.objectType?.toUpperCase() || 'TABLE',
+      });
+      if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      await navigator.clipboard.writeText(result.ddlCode);
+      setNotice(result.ddlFidelity === 'reconstructed'
+        ? 'Reconstructed DDL copied; review metadata warnings before executing it.'
+        : 'DDL copied.');
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not copy DDL.');
+    }
+  }, [api, selectedConnection]);
+
   const insertSchemaNode = useCallback((node: SchemaTreeNode): void => {
     if (!activeDocument) return;
     const value = qualifySharedSchemaNode(node, authoringDatabaseKind);
@@ -961,6 +982,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       onOpenQuery={openSchemaQuery}
       onOpenExplain={explainSchemaObject}
       onOpenDdl={node => { void openSchemaDdl(node); }}
+      onCopyDdl={node => { void copySchemaDdl(node); }}
       onImport={node => setImportTarget(node)}
       onCopyName={copySchemaName}
       onToggleFavorite={toggleSchemaFavorite}

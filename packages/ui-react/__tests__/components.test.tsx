@@ -653,6 +653,7 @@ describe('shared React presentation', () => {
       onOpenQuery: jest.fn(),
       onOpenExplain: jest.fn(),
       onOpenDdl: jest.fn(),
+      onCopyDdl: jest.fn(),
       onImport: jest.fn(),
       onCopyName: jest.fn(),
     };
@@ -665,6 +666,9 @@ describe('shared React presentation', () => {
     fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
     await user.click(screen.getByRole('menuitem', { name: 'Open DDL' }));
     expect(actions.onOpenDdl).toHaveBeenCalledTimes(1);
+    fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
+    await user.click(screen.getByRole('menuitem', { name: 'Copy DDL' }));
+    expect(actions.onCopyDdl).toHaveBeenCalledTimes(1);
   });
 
   it('keeps shared schema search, shortcuts and lifecycle controls host-neutral', async () => {

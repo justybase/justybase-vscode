@@ -76,6 +76,70 @@ async function replaceMonacoText(page, sql) {
   await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(expectedMarker);
 }
 
+async function connectionIdByName(page, profileName) {
+  return page.evaluate(async name => {
+    const response = await fetch('/api/connections', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`Could not load connection profiles (${response.status}).`);
+    const profiles = await response.json();
+    const profile = profiles.find(item => item.name === name);
+    if (!profile || typeof profile.id !== 'string') throw new Error(`Connection profile ${name} was not returned by the API.`);
+    return profile.id;
+  }, profileName);
+}
+
+/** Execute a guarded schema mutation and wait for the real query event terminal. */
+async function executeWriteStatement(page, connectionId, sql) {
+  const outcome = await page.evaluate(async input => {
+    const csrfCookie = document.cookie.split('; ').find(cookie => cookie.startsWith('justybase_csrf='));
+    const csrf = csrfCookie?.slice('justybase_csrf='.length);
+    if (!csrf) throw new Error('The Electron session did not expose a CSRF token.');
+    const postJson = async (url, body) => {
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-justybase-csrf': decodeURIComponent(csrf) },
+        body: JSON.stringify(body),
+      });
+      const text = await response.text();
+      let payload = {};
+      try { payload = JSON.parse(text); } catch { /* error below carries the status */ }
+      if (!response.ok) throw new Error(`${url} failed (${response.status}): ${String(payload.message ?? text).slice(0, 300)}`);
+      return payload;
+    };
+    const preview = await postJson('/api/query/preview', { connectionId: input.connectionId, database: ':memory:', sql: input.sql, mode: 'single' });
+    const started = await postJson('/api/query', {
+      connectionId: input.connectionId,
+      database: ':memory:',
+      sql: input.sql,
+      mode: 'single',
+      writeConfirmed: true,
+      writePreviewToken: preview.previewToken,
+    });
+    if (typeof started.queryId !== 'string') throw new Error('The schema mutation did not return a query id.');
+    return await new Promise((resolve, reject) => {
+      const socket = new WebSocket(`${location.origin.replace(/^http/iu, 'ws')}/api/ws`);
+      let timer;
+      let settled = false;
+      const finish = callback => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) window.clearTimeout(timer);
+        socket.close();
+        callback();
+      };
+      timer = window.setTimeout(() => finish(() => reject(new Error('Timed out waiting for the schema mutation event.'))), 30_000);
+      socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'subscribe', queryId: started.queryId })));
+      socket.addEventListener('message', event => {
+        const payload = JSON.parse(String(event.data));
+        if (payload.type === 'error') finish(() => reject(new Error(payload.message ?? 'The schema mutation failed.')));
+        if (payload.type === 'batch-complete') finish(() => resolve({ status: payload.status ?? 'unknown', message: payload.message }));
+      });
+      socket.addEventListener('error', () => finish(() => reject(new Error('The schema mutation WebSocket failed.'))));
+    });
+  }, { connectionId, sql });
+  expect(outcome.status, outcome.message).toBe('complete');
+}
+
 async function spawnElectron(port, dataDirectory) {
   if (!existsSync(electronBinary)) {
     throw new Error(`Electron binary is missing at ${electronBinary}; install Electron or set JUSTYBASE_ELECTRON_BINARY.`);
@@ -190,6 +254,56 @@ async function run() {
     await replaceMonacoText(page, 'SX ');
     await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain('SELECT ');
     checks.push('Monaco completion parity for PostgreSQL, Db2, ClickHouse, Oracle and MSSQL plus SX shortcut');
+
+    phase = 'schema DDL';
+    const ddlProfileName = `Electron DDL SQLite ${Date.now()}`;
+    const tableName = `electron_ddl_table_${Date.now()}`;
+    const viewName = `electron_ddl_view_${Date.now()}`;
+    await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+    const connectionDialog = page.getByRole('dialog', { name: 'New connection', exact: true });
+    await connectionDialog.getByLabel('Database type').selectOption('sqlite');
+    await connectionDialog.getByLabel('Profile name').fill(ddlProfileName);
+    await connectionDialog.locator('input[maxlength="2048"]').fill(':memory:');
+    await connectionDialog.getByLabel('User').fill('local');
+    await connectionDialog.locator('input[type="checkbox"]').uncheck();
+    await connectionDialog.getByRole('button', { name: 'Add connection', exact: true }).click();
+    await expect(page.getByRole('button', { name: `${ddlProfileName} sqlite`, exact: true })).toBeVisible();
+    const ddlConnectionId = await connectionIdByName(page, ddlProfileName);
+    await executeWriteStatement(page, ddlConnectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`);
+    await executeWriteStatement(page, ddlConnectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`);
+
+    const schema = page.getByRole('region', { name: 'Database schema', exact: true });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
+    await schema.getByRole('button', { name: 'Refresh schema', exact: true }).click();
+    await schema.getByRole('button', { name: 'Expand all schema nodes', exact: true }).click();
+    const tableNode = schema.locator('.electron-schema-label').filter({ hasText: tableName }).first();
+    await expect(tableNode).toBeVisible({ timeout: 30_000 });
+    await tableNode.click({ button: 'right' });
+    const tableMenu = page.getByRole('menu').filter({ hasText: tableName }).first();
+    await expect(tableMenu).toBeVisible();
+    await tableMenu.getByRole('button', { name: 'Copy DDL', exact: true }).click();
+    await expect.poll(() => page.evaluate(async () => navigator.clipboard.readText()), { timeout: 10_000 }).toContain(`CREATE TABLE main.${tableName}`);
+    await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
+
+    await tableNode.click({ button: 'right' });
+    await page.getByRole('menu').filter({ hasText: tableName }).first().getByRole('button', { name: 'Open DDL', exact: true }).click();
+    await expect(page.getByRole('tab', { name: `DDL · ${tableName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
+    await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain('label TEXT');
+
+    const viewNode = schema.locator('.electron-schema-label').filter({ hasText: viewName }).first();
+    await expect(viewNode).toBeVisible({ timeout: 30_000 });
+    await viewNode.click({ button: 'right' });
+    const viewMenu = page.getByRole('menu').filter({ hasText: viewName }).first();
+    await viewMenu.getByRole('button', { name: 'Copy DDL', exact: true }).click();
+    await expect.poll(() => page.evaluate(async () => navigator.clipboard.readText()), { timeout: 10_000 }).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
+    await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
+
+    await viewNode.click({ button: 'right' });
+    await page.getByRole('menu').filter({ hasText: viewName }).first().getByRole('button', { name: 'Open DDL', exact: true }).click();
+    await expect(page.getByRole('tab', { name: `DDL · ${viewName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
+    checks.push('schema explorer table/view DDL open/copy through guarded SQLite metadata');
 
     phase = 'result execution';
     const fixtureQuery = `WITH RECURSIVE seq(value) AS (
