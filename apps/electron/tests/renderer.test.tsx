@@ -128,6 +128,7 @@ describe('Electron renderer composition', () => {
       const route = String(input);
       if (route === '/api/query') return jsonResponse({ queryId: 'query-1', statementCount: 1 });
       if (route.includes('/page')) return jsonResponse({ queryId: 'query-1', sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }], rows: [[1, 'Alpha']], offset: 0, limit: 500, totalRows: 1, hasMore: false });
+      if (route.includes('/aggregate')) return jsonResponse({ queryId: 'query-1', filteredRowCount: 1, values: [{ columnIndex: 0, count: 1, sum: 1, avg: 1, min: 1, max: 1 }] });
       if (route.includes('/cancel')) return jsonResponse({ ok: true });
       return jsonResponse({});
     });
@@ -165,6 +166,10 @@ describe('Electron renderer composition', () => {
     await waitFor(() => expect(clipboard).toHaveBeenLastCalledWith('Alpha'));
     fireEvent.click(screen.getByRole('button', { name: 'Close cell value' }));
     expect(screen.queryByRole('dialog', { name: 'Cell Value: NAME' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Aggregate' }));
+    expect(await screen.findByRole('heading', { name: 'Aggregates' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Result analysis' })).toHaveTextContent('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Close result analysis' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: 'Alpha' } });
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
