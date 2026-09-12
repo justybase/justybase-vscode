@@ -458,7 +458,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       { name: 'Average' },
       { name: 'Min' },
       { name: 'Max' },
-    ]);
+    ]).map(column => ({ ...column, undefinedPlaceholder: '—' }));
     const rows = aggregates.values.map(value => {
       const sourceName = result.columns[value.columnIndex] ?? `Column ${value.columnIndex + 1}`;
       return [
@@ -468,7 +468,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
         value.avg,
         value.min,
         value.max,
-      ].map((cell, index) => index < 2 ? cell : cell === undefined ? null : cell);
+      ];
     });
     return {
       columns,
@@ -478,7 +478,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
         const sourceColumnIndex = aggregates.values[rowIndex]?.columnIndex;
         if (sourceColumnIndex === undefined) return column;
         const sourceColumn = gridColumns[sourceColumnIndex];
-        return sourceColumn === undefined ? column : sourceColumn;
+        if (sourceColumn === undefined) return column;
+        const { inferredDateInteger: _inferredDateInteger, ...sourceWithoutInferredDate } = sourceColumn;
+        return {
+          ...sourceWithoutInferredDate,
+          ...(columnIndex === 3 ? { type: 'DECIMAL', scale: Math.max(1, sourceColumn.scale ?? 4), inferredNumericKind: 'decimal' as const } : {}),
+          undefinedPlaceholder: column.undefinedPlaceholder,
+        };
       },
     };
   }, [aggregates, result.columns, gridColumns]);
@@ -611,8 +617,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       <div className="grid-tool-group grid-export-actions"><label className="grid-export-label">Export<select className="grid-export-format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)} aria-label="Export format"><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB (preferred, faster)</option></select></label><button className="secondary small" disabled={exporting} onClick={() => void exportResult()}>{exporting ? 'Exporting…' : 'Download'}</button></div>
       {loading && <span className="running">Loading…</span>}{error && <span className="grid-error">{error}</span>}
     </div>
-    {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
-    {(grouped || pivot) && groupedGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:${pivot ? 'pivot' : 'grouped'}`} columns={groupedGrid.columns} rows={groupedGrid.rows} totalRowCount={groupedGrid.rows.length} /></div></div>}
+    {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
+    {(grouped || pivot) && groupedGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:${pivot ? 'pivot' : 'grouped'}`} columns={groupedGrid.columns} rows={groupedGrid.rows} totalRowCount={groupedGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} /></div></div>}
     <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onContextMenu={context => setContextMenu({ x: context.clientX, y: context.clientY, rowIndex: context.rowIndex, columnIndex: context.columnIndex })} />
     {contextMenu && <div className="grid-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button type="button" onClick={() => copyContext('value')}>Copy value</button><button type="button" onClick={() => copyContext('tsv')}>Copy row as TSV</button><button type="button" onClick={() => copyContext('json')}>Copy row as JSON</button><button type="button" onClick={() => copyContext('markdown')}>Copy row as Markdown</button><button type="button" onClick={() => copyContext('sql')}>Copy SQL INSERT</button><hr /><button type="button" onClick={filterByContextValue}>Filter by this value</button><button type="button" onClick={() => sortByContextValue(false)}>Sort ascending</button><button type="button" onClick={() => sortByContextValue(true)}>Sort descending</button><hr /><button type="button" onClick={() => { setDetailRowIndex(contextMenu.rowIndex); setContextMenu(null); }}>View full row</button>{onEditRow && <button type="button" onClick={() => { const row = contextRow(); if (row) onEditRow([...row.values]); setContextMenu(null); }}>Edit row…</button>}</div>}
     {detailRowIndex !== null && gridRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{gridRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, gridColumns[index]).text}</dd></div>)}</dl></aside>}

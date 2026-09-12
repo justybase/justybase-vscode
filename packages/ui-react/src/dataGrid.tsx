@@ -253,6 +253,14 @@ function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): nu
   return -1;
 }
 
+/** Returns raw column indexes in the order and visibility of a grid view. */
+export function resolveDataGridColumnIndexes(
+  columns: readonly DataGridColumn[],
+  view: DataGridViewState = normaliseView(undefined),
+): readonly number[] {
+  return orderColumns(columns, normaliseView(view));
+}
+
 export function resolveDataGridColumns(
   columns: readonly DataGridColumn[],
   rows: readonly (readonly unknown[])[],
@@ -263,36 +271,50 @@ export function resolveDataGridColumns(
   }));
 }
 
-function compareValues(left: unknown, right: unknown, column: DataGridColumn): number {
+function compareValues(left: unknown, right: unknown, leftColumn: DataGridCellMetadata, rightColumn = leftColumn): number {
   if (left === null || left === undefined) return right === null || right === undefined ? 0 : -1;
   if (right === null || right === undefined) return 1;
-  if (isDataGridTemporalColumn(column)) {
-    const leftTime = parseTemporalSortValue(left, column);
-    const rightTime = parseTemporalSortValue(right, column);
+  if (isDataGridTemporalColumn(leftColumn) || isDataGridTemporalColumn(rightColumn)) {
+    const leftTime = parseTemporalSortValue(left, leftColumn);
+    const rightTime = parseTemporalSortValue(right, rightColumn);
     if (leftTime !== undefined || rightTime !== undefined) {
       if (leftTime === undefined) return -1;
       if (rightTime === undefined) return 1;
       return leftTime - rightTime;
     }
   }
-  if (isDataGridNumericColumn(column)) {
+  if (isDataGridNumericColumn(leftColumn) || isDataGridNumericColumn(rightColumn)) {
     const leftDecimal = parseComparableDecimal(left);
     const rightDecimal = parseComparableDecimal(right);
     if (leftDecimal && rightDecimal) return compareComparableDecimals(leftDecimal, rightDecimal);
   }
-  return cellText(left, column).localeCompare(cellText(right, column), undefined, { numeric: true, sensitivity: 'base' });
+  return cellText(left, leftColumn).localeCompare(cellText(right, rightColumn), undefined, { numeric: true, sensitivity: 'base' });
 }
+
+type CellMetadataResolver = (
+  value: unknown,
+  rowIndex: number,
+  columnIndex: number,
+  column: DataGridColumn,
+) => DataGridCellMetadata;
 
 function matchesRow(
   columns: readonly DataGridColumn[],
   values: readonly unknown[],
   view: DataGridViewState,
+  sourceIndex: number,
+  getCellMetadata?: CellMetadataResolver,
 ): boolean {
   const globalFilter = view.globalFilter.trim();
-  if (globalFilter && !values.some((value, columnIndex) => matchesDataGridFilterValue(value, globalFilter, columns[columnIndex]))) return false;
+  if (globalFilter && !values.some((value, columnIndex) => {
+    const column = columns[columnIndex];
+    const metadata = column === undefined ? undefined : getCellMetadata?.(value, sourceIndex, columnIndex, column) ?? column;
+    return matchesDataGridFilterValue(value, globalFilter, metadata);
+  })) return false;
   return columns.every((column, columnIndex) => {
     const filter = filterValue(view, column, columnIndex).trim();
-    return !filter || matchesDataGridFilterValue(values[columnIndex], filter, column);
+    const metadata = getCellMetadata?.(values[columnIndex], sourceIndex, columnIndex, column) ?? column;
+    return !filter || matchesDataGridFilterValue(values[columnIndex], filter, metadata);
   });
 }
 
@@ -301,9 +323,10 @@ function processIndexedRows(
   rows: readonly (readonly unknown[])[],
   view: DataGridViewState,
   clientProcessing: boolean,
+  getCellMetadata?: CellMetadataResolver,
 ): readonly IndexedRow[] {
   const indexed = rows.flatMap((values, sourceIndex) => {
-    if (clientProcessing && !matchesRow(columns, values, view)) return [];
+    if (clientProcessing && !matchesRow(columns, values, view, sourceIndex, getCellMetadata)) return [];
     return [{ values, sourceIndex }];
   });
   if (!clientProcessing) return indexed;
@@ -312,7 +335,10 @@ function processIndexedRows(
     .filter(item => item.columnIndex >= 0);
   indexed.sort((left, right) => {
     for (const item of sorting) {
-      const comparison = compareValues(left.values[item.columnIndex], right.values[item.columnIndex], columns[item.columnIndex]!);
+      const column = columns[item.columnIndex]!;
+      const leftColumn = getCellMetadata?.(left.values[item.columnIndex], left.sourceIndex, item.columnIndex, column) ?? column;
+      const rightColumn = getCellMetadata?.(right.values[item.columnIndex], right.sourceIndex, item.columnIndex, column) ?? column;
+      const comparison = compareValues(left.values[item.columnIndex], right.values[item.columnIndex], leftColumn, rightColumn);
       if (comparison !== 0) return item.descending ? -comparison : comparison;
     }
     return left.sourceIndex - right.sourceIndex;
@@ -345,17 +371,21 @@ function indexedRows(
   rows: readonly (readonly unknown[])[],
   view: DataGridViewState,
   clientProcessing: boolean,
+  getCellMetadata?: CellMetadataResolver,
 ): readonly IndexedRow[] {
-  return processIndexedRows(columns, rows, view, clientProcessing);
+  return processIndexedRows(columns, rows, view, clientProcessing, getCellMetadata);
 }
 
-function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow[], grouping: readonly string[]): readonly RenderedRow[] {
+function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow[], grouping: readonly string[], getCellMetadata?: CellMetadataResolver): readonly RenderedRow[] {
   if (grouping.length === 0) return rows.map((row, displayIndex) => ({ ...row, kind: 'data', displayIndex }));
   const groups = new Map<string, IndexedRow[]>();
   for (const row of rows) {
     const values = grouping.map(key => {
       const index = resolveColumnIndex(columns, key);
-      return formatDataGridCellValue(index >= 0 ? row.values[index] : undefined, index >= 0 ? columns[index]?.type : undefined, index >= 0 ? columns[index] : undefined);
+      const column = index >= 0 ? columns[index] : undefined;
+      const value = index >= 0 ? row.values[index] : undefined;
+      const metadata = column === undefined ? undefined : getCellMetadata?.(value, row.sourceIndex, index, column) ?? column;
+      return formatDataGridCellValue(value, metadata?.type, metadata);
     });
     const id = JSON.stringify(values);
     const group = groups.get(id) ?? [];
@@ -494,8 +524,8 @@ export function DataGrid({
   }, []);
 
   const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
-  const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing), [resolvedColumns, rows, activeView, clientProcessing]);
-  const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping), [resolvedColumns, processedRows, activeView.grouping]);
+  const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing, getCellMetadata), [resolvedColumns, rows, activeView, clientProcessing, getCellMetadata]);
+  const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata), [resolvedColumns, processedRows, activeView.grouping, getCellMetadata]);
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());

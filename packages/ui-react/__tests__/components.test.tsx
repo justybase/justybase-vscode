@@ -197,6 +197,24 @@ describe('shared React presentation', () => {
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ rows: [[true]] }));
   });
 
+  it('keeps unavailable aggregates distinct from SQL NULL', () => {
+    expect(formatDataGridCellValue(undefined, undefined, { undefinedPlaceholder: '—' })).toBe('—');
+    expect(formatDataGridCellValue(null, undefined, { undefinedPlaceholder: '—' })).toBe('NULL');
+  });
+
+  it('uses per-cell metadata for client filtering and sorting', () => {
+    const getCellMetadata = jest.fn((_value: unknown, _rowIndex: number, _columnIndex: number, _column: { name: string }) => ({ type: 'TEXT' }));
+    render(<DataGrid
+      resultSetId="per-cell-metadata"
+      columns={[{ name: 'VALUE' }]}
+      rows={[[1], [2]]}
+      view={{ globalFilter: '1', columnFilters: {}, sorting: [], grouping: [] }}
+      getCellMetadata={getCellMetadata}
+    />);
+    expect(screen.getAllByRole('cell')).toHaveLength(1);
+    expect(getCellMetadata.mock.calls.some(call => call[0] === 2)).toBe(true);
+  });
+
   it('matches canonical typed sorting and keeps selection coordinates in display order', () => {
     const numericColumns = [{ name: 'AMOUNT', type: 'DECIMAL' }];
     expect(processDataGridRows(numericColumns, [['9007199254740993'], ['10.00'], [null], ['2.0']], {
