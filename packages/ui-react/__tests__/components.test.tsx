@@ -550,6 +550,27 @@ describe('shared React presentation', () => {
     expect(onApply).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes common schema object actions from the shared context menu', async () => {
+    const user = userEvent.setup();
+    const actions = {
+      onInsert: jest.fn(),
+      onOpenQuery: jest.fn(),
+      onOpenExplain: jest.fn(),
+      onOpenDdl: jest.fn(),
+      onImport: jest.fn(),
+      onCopyName: jest.fn(),
+    };
+    const table = { id: 'table-1', kind: 'object' as const, label: 'ORDERS', objectName: 'ORDERS', objectType: 'TABLE', database: 'DB', schema: 'PUBLIC', hasChildren: true };
+    render(<SchemaTree nodes={[table]} onSelect={jest.fn()} {...actions} />);
+    fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
+    expect(screen.getByRole('menu', { name: 'Actions for ORDERS' })).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'View top 1000' }));
+    expect(actions.onOpenQuery).toHaveBeenCalledWith(expect.objectContaining({ id: 'table-1' }));
+    fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
+    await user.click(screen.getByRole('menuitem', { name: 'Open DDL' }));
+    expect(actions.onOpenDdl).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps result tabs keyboard navigable with roving focus', () => {
     const onSelect = jest.fn();
     render(<ResultTabs results={[{ ...result, resultSetId: 'result-1' }, { ...result, resultSetId: 'result-2' }]} activeResultSetId="result-1" onSelect={onSelect} />);

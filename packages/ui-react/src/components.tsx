@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseKind } from '@justybase/contracts';
 import type { MetadataNode } from '@justybase/ui-core';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
@@ -179,12 +179,49 @@ export function RowDetail({ columns, row, onClose }: RowDetailProps): ReactNode 
   return <aside className="ui-row-detail" aria-labelledby="ui-row-detail-title"><div><h2 id="ui-row-detail-title">Row details</h2><button type="button" onClick={onClose}>Close</button></div><dl>{columns.map((column, index) => <div key={`${column.name}:${index}`}><dt>{column.name}</dt><dd>{formatDataGridCellValue(row[index], column.type, column)}</dd></div>)}</dl></aside>;
 }
 
-export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect }: SchemaTreeProps): ReactNode {
+export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect, onInsert, onOpenQuery, onOpenExplain, onOpenDdl, onImport, onCopyName }: SchemaTreeProps): ReactNode {
   const expanded = new Set(expandedIds ?? []);
-  return <div className="ui-schema-tree" role="tree" aria-label="Schema">{nodes.map(node => <div className="ui-schema-node" role="treeitem" aria-selected={node.id === selectedId} aria-expanded={node.hasChildren ? expanded.has(node.id) : undefined} key={node.id}>
+  const [contextMenu, setContextMenu] = useState<{ readonly node: MetadataNode; readonly clientX: number; readonly clientY: number } | undefined>(undefined);
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = (): void => setContextMenu(undefined);
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => { if (event.key === 'Escape') close(); };
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [contextMenu]);
+
+  const openMenu = (event: ReactMouseEvent<HTMLDivElement>, node: MetadataNode): void => {
+    if (node.kind !== 'object' && node.kind !== 'column') return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect?.(node);
+    setContextMenu({ node, clientX: event.clientX, clientY: event.clientY });
+  };
+  const runAction = (action: ((node: MetadataNode) => void) | undefined): void => {
+    const node = contextMenu?.node;
+    setContextMenu(undefined);
+    if (node) action?.(node);
+  };
+  const hasObjectActions = contextMenu?.node.kind === 'object';
+
+  return <div className="ui-schema-tree" role="tree" aria-label="Schema">{nodes.map(node => <div className="ui-schema-node" role="treeitem" aria-selected={node.id === selectedId} aria-expanded={node.hasChildren ? expanded.has(node.id) : undefined} key={node.id} onContextMenu={event => openMenu(event, node)}>
     {node.hasChildren && <button type="button" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.label}`} onClick={() => onToggle?.(node)}>{expanded.has(node.id) ? '▾' : '▸'}</button>}
-    <button type="button" onClick={() => onSelect?.(node)}>{node.label}</button>
-  </div>)}</div>;
+    <button type="button" title={node.description} onClick={() => onSelect?.(node)}>{node.label}{node.kind === 'column' && node.columnType ? ` · ${node.columnType}` : ''}</button>
+  </div>)}
+    {contextMenu && <div className="ui-schema-context-menu" role="menu" aria-label={`Actions for ${contextMenu.node.label}`} style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
+      <strong>{contextMenu.node.label}</strong>
+      {onInsert && <button type="button" role="menuitem" onClick={() => runAction(onInsert)}>Insert name</button>}
+      {hasObjectActions && onOpenQuery && <button type="button" role="menuitem" onClick={() => runAction(onOpenQuery)}>View top 1000</button>}
+      {hasObjectActions && onOpenExplain && <button type="button" role="menuitem" onClick={() => runAction(onOpenExplain)}>Explain plan</button>}
+      {hasObjectActions && onOpenDdl && <button type="button" role="menuitem" onClick={() => runAction(onOpenDdl)}>Open DDL</button>}
+      {hasObjectActions && onImport && <button type="button" role="menuitem" onClick={() => runAction(onImport)}>Import CSV/XLSX</button>}
+      {onCopyName && <button type="button" role="menuitem" onClick={() => runAction(onCopyName)}>Copy qualified name</button>}
+    </div>}
+  </div>;
 }
 
 export interface HistoryViewEntry {
@@ -207,6 +244,12 @@ export interface SchemaTreeProps {
   readonly expandedIds?: readonly string[];
   readonly onToggle?: (node: MetadataNode) => void;
   readonly onSelect?: (node: MetadataNode) => void;
+  readonly onInsert?: (node: MetadataNode) => void;
+  readonly onOpenQuery?: (node: MetadataNode) => void;
+  readonly onOpenExplain?: (node: MetadataNode) => void;
+  readonly onOpenDdl?: (node: MetadataNode) => void;
+  readonly onImport?: (node: MetadataNode) => void;
+  readonly onCopyName?: (node: MetadataNode) => void;
 }
 
 export interface HistoryViewProps {
