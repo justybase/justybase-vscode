@@ -189,6 +189,7 @@ interface ResultPanelWebviewToHostMessageMap {
         resultSetIndex: number;
         requestId: number;
         aggregations: Array<{ columnIndex: number; fn: string }>;
+        querySpec?: DiskQuerySpec;
         timeoutSeconds?: number;
         isRetry?: boolean;
     };

@@ -218,6 +218,7 @@ export type ResultPanelWebviewToHostMessage =
         resultSetIndex: number;
         requestId: number;
         aggregations: DatabaseAggregationRequest[];
+        querySpec?: DiskQuerySpec;
         timeoutSeconds?: number;
         isRetry?: boolean;
       }

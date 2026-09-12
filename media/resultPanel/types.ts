@@ -211,6 +211,7 @@ export interface DiskAggregationResult {
     columnIndex: number;
     fn: string;
     value: unknown;
+    filteredRowCount?: number;
 }
 
 export interface DiskGroupLevel {

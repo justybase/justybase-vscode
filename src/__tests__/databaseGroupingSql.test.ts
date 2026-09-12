@@ -371,6 +371,25 @@ describe('databaseGroupingSql', () => {
         expect(whereLines.length).toBe(0);
     });
 
+    it('applies a shared result-grid filter before grouping', () => {
+        const built = buildDatabaseGroupingSql(BASE_SQL, COLUMNS, {
+            groupByColumns: [{ columnIndex: 1, columnName: 'DEPARTMENT' }],
+            functions: [{ fn: 'count' }],
+            filterSpec: {
+                globalSearch: 'sales',
+                columnFilters: [{
+                    columnIndex: 2,
+                    conditions: [{ type: 'greaterThan', value: '100' }],
+                }],
+            },
+        });
+
+        expect(built.sql).toContain('WHERE');
+        expect(built.sql).toContain('LOWER(CAST(t."EMPLOYEE_ID" AS VARCHAR(64000)))');
+        expect(built.sql).toContain('t."SALARY" > 100');
+        expect(built.sql).toContain('GROUP BY t."DEPARTMENT"');
+    });
+
     // ======================== Error Cases ========================
 
     it('throws error when base SQL is empty', () => {

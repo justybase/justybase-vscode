@@ -70,7 +70,7 @@ export type ResultPanelInboundMessage =
     | { command: 'closeResult'; sourceUri: string; resultSetIndex: number }
     | { command: 'refreshResult'; sourceUri: string; resultSetIndex: number; limitValue?: string }
     | { command: 'clearRefreshFailure'; sourceUri: string; resultSetIndex: number }
-    | { command: 'requestDatabaseAggregations'; sourceUri: string; resultSetIndex: number; requestId: number; aggregations: DatabaseAggregationRequest[]; timeoutSeconds?: number; isRetry?: boolean }
+    | { command: 'requestDatabaseAggregations'; sourceUri: string; resultSetIndex: number; requestId: number; aggregations: DatabaseAggregationRequest[]; querySpec?: DiskQuerySpec; timeoutSeconds?: number; isRetry?: boolean }
     | { command: 'requestDatabaseFilterValues'; sourceUri: string; resultSetIndex: number; columnIndex: number; requestId: number; querySpec?: DiskQuerySpec; timeoutSeconds?: number; isRetry?: boolean }
     | { command: 'applyDatabaseFilter'; sourceUri: string; resultSetIndex: number; requestId: number; querySpec?: DiskQuerySpec; timeoutSeconds?: number; isRetry?: boolean }
     | { command: 'closeAllResults'; sourceUri: string }
