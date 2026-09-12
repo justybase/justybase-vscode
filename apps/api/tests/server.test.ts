@@ -37,6 +37,11 @@ describe('web API authentication and connection profiles', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  afterEach(() => {
+    // Keep each scenario independent while retaining the production limiter.
+    app.rateLimiter.clear();
+  });
+
   it('bootstraps an admin and protects authenticated routes', async () => {
     const unauthenticated = await app.inject({ method: 'GET', url: '/api/connections' });
     expect(unauthenticated.statusCode).toBe(401);
