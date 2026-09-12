@@ -76,6 +76,7 @@ interface ApiOptions {
   readonly connectionsError?: boolean;
   readonly historyError?: boolean;
   readonly schemaError?: boolean;
+  readonly schemaObject?: boolean;
   readonly pageError?: boolean;
   readonly startError?: boolean;
   readonly cancelError?: boolean;
@@ -94,7 +95,9 @@ function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mo
     }
     if (url.includes('/api/schema/tree')) {
       if (options.schemaError) throw new Error('schema failed');
-      return response({ nodes: [{ id: 'cte-1', kind: 'cte', label: 'orders_cte', hasChildren: false }] });
+      return response({ nodes: options.schemaObject
+        ? [{ id: 'object-1', kind: 'object', label: 'orders', database: 'main', schema: 'public', objectName: 'orders', objectType: 'TABLE', hasChildren: true }]
+        : [{ id: 'cte-1', kind: 'cte', label: 'orders_cte', hasChildren: false }] });
     }
     if (url.endsWith('/api/query')) {
       if (options.startError) throw new Error('start failed');
@@ -208,6 +211,19 @@ describe('shared Web UI adapter edge contracts', () => {
     await user.click(screen.getByRole('button', { name: 'History' }));
     await waitFor(() => expect(screen.getAllByRole('alert').some(element => element.textContent?.includes('history failed'))).toBe(true));
     failingView.unmount();
+  });
+
+  it('runs shared schema preview actions through the selected connection', async () => {
+    const user = userEvent.setup();
+    const { api, fetchMock } = edgeApi({ schemaObject: true });
+    render(<SharedWebWorkspace api={api} user={{ id: 'schema-user', username: 'alice', role: 'user' }} onLogout={() => undefined} />);
+    await screen.findByRole('button', { name: 'SQLite' });
+    const treeItem = await screen.findByRole('treeitem', { name: /orders/i });
+    fireEvent.contextMenu(treeItem, { clientX: 40, clientY: 40 });
+    await user.click(screen.getByRole('menuitem', { name: 'View top 1000' }));
+    await waitFor(() => expect((screen.getByLabelText('SQL editor') as HTMLTextAreaElement).value).toContain('FROM "public"."orders"'));
+    const startCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/query'));
+    expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ database: 'main' }));
   });
 
   it('maps error, cancellation and empty result terminal states without retrying SQL', async () => {
