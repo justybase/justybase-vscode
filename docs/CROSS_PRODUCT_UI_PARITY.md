@@ -1,8 +1,10 @@
 # Cross-product UI parity matrix
 
-Last updated: 2026-09-12
-Status: R10 Web Dockyard rollout is implemented on Linux; R9 cross-product
-parity and non-Linux evidence remain open.
+Last updated: 2026-09-13
+Status: R10 Web Dockyard rollout is implemented and verified locally on Linux;
+the cross-platform Chromium/API workflow is now committed, while its Windows
+and macOS evidence awaits an external CI run. R9 cross-product parity remains
+open.
 
 This is the operational inventory for [R9 and R10 in the refactoring plan](REFACTORING_PLAN.md#r10-dockyard-web-workspace-and-test-harness-login).
 It records the ownership and behavior that a vertical slice must preserve
@@ -74,6 +76,10 @@ import/export workflows through the real loopback API.
   filtering, rapid-query coalescing, sorting, export preparation, virtual
   scrolling, persistence, grouping, hidden views, and out-of-order stream
   recovery.
+- Web Dockyard cross-platform gate: `.github/workflows/web-dockyard.yml`
+  runs the real `npm run test:playwright:web-api` Chromium/API scenario on
+  Linux, Windows, and macOS. The local Linux run is the current proof point;
+  Windows/macOS are intentionally recorded as pending until the matrix runs.
 - `@vscode/test-electron`: package version `3.1.0`; the Extension Host version
   remains the version reported by its managed download on the gate runner.
 

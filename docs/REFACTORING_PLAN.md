@@ -751,8 +751,10 @@ temporary and ignored until the user makes a separate release decision.
 ### R10 — Dockyard web workspace and test-harness login
 
 Status: implementation complete for the Web Dockyard path and its controlled
-test harness on Linux (2026-09-12); cross-product parity and non-Linux browser
-evidence remain follow-up work. R10 starts after the R9 foundation is in place.
+test harness on Linux (2026-09-13); the required cross-platform browser
+workflow is now in place, but its Windows/macOS evidence remains pending an
+external CI run. Cross-product parity outside the R10 Web boundary remains
+follow-up work. R10 starts after the R9 foundation is in place.
 It replaces the Web editor's default shell with the web-only Dockyard adapter
 while keeping `ui-core` and `ui-react` platform-neutral. Dockyard is used as a
 retained-DOM layout engine; it is not treated as a verified AvalonDock/XAML
@@ -821,6 +823,7 @@ port.
 | Test login | Web client/component tests; API route tests for bodyless login, matching cookies/session, and absence outside controlled test mode. |
 | Dockyard lifecycle | Layout migration/validation tests plus adapter disposal tests covering hosts, listeners, subscriptions, stale content, and failed initialization. |
 | Web workspace | `npm run test:web`, `npm run build:web`, and the deterministic Playwright flow covering login, query documents, reorder, float, auto-hide, dock-back, reload, history, Explain, modals, cancellation, and narrow viewport. |
+| Cross-platform browser | `.github/workflows/web-dockyard.yml` runs the controlled Chromium/API flow on `ubuntu-latest`, `windows-latest`, and `macos-14`; all three matrix jobs must pass before R10 evidence is closed. |
 | Final R10 | `npm run verify:pr`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, and the applicable browser/API/package gates. |
 
 R10 is complete only when the Web Dockyard layout survives reload and user
