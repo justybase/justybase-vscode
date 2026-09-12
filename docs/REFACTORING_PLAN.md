@@ -635,17 +635,16 @@ twice merely to compare old and new UI paths.
    IPC payloads, persistence, logs, or URL values. The current
    `npm run test:electron` gate runs the Electron workspace Jest suite: its
    startup tests use an injected API factory/fetcher, and its smoke tests
-   cover the broker, redaction, and IPC contracts. It does not launch a real
-   Electron window, read `JUSTYBASE_*` environment variables, or verify
-   process/resource cleanup through a close event. The following are future
-   acceptance criteria for promoting the development shell to a full Electron
-   smoke gate: start the API with an isolated data directory and explicit
-   test-only `JUSTYBASE_MASTER_KEY`, `JUSTYBASE_ADMIN_USER`, and
-   `JUSTYBASE_ADMIN_PASSWORD` values; log in using that provisioned
-   admin/session; use controlled data; launch and close the window; and verify
-   API shutdown plus timer, socket, session, and temporary-profile cleanup. A
-   random master key alone does not provision a login. No installer,
-   auto-update, or system integration is part of R9.
+   cover the broker, redaction, and IPC contracts. The separate
+   `npm run test:electron:live` gate starts the real embedded API with an
+   isolated profile, authenticates in the main process, launches a real
+   Electron window, drives the shared renderer through controlled SQLite
+   authoring, schema, designer, result-grid, scroll, clipboard, and export
+   checks, then verifies close-time cleanup. Promoting the development shell
+   to a packaged product still requires distribution, installer, update,
+   native-dialog, and non-Linux lifecycle evidence. A random master key alone
+   does not provision a login. No installer, auto-update, or system
+   integration is part of R9.
 3. **VS Code:** host the migrated React components in webviews. The adapter
    translates webview messages and Extension Host commands to shared ports,
    preserving current host semantics, activation, secrets, workspace
@@ -722,7 +721,7 @@ slice passes all gates.
 | Baseline and every slice | `npm run check:architecture`, `npm run check-types`, `npm run lint`, `npm run lint:extended:check`, and focused tests; skipped environment gates are recorded, not passed. |
 | Changed UI coverage enforcement | CI and local changed-coverage input include `media`, `apps/web`, `apps/electron`, `packages/ui-core`, and `packages/ui-react`; each changed UI file has an LCOV/package gate at least 80% lines and 70% branches. |
 | `ui-core` / `ui-react` | Reducer, port, capability, persistence, React component, focus, keyboard, and accessibility tests, including loading/empty/error/cancel states; changed-code coverage must include the UI paths before their shared flag is enabled. |
-| Result Panel | `npm run test:result-core`, Web tests, `test-harness/tests/table-rendering.spec.ts`, `npm run test:extension-host`, `JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host`, `npm run benchmark:data-grid`, and `npm run test:playwright:data-grid-performance`. |
+| Result Panel | `npm run test:result-core`, Web tests, `test-harness/tests/table-rendering.spec.ts`, `npm run test:extension-host`, `JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host`, `npm run test:electron:live`, `npm run benchmark:data-grid`, and `npm run test:playwright:data-grid-performance`. |
 | Workspace/LSP | `npm run test:web`, `npm run test:playwright:web-api`, `npm run test:extension-host:authoring`, parser/completion/parity tests, and a Web smoke against a controlled API. |
 | Schema/designers/companions | `designer-core` tests, API/Web tests, `npm run test:extension-host:designer`, `npm run build:companions`, and the relevant companion verification gates. |
 | Final R9 | `npm run verify:pr`, `npm run test`, `npm run test:playwright`, `npm run test:playwright:web-api`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, main/companion builds, and packaging. |
@@ -752,7 +751,7 @@ temporary and ignored until the user makes a separate release decision.
 ### R10 — Dockyard web workspace and test-harness login
 
 Status: implementation complete for the Web Dockyard path and its controlled
-test harness on Linux (2026-09-11); cross-product parity and non-Linux browser
+test harness on Linux (2026-09-12); cross-product parity and non-Linux browser
 evidence remain follow-up work. R10 starts after the R9 foundation is in place.
 It replaces the Web editor's default shell with the web-only Dockyard adapter
 while keeping `ui-core` and `ui-react` platform-neutral. Dockyard is used as a
