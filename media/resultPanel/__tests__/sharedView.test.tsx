@@ -11,6 +11,7 @@ import {
     mountSharedResultPanelIfConfigured,
     normalizeSharedColumns,
     normalizeSharedResultSet,
+    sharedAnalysisQuerySpec,
     sharedResultPanelMode,
 } from '../sharedView.js';
 import { asHostMessage } from '../protocol.js';
@@ -233,6 +234,98 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
     });
 
+    it('runs shared aggregate, group and pivot analysis through host responses', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'analysis-result',
+                columns: [
+                    { name: 'REGION', type: 'VARCHAR' },
+                    { name: 'CHANNEL', type: 'VARCHAR' },
+                    { name: 'AMOUNT', type: 'NUMERIC', scale: 2 },
+                ],
+                data: [['EU', 'WEB', '10.00'], ['EU', 'STORE', '2.50'], ['US', 'WEB', '7.25']],
+                totalRowCount: 3,
+            },
+        ]));
+        const result = controller.activeResult();
+        expect(result).toBeDefined();
+        expect(sharedAnalysisQuerySpec({
+            ...result!,
+            view: {
+                ...result!.view,
+                globalFilter: 'web',
+                columnFilters: { AMOUNT: '> 1' },
+                sorting: [{ column: 'AMOUNT', descending: true }],
+            },
+        })).toEqual({
+            globalSearch: 'web',
+            columnFilters: [{ columnIndex: 2, conditions: [{ type: 'contains', value: '> 1' }] }],
+        });
+
+        const aggregatePromise = controller.requestAnalysis('aggregate', result!);
+        controller.handleHostMessage({
+            command: 'databaseAggregationResult',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            requestId: 1,
+            aggregations: [
+                { columnIndex: 0, fn: 'count', value: 3, filteredRowCount: 3 },
+                { columnIndex: 0, fn: 'min', value: 'EU' },
+                { columnIndex: 0, fn: 'max', value: 'US' },
+                { columnIndex: 2, fn: 'count', value: 3, filteredRowCount: 3 },
+                { columnIndex: 2, fn: 'sum', value: '19.75' },
+                { columnIndex: 2, fn: 'avg', value: '6.5833' },
+                { columnIndex: 2, fn: 'min', value: '2.50' },
+                { columnIndex: 2, fn: 'max', value: '10.00' },
+            ],
+        });
+        const aggregate = await aggregatePromise;
+        expect(aggregate.kind).toBe('aggregate');
+        expect(aggregate.summary).toContain('3');
+        expect(aggregate.rows.find(row => row[0] === 'AMOUNT')).toEqual(['AMOUNT', 3, '19.75', '6.5833', '2.50', '10.00']);
+
+        const groupPromise = controller.requestAnalysis('group', result!);
+        controller.handleHostMessage({
+            command: 'databaseGroupingResult',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            requestId: 2,
+            columns: [
+                { name: 'REGION', type: 'VARCHAR', kind: 'group' },
+                { name: 'COUNT', type: 'BIGINT', kind: 'count' },
+                { name: 'SUM_AMOUNT', type: 'NUMERIC', kind: 'aggregate' },
+                { name: 'ROW_COUNT_PERCENTAGE', type: 'NUMERIC', kind: 'percentage' },
+            ],
+            rows: [['EU', 2, '12.50', '66.67'], ['US', 1, '7.25', '33.33']],
+            totalRows: 2,
+        });
+        const group = await groupPromise;
+        expect(group.kind).toBe('group');
+        expect(group.rows).toEqual([['EU', 2, '12.50', '66.67'], ['US', 1, '7.25', '33.33']]);
+
+        const pivotPromise = controller.requestAnalysis('pivot', result!);
+        controller.handleHostMessage({
+            command: 'databaseGroupingResult',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            requestId: 3,
+            columns: [
+                { name: 'REGION', type: 'VARCHAR', kind: 'group' },
+                { name: 'CHANNEL', type: 'VARCHAR', kind: 'group' },
+                { name: 'SUM_AMOUNT', type: 'NUMERIC', kind: 'aggregate' },
+                { name: 'ROW_COUNT_PERCENTAGE', type: 'NUMERIC', kind: 'percentage' },
+            ],
+            rows: [['EU', 'WEB', '10.00', '33.33'], ['EU', 'STORE', '2.50', '33.33'], ['US', 'WEB', '7.25', '33.33']],
+            totalRows: 3,
+        });
+        const pivot = await pivotPromise;
+        expect(pivot.kind).toBe('pivot');
+        expect(pivot.columns.map(column => column.name)).toEqual(['REGION', 'WEB', 'STORE']);
+        expect(pivot.rows).toEqual([['EU', '10.00', '2.50'], ['US', '7.25', null]]);
+        controller.dispose();
+    });
+
     it('ignores row windows without a live request or matching result generation', () => {
         const controller = new SharedResultPanelController();
         controller.handleHostMessage({
@@ -319,6 +412,42 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(screen.getByText('Schema navigation is not available in this Result Panel yet.')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'History' }));
         expect(screen.getByText('History remains available through the host until the shared HistoryPort adapter is enabled.')).toBeInTheDocument();
+        controller.dispose();
+    });
+
+    it('renders host-backed analysis with the same shared DataGrid', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'analysis-render-result',
+                columns: [
+                    { name: 'REGION', type: 'VARCHAR' },
+                    { name: 'CHANNEL', type: 'VARCHAR' },
+                    { name: 'AMOUNT', type: 'NUMERIC' },
+                ],
+                data: [['EU', 'WEB', 10], ['US', 'WEB', 7]],
+                totalRowCount: 2,
+            },
+        ]));
+        render(<SharedResultPanelApp controller={controller} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Aggregate' }));
+        act(() => controller.handleHostMessage({
+            command: 'databaseAggregationResult',
+            sourceUri: 'file:///query.sql',
+            resultSetIndex: 0,
+            requestId: 1,
+            aggregations: [
+                { columnIndex: 2, fn: 'count', value: 2, filteredRowCount: 2 },
+                { columnIndex: 2, fn: 'sum', value: '17' },
+                { columnIndex: 2, fn: 'avg', value: '8.5' },
+                { columnIndex: 2, fn: 'min', value: '7' },
+                { columnIndex: 2, fn: 'max', value: '10' },
+            ],
+        }));
+        expect(await screen.findByRole('heading', { name: 'Aggregates' })).toBeInTheDocument();
+        expect(screen.getByRole('region', { name: 'Result analysis' })).toHaveTextContent('17');
+        fireEvent.click(screen.getByRole('button', { name: 'Close result analysis' }));
+        expect(screen.queryByRole('heading', { name: 'Aggregates' })).not.toBeInTheDocument();
         controller.dispose();
     });
 
