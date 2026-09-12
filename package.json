@@ -4474,6 +4474,7 @@
     "test:playwright:ui": "npx playwright test --ui --config=test-harness/playwright.config.ts",
     "test:playwright:web-sql": "npm run build:all:test && npx playwright test --config=test-harness/web-sql-playwright.config.ts",
     "test:playwright:web-api": "npm run build:all:test && npx playwright test --config=test-harness/web-sql-playwright.config.ts --grep=@web-api",
+    "test:playwright:web-shared": "cross-env VITE_UI_MODE=shared npm run build:all:test && npx playwright test --config=test-harness/web-sql-playwright.config.ts --grep=@web-shared",
     "test:playwright:install": "npx playwright install chromium",
     "test:duckdb:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/duckdb.integration.test.ts",
     "test:netezza:import:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/netezzaImport.live.integration.test.ts",

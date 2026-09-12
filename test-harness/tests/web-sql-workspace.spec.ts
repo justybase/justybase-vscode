@@ -45,6 +45,25 @@ async function replaceEditorText(page: Page, sql: string): Promise<void> {
   await page.waitForTimeout(300);
 }
 
+async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> {
+  const editor = page.locator('.monaco-editor');
+  await expect(editor).toBeVisible();
+  await editor.click();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.insertText(sql);
+  // Monaco may append an auto-closing parenthesis when a multi-line paste
+  // contains a CTE. Remove only that generated trailing delimiter; the
+  // source fixture remains the exact SQL sent to the API.
+  if (sql.includes('(')) {
+    await page.keyboard.press('Control+End');
+    await page.keyboard.press('Backspace');
+  }
+  const visibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
+  const expectedMarker = sql.trim().toUpperCase() === 'SX' ? 'SELECT' : visibleMarker;
+  await expect.poll(async () => (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ')).toContain(expectedMarker);
+}
+
 async function waitForCompletedResult(page: Page): Promise<void> {
   await expect.poll(async () => page.locator('.results-header').innerText()).toMatch(/complete/);
   await expect(page.locator('.result-grid, .explain-panel').first()).toBeVisible();
@@ -185,6 +204,112 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await page.setViewportSize({ width: 720, height: 900 });
     await expect(page.locator('.dockyard-shell')).toBeVisible();
     await expect(page.locator('.dockyard-tool-buttons')).toBeVisible();
+  });
+});
+
+test.describe('shared React web workspace', () => {
+  test('uses the shared authoring and Result Grid contract in a real browser @web-shared', async ({ page }) => {
+    const profileName = `Shared SQLite ${Date.now()}`;
+    const fixtureQuery = `WITH RECURSIVE seq(value) AS (
+  SELECT 1
+  UNION ALL
+  SELECT value + 1 FROM seq WHERE value < 1200
+)
+SELECT value AS ID,
+  'shared-grid-' || value AS LABEL,
+  value % 5 AS BUCKET,
+  value AS COL_04,
+  value AS COL_05,
+  value AS COL_06,
+  value AS COL_07,
+  value AS COL_08,
+  value AS COL_09,
+  value AS COL_10,
+  value AS COL_11,
+  value AS COL_12
+FROM seq`;
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
+    await loginWithTestData(page);
+    await expect(page.getByRole('heading', { name: 'JustyBase' })).toBeVisible();
+    await expect(page.getByRole('tree', { name: 'Schema' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'SQL Problems' })).toBeVisible();
+
+    await page.locator('.shared-sidebar-heading button[aria-label="Add connection"]').click();
+    const dialog = page.getByRole('dialog', { name: 'Add connection' });
+    await dialog.getByLabel('Database type').selectOption('sqlite');
+    await dialog.getByLabel('Profile name').fill(profileName);
+    await dialog.locator('#connection-database').fill(':memory:');
+    await dialog.getByLabel('User').fill('local');
+    await dialog.getByRole('button', { name: 'Add connection', exact: true }).click();
+    const connection = page.getByRole('button', { name: profileName, exact: true });
+    await expect(connection).toBeVisible();
+    await expect(connection).toHaveAttribute('aria-pressed', 'true');
+
+    const dialect = page.getByLabel('SQL authoring dialect');
+    await dialect.selectOption('postgresql');
+    await expect(dialect).toHaveValue('postgresql');
+    await dialect.selectOption('netezza');
+    await expect(dialect).toHaveValue('netezza');
+
+    await replaceMonacoTextAndWait(page, 'SX ');
+    await expect.poll(async () => (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ')).toContain('SELECT ');
+    await replaceMonacoTextAndWait(page, fixtureQuery);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+
+    const grid = page.locator('.ui-data-grid-scroll');
+    await expect(grid).toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => await grid.getAttribute('aria-label'), { timeout: 30_000 }).toBe('Data grid with 1200 rows');
+    await expect(page.locator('table.ui-data-grid')).toBeVisible();
+    await expect(page.locator('tr[data-source-index]').first()).toBeVisible();
+
+    // A filter that is outside the first hydrated page must drive the shared
+    // adapter through subsequent pages before it is considered complete.
+    const resultFilter = page.getByLabel('Filter results');
+    await resultFilter.fill('shared-grid-1199');
+    await expect(page.locator('tr[data-source-index="1198"]')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator('tr[data-source-index="1198"]')).toContainText('shared-grid-1199');
+    await resultFilter.fill('');
+    await expect.poll(async () => await page.locator('tr[data-source-index]').count()).toBeGreaterThan(0);
+
+    // The common renderer must preserve both axes and the exact virtual row
+    // anchor when the result surface is unmounted and mounted again.
+    await grid.evaluate(element => {
+      element.scrollTop = 9_000;
+      element.scrollLeft = 320;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 9_000, left: 320 }));
+    await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Query history' })).toBeVisible();
+    await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+    await expect(grid).toBeVisible();
+    await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 9_000, left: 320 }));
+    await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
+
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
+    const contextCell = page.locator('tr[data-source-index]').first().locator('td').nth(1);
+    await contextCell.click({ button: 'right' });
+    const contextMenu = page.getByRole('menu', { name: /Actions for row/u });
+    await expect(contextMenu).toBeVisible();
+    await contextMenu.getByRole('menuitem', { name: 'Copy row as JSON' }).click();
+    await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain('shared-grid-');
+
+    await contextCell.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'View Cell Value' }).click();
+    await expect(page.getByRole('dialog', { name: /Cell Value/u })).toBeVisible();
+    await page.getByRole('button', { name: 'Close cell value' }).click();
+
+    await contextCell.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'View full row' }).click();
+    await expect(page.getByRole('heading', { name: 'Row details' })).toBeVisible();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    expect((await download).suggestedFilename()).toMatch(/\.csv$/u);
   });
 });
 
