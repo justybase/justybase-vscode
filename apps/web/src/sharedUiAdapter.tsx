@@ -14,6 +14,7 @@ import type {
   UiMode,
   WebUser,
 } from '@justybase/contracts';
+import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
 import {
   createInitialUiState,
   createUiStore,
@@ -41,6 +42,7 @@ import {
 import type { DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
+import { ImportPanel } from './ImportPanel';
 
 const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'workspace', status: 'available', owner: 'ui-core', documentation: 'Shared workspace state and presentation.', removalCondition: 'Keep the shared workspace owner.' },
@@ -95,7 +97,7 @@ function createSharedStore(user: WebUser): UiStore {
 
 export function mapSchemaNode(node: SchemaTreeNode, parentId = node.parentId) {
   const kind = node.kind === 'cte' ? 'object' : node.kind;
-  return { id: node.id, ...(parentId === undefined ? {} : { parentId }), kind, label: node.label, hasChildren: node.hasChildren } as const;
+  return { ...node, ...(parentId === undefined ? {} : { parentId }), kind } as const;
 }
 
 function visibleSchemaNodes<T extends { readonly id: string; readonly parentId?: string }>(nodes: readonly T[], expandedIds: readonly string[]): readonly T[] {
@@ -138,6 +140,16 @@ export function displayRows(result: UiResultSurfaceState | undefined, rows: read
   return processDataGridRows(result.columns, rows, result.view);
 }
 
+export function qualifySharedSchemaNode(node: SchemaTreeNode, databaseKind: DatabaseKind): string {
+  if (node.kind === 'column') {
+    const objectName = formatQueryObjectName({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, databaseKind);
+    return `${objectName}.${quoteIdentifierForQuery(node.label, databaseKind)}`;
+  }
+  if (node.kind === 'object') return formatQueryObjectName({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, databaseKind);
+  if (node.kind === 'schema') return formatQuerySchemaName(node.database, node.schema ?? node.label, databaseKind);
+  return quoteIdentifierForQuery(node.database ?? node.label, databaseKind);
+}
+
 function csvCell(value: unknown): string {
   const text = value === null || value === undefined
     ? ''
@@ -169,6 +181,12 @@ interface ActiveQuery {
   subscription?: QueryEventSubscription;
 }
 
+interface RunOverride {
+  readonly sql: string;
+  readonly connection: ConnectionProfileSummary;
+  readonly database: string;
+}
+
 export interface SharedWebWorkspaceProps {
   readonly api: ApiClient;
   readonly user: WebUser;
@@ -189,6 +207,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
+  const [importTarget, setImportTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const rowsByResultRef = useRef(rowsByResult);
@@ -373,12 +392,14 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     void loadResultPage(active, 0, true);
   }, [loadResultPage]);
 
-  const run = useCallback(async (mode: 'single' | 'explain' = 'single'): Promise<void> => {
-    if (!selectedConnection) {
+  const run = useCallback(async (mode: 'single' | 'explain' = 'single', override?: RunOverride): Promise<void> => {
+    const connection = override?.connection ?? selectedConnection;
+    const sql = override?.sql ?? activeDocument?.content ?? '';
+    if (!connection) {
       setNotice('Select a connection before running SQL.');
       return;
     }
-    if (!activeDocument?.content.trim()) {
+    if (!sql.trim()) {
       setNotice('Enter SQL before running the document.');
       return;
     }
@@ -395,7 +416,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
     setNotice(undefined);
     try {
-      const started = await api.startQuery({ connectionId: selectedConnection.id, database: selectedConnection.database, sql: activeDocument.content, mode });
+      const started = await api.startQuery({ connectionId: connection.id, database: override?.database ?? connection.database, sql, mode });
       if (runGenerationRef.current !== runGeneration) {
         await api.cancelQuery(started.queryId).catch(() => undefined);
         return;
@@ -454,6 +475,84 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       statementIndex: activeResult.statementIndex,
     }, loadedRows, false);
   }, [activeResult, loadResultPage]);
+
+  const openSharedDocument = useCallback((id: string, title: string, content: string): void => {
+    if (!selectedConnection) {
+      setNotice('Select a connection before opening a schema document.');
+      return;
+    }
+    store.dispatch({
+      type: 'workspace/open-document',
+      document: {
+        id,
+        sourceId: id,
+        title,
+        content,
+        dirty: false,
+        connectionId: selectedConnection.id,
+        databaseKind: authoringDatabaseKind,
+      },
+    });
+    store.dispatch({ type: 'shell/surface', surface: 'workspace' });
+  }, [authoringDatabaseKind, selectedConnection, store]);
+
+  const openSchemaQuery = useCallback((node: SchemaTreeNode): void => {
+    if (node.kind !== 'object') return;
+    const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
+    const title = `Top 1000 · ${node.label}`;
+    openSharedDocument(`schema:${node.id}:top`, title, sql);
+    if (selectedConnection) void run('single', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database });
+  }, [authoringDatabaseKind, openSharedDocument, run, selectedConnection]);
+
+  const explainSchemaObject = useCallback((node: SchemaTreeNode): void => {
+    if (node.kind !== 'object') return;
+    const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
+    const title = `Explain · ${node.label}`;
+    openSharedDocument(`schema:${node.id}:explain`, title, sql);
+    store.dispatch({ type: 'shell/surface', surface: 'explain' });
+    if (selectedConnection) {
+      try {
+        buildExplainQuery(sql, authoringDatabaseKind);
+        void run('explain', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database });
+      } catch (error: unknown) {
+        setNotice(error instanceof Error ? error.message : 'Explain plans are not available for this connection.');
+      }
+    }
+  }, [authoringDatabaseKind, openSharedDocument, run, selectedConnection, store]);
+
+  const openSchemaDdl = useCallback(async (node: SchemaTreeNode): Promise<void> => {
+    if (node.kind !== 'object' || !selectedConnection || !node.schema) return;
+    try {
+      const result = await api.ddl({
+        connectionId: selectedConnection.id,
+        database: node.database ?? selectedConnection.database,
+        schema: node.schema,
+        objectName: node.objectName ?? node.label,
+        objectType: node.objectType?.toUpperCase() || 'TABLE',
+      });
+      if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
+      openSharedDocument(`schema:${node.id}:ddl`, `DDL · ${node.label}`, result.ddlCode);
+      setNotice(result.ddlFidelity === 'reconstructed' ? 'Reconstructed DDL opened; review metadata warnings before executing it.' : 'DDL opened.');
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not generate DDL.');
+    }
+  }, [api, openSharedDocument, selectedConnection]);
+
+  const insertSchemaNode = useCallback((node: SchemaTreeNode): void => {
+    if (!activeDocument) return;
+    const value = qualifySharedSchemaNode(node, authoringDatabaseKind);
+    const separator = activeDocument.content.length === 0 || /[\s(.,]$/u.test(activeDocument.content) ? '' : ' ';
+    store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content: `${activeDocument.content}${separator}${value}`, dirty: true } });
+  }, [activeDocument, authoringDatabaseKind, store]);
+
+  const copySchemaName = useCallback((node: SchemaTreeNode): void => {
+    const value = qualifySharedSchemaNode(node, authoringDatabaseKind);
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      setNotice('Clipboard access is unavailable.');
+      return;
+    }
+    void navigator.clipboard.writeText(value).then(() => setNotice('Qualified name copied.')).catch(() => setNotice('Could not copy the qualified name.'));
+  }, [authoringDatabaseKind]);
 
   const cancel = useCallback(async (): Promise<void> => {
     const active = activeQueryRef.current;
@@ -600,7 +699,19 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   return <UiShell title="JustyBase" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
     <strong>Connections</strong>{state.connections.profiles.map(profile => <button type="button" key={profile.id} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}>{profile.name}</button>)}
-    <SchemaTree nodes={visibleSchema} selectedId={state.metadata.selectedNodeId} expandedIds={state.metadata.expandedNodeIds} onToggle={toggleSchemaNode} onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })} />
+    <SchemaTree
+      nodes={visibleSchema}
+      selectedId={state.metadata.selectedNodeId}
+      expandedIds={state.metadata.expandedNodeIds}
+      onToggle={toggleSchemaNode}
+      onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })}
+      onInsert={insertSchemaNode}
+      onOpenQuery={openSchemaQuery}
+      onOpenExplain={explainSchemaObject}
+      onOpenDdl={node => { void openSchemaDdl(node); }}
+      onImport={node => setImportTarget(node)}
+      onCopyName={copySchemaName}
+    />
     <button type="button" onClick={onLogout}>Log out</button>
   </div>}>
     {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={entry => { const sourceId = sourceIdFor(user); const historyEntry = history.find(item => item.id === entry.id); const profile = historyEntry ? state.connections.profiles.find(item => item.id === historyEntry.connectionId) : undefined; store.dispatch({ type: 'workspace/open-document', document: { id: `history:${entry.id}`, sourceId, title: entry.label || 'History query', content: historyEntry?.sql ?? '', dirty: false, connectionId: historyEntry?.connectionId, databaseKind: profile?.dbType ?? runtimeDatabaseKind } }); store.dispatch({ type: 'shell/surface', surface: 'workspace' }); }} />
@@ -618,5 +729,6 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}
+    {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
   </UiShell>;
 }
