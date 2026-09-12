@@ -1,4 +1,4 @@
-import type { DataGridColumn, DataGridCopyPayload } from './dataGrid';
+import type { DataGridColumn, DataGridCopyPayload } from './dataGridTypes';
 import {
   formatDataGridCellValue,
   isDataGridNumericColumn,

@@ -1,5 +1,6 @@
 export type { DatabaseKind, DatabaseCapabilities, DatabaseDialect, DatabaseKindOption, DatabaseSqlAuthoring, DatabaseSqlFunctionSignature, DatabaseSqlValidationProfile, DatabaseSqlTypeSpec, DatabaseSqlLintIssue, DatabaseSqlQualityRule, DatabaseSqlFormatterProfile, DatabaseSqlParsingProfile, DatabaseSqlStaticAssetProfile } from './database';
 export { DEFAULT_DATABASE_KIND, DATABASE_KIND_DISPLAY_NAMES, DATABASE_KIND_OPTIONS, SUPPORTED_DATABASE_KINDS, createDatabaseCapabilities, createDatabaseDialectTraits, normalizeDatabaseKind, tryNormalizeDatabaseKind } from './database';
+export { CREDENTIAL_PROMPT_CHANNEL } from './electronProtocol';
 export type { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './database';
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor } from './database';
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './database';
