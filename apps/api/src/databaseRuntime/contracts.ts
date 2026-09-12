@@ -2,6 +2,9 @@ import type {
   DatabaseQueryCallbacks,
   DatabaseQueryOptions,
   DatabaseQueryResult,
+  DatabaseExternalTableDdlMetadata,
+  DatabaseProcedureInfo,
+  DatabaseSynonymInfo,
   DatabaseTableDdlMetadata,
   MetadataColumn,
   MetadataDatabase,
@@ -51,6 +54,27 @@ export interface ApiDatabaseRuntime {
     schema: string,
     view: string,
   ): Promise<string>;
+  /** Native procedure catalog payload used by the Netezza DDL formatter. */
+  getProcedureDdlMetadata?(
+    profile: StoredConnection,
+    database: string,
+    schema: string,
+    procedureSignature: string,
+  ): Promise<DatabaseProcedureInfo>;
+  /** Native external-table catalog payload used by the Netezza DDL formatter. */
+  getExternalTableDdlMetadata?(
+    profile: StoredConnection,
+    database: string,
+    schema: string,
+    table: string,
+  ): Promise<DatabaseExternalTableDdlMetadata>;
+  /** Native synonym catalog payload used by the Netezza DDL formatter. */
+  getSynonymDdlMetadata?(
+    profile: StoredConnection,
+    database: string,
+    schema: string,
+    synonym: string,
+  ): Promise<DatabaseSynonymInfo>;
   closeConnection(connectionId: string): Promise<void>;
   closeAll(): Promise<void>;
 }

@@ -1,6 +1,11 @@
 import type {
+  DatabaseDdlColumnInfo,
   DatabaseDdlKeyInfo,
+  DatabaseExternalTableDdlMetadata,
+  DatabaseExternalTableInfo,
+  DatabaseProcedureInfo,
   DatabaseTableDdlMetadata,
+  DatabaseSynonymInfo,
   DatabaseQueryCallbacks,
   DatabaseQueryCommand,
   DatabaseQueryOptions,
@@ -178,6 +183,22 @@ function stringValue(value: unknown): string {
 
 function optionalStringValue(value: unknown): string | null {
   return value ? String(value) : null;
+}
+
+function optionalNumberValue(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function fixProcedureReturnType(returns: string): string {
+  switch (returns.trim().toUpperCase()) {
+    case 'CHARACTER VARYING': return 'CHARACTER VARYING(ANY)';
+    case 'NATIONAL CHARACTER VARYING': return 'NATIONAL CHARACTER VARYING(ANY)';
+    case 'NATIONAL CHARACTER': return 'NATIONAL CHARACTER(ANY)';
+    case 'CHARACTER': return 'CHARACTER(ANY)';
+    default: return returns;
+  }
 }
 
 function rawStringValue(value: unknown): string {
@@ -559,6 +580,287 @@ export class NetezzaRuntime {
     `.trim(), values => String(values[0] ?? ''), unquoteNetezzaIdentifier(database));
     if (rows.length === 0) throw new Error(`View ${database}.${schema}.${view} not found`);
     return rows[0] ?? '';
+  }
+
+  /** Loads the serializable procedure catalog payload for the shared DDL formatter. */
+  public async getProcedureDdlMetadata(
+    target: NetezzaRuntimeTarget,
+    database: string,
+    schema: string,
+    procedureSignature: string,
+  ): Promise<DatabaseProcedureInfo> {
+    const db = formatNetezzaIdentifier(database);
+    const rows = await this.queryMetadata(target, `
+      SELECT
+        SCHEMA,
+        PROCEDURESOURCE,
+        OBJID::INT,
+        RETURNS,
+        EXECUTEDASOWNER,
+        DESCRIPTION,
+        PROCEDURESIGNATURE,
+        PROCEDURE,
+        ARGUMENTS
+      FROM ${db}.._V_PROCEDURE
+      WHERE ${identifierEquality('DATABASE', database)}
+        AND ${identifierEquality('SCHEMA', schema)}
+        AND ${identifierEquality('PROCEDURESIGNATURE', procedureSignature)}
+      ORDER BY OBJID
+    `.trim(), values => ({
+      schema: stringValue(values[0]),
+      procedureSource: String(values[1] ?? ''),
+      objId: Number(values[2] ?? 0),
+      returns: fixProcedureReturnType(String(values[3] ?? '')),
+      executeAsOwner: booleanValue(values[4]),
+      description: optionalDescription(values[5]),
+      procedureSignature: stringValue(values[6]),
+      procedureName: stringValue(values[7]),
+      arguments: optionalStringValue(values[8]),
+    }), unquoteNetezzaIdentifier(database));
+    const procedure = rows[0];
+    if (!procedure) throw new Error(`Procedure ${database}.${schema}.${procedureSignature} not found`);
+    return procedure;
+  }
+
+  /** Loads external-table options and typed columns for the shared formatter. */
+  public async getExternalTableDdlMetadata(
+    target: NetezzaRuntimeTarget,
+    database: string,
+    schema: string,
+    table: string,
+  ): Promise<DatabaseExternalTableDdlMetadata> {
+    const db = formatNetezzaIdentifier(database);
+    interface ExternalRow {
+      schema: string;
+      tableName: string;
+      dataObject: string | null;
+      delimiter: string | null;
+      encoding: string | null;
+      timeStyle: string | null;
+      remoteSource: string | null;
+      skipRows: number | null;
+      maxErrors: number | null;
+      escapeChar: string | null;
+      logDir: string | null;
+      decimalDelim: string | null;
+      quotedValue: string | null;
+      nullValue: string | null;
+      crInString: boolean | null;
+      truncString: boolean | null;
+      ctrlChars: boolean | null;
+      ignoreZero: boolean | null;
+      timeExtraZeros: boolean | null;
+      y2Base: number | null;
+      fillRecord: boolean | null;
+      compress: boolean | null;
+      includeHeader: boolean | null;
+      lfInString: boolean | null;
+      dateStyle: string | null;
+      dateDelim: string | null;
+      timeDelim: string | null;
+      boolStyle: string | null;
+      format: string | null;
+      socketBufSize: number | null;
+      recordDelim: string | null;
+      maxRows: number | null;
+      requireQuotes: boolean | null;
+      recordLength: string | null;
+      dateTimeDelim: string | null;
+      rejectFile: string | null;
+    }
+    const rows = await this.queryMetadata(target, `
+      SELECT
+        E1.SCHEMA,
+        E1.TABLENAME,
+        E2.EXTOBJNAME,
+        E1.DELIM,
+        E1.ENCODING,
+        E1.TIMESTYLE,
+        E1.REMOTESOURCE,
+        E1.SKIPROWS,
+        E1.MAXERRORS,
+        E1.ESCAPE,
+        E1.LOGDIR,
+        E1.DECIMALDELIM,
+        E1.QUOTEDVALUE,
+        E1.NULLVALUE,
+        E1.CRINSTRING,
+        E1.TRUNCSTRING,
+        E1.CTRLCHARS,
+        E1.IGNOREZERO,
+        E1.TIMEEXTRAZEROS,
+        E1.Y2BASE,
+        E1.FILLRECORD,
+        E1.COMPRESS,
+        E1.INCLUDEHEADER,
+        E1.LFINSTRING,
+        E1.DATESTYLE,
+        E1.DATEDELIM,
+        E1.TIMEDELIM,
+        E1.BOOLSTYLE,
+        E1.FORMAT,
+        E1.SOCKETBUFSIZE,
+        E1.RECORDDELIM,
+        E1.MAXROWS,
+        E1.REQUIREQUOTES,
+        E1.RECORDLENGTH,
+        E1.DATETIMEDELIM,
+        E1.REJECTFILE
+      FROM ${db}.._V_EXTERNAL E1
+      INNER JOIN ${db}.._V_EXTOBJECT E2 ON E1.RELID = E2.OBJID
+      WHERE ${identifierEquality('E1.DATABASE', database)}
+        AND ${identifierEquality('E1.SCHEMA', schema)}
+        AND ${identifierEquality('E1.TABLENAME', table)}
+    `.trim(), values => {
+      const booleanAt = (index: number): boolean | null => values[index] === null || values[index] === undefined
+        ? null
+        : booleanValue(values[index]);
+      const stringAt = (index: number): string | null => optionalStringValue(values[index]);
+      return {
+        schema: stringValue(values[0]),
+        tableName: stringValue(values[1]),
+        dataObject: stringAt(2),
+        delimiter: stringAt(3),
+        encoding: stringAt(4),
+        timeStyle: stringAt(5),
+        remoteSource: stringAt(6),
+        skipRows: optionalNumberValue(values[7]),
+        maxErrors: optionalNumberValue(values[8]),
+        escapeChar: stringAt(9),
+        logDir: stringAt(10),
+        decimalDelim: stringAt(11),
+        quotedValue: stringAt(12),
+        nullValue: stringAt(13),
+        crInString: booleanAt(14),
+        truncString: booleanAt(15),
+        ctrlChars: booleanAt(16),
+        ignoreZero: booleanAt(17),
+        timeExtraZeros: booleanAt(18),
+        y2Base: optionalNumberValue(values[19]),
+        fillRecord: booleanAt(20),
+        compress: booleanAt(21),
+        includeHeader: booleanAt(22),
+        lfInString: booleanAt(23),
+        dateStyle: stringAt(24),
+        dateDelim: stringAt(25),
+        timeDelim: stringAt(26),
+        boolStyle: stringAt(27),
+        format: stringAt(28),
+        socketBufSize: optionalNumberValue(values[29]),
+        recordDelim: stringAt(30)?.replace(/\r/gu, '\\r').replace(/\n/gu, '\\n') ?? null,
+        maxRows: optionalNumberValue(values[31]),
+        requireQuotes: booleanAt(32),
+        recordLength: stringAt(33),
+        dateTimeDelim: stringAt(34),
+        rejectFile: stringAt(35),
+      } satisfies ExternalRow;
+    }, unquoteNetezzaIdentifier(database));
+    const external = rows[0];
+    if (!external) throw new Error(`External table ${database}.${schema}.${table} not found`);
+
+    const columns = await this.queryMetadata(target, `
+      SELECT
+        C.ATTNAME,
+        C.DESCRIPTION,
+        C.FORMAT_TYPE,
+        C.ATTNOTNULL,
+        C.COLDEFAULT
+      FROM ${db}.._V_RELATION_COLUMN C
+      INNER JOIN ${db}.._V_EXTERNAL E ON C.OBJID = E.RELID
+      WHERE ${identifierEquality('E.DATABASE', database)}
+        AND ${identifierEquality('E.SCHEMA', schema)}
+        AND ${identifierEquality('E.TABLENAME', table)}
+      ORDER BY C.ATTNUM
+    `.trim(), values => ({
+      name: stringValue(values[0]),
+      description: optionalDescription(values[1]),
+      fullTypeName: stringValue(values[2]),
+      notNull: booleanValue(values[3]),
+      defaultValue: values[4] ? String(values[4]) : null,
+    } satisfies DatabaseDdlColumnInfo), unquoteNetezzaIdentifier(database));
+
+    const info: DatabaseExternalTableInfo = external;
+    return { info, columns: columns.filter(column => column.name.length > 0), metadataComplete: true };
+  }
+
+  /** Loads and resolves a synonym target so the shared formatter can emit a runnable definition. */
+  public async getSynonymDdlMetadata(
+    target: NetezzaRuntimeTarget,
+    database: string,
+    schema: string,
+    synonym: string,
+  ): Promise<DatabaseSynonymInfo> {
+    const db = formatNetezzaIdentifier(database);
+    const rows = await this.queryMetadata(target, `
+      SELECT SCHEMA, OWNER, SYNONYM_NAME, REFOBJNAME, DESCRIPTION
+      FROM ${db}.._V_SYNONYM
+      WHERE ${identifierEquality('DATABASE', database)}
+        AND ${identifierEquality('SCHEMA', schema)}
+        AND ${identifierEquality('SYNONYM_NAME', synonym)}
+    `.trim(), values => ({
+      schema: stringValue(values[0]),
+      owner: stringValue(values[1]),
+      synonymName: stringValue(values[2]),
+      referenceObjectName: stringValue(values[3]),
+      description: optionalDescription(values[4]),
+    }), unquoteNetezzaIdentifier(database));
+    const row = rows[0];
+    if (!row) throw new Error(`Synonym ${database}.${schema}.${synonym} not found`);
+    return {
+      ...row,
+      referenceObjectName: await this.resolveSynonymTarget(target, database, row.referenceObjectName),
+    };
+  }
+
+  private async resolveSynonymTarget(
+    target: NetezzaRuntimeTarget,
+    synonymDatabase: string,
+    referenceObjectName: string,
+  ): Promise<string> {
+    const trimmed = referenceObjectName.trim();
+    if (!trimmed || trimmed.includes('.')) return trimmed;
+
+    const targetInDatabase = async (database: string): Promise<{
+      database: string;
+      schema: string;
+      name: string;
+    } | undefined> => {
+      const db = formatNetezzaIdentifier(database);
+      const rows = await this.queryMetadata(target, `
+        SELECT DBNAME, SCHEMA, OBJNAME
+        FROM ${db}.._V_OBJECT_DATA
+        WHERE UPPER(OBJNAME) = UPPER('${literal(trimmed)}')
+          AND OBJTYPE IN ('TABLE', 'VIEW', 'EXTERNAL TABLE')
+        ORDER BY OBJID
+        LIMIT 1
+      `.trim(), values => ({
+        database: stringValue(values[0]),
+        schema: stringValue(values[1]),
+        name: stringValue(values[2]),
+      }), unquoteNetezzaIdentifier(database));
+      return rows[0];
+    };
+
+    try {
+      const local = await targetInDatabase(synonymDatabase);
+      if (local) return `${local.database}.${local.schema}.${local.name}`;
+
+      const databases = await this.queryMetadata(target, `
+        SELECT DATABASE
+        FROM SYSTEM.._V_DATABASE
+        WHERE DATABASE <> '${literal(unquoteNetezzaIdentifier(synonymDatabase))}'
+        ORDER BY DATABASE
+      `.trim(), values => stringValue(values[0]));
+      for (const database of databases) {
+        const match = await targetInDatabase(database);
+        if (match) return `${match.database}.${match.schema}.${match.name}`;
+      }
+    } catch {
+      // A synonym can still be reconstructed from its catalog reference when
+      // a cross-database lookup is unavailable to the current user.
+    }
+
+    return trimmed;
   }
 
   public async closeConnection(connectionId: string): Promise<void> {

@@ -2,8 +2,9 @@
  * DDL Generator - Procedure DDL Generation
  */
 
+import { buildNetezzaProcedureDdl, fixNetezzaProcedureReturnType } from '@justybase/designer-core';
 import { ProcedureInfo } from './types';
-import { executeQueryHelper, quoteNameIfNeeded, fixProcReturnType } from './helpers';
+import { executeQueryHelper } from './helpers';
 import type { NzConnection } from '../../../types';
 import { NZ_SYSTEM_VIEWS } from '../metadata/systemQueries';
 
@@ -15,46 +16,7 @@ export function buildProcedureDDLFromCache(
     schema: string,
     procInfo: ProcedureInfo
 ): string {
-    const cleanDatabase = quoteNameIfNeeded(database);
-    const cleanSchema = quoteNameIfNeeded(schema);
-    const cleanProcName = quoteNameIfNeeded(procInfo.procedureName);
-
-    const ddlLines: string[] = [];
-    let procHeader = `CREATE OR REPLACE PROCEDURE ${cleanDatabase}.${cleanSchema}.${cleanProcName}`;
-
-    // Add arguments
-    if (procInfo.arguments) {
-        const args = procInfo.arguments.trim();
-        // Check if parens already present
-        if (args.startsWith('(') && args.endsWith(')')) {
-            procHeader += args;
-        } else {
-            procHeader += `(${args})`;
-        }
-    } else {
-        procHeader += '()';
-    }
-
-    ddlLines.push(procHeader);
-    ddlLines.push(`RETURNS ${procInfo.returns}`);
-
-    if (procInfo.executeAsOwner) {
-        ddlLines.push('EXECUTE AS OWNER');
-    } else {
-        ddlLines.push('EXECUTE AS CALLER');
-    }
-
-    ddlLines.push('LANGUAGE NZPLSQL AS');
-    ddlLines.push('BEGIN_PROC');
-    ddlLines.push(procInfo.procedureSource);
-    ddlLines.push('END_PROC;');
-
-    if (procInfo.description) {
-        const cleanComment = procInfo.description.replace(/'/g, "''");
-        ddlLines.push(`COMMENT ON PROCEDURE ${cleanProcName} IS '${cleanComment}';`);
-    }
-
-    return ddlLines.join('\n');
+    return buildNetezzaProcedureDdl(database, schema, procInfo);
 }
 
 /**
@@ -108,7 +70,7 @@ export async function generateProcedureDDL(
         schema: row.SCHEMA,
         procedureSource: row.PROCEDURESOURCE,
         objId: row.OBJID,
-        returns: fixProcReturnType(row.RETURNS),
+        returns: fixNetezzaProcedureReturnType(row.RETURNS),
         executeAsOwner: Boolean(row.EXECUTEDASOWNER),
         description: row.DESCRIPTION || null,
         procedureSignature: row.PROCEDURESIGNATURE,

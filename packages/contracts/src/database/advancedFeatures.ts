@@ -131,6 +131,29 @@ export interface DatabaseExternalTableInfo {
   rejectFile: string | null;
 }
 
+/**
+ * Serializable catalog payload used by the shared Netezza synonym formatter.
+ * The target is kept as catalog text because it may be one-, two-, or
+ * three-part and the catalog is the authority for its spelling.
+ */
+export interface DatabaseSynonymInfo {
+  schema: string;
+  synonymName: string;
+  referenceObjectName: string;
+  owner: string;
+  description: string | null;
+}
+
+/**
+ * Complete external-table payload consumed by the shared Netezza formatter.
+ */
+export interface DatabaseExternalTableDdlMetadata {
+  info: DatabaseExternalTableInfo;
+  columns: DatabaseDdlColumnInfo[];
+  /** False when the catalog returned only a partial definition. */
+  metadataComplete?: boolean;
+}
+
 export type DatabaseDdlGenerationMode = 'objects' | 'schema-migration';
 
 export interface DatabaseBatchDDLOptions {

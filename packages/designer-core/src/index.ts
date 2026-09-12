@@ -73,6 +73,13 @@ export {
 } from './netezzaTableDdl';
 
 export {
+  buildNetezzaExternalTableDdl,
+  buildNetezzaProcedureDdl,
+  buildNetezzaSynonymDdl,
+  fixNetezzaProcedureReturnType,
+} from './netezzaAdvancedDdl';
+
+export {
   buildReconstructedTableDdl,
   buildReconstructedViewDdl,
   type MetadataTableDdlInput,
