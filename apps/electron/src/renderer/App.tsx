@@ -15,6 +15,8 @@ import {
   RowDetail,
   UiShell,
   WorkspaceTabs,
+  createDataGridClipboardPayload,
+  formatDataGridClipboard,
   formatDataGridCellValue,
   processDataGridRows,
   resolveDataGridColumns,
@@ -49,7 +51,7 @@ export function asSurface(value: string): UiSurface | undefined {
 }
 
 export function rowsAsText(columns: readonly UiResultColumn[], rows: readonly ElectronRow[]): string {
-  return [columns.map(column => column.name).join('\t'), ...rows.map(row => row.map((value, index) => formatDataGridCellValue(value, columns[index]?.type, columns[index])).join('\t'))].join('\n');
+  return formatDataGridClipboard({ columns, rows }, 'text');
 }
 
 export function rowsAsCsv(columns: readonly UiResultColumn[], rows: readonly ElectronRow[]): string {
@@ -374,16 +376,41 @@ export function App(): ReactElement {
     }
   }, []);
 
+  const copyGridPayload = useCallback(async (payload: DataGridCopyPayload): Promise<void> => {
+    const formatted = createDataGridClipboardPayload(payload);
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setNotice('Clipboard access is unavailable.');
+      return;
+    }
+    try {
+      if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([formatted.html], { type: 'text/html' }),
+          'text/plain': new Blob([formatted.text], { type: 'text/plain' }),
+        })]);
+      } else {
+        await navigator.clipboard.writeText(formatted.text);
+      }
+      setNotice('Copied.');
+    } catch {
+      try {
+        await navigator.clipboard.writeText(formatted.text);
+        setNotice('Copied.');
+      } catch {
+        setNotice('Could not copy to the clipboard.');
+      }
+    }
+  }, []);
+
   const copyGridSelection = useCallback((payload: DataGridCopyPayload): void => {
-    void copyText(rowsAsText(payload.columns, payload.rows));
-  }, [copyText]);
+    void copyGridPayload(payload);
+  }, [copyGridPayload]);
 
   const copyActive = useCallback(async (): Promise<void> => {
     const row = selectedRow === undefined ? rows[0] : rows[selectedRow];
     if (!row || !activeResult) return;
-    const text = rowsAsText(activeResult.columns, [row]);
-    await copyText(text);
-  }, [activeResult, copyText, rows, selectedRow]);
+    await copyGridPayload({ columns: activeResult.columns, rows: [row] });
+  }, [activeResult, copyGridPayload, rows, selectedRow]);
 
   const exportActive = useCallback(async (): Promise<void> => {
     if (!activeResult || typeof document === 'undefined') return;
