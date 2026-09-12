@@ -69,6 +69,25 @@ describe('QuerySessionManager', () => {
     }
   });
 
+  it('exposes the derived scale for grouped averages', () => {
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-query-session-'));
+    const manager = new QuerySessionManager(dataDir);
+    try {
+      const sessionId = manager.create('query-group-average', 'user-1', 'connection-1', [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'VALUE', type: 'NUMERIC(10,2)', scale: 2 }]);
+      manager.appendRows('user-1', sessionId, [['A', 1], ['A', 2]]);
+      manager.complete('user-1', sessionId);
+      const grouped = manager.group('user-1', sessionId, { groupByColumnIndices: [0], aggregates: [{ function: 'avg', columnIndex: 1 }] });
+      expect(grouped.columns).toEqual([
+        { name: 'CATEGORY', type: 'VARCHAR' },
+        { name: 'AVG(VALUE)', type: 'DECIMAL', scale: 22 },
+      ]);
+      expect(grouped.rows).toEqual([['A', 1.5]]);
+    } finally {
+      manager.closeAll();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it('sorts and aggregates high-precision numeric text without REAL rounding', () => {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), 'justybase-query-session-'));
     const manager = new QuerySessionManager(dataDir);

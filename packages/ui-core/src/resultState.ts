@@ -13,7 +13,7 @@ export interface UiResultAsyncStateOptions {
 export function resultAsyncState(
   result: UiResultSurfaceState | undefined,
   rowCount: number,
-  options: UiResultAsyncStateOptions = { streamingEmpty: 'loading', streamingWithUnloadedRows: 'ready' },
+  options: UiResultAsyncStateOptions = { streamingEmpty: 'loading', streamingWithUnloadedRows: 'loading' },
 ): UiResultAsyncState {
   if (!result) return 'empty';
   if (result.status === 'error') return 'error';

@@ -124,7 +124,7 @@ function mapQueryColumn(column: { readonly name: string; readonly type?: string;
 }
 
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
-  return getResultAsyncState(result, rowCount, { streamingEmpty: 'loading', streamingWithUnloadedRows: 'loading' });
+  return getResultAsyncState(result, rowCount);
 }
 
 export function displayRows(result: UiResultSurfaceState | undefined, rows: readonly (readonly unknown[])[]): readonly (readonly unknown[])[] {

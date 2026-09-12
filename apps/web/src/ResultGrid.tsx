@@ -129,9 +129,8 @@ function rowAsInsert(columns: string[], values: readonly unknown[]): string {
  * Type-aware formatting and display utilities for cell values.
  * Inspired by the extension's result panel but simplified for the web.
  */
-function isNumericType(type?: string): boolean {
-  if (!type) return false;
-  return /INT|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|NUMBER|REAL|FLOAT|DOUBLE|MONEY/.test(type.toUpperCase());
+function isNumericType(type?: string, scale?: number): boolean {
+  return isDataGridNumericColumn({ type, scale });
 }
 
 function formatCellValue(value: unknown, metadata: DataGridCellMetadata = {}): { text: string; isNull: boolean; colorClass: string; } {
@@ -192,14 +191,27 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const requestSorting = useMemo<QuerySortSpec[]>(() => sorting.map(item => ({ columnIndex: Number(item.id), desc: item.desc })), [sorting]);
   const hasGridFilter = globalFilter.trim().length > 0 || requestFilters.length > 0;
   const gridRows = result.sessionId ? rows : result.rows;
-  const gridColumns = useMemo<ResultGridColumnMetadata[]>(() => result.columns.map((name, index) => {
-    const column: ResultGridColumnMetadata = {
-      name,
-      ...(result.columnTypes[index] === undefined ? {} : { type: result.columnTypes[index] }),
-      ...(result.columnScales[index] === undefined ? {} : { scale: result.columnScales[index] }),
-    };
-    return { ...inferDataGridColumnMetadata(column, gridRows.slice(0, 100).map(row => row[index])), ...column };
-  }), [result.columns, result.columnTypes, result.columnScales, gridRows]);
+  const gridColumnSignature = useMemo(
+    () => result.columns.map((name, index) => [name, result.columnTypes[index] ?? '', result.columnScales[index] ?? ''].join('\u0000')).join('\u0001'),
+    [result.columns, result.columnScales, result.columnTypes],
+  );
+  const gridColumnsCacheRef = useRef<{ readonly resultSetId: string; readonly signature: string; readonly columns: ResultGridColumnMetadata[]; readonly ready: boolean } | undefined>(undefined);
+  const gridColumns = useMemo<ResultGridColumnMetadata[]>(() => {
+    const cache = gridColumnsCacheRef.current;
+    if (cache?.resultSetId === resultSetId && cache.signature === gridColumnSignature && cache.ready) return cache.columns;
+    if (cache?.resultSetId === resultSetId && cache.signature === gridColumnSignature && gridRows.length === 0) return cache.columns;
+    const nextColumns = result.columns.map((name, index) => {
+      const column: ResultGridColumnMetadata = {
+        name,
+        ...(result.columnTypes[index] === undefined ? {} : { type: result.columnTypes[index] }),
+        ...(result.columnScales[index] === undefined ? {} : { scale: result.columnScales[index] }),
+      };
+      return { ...column, ...inferDataGridColumnMetadata(column, gridRows.slice(0, 100).map(row => row[index])) };
+    });
+    const ready = gridRows.length > 0 || nextColumns.every(column => column.type !== undefined || column.inferredNumericKind !== undefined || column.inferredDateInteger !== undefined);
+    gridColumnsCacheRef.current = { resultSetId, signature: gridColumnSignature, columns: nextColumns, ready };
+    return nextColumns;
+  }, [gridColumnSignature, gridRows, result.columns, result.columnScales, result.columnTypes, resultSetId]);
   const localFilterColumns = useMemo<ResultColumn[]>(() => gridColumns.map(({ name, type, scale }) => ({ name, type, scale })), [gridColumns]);
   const localFilters = useMemo<ResultColumnFilter[]>(() => requestFilters.map(filter => ({
     columnIndex: filter.columnIndex,
@@ -311,7 +323,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     try {
       const aggregates = [
         { function: 'count' as const },
-        ...result.columns.map((_column, index) => ({ index, function: 'sum' as const })).filter(item => isNumericType(result.columnTypes[item.index])).map(item => ({ function: item.function, columnIndex: item.index })),
+        ...result.columns.map((_column, index) => ({ index, function: 'sum' as const })).filter(item => isNumericType(result.columnTypes[item.index], result.columnScales[item.index])).map(item => ({ function: item.function, columnIndex: item.index })),
       ];
       setGrouped(await api.group(queryId, { statementIndex, groupByColumnIndices, aggregates, globalFilter, columnFilters: requestFilters, groupLimit: 2_000 }));
       setPivot(null);
@@ -368,7 +380,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       accessorFn: row => row.values[index],
       header: name,
       meta: { dataType, scale: metadata.scale },
-      size: isNumericType(dataType) ? 130 : 150,
+      size: isNumericType(dataType, metadata.scale) ? 130 : 150,
       enableSorting: true,
       enableColumnFilter: true,
       enableResizing: true,
