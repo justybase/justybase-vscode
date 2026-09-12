@@ -10,9 +10,13 @@ const { spawn } = require('node:child_process');
 const { chromium, expect } = require('@playwright/test');
 
 const repositoryRoot = path.resolve(__dirname, '../..');
-const electronBinary = process.env.JUSTYBASE_ELECTRON_BINARY
-  ? path.resolve(process.env.JUSTYBASE_ELECTRON_BINARY)
-  : path.join(repositoryRoot, 'node_modules/electron/dist/electron');
+const electronBinaryCandidates = process.env.JUSTYBASE_ELECTRON_BINARY
+  ? [path.resolve(process.env.JUSTYBASE_ELECTRON_BINARY)]
+  : [
+      path.join(repositoryRoot, 'node_modules/electron/dist/electron'),
+      path.join(repositoryRoot, 'apps/electron/node_modules/electron/dist/electron'),
+    ];
+const electronBinary = electronBinaryCandidates.find(candidate => existsSync(candidate)) ?? electronBinaryCandidates[0];
 const mainEntry = path.join(repositoryRoot, 'apps/electron/dist/main/main.js');
 const rendererDirectory = path.join(repositoryRoot, 'apps/electron/dist/renderer');
 const timeoutMs = 120_000;
@@ -76,6 +80,15 @@ async function replaceMonacoText(page, sql) {
   await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(expectedMarker);
 }
 
+async function refreshAndExpandSqliteSchema(page, schema) {
+  await schema.getByRole('button', { name: 'Refresh schema', exact: true }).click();
+  await expect(schema).toHaveAttribute('aria-busy', 'false', { timeout: 30_000 });
+  await expect(schema.locator('.electron-schema-node').first().locator('.electron-schema-label')).toHaveAttribute('title', 'main', { timeout: 30_000 });
+  const expandAll = schema.getByRole('button', { name: 'Expand all schema nodes', exact: true });
+  await expect(expandAll).toBeEnabled({ timeout: 30_000 });
+  await expandAll.click();
+}
+
 async function connectionIdByName(page, profileName) {
   return page.evaluate(async name => {
     const response = await fetch('/api/connections', { credentials: 'same-origin' });
@@ -88,7 +101,7 @@ async function connectionIdByName(page, profileName) {
 }
 
 /** Execute a guarded schema mutation and wait for the real query event terminal. */
-async function executeWriteStatement(page, connectionId, sql) {
+async function executeWriteStatement(page, connectionId, sql, database = ':memory:') {
   const outcome = await page.evaluate(async input => {
     const csrfCookie = document.cookie.split('; ').find(cookie => cookie.startsWith('justybase_csrf='));
     const csrf = csrfCookie?.slice('justybase_csrf='.length);
@@ -106,10 +119,10 @@ async function executeWriteStatement(page, connectionId, sql) {
       if (!response.ok) throw new Error(`${url} failed (${response.status}): ${String(payload.message ?? text).slice(0, 300)}`);
       return payload;
     };
-    const preview = await postJson('/api/query/preview', { connectionId: input.connectionId, database: ':memory:', sql: input.sql, mode: 'single' });
+    const preview = await postJson('/api/query/preview', { connectionId: input.connectionId, database: input.database, sql: input.sql, mode: 'single' });
     const started = await postJson('/api/query', {
       connectionId: input.connectionId,
-      database: ':memory:',
+      database: input.database,
       sql: input.sql,
       mode: 'single',
       writeConfirmed: true,
@@ -136,7 +149,7 @@ async function executeWriteStatement(page, connectionId, sql) {
       });
       socket.addEventListener('error', () => finish(() => reject(new Error('The schema mutation WebSocket failed.'))));
     });
-  }, { connectionId, sql });
+  }, { connectionId, database, sql });
   expect(outcome.status, outcome.message).toBe('complete');
 }
 
@@ -259,23 +272,41 @@ async function run() {
     const ddlProfileName = `Electron DDL SQLite ${Date.now()}`;
     const tableName = `electron_ddl_table_${Date.now()}`;
     const viewName = `electron_ddl_view_${Date.now()}`;
+    const addedColumnName = `designer_added_${Date.now()}`;
+    const ddlDatabase = `designer_${Date.now()}.sqlite`;
     await page.getByRole('button', { name: 'Add connection', exact: true }).click();
     const connectionDialog = page.getByRole('dialog', { name: 'New connection', exact: true });
     await connectionDialog.getByLabel('Database type').selectOption('sqlite');
     await connectionDialog.getByLabel('Profile name').fill(ddlProfileName);
-    await connectionDialog.locator('input[maxlength="2048"]').fill(':memory:');
+    await connectionDialog.locator('input[maxlength="2048"]').fill(ddlDatabase);
     await connectionDialog.getByLabel('User').fill('local');
     await connectionDialog.locator('input[type="checkbox"]').uncheck();
     await connectionDialog.getByRole('button', { name: 'Add connection', exact: true }).click();
-    await expect(page.getByRole('button', { name: `${ddlProfileName} sqlite`, exact: true })).toBeVisible();
+    await waitFor('new connection save or validation error', async () => {
+      if (!(await connectionDialog.isVisible())) return true;
+      const validationError = connectionDialog.getByRole('alert');
+      return (await validationError.count()) > 0 && (await validationError.first().textContent())?.trim();
+    }, 30_000);
+    if (await connectionDialog.isVisible()) {
+      throw new Error(`Electron connection profile could not be saved: ${await connectionDialog.getByRole('alert').first().textContent()}`);
+    }
+    const ddlConnectionItem = page.locator('.electron-connection-item').filter({ hasText: ddlProfileName }).first();
+    await expect(ddlConnectionItem).toBeVisible({ timeout: 30_000 });
+    await ddlConnectionItem.locator('button[aria-pressed]').click();
+    await expect(ddlConnectionItem.locator('button[aria-pressed]')).toHaveAttribute('aria-pressed', 'true');
     const ddlConnectionId = await connectionIdByName(page, ddlProfileName);
-    await executeWriteStatement(page, ddlConnectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`);
-    await executeWriteStatement(page, ddlConnectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`);
+    await executeWriteStatement(page, ddlConnectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`, ddlDatabase);
+    await executeWriteStatement(page, ddlConnectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`, ddlDatabase);
+    const metadataObjects = await page.evaluate(async connectionId => {
+      const response = await fetch(`/api/metadata/objects?connectionId=${encodeURIComponent(connectionId)}&database=main&schema=main`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`Could not read SQLite metadata after DDL (${response.status}).`);
+      return await response.json();
+    }, ddlConnectionId);
+    expect(metadataObjects.some(item => item.name === tableName && item.objectType === 'TABLE')).toBe(true);
 
     const schema = page.getByRole('region', { name: 'Database schema', exact: true });
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
-    await schema.getByRole('button', { name: 'Refresh schema', exact: true }).click();
-    await schema.getByRole('button', { name: 'Expand all schema nodes', exact: true }).click();
+    await refreshAndExpandSqliteSchema(page, schema);
     const tableNode = schema.locator('.electron-schema-label').filter({ hasText: tableName }).first();
     await expect(tableNode).toBeVisible({ timeout: 30_000 });
     await tableNode.click({ button: 'right' });
@@ -290,6 +321,33 @@ async function run() {
     await expect(page.getByRole('tab', { name: `DDL · ${tableName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
     await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain('label TEXT');
+
+    await tableNode.click({ button: 'right' });
+    const designerMenu = page.getByRole('menu').filter({ hasText: tableName }).first();
+    await designerMenu.getByRole('button', { name: 'Open Object Designer', exact: true }).click();
+    const designer = page.getByRole('dialog', { name: tableName, exact: true });
+    await expect(designer).toBeVisible();
+    await expect(designer.getByText('Runtime available', { exact: true })).toBeVisible();
+    await expect(designer.getByText('Writable connection', { exact: true })).toBeVisible();
+    await designer.getByRole('button', { name: 'Columns', exact: true }).click();
+    await designer.getByLabel('Column name', { exact: true }).fill(addedColumnName);
+    await designer.getByLabel('Data type', { exact: true }).fill('TEXT');
+    await expect(designer.getByLabel('SQL preview', { exact: true })).toHaveValue(`ALTER TABLE "main"."${tableName}" ADD COLUMN "${addedColumnName}" TEXT;`);
+    await designer.getByRole('button', { name: 'Preview SQL', exact: true }).click();
+    await expect(designer.getByText('1 statement(s)', { exact: true })).toBeVisible();
+    await designer.getByRole('button', { name: 'Apply preview', exact: true }).click();
+    await expect(designer).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByRole('status').filter({ hasText: 'Object designer change applied' })).toBeVisible();
+    const updatedColumns = await page.evaluate(async ({ connectionId, table }) => {
+      const response = await fetch(`/api/metadata/columns?connectionId=${encodeURIComponent(connectionId)}&database=main&schema=main&table=${encodeURIComponent(table)}`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`Could not read SQLite columns after designer apply (${response.status}).`);
+      return await response.json();
+    }, { connectionId: ddlConnectionId, table: tableName });
+    expect(updatedColumns.some(item => item.name === addedColumnName)).toBe(true);
+    await refreshAndExpandSqliteSchema(page, schema);
+    await expect(schema.locator('.electron-schema-label').filter({ hasText: tableName }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(schema.locator('.electron-schema-label').filter({ hasText: addedColumnName }).first()).toBeVisible({ timeout: 30_000 });
+    checks.push('shared Object Designer preview/apply and refreshed SQLite columns');
 
     const viewNode = schema.locator('.electron-schema-label').filter({ hasText: viewName }).first();
     await expect(viewNode).toBeVisible({ timeout: 30_000 });
