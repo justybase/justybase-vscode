@@ -1,5 +1,6 @@
 import type * as Monaco from 'monaco-editor';
 import type {
+  DatabaseKind,
   EditorPreferences,
   SqlCompletionRequest,
   SqlCompletionResponse,
@@ -9,6 +10,7 @@ import type {
   SqlFormatResponse,
   SqlLanguageContext,
 } from '@justybase/contracts';
+import { registerSqlShortcuts } from './sqlShortcuts';
 
 /**
  * Transport needed by the shared Monaco/LSP integration.
@@ -21,7 +23,7 @@ import type {
  */
 export interface SqlLanguageApi {
   openWebSocket(path: string): WebSocket;
-  snippets(): Promise<{ snippets: WebSnippetLike[] }>;
+  snippets(databaseKind?: DatabaseKind): Promise<{ snippets: WebSnippetLike[] }>;
   completion(input: SqlCompletionRequest): Promise<SqlCompletionResponse>;
   diagnostics(input: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse>;
   formatSql(input: SqlFormatRequest): Promise<SqlFormatResponse>;
@@ -38,12 +40,15 @@ interface CoreSignatureHelpLike { signatures: CoreSignatureInformationLike[]; ac
 interface CoreSemanticTokenLike { line: number; character: number; length: number; type: string; modifiers: string[]; }
 interface WebSnippetLike { prefix: string[]; body: string[]; description?: string; }
 
-const cachedSnippets = new WeakMap<object, Promise<WebSnippetLike[]>>();
-function loadSnippets(api: SqlLanguageApi): Promise<WebSnippetLike[]> {
-  const existing = cachedSnippets.get(api);
+const cachedSnippets = new WeakMap<object, Map<string, Promise<WebSnippetLike[]>>>();
+function loadSnippets(api: SqlLanguageApi, databaseKind?: DatabaseKind): Promise<WebSnippetLike[]> {
+  const key = databaseKind ?? 'netezza';
+  const cache = cachedSnippets.get(api) ?? new Map<string, Promise<WebSnippetLike[]>>();
+  const existing = cache.get(key);
   if (existing) return existing;
-  const loaded = api.snippets().then(response => response.snippets ?? []).catch(() => []);
-  cachedSnippets.set(api, loaded);
+  const loaded = api.snippets(databaseKind).then(response => response.snippets ?? []).catch(() => []);
+  cache.set(key, loaded);
+  cachedSnippets.set(api, cache);
   return loaded;
 }
 
@@ -260,7 +265,7 @@ class SqlLanguageFeatureRegistry {
         provideCompletionItems: async (model, position) => {
           const registration = this.registrationFor(model);
           if (!registration) return { suggestions: [] };
-          const snippets = await loadSnippets(registration.api);
+          const snippets = await loadSnippets(registration.api, registration.getContext().databaseKind);
           const word = model.getWordUntilPosition(position);
           const range = new this.monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
           const prefix = word.word.toLowerCase();
@@ -495,6 +500,7 @@ class SqlLanguageFeatureRegistry {
     };
     client.setDiagnosticsHandler(setMarkers);
     const changeDisposable = model.onDidChangeContent(() => client.didChange(model));
+    const shortcutDisposable = registerSqlShortcuts(editor, this.monaco);
     const registration: SqlModelRegistration = {
       model,
       editor,
@@ -508,6 +514,7 @@ class SqlLanguageFeatureRegistry {
         disposed = true;
         if (this.registrations.get(uri) === registration) this.registrations.delete(uri);
         changeDisposable.dispose();
+        shortcutDisposable.dispose();
         this.monaco.editor.setModelMarkers(model, 'justybase-netezza-lsp', []);
         client.dispose();
       },

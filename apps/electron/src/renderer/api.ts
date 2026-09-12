@@ -2,6 +2,7 @@ import type {
   DesignerCapabilitiesRequest,
   DesignerCapabilitiesResponse,
   DesignerSnapshotResponse,
+  DatabaseKind,
   EditorPreferences,
   EditorPreferencesPatch,
   HistoryEntry,
@@ -82,7 +83,7 @@ export interface ElectronWorkspaceApi extends ElectronApiClient {
   completion(input: SqlCompletionRequest): Promise<SqlCompletionResponse>;
   diagnostics(input: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse>;
   formatSql(input: SqlFormatRequest): Promise<SqlFormatResponse>;
-  snippets(): Promise<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>;
+  snippets(databaseKind?: DatabaseKind): Promise<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>;
   openWebSocket(path: string): WebSocket;
 }
 
@@ -323,7 +324,7 @@ export function createElectronApiClient(options: ElectronApiClientOptions = {}):
     completion: input => request<SqlCompletionResponse>('/api/lsp/completion', { method: 'POST', body: JSON.stringify(input) }),
     diagnostics: input => request<SqlDiagnosticsResponse>('/api/lsp/diagnostics', { method: 'POST', body: JSON.stringify(input) }),
     formatSql: input => request<SqlFormatResponse>('/api/lsp/format', { method: 'POST', body: JSON.stringify(input) }),
-    snippets: () => request<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>('/api/lsp/snippets'),
+    snippets: (databaseKind?: DatabaseKind) => request<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>(`/api/lsp/snippets${databaseKind ? `?databaseKind=${encodeURIComponent(databaseKind)}` : ''}`),
     openWebSocket: path => {
       const WebSocketConstructor = options.WebSocket ?? (typeof WebSocket === 'function' ? WebSocket : undefined);
       if (!WebSocketConstructor) throw new Error('WebSocket is unavailable in the Electron renderer.');

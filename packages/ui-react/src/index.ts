@@ -22,6 +22,8 @@ export type {
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
 export { disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
 export type { SqlLanguageApi } from './sqlLanguage';
+export { registerSqlShortcuts, sqlShortcutEdit, SQL_SHORTCUTS } from './sqlShortcuts';
+export type { SqlShortcutEdit } from './sqlShortcuts';
 export {
   AsyncStateView,
   CapabilityGate,
