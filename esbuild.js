@@ -21,8 +21,13 @@ async function main() {
   // The VS Code shared Result Panel is a webview, so it cannot import the
   // package CSS through Vite. Publish the same package-owned skin next to the
   // browser bundles and let the webview HTML load it as a stylesheet.
-  fs.mkdirSync('dist/media', { recursive: true });
-  fs.copyFileSync('./packages/ui-react/src/resultGrid.css', 'dist/media/sharedResultGrid.css');
+  const sharedGridStyleSource = './packages/ui-react/src/resultGrid.css';
+  const sharedGridStyleTarget = 'dist/media/sharedResultGrid.css';
+  const syncSharedGridStyle = () => {
+    fs.mkdirSync('dist/media', { recursive: true });
+    fs.copyFileSync(sharedGridStyleSource, sharedGridStyleTarget);
+  };
+  syncSharedGridStyle();
 
   // These libraries are loaded as globals by several webviews. Build them from
   // their published ESM sources instead of shipping upstream production/minified
@@ -158,6 +163,7 @@ async function main() {
   const watch = process.argv.includes('--watch');
 
   if (watch) {
+    fs.watchFile(sharedGridStyleSource, { interval: 250 }, syncSharedGridStyle);
     await Promise.all([
       tanStackTableCtx.watch(),
       tanStackVirtualCtx.watch(),

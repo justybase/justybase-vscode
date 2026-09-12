@@ -3,6 +3,7 @@ import {
   parseQueryGroupRequest,
   parseQueryPageRequest,
   parseQueryStartRequest,
+  parseMetadataDdlRequest,
   RequestValidationError,
 } from '../src/requestValidation';
 
@@ -58,5 +59,10 @@ describe('API request validation', () => {
     expect(() => parseQueryAggregateRequest({ functions: ['drop'] })).toThrow('not supported');
     expect(() => parseQueryGroupRequest({ groupByColumnIndices: [], aggregates: [{ function: 'count' }] })).toThrow('at least one column');
     expect(() => parseQueryGroupRequest({ groupByColumnIndices: [0], aggregates: [{ function: 'drop' }] })).toThrow('not supported');
+  });
+
+  it('limits schema DDL requests to supported object types', () => {
+    expect(parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 't', objectType: 'table' }).objectType).toBe('TABLE');
+    expect(() => parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 't', objectType: 'procedure' })).toThrow('objectType must be TABLE or VIEW');
   });
 });

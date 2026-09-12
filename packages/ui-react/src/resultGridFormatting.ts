@@ -91,6 +91,13 @@ const DECIMAL_TYPE_ALIASES = new Set([
   ...ALWAYS_DECIMAL_TYPE_ALIASES,
 ]);
 
+const TEMPORAL_TYPE_ALIASES = new Set([
+  'date', 'datetime', 'datetime2', 'datetimeoffset', 'smalldatetime',
+  'timestamp', 'timestamp without time zone', 'timestamp with time zone',
+  'timestamptz', 'timestamp_ntz', 'timestamp_ltz', 'timestamp_tz',
+  'time', 'timetz', 'abstime', 'reltime', 'interval',
+]);
+
 const BINARY_TYPE_ALIASES = new Set([
   'binary', 'varbinary', 'longvarbinary', 'blob', 'tinyblob', 'mediumblob',
   'longblob', 'bytea', 'raw', 'image', 'ole', 'ole object', 'oid', 'byte',
@@ -343,8 +350,10 @@ export function isDataGridNumericColumn(metadata: DataGridCellMetadata): boolean
 export function isDataGridTemporalColumn(metadata: DataGridCellMetadata): boolean {
   const normalizedType = normalizeTypeName(metadata.type);
   return metadata.inferredDateInteger === true
-    || normalizedType.includes('date')
-    || normalizedType.includes('time');
+    || TEMPORAL_TYPE_ALIASES.has(normalizedType)
+    || TEMPORAL_TYPE_ALIASES.has(extractBaseTypeName(normalizedType))
+    || normalizedType.includes('timestamp')
+    || normalizedType.includes('datetime');
 }
 
 function formatBytes(byteCount: number): string {
@@ -457,11 +466,15 @@ export function formatCanonicalDataGridCellValue(
   }
 
   if (typeof value === 'object') {
-    const stringValue = String(value);
-    if (stringValue !== '[object Object]') return stringValue;
     if ('hours' in value || 'minutes' in value || 'seconds' in value) {
       const timeValue = value as { hours?: unknown; minutes?: unknown; seconds?: unknown };
       return `${String(timeValue.hours ?? 0).padStart(2, '0')}:${String(timeValue.minutes ?? 0).padStart(2, '0')}:${String(timeValue.seconds ?? 0).padStart(2, '0')}`;
+    }
+    try {
+      const jsonValue = JSON.stringify(value);
+      if (jsonValue !== undefined) return jsonValue;
+    } catch {
+      // Fall through to String for circular host values.
     }
   }
 
@@ -482,4 +495,25 @@ export function formatDataGridCellValue(
     return isTrue ? '✓ true' : '✗ false';
   }
   return formatCanonicalDataGridCellValue(value, cellMetadata) ?? 'NULL';
+}
+
+const DATA_GRID_FILTER_GROUPING_PATTERN = /[\s\u00A0\u202F,]/gu;
+
+interface DataGridFilterSearchText {
+  readonly lower: string;
+  readonly compact: string;
+}
+
+function createDataGridFilterSearchText(value: string): DataGridFilterSearchText {
+  const lower = value.toLowerCase();
+  return { lower, compact: lower.replace(DATA_GRID_FILTER_GROUPING_PATTERN, '') };
+}
+
+/** Matches display text and its compact form without grouping separators. */
+export function matchesDataGridFilterValue(value: unknown, filter: string, metadata: DataGridCellMetadata = {}): boolean {
+  if (value === null || value === undefined) return false;
+  const displayValue = createDataGridFilterSearchText(formatDataGridCellValue(value, metadata.type, metadata));
+  const searchTerm = createDataGridFilterSearchText(filter);
+  return displayValue.lower.includes(searchTerm.lower)
+    || (searchTerm.compact.length > 0 && displayValue.compact.includes(searchTerm.compact));
 }

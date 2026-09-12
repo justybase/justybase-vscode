@@ -100,7 +100,8 @@ describe('Electron authenticated startup', () => {
     const session = await startElectronSession({ webDistDirectory: '/tmp/electron-renderer-fixture', apiFactory: () => server, fetcher });
     await expect(session.requestJson<{ ok: boolean }>('api/status', { headers: { 'x-fixture': 'yes' } })).resolves.toEqual({ ok: true });
     expect(String(calls[1]?.input)).toBe('http://127.0.0.1:43123/api/status');
-    expect(calls[1]?.init?.headers).toEqual(expect.objectContaining({ Cookie: 'justybase_session=session-fixture; justybase_csrf=csrf-fixture' }));
+    expect((calls[1]?.init?.headers as Headers).get('Cookie')).toBe('justybase_session=session-fixture; justybase_csrf=csrf-fixture');
+    expect((calls[1]?.init?.headers as Headers).get('x-fixture')).toBe('yes');
 
     await expect(session.applyAuthenticationCookie({ set: async () => { throw new Error('cookie writer failed'); } })).rejects.toThrow('cookie writer failed');
     await expect(session.applyAuthenticationCookie({ set: async () => undefined })).resolves.toBeUndefined();

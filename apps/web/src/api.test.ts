@@ -161,6 +161,36 @@ describe('API client factory', () => {
     expect(socket?.readyState).toBe(3);
   });
 
+  it('wraps empty and malformed HTTP responses in ApiRequestError', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: false, status: 502, headers: new Headers(), json: async () => { throw new Error('html'); } } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers(), json: async () => { throw new Error('empty'); } } as unknown as Response);
+    const client = createApiClient({ fetch });
+
+    await expect(client.me()).rejects.toEqual(expect.objectContaining({ name: 'ApiRequestError', status: 502 } satisfies Partial<ApiRequestError>));
+    await expect(client.me()).rejects.toEqual(expect.objectContaining({ name: 'ApiRequestError', status: 200 } satisfies Partial<ApiRequestError>));
+  });
+
+  it('encodes query identifiers in every result route', async () => {
+    const fetch = jest.fn(async () => jsonResponse({ ok: true }));
+    const client = createApiClient({ fetch });
+    const queryId = 'query/one?part=two';
+
+    await client.cancelQuery(queryId);
+    await client.queryPage(queryId, {});
+    await client.aggregate(queryId);
+    await client.group(queryId, { groupByColumnIndices: [] });
+    await client.exportQuery(queryId, { format: 'json' });
+
+    expect((fetch.mock.calls as unknown[][]).map(call => String(call[0]))).toEqual([
+      '/api/query/query%2Fone%3Fpart%3Dtwo/cancel',
+      '/api/query/query%2Fone%3Fpart%3Dtwo/page',
+      '/api/query/query%2Fone%3Fpart%3Dtwo/aggregate',
+      '/api/query/query%2Fone%3Fpart%3Dtwo/group',
+      '/api/query/query%2Fone%3Fpart%3Dtwo/export',
+    ]);
+  });
+
   it('drops malformed, foreign, and unsupported query-event frames at the transport boundary', () => {
     const client = createApiClient({
       fetch: jest.fn(async () => jsonResponse({ ok: true })),

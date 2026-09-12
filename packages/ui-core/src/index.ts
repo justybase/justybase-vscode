@@ -51,6 +51,8 @@ export { createUiStore } from './store';
 export type { UiStore } from './store';
 export { createExecutionController, createWorkspaceController } from './controllers';
 export type { ExecutionController, WorkspaceController } from './controllers';
+export { resultAsyncState } from './resultState';
+export type { UiResultAsyncState, UiResultAsyncStateOptions } from './resultState';
 export { resolveUiMode } from './mode';
 export { createInitialUiState, emptyResultView, reduceUiState, resultKey } from './reducer';
 export type { InitialUiStateOptions } from './reducer';

@@ -96,6 +96,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+async function readJsonResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new ApiRequestError(
+      response.status,
+      response.ok ? 'The API returned an invalid JSON response.' : 'Request failed.',
+    );
+  }
+}
+
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
@@ -267,7 +278,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
       credentials: 'include',
     });
     rememberCsrfToken(response);
-    const body = await response.json() as T | { message?: string };
+    const body = await readJsonResponse(response) as T | { message?: string };
     if (!response.ok) {
       throw new ApiRequestError(
         response.status,
@@ -291,7 +302,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
     });
     rememberCsrfToken(response);
     if (!response.ok) {
-      const body = await response.json() as { message?: string };
+      const body = await readJsonResponse(response) as { message?: string };
       throw new ApiRequestError(response.status, body.message ?? 'Download failed.');
     }
     const disposition = response.headers.get('content-disposition') ?? '';
@@ -400,11 +411,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     importRows: (input: QueryImportRequest) => request<QueryWriteResponse>('/api/query/import', { method: 'POST', body: JSON.stringify(input) }),
     importFilePreview: (input: QueryFileImportPreviewRequest) => request<WriteOperationPreviewResponse>('/api/query/import-file/preview', { method: 'POST', body: JSON.stringify(input) }),
     importFile: (input: QueryFileImportRequest) => request<QueryWriteResponse>('/api/query/import-file', { method: 'POST', body: JSON.stringify(input) }),
-    cancelQuery: (queryId: string) => request<{ ok: true }>(`/api/query/${queryId}/cancel`, { method: 'POST' }),
-    queryPage: (queryId: string, input: QueryPageRequest) => request<QueryPageResponse>(`/api/query/${queryId}/page`, { method: 'POST', body: JSON.stringify(input) }),
-    aggregate: (queryId: string, input: QueryAggregateRequest = {}) => request<QueryAggregateResponse>(`/api/query/${queryId}/aggregate`, { method: 'POST', body: JSON.stringify(input) }),
-    group: (queryId: string, input: QueryGroupRequest) => request<QueryGroupResponse>(`/api/query/${queryId}/group`, { method: 'POST', body: JSON.stringify(input) }),
-    exportQuery: (queryId: string, input: QueryExportRequest) => download(`/api/query/${queryId}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }, `justybase-query.${input.format}`),
+    cancelQuery: (queryId: string) => request<{ ok: true }>(`/api/query/${encodeURIComponent(queryId)}/cancel`, { method: 'POST' }),
+    queryPage: (queryId: string, input: QueryPageRequest) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, { method: 'POST', body: JSON.stringify(input) }),
+    aggregate: (queryId: string, input: QueryAggregateRequest = {}) => request<QueryAggregateResponse>(`/api/query/${encodeURIComponent(queryId)}/aggregate`, { method: 'POST', body: JSON.stringify(input) }),
+    group: (queryId: string, input: QueryGroupRequest) => request<QueryGroupResponse>(`/api/query/${encodeURIComponent(queryId)}/group`, { method: 'POST', body: JSON.stringify(input) }),
+    exportQuery: (queryId: string, input: QueryExportRequest) => download(`/api/query/${encodeURIComponent(queryId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }, `justybase-query.${input.format}`),
     editorPreferences: () => request<EditorPreferences>('/api/preferences/editor'),
     updateEditorPreferences: (input: EditorPreferencesPatch) => request<EditorPreferences>('/api/preferences/editor', { method: 'PATCH', body: JSON.stringify(input) }),
     schemaTree: (connectionId: string, parentId?: string) => request<SchemaTreeResponse>(`/api/schema/tree?connectionId=${encodeURIComponent(connectionId)}${parentId ? `&parentId=${encodeURIComponent(parentId)}` : ''}`),

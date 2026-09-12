@@ -11,6 +11,7 @@ import type { StoredConnection } from './store';
 
 export class SchemaDdlUnavailableError extends Error {
   public readonly code = 'SCHEMA_DDL_UNAVAILABLE';
+  public readonly statusCode = 501;
 
   public constructor(message: string) {
     super(message);
@@ -28,6 +29,9 @@ export async function getSchemaObjectDdlResponse(
   request: MetadataDdlRequest,
   runtimes: ApiDatabaseRuntimeRegistry,
 ): Promise<MetadataDdlResponse> {
+  if (profile.dbType !== 'netezza') {
+    throw new SchemaDdlUnavailableError(`Exact DDL is not available for ${profile.dbType}.`);
+  }
   const objectType = request.objectType.trim().toUpperCase();
   const runtime = runtimes.forProfile(profile);
   const objectInfo = {
@@ -47,7 +51,9 @@ export async function getSchemaObjectDdlResponse(
       request.schema,
       request.objectName,
     );
-    if (metadata.columns.length === 0 || metadata.columns.some(column => !column.fullTypeName.trim())) {
+    if (metadata.metadataComplete === false
+      || metadata.columns.length === 0
+      || metadata.columns.some(column => !column.fullTypeName.trim())) {
       throw new SchemaDdlUnavailableError(
         `The catalog did not return complete column types for ${request.database}.${request.schema}.${request.objectName}.`,
       );

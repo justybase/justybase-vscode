@@ -1,7 +1,10 @@
+import { rmSync } from 'node:fs';
+
 jest.mock('electron', () => {
   const appEvents = new Map<string, (...args: unknown[]) => void>();
   const app = {
     whenReady: jest.fn(async () => undefined),
+    getPath: jest.fn(() => '/tmp/justybase-electron-main-test'),
     on: jest.fn((event: string, listener: (...args: unknown[]) => void) => { appEvents.set(event, listener); }),
     quit: jest.fn(),
     __events: appEvents,
@@ -20,6 +23,11 @@ jest.mock('electron', () => {
     __windows: windows,
     ipcMain: { handle: jest.fn(), removeHandler: jest.fn() },
     session: { defaultSession: { cookies: { set: jest.fn(async () => undefined) } } },
+    safeStorage: {
+      isEncryptionAvailable: jest.fn(() => false),
+      encryptString: jest.fn((value: string) => Buffer.from(value, 'utf8')),
+      decryptString: jest.fn((value: Buffer) => value.toString('utf8')),
+    },
   };
 });
 
@@ -35,18 +43,20 @@ jest.mock('../src/main/startup', () => {
 });
 
 describe('Electron main composition root', () => {
+  afterAll(() => rmSync('/tmp/justybase-electron-main-test', { recursive: true, force: true }));
+
   it('starts an authenticated window and shuts down all main-owned resources once', async () => {
     await import('../src/main/main');
-    await new Promise<void>(resolve => setImmediate(resolve));
-    await new Promise<void>(resolve => setImmediate(resolve));
-
+    const startup = jest.requireMock('../src/main/startup') as { startElectronSession: jest.Mock; __runtime: { applyAuthenticationCookie: jest.Mock; close: jest.Mock } };
     const electron = jest.requireMock('electron') as {
       app: { __events: Map<string, (...args: unknown[]) => void>; quit: jest.Mock };
       __windows: Array<{ events: Map<string, (...args: unknown[]) => void>; loadURL: jest.Mock; show: jest.Mock }>;
       ipcMain: { handle: jest.Mock; removeHandler: jest.Mock };
       session: { defaultSession: { cookies: { set: jest.Mock } } };
     };
-    const startup = jest.requireMock('../src/main/startup') as { __runtime: { applyAuthenticationCookie: jest.Mock; close: jest.Mock } };
+    for (let attempt = 0; attempt < 200 && electron.__windows.length === 0; attempt += 1) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
     const windowInstance = electron.__windows[0];
     expect(windowInstance?.loadURL).toHaveBeenCalledWith('http://127.0.0.1:43123/');
     expect(windowInstance?.show).toHaveBeenCalledTimes(1);

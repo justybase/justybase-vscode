@@ -45,8 +45,8 @@ export interface ElectronExecutionPortOptions {
   readonly client: ElectronApiClient;
   readonly onRows?: (resultSetId: string, rows: readonly (readonly unknown[])[]) => void;
   /** Replaces the adapter-owned page after the API has finalized the session. */
-  readonly onPage?: (resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly QueryColumn[], executionId: string) => void;
-  readonly onPageError?: (resultSetId: string, error: Error, executionId: string) => void;
+  readonly onPage?: (sourceId: string, resultSetId: string, rows: readonly (readonly unknown[])[], totalRowCount: number, columns: readonly QueryColumn[], executionId: string) => void;
+  readonly onPageError?: (sourceId: string, resultSetId: string, error: Error, executionId: string) => void;
 }
 
 interface ActiveStream {
@@ -101,14 +101,16 @@ function eventStream(
   const subscriptionRef: { current?: QueryEventSubscription } = {};
   let pageRequested = false;
 
-  const hydratePages = async (): Promise<Error | undefined> => {
+  const hydratePages = async (statementIndex: number): Promise<Error | undefined> => {
     if (!onPage || pageRequested) return undefined;
     pageRequested = true;
+    const resultSetId = resultSetIdFor(queryId, statementIndex);
     try {
-      const hydrated = await fetchAllResultPages(client, queryId);
+      const hydrated = await fetchAllResultPages(client, queryId, statementIndex);
       if (done) return undefined;
       onPage(
-        resultSetIdFor(queryId),
+        sourceId,
+        resultSetId,
         hydrated.rows,
         hydrated.totalRowCount,
         hydrated.columns,
@@ -118,7 +120,7 @@ function eventStream(
     } catch (error: unknown) {
       const failure = error instanceof Error ? error : new Error('Could not load result rows.');
       if (done) return undefined;
-      onPageError?.(resultSetIdFor(queryId), failure, queryId);
+      onPageError?.(sourceId, resultSetId, failure, queryId);
       return failure;
     }
   };
@@ -150,7 +152,7 @@ function eventStream(
     if (event.type === 'complete' && onPage && !pageRequested) {
       // Keep the terminal event behind hydration. The renderer can therefore
       // only expose a complete/ready result after every result page is local.
-      void hydratePages().then(failure => {
+      void hydratePages(event.statementIndex ?? 0).then(failure => {
         if (failure) {
           pushMapped({ ...event, type: 'error', message: `Result page hydration failed: ${failure.message}` });
           return;

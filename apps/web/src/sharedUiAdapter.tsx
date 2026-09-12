@@ -12,6 +12,7 @@ import type {
 import {
   createInitialUiState,
   createUiStore,
+  resultAsyncState as getResultAsyncState,
   resolveUiMode,
 } from '@justybase/ui-core';
 import type { UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
@@ -27,6 +28,7 @@ import {
   ResultTabs,
   ResultViewToolbar,
   RowDetail,
+  resolveDataGridColumns,
   SchemaTree,
   UiShell,
   WorkspaceTabs,
@@ -121,23 +123,35 @@ function mapQueryColumn(column: { readonly name: string; readonly type?: string;
   };
 }
 
-export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number): 'loading' | 'empty' | 'error' | 'cancelled' | 'ready' {
-  if (!result) return 'empty';
-  if (result.status === 'error') return 'error';
-  if (result.status === 'cancelled') return 'cancelled';
-  const hasViewFilter = result.view.globalFilter.trim().length > 0
-    || Object.values(result.view.columnFilters).some(value => value.trim().length > 0);
-  const rowsMayBeOutsideView = result.totalRowCount > 0
-    && (hasViewFilter || result.loadedRowCount < result.totalRowCount);
-  if (result.status === 'loading') return 'loading';
-  if (result.status === 'streaming' && rowCount === 0 && !rowsMayBeOutsideView) return 'loading';
-  if (result.status === 'empty' || (rowCount === 0 && !rowsMayBeOutsideView)) return 'empty';
-  return 'ready';
+export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
+  return getResultAsyncState(result, rowCount, { streamingEmpty: 'loading', streamingWithUnloadedRows: 'loading' });
 }
 
 export function displayRows(result: UiResultSurfaceState | undefined, rows: readonly (readonly unknown[])[]): readonly (readonly unknown[])[] {
   if (!result) return [];
   return processDataGridRows(result.columns, rows, result.view);
+}
+
+function csvCell(value: unknown): string {
+  const text = value === null || value === undefined
+    ? ''
+    : typeof value === 'object'
+      ? (() => {
+        try {
+          return JSON.stringify(value) ?? String(value);
+        } catch {
+          return String(value);
+        }
+      })()
+      : String(value);
+  return /[",\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+export function rowsAsCsv(columns: readonly { readonly name: string }[], rows: readonly (readonly unknown[])[]): string {
+  return [
+    columns.map(column => csvCell(column.name)).join(','),
+    ...rows.map(row => row.map(value => csvCell(value)).join(',')),
+  ].join('\n');
 }
 
 interface ActiveQuery {
@@ -170,6 +184,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const rowsByResultRef = useRef(rowsByResult);
   const activeQueryRef = useRef<ActiveQuery | undefined>(undefined);
+  const runGenerationRef = useRef(0);
   const queryByResultRef = useRef(new Map<string, string>());
   const pageHydrationRef = useRef(new Set<string>());
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
@@ -344,13 +359,24 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       setNotice('Enter SQL before running the document.');
       return;
     }
+    const runGeneration = ++runGenerationRef.current;
     const previous = activeQueryRef.current;
     activeQueryRef.current = undefined;
     previous?.subscription?.close();
-    if (previous) void api.cancelQuery(previous.queryId).catch(() => undefined);
+    if (previous) {
+      const previousResult = Object.values(store.getState().results.byResultSetId)
+        .find(result => result.sourceId === previous.sourceId && result.executionId === previous.executionId);
+      if (previousResult?.status === 'loading' || previousResult?.status === 'streaming') {
+        void api.cancelQuery(previous.queryId).catch(() => undefined);
+      }
+    }
     setNotice(undefined);
     try {
       const started = await api.startQuery({ connectionId: selectedConnection.id, database: selectedConnection.database, sql: activeDocument.content, mode });
+      if (runGenerationRef.current !== runGeneration) {
+        await api.cancelQuery(started.queryId).catch(() => undefined);
+        return;
+      }
       const active: ActiveQuery = { queryId: started.queryId, resultSetId: queryResultId(started.queryId), sourceId: sourceIdFor(user), executionId: started.queryId, statementIndex: 0 };
       activeQueryRef.current = active;
       queryByResultRef.current.set(active.resultSetId, active.queryId);
@@ -383,6 +409,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       active.subscription = subscription;
       activeQueryRef.current = active;
     } catch (error) {
+      if (runGenerationRef.current !== runGeneration) return;
       setNotice(error instanceof Error ? error.message : 'Could not start query.');
     }
   }, [activeDocument?.content, api, dispatchQueryEvent, hydrateResultPage, selectedConnection, store, user]);
@@ -451,7 +478,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [updateResultView]);
 
   const copySelected = useCallback(async (): Promise<void> => {
-    const row = selectedRow === undefined ? visibleRows[0] : activeRows[selectedRow];
+    const row = selectedRow === undefined ? visibleRows[0] : visibleRows[selectedRow];
     if (!row) return;
     const text = row.map((value, index) => {
       const column = activeResult?.columns[index];
@@ -463,9 +490,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   const exportResults = useCallback((): void => {
     if (typeof document === 'undefined') return;
-    const header = activeResult?.columns.map(column => column.name).join(',') ?? '';
-    const body = visibleRows.map(row => row.map(value => JSON.stringify(value ?? '')).join(',')).join('\n');
-    const blob = new Blob([`${header}\n${body}\n`], { type: 'text/csv' });
+    const blob = new Blob([`${rowsAsCsv(activeResult?.columns ?? [], visibleRows)}\n`], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -478,6 +503,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const historyItems: HistoryViewEntry[] = useMemo(() => history.map(entry => ({ id: entry.id, label: entry.sql.slice(0, 80), status: entry.status, sqlFingerprint: `${entry.createdAt} · ${entry.rowCount} rows` })), [history]);
   const selectedNode = state.metadata.selectedNodeId ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) : undefined;
   const resultState = resultAsyncState(activeResult, visibleRows.length);
+  const detailColumns = useMemo(
+    () => activeResult ? resolveDataGridColumns(activeResult.columns, activeRows) : [],
+    [activeResult?.columns, activeRows],
+  );
   const resultMessage = activeResult?.message;
   const designerFields = { target: selectedNode?.label ?? 'Select an object', connection: selectedConnection?.name ?? 'No connection' };
 
@@ -497,8 +526,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
               {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
-              {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={activeResult.columns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={visibleRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={false} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onRowSelect={setSelectedRow} /></AsyncStateView>
+              {selectedRow !== undefined && visibleRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={visibleRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
             </div>
           </>}
   </UiShell>;

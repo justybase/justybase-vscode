@@ -170,9 +170,11 @@ describe('Netezza runtime boundary', () => {
 
   it('loads all catalog fields required by the canonical table DDL', async () => {
     const factoryCalls: Array<{ database: string }> = [];
+    const metadataQueries: string[] = [];
     const factory = jest.fn(async (details: { database: string }) => {
       factoryCalls.push({ database: details.database });
       return connectionForMetadata(sql => {
+        metadataQueries.push(sql);
         if (sql.includes('_V_RELATION_COLUMN')) {
           return {
             columns: ['OBJID', 'ATTNUM', 'ATTNAME', 'DESCRIPTION', 'FULL_TYPE', 'ATTNOTNULL', 'COLDEFAULT'],
@@ -228,9 +230,12 @@ describe('Netezza runtime boundary', () => {
         },
       ],
       tableComment: "Owner's users",
+      metadataComplete: true,
     });
-    expect(factoryCalls).toHaveLength(5);
+    expect(factoryCalls).toHaveLength(1);
     expect(factoryCalls.every(call => call.database === 'MYDB')).toBe(true);
+    expect(metadataQueries[0]).toContain("D.DBNAME = 'MYDB'");
+    expect(metadataQueries[0]).toContain("D.OBJTYPE IN ('TABLE', 'VIEW', 'EXTERNAL TABLE')");
     await runtime.closeAll();
   });
 

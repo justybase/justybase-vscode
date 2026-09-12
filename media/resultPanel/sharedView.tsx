@@ -6,6 +6,7 @@ import {
     createInitialUiState,
     createUiStore,
     resultKey,
+    resultAsyncState as getResultAsyncState,
     type UiResultEvent,
     type UiResultSurfaceState,
     type UiState,
@@ -16,7 +17,9 @@ import {
     CapabilityGate,
     DataGrid,
     formatDataGridCellValue,
+    processDataGridRowIndices,
     processDataGridRows,
+    resolveDataGridColumns,
     FocusOnMount,
     ResultTabs,
     ResultViewToolbar,
@@ -72,6 +75,7 @@ interface SharedResultPanelData {
     readonly activeSourceJson?: unknown;
     readonly activeResultSetIndex?: unknown;
     readonly executingSourcesJson?: unknown;
+    readonly formatSettings?: unknown;
     readonly dataVersion?: unknown;
     readonly resultSyncVersion?: unknown;
 }
@@ -261,9 +265,23 @@ function csvCell(value: unknown): string {
     return /[",\n]/u.test(text) ? `"${text.replace(/"/gu, '""')}"` : text;
 }
 
-function rowsAsCsv(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
+function rawCell(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value) ?? String(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+function rowsAsCsv(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[], useFormattedValues = true): string {
     const header = columns.map(column => csvCell(column.name)).join(',');
-    const body = rows.map(row => row.map((value, index) => csvCell(value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index]))).join(',')).join('\n');
+    const body = rows.map(row => row.map((value, index) => csvCell(useFormattedValues
+        ? (value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index]))
+        : rawCell(value))).join(',')).join('\n');
     return [header, body].filter(Boolean).join('\n');
 }
 
@@ -274,22 +292,11 @@ function rowsAsText(columns: readonly SharedColumn[], rows: readonly (readonly u
     ].join('\n');
 }
 
-function asyncStateFor(result: UiResultSurfaceState | undefined): 'loading' | 'empty' | 'error' | 'cancelled' | 'ready' {
-    if (!result) return 'empty';
-    switch (result.status) {
-        case 'loading':
-            return 'loading';
-        case 'empty':
-            return 'empty';
-        case 'error':
-            return 'error';
-        case 'cancelled':
-            return 'cancelled';
-        case 'streaming':
-        case 'complete':
-        case 'idle':
-            return 'ready';
-    }
+function asyncStateFor(result: UiResultSurfaceState | undefined, rowCount: number) {
+    return getResultAsyncState(result, rowCount, {
+        streamingEmpty: 'loading',
+        streamingWithUnloadedRows: 'loading',
+    });
 }
 
 export function displaySharedRows(
@@ -319,6 +326,7 @@ export class SharedResultPanelController {
     private readonly nextChunkSequence = new Map<string, number>();
     private readonly cancelRequests = new Map<string, string>();
     private readonly pendingRowWindows = new Map<number, { readonly ref: ResultRef; readonly offset: number }>();
+    private formatSettings: unknown;
     private revision = 0;
     private streamRevision = 0;
     private rowRequestId = 0;
@@ -361,7 +369,12 @@ export class SharedResultPanelController {
                 this.applyHydrate(valid.data as unknown as SharedResultPanelData);
                 break;
             case 'setActiveSource':
+                if (valid.formatSettings !== undefined) this.formatSettings = valid.formatSettings;
                 this.selectSource(valid.sourceUri);
+                break;
+            case 'resultFormattingState':
+                this.formatSettings = valid.data;
+                this.notify();
                 break;
             case 'appendRows':
                 this.applyAppend(valid);
@@ -425,7 +438,9 @@ export class SharedResultPanelController {
     }
 
     public updateView(resultSetId: string, patch: Partial<UiResultSurfaceState['view']>): void {
-        this.dispatch({ type: 'results/view', sourceId: this.getState().results.activeSourceId, resultSetId, patch });
+        const sourceId = this.getState().results.activeSourceId;
+        if (!sourceId) return;
+        this.dispatch({ type: 'results/view', sourceId, resultSetId, patch });
     }
 
     public refresh(): void {
@@ -483,18 +498,46 @@ export class SharedResultPanelController {
     public exportActive(): void {
         const result = this.activeResult();
         if (!result) return;
+        const rows = this.getRows(result);
+        const rowIndices = processDataGridRowIndices(result.columns, rows, result.view);
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        const formatSettings = isRecord(this.formatSettings) ? this.formatSettings : undefined;
+        const globalSettings = formatSettings && isRecord(formatSettings.global) ? formatSettings.global : undefined;
+        const useFormattedValues = globalSettings?.useFormattedValuesForExport === true;
+        if (!ref || rowIndices.length === 0) {
+            postHostMessage({
+                command: 'exportCsv',
+                data: rowsAsCsv(result.columns, processDataGridRows(result.columns, rows, result.view), useFormattedValues),
+            });
+            return;
+        }
         postHostMessage({
             command: 'exportCsv',
-            data: rowsAsCsv(result.columns, processDataGridRows(result.columns, this.getRows(result), result.view)),
+            data: {
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                rowIndices: [...rowIndices],
+                rowScope: 'loaded',
+                formatting: globalSettings && typeof globalSettings.useFormattedValuesForExport === 'boolean'
+                    ? {
+                        useFormattedValues: globalSettings.useFormattedValuesForExport,
+                        payload: formatSettings,
+                    }
+                    : undefined,
+            },
         });
     }
 
     public activeResult(): UiResultSurfaceState | undefined {
         const state = this.getState();
         const sourceId = state.results.activeSourceId;
-        return Object.values(state.results.byResultSetId).find(result =>
-            result.sourceId === sourceId && result.resultSetId === state.results.activeResultSetId,
-        ) ?? Object.values(state.results.byResultSetId).find(result => result.sourceId === sourceId);
+        if (!sourceId) return undefined;
+        if (state.results.activeResultSetId !== undefined) {
+            return Object.values(state.results.byResultSetId).find(result =>
+                result.sourceId === sourceId && result.resultSetId === state.results.activeResultSetId,
+            );
+        }
+        return Object.values(state.results.byResultSetId).find(result => result.sourceId === sourceId);
     }
 
     public dispose(): void {
@@ -526,22 +569,34 @@ export class SharedResultPanelController {
     }
 
     private replaceRef(indexKey: string, ref: ResultRef): void {
-        for (const [requestId, request] of this.pendingRowWindows.entries()) {
-            if (request.ref.sourceId === ref.sourceId && request.ref.resultSetId === ref.resultSetId && request.ref !== ref) {
-                this.pendingRowWindows.delete(requestId);
-            }
-        }
         this.refs.set(indexKey, ref);
+        for (const [requestId, request] of this.pendingRowWindows.entries()) {
+            if (request.ref.sourceId !== ref.sourceId || request.ref.resultSetId !== ref.resultSetId) continue;
+            if (request.ref === ref) continue;
+            const nextRequestId = ++this.rowRequestId;
+            this.pendingRowWindows.delete(requestId);
+            this.pendingRowWindows.set(nextRequestId, { ref, offset: request.offset });
+            postHostMessage({
+                command: 'requestRows',
+                sourceUri: ref.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                offset: request.offset,
+                limit: 2_000,
+                requestId: nextRequestId,
+            });
+        }
     }
 
     private applyHydrate(data: SharedResultPanelData): void {
         const sourceId = parseJsonString(data.activeSourceJson) ?? 'vscode:results';
         const resultSets = resultSetsFromData(data);
+        this.formatSettings = data.formatSettings;
         const activeResultSetIndex = asNonNegativeInteger(data.activeResultSetIndex) ?? 0;
         const executingSources = new Set(parseJsonStrings(data.executingSourcesJson));
         const version = asNonNegativeInteger(data.dataVersion)
             ?? asNonNegativeInteger(data.resultSyncVersion)
             ?? ++this.streamRevision;
+        const hydrationRevision = ++this.streamRevision;
         let activeResultSetId: string | undefined;
         const incomingResultSetIds = new Set<string>();
         const incomingIndexKeys = new Set<string>();
@@ -554,7 +609,7 @@ export class SharedResultPanelController {
                 sourceId,
                 resultSetIndex,
                 resultSetId,
-                executionId: `vscode-execution-${sourceId}-${resultSetId}-${version}`,
+                executionId: `vscode-execution-${sourceId}-${resultSetId}-${version}-${hydrationRevision}`,
             };
             const key = resultKey(sourceId, resultSetId);
             incomingResultSetIds.add(resultSetId);
@@ -898,11 +953,15 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         [state.results],
     );
     const rows = controller.getRows(activeResult);
-    const resultState = asyncStateFor(activeResult);
+    const resultState = asyncStateFor(activeResult, rows.length);
     const schemaCapability = capability(state.capabilities, 'result-panel.schema-navigation');
     const sourceLabel = state.results.activeSourceId?.split(/[\\/]/u).pop() ?? 'Query Results';
     const view = activeResult?.view ?? { globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined };
     const selected = selectedRow === undefined ? undefined : rows[selectedRow];
+    const detailColumns = useMemo(
+        () => activeResult ? resolveDataGridColumns(activeResult.columns, rows) : [],
+        [activeResult?.columns, rows],
+    );
 
     return <UiShell
         title={sourceLabel}
@@ -937,7 +996,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         onCopySelection={payload => postHostMessage({ command: 'copyToClipboard', text: rowsAsText(payload.columns, payload.rows) })}
                     />}
                 </AsyncStateView>
-                {selected && activeResult && <RowDetail columns={activeResult.columns} row={selected} onClose={() => setSelectedRow(undefined)} />}
+                {selected && activeResult && <RowDetail columns={detailColumns} row={selected} onClose={() => setSelectedRow(undefined)} />}
             </>}
             {state.shell.activeSurface === 'schema' && <CapabilityGate capability={schemaCapability} fallback={<AsyncStateView state="empty" emptyLabel="Schema navigation is not available in this Result Panel yet." />}><div>Schema navigation</div></CapabilityGate>}
             {state.shell.activeSurface === 'history' && <AsyncStateView state="empty" emptyLabel="History remains available through the host until the shared HistoryPort adapter is enabled." />}

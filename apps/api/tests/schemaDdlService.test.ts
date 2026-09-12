@@ -96,6 +96,24 @@ describe('schema DDL service', () => {
     }, registryFor(runtime))).rejects.toBeInstanceOf(SchemaDdlUnavailableError);
   });
 
+  it('refuses DDL when an ancillary catalog query failed', async () => {
+    const runtime = runtimeWith({
+      columns: [{ name: 'ID', description: null, fullTypeName: 'INTEGER', notNull: false, defaultValue: null }],
+      distributionColumns: [], organizeColumns: [], keys: [], tableComment: null, metadataComplete: false,
+    });
+    await expect(getSchemaObjectDdlResponse(profile(), {
+      connectionId: 'connection-1', database: 'MYDB', schema: 'ADMIN', objectName: 'USERS', objectType: 'TABLE',
+    }, registryFor(runtime))).rejects.toBeInstanceOf(SchemaDdlUnavailableError);
+  });
+
+  it('does not use Netezza DDL builders for another database kind', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
+    await expect(getSchemaObjectDdlResponse(profile('sqlite'), {
+      connectionId: 'connection-1', database: 'main', schema: 'main', objectName: 'users', objectType: 'TABLE',
+    }, registryFor(runtime))).rejects.toBeInstanceOf(SchemaDdlUnavailableError);
+    expect(runtime.getTableDdlMetadata).not.toHaveBeenCalled();
+  });
+
   it('reports unsupported object types explicitly', async () => {
     const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
     await expect(getSchemaObjectDdlResponse(profile(), {

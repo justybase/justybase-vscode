@@ -42,6 +42,8 @@ export interface DatabaseTableDdlMetadata {
   organizeColumns: string[];
   keys: Array<{ name: string; info: DatabaseDdlKeyInfo }>;
   tableComment: string | null;
+  /** False when an ancillary catalog query failed and the DDL is incomplete. */
+  metadataComplete?: boolean;
 }
 
 /**

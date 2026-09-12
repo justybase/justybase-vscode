@@ -1,6 +1,6 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
-export { formatDataGridCellValue, processDataGridRows } from './dataGrid';
+export { formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumns } from './dataGrid';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,
@@ -9,6 +9,7 @@ export {
   isDataGridIntegerType,
   isDataGridNumericColumn,
   isDataGridTemporalColumn,
+  matchesDataGridFilterValue,
 } from './resultGridFormatting';
 export type {
   DataGridCellMetadata,
