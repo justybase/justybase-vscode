@@ -305,7 +305,7 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(screen.queryByText('two')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Group by label' }));
         expect(screen.getByText(/1 rows/)).toBeInTheDocument();
-        expect(controller.activeResult()?.view).toMatchObject({ columnFilters: { '1': 'one' }, grouping: ['1'] });
+        expect(controller.activeResult()?.view).toMatchObject({ columnFilters: { label: 'one' }, grouping: ['label'] });
         const selectedCell = screen.getByRole('cell', { name: 'one' });
         fireEvent.mouseDown(selectedCell, { button: 0 });
         expect(selectedCell).toHaveClass('ui-data-grid-cell-selected');

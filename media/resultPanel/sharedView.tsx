@@ -16,6 +16,7 @@ import {
     AsyncStateView,
     CapabilityGate,
     DataGrid,
+    formatDataGridClipboard,
     formatDataGridCellValue,
     processDataGridRowIndices,
     processDataGridRows,
@@ -286,10 +287,7 @@ function rowsAsCsv(columns: readonly SharedColumn[], rows: readonly (readonly un
 }
 
 function rowsAsText(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
-    return [
-        columns.map(column => column.name).join('\t'),
-        ...rows.map(row => row.map((value, index) => value === null || value === undefined ? '' : formatDataGridCellValue(value, columns[index]?.type, columns[index])).join('\t')),
-    ].join('\n');
+    return formatDataGridClipboard({ columns, rows }, 'text');
 }
 
 function asyncStateFor(result: UiResultSurfaceState | undefined, rowCount: number) {
