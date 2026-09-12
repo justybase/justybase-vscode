@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { CREDENTIAL_PROMPT_CHANNEL } from '../credentialPromptProtocol';
+import { CREDENTIAL_PROMPT_CHANNEL } from '@justybase/contracts';
 
 contextBridge.exposeInMainWorld('justybaseCredentialPrompt', Object.freeze({
   submit: (requestId: string, value: string, cancelled: boolean): void => {

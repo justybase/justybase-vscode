@@ -49,6 +49,8 @@
     ],
     "packages/ui-react": [
       "packages/contracts",
+      "packages/dialect-utils",
+      "packages/designer-core",
       "packages/ui-core"
     ]
   },
@@ -102,6 +104,55 @@
       "reason": "The shared result grid is a React presentation component consumed by web, Electron and VS Code adapters.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/resultAnalysis.tsx",
+      "target": "react",
+      "reason": "Shared result analysis is a React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/sqlLanguage.ts",
+      "target": "monaco-editor",
+      "reason": "Shared SQL authoring integration is intentionally implemented against the Monaco editor API.",
+      "owner": "SQL authoring maintainers",
+      "removeWhen": "Move Monaco integration into a product adapter while retaining the shared authoring contract."
+    },
+    {
+      "source": "packages/ui-react/src/sqlProblems.tsx",
+      "target": "monaco-editor",
+      "reason": "The shared Problems adapter translates Monaco markers into the portable presentation model.",
+      "owner": "SQL authoring maintainers",
+      "removeWhen": "Move Monaco marker translation into a product adapter."
+    },
+    {
+      "source": "packages/ui-react/src/sqlProblems.tsx",
+      "target": "react",
+      "reason": "The shared Problems view is a React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/sqlShortcuts.ts",
+      "target": "monaco-editor",
+      "reason": "Shared SQL shortcut registration is intentionally implemented against the Monaco editor API.",
+      "owner": "SQL authoring maintainers",
+      "removeWhen": "Move Monaco shortcut registration into a product adapter while retaining the shared shortcut semantics."
+    },
+    {
+      "source": "packages/ui-react/src/objectDesigner/ObjectDesigner.tsx",
+      "target": "react",
+      "reason": "The shared object designer is a React presentation component consumed by product adapters.",
+      "owner": "Designer maintainers",
+      "removeWhen": "Replace the React designer presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/objectDesigner/useObjectDesignerController.ts",
+      "target": "react",
+      "reason": "The shared object designer controller uses React state and effects for adapter-owned workflows.",
+      "owner": "Designer maintainers",
+      "removeWhen": "Move the controller lifecycle into a platform-neutral state machine."
     }
   ],
   "layers": {

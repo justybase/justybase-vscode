@@ -1,4 +1,4 @@
-import { CREDENTIAL_PROMPT_CHANNEL } from '../src/credentialPromptProtocol';
+import { CREDENTIAL_PROMPT_CHANNEL } from '@justybase/contracts';
 import { createNativeCredentialProvider } from '../src/main/credentialPrompt';
 
 jest.mock('electron', () => {

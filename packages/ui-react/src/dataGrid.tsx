@@ -11,12 +11,10 @@ import {
 import type { DataGridCellMetadata } from './resultGridFormatting';
 import { formatDataGridClipboard } from './dataGridClipboard';
 import type { DataGridClipboardFormat } from './dataGridClipboard';
+import type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
 
 export { formatDataGridCellValue } from './resultGridFormatting';
-
-export interface DataGridColumn extends DataGridCellMetadata {
-  readonly name: string;
-}
+export type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
 
 export type DataGridViewState = Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'sorting' | 'grouping'> &
   Partial<Pick<UiResultViewState, 'columnVisibility' | 'columnOrder' | 'pinnedColumns' | 'columnWidths'>>;
@@ -29,27 +27,12 @@ export interface GridScrollPosition {
   readonly anchorRow?: number;
 }
 
-export interface DataGridSelection {
-  readonly anchorRow: number;
-  readonly anchorColumn: number;
-  readonly focusRow: number;
-  readonly focusColumn: number;
-}
-
 export interface DataGridCellContext {
   /** Index into the supplied raw rows, not the filtered or sorted display list. */
   readonly rowIndex: number;
   readonly columnIndex: number;
   readonly clientX: number;
   readonly clientY: number;
-}
-
-export interface DataGridCopyPayload {
-  readonly columns: readonly DataGridColumn[];
-  readonly rows: readonly (readonly unknown[])[];
-  readonly selection?: DataGridSelection;
-  /** Whether the receiving clipboard adapter should include column headers. */
-  readonly includeHeaders?: boolean;
 }
 
 export interface DataGridProps {

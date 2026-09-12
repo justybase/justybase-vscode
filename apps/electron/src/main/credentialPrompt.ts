@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { BrowserWindow, ipcMain } from 'electron';
-import { CREDENTIAL_PROMPT_CHANNEL } from '../credentialPromptProtocol';
+import { CREDENTIAL_PROMPT_CHANNEL } from '@justybase/contracts';
 import type { CredentialProvider } from './credentialBroker';
 
 interface CredentialPromptMessage {
