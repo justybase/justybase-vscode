@@ -483,24 +483,24 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [loadSchemaChildren, schemaNodes, selectedConnectionId, store]);
 
   const dispatchQueryEvent = useCallback((active: ActiveQuery, event: QueryEvent, nextSequence: () => number): void => {
-    const base = { sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId, sequence: nextSequence() };
+    const base = { sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId };
     let mapped: UiResultEvent | undefined;
     switch (event.type) {
-      case 'started': mapped = { ...base, type: 'started' }; break;
-      case 'statement-started': mapped = { ...base, type: 'statement-started' }; break;
-      case 'columns': mapped = { ...base, type: 'columns', columns: event.columns.map(mapQueryColumn) }; break;
+      case 'started': mapped = { ...base, sequence: nextSequence(), type: 'started' }; break;
+      case 'statement-started': mapped = { ...base, sequence: nextSequence(), type: 'statement-started' }; break;
+      case 'columns': mapped = { ...base, sequence: nextSequence(), type: 'columns', columns: event.columns.map(mapQueryColumn) }; break;
       case 'rows': {
         const rows = rowsByResultRef.current[active.resultSetId] ?? [];
         const nextRows = [...rows, ...event.rows.map(row => [...row])];
         rowsByResultRef.current = { ...rowsByResultRef.current, [active.resultSetId]: nextRows };
         setRowsByResult(rowsByResultRef.current);
-        mapped = { ...base, type: 'rows', rowCount: nextRows.length, totalRowCount: event.totalRows };
+        mapped = { ...base, sequence: nextSequence(), type: 'rows', rowCount: nextRows.length, totalRowCount: event.totalRows };
         break;
       }
-      case 'progress': mapped = { ...base, type: 'progress', totalRowCount: event.totalRows }; break;
-      case 'complete': mapped = { ...base, type: 'complete', totalRowCount: event.totalRows, message: event.message }; break;
-      case 'error': mapped = { ...base, type: 'error', message: event.message }; break;
-      case 'cancelled': mapped = { ...base, type: 'cancelled', totalRowCount: event.totalRows }; break;
+      case 'progress': mapped = { ...base, sequence: nextSequence(), type: 'progress', totalRowCount: event.totalRows }; break;
+      case 'complete': mapped = { ...base, sequence: nextSequence(), type: 'complete', totalRowCount: event.totalRows, message: event.message }; break;
+      case 'error': mapped = { ...base, sequence: nextSequence(), type: 'error', message: event.message }; break;
+      case 'cancelled': mapped = { ...base, sequence: nextSequence(), type: 'cancelled', totalRowCount: event.totalRows }; break;
       case 'session':
       case 'batch-complete':
         break;

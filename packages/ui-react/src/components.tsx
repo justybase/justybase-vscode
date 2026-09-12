@@ -135,7 +135,7 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
         ? matchingActiveResults.length === 1
         : result.sourceId === activeSourceId);
     const tabIndex = active || (activeResultSetId === undefined && index === 0) ? 0 : -1;
-    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} onKeyDown={event => {
+    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} data-result-status={result.status} onKeyDown={event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? results.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + results.length) % results.length;

@@ -331,6 +331,7 @@ describe('shared Web UI adapter edge contracts', () => {
     await screen.findByRole('button', { name: 'SQLite' });
     await user.click(screen.getByRole('button', { name: 'Run' }));
     expect(await screen.findByRole('cell', { name: 'b' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Result 1' })).toHaveAttribute('data-result-status', 'complete');
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/query/query-1/page'), expect.anything());
   });
 
