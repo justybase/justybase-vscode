@@ -1,8 +1,8 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
-import type { SqlCompletionRequest, SqlDiagnosticsRequest, SqlFormatRequest } from '@justybase/contracts';
+import { tryNormalizeDatabaseKind, type SqlCompletionRequest, type SqlDiagnosticsRequest, type SqlFormatRequest } from '@justybase/contracts';
 import { formatSqlDocument, provideSqlCompletion, provideSqlDiagnostics } from '../lsp';
 import { attachLspSocket } from '../lspProtocol';
-import { loadNetezzaSnippets } from '../snippets';
+import { loadSqlSnippets } from '../snippets';
 import { createWebSocketOriginGuard } from '../webSocketOrigin';
 
 export interface LspRouteHooks {
@@ -25,7 +25,13 @@ export function registerLspRoutes(app: FastifyInstance, hooks: LspRouteHooks): v
     try { return await formatSqlDocument(app.store, app.apiConfig, request.user!.id, request.body as SqlFormatRequest); }
     catch (error: unknown) { return reply.code(400).send({ code: 'LSP_FORMAT_FAILED', message: error instanceof Error ? error.message : 'Formatting failed.' }); }
   });
-  app.get('/api/lsp/snippets', { preHandler: hooks.authenticate }, async () => ({ snippets: loadNetezzaSnippets() }));
+  app.get('/api/lsp/snippets', { preHandler: hooks.authenticate }, async request => {
+    const rawKind = typeof request.query === 'object' && request.query !== null && 'databaseKind' in request.query
+      ? (request.query as { databaseKind?: unknown }).databaseKind
+      : undefined;
+    const databaseKind = typeof rawKind === 'string' ? tryNormalizeDatabaseKind(rawKind) ?? 'netezza' : 'netezza';
+    return { snippets: loadSqlSnippets(databaseKind) };
+  });
   app.get('/api/lsp', { websocket: true, preValidation: [webSocketOriginGuard, hooks.authenticate] }, (socket, request) => {
     const session = attachLspSocket(socket, app.store, app.databaseRuntimes, request.user!.id, closed => app.lspSessions.delete(closed), app.metadataService);
     app.lspSessions.add(session);

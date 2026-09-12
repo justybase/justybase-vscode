@@ -50,6 +50,7 @@ import type {
   SqlDiagnosticsResponse,
   SqlFormatRequest,
   SqlFormatResponse,
+  DatabaseKind,
   WebUser,
   WriteOperationPreviewResponse,
 } from '@justybase/contracts';
@@ -423,7 +424,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
     completion: (input: SqlCompletionRequest) => request<SqlCompletionResponse>('/api/lsp/completion', { method: 'POST', body: JSON.stringify(input) }),
     diagnostics: (input: SqlDiagnosticsRequest) => request<SqlDiagnosticsResponse>('/api/lsp/diagnostics', { method: 'POST', body: JSON.stringify(input) }),
     formatSql: (input: SqlFormatRequest) => request<SqlFormatResponse>('/api/lsp/format', { method: 'POST', body: JSON.stringify(input) }),
-    snippets: () => request<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>('/api/lsp/snippets'),
+    snippets: (databaseKind?: DatabaseKind) => request<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>(`/api/lsp/snippets${databaseKind ? `?databaseKind=${encodeURIComponent(databaseKind)}` : ''}`),
     adminUsers: () => request<AdminUserSummary[]>('/api/admin/users'),
     createAdminUser: (input: AdminUserCreateRequest) => request<AdminUserSummary>('/api/admin/users', { method: 'POST', body: JSON.stringify(input) }),
     updateAdminUser: (id: string, input: AdminUserUpdateRequest) => request<AdminUserSummary>(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
