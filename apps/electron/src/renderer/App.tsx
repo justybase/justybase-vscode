@@ -12,6 +12,7 @@ import {
   ResultTabs,
   ResultViewToolbar,
   RowDetail,
+  SqlDialectSelect,
   UiShell,
   WorkspaceTabs,
   createDataGridClipboardPayload,
@@ -132,6 +133,7 @@ export function App(): ReactElement {
         title: 'scratch.sql',
         content: 'SELECT 1;',
         dirty: false,
+        databaseKind: 'netezza',
       },
     });
     storeRef.current = store;
@@ -212,7 +214,11 @@ export function App(): ReactElement {
       store.dispatch({ type: 'auth/set', auth });
       store.dispatch({ type: 'capabilities/set', capabilities: capabilities.descriptors });
       store.dispatch({ type: 'connections/set-profiles', profiles });
-      if (profiles[0]) store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
+      if (profiles[0]) {
+        store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
+        const currentDocumentId = store.getState().workspace.activeDocumentId;
+        if (currentDocumentId) store.dispatch({ type: 'workspace/update-document', documentId: currentDocumentId, patch: { connectionId: profiles[0].id, databaseKind: profiles[0].dbType } });
+      }
       store.dispatch({ type: 'shell/status', status: auth.status === 'authenticated' ? 'complete' : 'error', message: auth.message });
       void clientRef.current?.editorPreferences().then(setPreferences).catch(() => undefined);
     }).catch(error => {
@@ -309,7 +315,7 @@ export function App(): ReactElement {
     documentContextRef.current.set(sourceId, { database: database || selectedConnection?.database || '', schema });
     store.dispatch({
       type: 'workspace/open-document',
-      document: { id: sourceId, sourceId, title, content, dirty: false, connectionId },
+      document: { id: sourceId, sourceId, title, content, dirty: false, connectionId, databaseKind: selectedConnection?.dbType ?? 'netezza' },
     });
     store.dispatch({ type: 'workspace/select-document', documentId: sourceId });
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
@@ -337,7 +343,12 @@ export function App(): ReactElement {
 
   const selectConnection = useCallback((connectionId: string): void => {
     store.dispatch({ type: 'connections/select', connectionId });
-    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId } });
+    const profile = state.connections.profiles.find(item => item.id === connectionId);
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
+  }, [activeDocument, state.connections.profiles, store]);
+
+  const selectAuthoringDialect = useCallback((databaseKind: DatabaseKind): void => {
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { databaseKind } });
   }, [activeDocument, store]);
 
   const saveConnection = useCallback((profile: RedactedConnectionProfile): void => {
@@ -346,7 +357,7 @@ export function App(): ReactElement {
       : [...state.connections.profiles, profile];
     store.dispatch({ type: 'connections/set-profiles', profiles });
     store.dispatch({ type: 'connections/select', connectionId: profile.id });
-    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id } });
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id, databaseKind: profile.dbType } });
     setDatabase(profile.database);
     setSchema('');
     setConnectionEditor(undefined);
@@ -362,7 +373,7 @@ export function App(): ReactElement {
       if (state.connections.selectedConnectionId === profile.id) {
         const next = profiles[0];
         store.dispatch({ type: 'connections/select', connectionId: next?.id });
-        if (activeDocument && next) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id } });
+        if (activeDocument && next) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id, databaseKind: next.dbType } });
       }
       setNotice(`Connection “${profile.name}” deleted.`);
     } catch (reason: unknown) {
@@ -700,7 +711,8 @@ export function App(): ReactElement {
   const explainCapability = state.capabilities.find(descriptor => descriptor.key === 'explain');
   const historyCapability = state.capabilities.find(descriptor => descriptor.key === 'history');
   const metadataCapability = state.capabilities.find(descriptor => descriptor.key === 'metadata');
-  const databaseKind = (selectedConnection?.dbType ?? 'netezza') as DatabaseKind;
+  const runtimeDatabaseKind = (selectedConnection?.dbType ?? 'netezza') as DatabaseKind;
+  const authoringDatabaseKind = activeDocument?.databaseKind ?? runtimeDatabaseKind;
   const surfaces: readonly { id: UiSurface; label: string }[] = [
     { id: 'workspace', label: 'Workspace' },
     { id: 'results', label: 'Results' },
@@ -726,7 +738,7 @@ export function App(): ReactElement {
     sidebar={<div className="electron-sidebar-content">
       <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
       <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" className="electron-section-action" aria-label="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <div className="electron-connection-item" key={profile.id}><button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="electron-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
-      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={databaseKind} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
+      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={runtimeDatabaseKind} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
     </div>}
   >
     {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} /></CapabilityGate>
@@ -739,6 +751,7 @@ export function App(): ReactElement {
             <button type="button" onClick={commentDocument}>Comment</button>
             <button type="button" onClick={formatDocument}>Format</button>
             <span className="electron-toolbar-spacer" />
+            <SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" />
             <label>Connection<select aria-label="Editor connection" value={selectedConnection?.id ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
             <label>Database<select aria-label="Editor database" value={database} disabled={!selectedConnection} onChange={event => selectDatabase(event.target.value)}><option value="">{selectedConnection ? 'Select database' : 'Select connection'}</option>{databases.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
             <button type="button" className="electron-run-button" aria-label="Run" onClick={() => void run()} disabled={!activeDocument}>▶ Run</button>
@@ -747,7 +760,7 @@ export function App(): ReactElement {
             <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
           </div>
           {notice && <div className="electron-notice" role="status">{notice}</div>}
-          <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database, schema, databaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
+          <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database, schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
           <ProblemsPanel problems={problems} onSelect={selectProblem} />
           <div className="electron-result-panel">
             <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>

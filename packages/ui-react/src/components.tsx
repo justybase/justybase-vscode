@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
-import type { CapabilityDescriptor } from '@justybase/contracts';
+import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseKind } from '@justybase/contracts';
 import type { MetadataNode } from '@justybase/ui-core';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
@@ -69,6 +69,18 @@ export interface WorkspaceTabsProps {
   readonly activeId?: string;
   readonly onSelect: (id: string) => void;
   readonly onClose?: (id: string) => void;
+}
+
+/** Dialect picker shared by Web, Electron and future host adapters. */
+export interface SqlDialectSelectProps {
+  readonly value: DatabaseKind;
+  readonly onChange: (databaseKind: DatabaseKind) => void;
+  readonly ariaLabel?: string;
+}
+
+export function SqlDialectSelect({ value, onChange, ariaLabel = 'SQL dialect' }: SqlDialectSelectProps): ReactNode {
+  const known = SUPPORTED_DATABASE_KINDS.includes(value as typeof SUPPORTED_DATABASE_KINDS[number]);
+  return <label className="ui-sql-dialect-select">Dialect<select aria-label={ariaLabel} value={value} onChange={event => onChange(event.target.value as DatabaseKind)}>{SUPPORTED_DATABASE_KINDS.map(kind => <option key={kind} value={kind}>{DATABASE_KIND_DISPLAY_NAMES[kind] ?? kind}</option>)}{!known && <option value={value}>{DATABASE_KIND_DISPLAY_NAMES[value] ?? value}</option>}</select><small>SQL authoring profile</small></label>;
 }
 
 export function WorkspaceTabs({ tabs, activeId, onSelect, onClose }: WorkspaceTabsProps): ReactNode {

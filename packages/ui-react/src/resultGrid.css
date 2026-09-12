@@ -597,6 +597,33 @@ body,
 .shared-sidebar > button:hover,
 .shared-sidebar > button[aria-pressed='true'] { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
 
+.ui-sql-dialect-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ui-sql-dialect-select select {
+  min-height: 26px;
+  max-width: 172px;
+  padding: 3px 7px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
+  font: inherit;
+}
+
+.ui-sql-dialect-select select:focus {
+  border-color: var(--justybase-grid-accent);
+  outline: none;
+}
+
+.ui-sql-dialect-select small { color: var(--justybase-grid-muted); font-size: 9px; }
+
 .shared-editor-stack {
   display: flex;
   min-width: 0;
@@ -606,6 +633,31 @@ body,
   flex-direction: column;
   border-bottom: 1px solid var(--justybase-grid-border);
 }
+
+.shared-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  background: var(--justybase-grid-bg);
+}
+
+.shared-editor-actions > button {
+  min-height: 25px;
+  padding: 3px 9px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  font: inherit;
+  font-size: 11px;
+}
+
+.shared-editor-actions > button:hover:not(:disabled) { background: var(--justybase-grid-hover); }
+.shared-editor-actions > button:disabled { cursor: not-allowed; opacity: .5; }
 
 .shared-sql-editor { min-width: 0; min-height: 0; flex: 1; }
 .shared-sql-problems { display: flex; min-height: 30px; max-height: 132px; flex: 0 0 auto; flex-direction: column; overflow: hidden; border-top: 1px solid var(--justybase-grid-border); background: var(--justybase-grid-bg); }

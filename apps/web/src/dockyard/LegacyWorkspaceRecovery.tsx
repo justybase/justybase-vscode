@@ -44,6 +44,7 @@ export function LegacyWorkspaceRecovery({
   onRetryStatement,
   onSelectConnection,
   onSelectDatabase,
+  onSelectDialect,
   onInsertSql,
   onContextChange,
   onObjectSelect,
@@ -136,6 +137,7 @@ export function LegacyWorkspaceRecovery({
         onRetryStatement={onRetryStatement}
         onSelectConnection={onSelectConnection}
         onSelectDatabase={onSelectDatabase}
+        onSelectDialect={onSelectDialect}
         onOpenConnectionForm={onOpenConnectionForm}
         onEditRow={onEditRow}
       /> : <div className="empty-state"><strong>No query tab</strong><button type="button" onClick={onAddTab}>New query</button></div>}

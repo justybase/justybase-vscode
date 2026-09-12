@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import type {
   CapabilityDescriptor,
   ConnectionProfileSummary,
+  DatabaseKind,
   EditorPreferences,
   HistoryEntry,
   QueryEvent,
@@ -31,6 +32,7 @@ import {
   resolveDataGridColumnIndexes,
   resolveDataGridColumns,
   SchemaTree,
+  SqlDialectSelect,
   UiShell,
   WorkspaceTabs,
 } from '@justybase/ui-react';
@@ -84,7 +86,7 @@ function createSharedStore(user: WebUser): UiStore {
   }));
   store.dispatch({
     type: 'workspace/open-document',
-    document: { id: DOCUMENT_ID, sourceId, title: 'scratch.sql', content: 'SELECT 1;', dirty: false },
+    document: { id: DOCUMENT_ID, sourceId, title: 'scratch.sql', content: 'SELECT 1;', dirty: false, databaseKind: 'netezza' },
   });
   return store;
 }
@@ -195,8 +197,9 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const schemaLoadedParentsRef = useRef(new Set<string>());
   const selectedConnectionId = state.connections.selectedConnectionId;
   const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
-  const databaseKind = selectedConnection?.dbType ?? 'netezza';
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
+  const runtimeDatabaseKind = selectedConnection?.dbType ?? 'netezza';
+  const authoringDatabaseKind = activeDocument?.databaseKind ?? runtimeDatabaseKind;
   const activeResult = state.results.activeResultSetId
     ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
     : undefined;
@@ -221,7 +224,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     void api.connections().then(profiles => {
       if (!live) return;
       store.dispatch({ type: 'connections/set-profiles', profiles: profiles.map(redactedWebProfile) });
-      if (profiles[0]) store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
+      if (profiles[0]) {
+        store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
+        const currentDocumentId = store.getState().workspace.activeDocumentId;
+        if (currentDocumentId) store.dispatch({ type: 'workspace/update-document', documentId: currentDocumentId, patch: { connectionId: profiles[0].id, databaseKind: profiles[0].dbType } });
+      }
     }).catch(error => {
       if (!live) return;
       store.dispatch({ type: 'connections/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load connections.' });
@@ -478,6 +485,16 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } });
   }, [activeDocument, store]);
 
+  const selectConnection = useCallback((connectionId: string): void => {
+    const profile = state.connections.profiles.find(item => item.id === connectionId);
+    store.dispatch({ type: 'connections/select', connectionId });
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
+  }, [activeDocument, state.connections.profiles, store]);
+
+  const selectAuthoringDialect = useCallback((databaseKind: DatabaseKind): void => {
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { databaseKind } });
+  }, [activeDocument, store]);
+
   const selectSurface = useCallback((surface: string): void => {
     if (['workspace', 'editor', 'results', 'schema', 'history', 'explain', 'designer'].includes(surface)) store.dispatch({ type: 'shell/surface', surface: surface as UiSurface });
   }, [store]);
@@ -523,18 +540,18 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const designerFields = { target: selectedNode?.label ?? 'Select an object', connection: selectedConnection?.name ?? 'No connection' };
 
   return <UiShell title="JustyBase" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
-    <strong>Connections</strong>{state.connections.profiles.map(profile => <button type="button" key={profile.id} aria-pressed={profile.id === selectedConnectionId} onClick={() => store.dispatch({ type: 'connections/select', connectionId: profile.id })}>{profile.name}</button>)}
+    <strong>Connections</strong>{state.connections.profiles.map(profile => <button type="button" key={profile.id} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}>{profile.name}</button>)}
     <SchemaTree nodes={visibleSchema} selectedId={state.metadata.selectedNodeId} expandedIds={state.metadata.expandedNodeIds} onToggle={toggleSchemaNode} onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })} />
     <button type="button" onClick={onLogout}>Log out</button>
   </div>}>
-    {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={entry => { const sourceId = sourceIdFor(user); store.dispatch({ type: 'workspace/open-document', document: { id: `history:${entry.id}`, sourceId, title: entry.label || 'History query', content: history.find(item => item.id === entry.id)?.sql ?? '', dirty: false } }); store.dispatch({ type: 'shell/surface', surface: 'workspace' }); }} />
+    {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={entry => { const sourceId = sourceIdFor(user); const historyEntry = history.find(item => item.id === entry.id); const profile = historyEntry ? state.connections.profiles.find(item => item.id === historyEntry.connectionId) : undefined; store.dispatch({ type: 'workspace/open-document', document: { id: `history:${entry.id}`, sourceId, title: entry.label || 'History query', content: historyEntry?.sql ?? '', dirty: false, connectionId: historyEntry?.connectionId, databaseKind: profile?.dbType ?? runtimeDatabaseKind } }); store.dispatch({ type: 'shell/surface', surface: 'workspace' }); }} />
       : state.shell.activeSurface === 'explain' ? <ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={cancel} />
         : state.shell.activeSurface === 'designer' ? <DesignerForm fields={designerFields} capability={state.capabilities.find(capability => capability.key === 'designer')} onChange={() => undefined} onPreview={() => setNotice('Designer preview remains adapter-backed in shared mode.')} onApply={() => setNotice('Designer apply is guarded and unavailable for this read-only capability.')} />
           : <>
             <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} />
-            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind })} onChange={updateSql} onRun={() => void run()} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={problem => setNotice(`SQL problem at line ${problem.startLineNumber}, column ${problem.startColumn}.`)} /></div>
+            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={problem => setNotice(`SQL problem at line ${problem.startLineNumber}, column ${problem.startColumn}.`)} /></div>
             <div className="shared-result-panel">
-              <button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button>
+              <div className="shared-editor-actions" role="toolbar" aria-label="SQL editor actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div>
               {notice && <div role="status">{notice}</div>}
               <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
               {activeResult && <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={exportResults} />}

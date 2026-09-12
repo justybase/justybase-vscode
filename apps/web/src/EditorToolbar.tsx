@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { ConnectionProfileSummary, MetadataDatabase } from '@justybase/contracts';
+import type { ConnectionProfileSummary, DatabaseKind, MetadataDatabase } from '@justybase/contracts';
+import { SqlDialectSelect } from '@justybase/ui-react';
 
 // ── SVG Icons ──────────────────────────────────────────
 
@@ -90,6 +91,8 @@ export interface EditorToolbarProps {
   databases: MetadataDatabase[];
   onSelectConnection: (id: string) => void;
   onSelectDatabase: (db: string) => void;
+  databaseKind: DatabaseKind;
+  onSelectDialect: (databaseKind: DatabaseKind) => void;
   onRun: (mode: RunMode) => void;
   onSave: () => void;
   onComment: () => void;
@@ -107,6 +110,8 @@ export function EditorToolbar({
   databases,
   onSelectConnection,
   onSelectDatabase,
+  databaseKind,
+  onSelectDialect,
   onRun,
   onSave,
   onComment,
@@ -208,7 +213,9 @@ export function EditorToolbar({
       </div>
 
       {/* Right group */}
-      <div className="toolbar-right">          <select
+      <div className="toolbar-right">
+        <SqlDialectSelect value={databaseKind} onChange={onSelectDialect} ariaLabel="SQL authoring dialect" />
+        <select
           className="tb-select"
           title="Connection"
           value={connectionId || ''}

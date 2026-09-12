@@ -65,6 +65,8 @@ describe('shared Web UI adapter', () => {
     render(<SharedWebWorkspace api={api} user={{ id: 'user-1', username: 'alice', role: 'user' }} onLogout={onLogout} />);
 
     await screen.findByRole('button', { name: 'SQLite' });
+    await user.selectOptions(screen.getByRole('combobox', { name: 'SQL authoring dialect' }), 'postgresql');
+    expect(screen.getByRole('combobox', { name: 'SQL authoring dialect' })).toHaveValue('postgresql');
     expect(screen.getByRole('tree', { name: 'Schema' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Run' }));
     await screen.findByRole('table');
