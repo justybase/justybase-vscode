@@ -100,6 +100,11 @@ export interface ExecutionInput {
   readonly sql: string;
   readonly connectionId: string;
   readonly mode: 'single' | 'script' | 'explain';
+  /** Optional cursor location used by dialect adapters to select a statement. */
+  readonly cursorOffset?: number;
+  /** Short-lived confirmation fields for guarded write execution. */
+  readonly writeConfirmed?: boolean;
+  readonly writePreviewToken?: string;
 }
 
 export interface ExecutionHandle {

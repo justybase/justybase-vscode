@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
-import type { QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec } from '@justybase/contracts';
+import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataDatabase, QueryColumnFilterSpec, QueryExportFormat, QuerySortSpec, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createExecutionController, createInitialUiState, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
 import {
   AsyncStateView,
   CapabilityGate,
   DataGrid,
-  EditorSurface,
   ExplainView,
   HistoryView,
   ResultTabs,
@@ -16,6 +15,7 @@ import {
   UiShell,
   WorkspaceTabs,
   createDataGridClipboardPayload,
+  disposeSqlLanguageFeatures,
   formatDataGridClipboard,
   formatDataGridCellValue,
   processDataGridRows,
@@ -24,6 +24,9 @@ import {
 import type { DataGridCellContext, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import { createElectronApiClient } from './api';
 import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from './execution';
+import { ProblemsPanel, SqlEditor } from './SqlEditor';
+import type { SqlEditorProblem } from './SqlEditor';
+import { SchemaExplorer } from './SchemaExplorer';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -140,11 +143,23 @@ export function App(): ReactElement {
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [contextMenu, setContextMenu] = useState<ElectronGridContextMenu | undefined>(undefined);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
+  const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
+  const [problems, setProblems] = useState<readonly SqlEditorProblem[]>([]);
+  const [database, setDatabase] = useState('');
+  const [schema, setSchema] = useState('');
+  const [databases, setDatabases] = useState<readonly MetadataDatabase[]>([]);
+  const [history, setHistory] = useState<readonly HistoryEntry[]>([]);
+  const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'error'>('ready');
+  const [historyMessage, setHistoryMessage] = useState<string | undefined>(undefined);
   const activeExecutionRef = useRef<ExecutionHandle | undefined>(undefined);
   const pendingPageRequestsRef = useRef(new Set<string>());
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
   const clientRef = useRef<ReturnType<typeof createElectronApiClient> | undefined>(undefined);
   const executionRef = useRef<ExecutionController | undefined>(undefined);
+  const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof import('monaco-editor') | undefined>(undefined);
+  const documentContextRef = useRef(new Map<string, { database: string; schema: string }>());
+  const documentSequenceRef = useRef(1);
   if (!clientRef.current) clientRef.current = createElectronApiClient();
   if (!executionRef.current) {
     executionRef.current = createExecutionController(store, createElectronExecutionPort({
@@ -190,6 +205,7 @@ export function App(): ReactElement {
       store.dispatch({ type: 'connections/set-profiles', profiles });
       if (profiles[0]) store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
       store.dispatch({ type: 'shell/status', status: auth.status === 'authenticated' ? 'complete' : 'error', message: auth.message });
+      void clientRef.current?.editorPreferences().then(setPreferences).catch(() => undefined);
     }).catch(error => {
       if (!active) return;
       store.dispatch({ type: 'auth/set', auth: { status: 'error', message: error instanceof Error ? error.message : 'Authentication is unavailable.' } });
@@ -215,6 +231,10 @@ export function App(): ReactElement {
     };
   }, [execution, store]);
 
+  useEffect(() => () => {
+    if (monacoRef.current) disposeSqlLanguageFeatures(monacoRef.current);
+  }, []);
+
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
   const activeResult = state.results.activeResultSetId
     ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
@@ -225,6 +245,47 @@ export function App(): ReactElement {
   const resultMessage = activeResult?.message;
 
   useEffect(() => {
+    if (!activeDocument) return;
+    const remembered = documentContextRef.current.get(activeDocument.id);
+    const nextDatabase = remembered?.database || selectedConnection?.database || '';
+    const nextSchema = remembered?.schema ?? '';
+    setDatabase(previous => previous === nextDatabase ? previous : nextDatabase);
+    setSchema(previous => previous === nextSchema ? previous : nextSchema);
+  }, [activeDocument?.id, selectedConnection?.database]);
+
+  useEffect(() => {
+    const connectionId = selectedConnection?.id;
+    if (!connectionId) {
+      setDatabases([]);
+      return undefined;
+    }
+    let active = true;
+    void clientRef.current?.databases(connectionId).then(next => {
+      if (active) setDatabases(Array.isArray(next) ? next : []);
+    }).catch(error => {
+      if (active) setNotice(error instanceof Error ? error.message : 'Could not load databases.');
+    });
+    return () => { active = false; };
+  }, [selectedConnection?.id]);
+
+  useEffect(() => {
+    if (state.shell.activeSurface !== 'history') return undefined;
+    let active = true;
+    setHistoryState('loading');
+    setHistoryMessage(undefined);
+    void clientRef.current?.history().then(entries => {
+      if (!active) return;
+      setHistory(Array.isArray(entries) ? entries : []);
+      setHistoryState('ready');
+    }).catch(error => {
+      if (!active) return;
+      setHistoryState('error');
+      setHistoryMessage(error instanceof Error ? error.message : 'Could not load query history.');
+    });
+    return () => { active = false; };
+  }, [state.shell.activeSurface]);
+
+  useEffect(() => {
     setSelectedRow(undefined);
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
 
@@ -233,6 +294,94 @@ export function App(): ReactElement {
     rowsByResultRef.current = next;
     setRowsByResult(next);
   }, []);
+
+  const openDocument = useCallback((content: string, title: string, sourceId = `electron:document:${documentSequenceRef.current++}`): void => {
+    const connectionId = selectedConnection?.id;
+    documentContextRef.current.set(sourceId, { database: database || selectedConnection?.database || '', schema });
+    store.dispatch({
+      type: 'workspace/open-document',
+      document: { id: sourceId, sourceId, title, content, dirty: false, connectionId },
+    });
+    store.dispatch({ type: 'workspace/select-document', documentId: sourceId });
+    store.dispatch({ type: 'shell/surface', surface: 'workspace' });
+  }, [database, schema, selectedConnection?.database, selectedConnection?.id, store]);
+
+  const closeDocument = useCallback((documentId: string): void => {
+    if (state.workspace.documentOrder.length <= 1) return;
+    const document = state.workspace.documents[documentId];
+    if (document?.dirty && typeof window !== 'undefined' && !window.confirm(`Close modified document “${document.title}”?`)) return;
+    documentContextRef.current.delete(documentId);
+    store.dispatch({ type: 'workspace/close-document', documentId });
+  }, [state.workspace.documentOrder.length, state.workspace.documents, store]);
+
+  const insertSql = useCallback((value: string): void => {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model) {
+      if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content: `${activeDocument.content}${value}`, dirty: true } });
+      return;
+    }
+    const selection = editor.getSelection() ?? model.getFullModelRange();
+    editor.executeEdits('schema-insert', [{ range: selection, text: value, forceMoveMarkers: true }]);
+    editor.focus();
+  }, [activeDocument, store]);
+
+  const selectConnection = useCallback((connectionId: string): void => {
+    store.dispatch({ type: 'connections/select', connectionId });
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId } });
+  }, [activeDocument, store]);
+
+  const selectDatabase = useCallback((nextDatabase: string): void => {
+    setDatabase(nextDatabase);
+    if (activeDocument) documentContextRef.current.set(activeDocument.id, { database: nextDatabase, schema });
+    setSchema('');
+  }, [activeDocument, schema]);
+
+  const handleEditorProblems = useCallback((nextProblems: readonly SqlEditorProblem[]): void => {
+    setProblems(nextProblems);
+  }, []);
+
+  const revealProblem = useCallback((problem: SqlEditorProblem): void => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.revealLineInCenter(problem.startLineNumber);
+    editor.setPosition({ lineNumber: problem.startLineNumber, column: problem.startColumn });
+    editor.focus();
+  }, []);
+
+  const openSchemaQuery = useCallback((sql: string, title: string, node?: SchemaTreeNode): void => {
+    if (node?.database) setDatabase(node.database);
+    if (node?.schema) setSchema(node.schema);
+    openDocument(sql, title);
+  }, [openDocument]);
+
+  const openHistoryEntry = useCallback((entry: HistoryEntry): void => {
+    openDocument(entry.sql, `History · ${entry.createdAt.slice(0, 19)}`, `electron:history:${entry.id}`);
+  }, [openDocument]);
+
+  const openDdl = useCallback((sql: string, title: string, node: SchemaTreeNode): void => {
+    if (node.database) setDatabase(node.database);
+    if (node.schema) setSchema(node.schema);
+    openDocument(sql, title);
+  }, [openDocument]);
+
+  const saveDocument = useCallback((): void => {
+    if (!activeDocument) return;
+    store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { dirty: false } });
+    setNotice('Document saved for this Electron profile.');
+  }, [activeDocument, store]);
+
+  const formatDocument = useCallback((): void => {
+    void editorRef.current?.getAction('editor.action.formatDocument')?.run();
+  }, []);
+
+  const commentDocument = useCallback((): void => {
+    void editorRef.current?.getAction('editor.action.commentLine')?.run();
+  }, []);
+
+  const selectProblem = useCallback((problem: SqlEditorProblem): void => {
+    revealProblem(problem);
+  }, [revealProblem]);
 
   const resultViewRequestKey = useCallback((view: UiResultSurfaceState['view']): string => {
     const columnFilters = Object.entries(view.columnFilters)
@@ -299,7 +448,7 @@ export function App(): ReactElement {
     }
   }, [resultViewRequestKey, store, updateRows]);
 
-  const run = useCallback(async (mode: 'single' | 'explain' = 'single'): Promise<void> => {
+  const run = useCallback(async (mode: 'single' | 'script' | 'explain' = 'single'): Promise<void> => {
     if (!selectedConnection) {
       setNotice('Select a connection before running SQL.');
       return;
@@ -316,7 +465,13 @@ export function App(): ReactElement {
     setNotice(undefined);
     setSelectedRow(undefined);
     try {
-      const handle = await execution.run({ sourceId: 'electron:scratch', sql: activeDocument.content, connectionId: selectedConnection.id, mode });
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      const selection = editor?.getSelection();
+      const selectedSql = model && selection && !selection.isEmpty() ? model.getValueInRange(selection) : '';
+      const sql = selectedSql.trim() && mode === 'single' ? selectedSql : activeDocument.content;
+      const cursorOffset = model && editor?.getPosition() ? model.getOffsetAt(editor.getPosition()!) : undefined;
+      const handle = await execution.run({ sourceId: activeDocument.sourceId, sql, connectionId: selectedConnection.id, mode, ...(selectedSql.trim() ? {} : { cursorOffset }) });
       activeExecutionRef.current = handle;
       pageStateRef.current.delete(handle.resultSetId);
       updateRows(handle.resultSetId, []);
@@ -325,7 +480,7 @@ export function App(): ReactElement {
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not start query.');
     }
-  }, [activeDocument?.content, execution, selectedConnection, store, updateRows]);
+  }, [activeDocument, execution, selectedConnection, store, updateRows]);
 
   const cancel = useCallback(async (): Promise<void> => {
     const active = activeExecutionRef.current;
@@ -477,13 +632,20 @@ export function App(): ReactElement {
   const workspaceCapability = state.capabilities.find(descriptor => descriptor.key === 'workspace');
   const explainCapability = state.capabilities.find(descriptor => descriptor.key === 'explain');
   const historyCapability = state.capabilities.find(descriptor => descriptor.key === 'history');
+  const metadataCapability = state.capabilities.find(descriptor => descriptor.key === 'metadata');
+  const databaseKind = (selectedConnection?.dbType ?? 'netezza') as DatabaseKind;
   const surfaces: readonly { id: UiSurface; label: string }[] = [
     { id: 'workspace', label: 'Workspace' },
     { id: 'results', label: 'Results' },
     { id: 'history', label: 'History' },
     { id: 'explain', label: 'Explain' },
   ];
-  const historyItems: HistoryViewEntry[] = [];
+  const historyItems: HistoryViewEntry[] = history.map(entry => ({
+    id: entry.id,
+    label: entry.sql.slice(0, 120) || '(empty SQL)',
+    status: entry.status,
+    sqlFingerprint: `${entry.createdAt} · ${entry.rowCount.toLocaleString()} rows · ${entry.durationMs} ms`,
+  }));
   const onScroll = (position: GridScrollPosition): void => {
     if (activeResult && position.resultSetId === activeResult.resultSetId) updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
   };
@@ -493,46 +655,39 @@ export function App(): ReactElement {
     activeSurface={state.shell.activeSurface}
     onSurfaceChange={selectSurface}
     surfaces={surfaces}
-    sidebar={<>
-      <WorkspaceTabs
-        tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))}
-        activeId={state.workspace.activeDocumentId}
-        onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })}
-      />
-      <section aria-label="Connections"><strong>Connections</strong>{state.connections.profiles.map(profile => <button type="button" key={profile.id} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => store.dispatch({ type: 'connections/select', connectionId: profile.id })}>{profile.name}</button>)}</section>
-    </>}
+    sidebar={<div className="electron-sidebar-content">
+      <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
+      <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} key={profile.id} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button>)}</section>
+      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={databaseKind} onInsert={insertSql} onObjectSelect={() => undefined} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={() => setNotice('Import workflow will open from the selected schema object.')} /></CapabilityGate>
+    </div>}
   >
-    {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state="empty" /></CapabilityGate>
+    {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} /></CapabilityGate>
       : state.shell.activeSurface === 'explain' ? <CapabilityGate capability={explainCapability} fallback={<AsyncStateView state="empty" emptyLabel="Explain is not available in this Electron shell yet." />}><ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={() => void cancel()} /></CapabilityGate>
-        : <>
-          <WorkspaceTabs
-            tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))}
-            activeId={state.workspace.activeDocumentId}
-            onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })}
-          />
-          <EditorSurface value={activeDocument?.content ?? ''} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onSubmit={() => void run()} />
-          <div className="electron-result-panel">
-            <button type="button" onClick={() => void run()}>Run</button>
-            <button type="button" onClick={() => void run('explain')}>Explain</button>
+        : <div className="electron-workspace-content">
+          <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} onClose={closeDocument} />
+          <div className="electron-editor-toolbar" role="toolbar" aria-label="SQL editor actions">
+            <button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>＋ SQL</button>
+            <button type="button" onClick={saveDocument}>Save</button>
+            <button type="button" onClick={commentDocument}>Comment</button>
+            <button type="button" onClick={formatDocument}>Format</button>
+            <span className="electron-toolbar-spacer" />
+            <label>Connection<select aria-label="Editor connection" value={selectedConnection?.id ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+            <label>Database<select aria-label="Editor database" value={database} disabled={!selectedConnection} onChange={event => selectDatabase(event.target.value)}><option value="">{selectedConnection ? 'Select database' : 'Select connection'}</option>{databases.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+            <button type="button" className="electron-run-button" aria-label="Run" onClick={() => void run()} disabled={!activeDocument}>▶ Run</button>
+            <button type="button" onClick={() => void run('script')} disabled={!selectedConnection || !activeDocument}>Run script</button>
+            <button type="button" aria-label="Explain current SQL" onClick={() => void run('explain')} disabled={!selectedConnection || !activeDocument}>Explain</button>
             <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
-            {notice && <div role="status">{notice}</div>}
-            <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-            {activeResult && <>
-              <ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} />
-              <label className="electron-export-format">Export format<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label>
-            </>}
-            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…">
-              <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} />
-            </AsyncStateView>
-            {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
-              <button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button>
-              <button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'row'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy row</button>
-              <button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ columnFilters: { ...activeResult.view.columnFilters, [column.name]: String(contextRow[contextMenu.columnIndex] ?? '') } }); closeContextMenu(); }}>Filter by value</button>
-              <button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ sorting: [{ column: column.name, descending: false }] }); closeContextMenu(); }}>Sort ascending</button>
-              <button type="button" role="menuitem" onClick={() => { setSelectedRow(contextMenu.rowIndex); closeContextMenu(); }}>View full row</button>
-            </div>}
+          </div>
+          {notice && <div className="electron-notice" role="status">{notice}</div>}
+          <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database, schema, databaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
+          <ProblemsPanel problems={problems} onSelect={selectProblem} />
+          <div className="electron-result-panel">
+            <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
+            {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onContextMenu={context => setContextMenu(context)} onRowSelect={setSelectedRow} /></AsyncStateView>
+            {contextMenu && contextRow && activeResult && <div className="electron-grid-context-menu" role="menu" style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'value'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy value</button><button type="button" role="menuitem" onClick={() => { const text = contextText(contextMenu, 'row'); if (text !== undefined) void copyText(text); closeContextMenu(); }}>Copy row</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ columnFilters: { ...activeResult.view.columnFilters, [column.name]: String(contextRow[contextMenu.columnIndex] ?? '') } }); closeContextMenu(); }}>Filter by value</button><button type="button" role="menuitem" onClick={() => { const column = activeResult.columns[contextMenu.columnIndex]; if (column) updateView({ sorting: [{ column: column.name, descending: false }] }); closeContextMenu(); }}>Sort ascending</button><button type="button" role="menuitem" onClick={() => { setSelectedRow(contextMenu.rowIndex); closeContextMenu(); }}>View full row</button></div>}
             {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
           </div>
-        </>}
+        </div>}
   </UiShell></CapabilityGate> as ReactElement;
 }
