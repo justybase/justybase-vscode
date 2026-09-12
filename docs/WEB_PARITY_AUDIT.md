@@ -231,7 +231,7 @@ share one renderer.**
 | Inspector (columns, PK/FK, comments) | ✅ | ✅ `InspectorPanel` | ✅ | |
 | Top 1000 / Copy DDL | ✅ | ✅ context menu | 🟡 | Web DDL generation is simpler than provider-specific desktop generators; a dedicated Copy Name action remains absent. |
 | Favorites / recent objects | ✅ `favoritesManager`, `schemaRecentObjects` | ✅ local favorites | 🟡 | Favorites exist; desktop has deeper recent-object integration. |
-| Refresh/invalidate metadata | ✅ | 🟡 | — | Web object/column cache (`lsp.ts`) auto-expires after 5 min TTL; no on-demand invalidation hook (e.g. after DDL) yet. |
+| Refresh/invalidate metadata | ✅ | ✅ | ✅ | Successful guarded schema writes invalidate the scoped API metadata/LSP cache; SchemaTree Refresh clears the loaded tree and reruns an active search. |
 
 ---
 
@@ -249,7 +249,8 @@ webviews.
 | Copy DDL | ✅ | ✅ | ✅ | – | Available from the schema object menu. |
 | View/Edit data (50k editor) | ✅ | ✅ guarded row edit | 🟡 | M | Web edit requires eligible source metadata, preview token, explicit confirmation, ownership, and non-read-only profile. |
 | Import CSV/XLSX (smart paste, wizard) | ✅ | ✅ guarded file import | 🟡 | L | Web supports preview-token-confirmed CSV/XLSX, null/Unicode/duplicate-header handling, compressed CSV, bounded rows and rollback; desktop wizard and format depth remain broader. |
-| DDL templates (CREATE VIEW/PROC/SEQUENCE/EXT TABLE) | ✅ | ❌ | ❌ | M | Reuse `externalTableTemplates` and `procedureTemplates`. |
+| Guarded Object Designer (tables/views) | ✅ | ✅ shared + legacy Web | 🟡 | M | Shared Web now launches the same capability-driven Object Designer as the existing Web surface; local SQLite/DuckDB table/view preview/apply uses an object snapshot, exact SQL token and optimistic-concurrency check. Provider-specific breadth remains. |
+| DDL templates (CREATE VIEW/PROC/SEQUENCE/EXT TABLE) | ✅ | 🟡 | 🟡 | M | View/procedure forms are capability-driven in Object Designer; sequence/external-table templates and the full desktop wizard remain follow-up work. |
 | Comments (table/column) | ✅ | ❌ | ❌ | S–M | Use the existing guarded write boundary. |
 | Constraints PK/FK/Unique | ✅ | ❌ | ❌ | S–M | Requires provider-specific DDL and metadata refresh. |
 | Indexes (Netezza/PG/SQLite/Db2/MySQL) | ✅ | ❌ | ❌ | M | Db2 and MySQL include dedicated Index Designer webviews; PostgreSQL and SQLite use command-based desktop workflows. |

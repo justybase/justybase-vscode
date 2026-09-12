@@ -219,7 +219,7 @@ describe('shared Web UI adapter edge contracts', () => {
     await user.click(screen.getAllByRole('button', { name: 'Explain' })[0]);
     expect(screen.getByRole('heading', { name: 'Explain' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Designer' }));
-    expect(screen.getByRole('heading', { name: 'Designer' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Object Designer' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Workspace' }));
     await user.click(screen.getByRole('button', { name: 'orders_cte' }));
     await user.click(screen.getByRole('button', { name: 'History' }));

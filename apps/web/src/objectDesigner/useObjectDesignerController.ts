@@ -181,6 +181,14 @@ export function useObjectDesignerController({
 
   useEffect(() => {
     let disposed = false;
+    const requiresSnapshot = (isTableTarget || isViewTarget)
+      && (databaseKind === 'sqlite' || databaseKind === 'duckdb')
+      && Boolean(target.schema && (target.objectName ?? target.label));
+    let capabilitiesLoaded = false;
+    let snapshotLoaded = !requiresSnapshot;
+    const finishLoading = (): void => {
+      if (!disposed && capabilitiesLoaded && snapshotLoaded) setLoading(false);
+    };
     setLoading(true);
     setActiveTab('overview');
     setContext(null);
@@ -249,18 +257,19 @@ export function useObjectDesignerController({
     }).then(response => {
       if (disposed) return;
       setContext(response);
-      setLoading(false);
     }).catch(reason => {
       if (disposed) return;
       setError(reason instanceof Error ? reason.message : 'Could not load designer capabilities.');
-      setLoading(false);
+    }).finally(() => {
+      capabilitiesLoaded = true;
+      finishLoading();
     });
     if (isTableTarget && target.schema && (target.objectName ?? target.label)) {
       void api.columns(connectionId, target.database ?? database, target.schema, target.objectName ?? target.label)
         .then(response => { if (!disposed) setColumns(response); })
         .catch(() => { if (!disposed) setColumns([]); });
     }
-    if ((isTableTarget || isViewTarget) && (databaseKind === 'sqlite' || databaseKind === 'duckdb') && target.schema && (target.objectName ?? target.label)) {
+    if (requiresSnapshot) {
       void api.designerSnapshot({
         connectionId,
         database: target.database ?? database,
@@ -271,7 +280,10 @@ export function useObjectDesignerController({
         if (disposed) return;
         setSnapshot(response.snapshot);
         if (response.snapshot.definition.kind === 'view') setViewDefinition(response.snapshot.definition.query);
-      }).catch(() => { if (!disposed) setSnapshot(null); });
+      }).catch(() => { if (!disposed) setSnapshot(null); }).finally(() => {
+        snapshotLoaded = true;
+        finishLoading();
+      });
     }
     return () => {
       disposed = true;
