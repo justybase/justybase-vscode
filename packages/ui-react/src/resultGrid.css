@@ -618,6 +618,28 @@ body,
   font-size: 12px;
 }
 
+.shared-sidebar-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--justybase-grid-text);
+}
+
+.shared-sidebar-heading span { margin-left: auto; color: var(--justybase-grid-muted); font-size: 10px; }
+.shared-sidebar-heading button { min-width: 25px; padding: 2px 5px; color: var(--justybase-grid-muted); background: transparent; }
+.shared-sidebar-heading button:hover { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
+.shared-sidebar-empty { display: grid; gap: 6px; padding: 4px 5px 8px; color: var(--justybase-grid-muted); font-size: 11px; }
+.shared-sidebar-empty button { justify-self: start; padding: 3px 7px; }
+.shared-connection-item { display: flex; min-width: 0; align-items: stretch; gap: 2px; }
+.shared-connection-item > button:first-child { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; padding: 4px 6px; color: var(--justybase-grid-muted); background: transparent; text-align: left; }
+.shared-connection-item > button:first-child.active { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
+.shared-connection-item > button:first-child span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-connection-item small { margin-left: auto; color: var(--justybase-grid-muted); font-size: 9px; }
+.shared-connection-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--justybase-grid-accent); }
+.shared-connection-actions { display: flex; gap: 1px; }
+.shared-connection-actions button { width: 24px; padding: 2px; color: var(--justybase-grid-muted); background: transparent; }
+.shared-connection-actions button:hover { color: var(--justybase-grid-text); background: var(--justybase-grid-hover); }
+
 .shared-sidebar > button {
   min-height: 26px;
   padding: 4px 7px;

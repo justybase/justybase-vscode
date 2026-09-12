@@ -6,7 +6,7 @@ import type {
   EditorPreferences,
   WebUser,
 } from '@justybase/contracts';
-import { useApiClient, type ApiClient } from './api';
+import { useApiClient, useOptionalApiClient, type ApiClient } from './api';
 
 export function isTestLoginEnabled(): boolean {
   return (globalThis as { __JUSTYBASE_ENABLE_TEST_LOGIN__?: unknown }).__JUSTYBASE_ENABLE_TEST_LOGIN__ === true;
@@ -38,8 +38,11 @@ function webConnectionKind(value: ConnectionProfileSummary['dbType'] | undefined
   return 'netezza';
 }
 
-export function ConnectionForm({ initial, onCreated, onCancel }: { initial?: ConnectionProfileSummary; onCreated(connection: ConnectionProfileSummary): void; onCancel(): void }): ReactElement {
-  const api = useApiClient();
+export function ConnectionForm({ initial, onCreated, onCancel, api: providedApi }: { initial?: ConnectionProfileSummary; onCreated(connection: ConnectionProfileSummary): void; onCancel(): void; api?: ApiClient }): ReactElement {
+  const contextApi = useOptionalApiClient();
+  const client = providedApi ?? contextApi;
+  if (!client) throw new Error('ConnectionForm requires an API client.');
+  const api: ApiClient = client;
   const [form, setForm] = useState<ConnectionFormState>(() => ({ name: initial?.name ?? '', host: initial?.host ?? '', port: initial?.port ?? 5480, database: initial?.database ?? 'system', user: initial?.user ?? '', password: '', dbType: webConnectionKind(initial?.dbType), readOnly: initial?.readOnly ?? true }));
   const [error, setError] = useState('');
   const [testing, setTesting] = useState(false);
