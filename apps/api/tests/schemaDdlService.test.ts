@@ -19,9 +19,12 @@ function profile(dbType: StoredConnection['dbType'] = 'netezza'): StoredConnecti
   };
 }
 
-function runtimeWith(metadata: DatabaseTableDdlMetadata): jest.Mocked<ApiDatabaseRuntime> {
+function runtimeWith(
+  metadata: DatabaseTableDdlMetadata,
+  kind: ApiDatabaseRuntime['kind'] = 'netezza',
+): jest.Mocked<ApiDatabaseRuntime> {
   return {
-    kind: 'netezza',
+    kind,
     isAvailable: jest.fn().mockReturnValue(true),
     isReadOnlySql: jest.fn().mockReturnValue(true),
     normalizeDatabase: jest.fn((database: string) => database),
@@ -106,12 +109,55 @@ describe('schema DDL service', () => {
     }, registryFor(runtime))).rejects.toBeInstanceOf(SchemaDdlUnavailableError);
   });
 
-  it('does not use Netezza DDL builders for another database kind', async () => {
+  it('reconstructs SQLite table DDL from the shared metadata contract', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null }, 'sqlite');
+    runtime.listColumns.mockResolvedValue([
+      { name: 'id', type: 'INTEGER', isPk: true },
+      { name: 'label', type: 'TEXT', isPk: false },
+    ]);
+
+    const result = await getSchemaObjectDdlResponse(profile('sqlite'), {
+      connectionId: 'connection-1', database: 'main', schema: 'main', objectName: 'users', objectType: 'TABLE',
+    }, registryFor(runtime));
+
+    expect(result).toEqual(expect.objectContaining({ success: true, ddlFidelity: 'reconstructed' }));
+    expect(result.ddlCode).toContain('CREATE TABLE main.users');
+    expect(result.ddlCode).toContain('PRIMARY KEY (id)');
+    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('generic metadata')]));
+    expect(runtime.listColumns).toHaveBeenCalledWith(profile('sqlite'), 'main', 'main', 'users');
+    expect(runtime.getTableDdlMetadata).not.toHaveBeenCalled();
+  });
+
+  it('reconstructs a DuckDB view from catalog source SQL', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null }, 'duckdb');
+    runtime.listObjects.mockResolvedValue([{
+      name: 'v_users', database: 'analytics', schema: 'main', objectType: 'VIEW',
+      viewSql: 'CREATE VIEW v_users AS SELECT id FROM users;',
+    }]);
+
+    const result = await getSchemaObjectDdlResponse(profile('duckdb'), {
+      connectionId: 'connection-1', database: 'analytics', schema: 'main', objectName: 'V_USERS', objectType: 'VIEW',
+    }, registryFor(runtime));
+
+    expect(result.ddlCode).toBe('CREATE VIEW v_users AS SELECT id FROM users;');
+    expect(result.ddlFidelity).toBe('reconstructed');
+    expect(runtime.listObjects).toHaveBeenCalledWith(profile('duckdb'), 'analytics', 'main');
+  });
+
+  it('does not use a Netezza DDL builder for an unavailable runtime kind', async () => {
     const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null });
     await expect(getSchemaObjectDdlResponse(profile('sqlite'), {
       connectionId: 'connection-1', database: 'main', schema: 'main', objectName: 'users', objectType: 'TABLE',
     }, registryFor(runtime))).rejects.toBeInstanceOf(SchemaDdlUnavailableError);
     expect(runtime.getTableDdlMetadata).not.toHaveBeenCalled();
+  });
+
+  it('refuses an incomplete generic table instead of emitting fake DDL', async () => {
+    const runtime = runtimeWith({ columns: [], distributionColumns: [], organizeColumns: [], keys: [], tableComment: null }, 'duckdb');
+    runtime.listColumns.mockResolvedValue([{ name: 'id', type: '' }]);
+    await expect(getSchemaObjectDdlResponse(profile('duckdb'), {
+      connectionId: 'connection-1', database: 'main', schema: 'main', objectName: 'users', objectType: 'TABLE',
+    }, registryFor(runtime))).rejects.toThrow('no declared type');
   });
 
   it('reports unsupported object types explicitly', async () => {

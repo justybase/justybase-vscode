@@ -481,27 +481,19 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   async function copyObjectDdl(node: SchemaTreeNode): Promise<void> {
     try {
       const objectType = node.objectType?.trim().toUpperCase() || 'TABLE';
-      let ddl: string;
-      if (databaseKind === 'netezza') {
-        const result = await api.ddl({
-          connectionId,
-          database: node.database ?? database ?? '',
-          schema: node.schema ?? '',
-          objectName: node.objectName ?? node.label,
-          objectType,
-        });
-        if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
-        ddl = result.ddlCode;
-      } else {
-        const columns = await api.columns(connectionId, node.database ?? database ?? '', node.schema ?? '', node.objectName ?? node.label);
-        ddl = objectType === 'VIEW'
-          ? (/^CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i.test(node.viewSql?.trim() ?? '')
-            ? node.viewSql!.trim()
-            : `-- View definition is not exposed by the lightweight metadata endpoint.\n-- Columns visible in ${objectSqlName(node)}: ${columns.map(column => quoteIdentifier(column.name, databaseKind)).join(', ') || '(none)'}\n-- Retrieve the source definition from the database catalog before executing this DDL.`)
-          : `CREATE TABLE ${objectSqlName(node)} (\n${columns.map(column => `  ${quoteIdentifier(column.name, databaseKind)} ${column.type || 'VARCHAR(1)'}`).join(',\n')}\n);`;
-      }
+      const result = await api.ddl({
+        connectionId,
+        database: node.database ?? database ?? '',
+        schema: node.schema ?? '',
+        objectName: node.objectName ?? node.label,
+        objectType,
+      });
+      if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
+      const ddl = result.ddlCode;
       await navigator.clipboard.writeText(ddl);
-      setError('DDL copied to clipboard.');
+      setError(result.ddlFidelity === 'reconstructed'
+        ? 'Reconstructed DDL copied to clipboard; inspect the metadata warnings before executing it.'
+        : 'DDL copied to clipboard.');
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not generate DDL.');
     } finally {

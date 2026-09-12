@@ -66,6 +66,25 @@ describe('SqliteRuntime', () => {
     }
   });
 
+  it('exposes catalog view SQL for shared DDL generation', async () => {
+    const runtime = new SqliteRuntime({ isReadOnlySql });
+    const runtimeTarget = target('view-source', path.join(root, 'view-source.sqlite'));
+    try {
+      await execute(runtime, runtimeTarget, 'CREATE TABLE records (id INTEGER)');
+      await execute(runtime, runtimeTarget, 'CREATE VIEW recent_records AS SELECT id FROM records');
+
+      expect(await runtime.listObjects(runtimeTarget, 'main')).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          name: 'recent_records',
+          objectType: 'VIEW',
+          viewSql: 'CREATE VIEW recent_records AS SELECT id FROM records',
+        }),
+      ]));
+    } finally {
+      await runtime.closeAll();
+    }
+  });
+
   it('rejects read-only writes before creating a missing database file', async () => {
     const runtime = new SqliteRuntime({ isReadOnlySql });
     const databasePath = path.join(root, 'missing.sqlite');

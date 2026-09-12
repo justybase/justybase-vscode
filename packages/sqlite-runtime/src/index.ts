@@ -276,13 +276,18 @@ export class SqliteRuntime {
     const source = `${quoteIdentifier(catalog)}.sqlite_master`;
     const statement = this.getSession(target).native.database.prepare(`SELECT name, type, sql FROM ${source} WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`);
     statement.setReturnArrays(true);
-    return (statement.all() as unknown as unknown[][]).map(row => ({
-      name: String(row[0] ?? ''),
-      database: catalog,
-      schema: catalog,
-      objectType: String(row[1] ?? '').toUpperCase(),
-      description: typeof row[2] === 'string' ? row[2] : undefined,
-    }));
+    return (statement.all() as unknown as unknown[][]).map(row => {
+      const objectType = String(row[1] ?? '').toUpperCase();
+      const sourceSql = typeof row[2] === 'string' ? row[2] : undefined;
+      return {
+        name: String(row[0] ?? ''),
+        database: catalog,
+        schema: catalog,
+        objectType,
+        description: sourceSql,
+        ...(objectType === 'VIEW' && sourceSql ? { viewSql: sourceSql } : {}),
+      };
+    });
   }
 
   public async listColumns(target: SqliteRuntimeTarget, database: string, schema: string, table: string): Promise<MetadataColumn[]> {

@@ -71,3 +71,11 @@ export {
   buildNetezzaViewDdl,
   quoteNetezzaIdentifier,
 } from './netezzaTableDdl';
+
+export {
+  buildReconstructedTableDdl,
+  buildReconstructedViewDdl,
+  type MetadataTableDdlInput,
+  type MetadataViewDdlInput,
+  type ReconstructedDdlResult,
+} from './metadataDdl';
