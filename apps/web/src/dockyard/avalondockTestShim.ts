@@ -1,3 +1,4 @@
+/* istanbul ignore file -- Jest-only Dockyard API shim; vendor has its own gate. */
 type Listener<T> = (sender: unknown, args: T) => void;
 
 class TestEvent<T> {
