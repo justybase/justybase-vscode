@@ -97,6 +97,43 @@ const DEFAULT_COLUMN_WIDTH = 144;
 const MIN_COLUMN_WIDTH = 72;
 const MAX_EMPTY_PAGE_REQUESTS = 3;
 const ROW_HEIGHT = 30;
+const DEFAULT_VIEWPORT_HEIGHT = 480;
+const VIRTUAL_OVERSCAN_ROWS = 8;
+
+export interface DataGridVirtualWindow {
+  readonly startIndex: number;
+  readonly endIndex: number;
+  readonly paddingTop: number;
+  readonly paddingBottom: number;
+}
+
+/**
+ * Calculates the rendered row window without touching the DOM. Keeping this
+ * calculation pure makes the large-result behaviour testable in Node and
+ * keeps the React renderer responsible only for applying the window.
+ */
+export function calculateDataGridVirtualWindow(
+  rowCount: number,
+  scrollTop: number,
+  viewportHeight: number,
+  overscanRows = VIRTUAL_OVERSCAN_ROWS,
+): DataGridVirtualWindow {
+  const count = Math.max(0, Math.trunc(rowCount));
+  if (count === 0) return { startIndex: 0, endIndex: 0, paddingTop: 0, paddingBottom: 0 };
+  const safeScrollTop = Math.max(0, Number.isFinite(scrollTop) ? scrollTop : 0);
+  const safeViewportHeight = Math.max(ROW_HEIGHT, Number.isFinite(viewportHeight) ? viewportHeight : DEFAULT_VIEWPORT_HEIGHT);
+  const safeOverscan = Math.max(0, Math.trunc(overscanRows));
+  const firstVisible = Math.min(count - 1, Math.floor(safeScrollTop / ROW_HEIGHT));
+  const visibleRows = Math.max(1, Math.ceil(safeViewportHeight / ROW_HEIGHT));
+  const startIndex = Math.max(0, firstVisible - safeOverscan);
+  const endIndex = Math.min(count, firstVisible + visibleRows + safeOverscan);
+  return {
+    startIndex,
+    endIndex,
+    paddingTop: startIndex * ROW_HEIGHT,
+    paddingBottom: Math.max(0, count - endIndex) * ROW_HEIGHT,
+  };
+}
 
 function normaliseView(view: DataGridViewState | undefined): DataGridViewState {
   return {
@@ -493,6 +530,9 @@ export function DataGrid({
   const selectionScopeRef = useRef<string | undefined>(undefined);
   const selectionChangeRef = useRef(onSelectionChange);
   const emptyPageRequestRef = useRef<{ readonly key: string; readonly count: number } | undefined>(undefined);
+  const virtualScrollFrameRef = useRef<number | undefined>(undefined);
+  const virtualViewportRef = useRef({ scrollTop: 0, height: DEFAULT_VIEWPORT_HEIGHT });
+  const [virtualViewport, setVirtualViewport] = useState(virtualViewportRef.current);
   activeViewRef.current = activeView;
   selectionChangeRef.current = onSelectionChange;
 
@@ -523,9 +563,51 @@ export function DataGrid({
     };
   }, []);
 
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+
+    const flushViewport = (): void => {
+      virtualScrollFrameRef.current = undefined;
+      const next = virtualViewportRef.current;
+      setVirtualViewport(previous => previous.scrollTop === next.scrollTop && previous.height === next.height ? previous : next);
+    };
+    const scheduleViewport = (): void => {
+      virtualViewportRef.current = {
+        scrollTop: Math.max(0, element.scrollTop),
+        height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,
+      };
+      if (virtualScrollFrameRef.current !== undefined) return;
+      if (typeof requestAnimationFrame === 'function') {
+        virtualScrollFrameRef.current = requestAnimationFrame(flushViewport);
+      } else {
+        flushViewport();
+      }
+    };
+
+    scheduleViewport();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(scheduleViewport);
+    observer?.observe(element);
+    return () => {
+      observer?.disconnect();
+      if (virtualScrollFrameRef.current !== undefined && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(virtualScrollFrameRef.current);
+      }
+      virtualScrollFrameRef.current = undefined;
+    };
+  }, [resultSetId]);
+
   const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
   const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing, getCellMetadata), [resolvedColumns, rows, activeView, clientProcessing, getCellMetadata]);
   const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata), [resolvedColumns, processedRows, activeView.grouping, getCellMetadata]);
+  const virtualWindow = useMemo(
+    () => calculateDataGridVirtualWindow(renderedRows.length, virtualViewport.scrollTop, virtualViewport.height),
+    [renderedRows.length, virtualViewport.height, virtualViewport.scrollTop],
+  );
+  const virtualRenderedRows = useMemo(
+    () => renderedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex),
+    [renderedRows, virtualWindow.endIndex, virtualWindow.startIndex],
+  );
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
@@ -601,6 +683,19 @@ export function DataGrid({
 
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
+    virtualViewportRef.current = {
+      scrollTop: Math.max(0, element.scrollTop),
+      height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,
+    };
+    if (virtualScrollFrameRef.current === undefined) {
+      const flush = (): void => {
+        virtualScrollFrameRef.current = undefined;
+        const next = virtualViewportRef.current;
+        setVirtualViewport(previous => previous.scrollTop === next.scrollTop && previous.height === next.height ? previous : next);
+      };
+      if (typeof requestAnimationFrame === 'function') virtualScrollFrameRef.current = requestAnimationFrame(flush);
+      else flush();
+    }
     onScroll?.({ ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / ROW_HEIGHT) });
     const distanceFromEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
     if (onLoadMore && rows.length < totalRowCount && distanceFromEnd <= 160) onLoadMore();
@@ -738,7 +833,9 @@ export function DataGrid({
             </th>;
           })}
         </tr></thead>
-        <tbody>{renderedRows.map(rendered => {
+        <tbody>
+          {virtualWindow.paddingTop > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={visibleColumnIndexes.length + 1} style={{ height: virtualWindow.paddingTop }} /></tr>}
+          {virtualRenderedRows.map(rendered => {
           if (rendered.kind === 'group') {
             const collapsed = collapsedGroups.has(rendered.id);
             return <tr className="ui-data-grid-group-row" key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
@@ -765,7 +862,9 @@ export function DataGrid({
               return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, metadata)}`, isDataGridNumericColumn(metadata) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); onContextMenu?.({ rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
-        })}</tbody>
+        })}
+          {virtualWindow.paddingBottom > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={visibleColumnIndexes.length + 1} style={{ height: virtualWindow.paddingBottom }} /></tr>}
+        </tbody>
       </table>}
     </div>
   </div>;

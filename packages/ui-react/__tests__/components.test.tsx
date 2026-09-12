@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import {
@@ -16,6 +16,7 @@ import {
   SchemaTree,
   UiShell,
   WorkspaceTabs,
+  calculateDataGridVirtualWindow,
   formatDataGridCellValue,
   processDataGridRows,
 } from '../src';
@@ -132,6 +133,59 @@ describe('shared React presentation', () => {
     render(<DataGrid resultSetId={result.resultSetId} columns={result.columns} rows={[[1]]} scroll={{ resultSetId: 'different-result', top: -1, left: -1 }} />);
     render(<DataGrid resultSetId="empty-result" columns={[]} rows={[]} />);
     expect(screen.getByRole('status')).toHaveTextContent('No rows');
+  });
+
+  it('calculates a bounded virtual window with stable pixel padding', () => {
+    expect(calculateDataGridVirtualWindow(0, 120, 300, 2)).toEqual({
+      startIndex: 0,
+      endIndex: 0,
+      paddingTop: 0,
+      paddingBottom: 0,
+    });
+    expect(calculateDataGridVirtualWindow(1000, 0, 300, 2)).toEqual({
+      startIndex: 0,
+      endIndex: 12,
+      paddingTop: 0,
+      paddingBottom: 29_640,
+    });
+    expect(calculateDataGridVirtualWindow(1000, 900, 300, 2)).toEqual({
+      startIndex: 28,
+      endIndex: 42,
+      paddingTop: 840,
+      paddingBottom: 28_740,
+    });
+    expect(calculateDataGridVirtualWindow(4, Number.NaN, 0, -2)).toEqual({
+      startIndex: 0,
+      endIndex: 1,
+      paddingTop: 0,
+      paddingBottom: 90,
+    });
+  });
+
+  it('renders only the visible result window and moves it without changing row identity', () => {
+    jest.useFakeTimers();
+    try {
+      const rows = Array.from({ length: 1000 }, (_value, index) => [index + 1, `row-${index + 1}`]);
+      const { container } = render(<DataGrid resultSetId="virtual-grid" columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }]} rows={rows} />);
+      const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+      expect(scroller).not.toBeNull();
+      if (!scroller) return;
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
+      act(() => { jest.runOnlyPendingTimers(); });
+      const renderedRows = (): NodeListOf<HTMLTableRowElement> => container.querySelectorAll<HTMLTableRowElement>('tbody tr:not(.ui-data-grid-virtual-spacer)');
+      expect(renderedRows().length).toBeLessThan(100);
+      expect(renderedRows()[0]).toHaveTextContent('1');
+
+      scroller.scrollTop = 15_000;
+      fireEvent.scroll(scroller);
+      act(() => { jest.runOnlyPendingTimers(); });
+      expect(renderedRows().length).toBeLessThan(100);
+      expect(renderedRows()[0]).toHaveTextContent('493');
+      expect(renderedRows()[renderedRows().length - 1]).toHaveTextContent('512');
+      expect(container.querySelector('.ui-data-grid-virtual-spacer')?.getAttribute('aria-hidden')).toBe('true');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('retries scroll restoration when rows arrive after the initial mount', () => {
