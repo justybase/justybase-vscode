@@ -190,6 +190,9 @@ describe('shared Web UI adapter edge contracts', () => {
     grid.scrollTop = 64;
     grid.scrollLeft = 32;
     fireEvent.scroll(grid);
+    fireEvent.contextMenu(screen.getByRole('cell', { name: 'a' }), { clientX: 48, clientY: 72 });
+    await user.click(screen.getByRole('menuitem', { name: 'Copy row as JSON' }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('"NAME": "a"')));
     await user.click(screen.getByRole('row', { name: /alpha|1/ }));
     await user.click(screen.getByRole('button', { name: 'Copy' }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Shared export format' }), 'json');

@@ -21,7 +21,7 @@ import {
   processDataGridRows,
   resolveDataGridColumns,
 } from '@justybase/ui-react';
-import type { DataGridCellContext, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
+import type { DataGridCellContext, DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import { createElectronApiClient } from './api';
 import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from './execution';
 import { ProblemsPanel, SqlEditor } from './SqlEditor';
@@ -582,8 +582,10 @@ export function App(): ReactElement {
     [activeResult?.columns, rows],
   );
 
-  const copyGridPayload = useCallback(async (payload: DataGridCopyPayload): Promise<void> => {
-    const formatted = createDataGridClipboardPayload(payload);
+  const copyGridPayload = useCallback(async (payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): Promise<void> => {
+    const options = { includeHeaders: payload.includeHeaders ?? true };
+    const formatted = createDataGridClipboardPayload(payload, options);
+    const plainText = formatDataGridClipboard(payload, format, options);
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
       setNotice('Clipboard access is unavailable.');
       return;
@@ -592,15 +594,15 @@ export function App(): ReactElement {
       if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
         await navigator.clipboard.write([new ClipboardItem({
           'text/html': new Blob([formatted.html], { type: 'text/html' }),
-          'text/plain': new Blob([formatted.text], { type: 'text/plain' }),
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
         })]);
       } else {
-        await navigator.clipboard.writeText(formatted.text);
+        await navigator.clipboard.writeText(plainText);
       }
       setNotice('Copied.');
     } catch {
       try {
-        await navigator.clipboard.writeText(formatted.text);
+        await navigator.clipboard.writeText(plainText);
         setNotice('Copied.');
       } catch {
         setNotice('Could not copy to the clipboard.');
@@ -608,8 +610,8 @@ export function App(): ReactElement {
     }
   }, []);
 
-  const copyGridSelection = useCallback((payload: DataGridCopyPayload): void => {
-    void copyGridPayload(payload);
+  const copyGridSelection = useCallback((payload: DataGridCopyPayload, format?: DataGridClipboardFormat): void => {
+    void copyGridPayload(payload, format);
   }, [copyGridPayload]);
 
   const copyActive = useCallback(async (): Promise<void> => {

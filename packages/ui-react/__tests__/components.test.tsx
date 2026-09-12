@@ -300,6 +300,8 @@ describe('shared React presentation', () => {
     const onViewChange = jest.fn();
     const onCopySelection = jest.fn();
     const onRowSelect = jest.fn();
+    const onViewCell = jest.fn();
+    const onOpenResultFormatting = jest.fn();
     render(<DataGrid
       resultSetId="context-actions"
       columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'VARCHAR' }]}
@@ -308,6 +310,8 @@ describe('shared React presentation', () => {
       onViewChange={onViewChange}
       onCopySelection={onCopySelection}
       onRowSelect={onRowSelect}
+      onViewCell={onViewCell}
+      onOpenResultFormatting={onOpenResultFormatting}
     />);
     const beta = screen.getByRole('cell', { name: 'beta' });
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
@@ -322,6 +326,34 @@ describe('shared React presentation', () => {
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row' }));
     expect(onCopySelection).toHaveBeenLastCalledWith(expect.objectContaining({ rows: [[2, 'beta']] }));
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row as JSON' }));
+    expect(onCopySelection).toHaveBeenLastCalledWith(expect.objectContaining({ rows: [[2, 'beta']], includeHeaders: false }), 'json');
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row as Markdown' }));
+    expect(onCopySelection).toHaveBeenLastCalledWith(expect.objectContaining({ includeHeaders: true }), 'markdown');
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear Filter' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ columnFilters: {} });
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Group by This Column' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ grouping: ['NAME'] });
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Cell Value' }));
+    expect(onViewCell).toHaveBeenLastCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 40, clientY: 60 });
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Result Formatting…' }));
+    expect(onOpenResultFormatting).toHaveBeenCalledTimes(1);
+
+    fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide Column' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ columnVisibility: { NAME: false } });
 
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'View full row' }));

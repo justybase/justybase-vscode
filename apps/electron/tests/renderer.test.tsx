@@ -155,6 +155,9 @@ describe('Electron renderer composition', () => {
       socket?.emit('message', { data: JSON.stringify({ queryId: 'query-1', type: 'complete', totalRows: 1, limitReached: false, sequence: 4 }) });
     });
     expect(await screen.findByRole('cell', { name: 'Alpha' })).toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole('cell', { name: 'Alpha' }), { clientX: 48, clientY: 72 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row as JSON' }));
+    await waitFor(() => expect(clipboard).toHaveBeenLastCalledWith(expect.stringContaining('"NAME": "Alpha"')));
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: 'Alpha' } });
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);

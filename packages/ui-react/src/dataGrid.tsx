@@ -9,6 +9,8 @@ import {
   matchesDataGridFilterValue,
 } from './resultGridFormatting';
 import type { DataGridCellMetadata } from './resultGridFormatting';
+import { formatDataGridClipboard } from './dataGridClipboard';
+import type { DataGridClipboardFormat } from './dataGridClipboard';
 
 export { formatDataGridCellValue } from './resultGridFormatting';
 
@@ -46,6 +48,8 @@ export interface DataGridCopyPayload {
   readonly columns: readonly DataGridColumn[];
   readonly rows: readonly (readonly unknown[])[];
   readonly selection?: DataGridSelection;
+  /** Whether the receiving clipboard adapter should include column headers. */
+  readonly includeHeaders?: boolean;
 }
 
 export interface DataGridProps {
@@ -71,7 +75,11 @@ export interface DataGridProps {
   readonly clientProcessing?: boolean;
   readonly onSelectionChange?: (selection: DataGridSelection | undefined) => void;
   readonly onContextMenu?: (context: DataGridCellContext) => void;
-  readonly onCopySelection?: (payload: DataGridCopyPayload) => void;
+  readonly onCopySelection?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void;
+  /** Opens the host-specific large-value viewer for a context-menu cell. */
+  readonly onViewCell?: (context: DataGridCellContext) => void;
+  /** Opens the host-specific result formatting surface. */
+  readonly onOpenResultFormatting?: () => void;
   /** Enables the shared copy/filter/sort/row-detail context menu. */
   readonly showContextMenu?: boolean;
   /** Shows the shared column visibility/order/pinning menu. */
@@ -490,6 +498,8 @@ export function DataGrid({
   onSelectionChange,
   onContextMenu,
   onCopySelection,
+  onViewCell,
+  onOpenResultFormatting,
   showContextMenu = true,
   showColumnMenu = true,
 }: DataGridProps): ReactNode {
@@ -826,50 +836,55 @@ export function DataGrid({
     const selectedColumns = visibleColumnIndexes.filter((_columnIndex, position) => columnRange === undefined || (position >= columnRange.minColumn && position <= columnRange.maxColumn));
     const columnIndexes = selectedColumns.length > 0 ? selectedColumns : visibleColumnIndexes;
     const selectedRows = processedRows.slice(minRow, maxRow + 1).map(row => row.values);
-    const payload: DataGridCopyPayload = { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection };
+    const payload: DataGridCopyPayload = { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection, includeHeaders: true };
     if (onCopySelection) {
       onCopySelection(payload);
       return;
     }
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
-    const text = [payload.columns.map(column => column.name).join('\t'), ...payload.rows.map(row => row.map((value, index) => {
-      const columnIndex = columnIndexes[index];
-      const column = columnIndex === undefined ? payload.columns[index] : resolvedColumns[columnIndex];
-      return formatDataGridCellValue(value, column?.type, column);
-    }).join('\t'))].join('\n');
+    const text = formatDataGridClipboard(payload, 'text');
     void navigator.clipboard.writeText(text);
   }
 
-  function copyContextPayload(payload: DataGridCopyPayload): void {
+  function copyContextPayload(payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): void {
     if (onCopySelection) {
-      onCopySelection(payload);
+      if (format === 'text') onCopySelection(payload);
+      else onCopySelection(payload, format);
       return;
     }
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
-    const text = [
-      payload.columns.map(column => column.name).join('\t'),
-      ...payload.rows.map(row => row.map((value, index) => {
-        const column = payload.columns[index];
-        return formatDataGridCellValue(value, column?.type, column);
-      }).join('\t')),
-    ].join('\n');
+    const text = formatDataGridClipboard(payload, format);
     void navigator.clipboard.writeText(text);
   }
 
   function copyContextValue(context: DataGridCellContext, row: readonly unknown[]): void {
     const column = resolvedColumns[context.columnIndex];
     if (!column) return;
-    copyContextPayload({ columns: [column], rows: [[row[context.columnIndex]]] });
+    copyContextPayload({ columns: [column], rows: [[row[context.columnIndex]]], includeHeaders: false });
     setContextMenu(undefined);
   }
 
   function copyContextRow(row: readonly unknown[]): void {
-    copyContextPayload({ columns: resolvedColumns, rows: [row] });
+    const columnIndexes = visibleColumnIndexes;
+    copyContextPayload({ columns: columnIndexes.map(index => resolvedColumns[index]!), rows: [columnIndexes.map(index => row[index])], includeHeaders: false });
+    setContextMenu(undefined);
+  }
+
+  function copyContextRowAs(format: Exclude<DataGridClipboardFormat, 'html' | 'tsv'> | 'tsv'): void {
+    const row = contextMenu ? rows[contextMenu.rowIndex] : undefined;
+    if (!row) return;
+    const columnIndexes = visibleColumnIndexes;
+    copyContextPayload({ columns: columnIndexes.map(index => resolvedColumns[index]!), rows: [columnIndexes.map(index => row[index])], includeHeaders: format === 'markdown' }, format);
     setContextMenu(undefined);
   }
 
   function filterContextValue(context: DataGridCellContext, row: readonly unknown[]): void {
     filterColumn(context.columnIndex, row[context.columnIndex] === null || row[context.columnIndex] === undefined ? '' : String(row[context.columnIndex]));
+    setContextMenu(undefined);
+  }
+
+  function clearContextFilter(columnIndex: number): void {
+    filterColumn(columnIndex, '');
     setContextMenu(undefined);
   }
 
@@ -882,6 +897,27 @@ export function DataGrid({
 
   function selectContextRow(context: DataGridCellContext): void {
     onRowSelect?.(context.rowIndex);
+    setContextMenu(undefined);
+  }
+
+  function toggleContextGrouping(columnIndex: number): void {
+    const column = resolvedColumns[columnIndex];
+    if (!column) return;
+    const id = columnKey(column, columnIndex);
+    const grouping = activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key))
+      ? activeView.grouping.filter(key => !columnMatchesKey(column, columnIndex, key))
+      : [...activeView.grouping, id];
+    updateView({ grouping });
+    setContextMenu(undefined);
+  }
+
+  function hideContextColumn(columnIndex: number): void {
+    toggleColumnVisibility(columnIndex, false);
+    setContextMenu(undefined);
+  }
+
+  function viewContextCell(context: DataGridCellContext): void {
+    onViewCell?.(context);
     setContextMenu(undefined);
   }
 
@@ -975,12 +1011,21 @@ export function DataGrid({
       <strong>{contextColumn.name}</strong>
       <button type="button" role="menuitem" onClick={() => copyContextValue(contextMenu, contextRow)}>Copy value</button>
       <button type="button" role="menuitem" onClick={() => copyContextRow(contextRow)}>Copy row</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('tsv')}>Copy row as TSV</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('markdown')}>Copy row as Markdown</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('json')}>Copy row as JSON</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('sql')}>Copy SQL INSERT</button>
       <hr />
       <button type="button" role="menuitem" onClick={() => filterContextValue(contextMenu, contextRow)}>Filter by this value</button>
+      <button type="button" role="menuitem" onClick={() => clearContextFilter(contextMenu.columnIndex)}>Clear Filter</button>
       <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, false)}>Sort ascending</button>
       <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, true)}>Sort descending</button>
+      <button type="button" role="menuitem" onClick={() => toggleContextGrouping(contextMenu.columnIndex)}>{activeView.grouping.some(key => columnMatchesKey(contextColumn, contextMenu.columnIndex, key)) ? 'Ungroup This Column' : 'Group by This Column'}</button>
+      <button type="button" role="menuitem" onClick={() => hideContextColumn(contextMenu.columnIndex)}>Hide Column</button>
       <hr />
       <button type="button" role="menuitem" onClick={() => selectContextRow(contextMenu)}>View full row</button>
+      {onViewCell && <button type="button" role="menuitem" onClick={() => viewContextCell(contextMenu)}>View Cell Value</button>}
+      {onOpenResultFormatting && <button type="button" role="menuitem" onClick={() => { onOpenResultFormatting(); setContextMenu(undefined); }}>Result Formatting…</button>}
       {onEditRow && <button type="button" role="menuitem" onClick={() => { onEditRow(contextMenu); setContextMenu(undefined); }}>Edit row…</button>}
     </div>}
   </div>;
