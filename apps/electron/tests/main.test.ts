@@ -42,6 +42,10 @@ jest.mock('../src/main/startup', () => {
   return { startElectronSession: jest.fn(async () => runtime), __runtime: runtime };
 });
 
+jest.mock('../src/main/credentialPrompt', () => ({
+  createNativeCredentialProvider: jest.fn(() => ({ request: jest.fn(async () => 'credential-fixture') })),
+}));
+
 describe('Electron main composition root', () => {
   const previousFixtureFlag = process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE;
   beforeAll(() => { process.env.JUSTYBASE_ELECTRON_PROVISION_SQLITE = '1'; });
@@ -53,7 +57,10 @@ describe('Electron main composition root', () => {
 
   it('starts an authenticated window and shuts down all main-owned resources once', async () => {
     await import('../src/main/main');
-    const startup = jest.requireMock('../src/main/startup') as { startElectronSession: jest.Mock; __runtime: { applyAuthenticationCookie: jest.Mock; close: jest.Mock } };
+    const startup = jest.requireMock('../src/main/startup') as {
+      startElectronSession: jest.Mock;
+      __runtime: { applyAuthenticationCookie: jest.Mock; close: jest.Mock; requestJson: jest.Mock };
+    };
     const electron = jest.requireMock('electron') as {
       app: { __events: Map<string, (...args: unknown[]) => void>; quit: jest.Mock };
       __windows: Array<{ events: Map<string, (...args: unknown[]) => void>; loadURL: jest.Mock; show: jest.Mock }>;
@@ -69,6 +76,30 @@ describe('Electron main composition root', () => {
     expect(startup.startElectronSession).toHaveBeenCalledWith(expect.objectContaining({ provisionSqliteFixture: true }));
     expect(startup.__runtime.applyAuthenticationCookie).toHaveBeenCalledTimes(1);
     expect(electron.ipcMain.handle).toHaveBeenCalledWith('ui:request', expect.any(Function));
+
+    const ipcListener = electron.ipcMain.handle.mock.calls[0]?.[1] as (event: unknown, message: unknown) => Promise<unknown>;
+    const profile = { id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true };
+    startup.__runtime.requestJson.mockImplementation(async (route: string) => {
+      if (route === '/api/connections' || route.startsWith('/api/connections/')) return profile;
+      return {};
+    });
+    const invoke = (message: unknown): Promise<unknown> => ipcListener({}, message);
+    const credentialRequest = async (): Promise<string> => {
+      const response = await invoke({ method: 'credential/request', payload: { purpose: 'connection' } }) as { requestId?: string };
+      if (!response.requestId) throw new Error('Credential fixture did not return a request ID.');
+      return response.requestId;
+    };
+    await expect(invoke({ method: 'connections/create', payload: { profile } })).resolves.toEqual({ ok: true, profile });
+    await expect(invoke({ method: 'connections/create', payload: { profile, requestId: await credentialRequest() } })).resolves.toEqual({ ok: true, profile });
+    await expect(invoke({ method: 'connections/update', payload: { id: 'connection-1', profile } })).resolves.toEqual({ ok: true, profile });
+    await expect(invoke({ method: 'connections/update', payload: { id: 'connection-1', profile, requestId: await credentialRequest() } })).resolves.toEqual({ ok: true, profile });
+    await expect(invoke({ method: 'connections/test', payload: { profile } })).resolves.toEqual({ ok: true, operation: 'tested' });
+    await expect(invoke({ method: 'connections/test', payload: { profile, requestId: await credentialRequest() } })).resolves.toEqual({ ok: true, operation: 'tested' });
+    expect(startup.__runtime.requestJson).toHaveBeenCalledWith('/api/connections', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(profile),
+    }));
+    expect(startup.__runtime.requestJson.mock.calls.some(([, init]) => typeof init?.body === 'string' && init.body.includes('credential-fixture'))).toBe(true);
 
     let resolveClose!: () => void;
     startup.__runtime.close.mockImplementation(() => new Promise<void>(resolve => { resolveClose = resolve; }));

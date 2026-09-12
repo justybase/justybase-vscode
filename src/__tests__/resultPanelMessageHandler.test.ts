@@ -216,6 +216,60 @@ describe('ResultPanelMessageHandler', () => {
         });
     });
 
+    describe('requestDatabaseAggregations message', () => {
+        it('forwards shared-grid filters and returns sanitized database results', async () => {
+            const aggregationRequest = [{ columnIndex: 0, fn: 'count' }];
+            const querySpec = { globalSearch: 'EU' };
+            const requestDatabaseAggregations = jest.fn().mockResolvedValue([
+                { columnIndex: 0, fn: 'count', value: 2, filteredRowCount: 2 },
+            ]);
+            callbacks.onRequestDatabaseAggregations = requestDatabaseAggregations;
+
+            handler.handleMessage({
+                command: 'requestDatabaseAggregations',
+                sourceUri: 'file:///aggregate.sql',
+                resultSetIndex: 0,
+                requestId: 7,
+                aggregations: aggregationRequest,
+                querySpec,
+                timeoutSeconds: 12,
+                isRetry: true,
+            });
+            await new Promise<void>(resolve => setImmediate(resolve));
+
+            expect(requestDatabaseAggregations).toHaveBeenCalledWith(
+                'file:///aggregate.sql',
+                0,
+                aggregationRequest,
+                querySpec,
+                12,
+                true,
+            );
+            expect(postedMessages).toContainEqual({
+                command: 'databaseAggregationResult',
+                sourceUri: 'file:///aggregate.sql',
+                resultSetIndex: 0,
+                requestId: 7,
+                aggregations: [{ columnIndex: 0, fn: 'count', value: 2, filteredRowCount: 2 }],
+            });
+
+            requestDatabaseAggregations.mockRejectedValueOnce(new Error('aggregation unavailable'));
+            handler.handleMessage({
+                command: 'requestDatabaseAggregations',
+                sourceUri: 'file:///aggregate.sql',
+                resultSetIndex: 0,
+                requestId: 8,
+                aggregations: aggregationRequest,
+            });
+            await new Promise<void>(resolve => setImmediate(resolve));
+            expect(postedMessages).toContainEqual(expect.objectContaining({
+                command: 'databaseAggregationResult',
+                requestId: 8,
+                error: 'aggregation unavailable',
+            }));
+        });
+    });
+
     describe('copilot commands', () => {
         it('should execute describeWithCopilot command', () => {
             const data = { rows: [] };
