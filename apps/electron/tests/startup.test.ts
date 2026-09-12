@@ -45,6 +45,7 @@ describe('Electron authenticated startup', () => {
     expect(JSON.stringify(session.bootstrap)).not.toContain(configuration?.adminPassword ?? '');
     expect(JSON.stringify(session.bootstrap)).not.toContain(configuration?.masterKey ?? '');
     expect(session.bootstrap).not.toHaveProperty('password');
+    expect(session.bootstrap.capabilities.descriptors.find(descriptor => descriptor.key === 'designer')).toEqual(expect.objectContaining({ status: 'available' }));
 
     const cookies: Array<{ name: string; value: string }> = [];
     await session.applyAuthenticationCookie({ set: async details => { cookies.push({ name: details.name, value: details.value }); } });
