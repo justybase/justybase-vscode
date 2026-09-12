@@ -87,9 +87,16 @@ function resultSetIdFor(queryId: string, statementIndex = 0): string {
   return `${queryId}:${statementIndex}`;
 }
 
-function mapEvent(sourceId: string, queryId: string, event: QueryEvent, sequence: number, loadedRowCount: number, onRows: ElectronExecutionPortOptions['onRows']): UiResultEvent | undefined {
+function mapEvent(
+  sourceId: string,
+  queryId: string,
+  event: QueryEvent,
+  sequence: number,
+  loadedRowCount: number,
+  onRows: ElectronExecutionPortOptions['onRows'],
+): UiResultEvent | undefined {
   const resultSetId = resultSetIdFor(queryId, event.statementIndex ?? 0);
-  const base = { sourceId, executionId: queryId, resultSetId, sequence };
+  const base = { sourceId, executionId: queryId, resultSetId, sequence, statementIndex: event.statementIndex ?? 0 };
   switch (event.type) {
     case 'started': return { ...base, type: 'started' };
     case 'statement-started': return { ...base, type: 'statement-started' };
@@ -115,6 +122,7 @@ function mapEvent(sourceId: string, queryId: string, event: QueryEvent, sequence
 function eventStream(
   sourceId: string,
   queryId: string,
+  statementCount: number,
   client: ElectronApiClient,
   onRows: ElectronExecutionPortOptions['onRows'],
   onPage: ElectronExecutionPortOptions['onPage'],
@@ -123,34 +131,41 @@ function eventStream(
   const queue: UiResultEvent[] = [];
   const pending: Array<(result: IteratorResult<UiResultEvent>) => void> = [];
   let done = false;
-  let sequence = 0;
-  let loadedRowCount = 0;
+  let knownStatementCount = Math.max(1, statementCount);
   const subscriptionRef: { current?: QueryEventSubscription } = {};
-  let pageRequested = false;
+  const resultSequences = new Map<string, number>();
+  const loadedRowCounts = new Map<string, number>();
+  const hydrationPromises = new Map<number, Promise<Error | undefined>>();
+  let processing = Promise.resolve();
 
   const hydratePages = async (statementIndex: number): Promise<Error | undefined> => {
-    if (!onPage || pageRequested) return undefined;
-    pageRequested = true;
+    if (!onPage) return undefined;
+    const existing = hydrationPromises.get(statementIndex);
+    if (existing) return existing;
     const resultSetId = resultSetIdFor(queryId, statementIndex);
-    try {
-      const hydrated = await fetchResultPage(client, queryId, statementIndex, 0, RESULT_PAGE_SIZE);
-      if (done) return undefined;
-      onPage(
-        sourceId,
-        resultSetId,
-        hydrated.rows,
-        hydrated.totalRowCount,
-        hydrated.columns,
-        queryId,
-        hydrated.offset,
-        hydrated.hasMore,
-      );
-      return undefined;
-    } catch (error: unknown) {
-      const failure = error instanceof Error ? error : new Error('Could not load result rows.');
-      if (done) return undefined;
-      return failure;
-    }
+    const hydration = (async (): Promise<Error | undefined> => {
+      try {
+        const hydrated = await fetchResultPage(client, queryId, statementIndex, 0, RESULT_PAGE_SIZE);
+        if (done) return undefined;
+        onPage(
+          sourceId,
+          resultSetId,
+          hydrated.rows,
+          hydrated.totalRowCount,
+          hydrated.columns,
+          queryId,
+          hydrated.offset,
+          hydrated.hasMore,
+        );
+        return undefined;
+      } catch (error: unknown) {
+        const failure = error instanceof Error ? error : new Error('Could not load result rows.');
+        if (done) return undefined;
+        return failure;
+      }
+    })();
+    hydrationPromises.set(statementIndex, hydration);
+    return hydration;
   };
 
   const flush = (): void => {
@@ -164,36 +179,59 @@ function eventStream(
     onActive(undefined);
     flush();
   };
-  const pushMapped = (event: QueryEvent): void => {
+  const pushMapped = (event: QueryEvent, finishWhenSingle = false): void => {
     if (done) return;
-    if (event.type === 'rows') loadedRowCount += event.rows.length;
-    const mapped = mapEvent(sourceId, queryId, event, ++sequence, loadedRowCount, onRows);
+    const resultSetId = resultSetIdFor(queryId, event.statementIndex ?? 0);
+    const loadedRowCount = (loadedRowCounts.get(resultSetId) ?? 0) + (event.type === 'rows' ? event.rows.length : 0);
+    if (event.type === 'rows') loadedRowCounts.set(resultSetId, loadedRowCount);
+    const sequence = (resultSequences.get(resultSetId) ?? 0) + 1;
+    resultSequences.set(resultSetId, sequence);
+    const mapped = mapEvent(sourceId, queryId, event, sequence, loadedRowCount, onRows);
     if (mapped) {
       queue.push(mapped);
-      if (mapped.type === 'complete' || mapped.type === 'error' || mapped.type === 'cancelled') finish();
+      if (finishWhenSingle && (mapped.type === 'complete' || mapped.type === 'error' || mapped.type === 'cancelled')) finish();
       flush();
     }
   };
-  const push = (event: QueryEvent): void => {
+  const process = async (event: QueryEvent): Promise<void> => {
     if (done) return;
-    if (event.type === 'session' || event.type === 'batch-complete') return;
-    if (event.type === 'complete' && onPage && !pageRequested) {
-      // Keep the terminal event behind hydration. The renderer can therefore
-      // only expose a complete/ready result after every result page is local.
-      void hydratePages(event.statementIndex ?? 0).then(failure => {
-        if (failure) {
-          pushMapped({ ...event, type: 'error', message: `Result page hydration failed: ${failure.message}` });
-          return;
-        }
-        pushMapped(event);
-      });
+    if (event.statementCount !== undefined) knownStatementCount = Math.max(knownStatementCount, event.statementCount);
+    if (event.type === 'session') return;
+    if (event.type === 'batch-complete') {
+      await Promise.all(hydrationPromises.values());
+      finish();
       return;
     }
-    pushMapped(event);
+    if (event.type === 'complete' && onPage) {
+      // Keep each statement terminal event behind its own first-page hydration.
+      // The result grid may therefore render every script result immediately,
+      // while the API remains the owner of the complete result spool.
+      const failure = await hydratePages(event.statementIndex ?? 0);
+      if (failure) {
+        pushMapped({ ...event, type: 'error', message: `Result page hydration failed: ${failure.message}` }, knownStatementCount <= 1);
+        return;
+      }
+    }
+    pushMapped(event, knownStatementCount <= 1);
+  };
+  const push = (event: QueryEvent): void => {
+    processing = processing.then(() => process(event)).catch(error => {
+      if (done) return;
+      pushMapped({
+        queryId,
+        type: 'error',
+        statementIndex: event.statementIndex,
+        statementCount: knownStatementCount,
+        message: error instanceof Error ? error.message : 'Electron query event processing failed.',
+      }, knownStatementCount <= 1);
+    });
   };
   const subscription = client.connectToQueryEvents(queryId, push, error => {
     if (done) return;
-    queue.push({ sourceId, executionId: queryId, resultSetId: resultSetIdFor(queryId), sequence: ++sequence, type: 'error', message: error.message });
+    const resultSetId = resultSetIdFor(queryId);
+    const sequence = (resultSequences.get(resultSetId) ?? 0) + 1;
+    resultSequences.set(resultSetId, sequence);
+    queue.push({ sourceId, executionId: queryId, resultSetId, statementIndex: 0, sequence, type: 'error', message: error.message });
     finish();
   });
   subscriptionRef.current = subscription;
@@ -227,7 +265,7 @@ export function createElectronExecutionPort(options: ElectronExecutionPortOption
       });
       const sourceId = input.sourceId;
       const resultSetId = resultSetIdFor(started.queryId);
-      const events = eventStream(sourceId, started.queryId, options.client, options.onRows, options.onPage, stream => {
+      const events = eventStream(sourceId, started.queryId, started.statementCount ?? 1, options.client, options.onRows, options.onPage, stream => {
         if (stream) active.set(started.queryId, stream);
         else active.delete(started.queryId);
       });

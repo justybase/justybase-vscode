@@ -1,5 +1,5 @@
 import type { DocumentPort, ExecutionPort, ExecutionHandle, ExecutionInput } from './ports';
-import type { UiDocumentState, UiState } from './types';
+import type { UiDocumentState, UiResultEvent, UiState } from './types';
 import type { UiStore } from './store';
 
 export interface WorkspaceController {
@@ -47,6 +47,14 @@ function resultIdForExecution(state: UiState, sourceId: string, executionId: str
   return Object.values(state.results.byResultSetId).find(result => result.sourceId === sourceId && result.executionId === executionId)?.resultSetId;
 }
 
+function resultForEvent(state: UiState, event: UiResultEvent): boolean {
+  return Object.values(state.results.byResultSetId).some(result =>
+    result.sourceId === event.sourceId
+      && result.resultSetId === event.resultSetId
+      && result.executionId === event.executionId,
+  );
+}
+
 /**
  * Bridges one execution port to the reducer. Cancellation only invokes the
  * port's cancel operation; it never starts the SQL again as a fallback.
@@ -71,6 +79,18 @@ export function createExecutionController(store: UiStore, execution: ExecutionPo
     try {
       for await (const event of handle.events) {
         if (disposed) return;
+        // A script produces one result surface per statement. The execution
+        // handle exposes statement 0 for backwards compatibility; later
+        // statement-started events lazily create their result surfaces here.
+        if (!resultForEvent(store.getState(), event)) {
+          store.dispatch({
+            type: 'execution/start',
+            sourceId: event.sourceId,
+            executionId: event.executionId,
+            resultSetId: event.resultSetId,
+            statementIndex: event.statementIndex,
+          });
+        }
         store.dispatch({ type: 'execution/event', event });
       }
     } catch (error: unknown) {
