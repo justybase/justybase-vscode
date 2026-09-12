@@ -207,7 +207,7 @@ export function CellValueViewer({ column, value, rowNumber, onClose, onCopy }: C
   return <div className="ui-cell-value-viewer-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section className="ui-cell-value-viewer" role="dialog" aria-modal="true" aria-labelledby="ui-cell-value-viewer-title"><header className="ui-cell-value-viewer-header"><div><h2 id="ui-cell-value-viewer-title">Cell Value: {column.name}</h2><small>{meta}</small></div><button type="button" className="ui-cell-value-viewer-close" aria-label="Close cell value" onClick={onClose}>×</button></header><div className="ui-cell-value-viewer-body">{value === null || value === undefined ? <div className="ui-cell-value-viewer-null">NULL</div> : <pre>{cellValueViewerText(value)}</pre>}</div><footer className="ui-cell-value-viewer-actions">{onCopy && <button type="button" onClick={onCopy}>Copy Value</button>}<button type="button" onClick={onClose}>Close</button></footer></section></div>;
 }
 
-export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect, onActivate, onInsert, onOpenQuery, onOpenExplain, onOpenDdl, onImport, onCopyName, onToggleFavorite, isFavorite, favorites = [], recent = [], searchValue = '', onSearchChange, searchResults = [], searchLoading = false, searchPlaceholder = 'Search tables, views…', filters = [], activeFilterIds = [], onFilterToggle, onRefresh, onExpandAll, onCollapseAll }: SchemaTreeProps): ReactNode {
+export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect, onActivate, onInsert, onOpenQuery, onOpenExplain, onOpenDdl, onCopyDdl, onImport, onCopyName, onToggleFavorite, isFavorite, favorites = [], recent = [], searchValue = '', onSearchChange, searchResults = [], searchLoading = false, searchPlaceholder = 'Search tables, views…', filters = [], activeFilterIds = [], onFilterToggle, onRefresh, onExpandAll, onCollapseAll }: SchemaTreeProps): ReactNode {
   const expanded = new Set(expandedIds ?? []);
   const [contextMenu, setContextMenu] = useState<{ readonly node: MetadataNode; readonly clientX: number; readonly clientY: number } | undefined>(undefined);
   useEffect(() => {
@@ -280,6 +280,7 @@ export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect,
       {hasObjectActions && onOpenQuery && <button type="button" role="menuitem" onClick={() => runAction(onOpenQuery)}>View top 1000</button>}
       {hasObjectActions && onOpenExplain && <button type="button" role="menuitem" onClick={() => runAction(onOpenExplain)}>Explain plan</button>}
       {hasObjectActions && onOpenDdl && <button type="button" role="menuitem" onClick={() => runAction(onOpenDdl)}>Open DDL</button>}
+      {hasObjectActions && onCopyDdl && <button type="button" role="menuitem" onClick={() => runAction(onCopyDdl)}>Copy DDL</button>}
       {hasObjectActions && onImport && <button type="button" role="menuitem" onClick={() => runAction(onImport)}>Import CSV/XLSX</button>}
       {onCopyName && <button type="button" role="menuitem" onClick={() => runAction(onCopyName)}>Copy qualified name</button>}
       {hasObjectActions && onToggleFavorite && <button type="button" role="menuitem" onClick={() => runAction(onToggleFavorite)}>{(isFavorite?.(contextMenu.node) ?? favorites.some(node => node.id === contextMenu.node.id)) ? 'Remove from favorites' : 'Add to favorites'}</button>}
@@ -327,6 +328,7 @@ export interface SchemaTreeProps {
   readonly onOpenQuery?: (node: MetadataNode) => void;
   readonly onOpenExplain?: (node: MetadataNode) => void;
   readonly onOpenDdl?: (node: MetadataNode) => void;
+  readonly onCopyDdl?: (node: MetadataNode) => void;
   readonly onImport?: (node: MetadataNode) => void;
   readonly onCopyName?: (node: MetadataNode) => void;
   readonly onToggleFavorite?: (node: MetadataNode) => void;
