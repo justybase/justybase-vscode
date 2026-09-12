@@ -4,9 +4,10 @@ import { execFileSync } from 'node:child_process';
 /** Versioned contract for desktop Result Panel and Import Wizard performance runs. */
 export const DATA_GRID_PERFORMANCE_SUITE_VERSION = 'data-grid.v1';
 
-export type DataGridBenchmarkOperation = 'import' | 'export' | 'search' | 'render';
+export type DataGridBenchmarkOperation = 'import' | 'export' | 'search' | 'sort' | 'scroll' | 'render';
 export type DataGridBenchmarkStatus = 'PASS' | 'WARN' | 'SKIP' | 'BASELINE_PENDING';
-export type DataGridMode = 'inline' | 'worker' | 'sqlite';
+/** Renderer or execution mode captured by a benchmark record. */
+export type DataGridMode = 'inline' | 'worker' | 'sqlite' | 'legacy' | 'shared';
 export type BenchmarkRuntime = 'node' | 'chromium';
 
 export type ImportBenchmarkFormat = 'csv' | 'xlsx' | 'xlsb';
