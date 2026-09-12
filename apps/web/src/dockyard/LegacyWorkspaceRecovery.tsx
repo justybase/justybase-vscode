@@ -28,8 +28,11 @@ export function LegacyWorkspaceRecovery({
   preferences,
   error,
   editorSplit,
+  problemsByTab,
   onEditorReady,
   onEditorDispose,
+  onProblemsChange,
+  onSelectProblem,
   onOverwriteChange,
   onActivateTab,
   onCloseTab,
@@ -123,8 +126,11 @@ export function LegacyWorkspaceRecovery({
         databases={databases}
         preferences={preferences}
         editorSplit={editorSplit}
+        problems={problemsByTab[activeTab.id] ?? []}
         onEditorReady={onEditorReady}
         onEditorDispose={onEditorDispose}
+        onProblemsChange={onProblemsChange}
+        onSelectProblem={onSelectProblem}
         onOverwriteChange={onOverwriteChange}
         onActivateTab={onActivateTab}
         onUpdateSql={onUpdateSql}

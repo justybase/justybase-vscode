@@ -3,18 +3,10 @@ import type { ReactElement } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type { EditorPreferences, SqlLanguageContext } from '@justybase/contracts';
-import { EditorSurface, registerSqlLanguageFeatures } from '@justybase/ui-react';
-import type { SqlLanguageApi, SqlLanguageFeatureHandle } from '@justybase/ui-react';
+import { EditorSurface, registerSqlLanguageFeatures, SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
+import type { SqlLanguageApi, SqlLanguageFeatureHandle, SqlProblem } from '@justybase/ui-react';
 
-export interface SharedSqlEditorProblem {
-  readonly message: string;
-  readonly severity: 'error' | 'warning' | 'info' | 'hint';
-  readonly code?: string;
-  readonly startLineNumber: number;
-  readonly startColumn: number;
-  readonly endLineNumber: number;
-  readonly endColumn: number;
-}
+export type SharedSqlEditorProblem = SqlProblem;
 
 interface SharedSqlEditorProps {
   readonly documentId: string;
@@ -30,30 +22,6 @@ interface SharedSqlEditorProps {
 function isTestEnvironment(): boolean {
   const runtime = globalThis as typeof globalThis & { process?: { env?: { NODE_ENV?: string } } };
   return runtime.process?.env?.NODE_ENV === 'test';
-}
-
-function markerSeverity(severity: Monaco.MarkerSeverity): SharedSqlEditorProblem['severity'] {
-  if (severity === 8) return 'error';
-  if (severity === 4) return 'warning';
-  if (severity === 2) return 'info';
-  return 'hint';
-}
-
-function markerCode(code: Monaco.editor.IMarker['code']): string | undefined {
-  if (typeof code === 'string') return code;
-  return code && typeof code.value === 'string' ? code.value : undefined;
-}
-
-function toProblem(marker: Monaco.editor.IMarker): SharedSqlEditorProblem {
-  return {
-    message: marker.message,
-    severity: markerSeverity(marker.severity),
-    code: markerCode(marker.code),
-    startLineNumber: marker.startLineNumber,
-    startColumn: marker.startColumn,
-    endLineNumber: marker.endLineNumber,
-    endColumn: marker.endColumn,
-  };
 }
 
 /** Monaco/LSP editor used by the shared Web shell, with a testable textarea fallback. */
@@ -78,7 +46,7 @@ export function SharedSqlEditor({ documentId, value, api, preferences, getContex
   }, [api]);
 
   const handleValidate = useCallback((markers: Monaco.editor.IMarker[]): void => {
-    onProblemsChange?.(markers.map(toProblem));
+    onProblemsChange?.(sqlProblemsFromMarkers(markers));
   }, [onProblemsChange]);
 
   if (isTestEnvironment()) return <EditorSurface value={value} label="SQL editor" onChange={onChange} onSubmit={onRun} /> as ReactElement;
@@ -114,13 +82,5 @@ export function SharedSqlEditor({ documentId, value, api, preferences, getContex
 }
 
 export function SharedSqlProblems({ problems, onSelect }: { readonly problems: readonly SharedSqlEditorProblem[]; readonly onSelect?: (problem: SharedSqlEditorProblem) => void }): ReactElement {
-  return <section className="shared-sql-problems" aria-label="SQL Problems">
-    <header><strong>Problems</strong><span>{problems.length}</span></header>
-    {problems.length === 0
-      ? <div className="shared-sql-problems-empty">No SQL problems detected.</div>
-      : <div className="shared-sql-problems-list">{problems.map((problem, index) => <button type="button" key={`${problem.code ?? 'problem'}:${problem.startLineNumber}:${problem.startColumn}:${index}`} onClick={() => onSelect?.(problem)}>
-        <span className={`shared-sql-problem-severity shared-sql-problem-${problem.severity}`}>{problem.severity === 'error' ? '×' : problem.severity === 'warning' ? '!' : '·'}</span>
-        <span><strong>{problem.code ?? problem.severity}</strong> {problem.message}</span><small>Ln {problem.startLineNumber}, Col {problem.startColumn}</small>
-      </button>)}</div>}
-  </section>;
+  return <SqlProblemsPanel problems={problems} onSelect={onSelect} />;
 }
