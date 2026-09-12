@@ -27,6 +27,7 @@ import {
   AsyncStateView,
   DataGrid,
   createDataGridClipboardPayload,
+  formatDataGridClipboard,
   processDataGridRows,
   DesignerForm,
   ExplainView,
@@ -40,7 +41,7 @@ import {
   UiShell,
   WorkspaceTabs,
 } from '@justybase/ui-react';
-import type { DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
+import type { DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry } from '@justybase/ui-react';
 import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
 import { ImportPanel } from './ImportPanel';
@@ -836,8 +837,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     [activeResult?.columns, activeRows],
   );
 
-  const copyGridPayload = useCallback(async (payload: DataGridCopyPayload): Promise<void> => {
-    const formatted = createDataGridClipboardPayload(payload);
+  const copyGridPayload = useCallback(async (payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): Promise<void> => {
+    const options = { includeHeaders: payload.includeHeaders ?? true };
+    const formatted = createDataGridClipboardPayload(payload, options);
+    const plainText = formatDataGridClipboard(payload, format, options);
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
       setNotice('Clipboard access is unavailable.');
       return;
@@ -846,10 +849,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
         await navigator.clipboard.write([new ClipboardItem({
           'text/html': new Blob([formatted.html], { type: 'text/html' }),
-          'text/plain': new Blob([formatted.text], { type: 'text/plain' }),
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
         })]);
       } else if (typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(formatted.text);
+        await navigator.clipboard.writeText(plainText);
       } else {
         setNotice('Clipboard access is unavailable.');
         return;
@@ -857,7 +860,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       setNotice('Copied.');
     } catch {
       try {
-        await navigator.clipboard.writeText(formatted.text);
+        await navigator.clipboard.writeText(plainText);
         setNotice('Copied.');
       } catch {
         setNotice('Could not copy to the clipboard.');
@@ -865,8 +868,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, []);
 
-  const copyGridSelection = useCallback((payload: DataGridCopyPayload): void => {
-    void copyGridPayload(payload);
+  const copyGridSelection = useCallback((payload: DataGridCopyPayload, format?: DataGridClipboardFormat): void => {
+    void copyGridPayload(payload, format);
   }, [copyGridPayload]);
 
   const copySelected = useCallback(async (): Promise<void> => {

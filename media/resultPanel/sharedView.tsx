@@ -28,6 +28,8 @@ import {
     UiShell,
     WorkspaceTabs,
 } from '@justybase/ui-react';
+import type { DataGridClipboardFormat, DataGridCellContext } from '@justybase/ui-react';
+import { callPanelMethod } from './types.js';
 import type { ResultPanelHostToWebviewMessage } from './hostContracts.js';
 import { asHostMessage, postHostMessage } from './protocol.js';
 
@@ -960,6 +962,22 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         () => activeResult ? resolveDataGridColumns(activeResult.columns, rows) : [],
         [activeResult?.columns, rows],
     );
+    const openCellValue = (context: DataGridCellContext): void => {
+        const result = activeResult;
+        const row = rows[context.rowIndex];
+        const column = result?.columns[context.columnIndex];
+        if (!result || !row || !column) return;
+        const value = row[context.columnIndex];
+        callPanelMethod('openValueViewer', {
+            rowIndex: context.rowIndex,
+            rowNumber: context.rowIndex + 1,
+            columnId: column.name,
+            columnName: column.name,
+            dataType: column.type ?? 'text',
+            value,
+            isNull: value === null || value === undefined,
+        });
+    };
 
     return <UiShell
         title={sourceLabel}
@@ -992,7 +1010,9 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })}
                         onLoadMore={() => controller.loadMore(activeResult)}
                         onRowSelect={setSelectedRow}
-                        onCopySelection={payload => postHostMessage({ command: 'copyToClipboard', text: rowsAsText(payload.columns, payload.rows) })}
+                        onCopySelection={(payload, format?: DataGridClipboardFormat) => postHostMessage({ command: 'copyToClipboard', text: formatDataGridClipboard(payload, format === undefined || format === 'tsv' ? 'text' : format, { includeHeaders: payload.includeHeaders ?? true }) })}
+                        onViewCell={openCellValue}
+                        onOpenResultFormatting={() => callPanelMethod('openResultFormattingPanel', { scope: 'result' })}
                     />}
                 </AsyncStateView>
                 {selected && activeResult && <RowDetail columns={detailColumns} row={selected} onClose={() => setSelectedRow(undefined)} />}
