@@ -1091,7 +1091,13 @@ export class NetezzaWebLspCore {
     references: readonly NetezzaTableReference[],
   ): Promise<void> {
     for (const reference of references) {
-      const key = tableKey(reference.database ?? state.context.effectiveDatabase, reference.schema ?? state.context.effectiveSchema, reference.name);
+      // `DB..TABLE` deliberately omits the schema. Do not silently replace
+      // that empty segment with the document's default schema: the object may
+      // live in any schema of the explicitly named database. The metadata
+      // adapter resolves the concrete schema before loading columns.
+      const database = reference.database ?? state.context.effectiveDatabase;
+      const schema = reference.schema ?? (reference.database ? undefined : state.context.effectiveSchema);
+      const key = tableKey(database, schema, reference.name);
       const qualificationKey = tableKey(reference.database, reference.schema, reference.name);
       if (!state.qualificationProposals.has(qualificationKey)
         && !(reference.database && reference.schema)) {
@@ -1113,8 +1119,8 @@ export class NetezzaWebLspCore {
       const response = await this.safeMetadataRequest({
         documentUri,
         kind: "cachedTableInfo",
-        database: reference.database ?? state.context.effectiveDatabase,
-        schema: reference.schema ?? state.context.effectiveSchema,
+        database,
+        schema,
         table: reference.name,
       });
       let table = parseMetadataTable(response);
@@ -1122,15 +1128,18 @@ export class NetezzaWebLspCore {
         const fetched = await this.safeMetadataRequest({
           documentUri,
           kind: "tableInfo",
-          database: reference.database ?? state.context.effectiveDatabase,
-          schema: reference.schema ?? state.context.effectiveSchema,
+          database,
+          schema,
           table: reference.name,
         });
         table = parseMetadataTable(fetched);
       }
       if (table && table.exists !== false) {
         const tableInfo = toTableInfo(table, reference.name);
-        if (tableInfo) state.tables.set(key, tableInfo);
+        if (tableInfo) {
+          const resolvedKey = tableKey(tableInfo.database ?? database, tableInfo.schema ?? schema, tableInfo.name);
+          state.tables.set(resolvedKey, tableInfo);
+        }
       } else {
         state.knownMissingTables.add(key);
       }

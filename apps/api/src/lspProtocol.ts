@@ -60,16 +60,36 @@ export async function requestMetadata(
   }
   if (params.kind === 'columns' || params.kind === 'tableInfo') {
     if (!params.table) return params.kind === 'columns' ? [] : null;
-    const schema = params.schema ?? context?.schema;
+    // A tableInfo request without an explicit schema is used for Netezza's
+    // DB..TABLE notation. Resolve the table across all schemas first; the
+    // connection's default schema must not narrow an explicitly qualified
+    // database path.
+    const schema = params.kind === 'tableInfo' ? params.schema : params.schema ?? context?.schema;
     if (params.kind === 'tableInfo') {
       const objects = await metadataService.listObjects(runtimes, userId, profile, database, schema || undefined, {
         ttlMs: metadataService.lspTtlMs,
         staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
         staleOnError: false,
       });
-      const exists = objects.some(item => item.name.toUpperCase() === params.table!.toUpperCase()
+      const object = objects.find(item => item.name.toUpperCase() === params.table!.toUpperCase()
         && (!schema || item.schema?.toUpperCase() === schema.toUpperCase()));
-      if (!exists) return { exists: false, table: params.table, database, schema: schema ?? '', columns: [] };
+      if (!object) return { exists: false, table: params.table, database, schema: schema ?? '', columns: [] };
+      const resolvedSchema = object.schema ?? schema;
+      if (!resolvedSchema) return { exists: true, table: params.table, database, schema: '', columns: [] };
+      const columns = await metadataService.listColumns(runtimes, userId, profile, database, resolvedSchema, params.table, {
+        ttlMs: metadataService.lspTtlMs,
+        staleTtlMs: metadataService.lspTtlMs * STALE_TTL_MULTIPLIER,
+        staleOnError: false,
+      });
+      return {
+        exists: true,
+        table: params.table,
+        database,
+        schema: resolvedSchema,
+        objectType: object.objectType,
+        description: object.description,
+        columns,
+      };
     }
     if (!schema) {
       return params.kind === 'columns'

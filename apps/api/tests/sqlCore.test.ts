@@ -93,6 +93,49 @@ describe('shared Netezza web SQL core', () => {
     ]));
   });
 
+  it('completes columns for DB..TABLE aliases across the database schemas', async () => {
+    const uri = 'file:///netezza-double-dot-qualified-column.sql';
+    const metadataRequests: Array<{ kind: string; database?: string; schema?: string; table?: string }> = [];
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      metadataRequests.push({ kind: params.kind, database: params.database, schema: params.schema, table: params.table });
+      if (params.kind === 'context') return {
+        connectionName: 'connection-1',
+        effectiveDatabase: 'SYSTEM',
+        effectiveSchema: 'PUBLIC',
+        databaseKind: 'netezza',
+      };
+      if (params.kind === 'tableInfo' && params.database === 'JUST_DATA' && params.schema === undefined && params.table === 'DIMDATE') {
+        return {
+          exists: true,
+          table: 'DIMDATE',
+          database: 'JUST_DATA',
+          schema: 'ADMIN',
+          objectType: 'TABLE',
+          columns: [
+            { name: 'DATEKEY', type: 'INTEGER' },
+            { name: 'FULLDATEALTERNATEKEY', type: 'TIMESTAMP' },
+          ],
+        };
+      }
+      return [];
+    } });
+    core.setContext(uri, {
+      connectionName: 'connection-1',
+      effectiveDatabase: 'SYSTEM',
+      effectiveSchema: 'PUBLIC',
+      databaseKind: 'netezza',
+    });
+
+    const sql = 'SELECT * FROM JUST_DATA..DIMDATE D WHERE D.';
+    const items = await core.completion(uri, 1, sql, { line: 0, character: sql.length });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'DATEKEY', kind: 5, detail: 'INTEGER' }),
+      expect.objectContaining({ label: 'FULLDATEALTERNATEKEY', kind: 5, detail: 'TIMESTAMP' }),
+    ]));
+    expect(metadataRequests).toContainEqual({ kind: 'tableInfo', database: 'JUST_DATA', schema: undefined, table: 'DIMDATE' });
+  });
+
   it('completes Netezza schemas after a known database dot', async () => {
     const uri = 'file:///netezza-database-path.sql';
     const core = new NetezzaWebLspCore({ requestMetadata: async params => {
