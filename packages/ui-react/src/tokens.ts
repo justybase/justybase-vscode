@@ -17,7 +17,7 @@ export const uiTokens = Object.freeze({
   typography: Object.freeze({ fontSize: '12px', smallFontSize: '11px', lineHeight: '1.35' }),
   space: Object.freeze({ xs: '4px', sm: '6px', md: '8px', lg: '10px', xl: '12px', xxl: '16px' }),
   radius: Object.freeze({ sm: '3px', md: '5px' }),
-  density: Object.freeze({ row: '30px', header: '34px', control: '26px', toolbar: '40px', tab: '32px' }),
+  density: Object.freeze({ row: '30px', header: '34px', columnHeader: '62px', cellPadding: '8px', control: '26px', toolbar: '40px', tab: '32px' }),
   layout: Object.freeze({ sidebar: '360px' }),
 });
 
