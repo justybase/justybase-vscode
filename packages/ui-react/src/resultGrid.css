@@ -97,7 +97,12 @@ body,
   height: 100%;
   overflow: auto;
   outline: none;
+  /* The browser must not choose a different DOM anchor when a new page
+     changes the virtual spacer height. DataGrid restores the logical SQL
+     viewport explicitly. */
+  overflow-anchor: none;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--vscode-scrollbarSlider-background, #475569) transparent;
 }
 
@@ -396,11 +401,22 @@ body,
 }
 
 .ui-data-grid tr.ui-data-grid-virtual-spacer td {
-  height: auto;
+  height: 0;
   min-height: 0;
   padding: 0;
   border: 0;
   background: transparent;
+  line-height: 0;
+  pointer-events: none;
+  vertical-align: top;
+}
+
+.ui-data-grid-virtual-spacer-inner {
+  display: block;
+  width: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -711,9 +727,9 @@ body,
 .ui-shell {
   box-sizing: border-box;
   min-height: 100vh;
-  color: var(--vscode-editor-foreground, #edf2ff);
-  background: var(--vscode-editor-background, #101522);
-  font-family: var(--vscode-font-family, Inter, system-ui, sans-serif);
+  color: var(--jb-color-text);
+  background: var(--jb-color-background);
+  font-family: var(--jb-font-family);
 }
 
 .ui-shell,
@@ -751,12 +767,12 @@ body,
 .ui-result-toolbar button,
 .ui-result-tabs button,
 .ui-workspace-tabs button {
-  min-height: 26px;
+  min-height: var(--jb-control-height);
   padding: 3px 8px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  color: var(--vscode-button-secondaryForeground, #dbeafe);
-  background: var(--vscode-button-secondaryBackground, #26364d);
+  border: 1px solid var(--jb-color-border);
+  border-radius: var(--jb-radius-sm);
+  color: var(--jb-color-text);
+  background: var(--jb-color-surface);
   cursor: pointer;
   font: inherit;
 }
@@ -765,7 +781,8 @@ body,
 .ui-result-toolbar button:hover,
 .ui-result-tabs button:hover,
 .ui-workspace-tabs button:hover {
-  background: var(--vscode-button-secondaryHoverBackground, #334155);
+  border-color: var(--jb-color-accent);
+  background: var(--jb-color-hover);
 }
 
 .ui-shell-body {
@@ -1454,8 +1471,9 @@ body,
 
 .ui-result-tabs button[aria-selected='true'],
 .ui-workspace-tabs [aria-selected='true'] {
-  color: var(--vscode-tab-activeForeground, #fff);
-  background: var(--vscode-tab-activeBackground, #26364d);
+  border-color: var(--jb-color-accent);
+  color: var(--jb-color-text);
+  background: var(--jb-color-hover);
 }
 
 .ui-editor-surface {

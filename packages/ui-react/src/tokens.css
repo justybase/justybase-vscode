@@ -6,18 +6,18 @@
 :root,
 .justybase-theme {
   color-scheme: dark;
-  --jb-color-background: var(--vscode-editor-background, #101522);
-  --jb-color-surface: var(--vscode-editorGroupHeader-tabsBackground, #182033);
-  --jb-color-surface-raised: var(--vscode-editorWidget-background, #202b42);
-  --jb-color-border: var(--vscode-panel-border, #33415f);
-  --jb-color-text: var(--vscode-editor-foreground, #edf2ff);
-  --jb-color-muted: var(--vscode-descriptionForeground, #aeb9d4);
-  --jb-color-accent: var(--vscode-focusBorder, #60a5fa);
-  --jb-color-danger: var(--vscode-errorForeground, #ff8e8e);
-  --jb-color-warning: var(--vscode-editorWarning-foreground, #fbbf24);
-  --jb-color-success: var(--vscode-testing-iconPassed, #82d9aa);
+  --jb-color-background: var(--vscode-editor-background, #1e1e1e);
+  --jb-color-surface: var(--vscode-editorGroupHeader-tabsBackground, #252526);
+  --jb-color-surface-raised: var(--vscode-editorWidget-background, #2d2d2d);
+  --jb-color-border: var(--vscode-panel-border, #3c3c3c);
+  --jb-color-text: var(--vscode-editor-foreground, #cccccc);
+  --jb-color-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --jb-color-accent: var(--vscode-focusBorder, #007fd4);
+  --jb-color-danger: var(--vscode-errorForeground, #f48771);
+  --jb-color-warning: var(--vscode-editorWarning-foreground, #cca700);
+  --jb-color-success: var(--vscode-testing-iconPassed, #89d185);
   --jb-color-selection: var(--vscode-list-activeSelectionBackground, #094771);
-  --jb-color-hover: var(--vscode-list-hoverBackground, #1e293b);
+  --jb-color-hover: var(--vscode-list-hoverBackground, #2a2d2e);
   --jb-color-row-alt: color-mix(in srgb, var(--jb-color-text) 3%, transparent);
   --jb-font-family: var(--vscode-font-family, Inter, ui-sans-serif, system-ui, sans-serif);
   --jb-mono-font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
