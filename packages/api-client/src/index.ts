@@ -71,6 +71,8 @@ export interface ApiClientOptions {
   readonly fetch?: typeof globalThis.fetch;
   /** Product-specific cookie policy; browser Web uses `include`, Electron uses `same-origin`. */
   readonly credentials?: RequestCredentials;
+  /** Product-specific fallback prefix when an export response has no filename header. */
+  readonly exportFilePrefix?: string;
   /** Injectable WebSocket constructor for browser and embedded consumers. */
   readonly WebSocket?: new (url: string) => WebSocket;
   /** Product wording remains configurable without duplicating transport logic. */
@@ -477,7 +479,7 @@ export function createApiClient(options: ApiClientOptions = {}): WorkspaceApi {
     queryPage: (queryId: string, input: QueryPageRequest) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, { method: 'POST', body: JSON.stringify(input) }),
     aggregate: (queryId: string, input: QueryAggregateRequest = {}) => request<QueryAggregateResponse>(`/api/query/${encodeURIComponent(queryId)}/aggregate`, { method: 'POST', body: JSON.stringify(input) }),
     group: (queryId: string, input: QueryGroupRequest) => request<QueryGroupResponse>(`/api/query/${encodeURIComponent(queryId)}/group`, { method: 'POST', body: JSON.stringify(input) }),
-    exportQuery: (queryId: string, input: QueryExportRequest) => download(`/api/query/${encodeURIComponent(queryId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }, `justybase-query.${input.format}`),
+    exportQuery: (queryId: string, input: QueryExportRequest) => download(`/api/query/${encodeURIComponent(queryId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }, `${options.exportFilePrefix ?? 'justybase-query'}.${input.format}`),
     editorPreferences: () => request<EditorPreferences>('/api/preferences/editor'),
     updateEditorPreferences: (input: EditorPreferencesPatch) => request<EditorPreferences>('/api/preferences/editor', { method: 'PATCH', body: JSON.stringify(input) }),
     schemaTree: (connectionId: string, parentId?: string) => request<SchemaTreeResponse>(`/api/schema/tree?connectionId=${encodeURIComponent(connectionId)}${parentId ? `&parentId=${encodeURIComponent(parentId)}` : ''}`),

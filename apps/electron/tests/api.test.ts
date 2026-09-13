@@ -74,6 +74,18 @@ describe('Electron same-origin API adapter', () => {
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(expect.objectContaining({ format: 'csv.gz' }));
   });
 
+  it('keeps the Electron export filename fallback when the server omits disposition', async () => {
+    const blob = new Blob(['"ID"\n"1"'], { type: 'text/csv' });
+    const fetcher = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      blob: async () => blob,
+    }) as Response);
+    const client = createElectronApiClient({ fetcher });
+    await expect(client.exportQuery('query-1', { format: 'csv', offset: 0, limit: 500 })).resolves.toEqual({ blob, fileName: 'justybase-result.csv' });
+  });
+
   it('exposes the authenticated metadata, authoring and guarded-write routes', async () => {
     const fetcher = jest.fn(async (input: RequestInfo | URL) => {
       const route = String(input);

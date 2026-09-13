@@ -53,6 +53,7 @@ export function createElectronApiClient(options: ElectronApiClientOptions = {}):
   const client = createSharedApiClient({
     fetch: options.fetcher,
     credentials: 'same-origin',
+    exportFilePrefix: 'justybase-result',
     WebSocket: options.WebSocket,
     errorMessages: {
       request: 'Electron API request failed.',
