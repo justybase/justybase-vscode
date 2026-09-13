@@ -2,6 +2,9 @@
   "version": 1,
   "packageDependencies": {
     "packages/contracts": [],
+    "packages/api-client": [
+      "packages/contracts"
+    ],
     "packages/sql-core": [
       "packages/contracts"
     ],
@@ -82,6 +85,7 @@
   ],
   "pureSources": [
     "packages/contracts/src/**",
+    "packages/api-client/src/**",
     "packages/database-utils/src/**",
     "packages/dialect-utils/src/**",
     "packages/*-core/src/**",
@@ -259,6 +263,7 @@
     ]
   },
     "workspaceEntryPoints": {
+      "@justybase/api-client": "packages/api-client/src/index.ts",
       "@justybase/metadata-core": "packages/metadata-core/src/index.ts",
       "@justybase/result-core": "packages/result-core/src/index.ts",
       "@justybase/sql-core": "packages/sql-core/src/index.ts",

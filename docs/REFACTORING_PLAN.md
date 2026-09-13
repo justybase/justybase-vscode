@@ -449,8 +449,9 @@ WebSocket, cookie-authentication, and CSRF contracts.
    controllers; App remains the composition root. Add cleanup on tab close and
    logout.
 4. Make the API client a factory for HTTP/WebSocket addresses and the CSRF
-   adapter; preserve cookie authentication. Keep the client in the product
-   until there is a second consumer.
+   adapter; preserve cookie authentication. Once Electron became the second
+   consumer, move the transport into `@justybase/api-client` and keep only
+   product-specific composition in Web/Electron.
 
 Acceptance: compatible web functionality, configurable host, and no mutable
 state shared between API instances.
@@ -463,8 +464,11 @@ R7 implementation evidence (2026-09-10, Linux):
   `applicationContext.ts` composes per-server stores, runtimes, jobs,
   sessions, metadata, rate limiting, and idempotent shutdown; `main.ts` drains
   the Fastify server on SIGINT/SIGTERM.
-- `apps/web/src/api.ts` exposes a client factory with injectable HTTP and
-  WebSocket origins and CSRF adapter while retaining cookie credentials.
+- `@justybase/api-client` exposes the typed client factory with injectable HTTP
+  and WebSocket origins, CSRF adapter, credentials policy, and product error
+  wording while retaining cookie credentials. `apps/web/src/api.ts` keeps the
+  React provider; `apps/electron/src/renderer/api.ts` keeps the Electron
+  same-origin adapter.
   Workspace documents, execution transitions, connection rules, and
   persistence are covered by focused controllers; persisted keys are scoped
   to the authenticated user and legacy keys migrate without overwriting or

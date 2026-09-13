@@ -11,6 +11,8 @@
     "rootDir": ".",
     "isolatedModules": true,
     "paths": {
+      "@justybase/api-client": ["./packages/api-client/src"],
+      "@justybase/api-client/*": ["./packages/api-client/src/*"],
       "@justybase/contracts": ["./packages/contracts/src"],
       "@justybase/contracts/*": ["./packages/contracts/src/*"],
       "@justybase/database-utils": ["./packages/database-utils/src"],

@@ -18,6 +18,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
+      "@justybase/api-client": ["../../packages/api-client/src"],
       "@justybase/contracts": ["../../packages/contracts/src"],
       "@justybase/designer-core": ["../../packages/designer-core/src"],
       "@justybase/dialect-utils": ["../../packages/dialect-utils/src"],

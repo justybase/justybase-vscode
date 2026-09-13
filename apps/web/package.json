@@ -13,6 +13,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@justybase/api-client": "*",
     "@justybase/contracts": "*",
     "@justybase/designer-core": "*",
     "@justybase/dialect-utils": "*",
