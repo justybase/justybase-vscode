@@ -332,4 +332,8 @@ describe('API client factory', () => {
     const markup = renderToStaticMarkup(createElement(ApiClientProvider, { client, children: createElement(ClientProbe) }));
     expect(markup).toContain('<span>function</span>');
   });
+
+  it('creates the shared transport with its browser defaults', () => {
+    expect(createApiClient().me).toEqual(expect.any(Function));
+  });
 });
