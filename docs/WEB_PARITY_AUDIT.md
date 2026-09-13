@@ -1,6 +1,6 @@
 # Web Editor ↔ VS Code Extension — Parity Audit & Backlog
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 This document is the **feature-by-feature parity audit** between the two products shipped
 from this repository:
@@ -18,6 +18,20 @@ from this repository:
 > Cross-cutting readiness and quality gates are owned by
 > `docs/PROJECT_QUALITY_ROADMAP.md`; parity status alone does not make a feature
 > production-ready.
+
+## Current Web renderer status
+
+The production Web entrypoint always mounts `SharedWebWorkspace`; the former
+Dockyard composition and `VITE_UI_MODE` runtime switch are not active Web
+paths. Shared Web now owns durable query documents, per-document execution and
+result identities, multi-statement status/cancellation, typed result export,
+schema/database context, history, Explain, guarded designer flows, and the
+common React Result Grid. Persistence is a versioned user-scoped envelope and
+does not contain credentials, result rows, or runtime handles.
+
+Notebook, chart, tuning, and other host-specific database operations remain
+explicit capability gaps rather than implied parity. VS Code keeps its own
+renderer and host lifecycle; Web and Electron share the React renderer.
 
 ---
 

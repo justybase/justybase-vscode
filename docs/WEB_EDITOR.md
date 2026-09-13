@@ -52,14 +52,13 @@ the `ws:`/`wss:` origin from the HTTP base URL. If both are omitted, the client
 uses same-origin `/api` and WebSocket URLs. The WebSocket setting is an origin
 and the client appends `/api/ws` and `/api/lsp`.
 
-The default authenticated Web workspace uses the web-only Dockyard layout
-adapter. Set `VITE_UI_MODE=shared` when running Vite or building the frontend
-to exercise the explicit R9 shared composition; omit the variable to use
-Dockyard. Dockyard keeps one retained `LayoutDocument` per query and provides
-in-page dockable, floating, and auto-hide tools. Its versioned user-scoped
-layout stores only stable content IDs and layout configuration, never
-credentials, result data, DOM nodes, or runtime handles. Existing `tabs`, grid,
-`sidebar`, and `editor_pct` values remain readable during migration.
+The authenticated Web workspace always uses the Shared UI composition. There
+is no production `VITE_UI_MODE` switch and the retired Dockyard composition is
+not part of the Web runtime. Shared UI keeps stable, user-scoped query
+documents and restores their order, active document, and connection context;
+credentials, SQL result data, DOM nodes, and runtime handles are never written
+to workspace persistence. Existing `tabs` and older global Web keys are read
+through a versioned migration.
 
 ## Controlled test login
 
@@ -72,10 +71,10 @@ the normal session and CSRF cookies. Test specs must use this control instead
 of repeating credentials. Do not enable either flag in a production build or
 deployment; the route is not registered outside test mode.
 
-The deterministic gate is:
+The deterministic Shared Web gate is:
 
 ```bash
-npm run test:playwright:web-api
+npm run test:playwright:web-shared
 ```
 
 The API must also be configured with the exact frontend origin(s), separated

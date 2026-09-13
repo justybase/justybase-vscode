@@ -51,6 +51,14 @@ describe('ui-core reducer', () => {
     });
     expect(contextual.workspace.documents['doc-1']).toMatchObject({ database: 'JUST_DATA', schema: 'ADMIN' });
     expect(after.workspace.documents['doc-1']?.database).toBeUndefined();
+    const cleared = reduceUiState(contextual, {
+      type: 'workspace/update-document',
+      documentId: 'doc-1',
+      patch: { connectionId: undefined, database: undefined, schema: undefined },
+    });
+    expect(cleared.workspace.documents['doc-1']?.connectionId).toBeUndefined();
+    expect(cleared.workspace.documents['doc-1']?.database).toBeUndefined();
+    expect(cleared.workspace.documents['doc-1']?.schema).toBeUndefined();
   });
 
   it('rejects foreign, delayed, duplicate and gapped result events', () => {
@@ -84,6 +92,107 @@ describe('ui-core reducer', () => {
     const cancelled = reduceUiState(state, { type: 'execution/event', event: { type: 'cancelled', sourceId: 'source-1', executionId: 'exec-2', resultSetId: 'result-2', sequence: 2, totalRowCount: 0 } });
     expect(cancelled.results.byResultSetId['source-1\u0000result-2']?.cancellation).toBe('cancelled');
     expect(reduceUiState(cancelled, { type: 'execution/event', event: { type: 'complete', sourceId: 'source-1', executionId: 'exec-2', resultSetId: 'result-2', sequence: 3, totalRowCount: 1 } })).toBe(cancelled);
+  });
+
+  it('keeps statement result sets isolated while tracking one batch execution', () => {
+    let state = reduceUiState(initial(), {
+      type: 'execution/start',
+      sourceId: 'source-1',
+      executionId: 'batch-1',
+      resultSetId: 'batch-1:0',
+      statementIndex: 0,
+      mode: 'script',
+      statementCount: 3,
+      statementSql: 'SELECT 1',
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'started', sourceId: 'source-1', executionId: 'batch-1', resultSetId: 'batch-1:0', statementIndex: 0, sequence: 1, mode: 'script', statementCount: 3 },
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'complete', sourceId: 'source-1', executionId: 'batch-1', resultSetId: 'batch-1:0', statementIndex: 0, sequence: 2, totalRowCount: 1 },
+    });
+    state = reduceUiState(state, {
+      type: 'execution/start',
+      sourceId: 'source-1',
+      executionId: 'batch-1',
+      resultSetId: 'batch-1:1',
+      statementIndex: 1,
+      mode: 'script',
+      statementCount: 3,
+      statementSql: 'SELECT missing',
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'statement-started', sourceId: 'source-1', executionId: 'batch-1', resultSetId: 'batch-1:1', statementIndex: 1, sequence: 1, statementSql: 'SELECT missing' },
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'error', sourceId: 'source-1', executionId: 'batch-1', resultSetId: 'batch-1:1', statementIndex: 1, sequence: 2, message: 'statement failed' },
+    });
+
+    const beforeBatchComplete = state;
+    expect(beforeBatchComplete.results.byResultSetId['source-1\u0000batch-1:0']).toMatchObject({ status: 'complete', lastSequence: 2 });
+    expect(beforeBatchComplete.results.byResultSetId['source-1\u0000batch-1:1']).toMatchObject({ status: 'error', lastSequence: 2 });
+    expect(beforeBatchComplete.executions.byExecutionId['batch-1']).toMatchObject({ status: 'running', statementCount: 3, completedStatements: 2 });
+    expect(beforeBatchComplete.executions.byExecutionId['batch-1']?.statements[1]).toMatchObject({ status: 'error', sql: 'SELECT missing' });
+
+    state = reduceUiState(state, {
+      type: 'execution/batch-complete',
+      sourceId: 'source-1',
+      executionId: 'batch-1',
+      status: 'error',
+      statementCount: 3,
+      completedStatements: 2,
+      message: 'Batch stopped after statement 2.',
+    });
+    expect(state.executions.byExecutionId['batch-1']).toMatchObject({ status: 'error', completedStatements: 2, message: 'Batch stopped after statement 2.' });
+    expect(state.executions.byExecutionId['batch-1']?.statements[2]).toMatchObject({ status: 'skipped' });
+    expect(state.results.byResultSetId['source-1\u0000batch-1:0']?.batchStatus).toBe('error');
+    expect(state.results.byResultSetId['source-1\u0000batch-1:1']?.batchMessage).toBe('Batch stopped after statement 2.');
+  });
+
+  it('does not reset a running statement when a result event repeats execution start metadata', () => {
+    let state = reduceUiState(initial(), {
+      type: 'execution/start',
+      sourceId: 'source-1',
+      executionId: 'repeat-start',
+      resultSetId: 'repeat-start:0',
+      mode: 'script',
+      statementCount: 2,
+      statementSql: 'SELECT 1',
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'started', sourceId: 'source-1', executionId: 'repeat-start', resultSetId: 'repeat-start:0', sequence: 1, statementIndex: 0 },
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'statement-started', sourceId: 'source-1', executionId: 'repeat-start', resultSetId: 'repeat-start:0', sequence: 2, statementIndex: 0, statementSql: 'SELECT 1' },
+    });
+    state = reduceUiState(state, {
+      type: 'execution/start',
+      sourceId: 'source-1',
+      executionId: 'repeat-start',
+      resultSetId: 'repeat-start:0',
+      statementIndex: 0,
+      mode: 'script',
+      statementCount: 2,
+    });
+    expect(state.executions.byExecutionId['repeat-start']?.statements[0]).toMatchObject({ status: 'running', sql: 'SELECT 1' });
+  });
+
+  it('applies cancellation transitions to every result set of one execution', () => {
+    let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'batch-cancel', resultSetId: 'batch-cancel:0', mode: 'script', statementCount: 2 });
+    state = reduceUiState(state, { type: 'execution/start', sourceId: 'source-1', executionId: 'batch-cancel', resultSetId: 'batch-cancel:1', statementIndex: 1, mode: 'script', statementCount: 2 });
+    state = reduceUiState(state, { type: 'execution/cancel-requested', sourceId: 'source-1', executionId: 'batch-cancel', requestId: 'cancel-batch' });
+    expect(Object.values(state.results.byResultSetId).filter(result => result.executionId === 'batch-cancel').every(result => result.cancellation === 'requested')).toBe(true);
+    state = reduceUiState(state, { type: 'execution/cancel-acknowledged', sourceId: 'source-1', executionId: 'batch-cancel', requestId: 'cancel-batch' });
+    expect(Object.values(state.results.byResultSetId).filter(result => result.executionId === 'batch-cancel').every(result => result.cancellation === 'acknowledged')).toBe(true);
+    state = reduceUiState(state, { type: 'execution/event', event: { type: 'cancelled', sourceId: 'source-1', executionId: 'batch-cancel', resultSetId: 'batch-cancel:1', statementIndex: 1, sequence: 1, totalRowCount: 0 } });
+    expect(state.results.byResultSetId['source-1\u0000batch-cancel:1']?.status).toBe('cancelled');
+    expect(state.results.byResultSetId['source-1\u0000batch-cancel:0']?.status).toBe('loading');
   });
 
   it('keeps a terminal event that arrives before cancellation is acknowledged', () => {
@@ -129,6 +238,15 @@ describe('portable result query mapping', () => {
       columnFilters: [{ columnIndex: 1, value: '2026' }],
       sorting: [{ columnIndex: 1, desc: true }],
     });
+    expect(toUiResultQueryOptions(
+      [{ name: 'ID' }, { name: 'CreatedAt' }],
+      {
+        globalFilter: '',
+        columnFilters: { createdat: '2 selected' },
+        columnFilterDefinitions: { createdat: { operator: 'in', value: '2 selected', values: [1, null] } },
+        sorting: [],
+      },
+    )).toEqual({ columnFilters: [{ columnIndex: 1, value: '2 selected', operator: 'in', values: [1, null] }] });
   });
 
   it('drops stale persisted keys instead of sending malformed sort objects', () => {

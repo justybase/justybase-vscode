@@ -124,6 +124,10 @@ const DEFAULT_COLUMN_WIDTH = 144;
 const MIN_COLUMN_WIDTH = 72;
 const MAX_EMPTY_PAGE_REQUESTS = 3;
 const ROW_HEIGHT = 30;
+// The shared grid header contains the column label and inline filter rows.
+// Virtual row math must start below this sticky header, otherwise the first
+// rendered row after a programmatic scroll can be covered by the header.
+const COLUMN_HEADER_HEIGHT = 62;
 const DEFAULT_VIEWPORT_HEIGHT = 480;
 const VIRTUAL_OVERSCAN_ROWS = 8;
 
@@ -144,14 +148,23 @@ export function calculateDataGridVirtualWindow(
   scrollTop: number,
   viewportHeight: number,
   overscanRows = VIRTUAL_OVERSCAN_ROWS,
+  headerHeight = 0,
 ): DataGridVirtualWindow {
   const count = Math.max(0, Math.trunc(rowCount));
   if (count === 0) return { startIndex: 0, endIndex: 0, paddingTop: 0, paddingBottom: 0 };
   const safeScrollTop = Math.max(0, Number.isFinite(scrollTop) ? scrollTop : 0);
   const safeViewportHeight = Math.max(ROW_HEIGHT, Number.isFinite(viewportHeight) ? viewportHeight : DEFAULT_VIEWPORT_HEIGHT);
   const safeOverscan = Math.max(0, Math.trunc(overscanRows));
-  const firstVisible = Math.min(count - 1, Math.floor(safeScrollTop / ROW_HEIGHT));
-  const visibleRows = Math.max(1, Math.ceil(safeViewportHeight / ROW_HEIGHT));
+  const safeHeaderHeight = Math.max(0, Number.isFinite(headerHeight) ? headerHeight : 0);
+  // The table header is part of the scroll content but remains sticky at the
+  // top of the scroller. Row zero therefore starts at `headerHeight`, while
+  // row N still has a logical scroll coordinate of N * ROW_HEIGHT. Subtracting
+  // the header from scrollTop would render the restored row underneath the
+  // sticky header after a layout change.
+  const contentScrollTop = safeScrollTop;
+  const contentViewportHeight = Math.max(ROW_HEIGHT, safeViewportHeight - safeHeaderHeight);
+  const firstVisible = Math.min(count - 1, Math.floor(contentScrollTop / ROW_HEIGHT));
+  const visibleRows = Math.max(1, Math.ceil(contentViewportHeight / ROW_HEIGHT));
   const startIndex = Math.max(0, firstVisible - safeOverscan);
   const endIndex = Math.min(count, firstVisible + visibleRows + safeOverscan);
   return {
@@ -803,7 +816,7 @@ export function DataGrid({
     [collapsedGroups, groupedRows],
   );
   const virtualWindow = useMemo(
-    () => calculateDataGridVirtualWindow(visibleGroupedRows?.length ?? visibleRowCount, virtualViewport.scrollTop, virtualViewport.height),
+    () => calculateDataGridVirtualWindow(visibleGroupedRows?.length ?? visibleRowCount, virtualViewport.scrollTop, virtualViewport.height, VIRTUAL_OVERSCAN_ROWS, COLUMN_HEADER_HEIGHT),
     [visibleGroupedRows?.length, visibleRowCount, virtualViewport.height, virtualViewport.scrollTop],
   );
   const virtualRenderedRows = useMemo(
@@ -946,7 +959,7 @@ export function DataGrid({
 
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
-    const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / ROW_HEIGHT) };
+    const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT) };
     virtualViewportRef.current = {
       scrollTop: Math.max(0, element.scrollTop),
       height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,

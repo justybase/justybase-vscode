@@ -40,9 +40,11 @@ deployment because cross-site cookies require `SameSite=None; Secure`.
 HTTP origins remain useful for same-site local development and receive
 `SameSite=Lax` cookies.
 
-The shared UI composition is opt-in. Set `VITE_UI_MODE=shared` at Vite
-development/build time to enable it; leave it unset to use the legacy
-workspace.
+The authenticated Web workspace uses Shared UI by default and in production.
+There is no runtime rollback flag or `VITE_UI_MODE` switch; the retired
+Dockyard composition is not mounted by the Web entrypoint. Shared UI provides
+durable query documents, connections, schema browsing, history, Explain,
+guarded designer flows, and the common Result Grid.
 
 ## Required configuration
 

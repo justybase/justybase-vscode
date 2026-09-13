@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import type {
   SqlProblem,
+  UiExecutionState,
   UiResultAnalysisTable,
   UiResultSurfaceState,
   UiResultViewState,
@@ -31,6 +32,8 @@ import { ResultAnalysisPanel } from './resultAnalysis';
 export interface ResultPanelProps {
   readonly results: readonly UiResultSurfaceState[];
   readonly activeResult?: UiResultSurfaceState;
+  readonly execution?: UiExecutionState;
+  readonly onRetryStatement?: (statementIndex: number) => void;
   readonly rows: readonly (readonly unknown[])[];
   readonly resultState: AsyncViewState;
   readonly resultMessage?: string;
@@ -93,6 +96,8 @@ export interface ResultPanelProps {
 export function ResultPanel({
   results,
   activeResult,
+  execution,
+  onRetryStatement,
   rows,
   resultState,
   resultMessage,
@@ -145,11 +150,14 @@ export function ResultPanel({
 }: ResultPanelProps): ReactElement {
   const detailRow = selectedRowIndex === undefined ? undefined : rows[selectedRowIndex];
   const detailColumnSet = detailColumns ?? activeResult?.columns ?? [];
+  const statementEntries = execution ? Object.values(execution.statements).sort((left, right) => left.statementIndex - right.statementIndex) : [];
+  const showExecutionSummary = execution !== undefined && (execution.mode === 'script' || execution.statementCount > 1 || execution.status === 'error' || execution.status === 'cancelled');
 
   return <section className="ui-result-panel" aria-label="Query results">
     <ResultOutputTabs activeTab={activeTab} problemCount={problemCount} onChange={onOutputTabChange} />
     {activeTab === 'problems' ? <div className="ui-result-output-content"><SqlProblemsPanel problems={problems} onSelect={onProblemSelect} /></div> : <>
-      <div className="ui-result-heading"><strong>Results</strong><ResultTabs results={results} activeResultSetId={activeResult?.resultSetId} activeSourceId={activeResult?.sourceId} onSelect={onResultSelect} /></div>
+      <div className="ui-result-heading"><strong>Result sets</strong><ResultTabs results={results} activeResultSetId={activeResult?.resultSetId} activeSourceId={activeResult?.sourceId} execution={execution} onSelect={onResultSelect} /></div>
+      {showExecutionSummary && execution && <section className="ui-batch-summary" aria-label="Batch execution"><div className="ui-batch-summary-heading"><strong>{execution.mode === 'script' || execution.statementCount > 1 ? 'Batch execution' : 'Execution'}</strong><span>{execution.completedStatements} / {execution.statementCount} statements complete</span><span data-execution-status={execution.status}>Status: {execution.status}</span></div>{execution.message && <p>{execution.message}</p>}{statementEntries.length > 0 && <ol>{statementEntries.map(statement => <li key={statement.statementIndex} data-statement-status={statement.status}><span>Statement {statement.statementIndex + 1} · {statement.status}</span>{statement.status === 'error' && onRetryStatement && <button type="button" onClick={() => onRetryStatement(statement.statementIndex)}>Retry statement {statement.statementIndex + 1}</button>}</li>)}</ol>}</section>}
       {activeResult && <div className="ui-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={onViewChange} onAggregate={onAggregate} onGroup={onGroup} onPivot={onPivot} activeAnalysis={activeAnalysis} analysisBusy={analysisBusy} onRefresh={onRefresh} onCopy={onCopy} onExport={onExport} />
         {exportFormat !== undefined && onExportFormatChange && <label className="ui-export-format">Format<select aria-label={exportFormatAriaLabel} value={exportFormat} onChange={event => onExportFormatChange(event.target.value)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label>}
       </div>}

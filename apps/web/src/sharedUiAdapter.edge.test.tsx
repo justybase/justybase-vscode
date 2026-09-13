@@ -7,6 +7,7 @@ import type { UiResultSurfaceState } from '@justybase/ui-core';
 import { createApiClient, type ApiClient } from './api';
 import { displayRows, mapSchemaNode, resultAsyncState, SharedWebWorkspace } from './sharedUiAdapter';
 import { readSharedResultView, writeSharedResultView } from './sharedResultViewPersistence';
+import { persistSharedWorkspace, sharedDocumentSourceId } from './sharedWorkspacePersistence';
 import { createWorkspaceStorage } from './workspacePersistence';
 
 function response(body: unknown, ok = true, status = 200): Response {
@@ -75,6 +76,7 @@ class EdgeWebSocket {
 
 interface ApiOptions {
   readonly noConnections?: boolean;
+  readonly multipleConnections?: boolean;
   readonly connectionsError?: boolean;
   readonly historyError?: boolean;
   readonly schemaError?: boolean;
@@ -86,7 +88,7 @@ interface ApiOptions {
 }
 
 function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mock } {
-  const connectionProfiles = [{ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }];
+  const connectionProfiles = [{ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }, ...(options.multipleConnections ? [{ id: 'connection-2', name: 'Warehouse', host: 'warehouse', port: 5480, database: 'warehouse', user: 'analytics', dbType: 'netezza', readOnly: true }] : [])];
   const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method?.toUpperCase() ?? 'GET';
@@ -288,6 +290,36 @@ describe('shared Web UI adapter edge contracts', () => {
     failingView.unmount();
   });
 
+  it('executes and authors against the active document connection after switching tabs', async () => {
+    const user = userEvent.setup();
+    const userId = 'multi-context-user';
+    const storage = createWorkspaceStorage(userId);
+    persistSharedWorkspace(storage, userId, {
+      documents: [
+        { id: 'document-one', sourceId: sharedDocumentSourceId(userId, 'document-one'), title: 'One', content: 'SELECT 1', dirty: false, connectionId: 'connection-1', database: ':memory:', databaseKind: 'sqlite' },
+        { id: 'document-two', sourceId: sharedDocumentSourceId(userId, 'document-two'), title: 'Two', content: 'SELECT 2', dirty: false, connectionId: 'connection-2', database: 'warehouse', databaseKind: 'netezza' },
+      ],
+      documentOrder: ['document-one', 'document-two'],
+      activeDocumentId: 'document-two',
+      selectedConnectionId: 'connection-1',
+    });
+    const { api, fetchMock } = edgeApi({ multipleConnections: true });
+    const view = render(<SharedWebWorkspace api={api} user={{ id: userId, username: 'context', role: 'user' }} onLogout={() => undefined} />);
+    await screen.findByRole('button', { name: 'Warehouse' });
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/query'))).toBe(true));
+    let startCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/query'));
+    expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ connectionId: 'connection-2', database: 'warehouse', sql: 'SELECT 2' }));
+
+    await user.click(screen.getByRole('tab', { name: 'One' }));
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/query')).length).toBeGreaterThan(1));
+    startCall = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/query')).at(-1);
+    expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ connectionId: 'connection-1', database: ':memory:', sql: 'SELECT 1' }));
+    view.unmount();
+    storage.remove('shared_workspace_v2');
+  });
+
   it('runs shared schema preview actions through the selected connection', async () => {
     const user = userEvent.setup();
     const { api, fetchMock } = edgeApi({ schemaObject: true });
@@ -375,7 +407,7 @@ describe('shared Web UI adapter edge contracts', () => {
     const user = userEvent.setup();
     const { api } = edgeApi();
     const storage = createWorkspaceStorage('persisted-shared-grid-user');
-    writeSharedResultView(storage, storage.userId, { sourceId: 'web:persisted-shared-grid-user', resultSetId: 'query-1:0' }, {
+    writeSharedResultView(storage, storage.userId, { sourceId: 'web:persisted-shared-grid-user:document:shared-scratch', resultSetId: 'query-1:0' }, {
       globalFilter: 'a',
       columnFilters: {},
       sorting: [],
@@ -394,7 +426,7 @@ describe('shared Web UI adapter edge contracts', () => {
       expect(grid.scrollLeft).toBe(192);
     });
     expect(screen.getByRole('textbox', { name: 'Filter results' })).toHaveValue('a');
-    expect(readSharedResultView(storage, storage.userId, { sourceId: 'web:persisted-shared-grid-user', resultSetId: 'query-1:0' })?.view.scrollTop).toBe(4_500);
+    expect(readSharedResultView(storage, storage.userId, { sourceId: 'web:persisted-shared-grid-user:document:shared-scratch', resultSetId: 'query-1:0' })?.view.scrollTop).toBe(4_500);
     view.unmount();
     storage.remove('result_view_v1_query-1%3A0');
   });

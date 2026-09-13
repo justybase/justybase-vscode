@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseKind } from '@justybase/contracts';
 import type { MetadataNode } from '@justybase/ui-core';
-import type { UiResultSurfaceState } from '@justybase/ui-core';
+import type { UiExecutionState, UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
@@ -44,6 +44,7 @@ export function CapabilityGate({ capability, children, fallback, allowReadOnly =
 
 export interface UiShellProps {
   readonly title: string;
+  readonly className?: string;
   readonly activeSurface: string;
   readonly onSurfaceChange?: (surface: string) => void;
   readonly surfaces?: readonly { readonly id: string; readonly label: string }[];
@@ -51,8 +52,8 @@ export interface UiShellProps {
   readonly children: ReactNode;
 }
 
-export function UiShell({ title, activeSurface, onSurfaceChange, surfaces = [], sidebar, children }: UiShellProps): ReactNode {
-  return <div className="ui-shell" data-active-surface={activeSurface}>
+export function UiShell({ title, className, activeSurface, onSurfaceChange, surfaces = [], sidebar, children }: UiShellProps): ReactNode {
+  return <div className={['ui-shell', className].filter(Boolean).join(' ')} data-active-surface={activeSurface}>
     <header className="ui-shell-header"><h1>{title}</h1><nav aria-label="Workspace surfaces">{surfaces.map(surface => <button type="button" key={surface.id} aria-current={surface.id === activeSurface ? 'page' : undefined} onClick={() => onSurfaceChange?.(surface.id)}>{surface.label}</button>)}</nav></header>
     <div className="ui-shell-body">{sidebar && <aside className="ui-shell-sidebar" aria-label="Sidebar">{sidebar}</aside>}<main className="ui-shell-main">{children}</main></div>
   </div>;
@@ -117,7 +118,7 @@ export function FocusOnMount({ children }: { readonly children: ReactNode }): Re
   return <div ref={ref} tabIndex={-1}>{children}</div>;
 }
 
-export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect }: ResultTabsProps): ReactNode {
+export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect, execution }: ResultTabsProps): ReactNode {
   const matchingActiveResults = results.filter(result => result.resultSetId === activeResultSetId);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const focusTab = (index: number): void => {
@@ -135,7 +136,8 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
         ? matchingActiveResults.length === 1
         : result.sourceId === activeSourceId);
     const tabIndex = active || (activeResultSetId === undefined && index === 0) ? 0 : -1;
-    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} data-result-status={result.status} onKeyDown={event => {
+    const statement = execution?.statements[result.statementIndex];
+    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} data-result-status={result.status} data-statement-index={result.statementIndex} data-statement-status={statement?.status} title={statement ? `Statement ${result.statementIndex + 1}: ${statement.status}` : undefined} onKeyDown={event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? results.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + results.length) % results.length;
@@ -360,6 +362,7 @@ export interface ResultTabsProps {
   readonly activeResultSetId?: string;
   readonly activeSourceId?: string;
   readonly onSelect: (id: string, sourceId?: string) => void;
+  readonly execution?: UiExecutionState;
 }
 
 export interface SchemaTreeProps {

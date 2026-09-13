@@ -247,6 +247,12 @@ describe('shared React presentation', () => {
       paddingTop: 840,
       paddingBottom: 28_740,
     });
+    expect(calculateDataGridVirtualWindow(1000, 900, 300, 2, 62)).toEqual({
+      startIndex: 28,
+      endIndex: 40,
+      paddingTop: 840,
+      paddingBottom: 28_800,
+    });
     expect(calculateDataGridVirtualWindow(4, Number.NaN, 0, -2)).toEqual({
       startIndex: 0,
       endIndex: 1,
@@ -280,7 +286,7 @@ describe('shared React presentation', () => {
       act(() => { jest.runOnlyPendingTimers(); });
       expect(renderedRows().length).toBeLessThan(100);
       expect(renderedRows()[0]).toHaveTextContent('493');
-      expect(renderedRows()[renderedRows().length - 1]).toHaveTextContent('512');
+      expect(renderedRows()[renderedRows().length - 1]).toHaveTextContent('510');
       expect(container.querySelector('.ui-data-grid-virtual-spacer')?.getAttribute('aria-hidden')).toBe('true');
     } finally {
       jest.useRealTimers();
@@ -303,7 +309,7 @@ describe('shared React presentation', () => {
       expect(scroller.scrollLeft).toBe(240);
       const renderedRows = container.querySelectorAll<HTMLTableRowElement>('tbody tr:not(.ui-data-grid-virtual-spacer)');
       expect(renderedRows[0]).toHaveTextContent('493');
-      expect(renderedRows[renderedRows.length - 1]).toHaveTextContent('512');
+      expect(renderedRows[renderedRows.length - 1]).toHaveTextContent('510');
     } finally {
       jest.useRealTimers();
     }

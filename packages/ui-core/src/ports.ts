@@ -7,7 +7,7 @@ import type {
   UiAuthState,
   UiIdentity,
 } from '@justybase/contracts';
-import type { UiResultEvent, UiResultSurfaceState } from './types';
+import type { UiExecutionRequestMode, UiResultEvent, UiResultSurfaceState } from './types';
 
 export interface Disposable {
   dispose(): void | Promise<void>;
@@ -104,7 +104,8 @@ export interface ExecutionInput {
   readonly sourceId: string;
   readonly sql: string;
   readonly connectionId: string;
-  readonly mode: 'single' | 'script' | 'explain';
+  /** Smart authoring is resolved to a server-compatible mode by the adapter. */
+  readonly mode: UiExecutionRequestMode;
   /** Optional cursor location used by dialect adapters to select a statement. */
   readonly cursorOffset?: number;
   /** Short-lived confirmation fields for guarded write execution. */
