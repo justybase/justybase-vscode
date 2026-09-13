@@ -41,6 +41,35 @@ export interface SqlLanguageFeatureHandle {
   dispose(): void;
 }
 
+/** Defines the standalone Monaco theme used by Web/Electron SQL editors. */
+export function configureSqlMonacoTheme(monaco: typeof Monaco): string {
+  const themeName = 'justybase-sql-dark';
+  monaco.editor.defineTheme(themeName, {
+    base: 'vs-dark',
+    inherit: true,
+    colors: {},
+    rules: [
+      { token: 'keyword', foreground: '569CD6' },
+      { token: 'keyword.sql', foreground: '569CD6' },
+      { token: 'string', foreground: 'CE9178' },
+      { token: 'number', foreground: 'B5CEA8' },
+      { token: 'comment', foreground: '6A9955' },
+    ],
+    semanticTokenColors: {
+      keyword: '#569CD6',
+      function: '#DCDCAA',
+      column: '#9CDCFE',
+      table: '#4EC9B0',
+      schema: '#C586C0',
+      database: '#DCDCAA',
+      alias: { foreground: '#4FC1FF', italic: true },
+      localVariable: '#9CDCFE',
+      type: '#4EC9B0',
+    },
+  } as unknown as Monaco.editor.IStandaloneThemeData);
+  return themeName;
+}
+
 interface RpcMessage { id?: number; method?: string; result?: unknown; error?: { message?: string }; params?: Record<string, unknown>; }
 interface PendingRequest { resolve(value: unknown): void; reject(reason: unknown): void; }
 
@@ -90,6 +119,8 @@ class WebLspClient {
   private readonly ready: Promise<void>;
   private readonly uri: string;
   private readonly getContext: () => SqlLanguageContext;
+  private pendingChangeModel: Monaco.editor.ITextModel | undefined;
+  private changeTimer: number | undefined;
   private onDiagnostics: ((params: Record<string, unknown>) => void) | undefined;
 
   public constructor(uri: string, api: SqlLanguageApi, getContext: () => SqlLanguageContext) {
@@ -122,54 +153,70 @@ class WebLspClient {
   public setDiagnosticsHandler(handler: (params: Record<string, unknown>) => void): void { this.onDiagnostics = handler; }
   public async initialize(model: Monaco.editor.ITextModel): Promise<void> {
     await this.ready;
+    this.clearPendingChange();
     this.syncContext();
     this.notify('textDocument/didChange', { textDocument: { uri: this.uri, version: model.getVersionId() }, contentChanges: [{ text: model.getValue() }] });
   }
   public didChange(model: Monaco.editor.ITextModel): void {
-    this.syncContext();
-    this.notify('textDocument/didChange', { textDocument: { uri: this.uri, version: model.getVersionId() }, contentChanges: [{ text: model.getValue() }] });
+    this.pendingChangeModel = model;
+    if (this.changeTimer !== undefined) window.clearTimeout(this.changeTimer);
+    // Diagnostics are useful after a pause, but parsing the whole document
+    // for every native input event makes a browser editor compete with its
+    // own keystrokes. Completion/hover requests flush this queue first.
+    this.changeTimer = window.setTimeout(() => this.flushPendingChange(), 180);
   }
   public completion(position: Monaco.Position): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/completion', { textDocument: { uri: this.uri }, position: lspPosition(position) }));
   }
   public hover(position: Monaco.Position): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/hover', { textDocument: { uri: this.uri }, position: lspPosition(position) }));
   }
   public definition(position: Monaco.Position): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/definition', { textDocument: { uri: this.uri }, position: lspPosition(position) }));
   }
   public references(position: Monaco.Position, includeDeclaration: boolean): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/references', { textDocument: { uri: this.uri }, position: lspPosition(position), context: { includeDeclaration } }));
   }
   public prepareRename(position: Monaco.Position): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/prepareRename', { textDocument: { uri: this.uri }, position: lspPosition(position) }));
   }
   public rename(position: Monaco.Position, newName: string): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/rename', { textDocument: { uri: this.uri }, position: lspPosition(position), newName }));
   }
   public signatureHelp(position: Monaco.Position): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/signatureHelp', { textDocument: { uri: this.uri }, position: lspPosition(position) }));
   }
   public documentSymbols(): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/documentSymbol', { textDocument: { uri: this.uri } }));
   }
   public inlayHints(): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/inlayHint', { textDocument: { uri: this.uri } }));
   }
   public formatting(options: { tabSize: number; insertSpaces: boolean; keywordCase?: EditorPreferences['keywordCase'] }): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/formatting', { textDocument: { uri: this.uri }, options }));
   }
   public codeActions(range: Monaco.IRange, diagnostics: CoreDiagnosticLike[]): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/codeAction', {
       textDocument: { uri: this.uri },
@@ -181,18 +228,35 @@ class WebLspClient {
     }));
   }
   public semanticTokens(): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('textDocument/semanticTokens/full', { textDocument: { uri: this.uri } }));
   }
   public statementNav(offset: number, direction: 'before' | 'after'): Promise<unknown> {
+    this.flushPendingChange();
     this.syncContext();
     return this.ready.then(() => this.request('justybase/statementNav', { uri: this.uri, offset, direction }));
   }
   public dispose(): void {
+    this.clearPendingChange();
     this.notify('textDocument/didClose', { textDocument: { uri: this.uri } });
     this.socket.close();
     for (const pending of this.pending.values()) pending.reject(new Error('LSP client disposed.'));
     this.pending.clear();
+  }
+  private clearPendingChange(): void {
+    if (this.changeTimer !== undefined) {
+      window.clearTimeout(this.changeTimer);
+      this.changeTimer = undefined;
+    }
+    this.pendingChangeModel = undefined;
+  }
+  private flushPendingChange(): void {
+    const model = this.pendingChangeModel;
+    this.clearPendingChange();
+    if (!model || model.isDisposed()) return;
+    this.syncContext();
+    this.notify('textDocument/didChange', { textDocument: { uri: this.uri, version: model.getVersionId() }, contentChanges: [{ text: model.getValue() }] });
   }
   private syncContext(): void { this.notify('justybase/documentContext', { uri: this.uri, context: this.getContext() }); }
   private notify(method: string, params: unknown): void {
@@ -212,6 +276,7 @@ function completionKind(monaco: typeof Monaco, kind: number): Monaco.languages.C
   if (kind === 5) return monaco.languages.CompletionItemKind.Field;
   if (kind === 7) return monaco.languages.CompletionItemKind.Struct;
   if (kind === 8) return monaco.languages.CompletionItemKind.Interface;
+  if (kind === 9) return monaco.languages.CompletionItemKind.Module;
   return monaco.languages.CompletionItemKind.Keyword;
 }
 
@@ -295,6 +360,8 @@ type Disposable = { dispose(): void };
  */
 class SqlLanguageFeatureRegistry {
   private readonly registrations = new Map<string, SqlModelRegistration>();
+  private readonly completionGenerations = new Map<string, number>();
+  private completionGeneration = 0;
   private readonly providerDisposables: Disposable[];
   private readonly commandEditors = new WeakSet<object>();
 
@@ -305,21 +372,30 @@ class SqlLanguageFeatureRegistry {
     };
     this.providerDisposables = [
       this.monaco.languages.registerCompletionItemProvider('sql', {
-        triggerCharacters: ['.', ' ', '\n'],
-        provideCompletionItems: async (model, position) => {
+        // A dot is the meaningful SQL path boundary for an eager request.
+        // Plain quick suggestions are coalesced below before they cross the
+        // LSP boundary, so fast typing does not compete with a request per
+        // character.
+        triggerCharacters: ['.'],
+        provideCompletionItems: async (model, position, context, token) => {
           const registration = this.registrationFor(model);
           if (!registration) return { suggestions: [] };
+          const generation = this.beginCompletion(model);
+          const version = model.getVersionId();
+          if (!(await this.waitForCompletionWindow(model, generation, version, context, token))) return { suggestions: [] };
           try {
             const response = await registration.client.completion(position) as { items?: Array<{ label: string; kind?: number; detail?: string; insertText?: string }> };
+            if (!this.isCurrentCompletion(model, generation) || model.getVersionId() !== version || token.isCancellationRequested) return { suggestions: [] };
             const word = model.getWordUntilPosition(position);
             const range = new this.monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
             return { suggestions: (response.items ?? []).map(item => ({ label: item.label, kind: completionKind(this.monaco, item.kind ?? 14), detail: item.detail, insertText: item.insertText ?? item.label, range })) };
           } catch {
             try {
               const response = await registration.api.completion({ ...registration.getContext(), sql: model.getValue(), offset: model.getOffsetAt(position) });
+              if (!this.isCurrentCompletion(model, generation) || model.getVersionId() !== version || token.isCancellationRequested) return { suggestions: [] };
               const word = model.getWordUntilPosition(position);
               const range = new this.monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
-              return { suggestions: response.items.map(item => ({ label: item.label, kind: completionKind(this.monaco, item.kind === 'function' ? 3 : item.kind === 'column' ? 5 : 14), detail: item.detail, insertText: item.insertText ?? item.label, range })) };
+              return { suggestions: response.items.map(item => ({ label: item.label, kind: completionKind(this.monaco, item.kind === 'function' ? 3 : item.kind === 'column' ? 5 : item.kind === 'schema' || item.kind === 'database' ? 9 : 14), detail: item.detail, insertText: item.insertText ?? item.label, range })) };
             } catch { return { suggestions: [] }; }
           }
         },
@@ -589,7 +665,10 @@ class SqlLanguageFeatureRegistry {
       }));
     };
     client.setDiagnosticsHandler(setMarkers);
-    const changeDisposable = model.onDidChangeContent(() => client.didChange(model));
+    const changeDisposable = model.onDidChangeContent(() => {
+      this.invalidateCompletion(model);
+      client.didChange(model);
+    });
     const shortcutDisposable = registerSqlShortcuts(editor, this.monaco);
     const registration: SqlModelRegistration = {
       model,
@@ -603,6 +682,7 @@ class SqlLanguageFeatureRegistry {
         if (disposed) return;
         disposed = true;
         if (this.registrations.get(uri) === registration) this.registrations.delete(uri);
+        this.completionGenerations.delete(uri);
         changeDisposable.dispose();
         shortcutDisposable.dispose();
         this.monaco.editor.setModelMarkers(model, 'justybase-netezza-lsp', []);
@@ -624,6 +704,39 @@ class SqlLanguageFeatureRegistry {
   public registrationFor(model: Monaco.editor.ITextModel): SqlModelRegistration | undefined {
     const registration = this.registrations.get(model.uri.toString());
     return registration?.model === model ? registration : undefined;
+  }
+
+  private beginCompletion(model: Monaco.editor.ITextModel): number {
+    const generation = ++this.completionGeneration;
+    this.completionGenerations.set(model.uri.toString(), generation);
+    return generation;
+  }
+
+  private invalidateCompletion(model: Monaco.editor.ITextModel): void {
+    const generation = ++this.completionGeneration;
+    this.completionGenerations.set(model.uri.toString(), generation);
+  }
+
+  private isCurrentCompletion(model: Monaco.editor.ITextModel, generation: number): boolean {
+    return this.completionGenerations.get(model.uri.toString()) === generation;
+  }
+
+  private async waitForCompletionWindow(
+    model: Monaco.editor.ITextModel,
+    generation: number,
+    version: number,
+    context: Monaco.languages.CompletionContext,
+    token: Monaco.CancellationToken,
+  ): Promise<boolean> {
+    if (context.triggerKind === this.monaco.languages.CompletionTriggerKind.TriggerCharacter) {
+      return !token.isCancellationRequested && model.getVersionId() === version && this.isCurrentCompletion(model, generation);
+    }
+    // Monaco reports both Ctrl+Space and a delayed quick-suggest invocation
+    // as Invoke. A short quiet-window check lets an in-flight typing burst
+    // cancel before it reaches the remote LSP, while keeping manual
+    // completion responsive enough for authoring.
+    await new Promise<void>(resolve => window.setTimeout(resolve, 90));
+    return !token.isCancellationRequested && model.getVersionId() === version && this.isCurrentCompletion(model, generation);
   }
 
   public hasCommandsFor(editor: Monaco.editor.IStandaloneCodeEditor): boolean {

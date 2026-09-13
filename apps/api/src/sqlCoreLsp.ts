@@ -7,6 +7,7 @@ import {
   getQualityRuleIdForParserCode,
   resolveSqlRenameSymbol,
   collectSqlSymbolUsages,
+  collectSqlSemanticIdentifierRoles,
   splitSqlStatements,
   formatSqlWithProfile,
   getSqlFormatterProfile,
@@ -172,6 +173,15 @@ const LARGE_DOCUMENT_LINE_THRESHOLD = 500;
 const LARGE_DOCUMENT_CHAR_THRESHOLD = 150_000;
 const LSP_COMPLETION_TABLE = 7;
 const LSP_COMPLETION_VIEW = 17;
+const LSP_COMPLETION_MODULE = 9;
+const COMPLETION_PLACEHOLDER = "__JUSTYBASE_COMPLETION__";
+
+interface NetezzaPathCompletion {
+  /** Identifiers as written before the cursor; a trailing dot creates an empty segment. */
+  parts: string[];
+  /** True when the cursor is in a FROM/JOIN source path rather than an expression. */
+  sourceContext: "from" | "join";
+}
 
 interface ApiTableInfo extends TableInfo {
   objectType?: "TABLE" | "VIEW" | "PROCEDURE";
@@ -231,9 +241,19 @@ export class NetezzaWebLspCore {
     }
     const offset = offsetAt(sql, position);
     if (isCompletionSuppressed(sql, offset)) return [];
+    const pathContext = extractNetezzaPathCompletion(sql, offset);
+    if (pathContext) {
+      return this.resolveNetezzaPathCompletions(documentUri, state, pathContext);
+    }
     if (state.context.effectiveDatabase) await this.ensureTableList(documentUri, state);
     const prefix = sql.slice(0, offset);
-    const authoring = collectNetezzaAuthoringContext(sql);
+    // The desktop completion engine parses a cursor-safe document. A trailing
+    // `D.` is valid editor state but is intentionally rejected by the SQL
+    // parser; without the placeholder the web core loses the FROM table and
+    // therefore has no way to resolve D's columns.
+    const authoring = collectNetezzaAuthoringContext(
+      sql.slice(0, offset) + COMPLETION_PLACEHOLDER + sql.slice(offset),
+    );
     // Qualified completion needs column metadata, not just the object list used
     // for top-level suggestions. Reuse the same cache warming path as diagnostics.
     await this.warmTables(documentUri, state, authoring.tableReferences);
@@ -271,7 +291,104 @@ export class NetezzaWebLspCore {
       if (seen.has(key) || (normalized && !item.label.toUpperCase().startsWith(normalized))) return false;
       seen.add(key);
       return true;
-    }).slice(0, 200);
+      }).slice(0, 200);
+  }
+
+  private async resolveNetezzaPathCompletions(
+    documentUri: string,
+    state: DocumentState,
+    context: NetezzaPathCompletion,
+  ): Promise<CoreCompletionItem[]> {
+    const databasesResponse = await this.safeMetadataRequest({ documentUri, kind: "databases" });
+    const databases = parseMetadataNames(databasesResponse);
+    const [first, second, third] = context.parts;
+    const firstIsDatabase = Boolean(first) && (
+      state.context.effectiveDatabase?.toUpperCase() === first!.toUpperCase()
+      || databases.some((database) => database.toUpperCase() === first!.toUpperCase())
+    );
+
+    // FROM JUST_DATA. is a database container path in Netezza. The next
+    // completion level is the schema list, even if JUST_DATA is not the
+    // currently selected execution database.
+    if (context.parts.length === 2 && firstIsDatabase) {
+      return this.resolveNetezzaSchemas(documentUri, first!, second ?? "");
+    }
+
+    if (context.parts.length === 3 && firstIsDatabase) {
+      return this.resolveNetezzaObjects(
+        documentUri,
+        first!,
+        second || undefined,
+        third ?? "",
+      );
+    }
+
+    // A single-dot path can also mean SCHEMA.TABLE in the active database.
+    // Preserve that VS Code behaviour when the first segment is not a known
+    // database (for example FROM ADMIN.DIMDATE).
+    if (context.parts.length === 2 && state.context.effectiveDatabase) {
+      return this.resolveNetezzaObjects(
+        documentUri,
+        state.context.effectiveDatabase,
+        first || undefined,
+        second ?? "",
+      );
+    }
+
+    if (context.parts.length === 3 && !firstIsDatabase && state.context.effectiveDatabase) {
+      return [];
+    }
+
+    // Bare FROM completion contains database containers, schemas in the active
+    // database and relation names. This keeps Ctrl+Space useful before the
+    // user has typed a qualifier.
+    const partial = context.parts[0] ?? "";
+    const result: CoreCompletionItem[] = databases
+      .filter((name) => startsWithIgnoreCase(name, partial))
+      .map((name) => ({ label: name, kind: LSP_COMPLETION_MODULE, detail: "Netezza database" }));
+    if (!state.context.effectiveDatabase) return dedupeCoreCompletionItems(result);
+    result.push(...await this.resolveNetezzaSchemas(documentUri, state.context.effectiveDatabase, partial));
+    result.push(...await this.resolveNetezzaObjects(documentUri, state.context.effectiveDatabase, undefined, partial));
+    return dedupeCoreCompletionItems(result);
+  }
+
+  private async resolveNetezzaSchemas(
+    documentUri: string,
+    database: string,
+    partial: string,
+  ): Promise<CoreCompletionItem[]> {
+    const response = await this.safeMetadataRequest({ documentUri, kind: "schemas", database });
+    const schemas = parseMetadataNames(response);
+    return dedupeCoreCompletionItems(
+      schemas
+        .filter((name) => startsWithIgnoreCase(name, partial))
+        .map((name) => ({ label: name, kind: LSP_COMPLETION_MODULE, detail: `Schema in ${database}` })),
+    );
+  }
+
+  private async resolveNetezzaObjects(
+    documentUri: string,
+    database: string,
+    schema: string | undefined,
+    partial: string,
+  ): Promise<CoreCompletionItem[]> {
+    const [tablesResponse, viewsResponse] = await Promise.all([
+      this.safeMetadataRequest({ documentUri, kind: "tables", database, schema }),
+      this.safeMetadataRequest({ documentUri, kind: "views", database, schema }),
+    ]);
+    const objects = [
+      ...parseMetadataList(tablesResponse),
+      ...parseMetadataList(viewsResponse),
+    ];
+    return dedupeCoreCompletionItems(
+      objects
+        .filter((item) => item.table && startsWithIgnoreCase(item.table, partial))
+        .map((item) => ({
+          label: item.table!,
+          kind: item.objectType === "VIEW" ? LSP_COMPLETION_VIEW : LSP_COMPLETION_TABLE,
+          detail: item.objectType ?? "TABLE",
+        })),
+    );
   }
 
   public async diagnostics(
@@ -861,6 +978,7 @@ export class NetezzaWebLspCore {
     if (state.context.databaseKind && state.context.databaseKind !== "netezza") return genericSemanticTokens(sql, this.getAuthoring(state.context));
     const usages = collectSqlSymbolUsages(sql);
     const roles = new Map<number, string>();
+    for (const occurrence of collectSqlSemanticIdentifierRoles(sql)) roles.set(occurrence.startOffset, occurrence.role);
     for (const usage of usages) {
       for (const occurrence of usage.occurrences) roles.set(occurrence.startOffset, usage.kind);
     }
@@ -1360,6 +1478,93 @@ function parseMetadataList(value: unknown): MetadataTable[] {
     description: typeof item.description === "string" ? item.description : undefined,
     columns: parseColumns(item.columns),
   }));
+}
+
+function parseMetadataNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((item) => typeof item.name === "string" ? item.name.trim() : "")
+    .filter((name): name is string => name.length > 0);
+}
+
+function startsWithIgnoreCase(value: string, prefix: string): boolean {
+  return value.toUpperCase().startsWith(prefix.toUpperCase());
+}
+
+function dedupeCoreCompletionItems(items: CoreCompletionItem[]): CoreCompletionItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.kind ?? 0}:${item.label.toUpperCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 200);
+}
+
+interface CompletionLexerToken {
+  tokenType: { name: string };
+  image: string;
+}
+
+/**
+ * Finds an incomplete Netezza object path using lexer tokens. This is kept
+ * separate from table-reference collection because a cursor after a dot is
+ * intentionally not a complete SQL qualifiedName yet.
+ */
+function extractNetezzaPathCompletion(sql: string, offset: number): NetezzaPathCompletion | undefined {
+  const prefix = sql.slice(0, offset);
+  const lexResult = SqlLexer.tokenize(prefix);
+  const tokens = lexResult.tokens as readonly CompletionLexerToken[];
+  const boundaryTokens = new Set([
+    "Where", "On", "Group", "Having", "Order", "Limit", "Offset", "Union",
+    "Intersect", "Except", "Set", "Values", "Returning", "Window", "Qualify",
+  ]);
+
+  let sourceIndex = -1;
+  let sourceContext: "from" | "join" = "from";
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const tokenName = tokens[index]?.tokenType.name;
+    if (boundaryTokens.has(tokenName)) return undefined;
+    if (tokenName === "From" || tokenName === "Join") {
+      sourceIndex = index;
+      sourceContext = tokenName === "Join" ? "join" : "from";
+      break;
+    }
+  }
+  if (sourceIndex < 0) return undefined;
+
+  let pathStart = sourceIndex + 1;
+  for (let index = sourceIndex + 1; index < tokens.length; index += 1) {
+    if (tokens[index]?.tokenType.name === "Comma") pathStart = index + 1;
+  }
+  const pathTokens = tokens.slice(pathStart);
+  if (pathTokens.length === 0) return { parts: [""], sourceContext };
+
+  const parts = [""];
+  let expectingIdentifier = true;
+  for (const token of pathTokens) {
+    const tokenName = token.tokenType.name;
+    if (tokenName === "Dot") {
+      if (expectingIdentifier && parts.length === 1) {
+        // A leading dot is not a legal object path.
+        return undefined;
+      }
+      parts.push("");
+      expectingIdentifier = true;
+      continue;
+    }
+    if (tokenName !== "Identifier" && tokenName !== "QuotedIdentifier") return undefined;
+    if (!expectingIdentifier) return undefined;
+    parts[parts.length - 1] = normalizeIdentifierText(token.image);
+    expectingIdentifier = false;
+  }
+  if (parts.length > 3) return undefined;
+  // Unqualified relation names are already handled by the cached table-list
+  // completion path. Restrict this special branch to a blank source or an
+  // actual qualified path so repeated `FROM CU` completion keeps its cache.
+  if (parts.length === 1 && parts[0] !== "") return undefined;
+  return { parts, sourceContext };
 }
 
 function parseMetadataTable(value: unknown): MetadataTable | undefined {

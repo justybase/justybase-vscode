@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import type { QueryAggregateRequest, QueryAggregateResponse, QueryAggregateValue, QueryColumn, QueryGroupRequest, QueryGroupResponse, QueryPageRequest, QueryPageResponse, QuerySortSpec } from '@justybase/contracts';
+import type { QueryAggregateRequest, QueryAggregateResponse, QueryAggregateValue, QueryColumn, QueryColumnFilterOperator, QueryColumnFilterSpec, QueryDistinctRequest, QueryDistinctResponse, QueryGroupRequest, QueryGroupResponse, QueryPageRequest, QueryPageResponse, QuerySortSpec } from '@justybase/contracts';
 
 interface SessionManifest {
   sessionId: string;
@@ -109,6 +109,59 @@ function compareValues(left: unknown, right: unknown, numeric: boolean): number 
   return String(left).localeCompare(String(right), undefined, { sensitivity: 'base', numeric: false });
 }
 
+function filterText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+function filterOperator(filter: QueryColumnFilterSpec): QueryColumnFilterOperator {
+  if (filter.values !== undefined) return 'in';
+  return filter.operator ?? 'contains';
+}
+
+function hasAdvancedFilters(request: QueryPageRequest): boolean {
+  return (request.columnFilters ?? []).some(filter => filterOperator(filter) !== 'contains');
+}
+
+function matchesColumnFilter(value: unknown, filter: QueryColumnFilterSpec, column: QueryColumn): boolean {
+  const operator = filterOperator(filter);
+  const text = filterText(value);
+  const target = filter.value.trim();
+  const numeric = numericType(column.type);
+  switch (operator) {
+    case 'equals': return compareValues(value, target, numeric) === 0;
+    case 'notEquals': return compareValues(value, target, numeric) !== 0;
+    case 'startsWith': return text.toLocaleLowerCase().startsWith(target.toLocaleLowerCase());
+    case 'endsWith': return text.toLocaleLowerCase().endsWith(target.toLocaleLowerCase());
+    case 'greaterThan': return value !== null && value !== undefined && compareValues(value, target, numeric) > 0;
+    case 'greaterThanOrEqual': return value !== null && value !== undefined && compareValues(value, target, numeric) >= 0;
+    case 'lessThan': return value !== null && value !== undefined && compareValues(value, target, numeric) < 0;
+    case 'lessThanOrEqual': return value !== null && value !== undefined && compareValues(value, target, numeric) <= 0;
+    case 'isNull': return value === null || value === undefined;
+    case 'isNotNull': return value !== null && value !== undefined;
+    case 'in': {
+      const candidates = filter.values ?? [filter.value];
+      return candidates.some(candidate => compareValues(value, candidate, numeric) === 0);
+    }
+    case 'contains':
+    default: return text.toLocaleLowerCase().includes(target.toLocaleLowerCase());
+  }
+}
+
+function matchesRequest(row: unknown[], manifest: SessionManifest, request: QueryPageRequest, excludedColumnIndex?: number): boolean {
+  const globalFilter = request.globalFilter?.trim().toLocaleLowerCase();
+  if (globalFilter && !row.some(value => filterText(value).toLocaleLowerCase().includes(globalFilter))) return false;
+  return (request.columnFilters ?? []).every(filter => {
+    if (filter.columnIndex === excludedColumnIndex) return true;
+    const column = manifest.columns[filter.columnIndex];
+    if (!column || !Number.isInteger(filter.columnIndex) || filter.columnIndex < 0) return true;
+    return matchesColumnFilter(row[filter.columnIndex], filter, column);
+  });
+}
+
 function filterSql(manifest: SessionManifest, request: QueryPageRequest): { where: string; params: string[] } {
   const conditions: string[] = [];
   const params: string[] = [];
@@ -198,15 +251,30 @@ export class QuerySessionManager {
     return session.manifest.totalRows ?? this.count(session.db);
   }
 
+  private allStoredRows(session: OpenSession): Array<{ row_index: number; payload: string }> {
+    return session.db.prepare('SELECT row_index, payload FROM rows ORDER BY row_index ASC').all() as Array<{ row_index: number; payload: string }>;
+  }
+
+  private filteredStoredRows(session: OpenSession, request: QueryPageRequest, excludedColumnIndex?: number): Array<{ row_index: number; payload: string }> {
+    if (excludedColumnIndex === undefined && !hasAdvancedFilters(request)) {
+      const filtered = filterSql(session.manifest, request);
+      return session.db.prepare(`SELECT row_index, payload FROM rows ${filtered.where}`).all(...filtered.params) as Array<{ row_index: number; payload: string }>;
+    }
+    return this.allStoredRows(session).filter(stored => matchesRequest(JSON.parse(stored.payload) as unknown[], session.manifest, request, excludedColumnIndex));
+  }
+
   public page(userId: string, sessionId: string, request: QueryPageRequest): QueryPageResponse {
     const session = this.require(userId, sessionId);
     const offset = Math.max(0, Math.floor(request.offset ?? 0));
     const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(request.limit ?? 200)));
-    const filtered = filterSql(session.manifest, request);
-    const countRow = session.db.prepare(`SELECT COUNT(*) AS count FROM rows ${filtered.where}`).get(...filtered.params) as { count: number };
+    const advanced = hasAdvancedFilters(request);
+    const filtered = advanced ? undefined : filterSql(session.manifest, request);
+    const countRow = advanced
+      ? undefined
+      : session.db.prepare(`SELECT COUNT(*) AS count FROM rows ${filtered!.where}`).get(...filtered!.params) as { count: number };
     let values: unknown[][];
-    if (hasNumericSorting(session.manifest, request.sorting)) {
-      const storedRows = session.db.prepare(`SELECT row_index, payload FROM rows ${filtered.where}`).all(...filtered.params) as Array<{ row_index: number; payload: string }>;
+    if (advanced || hasNumericSorting(session.manifest, request.sorting)) {
+      const storedRows = this.filteredStoredRows(session, request);
       const sorting = (request.sorting ?? []).filter(item => Number.isInteger(item.columnIndex) && item.columnIndex >= 0 && item.columnIndex < session.manifest.columns.length);
       storedRows.sort((left, right) => {
         const leftRow = JSON.parse(left.payload) as unknown[];
@@ -219,10 +287,10 @@ export class QuerySessionManager {
       });
       values = storedRows.slice(offset, offset + limit).map(row => JSON.parse(row.payload) as unknown[]);
     } else {
-      const rows = session.db.prepare(`SELECT payload FROM rows ${filtered.where} ${orderSql(session.manifest, request.sorting)} LIMIT ? OFFSET ?`).all(...filtered.params, limit, offset) as Array<{ payload: string }>;
+      const rows = session.db.prepare(`SELECT payload FROM rows ${filtered!.where} ${orderSql(session.manifest, request.sorting)} LIMIT ? OFFSET ?`).all(...filtered!.params, limit, offset) as Array<{ payload: string }>;
       values = rows.map(row => JSON.parse(row.payload) as unknown[]);
     }
-    const totalRows = Number(countRow.count);
+    const totalRows = advanced ? this.filteredStoredRows(session, request).length : Number(countRow!.count);
     session.manifest.expiresAt = Date.now() + this.ttlMs;
     this.writeManifest(session.manifest);
     return {
@@ -240,18 +308,52 @@ export class QuerySessionManager {
     };
   }
 
+  public distinct(userId: string, sessionId: string, request: QueryDistinctRequest): QueryDistinctResponse {
+    const session = this.require(userId, sessionId);
+    const columnIndex = request.columnIndex;
+    if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= session.manifest.columns.length) {
+      throw new Error('Select a valid column for distinct values.');
+    }
+    const limit = Math.min(500, Math.max(1, Math.floor(request.limit ?? 200)));
+    const search = request.search?.trim().toLocaleLowerCase();
+    const storedRows = this.filteredStoredRows(session, request, columnIndex);
+    const values: unknown[] = [];
+    const seen = new Set<string>();
+    for (const stored of storedRows) {
+      const row = JSON.parse(stored.payload) as unknown[];
+      const value = row[columnIndex];
+      if (search && !filterText(value).toLocaleLowerCase().includes(search)) continue;
+      const key = `${typeof value}:${value === undefined ? 'undefined' : JSON.stringify(value)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      values.push(value);
+      if (values.length > limit) break;
+    }
+    const truncated = values.length > limit;
+    session.manifest.expiresAt = Date.now() + this.ttlMs;
+    this.writeManifest(session.manifest);
+    return {
+      statementIndex: session.manifest.statementIndex,
+      values: truncated ? values.slice(0, limit) : values,
+      truncated,
+    };
+  }
+
   public aggregate(userId: string, sessionId: string, request: QueryAggregateRequest = {}): QueryAggregateResponse {
     const session = this.require(userId, sessionId);
-    const filtered = filterSql(session.manifest, request);
-    const countRow = session.db.prepare(`SELECT COUNT(*) AS filtered_row_count FROM rows ${filtered.where}`).get(...filtered.params) as { filtered_row_count: number };
+    const advanced = hasAdvancedFilters(request);
+    const filtered = advanced ? undefined : filterSql(session.manifest, request);
+    const storedRows = this.filteredStoredRows(session, request);
+    const filteredRowCount = advanced
+      ? storedRows.length
+      : Number((session.db.prepare(`SELECT COUNT(*) AS filtered_row_count FROM rows ${filtered!.where}`).get(...filtered!.params) as { filtered_row_count: number }).filtered_row_count);
     const requestedFunctions = Array.isArray(request.functions) ? request.functions.filter(fn => ['count', 'sum', 'avg', 'min', 'max'].includes(fn)) : [];
     const functions = new Set(requestedFunctions.length > 0 ? requestedFunctions : ['count', 'sum', 'avg', 'min', 'max']);
     const requestedColumns = Array.isArray(request.columnIndices) ? request.columnIndices : [];
     const columnIndices = (requestedColumns.length > 0 ? requestedColumns : session.manifest.columns.map((_column, index) => index))
       .filter(index => Number.isInteger(index) && index >= 0 && index < session.manifest.columns.length);
-    if (columnIndices.length === 0) return { statementIndex: session.manifest.statementIndex, filteredRowCount: Number(countRow.filtered_row_count), values: [] };
+    if (columnIndices.length === 0) return { statementIndex: session.manifest.statementIndex, filteredRowCount, values: [] };
 
-    const storedRows = session.db.prepare(`SELECT payload FROM rows ${filtered.where}`).all(...filtered.params) as Array<{ payload: string }>;
     const values: QueryAggregateValue[] = columnIndices.map(columnIndex => {
       const numeric = numericType(session.manifest.columns[columnIndex]?.type);
       const columnValues = storedRows.map(row => (JSON.parse(row.payload) as unknown[])[columnIndex]).filter(value => value !== null && value !== undefined);
@@ -275,14 +377,13 @@ export class QuerySessionManager {
     });
     session.manifest.expiresAt = Date.now() + this.ttlMs;
     this.writeManifest(session.manifest);
-    return { statementIndex: session.manifest.statementIndex, filteredRowCount: Number(countRow.filtered_row_count), values };
+    return { statementIndex: session.manifest.statementIndex, filteredRowCount, values };
   }
 
   public group(userId: string, sessionId: string, request: QueryGroupRequest): QueryGroupResponse {
     const session = this.require(userId, sessionId);
     const groupIndices = [...new Set((request.groupByColumnIndices ?? []).filter(index => Number.isInteger(index) && index >= 0 && index < session.manifest.columns.length))];
     if (groupIndices.length === 0) throw new Error('Select at least one valid grouping column.');
-    const filtered = filterSql(session.manifest, request);
     const aggregateInputs = Array.isArray(request.aggregates) ? request.aggregates : [{ function: 'count' as const }];
     const outputColumns: QueryColumn[] = groupIndices.map(index => {
       const source = session.manifest.columns[index];
@@ -313,7 +414,7 @@ export class QuerySessionManager {
       aggregateSpecs.push({ functionName: 'count', columnIndex: undefined });
       outputColumns.push({ name: 'COUNT(*)', type: 'BIGINT' });
     }
-    const storedRows = session.db.prepare(`SELECT payload FROM rows ${filtered.where}`).all(...filtered.params) as Array<{ payload: string }>;
+    const storedRows = this.filteredStoredRows(session, request);
     const groups = new Map<string, { values: unknown[]; rows: unknown[][] }>();
     for (const stored of storedRows) {
       const row = JSON.parse(stored.payload) as unknown[];

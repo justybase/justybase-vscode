@@ -22,7 +22,7 @@ export type {
   DataGridNumericKind,
 } from './resultGridFormatting';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
-export { disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
+export { configureSqlMonacoTheme, disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
 export type { SqlLanguageApi, SqlLanguageFeatureHandle } from './sqlLanguage';
 export { SqlProblemsPanel, sqlProblemsFromMarkers } from './sqlProblems';
 export type { SqlProblem, SqlProblemSeverity, SqlProblemsPanelProps } from './sqlProblems';
@@ -39,6 +39,7 @@ export {
   FocusOnMount,
   HistoryView,
   ResultTabs,
+  ResultOutputTabs,
   ResultGrid,
   ResultViewToolbar,
   RowDetail,
@@ -53,6 +54,7 @@ export type {
   CellValueViewerProps,
   CapabilityGateProps,
   DataGridCellContext,
+  DataGridColumnFilterRequest,
   DataGridCopyPayload,
   DataGridProps,
   DesignerFormProps,
@@ -63,6 +65,8 @@ export type {
   HistoryViewEntry,
   HistoryViewProps,
   ResultTabsProps,
+  ResultOutputTab,
+  ResultOutputTabsProps,
   ResultViewToolbarProps,
   RowDetailProps,
   SchemaTreeProps,

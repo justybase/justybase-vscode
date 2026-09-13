@@ -409,6 +409,24 @@ describe('shared React presentation', () => {
     expect(onViewChange).toHaveBeenCalledWith({ pinnedColumns: ['ID'] });
   });
 
+  it('honours positional keys from legacy grid views after switching to semantic ids', () => {
+    render(<DataGrid
+      resultSetId="legacy-column-keys"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }]}
+      rows={[[1, 'Alpha']]}
+      view={{
+        globalFilter: '',
+        columnFilters: {},
+        sorting: [],
+        grouping: [],
+        columnVisibility: { '0': false },
+        columnWidths: { '1': 220 },
+      }}
+    />);
+    expect(screen.queryByRole('columnheader', { name: /ID/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /NAME/ })).toHaveStyle({ width: '220px' });
+  });
+
   it('renders formatted boolean values while preserving raw selection payloads', () => {
     const onCopySelection = jest.fn();
     render(<DataGrid

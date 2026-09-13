@@ -93,7 +93,9 @@ function toHttpCompletionItem(item: { label: string; kind?: number; detail?: str
         ? 'column'
         : item.kind === 17
           ? 'view'
-          : 'table';
+          : item.kind === 9
+            ? item.detail?.toLocaleLowerCase().startsWith('schema') ? 'schema' : 'database'
+            : 'table';
   return { label: item.label, kind, detail: item.detail, insertText: item.insertText };
 }
 

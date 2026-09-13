@@ -10,6 +10,8 @@ import type {
   QueryExecutionMode,
   QuerySortSpec,
   QueryColumnFilterSpec,
+  QueryColumnFilterOperator,
+  QueryDistinctRequest,
   QueryAggregateFunction,
   QueryGroupAggregate,
   QueryExportFormat,
@@ -145,9 +147,24 @@ function queryColumnFilters(value: unknown): QueryColumnFilterSpec[] | undefined
     const record = objectValue(item, `columnFilters[${index}]`);
     const columnIndex = optionalInteger(record.columnIndex, `columnFilters[${index}].columnIndex`, 0, Number.MAX_SAFE_INTEGER);
     if (columnIndex === undefined) throw new RequestValidationError(`columnFilters[${index}].columnIndex is required.`);
+    const operatorValue = record.operator;
+    let operator: QueryColumnFilterOperator | undefined;
+    if (operatorValue !== undefined && operatorValue !== null) {
+      const candidate = String(operatorValue) as QueryColumnFilterOperator;
+      const supported: readonly QueryColumnFilterOperator[] = ['contains', 'equals', 'notEquals', 'startsWith', 'endsWith', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual', 'isNull', 'isNotNull', 'in'];
+      if (!supported.includes(candidate)) throw new RequestValidationError(`columnFilters[${index}].operator is not supported.`);
+      operator = candidate;
+    }
+    const rawValues = arrayValue(record.values, `columnFilters[${index}].values`);
+    const values = rawValues?.map((candidate, valueIndex) => {
+      if (candidate === null || typeof candidate === 'string' || typeof candidate === 'boolean' || (typeof candidate === 'number' && Number.isFinite(candidate))) return candidate;
+      throw new RequestValidationError(`columnFilters[${index}].values[${valueIndex}] must be a JSON scalar.`);
+    });
     return {
       columnIndex,
       value: requiredString(record.value, `columnFilters[${index}].value`, MAX_FILTER_LENGTH),
+      ...(operator === undefined ? {} : { operator }),
+      ...(values === undefined ? {} : { values }),
     };
   });
 }
@@ -161,6 +178,19 @@ export function parseQueryPageRequest(value: unknown): QueryPageRequest {
     globalFilter: optionalString(record.globalFilter, 'globalFilter', MAX_FILTER_LENGTH),
     columnFilters: queryColumnFilters(record.columnFilters),
     sorting: querySort(record.sorting),
+  };
+}
+
+export function parseQueryDistinctRequest(value: unknown): QueryDistinctRequest {
+  const record = objectValue(value);
+  const base = parseQueryPageRequest(record);
+  const columnIndex = optionalInteger(record.columnIndex, 'columnIndex', 0, Number.MAX_SAFE_INTEGER);
+  if (columnIndex === undefined) throw new RequestValidationError('columnIndex is required.');
+  return {
+    ...base,
+    columnIndex,
+    search: optionalString(record.search, 'search', MAX_FILTER_LENGTH),
+    limit: optionalInteger(record.limit, 'limit', 1, 500),
   };
 }
 

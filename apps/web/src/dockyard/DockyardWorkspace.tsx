@@ -13,9 +13,10 @@ import type {
   SchemaTreeNode,
   WebUser,
 } from '@justybase/contracts';
-import { SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
-import type { SqlProblem } from '@justybase/ui-react';
+import { configureSqlMonacoTheme, ResultOutputTabs, SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
+import type { ResultOutputTab, SqlProblem } from '@justybase/ui-react';
 import { EditorToolbar } from '../EditorToolbar';
+import type { DatabaseLoadState } from '../EditorToolbar';
 import { ExplainPanel } from '../ExplainPanel';
 import { InspectorPanel } from '../InspectorPanel';
 import { ResultGrid } from '../ResultGrid';
@@ -29,6 +30,7 @@ import { statementStateFor, statementStatusClass, statementStatusLabel } from '.
 import {
   DOCKYARD_CONTENT_IDS,
   DockyardManagerAdapter,
+  DEFAULT_DOCKYARD_EXPLORER_WIDTH,
   explainToolId,
   queryDocumentId,
   type DockyardContentDefinition,
@@ -53,6 +55,9 @@ export interface DockyardWorkspaceProps {
   columns: MetadataColumn[];
   inspectedObject: SchemaTreeNode | null;
   databases: MetadataDatabase[];
+  databaseLoadState: DatabaseLoadState;
+  databaseLoadError: string;
+  onRetryDatabases(): void;
   preferences: EditorPreferences | null;
   error: string;
   lastQueryTime: number | null;
@@ -109,6 +114,9 @@ interface QueryDocumentProps {
   connections: ConnectionProfileSummary[];
   selected: ConnectionProfileSummary | null;
   databases: MetadataDatabase[];
+  databaseLoadState: DatabaseLoadState;
+  databaseLoadError: string;
+  onRetryDatabases(): void;
   preferences: EditorPreferences | null;
   editorSplit: DockyardEditorSplit;
   onEditorReady(tabId: string, editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void;
@@ -140,6 +148,9 @@ export function QueryDocument({
   connections,
   selected,
   databases,
+  databaseLoadState,
+  databaseLoadError,
+  onRetryDatabases,
   preferences,
   editorSplit,
   onEditorReady,
@@ -163,6 +174,17 @@ export function QueryDocument({
   onOpenConnectionForm,
   onEditRow,
 }: QueryDocumentProps): ReactElement {
+  const [activeOutputTab, setActiveOutputTab] = useState<ResultOutputTab>('results');
+  const updateSqlRef = useRef(onUpdateSql);
+  const problemsChangeRef = useRef(onProblemsChange);
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const localSqlRef = useRef(tab.sql);
+  const editorTabIdRef = useRef(tab.id);
+  const lastTabSqlRef = useRef(tab.sql);
+  const pendingSqlRef = useRef<string | undefined>(undefined);
+  const sqlUpdateTimerRef = useRef<number | undefined>(undefined);
+  updateSqlRef.current = onUpdateSql;
+  problemsChangeRef.current = onProblemsChange;
   const result = tab.results[tab.activeStatementIndex] ?? emptyResult;
   const activeQueryId = tab.queryId ?? '';
   const busy = tab.running === true;
@@ -178,8 +200,88 @@ export function QueryDocument({
   }, {});
   const batchExecutedCount = (batchStatusCounts.success ?? 0) + (batchStatusCounts.error ?? 0) + (batchStatusCounts.cancelled ?? 0);
   const failedStatementIndex = statementIndexes.find(index => statementStateFor(tab, index).status === 'error');
+  const editorOptions = useMemo(() => ({
+    minimap: { enabled: preferences?.minimap ?? false },
+    fontSize: preferences?.fontSize ?? 14,
+    tabSize: preferences?.tabSize ?? 4,
+    insertSpaces: preferences?.insertSpaces ?? true,
+    wordWrap: preferences?.wordWrap ?? 'off',
+    lineNumbers: preferences?.lineNumbers === false ? 'off' as const : 'on' as const,
+    formatOnType: preferences?.formatOnType ?? false,
+    automaticLayout: true,
+    // Plain suggestions are coalesced by the shared provider; keep them on so
+    // the browser behaves like the VS Code editor after a short pause.
+    quickSuggestions: { other: true, comments: false, strings: false },
+    quickSuggestionsDelay: 180,
+    // A completion popup must never consume punctuation/whitespace from a
+    // native typing burst. The dot is still a trigger character, so the
+    // qualified SQL completion list opens without rewriting the identifier
+    // the user is entering.
+    acceptSuggestionOnCommitCharacter: false,
+    suggestOnTriggerCharacters: true,
+    'semanticHighlighting.enabled': true,
+    padding: { top: 12 },
+  }), [preferences?.fontSize, preferences?.formatOnType, preferences?.insertSpaces, preferences?.lineNumbers, preferences?.minimap, preferences?.tabSize, preferences?.wordWrap]);
+  const flushSqlUpdate = useCallback((): void => {
+    const timer = sqlUpdateTimerRef.current;
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      sqlUpdateTimerRef.current = undefined;
+    }
+    const nextValue = pendingSqlRef.current;
+    pendingSqlRef.current = undefined;
+    if (nextValue !== undefined) updateSqlRef.current(tab.id, nextValue);
+  }, [tab.id]);
+  const scheduleSqlUpdate = useCallback((nextValue: string): void => {
+    pendingSqlRef.current = nextValue;
+    const timer = sqlUpdateTimerRef.current;
+    if (timer !== undefined) window.clearTimeout(timer);
+    // Keep the durable React/Dockyard state out of the native input hot path.
+    // Monaco owns the live document; React receives the latest value after a
+    // short idle window (or immediately when focus leaves the editor).
+    sqlUpdateTimerRef.current = window.setTimeout(flushSqlUpdate, 240);
+  }, [flushSqlUpdate, tab.id]);
+  const handleEditorChange = useCallback((value: string | undefined): void => {
+    const nextValue = value ?? '';
+    localSqlRef.current = nextValue;
+    scheduleSqlUpdate(nextValue);
+  }, [scheduleSqlUpdate]);
+  const handleEditorValidate = useCallback((markers: Monaco.editor.IMarker[]): void => {
+    problemsChangeRef.current(tab.id, sqlProblemsFromMarkers(markers));
+  }, [tab.id]);
+
+  useEffect(() => {
+    // A document owns its Monaco model. React state is still the durable
+    // source for persistence, but must not overwrite a model while Monaco is
+    // processing a burst of native input events.
+    if (editorTabIdRef.current !== tab.id) {
+      editorTabIdRef.current = tab.id;
+      lastTabSqlRef.current = tab.sql;
+      localSqlRef.current = tab.sql;
+      return;
+    }
+    const previousTabSql = lastTabSqlRef.current;
+    lastTabSqlRef.current = tab.sql;
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model || model.getValue() === tab.sql) {
+      localSqlRef.current = tab.sql;
+      return;
+    }
+    // A parent render can arrive from diagnostics, selection, or another
+    // panel while the local Monaco value is still waiting for the idle commit.
+    // If the tab prop did not change, it is not an external edit and must not
+    // replace the text currently being typed.
+    if (tab.sql === previousTabSql) return;
+    localSqlRef.current = tab.sql;
+    editor.executeEdits('external-sql-update', [{ range: model.getFullModelRange(), text: tab.sql, forceMoveMarkers: true }]);
+  }, [tab.id, tab.sql]);
+
+  useEffect(() => () => flushSqlUpdate(), [flushSqlUpdate]);
 
   function mountEditor(editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco): void {
+    monaco.editor.setTheme(configureSqlMonacoTheme(monaco));
+    editorRef.current = editor;
     onEditorReady(tab.id, editor, monaco);
     // Monaco does not expose the current insert/overtype mode through the
     // public EditorOption enum. Keep the small bit of UI state at this
@@ -192,8 +294,11 @@ export function QueryDocument({
       overwrite = !overwrite;
       window.setTimeout(updateOverwrite, 0);
     });
+    const blurDisposable = editor.onDidBlurEditorText(() => flushSqlUpdate());
     editor.onDidDispose(() => {
       disposable.dispose();
+      blurDisposable.dispose();
+      if (editorRef.current === editor) editorRef.current = null;
       onEditorDispose(tab.id);
     });
   }
@@ -204,6 +309,9 @@ export function QueryDocument({
       database={targetDatabase}
       connections={connections}
       databases={databases}
+      databaseLoadState={databaseLoadState}
+      databaseLoadError={databaseLoadError}
+      onRetryDatabases={onRetryDatabases}
       onSelectConnection={connectionId => onSelectConnection(tab.id, connectionId)}
       onSelectDatabase={database => onSelectDatabase(tab.id, database)}
       databaseKind={tab.databaseKind ?? targetConnection?.dbType ?? 'netezza'}
@@ -221,72 +329,65 @@ export function QueryDocument({
         <div className="dockyard-editor-host">
           <Editor
             height="100%"
+            path={`inmemory://web/dockyard/${encodeURIComponent(tab.id)}.sql`}
             language="sql"
-            theme="vs-dark"
-            value={tab.sql}
-            onChange={value => onUpdateSql(tab.id, value ?? '')}
+            theme="justybase-sql-dark"
+            defaultValue={tab.sql}
+            onChange={handleEditorChange}
             onMount={mountEditor}
-            onValidate={markers => onProblemsChange(tab.id, sqlProblemsFromMarkers(markers))}
-            options={{
-              minimap: { enabled: preferences?.minimap ?? false },
-              fontSize: preferences?.fontSize ?? 14,
-              tabSize: preferences?.tabSize ?? 4,
-              insertSpaces: preferences?.insertSpaces ?? true,
-              wordWrap: preferences?.wordWrap ?? 'off',
-              lineNumbers: preferences?.lineNumbers === false ? 'off' : 'on',
-              formatOnType: preferences?.formatOnType ?? false,
-              automaticLayout: true,
-              padding: { top: 12 },
-            }}
+            onValidate={handleEditorValidate}
+            options={editorOptions}
           />
         </div>
-        <SqlProblemsPanel problems={problems} onSelect={problem => onSelectProblem(tab.id, problem)} />
       </div>
       <div className="split-handle split-handle-v" onMouseDown={editorSplit.onMouseDown} />
-      <section className="results dockyard-query-results" style={{ height: `${100 - editorSplit.size}%` }}>
-        {active && error && <div className="error-banner">{error}</div>}
-        <div className="results-header">
-          <strong>Results</strong>
-          <div className="result-statement-tabs">
-            {statementIndexes.map(index => {
-              const state = statementStateFor(tab, index);
-              return <button
-                key={index}
-                className={`secondary small statement-tab ${tab.activeStatementIndex === index ? 'active' : ''}`}
-                title={state.sql ?? `Statement ${index + 1}`}
-                aria-label={`Statement ${index + 1}: ${statementStatusLabel(state.status)}`}
-                onClick={() => { onActivateTab(tab.id); onSelectStatement(tab.id, index); }}
-              >
-                <span>Statement {index + 1}</span><span className={statementStatusClass(state.status)}>{statementStatusLabel(state.status)}</span>
-              </button>;
-            })}
+      <div className="dockyard-query-output" style={{ height: `${100 - editorSplit.size}%` }}>
+        <ResultOutputTabs activeTab={activeOutputTab} problemCount={problems.length} onChange={setActiveOutputTab} />
+        {activeOutputTab === 'problems' ? <div className="ui-result-output-content"><SqlProblemsPanel problems={problems} onSelect={problem => onSelectProblem(tab.id, problem)} /></div> : <section className="results dockyard-query-results">
+          {active && error && <div className="error-banner">{error}</div>}
+          <div className="results-header">
+            <strong>Results</strong>
+            <div className="result-statement-tabs">
+              {statementIndexes.map(index => {
+                const state = statementStateFor(tab, index);
+                return <button
+                  key={index}
+                  className={`secondary small statement-tab ${tab.activeStatementIndex === index ? 'active' : ''}`}
+                  title={state.sql ?? `Statement ${index + 1}`}
+                  aria-label={`Statement ${index + 1}: ${statementStatusLabel(state.status)}`}
+                  onClick={() => { onActivateTab(tab.id); onSelectStatement(tab.id, index); }}
+                >
+                  <span>Statement {index + 1}</span><span className={statementStatusClass(state.status)}>{statementStatusLabel(state.status)}</span>
+                </button>;
+              })}
+            </div>
+            <span className={`result-status result-status-${result.status.startsWith('complete') ? 'complete' : result.status}`}>
+              {result.status}{result.totalRows >= 0 ? ` · ${result.totalRows.toLocaleString()} rows` : ''}
+            </span>
           </div>
-          <span className={`result-status result-status-${result.status.startsWith('complete') ? 'complete' : result.status}`}>
-            {result.status}{result.totalRows >= 0 ? ` · ${result.totalRows.toLocaleString()} rows` : ''}
-          </span>
-        </div>
-        {isBatchResult && <div className={`batch-summary ${tab.batchStatus ? `batch-summary-${tab.batchStatus}` : ''}`} role="status">
-          <div className="batch-summary-heading"><strong>{tab.batchStatus === 'complete' ? 'Batch complete' : 'Running batch'}</strong><span>{batchExecutedCount} of {batchStatementCount} statements executed</span></div>
-          <div className="batch-summary-counts">
-            <span className="batch-count batch-count-success">{batchStatusCounts.success ?? 0} succeeded</span>
-            <span className="batch-count batch-count-error">{batchStatusCounts.error ?? 0} failed</span>
-            <span className="batch-count batch-count-skipped">{batchStatusCounts.skipped ?? 0} skipped</span>
-            {(batchStatusCounts.cancelled ?? 0) > 0 && <span className="batch-count batch-count-cancelled">{batchStatusCounts.cancelled} cancelled</span>}
-          </div>
-          {tab.batchMessage && <span className="batch-summary-message">{tab.batchMessage}</span>}
-          {failedStatementIndex !== undefined && <button type="button" className="secondary small batch-retry" onClick={() => onRetryStatement(tab.id, failedStatementIndex)}>Retry failed statement</button>}
-        </div>}
-        {result.message && <div className={`${result.status === 'error' ? 'error' : 'result-notice'} result-message`}>{result.message}</div>}
-        {tab.resultView === 'explain' && activeQueryId && result.sessionId ? (
-          <ExplainPanel queryId={activeQueryId} statementIndex={tab.activeStatementIndex} result={result} />
-        ) : result.columns.length > 0 && activeQueryId && result.sessionId ? (
-          <ResultGrid queryId={activeQueryId} statementIndex={tab.activeStatementIndex} result={result} onEditRow={canEditActiveResult(tab, result, targetConnection ?? null) ? values => onEditRow(tab.id, values) : undefined} />
-        ) : (
-          <div className="empty-state" aria-live="polite">
-            {!targetConnection ? <><strong>No connection selected</strong><span>Add a connection to browse schema and run SQL.</span><button type="button" onClick={onOpenConnectionForm}>Add connection</button></> : result.status === 'idle' ? <><strong>Ready to run SQL</strong><span>Write a query or choose a table from the schema explorer.</span><small>Run with Ctrl/Cmd+Enter</small></> : result.status === 'running' ? <><span className="empty-state-spinner" aria-hidden="true" /> <strong>Preparing result session…</strong></> : <><strong>No tabular rows</strong><span>The statement completed without returning a result grid.</span></>}
-          </div>
-        )}
-      </section>
+          {isBatchResult && <div className={`batch-summary ${tab.batchStatus ? `batch-summary-${tab.batchStatus}` : ''}`} role="status">
+            <div className="batch-summary-heading"><strong>{tab.batchStatus === 'complete' ? 'Batch complete' : 'Running batch'}</strong><span>{batchExecutedCount} of {batchStatementCount} statements executed</span></div>
+            <div className="batch-summary-counts">
+              <span className="batch-count batch-count-success">{batchStatusCounts.success ?? 0} succeeded</span>
+              <span className="batch-count batch-count-error">{batchStatusCounts.error ?? 0} failed</span>
+              <span className="batch-count batch-count-skipped">{batchStatusCounts.skipped ?? 0} skipped</span>
+              {(batchStatusCounts.cancelled ?? 0) > 0 && <span className="batch-count batch-count-cancelled">{batchStatusCounts.cancelled} cancelled</span>}
+            </div>
+            {tab.batchMessage && <span className="batch-summary-message">{tab.batchMessage}</span>}
+            {failedStatementIndex !== undefined && <button type="button" className="secondary small batch-retry" onClick={() => onRetryStatement(tab.id, failedStatementIndex)}>Retry failed statement</button>}
+          </div>}
+          {result.message && <div className={`${result.status === 'error' ? 'error' : 'result-notice'} result-message`}>{result.message}</div>}
+          {tab.resultView === 'explain' && activeQueryId && result.sessionId ? (
+            <ExplainPanel queryId={activeQueryId} statementIndex={tab.activeStatementIndex} result={result} />
+          ) : result.columns.length > 0 && activeQueryId && result.sessionId ? (
+            <ResultGrid queryId={activeQueryId} statementIndex={tab.activeStatementIndex} result={result} onEditRow={canEditActiveResult(tab, result, targetConnection ?? null) ? values => onEditRow(tab.id, values) : undefined} />
+          ) : (
+            <div className="empty-state" aria-live="polite">
+              {!targetConnection ? <><strong>No connection selected</strong><span>Add a connection to browse schema and run SQL.</span><button type="button" onClick={onOpenConnectionForm}>Add connection</button></> : result.status === 'idle' ? <><strong>Ready to run SQL</strong><span>Write a query or choose a table from the schema explorer.</span><small>Run with Ctrl/Cmd+Enter</small></> : result.status === 'running' ? <><span className="empty-state-spinner" aria-hidden="true" /> <strong>Preparing result session…</strong></> : <><strong>No tabular rows</strong><span>The statement completed without returning a result grid.</span></>}
+            </div>
+          )}
+        </section>}
+      </div>
     </div>
   </article>;
 }
@@ -376,6 +477,9 @@ export function DockyardWorkspace({
   columns,
   inspectedObject,
   databases,
+  databaseLoadState,
+  databaseLoadError,
+  onRetryDatabases,
   preferences,
   error,
   lastQueryTime,
@@ -444,32 +548,57 @@ export function DockyardWorkspace({
     return host;
   }, []);
 
+  // SQL changes on every keystroke, but Dockyard only needs a definition
+  // refresh when a tab is added/removed. Rebuilding the layout model for a
+  // dirty marker or a caption update steals focus from Monaco.
+  const definitionSignature = tabs.map(tab => tab.id).join('\u0001');
+  const presentationSignature = tabs.map(tab => `${tab.id}\u0000${tab.title}\u0000${tab.dirty ? '1' : '0'}`).join('\u0001');
   const definitions = useMemo<DockyardContentDefinition[]>(() => {
     const result: DockyardContentDefinition[] = [
-      { id: DOCKYARD_CONTENT_IDS.connections, title: 'Connections', kind: 'tool', content: hostFor(DOCKYARD_CONTENT_IDS.connections) },
-      { id: DOCKYARD_CONTENT_IDS.schema, title: 'Schema', kind: 'tool', content: hostFor(DOCKYARD_CONTENT_IDS.schema) },
-      { id: DOCKYARD_CONTENT_IDS.inspector, title: 'Inspector', kind: 'tool', content: hostFor(DOCKYARD_CONTENT_IDS.inspector) },
-      { id: DOCKYARD_CONTENT_IDS.history, title: 'History', kind: 'tool', content: hostFor(DOCKYARD_CONTENT_IDS.history) },
+      { id: DOCKYARD_CONTENT_IDS.connections, title: 'Connections', kind: 'tool', defaultDock: 'hidden', content: hostFor(DOCKYARD_CONTENT_IDS.connections) },
+      { id: DOCKYARD_CONTENT_IDS.schema, title: 'Schema', kind: 'tool', defaultDock: 'left', content: hostFor(DOCKYARD_CONTENT_IDS.schema) },
+      { id: DOCKYARD_CONTENT_IDS.inspector, title: 'Inspector', kind: 'tool', defaultDock: 'hidden', content: hostFor(DOCKYARD_CONTENT_IDS.inspector) },
+      { id: DOCKYARD_CONTENT_IDS.history, title: 'History', kind: 'tool', defaultDock: 'hidden', content: hostFor(DOCKYARD_CONTENT_IDS.history) },
     ];
     for (const tab of tabs) {
       result.push({ id: queryDocumentId(tab.id), title: tab.title, kind: 'document', modified: tab.dirty, content: hostFor(queryDocumentId(tab.id)) });
-      result.push({ id: explainToolId(tab.id), title: `Explain · ${tab.title}`, kind: 'tool', content: hostFor(explainToolId(tab.id)) });
+      result.push({ id: explainToolId(tab.id), title: `Explain · ${tab.title}`, kind: 'tool', defaultDock: 'hidden', content: hostFor(explainToolId(tab.id)) });
     }
     return result;
-  }, [hostFor, tabs]);
+  }, [definitionSignature, hostFor]);
   const definitionsRef = useRef(definitions);
   definitionsRef.current = definitions;
+  const presentationDefinitions = useMemo<DockyardContentDefinition[]>(() => tabs.map(tab => ({
+    id: queryDocumentId(tab.id),
+    title: tab.title,
+    kind: 'document' as const,
+    modified: tab.dirty,
+    content: hostFor(queryDocumentId(tab.id)),
+  })), [hostFor, presentationSignature]);
+
+  useEffect(() => {
+    if (!adapter) return;
+    adapter.updateDefinitionPresentation(presentationDefinitions);
+  }, [adapter, presentationDefinitions]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host || adapterRef.current) return undefined;
     try {
       const persistedExplorerWidth = Number(storage.get('sidebar'));
+      // `sidebar` predates Dockyard and commonly contains the legacy 160px
+      // value. Do not carry that value into the new Schema pane; only reuse a
+      // deliberately resized Dockyard sidebar.
+      const explorerWidth = Number.isFinite(persistedExplorerWidth)
+        && persistedExplorerWidth >= 260
+        && persistedExplorerWidth <= 520
+        ? persistedExplorerWidth
+        : DEFAULT_DOCKYARD_EXPLORER_WIDTH;
       const next = new DockyardManagerAdapter({
         host,
         storage,
         definitions: definitionsRef.current,
-        explorerWidth: Number.isFinite(persistedExplorerWidth) ? persistedExplorerWidth : 250,
+        explorerWidth,
         onActiveContentChanged: contentId => {
           const tabId = contentId?.startsWith('query:') ? contentId.slice('query:'.length) : undefined;
           if (tabId) callbackRef.current.onActivateTab(tabId);
@@ -536,6 +665,9 @@ export function DockyardWorkspace({
         connections={connections}
         selected={selected}
         databases={databases}
+        databaseLoadState={databaseLoadState}
+        databaseLoadError={databaseLoadError}
+        onRetryDatabases={onRetryDatabases}
         preferences={preferences}
         editorSplit={editorSplit}
         onEditorReady={onEditorReady}

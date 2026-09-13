@@ -36,6 +36,15 @@ function DatabaseIcon(): ReactElement {
   );
 }
 
+function ConnectionIcon(): ReactElement {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 16V8l8 8V8" />
+    </svg>
+  );
+}
+
 function SchemaIcon(): ReactElement {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -159,6 +168,7 @@ function SpinnerIcon(): ReactElement {
 
 function nodeIcon(node: SchemaTreeNode, isPk?: boolean): ReactElement {
   switch (node.kind) {
+    case 'connection': return <ConnectionIcon />;
     case 'database': return <DatabaseIcon />;
     case 'schema': return <SchemaIcon />;
     case 'group': return <FolderIcon />;
@@ -187,6 +197,16 @@ export function typeClass(type: string): string {
   return 'other';
 }
 
+/** Compact column indicators used by the desktop schema tree. */
+function typeIndicator(type: string): string {
+  const normalized = type.toUpperCase();
+  if (/^(DATE|TIME|TIMESTAMP|DATETIME|INTERVAL)/.test(normalized)) return '📅';
+  if (/^(INT|BIGINT|SMALLINT|TINYINT|BYTEINT|INTEGER|SERIAL|DEC|DECIMAL|NUMERIC|FLOAT|DOUBLE|REAL)/.test(normalized)) return '123';
+  if (/^(BOOL|BOOLEAN)/.test(normalized)) return 'bool';
+  if (/^(VARCHAR|CHAR|TEXT|CLOB|NCHAR|NVARCHAR)/.test(normalized)) return 'txt';
+  return type;
+}
+
 // ── Column metadata tracked separately from SchemaTreeNode ──
 
 interface ColumnMeta {
@@ -197,10 +217,12 @@ interface ColumnMeta {
 // ── Node type filter constants ─────────────────────────
 
 const OBJECT_TYPES = [
-  { key: 'TABLE', label: 'Tables' },
-  { key: 'VIEW', label: 'Views' },
-  { key: 'PROCEDURE', label: 'Procedures' },
-  { key: 'SYNONYM', label: 'Synonyms' },
+  // These are also the labels used by the VS Code schema tree. Keep them
+  // singular and uppercase; "TABLEs"/"Tables" is a web-only artefact.
+  { key: 'TABLE', label: 'TABLE' },
+  { key: 'VIEW', label: 'VIEW' },
+  { key: 'PROCEDURE', label: 'PROCEDURE' },
+  { key: 'SYNONYM', label: 'SYNONYM' },
 ] as const;
 
 // ── Main SchemaTree component ───────────────────────────
@@ -233,6 +255,13 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   const [storageReadyKey, setStorageReadyKey] = useState<string | null>(null);
   // Separate store for column metadata not present on SchemaTreeNode
   const [columnMeta, setColumnMeta] = useState<Record<string, ColumnMeta>>({});
+  const connectionNode: SchemaTreeNode = {
+    id: `connection:${connectionId}`,
+    kind: 'connection',
+    label: databaseKind === 'netezza' ? 'NZ' : connectionId,
+    description: `${databaseKind} connection`,
+    hasChildren: true,
+  };
 
   useEffect(() => {
     const closeMenu = (): void => setObjectMenu(null);
@@ -278,12 +307,42 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   // Load root on connection change
   useEffect(() => {
     setChildren({});
-    setExpanded({ [ROOT]: true });
+    setExpanded({ [ROOT]: true, [connectionNode.id]: true });
     setColumnMeta({});
     setActiveDatabase('');
     setError('');
     void loadFn(ROOT);
   }, [loadFn]);
+
+  // Mirror the desktop tree's useful starting point: connection → active
+  // database (or JUST_DATA in a fresh Netezza workspace) → TABLE.
+  // Each level remains lazy, so this does not materialise the whole catalog.
+  const rootNodes = children[ROOT];
+  const databaseNode = rootNodes?.find(node => node.kind === 'database' && node.database?.toLocaleLowerCase() === ((database ?? '').trim() || 'just_data').toLocaleLowerCase());
+  const databaseNodes = databaseNode ? children[databaseNode.id] : undefined;
+  const schemaNode = databaseNodes?.find(node => node.kind === 'schema' && node.schema?.toLocaleLowerCase() === 'admin') ?? databaseNodes?.find(node => node.kind === 'schema');
+  const objectGroupNodes = schemaNode ? children[schemaNode.id] : databaseNodes;
+  const tableGroupNode = objectGroupNodes?.find(node => node.kind === 'group' && node.objectType?.toLocaleUpperCase() === 'TABLE');
+
+  useEffect(() => {
+    if (!databaseNode) return;
+    setExpanded(previous => previous[connectionNode.id] && previous[databaseNode.id]
+      ? previous
+      : ({ ...previous, [connectionNode.id]: true, [databaseNode.id]: true }));
+    if (!children[databaseNode.id] && !loading[databaseNode.id]) void loadFn(databaseNode.id);
+  }, [connectionNode.id, databaseNode, children, loading, loadFn]);
+
+  useEffect(() => {
+    if (!schemaNode) return;
+    setExpanded(previous => previous[schemaNode.id] ? previous : ({ ...previous, [schemaNode.id]: true }));
+    if (!children[schemaNode.id] && !loading[schemaNode.id]) void loadFn(schemaNode.id);
+  }, [children, loading, loadFn, schemaNode]);
+
+  useEffect(() => {
+    if (!tableGroupNode) return;
+    setExpanded(previous => previous[tableGroupNode.id] ? previous : ({ ...previous, [tableGroupNode.id]: true }));
+    if (!children[tableGroupNode.id] && !loading[tableGroupNode.id]) void loadFn(tableGroupNode.id);
+  }, [children, loading, loadFn, tableGroupNode]);
 
   // Debounced search
   useEffect(() => {
@@ -305,7 +364,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   // Refresh
   function refresh(): void {
     setChildren({});
-    setExpanded({ [ROOT]: true });
+    setExpanded({ [ROOT]: true, [connectionNode.id]: true });
     setColumnMeta({});
     void loadFn(ROOT);
   }
@@ -317,7 +376,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       await loadFn(ROOT);
     }
 
-    const newExpanded: Record<string, boolean> = { [ROOT]: true };
+    const newExpanded: Record<string, boolean> = { [ROOT]: true, [connectionNode.id]: true };
 
     // 2. Expand level 1 (databases / first-level nodes) + load their children
     const level1 = children[ROOT] ?? await loadFn(ROOT);
@@ -349,7 +408,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   }
 
   function collapseAll(): void {
-    setExpanded({ [ROOT]: true });
+    setExpanded({ [ROOT]: true, [connectionNode.id]: true });
   }
 
   // Load columns for an object node
@@ -392,6 +451,11 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
 
   // Toggle expand/collapse
   async function toggle(node: SchemaTreeNode): Promise<void> {
+    if (node.kind === 'connection') {
+      const isExpanded = expanded[node.id] === true;
+      setExpanded(previous => ({ ...previous, [node.id]: !isExpanded }));
+      return;
+    }
     if (node.kind === 'database') {
       setActiveDatabase(node.database ?? '');
       onContextChange(node.database, undefined);
@@ -428,6 +492,19 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     onInsert(qualifySchemaNode({ id: `search:${item.database}.${item.schema}.${item.name}`, kind: 'object', label: item.name, database: item.database, schema: item.schema, objectName: item.name, hasChildren: false }, databaseKind));
   }
 
+  function selectNode(node: SchemaTreeNode): void {
+    if (node.kind === 'database') {
+      setActiveDatabase(node.database ?? '');
+      onContextChange(node.database, undefined);
+    } else if (node.kind === 'schema') {
+      setActiveDatabase(node.database ?? '');
+      onContextChange(node.database, node.schema);
+    } else if (node.kind === 'object') {
+      onContextChange(node.database, node.schema);
+      onObjectSelect?.(node);
+    }
+  }
+
   function objectSqlName(node: SchemaTreeNode): string { return qualifySchemaNode(node, databaseKind); }
 
   function toggleFavorite(node: SchemaTreeNode): void {
@@ -436,11 +513,51 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   }
 
   function openObjectMenu(event: React.MouseEvent<HTMLElement>, node: SchemaTreeNode): void {
-    if (node.kind !== 'object') return;
     event.preventDefault();
     event.stopPropagation();
-    onObjectSelect?.(node);
+    selectNode(node);
     setObjectMenu({ x: event.clientX, y: event.clientY, node });
+  }
+
+  function openKeyboardMenu(event: React.KeyboardEvent<HTMLElement>, node: SchemaTreeNode): void {
+    if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectNode(node);
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setObjectMenu({ x: bounds.left + 8, y: bounds.bottom + 2, node });
+  }
+
+  async function refreshNode(node: SchemaTreeNode): Promise<void> {
+    if (node.kind === 'connection') {
+      refresh();
+      setObjectMenu(null);
+      return;
+    }
+    setChildren(previous => {
+      const next = { ...previous };
+      delete next[node.id];
+      return next;
+    });
+    await loadFn(node.id);
+    setExpanded(previous => ({ ...previous, [node.id]: true }));
+    setObjectMenu(null);
+  }
+
+  async function copyNodeName(node: SchemaTreeNode): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(objectSqlName(node));
+      setError(`Copied ${objectSqlName(node)}.`);
+    } catch {
+      setError('Could not copy the qualified name.');
+    } finally {
+      setObjectMenu(null);
+    }
+  }
+
+  function insertQualifiedNode(node: SchemaTreeNode): void {
+    onInsert(objectSqlName(node));
+    setObjectMenu(null);
   }
 
   function openObjectData(node: SchemaTreeNode): void {
@@ -592,37 +709,58 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
               <span>Loading schema…</span>
             </div>
           ) : (
-            (children[ROOT] ?? []).map(nodeItem => (
-              <TreeNode
-                key={nodeItem.id}
-                node={nodeItem}
-                depth={0}
-                childrenMap={children}
-                expanded={expanded}
-                loading={loading}
-                dragOverId={dragOverId}
-                columnMeta={columnMeta}
-                onToggle={toggle}
-                onInsert={insertNode}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onContextMenu={openObjectMenu}
-                databaseKind={databaseKind}
-              />
-            ))
+            <TreeNode
+              node={connectionNode}
+              depth={0}
+              childrenMap={{
+                ...children,
+                [connectionNode.id]: database
+                  ? (rootNodes ?? []).filter(node => node.kind !== 'database' || node.database?.toLocaleLowerCase() === database.trim().toLocaleLowerCase())
+                  : rootNodes ?? [],
+                ...(databaseNode && objectGroupNodes ? { [databaseNode.id]: objectGroupNodes } : {}),
+              }}
+              expanded={expanded}
+              loading={{ ...loading, [connectionNode.id]: loading[ROOT] ?? false }}
+              dragOverId={dragOverId}
+              columnMeta={columnMeta}
+              onToggle={toggle}
+              onSelect={selectNode}
+              onInsert={insertNode}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onContextMenu={openObjectMenu}
+              onKeyboardMenu={openKeyboardMenu}
+              databaseKind={databaseKind}
+            />
           )}
         </div>
       )}
-      {objectMenu && <div className="schema-context-menu" style={{ left: objectMenu.x, top: objectMenu.y }} onClick={event => event.stopPropagation()}><strong>{objectMenu.node.label}</strong><button type="button" onClick={() => openDesigner(objectMenu.node)}>Open Object Designer</button><button type="button" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button><button type="button" onClick={() => explainObject(objectMenu.node)}>Explain plan</button><button type="button" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button><button type="button" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button><button type="button" onClick={() => { onInsert(objectSqlName(objectMenu.node)); setObjectMenu(null); }}>Insert qualified name</button><button type="button" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
+      {objectMenu && <div className="schema-context-menu" role="menu" aria-label={`Actions for ${objectMenu.node.label}`} style={{ left: objectMenu.x, top: objectMenu.y }} onClick={event => event.stopPropagation()}>
+        <strong>{objectMenu.node.label}</strong>
+        <small>{objectMenu.node.kind === 'object' ? objectMenu.node.objectType ?? 'Object' : objectMenu.node.kind}</small>
+        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema') && <button type="button" role="menuitem" onClick={() => { selectNode(objectMenu.node); setObjectMenu(null); }}>Set as active context</button>}
+        {objectMenu.node.hasChildren && <button type="button" role="menuitem" onClick={() => void refreshNode(objectMenu.node)}>Refresh children</button>}
+        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema' || objectMenu.node.kind === 'object' || objectMenu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => insertQualifiedNode(objectMenu.node)}>Insert qualified name</button>}
+        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema' || objectMenu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => void copyNodeName(objectMenu.node)}>Copy qualified name</button>}
+        {objectMenu.node.kind === 'column' && <button type="button" role="menuitem" onClick={() => { onInsert(objectMenu.node.label); setObjectMenu(null); }}>Insert column name</button>}
+        {objectMenu.node.kind === 'object' && <>
+          <button type="button" role="menuitem" onClick={() => openDesigner(objectMenu.node)}>Open Object Designer</button>
+          <button type="button" role="menuitem" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button>
+          <button type="button" role="menuitem" onClick={() => explainObject(objectMenu.node)}>Explain plan</button>
+          <button type="button" role="menuitem" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button>
+          <button type="button" role="menuitem" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button>
+          <button type="button" role="menuitem" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button>
+        </>}
+      </div>}
     </div>
   );
 }
 
 // ── TreeNode recursive component ───────────────────────
 
-function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, columnMeta, onToggle, onInsert, onDragStart, onDragOver, onDragLeave, onDrop, onContextMenu, databaseKind }: {
+function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, columnMeta, onToggle, onSelect, onInsert, onDragStart, onDragOver, onDragLeave, onDrop, onContextMenu, onKeyboardMenu, databaseKind }: {
   node: SchemaTreeNode;
   depth: number;
   childrenMap: Record<string, SchemaTreeNode[]>;
@@ -631,12 +769,14 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
   dragOverId: string | null;
   columnMeta: Record<string, ColumnMeta>;
   onToggle(node: SchemaTreeNode): Promise<void>;
+  onSelect(node: SchemaTreeNode): void;
   onInsert(node: SchemaTreeNode): void;
   onDragStart(event: DragEvent<HTMLDivElement>, node: SchemaTreeNode): void;
   onDragOver(event: DragEvent<HTMLDivElement>, nodeId: string): void;
   onDragLeave(): void;
   onDrop(event: DragEvent<HTMLDivElement>, node: SchemaTreeNode): void;
   onContextMenu(event: React.MouseEvent<HTMLElement>, node: SchemaTreeNode): void;
+  onKeyboardMenu(event: React.KeyboardEvent<HTMLElement>, node: SchemaTreeNode): void;
   databaseKind: DatabaseKind;
 }): ReactElement {
   const [showCopied, setShowCopied] = useState(false);
@@ -674,6 +814,8 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
         onDragLeave={onDragLeave}
         onDrop={e => onDrop(e, node)}
         onContextMenu={e => onContextMenu(e, node)}
+        onKeyDown={e => onKeyboardMenu(e, node)}
+        tabIndex={0}
       >
         {/* Expander */}
         <button
@@ -704,7 +846,7 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
         <button
           className="schema-label"
           title={isObject ? `Insert: ${node.label}` : node.description || node.label}
-          onClick={() => { onInsert(node); if (node.kind === 'object' || node.hasChildren) void onToggle(node); }}
+          onClick={() => { onSelect(node); if (node.kind === 'object' || node.hasChildren) void onToggle(node); }}
         >
           <span className="schema-label-icon">{nodeIcon(node, meta?.isPrimaryKey)}</span>
           <span className="schema-label-text">{node.label}</span>
@@ -717,13 +859,16 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
                 <span className="schema-col-fk" title="Foreign key">FK</span>
               )}
               {node.columnType && (
-                <span className={`schema-col-type schema-col-type--${typeClass(node.columnType)}`}>
-                  {node.columnType}
+                <span className={`schema-col-type schema-col-type--${typeClass(node.columnType)}`} title={node.columnType}>
+                  {typeIndicator(node.columnType)}
                 </span>
               )}
             </>
           ) : (
-            node.columnType && <small className="schema-label-type">{node.columnType}</small>
+            <>
+              {node.kind === 'object' && node.schema && <small className="schema-object-schema">({node.schema})</small>}
+              {node.columnType && <small className="schema-label-type" title={node.columnType}>{typeIndicator(node.columnType)}</small>}
+            </>
           )}
         </button>
 
@@ -754,12 +899,14 @@ function TreeNode({ node, depth, childrenMap, expanded, loading, dragOverId, col
             dragOverId={dragOverId}
             columnMeta={columnMeta}
             onToggle={onToggle}
+            onSelect={onSelect}
             onInsert={onInsert}
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
                 onDrop={onDrop}
             onContextMenu={onContextMenu}
+            onKeyboardMenu={onKeyboardMenu}
             databaseKind={databaseKind}
               />
         ))}

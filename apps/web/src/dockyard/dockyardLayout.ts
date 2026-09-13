@@ -8,7 +8,11 @@ import type { LayoutSnapshot } from 'avalondock-web';
 import type { WorkspaceStorage } from '../workspacePersistence';
 
 export const DOCKYARD_LAYOUT_STORAGE_KEY = 'dockyard_layout_v1';
-export const DOCKYARD_LAYOUT_SCHEMA_VERSION = 1 as const;
+// Version 3 also resets layouts written by the first Dockyard migration. Those
+// layouts may contain the old 160px sidebar width, which makes the Schema tree
+// unusable at normal browser sizes even though the side-panel selection is now
+// correct.
+export const DOCKYARD_LAYOUT_SCHEMA_VERSION = 3 as const;
 export const DOCKYARD_UPSTREAM_VERSION = '0.1.0' as const;
 export const DOCKYARD_UPSTREAM_COMMIT = '921b9a66cac88b07af6edb3ebd5cd47af500c900' as const;
 

@@ -9,7 +9,7 @@ import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
 import type { ResultAnalysisKind } from './resultAnalysis';
 export { DataGrid, formatDataGridCellValue, ResultGrid } from './dataGrid';
-export type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
+export type { DataGridCellContext, DataGridColumn, DataGridColumnFilterRequest, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
 
@@ -143,6 +143,36 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
       focusTab(nextIndex);
     }} onClick={() => onSelect(result.resultSetId, result.sourceId)}>Result {index + 1}{result.status === 'streaming' ? ' · streaming' : ''}</button>;
   })}</div>;
+}
+
+export type ResultOutputTab = 'results' | 'problems';
+
+export interface ResultOutputTabsProps {
+  readonly activeTab: ResultOutputTab;
+  readonly problemCount: number;
+  readonly onChange: (tab: ResultOutputTab) => void;
+}
+
+/** Tabs for the single output panel shared by query results and diagnostics. */
+export function ResultOutputTabs({ activeTab, problemCount, onChange }: ResultOutputTabsProps): ReactNode {
+  const tabs: readonly { readonly id: ResultOutputTab; readonly label: string }[] = [
+    { id: 'results', label: 'Results' },
+    { id: 'problems', label: 'Problems' },
+  ];
+  const move = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    const next = tabs[nextIndex];
+    if (!next) return;
+    onChange(next.id);
+    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
+  };
+  return <div className="ui-result-output-tabs" role="tablist" aria-label="Query output">
+    {tabs.map((tab, index) => <button type="button" role="tab" key={tab.id} aria-selected={tab.id === activeTab} tabIndex={tab.id === activeTab ? 0 : -1} onClick={() => onChange(tab.id)} onKeyDown={event => move(event, index)}>
+      <span>{tab.label}</span>{tab.id === 'problems' && <span className="ui-result-output-count" aria-label={`${problemCount} problems`}>{problemCount}</span>}
+    </button>)}
+  </div>;
 }
 
 export interface ResultViewToolbarProps {

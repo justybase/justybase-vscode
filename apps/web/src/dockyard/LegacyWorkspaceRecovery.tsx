@@ -25,6 +25,9 @@ export function LegacyWorkspaceRecovery({
   columns,
   inspectedObject,
   databases,
+  databaseLoadState,
+  databaseLoadError,
+  onRetryDatabases,
   preferences,
   error,
   editorSplit,
@@ -124,6 +127,9 @@ export function LegacyWorkspaceRecovery({
         connections={connections}
         selected={selected}
         databases={databases}
+        databaseLoadState={databaseLoadState}
+        databaseLoadError={databaseLoadError}
+        onRetryDatabases={onRetryDatabases}
         preferences={preferences}
         editorSplit={editorSplit}
         problems={problemsByTab[activeTab.id] ?? []}

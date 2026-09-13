@@ -101,6 +101,19 @@ function normalizeValue(value: unknown): unknown {
   return value;
 }
 
+function normalizeCatalogText(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function normalizeCatalogObjectType(value: unknown): string {
+  return normalizeCatalogText(value).toUpperCase();
+}
+
+/** Netezza uses -1 as an unknown row-count sentinel for SELECT commands. */
+function normalizeRowsAffected(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 type NetezzaColumnReader = Pick<NetezzaDriverReader, 'fieldCount' | 'getName' | 'getTypeName'> & {
   getDeclaredTypeName?: (index: number) => string;
   getColumnMetadata?: (index: number) => { numericScale?: unknown } | null;
@@ -357,7 +370,7 @@ export class NetezzaRuntime {
         return {
           totalRows,
           limitReached: totalRows >= maxRows,
-          rowsAffected: command._recordsAffected,
+          ...(normalizeRowsAffected(command._recordsAffected) === undefined ? {} : { rowsAffected: normalizeRowsAffected(command._recordsAffected) }),
         };
       } finally {
         operation.deactivate();
@@ -381,33 +394,36 @@ export class NetezzaRuntime {
   }
 
   public listDatabases(target: NetezzaRuntimeTarget): Promise<MetadataDatabase[]> {
-    return this.queryMetadata(target, 'SELECT DATABASE FROM SYSTEM.._V_DATABASE ORDER BY DATABASE', values => ({ name: String(values[0] ?? '') }));
+    return this.queryMetadata(target, 'SELECT DATABASE FROM _V_DATABASE ORDER BY DATABASE', values => ({ name: normalizeCatalogText(values[0]) })).then(items => {
+      const seen = new Set<string>();
+      return items.filter(item => item.name.length > 0 && !seen.has(item.name) && seen.add(item.name));
+    });
   }
 
   public listSchemas(target: NetezzaRuntimeTarget, database: string): Promise<MetadataSchema[]> {
     const db = identifier(database);
-    return this.queryMetadata(target, `SELECT SCHEMA FROM ${db}.._V_SCHEMA ORDER BY SCHEMA`, values => ({ database, name: String(values[0] ?? '') }));
+    return this.queryMetadata(target, `SELECT SCHEMA FROM ${db}.._V_SCHEMA ORDER BY SCHEMA`, values => ({ database, name: normalizeCatalogText(values[0]) })).then(items => items.filter(item => item.name.length > 0));
   }
 
   public listObjects(target: NetezzaRuntimeTarget, database: string, schema?: string): Promise<MetadataObject[]> {
     const db = identifier(database);
     const schemaClause = schema ? ` AND UPPER(SCHEMA) = UPPER('${literal(schema)}')` : '';
     return this.queryMetadata(target, `SELECT OBJNAME, SCHEMA, OBJTYPE, COALESCE(DESCRIPTION, '') FROM ${db}.._V_OBJECT_DATA WHERE DBNAME = '${literal(database)}'${schemaClause} AND OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE', 'PROCEDURE') ORDER BY SCHEMA, OBJNAME`, values => ({
-      name: String(values[0] ?? ''),
-      schema: String(values[1] ?? ''),
+      name: normalizeCatalogText(values[0]),
+      schema: normalizeCatalogText(values[1]),
       database,
-      objectType: String(values[2] ?? ''),
-      description: String(values[3] ?? ''),
-    }));
+      objectType: normalizeCatalogObjectType(values[2]),
+      description: normalizeCatalogText(values[3]),
+    })).then(items => items.filter(item => item.name.length > 0 && item.schema !== ''));
   }
 
   public listColumns(target: NetezzaRuntimeTarget, database: string, schema: string, table: string): Promise<MetadataColumn[]> {
     const db = identifier(database);
     return this.queryMetadata(target, `SELECT C.ATTNAME, C.FORMAT_TYPE, COALESCE(C.DESCRIPTION, '') FROM ${db}.._V_RELATION_COLUMN C JOIN ${db}.._V_OBJECT_DATA O ON C.OBJID = O.OBJID WHERE UPPER(O.DBNAME) = UPPER('${literal(database)}') AND UPPER(O.SCHEMA) = UPPER('${literal(schema)}') AND UPPER(O.OBJNAME) = UPPER('${literal(table)}') ORDER BY C.ATTNUM`, values => ({
-      name: String(values[0] ?? ''),
-      type: String(values[1] ?? ''),
-      description: String(values[2] ?? ''),
-    }));
+      name: normalizeCatalogText(values[0]),
+      type: normalizeCatalogText(values[1]),
+      description: normalizeCatalogText(values[2]),
+    })).then(items => items.filter(item => item.name.length > 0));
   }
 
   /**

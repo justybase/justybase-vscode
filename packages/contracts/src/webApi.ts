@@ -274,7 +274,31 @@ export interface QueryBatchCompleteEvent extends QueryEventBase {
 export type QueryEvent = QueryStartedEvent | QueryStatementStartedEvent | QueryColumnsEvent | QuerySessionEvent | QueryProgressEvent | QueryRowsEvent | QueryCompleteEvent | QueryErrorEvent | QueryCancelledEvent | QueryBatchCompleteEvent;
 
 export interface QuerySortSpec { columnIndex: number; desc: boolean; }
-export interface QueryColumnFilterSpec { columnIndex: number; value: string; }
+export type QueryColumnFilterOperator =
+  | 'contains'
+  | 'equals'
+  | 'notEquals'
+  | 'startsWith'
+  | 'endsWith'
+  | 'greaterThan'
+  | 'greaterThanOrEqual'
+  | 'lessThan'
+  | 'lessThanOrEqual'
+  | 'isNull'
+  | 'isNotNull'
+  | 'in';
+
+/**
+ * A filter keeps the original string value for compatibility with older
+ * clients. New clients may additionally provide a typed operator and a
+ * bounded list of raw values for Excel-style multi-select filtering.
+ */
+export interface QueryColumnFilterSpec {
+  columnIndex: number;
+  value: string;
+  operator?: QueryColumnFilterOperator;
+  values?: readonly unknown[];
+}
 export interface QueryPageRequest {
   /** Statement result within a script. Defaults to statement 0 for compatibility. */
   statementIndex?: number;
@@ -283,6 +307,18 @@ export interface QueryPageRequest {
   globalFilter?: string;
   columnFilters?: QueryColumnFilterSpec[];
   sorting?: QuerySortSpec[];
+}
+
+export interface QueryDistinctRequest extends QueryPageRequest {
+  columnIndex: number;
+  search?: string;
+  limit?: number;
+}
+
+export interface QueryDistinctResponse {
+  statementIndex?: number;
+  values: unknown[];
+  truncated: boolean;
 }
 
 export interface QueryPageResponse {
@@ -434,7 +470,7 @@ export interface SqlCompletionRequest extends SqlLanguageContext {
 
 export interface SqlCompletionItem {
   label: string;
-  kind: 'keyword' | 'table' | 'view' | 'column' | 'function';
+  kind: 'keyword' | 'table' | 'view' | 'column' | 'function' | 'schema' | 'database';
   detail?: string;
   insertText?: string;
 }

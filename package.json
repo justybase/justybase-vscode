@@ -4381,6 +4381,7 @@
     "build:web": "npm run build:result-core && npm run build:designer-core && npm run build:api-client && npm run build:ui-react && npm run build --workspace @justybase/web",
     "build:web:test": "npm run build:result-core && npm run build:designer-core && npm run build:api-client && npm run build:ui-react && cross-env VITE_ENABLE_TEST_LOGIN=1 npm run build --workspace @justybase/web -- --mode test",
     "build:electron": "npm run build:api && npm run build:api-client && npm run build:ui-react && npm run build:bundle --workspace @justybase/electron-shell",
+    "package:electron:win": "npm run build:electron && node scripts/package-electron-win.mjs",
     "build:all": "npm run build:api && npm run build:web && npm run build:electron",
     "build:all:test": "npm run build:api && npm run build:web:test",
     "build:db2": "npm --prefix extensions/db2 run build",
@@ -4657,6 +4658,7 @@
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.0",
+    "@electron/packager": "^20.3.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
     "@tanstack/table-core": "^8.21.3",

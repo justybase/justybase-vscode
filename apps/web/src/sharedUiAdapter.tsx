@@ -38,6 +38,7 @@ import {
   processDataGridRows,
   ExplainView,
   HistoryView,
+  ResultOutputTabs,
   ResultTabs,
   ResultAnalysisPanel,
   ResultViewToolbar,
@@ -48,7 +49,7 @@ import {
   UiShell,
   WorkspaceTabs,
 } from '@justybase/ui-react';
-import type { DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind } from '@justybase/ui-react';
+import type { DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind, ResultOutputTab } from '@justybase/ui-react';
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { ApiClientProvider } from './api';
 import type { ApiClient, QueryEventSubscription } from './api';
@@ -279,6 +280,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
+  const [activeOutputTab, setActiveOutputTab] = useState<ResultOutputTab>('results');
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
   const [schemaSearch, setSchemaSearch] = useState('');
   const [schemaSearchRevision, setSchemaSearchRevision] = useState(0);
@@ -647,7 +649,9 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   const run = useCallback(async (mode: 'single' | 'explain' = 'single', override?: RunOverride): Promise<void> => {
     const connection = override?.connection ?? selectedConnection;
-    const sql = override?.sql ?? activeDocument?.content ?? '';
+    // Monaco owns the live document while the user is typing. Read it
+    // directly so Run never races the editor's debounced React persistence.
+    const sql = override?.sql ?? editorRef.current?.getModel()?.getValue() ?? activeDocument?.content ?? '';
     if (!connection) {
       setNotice('Select a connection before running SQL.');
       return;
@@ -864,6 +868,16 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const insertSchemaNode = useCallback((node: SchemaTreeNode): void => {
     if (!activeDocument) return;
     const value = qualifySharedSchemaNode(node, authoringDatabaseKind);
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (editor && model) {
+      const selection = editor.getSelection() ?? model.getFullModelRange();
+      const beforeCursor = model.getValue().slice(0, model.getOffsetAt({ lineNumber: selection.startLineNumber, column: selection.startColumn }));
+      const separator = beforeCursor.length === 0 || /[\s(.,]$/u.test(beforeCursor) ? '' : ' ';
+      editor.executeEdits('schema-insert', [{ range: selection, text: `${separator}${value}`, forceMoveMarkers: true }]);
+      editor.focus();
+      return;
+    }
     const separator = activeDocument.content.length === 0 || /[\s(.,]$/u.test(activeDocument.content) ? '' : ' ';
     store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content: `${activeDocument.content}${separator}${value}`, dirty: true } });
   }, [activeDocument, authoringDatabaseKind, store]);
@@ -1195,15 +1209,18 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         : state.shell.activeSurface === 'designer' ? <div className="shared-designer-launch"><h2>Object Designer</h2><p>Select a table, view, or routine in the schema explorer and choose <em>Open Object Designer</em> from its context menu.</p>{selectedNode?.kind === 'object' && <button type="button" onClick={() => openSchemaDesigner(selectedNode as SchemaTreeNode)}>Open selected object</button>}</div>
           : <>
             <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} />
-            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onReady={editor => { editorRef.current = editor; }} onProblemsChange={setProblems} /><SharedSqlProblems problems={problems} onSelect={revealProblem} /></div>
+            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: selectedConnection?.database, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onReady={editor => { editorRef.current = editor; }} onProblemsChange={setProblems} /></div>
             <div className="shared-result-panel">
               <div className="shared-editor-actions" role="toolbar" aria-label="SQL editor actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div>
               {notice && <div role="status">{notice}</div>}
-              <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-              {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => toggleResultAnalysis('group')} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-              {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={true} showContextMenu selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onViewCell={openCellValue} onRowSelect={setSelectedRow} /></AsyncStateView>
-              {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+              <ResultOutputTabs activeTab={activeOutputTab} problemCount={problems.length} onChange={setActiveOutputTab} />
+              {activeOutputTab === 'problems' ? <div className="ui-result-output-content"><SharedSqlProblems problems={problems} onSelect={revealProblem} /></div> : <>
+                <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
+                {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => toggleResultAnalysis('group')} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+                {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
+                <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={true} showContextMenu selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onViewCell={openCellValue} onRowSelect={setSelectedRow} /></AsyncStateView>
+                {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+              </>}
             </div>
           </>}
     {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
