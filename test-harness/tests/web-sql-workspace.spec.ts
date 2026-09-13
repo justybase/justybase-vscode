@@ -167,7 +167,7 @@ SELECT 3, 'SQLITE_FIXTURE'`;
       localStorage.setItem('jwb_editor_pct', '62');
     });
     await loginWithTestData(page);
-    await expect(page.locator('.sidebar .section-title').filter({ hasText: 'Connections' })).toBeVisible();
+    await expect(page.locator('.dockyard-schema-tool:visible')).toBeVisible();
     await expect.poll(async () => page.locator('.dockyard-query-editor:visible').first().getAttribute('style')).toContain('height: 62%');
     await expect.poll(async () => page.evaluate(() => ({
       sidebar: Object.entries(localStorage).find(([key]) => key.endsWith(':sidebar'))?.[1] ?? null,
@@ -176,7 +176,9 @@ SELECT 3, 'SQLITE_FIXTURE'`;
       legacyEditorPct: localStorage.getItem('jwb_editor_pct'),
     }))).toEqual({ sidebar: '333', editorPct: '62', legacySidebar: null, legacyEditorPct: null });
 
-    await page.locator('.sidebar .icon-button').first().click();
+    await page.getByRole('button', { name: 'Connections', exact: true }).click();
+    await expect(page.locator('.dockyard-connections-tool:visible')).toBeVisible();
+    await page.locator('.dockyard-connections-tool .section-title .icon-button').click();
     const dialog = page.getByRole('dialog', { name: 'Add connection' });
     await dialog.getByLabel('Database type').selectOption('sqlite');
     await dialog.getByLabel('Profile name').fill(profileName);
@@ -190,10 +192,40 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await waitForCompletedResult(page);
     await expect(page.locator('.result-grid tbody tr')).toHaveCount(3);
     await expect(page.locator('.result-grid')).toContainText('SQLITE_FIXTURE');
+    const sortButton = page.getByTitle('Sort by SCENARIO_ID');
+    await sortButton.click();
+    await expect(sortButton.getByLabel('Sorted ascending')).toBeVisible();
+    await expect(page.locator('.grid-error')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'History', exact: true }).click();
     await expect(page.locator('.history-card .section-title')).toContainText('Query history');
     await expect(page.locator('.history-entry').first()).toContainText('SQLITE_FIXTURE');
+  });
+
+  test('keeps Monaco input focused in a short editor pane while typing @web-api', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
+    await loginWithTestData(page);
+
+    const editor = page.locator('.monaco-editor:visible').first();
+    await expect(editor).toBeVisible();
+    const split = page.locator('.split-handle-v:visible').first();
+    const splitBox = await split.boundingBox();
+    if (splitBox) {
+      await page.mouse.move(splitBox.x + splitBox.width / 2, splitBox.y);
+      await page.mouse.down();
+      await page.mouse.move(splitBox.x + splitBox.width / 2, Math.max(160, splitBox.y - 180), { steps: 8 });
+      await page.mouse.up();
+    }
+    await expect.poll(async () => (await editor.boundingBox())?.height ?? 0).toBeGreaterThan(80);
+
+    await editor.click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    const sql = 'SELECT * FROM JUST_DATA.ADMIN.DIMDATE D WHERE D.';
+    await page.keyboard.type(sql, { delay: 8 });
+    await expect.poll(() => monacoDocumentText(page), { timeout: 15_000 }).toContain('SELECT * FROM JUST_DATA.ADMIN.DIMDATE D WHERE D.');
+    await expect.poll(async () => page.evaluate(() => document.activeElement?.className ?? ''), { timeout: 15_000 }).toContain('native-edit-context');
   });
 
   test('keeps query documents and Dockyard tool layout across reorder, float, auto-hide, and reload @web-api', async ({ page }) => {
@@ -245,14 +277,14 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await page.getByRole('button', { name: 'Dock window' }).click();
     await expect(page.locator('.ad-floating')).toHaveCount(0);
 
-    const explorerPane = page.locator('.ad-anchorable-pane:has([data-tab-id="connections"])');
+    const explorerPane = page.locator('.ad-anchorable-pane:has([data-tab-id="schema"])');
     await explorerPane.getByRole('button', { name: 'Auto-hide group' }).click();
-    const connectionsAnchor = page.locator('.ad-anchor-tab[data-content-id="connections"]');
-    await expect(connectionsAnchor).toBeVisible();
-    await connectionsAnchor.click();
+    const schemaAnchor = page.locator('.ad-anchor-tab[data-content-id="schema"]');
+    await expect(schemaAnchor).toBeVisible();
+    await schemaAnchor.click();
     await expect(page.locator('.ad-peek')).toBeVisible();
     await page.getByRole('button', { name: 'Pin tool window' }).click();
-    await expect(connectionsAnchor).toHaveCount(0);
+    await expect(schemaAnchor).toHaveCount(0);
 
     await page.getByRole('button', { name: 'History', exact: true }).click();
     await expect(page.locator('.dockyard-history-tool .section-title')).toContainText('Query history');
@@ -432,7 +464,11 @@ FROM seq`;
     await loginWithTestData(page);
     await expect(page.getByRole('heading', { name: 'JustyBase' })).toBeVisible();
     await expect(page.getByRole('tree', { name: 'Schema' })).toBeVisible();
+    // Results and Problems share one output panel. Verify the diagnostics
+    // tab explicitly instead of assuming both panels are mounted together.
+    await page.getByRole('tab', { name: /Problems/ }).click();
     await expect(page.getByRole('region', { name: 'SQL Problems' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Results', exact: true }).click();
 
     await page.locator('.shared-sidebar-heading button[aria-label="Add connection"]').click();
     const dialog = page.getByRole('dialog', { name: 'Add connection' });
@@ -484,6 +520,7 @@ FROM seq`;
     // source line in Monaco.
     const badSql = `${'SELECT 1;\n'.repeat(80)}SELCT 2;`;
     await replaceMonacoTextAndWait(page, badSql);
+    await page.getByRole('tab', { name: /Problems/ }).click();
     const typoProblem = page.locator('.ui-sql-problem').filter({ hasText: 'PAR004' }).first();
     await expect(typoProblem).toBeVisible({ timeout: 30_000 });
     await typoProblem.click();
@@ -492,6 +529,7 @@ FROM seq`;
     await expect(codeActionWidget).toBeVisible({ timeout: 30_000 });
     await expect(codeActionWidget).toContainText(/Fix typo|Apply PAR004/u);
     await page.keyboard.press('Escape');
+    await page.getByRole('tab', { name: 'Results', exact: true }).click();
 
     await replaceMonacoTextAndWait(page, 'SX ');
     await expect.poll(async () => (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ')).toContain('SELECT ');

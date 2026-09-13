@@ -7,12 +7,14 @@ describe('shared SQL shortcuts', () => {
       startColumn: 1,
       endColumn: 4,
       text: 'SELECT ',
+      cursorColumn: 8,
       triggerSuggest: true,
     });
     expect(sqlShortcutEdit('FROM SX ', 7)).toEqual({
       startColumn: 6,
       endColumn: 9,
       text: 'SELECT ',
+      cursorColumn: 13,
       triggerSuggest: true,
     });
   });

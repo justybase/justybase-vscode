@@ -34,6 +34,8 @@ import type {
   QueryGroupResponse,
   QueryImportPreviewRequest,
   QueryImportRequest,
+  QueryDistinctRequest,
+  QueryDistinctResponse,
   QueryPageRequest,
   QueryPageResponse,
   QueryPreviewResponse,
@@ -120,6 +122,7 @@ export interface WorkspaceApi {
   importFile(input: QueryFileImportRequest): Promise<QueryWriteResponse>;
   cancelQuery(queryId: string): Promise<{ ok: true }>;
   queryPage(queryId: string, input: QueryPageRequest): Promise<QueryPageResponse>;
+  distinct(queryId: string, input: QueryDistinctRequest): Promise<QueryDistinctResponse>;
   aggregate(queryId: string, input?: QueryAggregateRequest): Promise<QueryAggregateResponse>;
   group(queryId: string, input: QueryGroupRequest): Promise<QueryGroupResponse>;
   exportQuery(queryId: string, input: QueryExportRequest): Promise<{ blob: Blob; fileName: string }>;
@@ -477,6 +480,7 @@ export function createApiClient(options: ApiClientOptions = {}): WorkspaceApi {
     importFile: (input: QueryFileImportRequest) => request<QueryWriteResponse>('/api/query/import-file', { method: 'POST', body: JSON.stringify(input) }),
     cancelQuery: (queryId: string) => request<{ ok: true }>(`/api/query/${encodeURIComponent(queryId)}/cancel`, { method: 'POST' }),
     queryPage: (queryId: string, input: QueryPageRequest) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, { method: 'POST', body: JSON.stringify(input) }),
+    distinct: (queryId: string, input: QueryDistinctRequest) => request<QueryDistinctResponse>(`/api/query/${encodeURIComponent(queryId)}/distinct`, { method: 'POST', body: JSON.stringify(input) }),
     aggregate: (queryId: string, input: QueryAggregateRequest = {}) => request<QueryAggregateResponse>(`/api/query/${encodeURIComponent(queryId)}/aggregate`, { method: 'POST', body: JSON.stringify(input) }),
     group: (queryId: string, input: QueryGroupRequest) => request<QueryGroupResponse>(`/api/query/${encodeURIComponent(queryId)}/group`, { method: 'POST', body: JSON.stringify(input) }),
     exportQuery: (queryId: string, input: QueryExportRequest) => download(`/api/query/${encodeURIComponent(queryId)}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }, `${options.exportFilePrefix ?? 'justybase-query'}.${input.format}`),

@@ -13,6 +13,13 @@ export {
   collectSqlSymbolUsagesFromCst,
   resolveSqlRenameSymbol,
 } from "./validation/symbols";
+export {
+  collectSqlSemanticIdentifierRoles,
+} from "./validation/semanticTokens";
+export type {
+  SqlSemanticIdentifierOccurrence,
+  SqlSemanticIdentifierRole,
+} from "./validation/semanticTokens";
 export type {
   SqlRenameOccurrence,
   SqlRenameResolution,

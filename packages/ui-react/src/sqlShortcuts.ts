@@ -38,10 +38,12 @@ export function sqlShortcutEdit(lineText: string, spaceIndex: number): SqlShortc
   for (const [trigger, replacement] of SQL_SHORTCUTS) {
     if (!beforeSpace.toUpperCase().endsWith(trigger) || !isBoundaryBefore(beforeSpace[beforeSpace.length - trigger.length - 1])) continue;
     const startIndex = beforeSpace.length - trigger.length;
+    const text = `${replacement} `;
     return {
       startColumn: startIndex + 1,
       endColumn: spaceIndex + 2,
-      text: `${replacement} `,
+      text,
+      cursorColumn: startIndex + 1 + text.length,
       triggerSuggest: replacement === 'SELECT' || replacement === 'FROM' || replacement === 'JOIN',
     };
   }

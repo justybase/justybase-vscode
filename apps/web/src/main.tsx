@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { createApiClient } from './api';
+// The React wrapper loads Monaco's runtime but not its stylesheet. Without
+// this, Monaco's hidden IME textarea is rendered as a visible native textarea
+// and the rest of the editor widgets use browser defaults.
+import '../../../node_modules/monaco-editor/dev/vs/editor/editor.main.css';
+import '../../../node_modules/monaco-editor/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.css';
 import './styles.css';
 import '../../../packages/ui-react/src/resultGrid.css';
 import '../../../packages/ui-react/src/objectDesigner.css';

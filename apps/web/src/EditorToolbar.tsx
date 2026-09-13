@@ -81,6 +81,7 @@ function CancelIcon(): ReactElement {
 // ── Run mode types ────────────────────────────────────
 
 export type RunMode = 'run' | 'smart' | 'batch' | 'explain' | 'export-csv' | 'export-xlsx' | 'export-xlsb';
+export type DatabaseLoadState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 // ── Props ──────────────────────────────────────────────
 
@@ -89,6 +90,9 @@ export interface EditorToolbarProps {
   database: string;
   connections: ConnectionProfileSummary[];
   databases: MetadataDatabase[];
+  databaseLoadState?: DatabaseLoadState;
+  databaseLoadError?: string;
+  onRetryDatabases?: () => void;
   onSelectConnection: (id: string) => void;
   onSelectDatabase: (db: string) => void;
   databaseKind: DatabaseKind;
@@ -108,6 +112,9 @@ export function EditorToolbar({
   database,
   connections,
   databases,
+  databaseLoadState,
+  databaseLoadError,
+  onRetryDatabases,
   onSelectConnection,
   onSelectDatabase,
   databaseKind,
@@ -122,6 +129,7 @@ export function EditorToolbar({
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
   const modKey = typeof navigator !== 'undefined' && /Mac|iP(hone|od|ad)/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  const effectiveDatabaseState: DatabaseLoadState = databaseLoadState ?? (databases.length > 0 ? 'ready' : connectionId ? 'empty' : 'idle');
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -235,13 +243,14 @@ export function EditorToolbar({
           disabled={!connectionId}
         >
           {databases.length === 0
-            ? <option value="">{connectionId ? 'No databases' : 'Select connection'}</option>
+            ? <option value="">{!connectionId ? 'Select connection' : effectiveDatabaseState === 'loading' ? 'Loading databases…' : effectiveDatabaseState === 'error' ? 'Database list unavailable' : effectiveDatabaseState === 'empty' ? 'No accessible databases' : 'Select database'}</option>
             : <option value="">—</option>
           }
           {databases.map(db => (
             <option key={db.name} value={db.name}>{db.name}</option>
           ))}
         </select>
+        {effectiveDatabaseState === 'error' && onRetryDatabases && <button type="button" className="tb-btn tb-retry-databases" title={databaseLoadError || 'Retry loading databases'} onClick={onRetryDatabases}>Retry</button>}
       </div>
     </div>
   );

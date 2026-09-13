@@ -53,6 +53,68 @@ describe('shared Netezza web SQL core', () => {
     ]));
   });
 
+  it('completes columns after a trailing alias dot in a fully qualified Netezza query', async () => {
+    const uri = 'file:///netezza-qualified-column.sql';
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      if (params.kind === 'context') return {
+        connectionName: 'connection-1',
+        effectiveDatabase: 'JUST_DATA',
+        effectiveSchema: 'ADMIN',
+        databaseKind: 'netezza',
+      };
+      if (params.kind === 'tables') return [{ name: 'DIMDATE', database: 'JUST_DATA', schema: 'ADMIN', objectType: 'TABLE' }];
+      if (params.kind === 'views') return [];
+      if (params.kind === 'cachedTableInfo' || params.kind === 'tableInfo') return {
+        exists: true,
+        table: 'DIMDATE',
+        database: 'JUST_DATA',
+        schema: 'ADMIN',
+        objectType: 'TABLE',
+        columns: [
+          { name: 'DATEKEY', type: 'INTEGER' },
+          { name: 'FULLDATEALTERNATEKEY', type: 'TIMESTAMP' },
+        ],
+      };
+      return [];
+    } });
+    core.setContext(uri, {
+      connectionName: 'connection-1',
+      effectiveDatabase: 'JUST_DATA',
+      effectiveSchema: 'ADMIN',
+      databaseKind: 'netezza',
+    });
+
+    const sql = 'SELECT *\nFROM JUST_DATA.ADMIN.DIMDATE D\nWHERE D.';
+    const items = await core.completion(uri, 1, sql, { line: 2, character: 'WHERE D.'.length });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'DATEKEY', kind: 5, detail: 'INTEGER' }),
+      expect.objectContaining({ label: 'FULLDATEALTERNATEKEY', kind: 5, detail: 'TIMESTAMP' }),
+    ]));
+  });
+
+  it('completes Netezza schemas after a known database dot', async () => {
+    const uri = 'file:///netezza-database-path.sql';
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      if (params.kind === 'context') return { effectiveDatabase: 'SYSTEM', databaseKind: 'netezza' };
+      if (params.kind === 'databases') return [{ name: 'JUST_DATA' }, { name: 'SYSTEM' }];
+      if (params.kind === 'schemas' && params.database === 'JUST_DATA') return [
+        { name: 'ADMIN', database: 'JUST_DATA' },
+        { name: 'PUBLIC', database: 'JUST_DATA' },
+      ];
+      return [];
+    } });
+    core.setContext(uri, { effectiveDatabase: 'SYSTEM', databaseKind: 'netezza' });
+
+    const sql = 'SELECT * FROM JUST_DATA.';
+    const items = await core.completion(uri, 1, sql, { line: 0, character: sql.length });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'ADMIN', kind: 9, detail: 'Schema in JUST_DATA' }),
+      expect.objectContaining({ label: 'PUBLIC', kind: 9, detail: 'Schema in JUST_DATA' }),
+    ]));
+  });
+
   it('isolates HTTP metadata cache by connection and invalidates the matching entry', async () => {
     const store = { getConnection: jest.fn().mockReturnValue({ id: 'connection-1' }) } as unknown as AppStore;
     (listObjects as jest.Mock).mockResolvedValue([

@@ -1,6 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { createQueryExportStream } from '../queryExport';
-import { parseQueryAggregateRequest, parseQueryExportRequest, parseQueryGroupRequest, parseQueryPageRequest } from '../requestValidation';
+import { parseQueryAggregateRequest, parseQueryDistinctRequest, parseQueryExportRequest, parseQueryGroupRequest, parseQueryPageRequest } from '../requestValidation';
 
 export interface ResultRouteHooks {
   authenticate: preHandlerHookHandler;
@@ -24,6 +24,15 @@ export function registerResultRoutes(app: FastifyInstance, hooks: ResultRouteHoo
     const sessionId = sessionFor(app, request.params.id, request.user!.id, statementIndex);
     if (!sessionId) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
     try { return app.querySessions.page(request.user!.id, sessionId, input); }
+    catch (error: unknown) { return reply.code(410).send({ code: 'RESULT_EXPIRED', message: error instanceof Error ? error.message : 'Query result expired.' }); }
+  });
+
+  app.post<{ Params: { id: string } }>('/api/query/:id/distinct', { preHandler }, async (request, reply) => {
+    const input = parseQueryDistinctRequest(request.body);
+    const statementIndex = Number.isInteger(input.statementIndex) && (input.statementIndex ?? 0) >= 0 ? input.statementIndex ?? 0 : 0;
+    const sessionId = sessionFor(app, request.params.id, request.user!.id, statementIndex);
+    if (!sessionId) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Query result session not found.' });
+    try { return app.querySessions.distinct(request.user!.id, sessionId, input); }
     catch (error: unknown) { return reply.code(410).send({ code: 'RESULT_EXPIRED', message: error instanceof Error ? error.message : 'Query result expired.' }); }
   });
 

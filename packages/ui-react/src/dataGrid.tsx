@@ -35,6 +35,12 @@ export interface DataGridCellContext {
   readonly clientY: number;
 }
 
+export interface DataGridColumnFilterRequest {
+  readonly columnIndex: number;
+  readonly column: DataGridColumn;
+  readonly anchor: DOMRect;
+}
+
 export interface DataGridProps {
   readonly sourceId?: string;
   readonly resultSetId: string;
@@ -69,6 +75,10 @@ export interface DataGridProps {
   readonly showContextMenu?: boolean;
   /** Shows the shared column visibility/order/pinning menu. */
   readonly showColumnMenu?: boolean;
+  /** Opens the host-owned Excel-like filter surface for a column. */
+  readonly onOpenColumnFilter?: (request: DataGridColumnFilterRequest) => void;
+  /** Keeps the legacy inline text field for hosts without a filter surface. */
+  readonly showInlineColumnFilters?: boolean;
 }
 
 interface IndexedRow {
@@ -257,7 +267,23 @@ function columnMatchesKey(column: DataGridColumn, index: number, key: string): b
 function visibilityFor(column: DataGridColumn, index: number, view: DataGridViewState): boolean {
   const visibility = view.columnVisibility;
   if (!visibility) return true;
-  return visibility[columnKey(column, index)] !== false && visibility[column.name] !== false;
+  // Numeric keys were used by the first web grid implementation. Keep them
+  // readable here so an old persisted view cannot make a column reappear when
+  // the renderer switches to semantic column ids.
+  return visibility[columnKey(column, index)] !== false
+    && visibility[column.name] !== false
+    && visibility[String(index)] !== false;
+}
+
+function columnWidthFor(column: DataGridColumn, index: number, view: DataGridViewState): number {
+  const widths = view.columnWidths;
+  if (!widths) return DEFAULT_COLUMN_WIDTH;
+  // Prefer the semantic id written by the shared grid, then accept both
+  // historical name and positional keys from saved web/desktop views.
+  return widths[columnKey(column, index)]
+    ?? widths[column.name]
+    ?? widths[String(index)]
+    ?? DEFAULT_COLUMN_WIDTH;
 }
 
 function orderColumns(columns: readonly DataGridColumn[], view: DataGridViewState): readonly number[] {
@@ -488,6 +514,8 @@ export function DataGrid({
   onOpenResultFormatting,
   showContextMenu = true,
   showColumnMenu = true,
+  onOpenColumnFilter,
+  showInlineColumnFilters = true,
 }: DataGridProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
@@ -937,7 +965,7 @@ export function DataGrid({
   const contextRow = contextMenu ? rows[contextMenu.rowIndex] : undefined;
   const contextColumn = contextMenu ? resolvedColumns[contextMenu.columnIndex] : undefined;
 
-  return <div className="ui-result-grid result-grid">
+  return <div className={`ui-result-grid result-grid${onOpenColumnFilter && !showInlineColumnFilters ? ' ui-data-grid-compact' : ''}`}>
     {showColumnMenu && <details className="ui-data-grid-column-menu">
       <summary>Columns</summary>
       <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
@@ -960,16 +988,17 @@ export function DataGrid({
             const column = resolvedColumns[columnIndex]!;
             const id = columnKey(column, columnIndex);
             const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(resolvedColumns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
+            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView), 0) : undefined;
             const sort = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
-            const width = activeView.columnWidths?.[id] ?? DEFAULT_COLUMN_WIDTH;
+            const width = columnWidthFor(column, columnIndex, activeView);
             return <th scope="col" key={id} className={pinned ? 'ui-data-grid-pinned' : undefined} style={{ width, minWidth: width, ...(left === undefined ? {} : { left }) }} onDragOver={event => event.preventDefault()} onDrop={() => { const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex); draggedColumnRef.current = undefined; }}>
               <div className="ui-data-grid-header-content">
-                <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} onDragStart={() => { draggedColumnRef.current = columnIndex; }} onDragEnd={() => { draggedColumnRef.current = undefined; }}>⠿</button>
+                <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} onDragStart={event => { draggedColumnRef.current = columnIndex; event.dataTransfer?.setData('application/x-justybase-column-index', String(columnIndex)); event.dataTransfer?.setData('text/plain', String(columnIndex)); }} onDragEnd={() => { draggedColumnRef.current = undefined; }}>⠿</button>
                 <button type="button" className="ui-data-grid-header-label" onClick={() => sortColumn(columnIndex)} title={`Sort by ${column.name}`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : sort.descending ? 'Sorted descending' : 'Sorted ascending'}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}</span></button>
                 <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column)}`}>{typeBadge(column)}</span>
                 <button type="button" className={`ui-data-grid-header-action ${pinned ? 'active' : ''}`} aria-label={pinned ? `Unpin ${column.name}` : `Pin ${column.name}`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}>📌</button>
-                <input className="ui-data-grid-column-filter" aria-label={`Filter ${column.name}`} placeholder="filter…" value={filterValue(activeView, column, columnIndex)} onChange={event => filterColumn(columnIndex, event.target.value)} />
+                {onOpenColumnFilter && <button type="button" className={`ui-data-grid-filter-action ${filterValue(activeView, column, columnIndex) ? 'active' : ''}`} aria-label={`Open filter for ${column.name}`} title={`Filter ${column.name}`} onClick={event => { event.stopPropagation(); onOpenColumnFilter({ columnIndex, column, anchor: event.currentTarget.getBoundingClientRect() }); }}>⌕</button>}
+                {(!onOpenColumnFilter || showInlineColumnFilters) && <input className="ui-data-grid-column-filter" aria-label={`Filter ${column.name}`} placeholder="filter…" value={filterValue(activeView, column, columnIndex)} onChange={event => filterColumn(columnIndex, event.target.value)} />}
                 <button type="button" className="ui-data-grid-group-action" aria-label={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? `Ungroup ${column.name}` : `Group by ${column.name}`} title={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? 'Remove grouping' : 'Group by column'} onClick={() => { const grouping = activeView.grouping.filter(key => !columnMatchesKey(column, columnIndex, key)); if (grouping.length === activeView.grouping.length) grouping.push(id); updateView({ grouping }); }}>▦</button>
                 <span className="ui-data-grid-resizer" role="separator" aria-label={`Resize ${column.name}`} onMouseDown={event => { event.preventDefault(); event.stopPropagation(); resizeRef.current = { columnId: id, startX: event.clientX, startWidth: width }; }} />
               </div>
@@ -995,7 +1024,7 @@ export function DataGrid({
             {visibleColumnIndexes.map(columnIndex => {
               const column = resolvedColumns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + (activeView.columnWidths?.[columnKey(resolvedColumns[index]!, index)] ?? DEFAULT_COLUMN_WIDTH), 0) : undefined;
+              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView), 0) : undefined;
               const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];

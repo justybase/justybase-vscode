@@ -11,7 +11,7 @@ import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { EditRowPanel } from './EditRowPanel';
 import { AdminPanel } from './AdminPanel';
-import type { RunMode } from './EditorToolbar';
+import type { DatabaseLoadState, RunMode } from './EditorToolbar';
 import { useSplitPane } from './useSplitPane';
 import { createWorkspaceStorage, migrateLegacyWorkspace, useWorkspaceStorage, WorkspaceStorageProvider, type WorkspaceStorage } from './workspacePersistence';
 import { canEditActiveResult, workspaceDatabase } from './workspaceConnectionController';
@@ -98,6 +98,9 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
   const [importTarget, setImportTarget] = useState<SchemaTreeNode | null>(null);
   const [editRow, setEditRow] = useState<unknown[] | null>(null);
   const [databases, setDatabases] = useState<MetadataDatabase[]>([]);
+  const [databaseLoadState, setDatabaseLoadState] = useState<DatabaseLoadState>('idle');
+  const [databaseLoadError, setDatabaseLoadError] = useState('');
+  const [databaseReloadToken, setDatabaseReloadToken] = useState(0);
   const [lastQueryTime, setLastQueryTime] = useState<number | null>(null);
   const [overwrite, setOverwrite] = useState(false);
   const [problemsByTab, setProblemsByTab] = useState<Readonly<Record<string, readonly SqlProblem[]>>>({});
@@ -256,7 +259,30 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { if (!selected) return; void api.databases(selected.id).then(setDatabases).catch(() => undefined); }, [selected?.id]);
+  useEffect(() => {
+    const connectionId = selected?.id;
+    if (!connectionId) {
+      setDatabases([]);
+      setDatabaseLoadState('idle');
+      setDatabaseLoadError('');
+      return undefined;
+    }
+    let active = true;
+    setDatabases([]);
+    setDatabaseLoadState('loading');
+    setDatabaseLoadError('');
+    void api.databases(connectionId).then(items => {
+      if (!active) return;
+      setDatabases(items);
+      setDatabaseLoadState(items.length > 0 ? 'ready' : 'empty');
+    }).catch(reason => {
+      if (!active) return;
+      setDatabases([]);
+      setDatabaseLoadState('error');
+      setDatabaseLoadError(reason instanceof Error ? reason.message : 'Could not load databases.');
+    });
+    return () => { active = false; };
+  }, [api, databaseReloadToken, selected?.id]);
 
   // Dockyard persists its own explorer/tool geometry in its versioned layout.
   useEffect(() => { storage.set('editor_pct', String(editorSplit.size)); }, [editorSplit.size, storage]);
@@ -622,7 +648,10 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     }).join('\n'), targetTabId);
   }
 
-  function updateSql(nextSql: string, targetTabId = activeTabId): void { setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, sql: nextSql, dirty: true, source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab)); setInspectedObject(null); }
+  function updateSql(nextSql: string, targetTabId = activeTabId): void {
+    setTabs(previous => previous.map(tab => tab.id === targetTabId ? { ...tab, sql: nextSql, dirty: true, source: undefined, sourceSql: undefined, sourceConnectionId: undefined, sourceDatabase: undefined } : tab));
+    setInspectedObject(previous => previous === null ? previous : null);
+  }
   function insertSql(value: string, targetTabId = activeTabId): void {
     const editor = editorRefs.current.get(targetTabId) ?? (targetTabId === activeTabId ? editorRef.current : null);
     const model = editor?.getModel();
@@ -792,6 +821,9 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     columns={columns}
     inspectedObject={inspectedObject}
     databases={databases}
+    databaseLoadState={databaseLoadState}
+    databaseLoadError={databaseLoadError}
+    onRetryDatabases={() => setDatabaseReloadToken(previous => previous + 1)}
     preferences={preferences}
     error={error}
     lastQueryTime={lastQueryTime}
@@ -852,6 +884,9 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     columns={columns}
     inspectedObject={inspectedObject}
     databases={databases}
+    databaseLoadState={databaseLoadState}
+    databaseLoadError={databaseLoadError}
+    onRetryDatabases={() => setDatabaseReloadToken(previous => previous + 1)}
     preferences={preferences}
     error={error}
     lastQueryTime={lastQueryTime}

@@ -89,6 +89,9 @@ export interface DockyardContentDefinition {
   readonly kind: DockyardContentKind;
   readonly content: HTMLElement;
   readonly modified?: boolean;
+  /** Initial placement in the SQL workspace. Hidden tools remain available
+   * through the top-level tool buttons without stealing result-grid space. */
+  readonly defaultDock?: 'left' | 'right' | 'hidden';
 }
 
 export interface DockyardManagerCallbacks {
@@ -116,7 +119,11 @@ export const DOCKYARD_LAYOUT_IDS = {
   toolsPane: 'dockyard-tools-pane',
 } as const;
 
-export const DEFAULT_DOCKYARD_EXPLORER_WIDTH = 250;
+// The Schema tree contains a search field, type filters and a VS Code-like
+// object tree. 250px is technically valid for Dockyard, but it is too narrow
+// once those controls are rendered; 360px keeps the tree readable while
+// leaving the query editor/results area dominant.
+export const DEFAULT_DOCKYARD_EXPLORER_WIDTH = 360;
 
 function definitionModel(definition: DockyardContentDefinition): LayoutContent {
   if (definition.kind === 'document') {
@@ -158,8 +165,13 @@ export function createDefaultDockyardLayout(
   explorerWidth: number,
   rightWidth = 320,
 ): LayoutRoot {
-  const leftTools = definitions.filter(definition => definition.id === DOCKYARD_CONTENT_IDS.connections || definition.id === DOCKYARD_CONTENT_IDS.schema);
-  const rightTools = definitions.filter(definition => definition.kind === 'tool' && !leftTools.some(left => left.id === definition.id));
+  const leftTools = definitions.filter(definition => definition.kind === 'tool' && (
+    definition.defaultDock === 'left'
+    || (definition.defaultDock === undefined && (definition.id === DOCKYARD_CONTENT_IDS.connections || definition.id === DOCKYARD_CONTENT_IDS.schema))
+  ));
+  const rightTools = definitions.filter(definition => definition.kind === 'tool'
+    && !leftTools.some(left => left.id === definition.id)
+    && definition.defaultDock !== 'hidden');
   const explorerPane = new LayoutAnchorablePane({
     Id: DOCKYARD_LAYOUT_IDS.explorerPane,
     Name: 'Explorer',
@@ -293,7 +305,10 @@ export class DockyardManagerAdapter {
           if (model) this.removeModel(model);
           model = definitionModel(definition);
           if (expectedDocument) this.manager.AddDocument(model as LayoutDocument); // pane selection is owned by Dockyard.
-          else this.manager.AddAnchorable(model as LayoutAnchorable, 'Right');
+          else {
+            this.manager.AddAnchorable(model as LayoutAnchorable, definition.defaultDock === 'left' ? 'Left' : 'Right');
+            if (definition.defaultDock === 'hidden') this.manager.Hide(model as LayoutAnchorable, false);
+          }
         }
         model.Title = definition.title;
         model.Content = definition.content;
@@ -319,6 +334,23 @@ export class DockyardManagerAdapter {
       this.synchronizing = false;
     }
     this.persistLayout();
+  }
+
+  /**
+   * Updates tab captions/dirty markers without touching the Dockyard layout
+   * tree. This is intentionally separate from syncDefinitions: SQL editors
+   * report a dirty-state change while the user types, and rebuilding the
+   * docking tree at that point would detach Monaco's input surface/focus.
+   */
+  public updateDefinitionPresentation(definitions: readonly DockyardContentDefinition[]): void {
+    if (this.disposed) return;
+    for (const definition of definitions) {
+      const model = this.models.get(definition.id) ?? this.manager.Find(definition.id);
+      if (!model) continue;
+      this.definitions.set(definition.id, definition);
+      if (model.Title !== definition.title) model.Title = definition.title;
+      if (model.IsModified !== (definition.modified === true)) model.IsModified = definition.modified === true;
+    }
   }
 
   public getContentHost(contentId: string): HTMLElement | undefined {

@@ -58,6 +58,9 @@ tag, and GitHub Release are created.
 The `OVSX_TOKEN` secret is mapped to the `OVSX_PAT` variable expected by the
 Open VSX CLI.
 
+The Electron Windows x64 portable ZIP is built separately through the manual
+`Build Portable Electron` workflow. See [Portable Electron build](ELECTRON_PORTABLE_BUILD.md).
+
 ## One-time Open VSX setup
 
 Before the first publication:
