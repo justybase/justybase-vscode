@@ -46,7 +46,7 @@ VS Code adapter / API backend / Electron main backend
     -> Node database-runtime / dialect-<kind>-runtime -> driver or Node database API
     -> pure SQL / metadata / result engines -> contracts
 Desktop webview / Web / Electron React renderer -> `ui-react` -> pure engines and contracts
-React renderer -> HTTP client -> API backend
+React renderer -> `@justybase/api-client` -> API backend
 ```
 
 | Logic | Target owner |
@@ -58,6 +58,7 @@ React renderer -> HTTP client -> API backend
 | Database-specific driver and Node I/O | `@justybase/sqlite-runtime`, `@justybase/duckdb-runtime`, `@justybase/netezza-runtime` |
 | Database-specific SQL grammar and authoring | future `@justybase/dialect-<kind>` |
 | Stable public and transport types | `@justybase/contracts` |
+| Cross-product HTTP/CSRF/WebSocket workspace transport | `@justybase/api-client` |
 | Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
 | Shared React presentation and tokens | `@justybase/ui-react`; effects enter through product ports |
 | Product-specific DOM/webview/window integration | VS Code, Web, or Electron adapter |
@@ -99,10 +100,31 @@ compatibility exports in `@justybase/database-runtime` re-export this surface
 without importing the driver themselves.
 
 The Electron main process hosts/manages the embedded backend; its React
-renderer uses the same HTTP client boundary as Web after main-owned
-authentication. Backend startup, authentication, port selection and shutdown
-belong to the Electron composition root. Electron APIs stay in that adapter,
-never in a shared package.
+renderer uses the same `@justybase/api-client` transport as Web after
+main-owned authentication. Backend startup, authentication, port selection and
+shutdown belong to the Electron composition root. Electron only supplies its
+transport policy (`same-origin` credentials and renderer-specific error
+wording); it does not fork HTTP, CSRF, download, event validation, or reconnect
+logic. The shared package has no React, Node, VS Code, or Electron dependency,
+and all product-specific composition remains in the Web provider or Electron
+adapter.
+
+## Shared API transport boundary
+
+`@justybase/api-client` is the single client-side owner for the authenticated
+workspace API surface. It contains the typed REST methods, JSON/error handling,
+CSRF bootstrap and cookie handling, export downloads, WebSocket URL derivation,
+query-event validation, sequence de-duplication, and bounded reconnect policy.
+Its dependency direction is `api-client -> contracts`; browser globals and
+injected `fetch`/`WebSocket` are ports rather than framework dependencies.
+
+`apps/web/src/api.ts` intentionally contains only the React context/provider
+and the compatibility factory export. `apps/electron/src/renderer/api.ts`
+contains only Electron's transport configuration and compatibility types. This
+keeps the two composition roots free to differ in credentials and wording while
+making route additions and protocol fixes one shared change. The package has
+isolated transport tests, while the Web and Electron suites continue to test
+their adapter-specific contracts.
 
 ## Runtime boundaries
 

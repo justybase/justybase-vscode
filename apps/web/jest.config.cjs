@@ -6,6 +6,8 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   moduleNameMapper: {
     '^.+\\.css$': '<rootDir>/src/styleStub.cjs',
+    '^@justybase/api-client$': '<rootDir>/../../packages/api-client/src',
+    '^@justybase/api-client/(.*)$': '<rootDir>/../../packages/api-client/src/$1',
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
     '^@justybase/designer-core$': '<rootDir>/../../packages/designer-core/src',
     '^@justybase/designer-core/(.*)$': '<rootDir>/../../packages/designer-core/src/$1',

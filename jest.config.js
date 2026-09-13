@@ -56,6 +56,8 @@ module.exports = {
   // Mock modules not available in test environment
   moduleNameMapper: {
     "^vscode$": "<rootDir>/src/__tests__/__mocks__/vscode.ts",
+    "^@justybase/api-client$": "<rootDir>/packages/api-client/src/index.ts",
+    "^@justybase/api-client/(.*)$": "<rootDir>/packages/api-client/src/$1",
     "^@justybase/contracts$": "<rootDir>/packages/contracts/src/index.ts",
     "^@justybase/contracts/(.*)$": "<rootDir>/packages/contracts/src/$1",
     "^@justybase/database-utils$": "<rootDir>/packages/database-utils/src/index.ts",

@@ -123,6 +123,8 @@ describe('Electron same-origin API adapter', () => {
     const socket = client.openWebSocket('/api/lsp');
     expect(socket.url).toContain('/api/lsp');
     expect(fetcher.mock.calls.map(call => String(call[0]))).toContain('/api/query/import-file/preview');
+    expect(client).not.toHaveProperty('login');
+    expect(client).not.toHaveProperty('adminUsers');
   });
 
   it('deduplicates malformed/foreign websocket frames and reconnects with the last sequence', () => {

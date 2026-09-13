@@ -9,6 +9,8 @@
 **/[Pp]ackages/*
 !packages/contracts/
 !packages/contracts/**
+!packages/api-client/
+!packages/api-client/**
 !packages/database-runtime/
 !packages/database-runtime/**
 !packages/sqlite-runtime/

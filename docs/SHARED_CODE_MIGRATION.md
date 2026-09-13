@@ -175,9 +175,11 @@ header, type-inference, limits, and error behavior, then migrate consumers and
 remove the old paths with the corresponding product gates.
 
 Result webview messages and API `QueryEvent` are distinct existing protocols.
-No field rename, required stable-ID retrofit or shared transport switch occurs
-here. Preserve legacy timestamp identity fallback, row offsets, chunk sequence
-and authoritative hydrate semantics. Cache/disk schema changes require explicit
+No field rename or required stable-ID retrofit occurs here. The client-side
+HTTP/CSRF/download/WebSocket transport is now shared by Web and Electron in
+`@justybase/api-client`; the API `QueryEvent` wire protocol remains unchanged.
+Preserve legacy timestamp identity fallback, row offsets, chunk sequence and
+authoritative hydrate semantics. Cache/disk schema changes require explicit
 versioning, migration/reset and restart evidence under
 [Metadata cache contract](METADATA_CACHE_CONTRACT.md).
 
@@ -197,7 +199,7 @@ implementations; the other future packages remain migration targets.
 | SQL diagnostics | `@justybase/sql-core/validation`: `ValidationError`, `ValidationResult`, `Scope`, `StatementBoundary`; contracts `SqlDiagnostic`; desktop quality/LSP mappings | Shared structural validation types are canonical in sql-core; adapters retain only runtime, qualification and transport-specific mappings. Preserve offset and line conventions, rule-code mapping, ranges and suggested fixes. |
 | Metadata columns | parser `ColumnInfo`; contracts `MetadataColumn`; desktop `MetadataColumnItem`; `ColumnDefinition` | Portable metadata column DTO in contracts and metadata rules in `@justybase/metadata-core`. Preserve `dataType`, keys, qualification, aliases; map `FORMAT_TYPE` and LSP `type` explicitly. SQL025/026 must work through both schema providers. |
 | Capabilities and authoring | `packages/contracts/src/database/index.ts`; `packages/contracts/src/database/advancedFeatures.ts`; `packages/dialect-utils/src/authoring/*`; `src/core/sqlAuthoringRegistry.ts`; `src/contracts/database/index.ts` | contracts owns portable capabilities, provider contracts, and validation profiles; `@justybase/dialect-utils` owns pure optional-dialect authoring; desktop owns registry lookup/orchestration; dialect packages own runtime providers; extension authoring files remain compatibility facades. |
-| Query/metadata/result services | shared `ExecutionOrchestrator`; desktop activation-owned `StreamingManager`, `MetadataCache`, `ResultStateManager`; API server-owned execution jobs; web `api.ts` and `queryState.ts` | The orchestrator owns execution state/retry/cleanup through injected ports. Product adapters retain secrets, database acquisition, I/O, state lifetime and transport. |
+| Query/metadata/result services | shared `ExecutionOrchestrator`; desktop activation-owned `StreamingManager`, `MetadataCache`, `ResultStateManager`; API server-owned execution jobs; `@justybase/api-client`; web `queryState.ts` | The orchestrator owns execution state/retry/cleanup through injected ports. `api-client` owns typed client transport and protocol safety; product adapters retain secrets, database acquisition, I/O, state lifetime and product transport policy. |
 
 ## Proposed product service ports
 
@@ -270,12 +272,15 @@ authenticated owner; it is not a raw server filesystem path.
    `@justybase/result-core`, with desktop and web adapters.
 4. Keep API/web event and storage boundaries explicit; the web query adapter
    now consumes the shared portable reducer without changing the wire protocol.
-5. Extracted metadata keys, identifier policies, TTL, completeness,
+5. After Electron became a second client consumer, extract the typed
+   HTTP/CSRF/download/WebSocket transport to `@justybase/api-client`; retain
+   Web's React provider and Electron's same-origin composition as thin adapters.
+6. Extracted metadata keys, identifier policies, TTL, completeness,
    merge/invalidation, indexes, and prefetch decisions to
    `@justybase/metadata-core`; desktop disk/catalog adapters and the API
    per-server metadata service retain their product-specific ownership.
-6. Migrate companions one at a time with their own activation/runtime evidence.
-7. The R9 Electron composition root is now implemented as a development/test
+7. Migrate companions one at a time with their own activation/runtime evidence.
+8. The R9 Electron composition root is now implemented as a development/test
    shell: it starts one embedded API instance, authenticates in main, and
    exposes only redacted/opaque preload data.
 

@@ -6,6 +6,8 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   moduleNameMapper: {
     '^.+\\.css$': '<rootDir>/tests/styleStub.cjs',
+    '^@justybase/api-client$': '<rootDir>/../../packages/api-client/src',
+    '^@justybase/api-client/(.*)$': '<rootDir>/../../packages/api-client/src/$1',
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
     '^@justybase/dialect-utils$': '<rootDir>/../../packages/dialect-utils/src',
     '^@justybase/dialect-utils/(.*)$': '<rootDir>/../../packages/dialect-utils/src/$1',

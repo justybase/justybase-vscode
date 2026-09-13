@@ -13,6 +13,7 @@ export default defineConfig({
     // (for example UnsupportedDesignerOperationError) remain tree-shakable
     // named exports instead of relying on Rollup's CJS guesser.
     alias: {
+      '@justybase/api-client': path.join(repositoryRoot, 'packages/api-client/src'),
       '@justybase/contracts': path.join(repositoryRoot, 'packages/contracts/src'),
       '@justybase/designer-core': path.join(repositoryRoot, 'packages/designer-core/src'),
       '@justybase/dialect-utils': path.join(repositoryRoot, 'packages/dialect-utils/src'),
