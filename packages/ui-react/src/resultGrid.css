@@ -2,6 +2,35 @@
    product shells only provide the surrounding surface and theme variables. */
 @import './tokens.css';
 
+/*
+ * The Dockyard shell owns its own chrome palette. Map it into the portable
+ * token names at the host boundary so the shared grid uses the same panel,
+ * hover and accent colors as Schema. This is deliberately scoped to
+ * Dockyard; Electron keeps the product-neutral token defaults above.
+ */
+.ad-manager {
+  --jb-color-background: var(--ad-bg);
+  --jb-color-surface: var(--ad-panel);
+  --jb-color-surface-raised: var(--ad-chrome);
+  --jb-color-border: var(--ad-border);
+  --jb-color-text: var(--ad-text);
+  --jb-color-muted: var(--ad-muted);
+  --jb-color-accent: var(--ad-accent);
+  --jb-color-selection: color-mix(in srgb, var(--ad-accent) 22%, var(--ad-panel));
+  --jb-color-hover: var(--ad-hover);
+  --jb-color-row-alt: color-mix(in srgb, var(--ad-text) 3%, transparent);
+  --justybase-grid-bg: var(--ad-bg);
+  --justybase-grid-surface: var(--ad-panel);
+  --justybase-grid-header: var(--ad-chrome);
+  --justybase-grid-border: var(--ad-border);
+  --justybase-grid-text: var(--ad-text);
+  --justybase-grid-muted: var(--ad-muted);
+  --justybase-grid-accent: var(--ad-accent);
+  --justybase-grid-selection: color-mix(in srgb, var(--ad-accent) 22%, var(--ad-panel));
+  --justybase-grid-hover: var(--ad-hover);
+  --justybase-grid-row-alt: color-mix(in srgb, var(--ad-text) 3%, transparent);
+}
+
 html,
 body,
 #root {
@@ -103,7 +132,7 @@ body,
   overflow-anchor: none;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  scrollbar-color: var(--vscode-scrollbarSlider-background, #475569) transparent;
+  scrollbar-color: var(--justybase-grid-border) transparent;
 }
 
 .ui-data-grid-scroll:focus-visible {
@@ -364,10 +393,10 @@ body,
 
 .ui-data-grid th {
   position: relative;
-  height: 62px;
+  height: var(--jb-grid-column-header-height, 62px);
   padding: 4px 6px;
   border-bottom: 2px solid var(--justybase-grid-accent);
-  color: var(--vscode-titleBar-activeForeground, #bfdbfe);
+  color: var(--justybase-grid-text);
   background: var(--justybase-grid-header);
   font-weight: 600;
   text-align: left;
@@ -381,7 +410,7 @@ body,
 .ui-data-grid td {
   height: var(--jb-grid-row-height);
   max-width: 520px;
-  padding: 0 10px;
+  padding: 0 var(--jb-grid-cell-padding-inline, 8px);
   overflow: hidden;
   color: var(--justybase-grid-text);
   line-height: 20px;
@@ -634,10 +663,10 @@ body,
   width: 100%;
   height: 22px;
   padding: 2px 5px;
-  border: 1px solid var(--vscode-input-border, var(--justybase-grid-border));
+  border: 1px solid var(--justybase-grid-border);
   border-radius: 2px;
-  color: var(--vscode-input-foreground, var(--justybase-grid-text));
-  background: var(--vscode-input-background, #0f172a);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
   font: 10px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   user-select: text;
 }

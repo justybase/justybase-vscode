@@ -37,6 +37,9 @@
   --jb-tab-height: 32px;
   --jb-grid-row-height: 30px;
   --jb-grid-header-height: 34px;
+  /* Column headers include the inline filter row. */
+  --jb-grid-column-header-height: 62px;
+  --jb-grid-cell-padding-inline: 8px;
   --jb-sidebar-width: 360px;
 
   /* Compatibility aliases consumed by the shared grid skin. */
