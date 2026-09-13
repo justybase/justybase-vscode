@@ -39,7 +39,7 @@ async function replaceEditorText(page: Page, sql: string): Promise<void> {
   const editor = page.locator('.monaco-editor:visible').first();
   await expect(editor).toBeVisible();
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.press('Backspace');
   await page.keyboard.insertText(sql);
   const visibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
@@ -51,7 +51,7 @@ async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> 
   const editor = page.locator('.monaco-editor');
   await expect(editor).toBeVisible();
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.press('Backspace');
   await page.keyboard.insertText(sql);
   // Monaco virtualizes view lines. Move the caret to the end so the marker
@@ -220,7 +220,7 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await expect.poll(async () => (await editor.boundingBox())?.height ?? 0).toBeGreaterThan(80);
 
     await editor.click();
-    await page.keyboard.press('Control+A');
+    await page.keyboard.press('ControlOrMeta+A');
     await page.keyboard.press('Backspace');
     const sql = 'SELECT * FROM JUST_DATA.ADMIN.DIMDATE D WHERE D.';
     await page.keyboard.type(sql, { delay: 8 });
@@ -668,7 +668,7 @@ test.describe('live Netezza web workspace', () => {
     await replaceEditorText(page, `SELECT 11 AS SMART_VALUE;\nSELECT 22 AS SMART_VALUE`);
     const editor = page.locator('.monaco-editor');
     await editor.click();
-    await page.keyboard.press('Control+A');
+    await page.keyboard.press('ControlOrMeta+A');
     await openRunMenu(page);
     await page.getByRole('button', { name: 'Smart run (split by ;)', exact: true }).click();
     await expect(page.getByRole('button', { name: /^Statement 1/ })).toBeVisible({ timeout: 30_000 });
