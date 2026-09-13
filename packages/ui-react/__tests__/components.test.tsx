@@ -590,7 +590,7 @@ describe('shared React presentation', () => {
       Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
       act(() => { jest.runOnlyPendingTimers(); });
       const spacerHeight = (): number => Array.from(container.querySelectorAll<HTMLTableRowElement>('.ui-data-grid-virtual-spacer'))
-        .reduce((sum, spacer) => sum + Number.parseFloat(spacer.firstElementChild?.getAttribute('style')?.match(/height:\s*([\d.]+)px/u)?.[1] ?? '0'), 0);
+        .reduce((sum, spacer) => sum + Number.parseFloat(spacer.querySelector('.ui-data-grid-virtual-spacer-inner')?.getAttribute('style')?.match(/height:\s*([\d.]+)px/u)?.[1] ?? '0'), 0);
       const before = spacerHeight();
       fireEvent.click(screen.getByRole('button', { name: 'Collapse group TEAM: A' }));
       act(() => { jest.runOnlyPendingTimers(); });

@@ -745,19 +745,30 @@ export function DataGrid({
   // Grouping is a renderer concern for every host. Server-backed adapters may
   // page/filter the input rows, but a group must still be a tree row in this
   // grid rather than a second aggregate table below it.
-  const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata), [resolvedColumns, processedRows, activeView.grouping, getCellMetadata]);
+  const groupedRows = useMemo(
+    () => activeView.grouping.length > 0 ? groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata) : undefined,
+    [activeView.grouping, getCellMetadata, processedRows, resolvedColumns],
+  );
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
-  const visibleRenderedRows = useMemo(
-    () => renderedRows.filter(row => !row.ancestorIds.some(groupId => collapsedGroups.has(groupId))),
-    [collapsedGroups, renderedRows],
+  const visibleRowCount = groupedRows === undefined ? processedRows.length : groupedRows.length;
+  const visibleGroupedRows = useMemo(
+    () => groupedRows?.filter(row => !row.ancestorIds.some(groupId => collapsedGroups.has(groupId))),
+    [collapsedGroups, groupedRows],
   );
   const virtualWindow = useMemo(
-    () => calculateDataGridVirtualWindow(visibleRenderedRows.length, virtualViewport.scrollTop, virtualViewport.height),
-    [visibleRenderedRows.length, virtualViewport.height, virtualViewport.scrollTop],
+    () => calculateDataGridVirtualWindow(visibleGroupedRows?.length ?? visibleRowCount, virtualViewport.scrollTop, virtualViewport.height),
+    [visibleGroupedRows?.length, visibleRowCount, virtualViewport.height, virtualViewport.scrollTop],
   );
   const virtualRenderedRows = useMemo(
-    () => visibleRenderedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex),
-    [visibleRenderedRows, virtualWindow.endIndex, virtualWindow.startIndex],
+    () => visibleGroupedRows === undefined
+      ? processedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex).map((row, index) => ({
+        ...row,
+        kind: 'data' as const,
+        displayIndex: virtualWindow.startIndex + index,
+        ancestorIds: [],
+      }))
+      : visibleGroupedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex),
+    [processedRows, virtualWindow.endIndex, virtualWindow.startIndex, visibleGroupedRows],
   );
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
@@ -833,15 +844,17 @@ export function DataGrid({
     requestMoreRows();
   }, [emptyPageRequestKey, hasMoreRows, processedRows.length, requestMoreRows]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const restore = (): void => {
       const element = scroller.current;
       if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
       const userPosition = userScrollPositionRef.current;
-      if (userPosition?.resultSetId === resultSetId
-        && (userPosition.top !== scroll.top || userPosition.left !== scroll.left)) return;
-      const nextTop = Math.max(0, scroll.top);
-      const nextLeft = Math.max(0, scroll.left);
+      // A page can arrive before the throttled host callback has committed
+      // the latest scroll coordinates. Prefer that local position during the
+      // commit so appending rows cannot restore the stale controlled value.
+      const preferredPosition = userPosition?.resultSetId === resultSetId ? userPosition : scroll;
+      const nextTop = Math.max(0, preferredPosition.top);
+      const nextLeft = Math.max(0, preferredPosition.left);
       if (element.scrollTop !== nextTop) element.scrollTop = nextTop;
       if (element.scrollLeft !== nextLeft) element.scrollLeft = nextLeft;
       virtualViewportSyncRef.current?.();
@@ -1224,7 +1237,7 @@ export function DataGrid({
           })}
         </tr></thead>
         <tbody>
-          {virtualWindow.paddingTop > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={visibleColumnIndexes.length + 1} style={{ height: virtualWindow.paddingTop }} /></tr>}
+          {virtualWindow.paddingTop > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={visibleColumnIndexes.length + 1}><div className="ui-data-grid-virtual-spacer-inner" style={{ height: virtualWindow.paddingTop }} /></td></tr>}
           {virtualRenderedRows.map(rendered => {
           if (rendered.kind === 'group') {
             const collapsed = collapsedGroups.has(rendered.id);
@@ -1252,7 +1265,7 @@ export function DataGrid({
             })}
           </tr>;
         })}
-          {virtualWindow.paddingBottom > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={visibleColumnIndexes.length + 1} style={{ height: virtualWindow.paddingBottom }} /></tr>}
+          {virtualWindow.paddingBottom > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={visibleColumnIndexes.length + 1}><div className="ui-data-grid-virtual-spacer-inner" style={{ height: virtualWindow.paddingBottom }} /></td></tr>}
         </tbody>
       </table>}
     </div>

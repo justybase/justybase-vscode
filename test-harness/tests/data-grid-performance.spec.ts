@@ -692,4 +692,15 @@ test.describe('Data Grid performance webview', () => {
 
         expect(shared.errors, shared.errors.join('\n')).toEqual([]);
     });
+
+    test('keeps the viewport anchored when a 10k page is appended', async ({ page }) => {
+        await openSharedFixture(page, 'append-10k');
+        const measurement = await page.evaluate(() => window.__sharedDataGrid.measureAppend());
+
+        expect(measurement.beforeScrollHeight).toBeGreaterThan(0);
+        expect(measurement.afterScrollHeight).toBeGreaterThan(measurement.beforeScrollHeight);
+        expect(measurement.beforeTop).toBeGreaterThan(0);
+        expect(measurement.afterTop).toBe(measurement.beforeTop);
+        expect(measurement.afterAnchor).toBe(measurement.beforeAnchor);
+    });
 });

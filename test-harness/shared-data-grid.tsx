@@ -26,6 +26,14 @@ interface SharedGridHarnessApi {
   readonly measureFilter: (query: string) => Promise<SharedGridMeasurement>;
   readonly measureSort: (descending: boolean) => Promise<SharedGridMeasurement>;
   readonly measureScroll: (top: number, left: number) => Promise<SharedGridMeasurement>;
+  readonly measureAppend: () => Promise<{
+    readonly beforeTop: number;
+    readonly afterTop: number;
+    readonly beforeAnchor: number;
+    readonly afterAnchor: number;
+    readonly beforeScrollHeight: number;
+    readonly afterScrollHeight: number;
+  }>;
   readonly snapshot: () => SharedGridMeasurement;
 }
 
@@ -82,6 +90,7 @@ function buildRow(index: number): HarnessRow {
 }
 
 const rows = Array.from({ length: profileDefinition.rowCount }, (_value, index) => buildRow(index));
+const appendRows = Array.from({ length: 10_000 }, (_value, index) => buildRow(profileDefinition.rowCount + index));
 const initialScroll: GridScrollPosition = {
   resultSetId: `shared-harness:${profile}`,
   top: Number(sessionStorage.getItem(`shared-grid-scroll:${profile}:top`) ?? 0),
@@ -124,6 +133,7 @@ function waitForFrame(): Promise<void> {
 
 function App(): ReactElement {
   const resultSetId = `shared-harness:${profile}`;
+  const [loadedRows, setLoadedRows] = useState<readonly HarnessRow[]>(rows);
   const [view, setView] = useState<DataGridViewState>({ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] });
   const [scroll, setScroll] = useState<GridScrollPosition>(initialScroll);
   const [ready, setReady] = useState(false);
@@ -172,6 +182,27 @@ function App(): ReactElement {
           scroller.dispatchEvent(new Event('scroll'));
         }
       }),
+      measureAppend: async () => {
+        const scroller = document.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+        if (!scroller) throw new Error('Shared grid scroller is not initialized');
+        scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight - 20);
+        scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+        await waitForFrame();
+        const beforeTop = scroller.scrollTop;
+        const beforeAnchor = Math.floor(beforeTop / 30);
+        const beforeScrollHeight = scroller.scrollHeight;
+        setLoadedRows(previous => previous.length === rows.length ? [...previous, ...appendRows] : previous);
+        await waitForFrame();
+        await waitForFrame();
+        return {
+          beforeTop,
+          afterTop: scroller.scrollTop,
+          beforeAnchor,
+          afterAnchor: Math.floor(scroller.scrollTop / 30),
+          beforeScrollHeight,
+          afterScrollHeight: scroller.scrollHeight,
+        };
+      },
       snapshot,
     };
     setReady(true);
@@ -179,7 +210,7 @@ function App(): ReactElement {
 
   return <main className="shared-grid-harness" data-result-set-id={resultSetId} data-ready={ready ? 'true' : 'false'}>
     <header><strong>Shared Result Grid fixture</strong><span id="shared-profile">{profile}</span><span id="shared-row-count">{rows.length}</span><span id="shared-visible-count">{visibleCount}</span><span id="shared-anchor">{scroll.anchorRow ?? 0}</span></header>
-    <DataGrid sourceId="shared-harness" resultSetId={resultSetId} columns={columns} rows={rows} totalRowCount={rows.length} view={view} onViewChange={patch => setView(previous => ({ ...previous, ...patch }))} scroll={scroll} onScroll={onScroll} />
+    <DataGrid sourceId="shared-harness" resultSetId={resultSetId} columns={columns} rows={loadedRows} totalRowCount={loadedRows.length} view={view} onViewChange={patch => setView(previous => ({ ...previous, ...patch }))} scroll={scroll} onScroll={onScroll} />
   </main>;
 }
 
