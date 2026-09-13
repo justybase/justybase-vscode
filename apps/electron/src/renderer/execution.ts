@@ -2,7 +2,7 @@ import type { QueryColumn, QueryEvent } from '@justybase/contracts';
 import type { ExecutionHandle, ExecutionInput, ExecutionPort, UiResultEvent } from '@justybase/ui-core';
 import type { ElectronApiClient, QueryEventSubscription } from './api';
 
-export const RESULT_PAGE_SIZE = 500;
+export const RESULT_PAGE_SIZE = 10_000;
 
 export interface HydratedResultRows {
   readonly columns: readonly QueryColumn[];

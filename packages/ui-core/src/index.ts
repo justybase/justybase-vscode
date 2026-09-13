@@ -70,6 +70,7 @@ export type { UiResultAnalysisKind, UiResultAnalysisTable } from './resultAnalys
 export { resolveUiMode } from './mode';
 export { createInitialUiState, emptyResultView, reduceUiState, resultKey } from './reducer';
 export type { InitialUiStateOptions } from './reducer';
+export type { SqlProblem, SqlProblemSeverity } from './editor';
 export type {
   UiAction,
   UiCancellationStatus,

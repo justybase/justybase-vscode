@@ -14,6 +14,7 @@ module.exports = {
     '^@justybase/result-core$': '<rootDir>/../../packages/result-core/src',
     '^@justybase/result-core/(.*)$': '<rootDir>/../../packages/result-core/src/$1',
     '^@justybase/ui-core$': '<rootDir>/../../packages/ui-core/src',
+    '^@justybase/ui-monaco$': '<rootDir>/../../packages/ui-monaco/src',
     '^@justybase/ui-core/(.*)$': '<rootDir>/../../packages/ui-core/src/$1',
     '^@justybase/ui-react$': '<rootDir>/../../packages/ui-react/src',
     '^@justybase/ui-react/(.*)$': '<rootDir>/../../packages/ui-react/src/$1',

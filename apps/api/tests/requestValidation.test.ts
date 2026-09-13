@@ -24,7 +24,8 @@ describe('API request validation', () => {
       columnFilters: undefined,
       sorting: [{ columnIndex: 1, desc: true }],
     });
-    expect(() => parseQueryPageRequest({ limit: 1001 })).toThrow('limit must be an integer from 1 to 1000');
+    expect(parseQueryPageRequest({ limit: 10_000 }).limit).toBe(10_000);
+    expect(() => parseQueryPageRequest({ limit: 10_001 })).toThrow('limit must be an integer from 1 to 10000');
     expect(() => parseQueryPageRequest({ sorting: [{ columnIndex: 0, desc: 'yes' }] })).toThrow('desc must be a boolean');
   });
 

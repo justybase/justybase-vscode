@@ -1,3 +1,3 @@
-/** Web compatibility facade for the shared Monaco/LSP integration. */
-export { configureSqlMonacoTheme, disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from '@justybase/ui-react';
-export type { SqlLanguageApi } from '@justybase/ui-react';
+/** Web compatibility facade for the portable Monaco/LSP integration. */
+export { configureSqlMonacoTheme, disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from '@justybase/ui-monaco';
+export type { SqlLanguageApi } from '@justybase/ui-monaco';

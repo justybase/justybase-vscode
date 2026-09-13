@@ -1,17 +1,6 @@
 /* Shared result-grid skin. The VS Code result panel is the visual reference;
    product shells only provide the surrounding surface and theme variables. */
-:root {
-  --justybase-grid-bg: var(--vscode-editor-background, #101522);
-  --justybase-grid-surface: var(--vscode-editorGroupHeader-tabsBackground, #182033);
-  --justybase-grid-header: var(--vscode-editorGroupHeader-tabsBackground, #1e293b);
-  --justybase-grid-border: var(--vscode-panel-border, #33415f);
-  --justybase-grid-text: var(--vscode-editor-foreground, #d1d5db);
-  --justybase-grid-muted: var(--vscode-descriptionForeground, #94a3b8);
-  --justybase-grid-accent: var(--vscode-focusBorder, #60a5fa);
-  --justybase-grid-selection: var(--vscode-list-activeSelectionBackground, #094771);
-  --justybase-grid-hover: var(--vscode-list-hoverBackground, #1e293b);
-  --justybase-grid-row-alt: color-mix(in srgb, var(--justybase-grid-text) 3%, transparent);
-}
+@import './tokens.css';
 
 html,
 body,
@@ -197,6 +186,103 @@ body,
   background: var(--justybase-grid-hover);
 }
 
+.ui-data-grid-group-panel {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 6px 0;
+  padding: 3px 6px;
+  border: 1px dashed color-mix(in srgb, var(--justybase-grid-border) 85%, var(--justybase-grid-accent));
+  border-radius: 3px;
+  color: var(--justybase-grid-muted);
+  background: color-mix(in srgb, var(--justybase-grid-surface) 72%, transparent);
+  font-size: 10px;
+}
+
+.ui-data-grid-group-panel:focus-within,
+.ui-data-grid-group-panel-active {
+  border-color: color-mix(in srgb, var(--justybase-grid-accent) 65%, var(--justybase-grid-border));
+}
+
+.ui-data-grid-group-panel-label {
+  flex: 0 0 auto;
+  color: var(--justybase-grid-muted);
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.ui-data-grid-group-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--justybase-grid-accent) 65%, var(--justybase-grid-border));
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: color-mix(in srgb, var(--justybase-grid-accent) 22%, var(--justybase-grid-surface));
+  cursor: grab;
+  font-weight: 600;
+  user-select: none;
+}
+
+.ui-data-grid-group-chip:active { cursor: grabbing; }
+
+.ui-data-grid-group-chip-drop-before {
+  box-shadow: inset 2px 0 0 var(--justybase-grid-accent);
+}
+
+.ui-data-grid-group-chip-drop-after {
+  box-shadow: inset -2px 0 0 var(--justybase-grid-accent);
+}
+
+.ui-data-grid-group-chip > span {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-data-grid-group-chip button {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  color: var(--justybase-grid-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  line-height: 14px;
+}
+
+.ui-data-grid-group-chip .ui-data-grid-group-drag-handle {
+  width: 14px;
+  color: var(--justybase-grid-muted);
+  cursor: grab;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.ui-data-grid-group-chip .ui-data-grid-group-drag-handle:active { cursor: grabbing; }
+
+.ui-data-grid-group-chip button:hover,
+.ui-data-grid-group-chip button:focus-visible {
+  color: var(--justybase-grid-text);
+  outline: 1px solid var(--justybase-grid-accent);
+}
+
+.ui-data-grid-group-panel-placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ui-data-grid-context-menu {
   position: fixed;
   z-index: 120;
@@ -240,6 +326,7 @@ body,
   table-layout: fixed;
   color: var(--justybase-grid-text);
   font: inherit;
+  user-select: none;
 }
 
 .ui-data-grid thead {
@@ -285,15 +372,27 @@ body,
 }
 
 .ui-data-grid td {
-  height: 30px;
+  height: var(--jb-grid-row-height);
   max-width: 520px;
-  padding: 4px 10px;
+  padding: 0 10px;
   overflow: hidden;
   color: var(--justybase-grid-text);
   line-height: 20px;
   text-align: left;
   text-overflow: ellipsis;
+  vertical-align: middle;
   white-space: nowrap;
+}
+
+.ui-data-grid tbody tr:not(.ui-data-grid-virtual-spacer):not(.ui-data-grid-group-row) {
+  height: var(--jb-grid-row-height);
+}
+
+.ui-data-grid tbody tr:not(.ui-data-grid-virtual-spacer):not(.ui-data-grid-group-row) > th[scope='row'] {
+  height: var(--jb-grid-row-height);
+  padding-top: 0;
+  padding-bottom: 0;
+  vertical-align: middle;
 }
 
 .ui-data-grid tr.ui-data-grid-virtual-spacer td {
@@ -522,6 +621,7 @@ body,
   color: var(--vscode-input-foreground, var(--justybase-grid-text));
   background: var(--vscode-input-background, #0f172a);
   font: 10px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  user-select: text;
 }
 
 .ui-data-grid-column-filter:focus {
@@ -551,12 +651,18 @@ body,
   background: color-mix(in srgb, var(--justybase-grid-accent) 30%, transparent);
 }
 
+.ui-data-grid-group-row {
+  height: var(--jb-grid-row-height, 30px);
+}
+
 .ui-data-grid-group-row td {
-  height: 26px;
-  padding: 4px 10px;
+  height: var(--jb-grid-row-height, 30px);
+  padding: 0 10px;
   color: var(--vscode-textLink-foreground, #93c5fd);
   background: var(--justybase-grid-surface);
   font-weight: 600;
+  line-height: 20px;
+  vertical-align: middle;
 }
 
 .ui-data-grid-group-marker {

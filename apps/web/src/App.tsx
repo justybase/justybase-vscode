@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import type * as Monaco from 'monaco-editor';
 import type { ConnectionProfileSummary, DatabaseKind, EditorPreferences, MetadataColumn, MetadataDatabase, SchemaTreeNode, WebUser } from '@justybase/contracts';
 import { AsyncStateView } from '@justybase/ui-react';
-import type { SqlProblem } from '@justybase/ui-react';
+import type { SqlProblem } from '@justybase/ui-core';
 import { ApiClientProvider, createApiClient, useApiClient, type ApiClient, type QueryEventSubscription } from './api';
 import { emptyResult } from './queryState';
 import { disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';

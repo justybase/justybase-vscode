@@ -7,7 +7,7 @@
   "main": "dist/main/main.js",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
-    "build": "npm run build --workspace @justybase/web-api && npm run build --workspace @justybase/api-client && npm run build --workspace @justybase/ui-core && npm run build --workspace @justybase/ui-react && npm run build:bundle",
+    "build": "npm --prefix ../.. run build:electron",
     "build:bundle": "node esbuild.electron.mjs",
     "check-types": "npm run build --workspace @justybase/web-api && npm run build --workspace @justybase/api-client && npm run build --workspace @justybase/ui-core && npm run build --workspace @justybase/ui-react && npm run check-types:only",
     "check-types:only": "tsc -p tsconfig.json --noEmit",
@@ -19,6 +19,7 @@
     "@justybase/contracts": "*",
     "@justybase/dialect-utils": "*",
     "@justybase/ui-core": "*",
+    "@justybase/ui-monaco": "*",
     "@justybase/ui-react": "*",
     "@justybase/web-api": "*",
     "@monaco-editor/react": "^4.7.0",

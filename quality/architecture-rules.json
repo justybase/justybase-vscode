@@ -50,6 +50,10 @@
     "packages/ui-core": [
       "packages/contracts"
     ],
+    "packages/ui-monaco": [
+      "packages/contracts",
+      "packages/ui-core"
+    ],
     "packages/ui-react": [
       "packages/contracts",
       "packages/dialect-utils",
@@ -89,7 +93,8 @@
     "packages/database-utils/src/**",
     "packages/dialect-utils/src/**",
     "packages/*-core/src/**",
-    "packages/ui-react/src/**"
+    "packages/ui-react/src/**",
+    "packages/ui-monaco/src/**"
   ],
   "pureExternalImports": [
     "chevrotain"
@@ -117,18 +122,18 @@
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },
     {
-      "source": "packages/ui-react/src/sqlLanguage.ts",
+      "source": "packages/ui-monaco/src/sqlLanguage.ts",
       "target": "monaco-editor",
-      "reason": "Shared SQL authoring integration is intentionally implemented against the Monaco editor API.",
+      "reason": "The portable Monaco package owns browser editor and LSP registration while product adapters own transport and lifecycle.",
       "owner": "SQL authoring maintainers",
-      "removeWhen": "Move Monaco integration into a product adapter while retaining the shared authoring contract."
+      "removeWhen": "Replace Monaco with a different browser editor integration."
     },
     {
-      "source": "packages/ui-react/src/sqlProblems.tsx",
+      "source": "packages/ui-monaco/src/sqlProblems.ts",
       "target": "monaco-editor",
-      "reason": "The shared Problems adapter translates Monaco markers into the portable presentation model.",
+      "reason": "The Monaco boundary translates editor markers into the portable ui-core Problems model.",
       "owner": "SQL authoring maintainers",
-      "removeWhen": "Move Monaco marker translation into a product adapter."
+      "removeWhen": "Replace Monaco with a different browser editor integration."
     },
     {
       "source": "packages/ui-react/src/sqlProblems.tsx",
@@ -138,11 +143,11 @@
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },
     {
-      "source": "packages/ui-react/src/sqlShortcuts.ts",
+      "source": "packages/ui-monaco/src/sqlShortcuts.ts",
       "target": "monaco-editor",
-      "reason": "Shared SQL shortcut registration is intentionally implemented against the Monaco editor API.",
+      "reason": "The Monaco boundary owns editor shortcut registration while shortcut semantics remain reusable.",
       "owner": "SQL authoring maintainers",
-      "removeWhen": "Move Monaco shortcut registration into a product adapter while retaining the shared shortcut semantics."
+      "removeWhen": "Replace Monaco with a different browser editor integration."
     },
     {
       "source": "packages/ui-react/src/objectDesigner/ObjectDesigner.tsx",
@@ -268,6 +273,7 @@
       "@justybase/result-core": "packages/result-core/src/index.ts",
       "@justybase/sql-core": "packages/sql-core/src/index.ts",
       "@justybase/ui-core": "packages/ui-core/src/index.ts",
+      "@justybase/ui-monaco": "packages/ui-monaco/src/index.ts",
       "@justybase/ui-react": "packages/ui-react/src/index.ts"
   },
   "forbiddenImports": [
@@ -299,6 +305,10 @@
     {
       "source": "packages/ui-core/src/**",
       "specifier": "^(?:react|react-dom|node:|vscode|electron)(?:/|$)"
+    },
+    {
+      "source": "packages/ui-monaco/src/**",
+      "specifier": "^(?:node:|vscode|electron|react|react-dom|@justybase/(?:database-runtime|duckdb-runtime|netezza-runtime|sqlite-runtime|web-api)(?:/|$))"
     },
     {
       "source": "packages/ui-react/src/**",

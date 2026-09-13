@@ -67,6 +67,32 @@ export function registerSqlShortcuts(
 ): { dispose(): void } {
   const model = editor.getModel();
   if (!model) return { dispose: () => undefined };
+  let disposed = false;
+
+  const applyShortcut = (lineNumber: number, spaceIndex: number, expected: SqlShortcutEdit): void => {
+    if (disposed || editor.getModel() !== model) return;
+    const lineText = model.getLineContent(lineNumber);
+    const current = sqlShortcutEdit(lineText, spaceIndex);
+    // A second native edit may have arrived before the microtask. Never
+    // rewrite a newer document state using the coordinates from the old one.
+    if (!current || current.startColumn !== expected.startColumn || current.text !== expected.text) return;
+    const range = new monaco.Range(lineNumber, current.startColumn, lineNumber, current.endColumn);
+    const cursorColumn = current.cursorColumn;
+    const applied = editor.executeEdits('justybase.sql-shortcut', [{ range, text: current.text }], () => (
+      cursorColumn === undefined ? null : [new monaco.Selection(lineNumber, cursorColumn, lineNumber, cursorColumn)]
+    ));
+    if (!applied) return;
+
+    // The native edit context can restore the caret from the original space
+    // insertion after a model-level edit callback has returned. Explicitly
+    // commit the collapsed caret after executeEdits, so `SX ` ends as
+    // `SELECT |` instead of `SEL|ECT ` in the browser.
+    if (cursorColumn !== undefined) {
+      editor.setPosition({ lineNumber, column: cursorColumn });
+    }
+    if (current.triggerSuggest) editor.trigger('justybase.sql-shortcut', 'editor.action.triggerSuggest', {});
+  };
+
   const disposable = model.onDidChangeContent(event => {
     if (event.changes.length !== 1) return;
     const change = event.changes[0];
@@ -77,11 +103,15 @@ export function registerSqlShortcuts(
     const lineText = model.getLineContent(lineNumber);
     const edit = sqlShortcutEdit(lineText, change.range.startColumn - 1);
     if (!edit) return;
-    model.pushEditOperations([], [{
-      range: new monaco.Range(lineNumber, edit.startColumn, lineNumber, edit.endColumn),
-      text: edit.text,
-    }], () => edit.cursorColumn === undefined ? null : [new monaco.Selection(lineNumber, edit.cursorColumn, lineNumber, edit.cursorColumn)]);
-    if (edit.triggerSuggest) editor.trigger('justybase.sql-shortcut', 'editor.action.triggerSuggest', {});
+    // Let Monaco finish the native insertion before replacing the compact
+    // token. This makes the editor selection state deterministic across the
+    // Chromium browser and Electron's WebView.
+    queueMicrotask(() => applyShortcut(lineNumber, change.range.startColumn - 1, edit));
   });
-  return disposable;
+  return {
+    dispose: () => {
+      disposed = true;
+      disposable.dispose();
+    },
+  };
 }

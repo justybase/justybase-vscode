@@ -13,8 +13,10 @@ import type {
   SchemaTreeNode,
   WebUser,
 } from '@justybase/contracts';
-import { configureSqlMonacoTheme, ResultOutputTabs, SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
-import type { ResultOutputTab, SqlProblem } from '@justybase/ui-react';
+import { configureSqlMonacoTheme, sqlProblemsFromMarkers } from '@justybase/ui-monaco';
+import { ResultOutputTabs, SqlProblemsPanel } from '@justybase/ui-react';
+import type { ResultOutputTab } from '@justybase/ui-react';
+import type { SqlProblem } from '@justybase/ui-core';
 import { EditorToolbar } from '../EditorToolbar';
 import type { DatabaseLoadState } from '../EditorToolbar';
 import { ExplainPanel } from '../ExplainPanel';
