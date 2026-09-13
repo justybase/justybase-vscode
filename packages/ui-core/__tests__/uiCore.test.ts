@@ -13,6 +13,7 @@ import {
   reduceUiState,
   createUiStore,
   resolveUiMode,
+  toUiResultQueryOptions,
 } from '../src';
 import type { Disposable, UiAction } from '../src';
 
@@ -42,6 +43,13 @@ describe('ui-core reducer', () => {
     const changed = reduceUiState(after, { type: 'workspace/update-document', documentId: 'doc-1', patch: { databaseKind: 'postgresql' } });
     expect(changed.workspace.documents['doc-1']?.databaseKind).toBe('postgresql');
     expect(after.workspace.documents['doc-1']?.databaseKind).toBe('netezza');
+    const contextual = reduceUiState(after, {
+      type: 'workspace/update-document',
+      documentId: 'doc-1',
+      patch: { database: 'JUST_DATA', schema: 'ADMIN' },
+    });
+    expect(contextual.workspace.documents['doc-1']).toMatchObject({ database: 'JUST_DATA', schema: 'ADMIN' });
+    expect(after.workspace.documents['doc-1']?.database).toBeUndefined();
   });
 
   it('rejects foreign, delayed, duplicate and gapped result events', () => {
@@ -95,6 +103,30 @@ describe('ui-core reducer', () => {
     const resumed = reduceUiState(state, { type: 'execution/event', event: { type: 'complete', sourceId: 'source-1', executionId: 'exec-3', resultSetId: 'result-3', sequence: 2, totalRowCount: 0 } });
     expect(resumed.results.byResultSetId['source-1\u0000result-3']?.status).toBe('empty');
     expect(resumed.results.byResultSetId['source-1\u0000result-3']?.cancellation).toBe('failed');
+  });
+});
+
+describe('portable result query mapping', () => {
+  it('normalises semantic and positional view keys to strict API indexes', () => {
+    expect(toUiResultQueryOptions(
+      [{ name: 'ID' }, { name: 'CreatedAt' }],
+      {
+        globalFilter: '2026',
+        columnFilters: { createdat: '2026' },
+        sorting: [{ column: 'CreatedAt', descending: true }],
+      },
+    )).toEqual({
+      globalFilter: '2026',
+      columnFilters: [{ columnIndex: 1, value: '2026' }],
+      sorting: [{ columnIndex: 1, desc: true }],
+    });
+  });
+
+  it('drops stale persisted keys instead of sending malformed sort objects', () => {
+    expect(toUiResultQueryOptions(
+      [{ name: 'ID' }],
+      { globalFilter: '', columnFilters: {}, sorting: [{ column: 'missing', descending: false }] },
+    )).toEqual({});
   });
 });
 

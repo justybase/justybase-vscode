@@ -1,5 +1,6 @@
 import type {
   CapabilityDescriptor,
+  DatabaseKind,
   OpaqueCredentialRequestId,
   PersistenceEnvelope,
   RedactedConnectionProfile,
@@ -58,6 +59,10 @@ export interface DocumentSnapshot {
   readonly uri?: string;
   readonly content: string;
   readonly dirty: boolean;
+  readonly connectionId?: string;
+  readonly database?: string;
+  readonly schema?: string;
+  readonly databaseKind?: DatabaseKind;
 }
 
 export interface DocumentPort extends Disposable {

@@ -262,6 +262,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
         ...(patch.content === undefined ? {} : { content: patch.content }),
         ...(patch.dirty === undefined ? {} : { dirty: patch.dirty }),
         ...(patch.connectionId === undefined ? {} : { connectionId: patch.connectionId }),
+        ...(patch.database === undefined ? {} : { database: patch.database }),
+        ...(patch.schema === undefined ? {} : { schema: patch.schema }),
         ...(patch.databaseKind === undefined ? {} : { databaseKind: patch.databaseKind }),
       };
       return updateDocuments(state, { ...state.workspace.documents, [document.id]: document }, state.workspace.documentOrder, state.workspace.activeDocumentId);

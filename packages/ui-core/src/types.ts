@@ -20,6 +20,10 @@ export interface UiDocumentState {
   readonly content: string;
   readonly dirty: boolean;
   readonly connectionId?: string;
+  /** Database used for unqualified SQL authoring in this document. */
+  readonly database?: string;
+  /** Optional schema used for unqualified SQL authoring in this document. */
+  readonly schema?: string;
   /** Authoring profile may be changed independently of the active runtime connection. */
   readonly databaseKind?: DatabaseKind;
 }

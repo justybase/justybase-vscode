@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ReactElement } from 'react';
 import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryAggregateFunction, QueryColumnFilterSpec, QueryExportFormat, QueryGroupAggregate, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
-import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, resultAsyncState as getResultAsyncState } from '@justybase/ui-core';
+import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
 import {
   AsyncStateView,
   CellValueViewer,
@@ -54,29 +54,12 @@ export function displayRows(result: UiResultSurfaceState | undefined, rows: read
   return processDataGridRows(result.columns, rows, result.view);
 }
 
-function resultColumnIndex(columns: readonly UiResultColumn[], key: string): number {
-  return columns.findIndex((column, index) => column.name === key || String(index) === key);
-}
-
 function resultQueryOptions(result: UiResultSurfaceState, view: UiResultSurfaceState['view']): {
   readonly globalFilter?: string;
   readonly columnFilters?: QueryColumnFilterSpec[];
   readonly sorting?: QuerySortSpec[];
 } {
-  const columnFilters: QueryColumnFilterSpec[] = Object.entries(view.columnFilters)
-    .flatMap(([column, value]) => {
-      const columnIndex = resultColumnIndex(result.columns, column);
-      return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
-    });
-  const sorting: QuerySortSpec[] = view.sorting.flatMap(item => {
-    const columnIndex = resultColumnIndex(result.columns, item.column);
-    return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
-  });
-  return {
-    ...(view.globalFilter.trim() ? { globalFilter: view.globalFilter } : {}),
-    ...(columnFilters.length > 0 ? { columnFilters } : {}),
-    ...(sorting.length > 0 ? { sorting } : {}),
-  };
+  return toUiResultQueryOptions(result.columns, view);
 }
 
 function isNumericResultColumn(column: UiResultColumn | undefined): boolean {
