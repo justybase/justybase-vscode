@@ -1,4 +1,4 @@
-import type { QueryColumn, QueryEvent } from '@justybase/contracts';
+import type { QueryColumn, QueryColumnFilterSpec, QueryEvent, QuerySortSpec } from '@justybase/contracts';
 import type { ExecutionHandle, ExecutionInput, ExecutionPort, UiResultEvent } from '@justybase/ui-core';
 import type { ElectronApiClient, QueryEventSubscription } from './api';
 
@@ -19,14 +19,14 @@ export async function fetchResultPage(
   statementIndex = 0,
   offset = 0,
   limit = RESULT_PAGE_SIZE,
-  request: { readonly globalFilter?: string; readonly columnFilters?: readonly { readonly columnIndex: number; readonly value: string }[]; readonly sorting?: readonly { readonly columnIndex: number; readonly desc: boolean }[] } = {},
+  request: { readonly globalFilter?: string; readonly columnFilters?: readonly QueryColumnFilterSpec[]; readonly sorting?: readonly QuerySortSpec[] } = {},
 ): Promise<HydratedResultRows> {
   const page = await client.queryPage(queryId, {
     statementIndex,
     offset,
     limit,
     ...(request.globalFilter === undefined ? {} : { globalFilter: request.globalFilter }),
-    ...(request.columnFilters === undefined ? {} : { columnFilters: [...request.columnFilters] }),
+    ...(request.columnFilters === undefined ? {} : { columnFilters: request.columnFilters.map(filter => ({ ...filter, ...(filter.values === undefined ? {} : { values: [...filter.values] }) })) }),
     ...(request.sorting === undefined ? {} : { sorting: [...request.sorting] }),
   });
   if (page.offset !== offset) throw new Error('Electron result paging returned a non-contiguous offset.');

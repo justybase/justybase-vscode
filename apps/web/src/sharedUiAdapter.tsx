@@ -619,7 +619,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       case 'columns': mapped = { ...base, sequence: nextSequence(), type: 'columns', columns: event.columns.map(mapQueryColumn) }; break;
       case 'rows': {
         const rows = rowsByResultRef.current[active.resultSetId] ?? [];
-        const nextRows = [...rows, ...event.rows.map(row => [...row])];
+        // The stream is a progress channel. Keep only the first bounded page
+        // here; the finalized page endpoint remains the source for scrolling
+        // through large results and prevents a 150k-row query from causing a
+        // render/copy of the complete result in the browser.
+        const nextRows = [...rows, ...event.rows.map(row => [...row])].slice(0, RESULT_PAGE_SIZE);
         rowsByResultRef.current = { ...rowsByResultRef.current, [active.resultSetId]: nextRows };
         setRowsByResult(rowsByResultRef.current);
         mapped = { ...base, sequence: nextSequence(), type: 'rows', rowCount: nextRows.length, totalRowCount: event.totalRows };

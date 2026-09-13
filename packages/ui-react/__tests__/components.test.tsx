@@ -283,6 +283,15 @@ describe('shared React presentation', () => {
     expect(grid.scrollLeft).toBe(24);
   });
 
+  it('does not restore a stale controlled position while a page is appended', () => {
+    const { rerender } = render(<DataGrid resultSetId="append-result" columns={[{ name: 'ID' }]} rows={[[1]]} scroll={{ resultSetId: 'append-result', top: 0, left: 0 }} />);
+    const grid = screen.getByRole('table').parentElement as HTMLDivElement;
+    grid.scrollTop = 420;
+    fireEvent.scroll(grid);
+    rerender(<DataGrid resultSetId="append-result" columns={[{ name: 'ID' }]} rows={[[1], [2]]} scroll={{ resultSetId: 'append-result', top: 0, left: 0 }} />);
+    expect(grid.scrollTop).toBe(420);
+  });
+
   it('keeps filtering, sorting, selection, grouping and column actions in the shared grid', () => {
     const onViewChange = jest.fn();
     const onSelectionChange = jest.fn();
