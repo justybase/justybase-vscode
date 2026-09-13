@@ -19,7 +19,8 @@ export function resultAsyncState(
   if (result.status === 'error') return 'error';
   if (result.status === 'cancelled') return 'cancelled';
   const hasViewFilter = result.view.globalFilter.trim().length > 0
-    || Object.values(result.view.columnFilters).some(value => value.trim().length > 0);
+    || Object.values(result.view.columnFilters).some(value => value.trim().length > 0)
+    || Object.values(result.view.columnFilterDefinitions ?? {}).some(definition => definition.operator !== 'in' || (definition.values?.length ?? 0) > 0);
   const rowsMayBeOutsideView = result.totalRowCount > 0
     && (hasViewFilter || result.loadedRowCount < result.totalRowCount);
   if (result.status === 'loading') return 'loading';

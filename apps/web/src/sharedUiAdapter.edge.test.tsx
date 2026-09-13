@@ -132,7 +132,16 @@ function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mo
     }
     if (url.includes('/api/query/query-1/page')) {
       if (options.pageError) return Promise.reject('page failed without an Error object');
-      return response({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }, { name: 'AMOUNT', type: 'NUMERIC(12,2)', scale: 2 }], rows: [[2, 'b', '10.00'], [1, 'a', '20.00']], offset: 0, limit: 10_000, totalRows: 2, hasMore: false });
+      const body = JSON.parse(String(init?.body ?? '{}')) as { globalFilter?: string; columnFilters?: Array<{ columnIndex: number; value: string }>; sorting?: Array<{ columnIndex: number; desc: boolean }> };
+      let rows: unknown[][] = [[2, 'b', '10.00'], [1, 'a', '20.00']];
+      const globalFilter = body.globalFilter?.toLocaleLowerCase();
+      if (globalFilter) rows = rows.filter(row => row.some(value => String(value).toLocaleLowerCase().includes(globalFilter)));
+      for (const filter of body.columnFilters ?? []) rows = rows.filter(row => String(row[filter.columnIndex] ?? '').toLocaleLowerCase().includes(filter.value.toLocaleLowerCase()));
+      for (const sorting of body.sorting ?? []) rows.sort((left, right) => String(left[sorting.columnIndex]).localeCompare(String(right[sorting.columnIndex]), undefined, { numeric: true }) * (sorting.desc ? -1 : 1));
+      return response({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }, { name: 'AMOUNT', type: 'NUMERIC(12,2)', scale: 2 }], rows, offset: 0, limit: 10_000, totalRows: rows.length, hasMore: false });
+    }
+    if (url.includes('/api/query/query-1/distinct')) {
+      return response({ statementIndex: 0, values: ['b', 'a'], truncated: false });
     }
     if (url.includes('/api/query/query-1/aggregate')) {
       return response({ filteredRowCount: 2, values: [{ columnIndex: 0, count: 2, sum: 3, avg: '1.5', min: 1, max: 2 }, { columnIndex: 2, count: 2, sum: '30.00', avg: '15.00', min: '10.00', max: '20.00' }] });
@@ -197,6 +206,10 @@ describe('shared Web UI adapter edge contracts', () => {
     await user.type(screen.getByRole('textbox', { name: 'Filter NAME' }), 'a');
     expect(screen.getByText('a')).toBeInTheDocument();
     expect(screen.queryByText('b')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open filter for NAME' }));
+    const filterDialog = await screen.findByRole('dialog', { name: 'Filter NAME' });
+    expect(filterDialog).toHaveClass('ui-data-grid-filter-menu');
+    await user.click(within(filterDialog).getByRole('button', { name: 'Cancel' }));
     const grid = screen.getByRole('table').parentElement as HTMLDivElement;
     grid.scrollTop = 64;
     grid.scrollLeft = 32;
@@ -232,8 +245,9 @@ describe('shared Web UI adapter edge contracts', () => {
     expect(screen.getByRole('region', { name: 'Result analysis' })).toHaveTextContent('30');
     await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
     await user.click(screen.getByRole('button', { name: 'Group' }));
-    expect(await screen.findByRole('heading', { name: 'Grouped result' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
+    expect(await screen.findByText('ID: 1')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Grouped result' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Group' }));
     await user.click(screen.getByRole('button', { name: 'Pivot' }));
     expect(await screen.findByRole('heading', { name: 'Pivot result' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Close result analysis' }));
@@ -304,7 +318,7 @@ describe('shared Web UI adapter edge contracts', () => {
     fireEvent.contextMenu(result, { clientX: 32, clientY: 48 });
     expect(screen.getByRole('menuitem', { name: 'Remove from favorites' })).toBeInTheDocument();
     const searchCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/schema/search'));
-    expect(JSON.parse(String((searchCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ term: 'ord', objectTypes: ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] }));
+    expect(JSON.parse(String((searchCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ term: 'ord', searchAllDatabases: true, objectTypes: ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] }));
   });
 
   it('exposes guarded connection add, edit and delete actions in shared Web mode', async () => {

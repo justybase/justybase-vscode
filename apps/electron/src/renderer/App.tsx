@@ -8,8 +8,10 @@ import {
   CellValueViewer,
   CapabilityGate,
   DataGrid,
+  DataGridColumnFilterPanel,
   ExplainView,
   HistoryView,
+  ResultOutputTabs,
   ResultTabs,
   ResultAnalysisPanel,
   ResultViewToolbar,
@@ -24,7 +26,7 @@ import {
   resolveDataGridColumns,
 } from '@justybase/ui-react';
 import { disposeSqlLanguageFeatures } from '@justybase/ui-monaco';
-import type { DataGridCellContext, DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind } from '@justybase/ui-react';
+import type { DataGridCellContext, DataGridColumnFilterState, DataGridClipboardFormat, DataGridCopyPayload, DataGridFilterValueOption, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind, ResultOutputTab } from '@justybase/ui-react';
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { createElectronApiClient } from './api';
 import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from './execution';
@@ -60,6 +62,29 @@ function resultQueryOptions(result: UiResultSurfaceState, view: UiResultSurfaceS
   readonly sorting?: QuerySortSpec[];
 } {
   return toUiResultQueryOptions(result.columns, view);
+}
+
+function filterValueKey(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+}
+
+function filterValueLabel(value: unknown): string {
+  if (value === null || value === undefined) return '(Blanks)';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+function filterOptionList(values: readonly unknown[]): DataGridFilterValueOption[] {
+  const seen = new Set<string>();
+  return values.flatMap(value => {
+    const key = filterValueKey(value);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, value, label: filterValueLabel(value) }];
+  }).sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
 function isNumericResultColumn(column: UiResultColumn | undefined): boolean {
@@ -149,6 +174,8 @@ export function App(): ReactElement {
         title: 'scratch.sql',
         content: 'SELECT 1;',
         dirty: false,
+        database: '',
+        schema: '',
         databaseKind: 'netezza',
       },
     });
@@ -169,6 +196,8 @@ export function App(): ReactElement {
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly SqlEditorProblem[]>([]);
+  const [activeOutputTab, setActiveOutputTab] = useState<ResultOutputTab>('results');
+  const [filterMenu, setFilterMenu] = useState<DataGridColumnFilterState | undefined>(undefined);
   const [database, setDatabase] = useState('');
   const [schema, setSchema] = useState('');
   const [databases, setDatabases] = useState<readonly MetadataDatabase[]>([]);
@@ -189,11 +218,11 @@ export function App(): ReactElement {
   const restoredResultViewsRef = useRef(new Set<string>());
   const pendingResultViewWritesRef = useRef(new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly write: () => void }>());
   const resultAnalysisGenerationRef = useRef(0);
+  const filterMenuGenerationRef = useRef(0);
   const clientRef = useRef<ReturnType<typeof createElectronApiClient> | undefined>(undefined);
   const executionRef = useRef<ExecutionController | undefined>(undefined);
   const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | undefined>(undefined);
-  const documentContextRef = useRef(new Map<string, { database: string; schema: string }>());
   const documentSequenceRef = useRef(1);
   if (!clientRef.current) clientRef.current = createElectronApiClient();
   if (!executionRef.current) {
@@ -242,7 +271,11 @@ export function App(): ReactElement {
       if (profiles[0]) {
         store.dispatch({ type: 'connections/select', connectionId: profiles[0].id });
         const currentDocumentId = store.getState().workspace.activeDocumentId;
-        if (currentDocumentId) store.dispatch({ type: 'workspace/update-document', documentId: currentDocumentId, patch: { connectionId: profiles[0].id, databaseKind: profiles[0].dbType } });
+        if (currentDocumentId) store.dispatch({
+          type: 'workspace/update-document',
+          documentId: currentDocumentId,
+          patch: { connectionId: profiles[0].id, database: profiles[0].database, schema: '', databaseKind: profiles[0].dbType },
+        });
       }
       store.dispatch({ type: 'shell/status', status: auth.status === 'authenticated' ? 'complete' : 'error', message: auth.message });
       void clientRef.current?.editorPreferences().then(setPreferences).catch(() => undefined);
@@ -306,12 +339,11 @@ export function App(): ReactElement {
 
   useEffect(() => {
     if (!activeDocument) return;
-    const remembered = documentContextRef.current.get(activeDocument.id);
-    const nextDatabase = remembered?.database || selectedConnection?.database || '';
-    const nextSchema = remembered?.schema ?? '';
+    const nextDatabase = activeDocument.database ?? selectedConnection?.database ?? '';
+    const nextSchema = activeDocument.schema ?? '';
     setDatabase(previous => previous === nextDatabase ? previous : nextDatabase);
     setSchema(previous => previous === nextSchema ? previous : nextSchema);
-  }, [activeDocument?.id, selectedConnection?.database]);
+  }, [activeDocument?.database, activeDocument?.id, activeDocument?.schema, selectedConnection?.database]);
 
   useEffect(() => {
     const connectionId = selectedConnection?.id;
@@ -390,10 +422,19 @@ export function App(): ReactElement {
     // tab's transient selection here.
     const documentDatabase = options.database ?? selectedConnection?.database ?? '';
     const documentSchema = options.schema ?? '';
-    documentContextRef.current.set(sourceId, { database: documentDatabase, schema: documentSchema });
     store.dispatch({
       type: 'workspace/open-document',
-      document: { id: sourceId, sourceId, title, content, dirty: false, connectionId, databaseKind: selectedConnection?.dbType ?? 'netezza' },
+      document: {
+        id: sourceId,
+        sourceId,
+        title,
+        content,
+        dirty: false,
+        connectionId,
+        database: documentDatabase,
+        schema: documentSchema,
+        databaseKind: selectedConnection?.dbType ?? 'netezza',
+      },
     });
     store.dispatch({ type: 'workspace/select-document', documentId: sourceId });
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
@@ -403,7 +444,6 @@ export function App(): ReactElement {
     if (state.workspace.documentOrder.length <= 1) return;
     const document = state.workspace.documents[documentId];
     if (document?.dirty && typeof window !== 'undefined' && !window.confirm(`Close modified document “${document.title}”?`)) return;
-    documentContextRef.current.delete(documentId);
     store.dispatch({ type: 'workspace/close-document', documentId });
   }, [state.workspace.documentOrder.length, state.workspace.documents, store]);
 
@@ -423,8 +463,7 @@ export function App(): ReactElement {
     store.dispatch({ type: 'connections/select', connectionId });
     const profile = state.connections.profiles.find(item => item.id === connectionId);
     if (activeDocument) {
-      documentContextRef.current.set(activeDocument.id, { database: profile?.database ?? '', schema: '' });
-      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
+      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, database: profile?.database ?? '', schema: '', databaseKind: profile?.dbType ?? 'netezza' } });
     }
     setDatabase(profile?.database ?? '');
     setSchema('');
@@ -441,8 +480,7 @@ export function App(): ReactElement {
     store.dispatch({ type: 'connections/set-profiles', profiles });
     store.dispatch({ type: 'connections/select', connectionId: profile.id });
     if (activeDocument) {
-      documentContextRef.current.set(activeDocument.id, { database: profile.database, schema: '' });
-      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id, databaseKind: profile.dbType } });
+      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id, database: profile.database, schema: '', databaseKind: profile.dbType } });
     }
     setDatabase(profile.database);
     setSchema('');
@@ -460,12 +498,11 @@ export function App(): ReactElement {
         const next = profiles[0];
         store.dispatch({ type: 'connections/select', connectionId: next?.id });
         if (activeDocument && next) {
-          documentContextRef.current.set(activeDocument.id, { database: next.database, schema: '' });
-          store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id, databaseKind: next.dbType } });
+          store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id, database: next.database, schema: '', databaseKind: next.dbType } });
           setDatabase(next.database);
           setSchema('');
         } else if (activeDocument) {
-          documentContextRef.current.delete(activeDocument.id);
+          store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: undefined, database: '', schema: '' } });
           setDatabase('');
           setSchema('');
         }
@@ -479,8 +516,8 @@ export function App(): ReactElement {
   const selectDatabase = useCallback((nextDatabase: string): void => {
     setDatabase(nextDatabase);
     setSchema('');
-    if (activeDocument) documentContextRef.current.set(activeDocument.id, { database: nextDatabase, schema: '' });
-  }, [activeDocument]);
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { database: nextDatabase, schema: '' } });
+  }, [activeDocument, store]);
 
   const handleEditorProblems = useCallback((nextProblems: readonly SqlEditorProblem[]): void => {
     setProblems(nextProblems);
@@ -563,6 +600,7 @@ export function App(): ReactElement {
     return JSON.stringify({
       globalFilter: view.globalFilter,
       columnFilters,
+      columnFilterDefinitions: view.columnFilterDefinitions,
       sorting: view.sorting,
     });
   }, []);
@@ -575,24 +613,14 @@ export function App(): ReactElement {
   ): Promise<void> => {
     const client = clientRef.current;
     if (!client) return;
-    const columnFilters: QueryColumnFilterSpec[] = Object.entries(requestedView.columnFilters)
-      .flatMap(([column, value]) => {
-        const columnIndex = result.columns.findIndex(item => item.name === column || String(result.columns.indexOf(item)) === column);
-        return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
-      });
-    const sorting: QuerySortSpec[] = requestedView.sorting.flatMap(item => {
-      const columnIndex = result.columns.findIndex(column => column.name === item.column || String(result.columns.indexOf(column)) === item.column);
-      return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
-    });
+    const queryOptions = resultQueryOptions(result, requestedView);
     const viewKey = resultViewRequestKey(requestedView);
     const requestKey = `${result.sourceId}\u0000${result.resultSetId}\u0000${result.executionId}\u0000${offset}\u0000${viewKey}`;
     if (pendingPageRequestsRef.current.has(requestKey)) return;
     pendingPageRequestsRef.current.add(requestKey);
     try {
       const page = await fetchResultPage(client, result.executionId, result.statementIndex, offset, RESULT_PAGE_SIZE, {
-        ...(requestedView.globalFilter.trim() ? { globalFilter: requestedView.globalFilter } : {}),
-        ...(columnFilters.length > 0 ? { columnFilters } : {}),
-        ...(sorting.length > 0 ? { sorting } : {}),
+        ...queryOptions,
       });
       const current = Object.values(store.getState().results.byResultSetId)
         .find(item => item.sourceId === result.sourceId && item.resultSetId === result.resultSetId);
@@ -747,11 +775,125 @@ export function App(): ReactElement {
     const nextView = { ...activeResult.view, ...patch };
     store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
     scheduleResultViewWrite(activeResult, nextView);
-    if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.sorting !== undefined) {
+    if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.columnFilterDefinitions !== undefined || patch.sorting !== undefined) {
       pageStateRef.current.delete(activeResult.resultSetId);
       void loadResultPage({ ...activeResult, view: nextView }, 0, true, nextView);
     }
   }, [activeResult, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
+
+  const closeColumnFilter = useCallback((): void => {
+    filterMenuGenerationRef.current += 1;
+    setFilterMenu(undefined);
+  }, []);
+
+  const openColumnFilter = useCallback(async (request: import('@justybase/ui-react').DataGridColumnFilterRequest): Promise<void> => {
+    if (!activeResult) return;
+    const generation = ++filterMenuGenerationRef.current;
+    const key = request.column.name || String(request.columnIndex);
+    const saved = activeResult.view.columnFilterDefinitions?.[key];
+    const anchor = request.anchor;
+    const popupWidth = Math.min(340, Math.max(240, window.innerWidth - 20));
+    const popupHeight = Math.min(520, Math.max(160, window.innerHeight - 20));
+    const margin = 10;
+    const gap = 5;
+    const left = Math.min(Math.max(margin, anchor.left), Math.max(margin, window.innerWidth - popupWidth - margin));
+    const below = Math.max(0, window.innerHeight - anchor.bottom - margin - gap);
+    const above = Math.max(0, anchor.top - margin - gap);
+    const top = Math.max(margin, Math.min(above >= below && below < 280 ? anchor.top - popupHeight - gap : anchor.bottom + gap, window.innerHeight - popupHeight - margin));
+    setFilterMenu({
+      columnIndex: request.columnIndex,
+      columnName: request.column.name,
+      left,
+      top,
+      options: [],
+      selectedKeys: saved?.operator === 'in' ? (saved.values ?? []).map(filterValueKey) : [],
+      operator: saved?.operator ?? 'in',
+      value: saved?.value ?? '',
+      search: '',
+      loading: true,
+      truncated: false,
+    });
+    try {
+      const queryId = activeResult.executionId;
+      const filters = { ...activeResult.view.columnFilters };
+      delete filters[key];
+      const definitions = { ...(activeResult.view.columnFilterDefinitions ?? {}) };
+      delete definitions[key];
+      const response = await clientRef.current!.distinct(queryId, {
+        statementIndex: activeResult.statementIndex,
+        columnIndex: request.columnIndex,
+        limit: 500,
+        ...resultQueryOptions(activeResult, { ...activeResult.view, columnFilters: filters, columnFilterDefinitions: definitions }),
+      });
+      if (generation !== filterMenuGenerationRef.current) return;
+      const options = filterOptionList(response.values);
+      const selectedKeys = saved?.operator === 'in'
+        ? (saved.values ?? []).map(filterValueKey).filter(valueKey => options.some(option => option.key === valueKey))
+        : options.map(option => option.key);
+      setFilterMenu(current => current && current.columnIndex === request.columnIndex ? { ...current, options, selectedKeys, loading: false, truncated: response.truncated } : current);
+    } catch (error: unknown) {
+      if (generation !== filterMenuGenerationRef.current) return;
+      setFilterMenu(current => current && current.columnIndex === request.columnIndex ? { ...current, loading: false, error: error instanceof Error ? error.message : 'Could not load column values.' } : current);
+    }
+  }, [activeResult]);
+
+  const updateColumnFilterMenu = useCallback((patch: Partial<DataGridColumnFilterState>): void => {
+    setFilterMenu(current => current ? { ...current, ...patch } : current);
+  }, []);
+
+  const applyColumnFilter = useCallback((): void => {
+    const menu = filterMenu;
+    if (!menu || !activeResult) return;
+    const key = menu.columnName || String(menu.columnIndex);
+    const nextDefinitions = { ...(activeResult.view.columnFilterDefinitions ?? {}) };
+    const nextFilters = { ...activeResult.view.columnFilters };
+    delete nextDefinitions[key];
+    delete nextFilters[key];
+    if (menu.operator === 'in') {
+      const selected = menu.options.filter(option => menu.selectedKeys.includes(option.key));
+      const allLoadedValuesSelected = selected.length === menu.options.length && !menu.truncated;
+      if (selected.length > 0 && !allLoadedValuesSelected) {
+        nextDefinitions[key] = { operator: 'in', value: `${selected.length} selected`, values: selected.map(option => option.value) };
+        nextFilters[key] = `${selected.length} selected`;
+      }
+    } else if (menu.operator === 'isNull' || menu.operator === 'isNotNull') {
+      nextDefinitions[key] = { operator: menu.operator, value: menu.operator };
+      nextFilters[key] = menu.operator;
+    } else if (menu.value.trim()) {
+      nextDefinitions[key] = { operator: menu.operator, value: menu.value.trim() };
+      nextFilters[key] = menu.value.trim();
+    }
+    updateView({ columnFilters: nextFilters, columnFilterDefinitions: nextDefinitions });
+    closeColumnFilter();
+  }, [activeResult, closeColumnFilter, filterMenu, updateView]);
+
+  const clearColumnFilter = useCallback((): void => {
+    const menu = filterMenu;
+    if (!menu || !activeResult) return;
+    const key = menu.columnName || String(menu.columnIndex);
+    const columnFilters = { ...activeResult.view.columnFilters };
+    const columnFilterDefinitions = { ...(activeResult.view.columnFilterDefinitions ?? {}) };
+    delete columnFilters[key];
+    delete columnFilterDefinitions[key];
+    updateView({ columnFilters, columnFilterDefinitions });
+    closeColumnFilter();
+  }, [activeResult, closeColumnFilter, filterMenu, updateView]);
+
+  useEffect(() => {
+    if (!filterMenu) return undefined;
+    const closeOnOutsideClick = (event: MouseEvent): void => {
+      const target = event.target;
+      if (target instanceof Element && (target.closest('.ui-data-grid-filter-menu') || target.closest('.ui-data-grid-filter-action'))) return;
+      closeColumnFilter();
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape') closeColumnFilter(); };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [closeColumnFilter, filterMenu]);
 
   const loadMoreRows = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
@@ -827,22 +969,12 @@ export function App(): ReactElement {
 
   const exportActive = useCallback(async (): Promise<void> => {
     if (!activeResult || typeof document === 'undefined') return;
-    const columnFilters: QueryColumnFilterSpec[] = Object.entries(activeResult.view.columnFilters)
-      .flatMap(([column, value]) => {
-        const columnIndex = activeResult.columns.findIndex(item => item.name === column || String(activeResult.columns.indexOf(item)) === column);
-        return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
-      });
-    const sorting: QuerySortSpec[] = activeResult.view.sorting.flatMap(item => {
-      const columnIndex = activeResult.columns.findIndex(column => column.name === item.column || String(activeResult.columns.indexOf(column)) === item.column);
-      return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
-    });
+    const queryOptions = resultQueryOptions(activeResult, activeResult.view);
     try {
       const downloaded = await clientRef.current!.exportQuery(activeResult.executionId, {
         statementIndex: activeResult.statementIndex,
         format: exportFormat,
-        globalFilter: activeResult.view.globalFilter,
-        columnFilters,
-        sorting,
+        ...queryOptions,
       });
       const url = URL.createObjectURL(downloaded.blob);
       const link = document.createElement('a');
@@ -954,14 +1086,17 @@ export function App(): ReactElement {
             <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
           </div>
           {notice && <div className="electron-notice" role="status">{notice}</div>}
-          <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database, schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
-          <ProblemsPanel problems={problems} onSelect={selectProblem} />
+          <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: activeDocument?.connectionId ?? selectedConnection?.id, database: activeDocument?.database ?? database, schema: activeDocument?.schema ?? schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
           <div className="electron-result-panel">
-            <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
-            {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => toggleResultAnalysis('group')} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-            {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
-            <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onViewCell={openCellValue} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
-            {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+            <ResultOutputTabs activeTab={activeOutputTab} problemCount={problems.length} onChange={setActiveOutputTab} />
+            {activeOutputTab === 'problems' ? <div className="ui-result-output-content"><ProblemsPanel problems={problems} onSelect={selectProblem} /></div> : <>
+              <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
+              {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => updateView({ grouping: activeResult.view.grouping.length > 0 ? [] : activeResult.columns[0] ? [activeResult.columns[0].name] : [] })} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+              {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
+              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} showInlineColumnFilters onOpenColumnFilter={openColumnFilter} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onViewCell={openCellValue} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
+              {filterMenu && <DataGridColumnFilterPanel state={filterMenu} onChange={updateColumnFilterMenu} onApply={applyColumnFilter} onClear={clearColumnFilter} onClose={closeColumnFilter} />}
+              {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+            </>}
           </div>
         </div>}
     </UiShell>

@@ -9,6 +9,7 @@ export { ApiRequestError, parseQueryEvent } from '@justybase/api-client';
 export type ElectronApiClient = Pick<WorkspaceApi,
   'startQuery'
   | 'queryPage'
+  | 'distinct'
   | 'cancelQuery'
   | 'exportQuery'
   | 'connectToQueryEvents'>;
@@ -66,6 +67,7 @@ export function createElectronApiClient(options: ElectronApiClientOptions = {}):
   return {
     startQuery: client.startQuery,
     queryPage: client.queryPage,
+    distinct: client.distinct,
     cancelQuery: client.cancelQuery,
     exportQuery: client.exportQuery,
     connectToQueryEvents: client.connectToQueryEvents,

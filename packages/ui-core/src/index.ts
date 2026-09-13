@@ -84,6 +84,7 @@ export type {
   UiResultEvent,
   UiResultEventBase,
   UiResultColumn,
+  UiResultColumnFilterDefinition,
   UiResultStatus,
   UiResultSurfaceState,
   UiResultViewState,

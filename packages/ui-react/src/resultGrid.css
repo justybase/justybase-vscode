@@ -358,6 +358,8 @@ body,
   border-top: 1px solid var(--justybase-grid-border);
   border-right: 1px solid var(--justybase-grid-border);
   border-left: 1px solid var(--justybase-grid-border);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .ui-data-grid th {
@@ -649,6 +651,261 @@ body,
   color: var(--justybase-grid-muted);
   font-size: 13px;
 }
+
+/* One filter surface for Web and Electron. Keep it outside the grid's
+   scrolling container so a column menu never moves with virtual rows. */
+.ui-data-grid-filter-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  width: min(340px, calc(100vw - 20px));
+  min-height: min(280px, calc(100vh - 20px));
+  max-height: min(520px, calc(100vh - 20px));
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 4px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 55%);
+  font: 11px/1.35 var(--justybase-results-grid-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.ui-data-grid-filter-menu button,
+.ui-data-grid-filter-menu input,
+.ui-data-grid-filter-menu select {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.ui-data-grid-filter-menu button {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.ui-data-grid-filter-heading {
+  display: flex;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  background: color-mix(in srgb, var(--justybase-grid-surface) 76%, #000 24%);
+}
+
+.ui-data-grid-filter-title {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ui-data-grid-filter-title > span {
+  color: var(--justybase-grid-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ui-data-grid-filter-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--justybase-grid-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-data-grid-filter-close {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-color: transparent !important;
+  color: var(--justybase-grid-muted) !important;
+  background: transparent !important;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ui-data-grid-filter-close:hover {
+  color: var(--justybase-grid-text) !important;
+  background: var(--justybase-grid-hover) !important;
+}
+
+.ui-data-grid-filter-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 9px 10px;
+}
+
+.ui-data-grid-filter-condition {
+  display: grid;
+  gap: 4px;
+  margin: 0 !important;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+}
+
+.ui-data-grid-filter-condition > span {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ui-data-grid-filter-condition select,
+.ui-data-grid-filter-search,
+.ui-data-grid-filter-value {
+  min-width: 0;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 7px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
+  font: inherit;
+}
+
+.ui-data-grid-filter-condition select:focus,
+.ui-data-grid-filter-search:focus,
+.ui-data-grid-filter-value:focus {
+  border-color: var(--justybase-grid-accent);
+  outline: none;
+}
+
+.ui-data-grid-filter-selection-actions { display: flex; gap: 5px; }
+
+.ui-data-grid-filter-selection-actions button {
+  min-height: 24px;
+  padding: 3px 8px;
+  border-color: var(--justybase-grid-border);
+  color: var(--justybase-grid-muted);
+  background: var(--justybase-grid-surface);
+  font: inherit;
+  font-size: 10px;
+}
+
+.ui-data-grid-filter-selection-actions button:hover {
+  border-color: var(--justybase-grid-accent);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-hover);
+}
+
+.ui-data-grid-filter-values {
+  display: flex;
+  min-height: 46px;
+  max-height: 250px;
+  flex: 1 1 150px;
+  flex-direction: column;
+  gap: 1px;
+  overflow: auto;
+  padding: 3px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  background: var(--justybase-grid-bg);
+  scrollbar-color: var(--vscode-scrollbarSlider-background, #475569) transparent;
+}
+
+.ui-data-grid-filter-values label {
+  display: flex;
+  min-width: 0;
+  min-height: 25px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 !important;
+  padding: 3px 5px;
+  border-radius: 2px;
+  color: var(--justybase-grid-text);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ui-data-grid-filter-values label:hover { background: var(--justybase-grid-hover); }
+
+.ui-data-grid-filter-values label input[type='checkbox'] {
+  width: 13px;
+  min-width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--justybase-grid-accent);
+}
+
+.ui-data-grid-filter-values label span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-data-grid-filter-empty,
+.ui-data-grid-filter-loading,
+.ui-data-grid-filter-hint,
+.ui-data-grid-filter-error,
+.ui-data-grid-filter-summary { color: var(--justybase-grid-muted); }
+.ui-data-grid-filter-empty,
+.ui-data-grid-filter-loading,
+.ui-data-grid-filter-hint,
+.ui-data-grid-filter-error { margin: 0; padding: 4px; }
+.ui-data-grid-filter-error { color: var(--vscode-errorForeground, #fca5a5); }
+.ui-data-grid-filter-summary { flex: 0 0 auto; font-size: 10px; }
+
+.ui-data-grid-filter-footer {
+  display: grid;
+  min-height: 42px;
+  flex: 0 0 auto;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--justybase-grid-border);
+  background: color-mix(in srgb, var(--justybase-grid-surface) 82%, #000 18%);
+}
+
+.ui-data-grid-filter-footer button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-color: var(--justybase-grid-border);
+  color: var(--justybase-grid-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.ui-data-grid-filter-footer button:hover:not(:disabled) {
+  border-color: var(--justybase-grid-accent);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-hover);
+}
+
+.ui-data-grid-filter-footer .ui-data-grid-filter-clear {
+  border-color: transparent;
+  color: var(--justybase-grid-muted);
+}
+
+.ui-data-grid-filter-footer .ui-data-grid-filter-clear:hover:not(:disabled) {
+  border-color: var(--vscode-errorForeground, #fca5a5);
+  color: var(--vscode-errorForeground, #fca5a5);
+  background: transparent;
+}
+
+.ui-data-grid-filter-footer button.primary {
+  border-color: var(--justybase-grid-accent);
+  color: #fff;
+  background: var(--justybase-grid-accent);
+}
+
+.ui-data-grid-filter-footer button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--justybase-grid-accent) 82%, #000); }
 
 .ui-data-grid-resizer {
   position: absolute;
