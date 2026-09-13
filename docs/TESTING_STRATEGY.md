@@ -23,7 +23,7 @@ test behavior.
 | Electron | Main/preload secret boundary, renderer presentation, lifecycle | `npm run test:electron` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
-| Web/API browser | Deterministic authenticated Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-api` |
+| Web/API browser | Deterministic authenticated Shared Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-shared` |
 | Extension Host | Real VS Code activation, commands, webview protocol | `npm run test:extension-host` |
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
@@ -175,16 +175,13 @@ flows. Serious or critical accessibility violations fail the gate. Verify
 accessible names, focus entry/return, modal focus containment, Escape/Enter,
 grid selection/copy, high-contrast themes, zoom, and reduced-motion behavior.
 
-## Dockyard and controlled Web login
+## Shared Web and controlled login
 
-The Web workspace uses the pinned, web-only Dockyard adapter by default. The
-adapter owns retained DOM hosts, layout models, floating/auto-hide behavior,
-browser listeners, and teardown; `ui-core` and `ui-react` must not import it.
-Test stable identities (`query:<tabId>`, `connections`, `schema`, `inspector`,
-`history`, and `explain:<tabId>`) rather than generated DOM ids. Stateful tests
-must cover query-document reorder/close, tool hide/float/auto-hide/dock-back,
-reload, old layout migration, corrupt/foreign/future snapshot reset, and
-`dispose()` with no remaining hosts, listeners, subscriptions, timers, or late
+The Web workspace uses the Shared UI composition by default. Test stable
+document/source/result identities rather than generated DOM ids. Stateful
+tests must cover query-document create/close/reorder, reload, legacy
+persistence migration, corrupt/future snapshot handling, reconnect, and
+`dispose()` with no remaining subscriptions, timers, sockets, or late
 callbacks. The browser scenario also runs at a narrow viewport.
 
 The exact `Use test login data` button is a test-harness control. It is rendered
@@ -194,7 +191,7 @@ The request is bodyless and obtains the configured test administrator through
 the server; credentials must not be repeated in Playwright specs or enter
 React state, DOM, URL, localStorage, logs, or the frontend bundle. The normal
 username/password login path remains covered independently. Use
-`npm run test:playwright:web-api` for the controlled API/SQLite browser gate;
+`npm run test:playwright:web-shared` for the controlled API/SQLite browser gate;
 never enable these flags in a production build or deployment.
 
 ## Live test hygiene

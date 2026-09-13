@@ -24,18 +24,13 @@ function fixtureApi(me: 'authenticated' | 'unauthenticated' = 'authenticated') {
 }
 
 describe('Web shared-mode composition root', () => {
-  afterEach(() => {
-    delete (globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__;
-  });
-
   it('renders the shared React shell after authenticated startup', async () => {
-    (globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__ = 'shared';
     render(<App apiClient={fixtureApi()} />);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'JustyBase' })).toBeInTheDocument());
     expect(screen.getByRole('tablist', { name: 'Open documents' })).toBeInTheDocument();
   });
 
-  it('uses the shared async state during startup and preserves the legacy fallback', async () => {
+  it('uses the shared async state during startup and keeps Shared as the only Web renderer', async () => {
     let resolveMe: ((value: Response) => void) | undefined;
     const pendingFetch = jest.fn(() => new Promise<Response>(resolve => { resolveMe = resolve; }));
     const pendingApi = createApiClient({ fetch: pendingFetch });
@@ -44,10 +39,10 @@ describe('Web shared-mode composition root', () => {
     pending.unmount();
     resolveMe?.(response({ user: { id: 'never-used', username: 'pending', role: 'user' } }));
 
-    delete (globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__;
     render(<App apiClient={fixtureApi('unauthenticated')} />);
     await waitFor(() => expect(screen.getByText('Sign in')).toBeInTheDocument());
     render(<App apiClient={fixtureApi()} />);
-    await waitFor(() => expect(screen.getByText('Netezza SQL Workspace')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'JustyBase' })).toBeInTheDocument());
+    expect(screen.getByRole('tablist', { name: 'Open documents' })).toBeInTheDocument();
   });
 });

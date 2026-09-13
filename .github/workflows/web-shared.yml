@@ -1,4 +1,4 @@
-name: Web Dockyard workspace
+name: Web Shared workspace
 
 on:
   pull_request:
@@ -7,10 +7,9 @@ on:
       - 'apps/web/**'
       - 'packages/**'
       - 'test-harness/**'
-      - 'vendor/dockyard/**'
       - 'package.json'
       - 'package-lock.json'
-      - '.github/workflows/web-dockyard.yml'
+      - '.github/workflows/web-shared.yml'
   push:
     branches:
       - master
@@ -20,10 +19,9 @@ on:
       - 'apps/web/**'
       - 'packages/**'
       - 'test-harness/**'
-      - 'vendor/dockyard/**'
       - 'package.json'
       - 'package-lock.json'
-      - '.github/workflows/web-dockyard.yml'
+      - '.github/workflows/web-shared.yml'
   workflow_dispatch:
 
 permissions:
@@ -31,7 +29,7 @@ permissions:
 
 jobs:
   browser:
-    name: Web Dockyard (${{ matrix.os }})
+    name: Web Shared (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -62,14 +60,14 @@ jobs:
         if: runner.os != 'Linux'
         run: npx playwright install chromium
 
-      - name: Run Web Dockyard API/browser gate
-        run: npm run test:playwright:web-api
+      - name: Run default Shared Web gate
+        run: npm run test:playwright:web-shared
 
-      - name: Upload Web Dockyard diagnostics
-        if: always()
+      - name: Upload Shared Web diagnostics
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: web-dockyard-${{ matrix.os }}
+          name: web-shared-${{ matrix.os }}
           path: test-results/web-sql
           if-no-files-found: warn
           retention-days: 14

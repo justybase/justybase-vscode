@@ -3,9 +3,11 @@ import type { CapabilityDescriptor, UiAuthState, UiIdentity, UiMode, Persistence
 import type {
   UiAction,
   UiDocumentState,
+  UiExecutionState,
   UiResultEvent,
   UiResultSurfaceState,
   UiResultViewState,
+  UiStatementExecutionState,
   UiState,
 } from './types';
 
@@ -35,6 +37,7 @@ export function createInitialUiState(identity: UiIdentity, options: InitialUiSta
     shell: { status: 'idle', activeSurface: 'workspace', sidebarOpen: true },
     workspace: { documentOrder: [], documents: {} },
     connections: { status: 'idle', profiles: [] },
+    executions: { byExecutionId: {} },
     results: { byResultSetId: {} },
     metadata: { status: 'idle', expandedNodeIds: [] },
     history: { status: 'idle', entryIds: [] },
@@ -68,6 +71,69 @@ function resultStateForStart(action: Extract<UiAction, { type: 'execution/start'
   };
 }
 
+function executionFor(state: UiState, sourceId: string, executionId: string): UiExecutionState | undefined {
+  const execution = state.executions.byExecutionId[executionId];
+  return execution?.sourceId === sourceId ? execution : undefined;
+}
+
+function executionWith(state: UiState, execution: UiExecutionState): UiState {
+  return {
+    ...state,
+    executions: {
+      ...state.executions,
+      activeExecutionId: execution.executionId,
+      byExecutionId: { ...state.executions.byExecutionId, [execution.executionId]: execution },
+    },
+  };
+}
+
+function statementState(
+  statementIndex: number,
+  status: UiStatementExecutionState['status'],
+  patch: Pick<UiStatementExecutionState, 'resultSetId' | 'sql' | 'message'> = {},
+): UiStatementExecutionState {
+  return { statementIndex, status, ...patch };
+}
+
+function completedStatementCount(statements: Readonly<Record<number, UiStatementExecutionState>>): number {
+  return Object.values(statements).filter(statement =>
+    statement.status === 'success' || statement.status === 'error' || statement.status === 'cancelled',
+  ).length;
+}
+
+function executionForStart(state: UiState, action: Extract<UiAction, { type: 'execution/start' }>): UiExecutionState {
+  const previous = executionFor(state, action.sourceId, action.executionId);
+  const statementIndex = action.statementIndex ?? 0;
+  const statementCount = Math.max(action.statementCount ?? previous?.statementCount ?? 1, statementIndex + 1);
+  const statements = { ...(previous?.statements ?? {}) };
+  const oldStatement = statements[statementIndex];
+  // Stream adapters may need to repeat the start action when a result event
+  // arrives before its surface exists. Repeating that action must not turn an
+  // already running statement back into pending or discard its SQL metadata.
+  statements[statementIndex] = statementState(statementIndex, oldStatement?.status ?? 'pending', {
+    resultSetId: action.resultSetId,
+    ...(action.statementSql === undefined
+      ? oldStatement?.sql === undefined ? {} : { sql: oldStatement.sql }
+      : { sql: action.statementSql }),
+    ...(oldStatement?.message === undefined ? {} : { message: oldStatement.message }),
+  });
+  const currentResult = resultFor(state, action.sourceId, action.resultSetId);
+  const resultAlreadyTerminal = currentResult?.executionId === action.executionId
+    && currentResult.statementIndex === statementIndex
+    && ['complete', 'empty', 'error', 'cancelled'].includes(currentResult.status);
+  const nextStatus = resultAlreadyTerminal && previous ? previous.status : 'running';
+  return {
+    sourceId: action.sourceId,
+    executionId: action.executionId,
+    mode: action.mode ?? previous?.mode ?? 'single',
+    statementCount,
+    completedStatements: previous?.completedStatements ?? 0,
+    status: nextStatus,
+    ...(previous?.message === undefined ? {} : { message: previous.message }),
+    statements,
+  };
+}
+
 function withResult(state: UiState, result: UiResultSurfaceState): UiState {
   const key = resultKey(result.sourceId, result.resultSetId);
   return {
@@ -84,7 +150,21 @@ function withResult(state: UiState, result: UiResultSurfaceState): UiState {
 function failExecution(state: UiState, action: Extract<UiAction, { type: 'execution/stream-failed' }>): UiState {
   const result = resultFor(state, action.sourceId, action.resultSetId);
   if (!result || result.executionId !== action.executionId || result.status === 'complete' || result.status === 'empty' || result.status === 'error' || result.status === 'cancelled') return state;
-  return withResult(state, { ...result, status: 'error', message: action.message });
+  let next = withResult(state, { ...result, status: 'error', message: action.message });
+  const execution = executionFor(next, action.sourceId, action.executionId);
+  if (!execution) return next;
+  const statements = {
+    ...execution.statements,
+    [result.statementIndex]: statementState(result.statementIndex, 'error', { resultSetId: result.resultSetId, message: action.message }),
+  };
+  next = executionWith(next, {
+    ...execution,
+    status: 'error',
+    message: action.message,
+    completedStatements: completedStatementCount(statements),
+    statements,
+  });
+  return next;
 }
 
 function findResultById(state: UiState, resultSetId: string, sourceId?: string): UiResultSurfaceState | undefined {
@@ -145,9 +225,73 @@ function hydrateResult(state: UiState, action: Extract<UiAction, { type: 'result
   });
 }
 
+function updateExecutionFromResultEvent(state: UiState, event: UiResultEvent, result: UiResultSurfaceState): UiState {
+  const execution = executionFor(state, event.sourceId, event.executionId);
+  if (!execution) return state;
+  const statementIndex = result.statementIndex;
+  const previousStatement = execution.statements[statementIndex];
+  let nextStatement = previousStatement;
+  let executionStatus = execution.status;
+  let executionMessage = execution.message;
+  if (event.type === 'started') {
+    executionStatus = 'running';
+  } else if (event.type === 'statement-started') {
+    nextStatement = statementState(statementIndex, 'running', {
+      resultSetId: result.resultSetId,
+      ...(event.statementSql === undefined ? {} : { sql: event.statementSql }),
+    });
+  } else if (event.type === 'complete' || event.type === 'empty') {
+    nextStatement = statementState(statementIndex, 'success', {
+      resultSetId: result.resultSetId,
+      ...(previousStatement?.sql === undefined ? {} : { sql: previousStatement.sql }),
+      ...(event.type === 'complete' && event.message === undefined ? {} : { message: event.type === 'complete' ? event.message : event.message }),
+    });
+    executionStatus = execution.mode === 'script' ? 'running' : 'success';
+  } else if (event.type === 'error') {
+    nextStatement = statementState(statementIndex, 'error', {
+      resultSetId: result.resultSetId,
+      ...(previousStatement?.sql === undefined ? {} : { sql: previousStatement.sql }),
+      message: event.message,
+    });
+    executionMessage = event.message;
+    // Script execution may continue after a statement error. The terminal
+    // batch action is authoritative for the execution-level status.
+    executionStatus = execution.mode === 'script' ? 'running' : 'error';
+  } else if (event.type === 'cancelled') {
+    nextStatement = statementState(statementIndex, 'cancelled', {
+      resultSetId: result.resultSetId,
+      ...(previousStatement?.sql === undefined ? {} : { sql: previousStatement.sql }),
+      ...(event.message === undefined ? {} : { message: event.message }),
+    });
+    executionStatus = execution.mode === 'script' ? 'running' : 'cancelled';
+  }
+  if (nextStatement === previousStatement && executionStatus === execution.status && executionMessage === execution.message) return state;
+  const statements = nextStatement === previousStatement
+    ? execution.statements
+    : { ...execution.statements, [statementIndex]: nextStatement };
+  return executionWith(state, {
+    ...execution,
+    status: executionStatus,
+    completedStatements: completedStatementCount(statements),
+    ...(executionMessage === undefined ? {} : { message: executionMessage }),
+    statements,
+  });
+}
+
 function applyResultEvent(state: UiState, event: UiResultEvent): UiState {
-  const previous = resultFor(state, event.sourceId, event.resultSetId);
-  if (!previous || previous.executionId !== event.executionId) return state;
+  let previous = resultFor(state, event.sourceId, event.resultSetId);
+  if (!previous) {
+    if (!executionFor(state, event.sourceId, event.executionId)) return state;
+    previous = resultStateForStart({
+      type: 'execution/start',
+      sourceId: event.sourceId,
+      executionId: event.executionId,
+      resultSetId: event.resultSetId,
+      statementIndex: event.statementIndex,
+    });
+    state = withResult(state, previous);
+  }
+  if (previous.executionId !== event.executionId) return state;
 
   // Shared adapters use a contiguous, one-based event sequence. This rejects
   // replayed, delayed, duplicated, and out-of-order transport messages.
@@ -173,6 +317,10 @@ function applyResultEvent(state: UiState, event: UiResultEvent): UiState {
       break;
     case 'columns':
       next = { ...base, status: 'streaming', columns: event.columns.map(column => ({ ...column })) };
+      break;
+    case 'session':
+      if (!Number.isInteger(event.totalRowCount) || event.totalRowCount < 0 || !event.storageId.trim()) return state;
+      next = { ...base, status: 'streaming', storageId: event.storageId, totalRowCount: event.totalRowCount };
       break;
     case 'rows': {
       if (!Number.isInteger(event.rowCount) || event.rowCount < 0 || event.rowCount < previous.loadedRowCount) return state;
@@ -216,7 +364,8 @@ function applyResultEvent(state: UiState, event: UiResultEvent): UiState {
       };
       break;
   }
-  return withResult(state, next);
+  const resultState = withResult(state, next);
+  return updateExecutionFromResultEvent(resultState, event, next);
 }
 
 function updateDocuments(state: UiState, documents: Readonly<Record<string, UiDocumentState>>, documentOrder: readonly string[], activeDocumentId?: string): UiState {
@@ -258,13 +407,13 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
       const document: UiDocumentState = {
         ...current,
         ...(patch.title === undefined ? {} : { title: patch.title }),
-        ...(patch.uri === undefined ? {} : { uri: patch.uri }),
+        ...('uri' in patch ? { uri: patch.uri } : {}),
         ...(patch.content === undefined ? {} : { content: patch.content }),
         ...(patch.dirty === undefined ? {} : { dirty: patch.dirty }),
-        ...(patch.connectionId === undefined ? {} : { connectionId: patch.connectionId }),
-        ...(patch.database === undefined ? {} : { database: patch.database }),
-        ...(patch.schema === undefined ? {} : { schema: patch.schema }),
-        ...(patch.databaseKind === undefined ? {} : { databaseKind: patch.databaseKind }),
+        ...('connectionId' in patch ? { connectionId: patch.connectionId } : {}),
+        ...('database' in patch ? { database: patch.database } : {}),
+        ...('schema' in patch ? { schema: patch.schema } : {}),
+        ...('databaseKind' in patch ? { databaseKind: patch.databaseKind } : {}),
       };
       return updateDocuments(state, { ...state.workspace.documents, [document.id]: document }, state.workspace.documentOrder, state.workspace.activeDocumentId);
     }
@@ -292,36 +441,90 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
         : state;
     case 'execution/start': {
       const key = resultKey(action.sourceId, action.resultSetId);
-      if (state.results.byResultSetId[key]?.executionId === action.executionId) return state;
-      return withResult(state, resultStateForStart(action));
+      const existing = state.results.byResultSetId[key];
+      // Preserve the reducer's identity contract for the legacy idempotent
+      // "start this already-started result" action. Rich start metadata is
+      // allowed to update an execution when a later script event supplies it.
+      if (existing?.executionId === action.executionId
+        && action.statementIndex === undefined
+        && action.storageId === undefined
+        && action.mode === undefined
+        && action.statementCount === undefined
+        && action.statementSql === undefined) return state;
+      const execution = executionForStart(state, action);
+      const withExecution = executionWith(state, execution);
+      if (existing?.executionId === action.executionId) return withExecution;
+      return withResult(withExecution, resultStateForStart(action));
     }
     case 'execution/event':
       return applyResultEvent(state, action.event);
+    case 'execution/statement-status': {
+      const execution = executionFor(state, action.sourceId, action.executionId);
+      if (!execution || !Number.isInteger(action.statementIndex) || action.statementIndex < 0) return state;
+      const current = execution.statements[action.statementIndex];
+      const nextStatement = statementState(action.statementIndex, action.status, {
+        ...(action.resultSetId === undefined ? current?.resultSetId === undefined ? {} : { resultSetId: current.resultSetId } : { resultSetId: action.resultSetId }),
+        ...(action.sql === undefined ? current?.sql === undefined ? {} : { sql: current.sql } : { sql: action.sql }),
+        ...(action.message === undefined ? {} : { message: action.message }),
+      });
+      const statements = { ...execution.statements, [action.statementIndex]: nextStatement };
+      return executionWith(state, { ...execution, completedStatements: completedStatementCount(statements), statements });
+    }
+    case 'execution/batch-complete': {
+      const execution = executionFor(state, action.sourceId, action.executionId);
+      if (!execution || !Number.isInteger(action.completedStatements) || action.completedStatements < 0) return state;
+      const statementCount = Math.max(action.statementCount ?? execution.statementCount, action.completedStatements);
+      const statements = { ...execution.statements };
+      for (let index = 0; index < statementCount; index += 1) {
+        const current = statements[index];
+        if (current && current.status !== 'pending') continue;
+        statements[index] = statementState(index, action.status === 'success' && index < action.completedStatements ? 'success' : 'skipped', {
+          ...(current?.resultSetId === undefined ? {} : { resultSetId: current.resultSetId }),
+          ...(current?.sql === undefined ? {} : { sql: current.sql }),
+        });
+      }
+      const byResultSetId = Object.fromEntries(Object.entries(state.results.byResultSetId).map(([key, result]) => {
+        if (result.sourceId !== action.sourceId || result.executionId !== action.executionId) return [key, result];
+        const terminalStatus = action.status === 'cancelled' && !['complete', 'empty', 'error'].includes(result.status)
+          ? { status: 'cancelled' as const, cancellation: 'cancelled' as const, message: action.message ?? 'Execution cancelled.' }
+          : {};
+        return [key, { ...result, batchStatus: action.status, batchMessage: action.message, ...terminalStatus }];
+      }));
+      const next = executionWith(state, {
+        ...execution,
+        status: action.status,
+        statementCount,
+        completedStatements: action.completedStatements,
+        ...(action.message === undefined ? {} : { message: action.message }),
+        statements,
+      });
+      return { ...next, results: { ...next.results, byResultSetId } };
+    }
     case 'execution/stream-failed':
       return failExecution(state, action);
     case 'results/hydrate':
       return hydrateResult(state, action);
     case 'execution/cancel-requested': {
-      const result = resultFor(state, action.sourceId, findResultSetForExecution(state, action.sourceId, action.executionId));
-      if (!result || result.executionId !== action.executionId || result.status === 'complete' || result.status === 'empty' || result.status === 'error' || result.status === 'cancelled') return state;
-      return withResult(state, { ...result, cancellation: 'requested', cancelRequestId: action.requestId });
+      const results = Object.values(state.results.byResultSetId).filter(result => result.sourceId === action.sourceId && result.executionId === action.executionId && !['complete', 'empty', 'error', 'cancelled'].includes(result.status));
+      if (results.length === 0) return state;
+      return results.reduce((next, result) => withResult(next, { ...result, cancellation: 'requested', cancelRequestId: action.requestId }), state);
     }
     case 'execution/cancel-acknowledged': {
-      const result = resultFor(state, action.sourceId, findResultSetForExecution(state, action.sourceId, action.executionId));
-      if (!result || result.executionId !== action.executionId || result.cancelRequestId !== action.requestId || result.cancellation !== 'requested') return state;
-      return withResult(state, { ...result, cancellation: 'acknowledged' });
+      const results = Object.values(state.results.byResultSetId).filter(result => result.sourceId === action.sourceId && result.executionId === action.executionId && result.cancelRequestId === action.requestId && result.cancellation === 'requested');
+      if (results.length === 0) return state;
+      return results.reduce((next, result) => withResult(next, { ...result, cancellation: 'acknowledged' }), state);
     }
     case 'execution/cancel-failed': {
-      const result = resultFor(state, action.sourceId, findResultSetForExecution(state, action.sourceId, action.executionId));
-      if (!result || result.executionId !== action.executionId || result.cancelRequestId !== action.requestId || result.cancellation !== 'requested') return state;
-      return withResult(state, { ...result, cancellation: 'failed', message: action.message });
+      const results = Object.values(state.results.byResultSetId).filter(result => result.sourceId === action.sourceId && result.executionId === action.executionId && result.cancelRequestId === action.requestId && result.cancellation === 'requested');
+      if (results.length === 0) return state;
+      return results.reduce((next, result) => withResult(next, { ...result, cancellation: 'failed', message: action.message }), state);
     }
     case 'results/select-source': {
       if (action.sourceId === undefined) {
         return { ...state, results: { ...state.results, activeSourceId: undefined, activeResultSetId: undefined } };
       }
       const sourceResults = Object.values(state.results.byResultSetId).filter(result => result.sourceId === action.sourceId);
-      if (sourceResults.length === 0) return state;
+      if (sourceResults.length === 0) return { ...state, results: { ...state.results, activeSourceId: action.sourceId, activeResultSetId: undefined } };
       const activeResult = sourceResults.find(result => result.resultSetId === state.results.activeResultSetId) ?? sourceResults[0];
       return { ...state, results: { ...state.results, activeSourceId: action.sourceId, activeResultSetId: activeResult.resultSetId } };
     }
@@ -357,10 +560,6 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
     case 'designer/dirty':
       return state.designer.dirty === action.dirty ? state : { ...state, designer: { ...state.designer, dirty: action.dirty } };
   }
-}
-
-function findResultSetForExecution(state: UiState, sourceId: string, executionId: string): string {
-  return Object.values(state.results.byResultSetId).find(result => result.sourceId === sourceId && result.executionId === executionId)?.resultSetId ?? '';
 }
 
 export { emptyResultView, resultKey };

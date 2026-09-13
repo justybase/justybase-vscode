@@ -6,15 +6,14 @@ import type {
   DatabaseKind,
   EditorPreferences,
   HistoryEntry,
+  MetadataColumn,
+  MetadataDatabase,
   QueryAggregateFunction,
-  QueryColumnFilterSpec,
   QueryEvent,
   QueryExportFormat,
   QueryGroupAggregate,
-  QuerySortSpec,
   SchemaSearchResult,
   SchemaTreeNode,
-  UiMode,
   WebUser,
 } from '@justybase/contracts';
 import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
@@ -26,10 +25,9 @@ import {
   createPivotAnalysisTable,
   hasUiResultQuery,
   resultAsyncState as getResultAsyncState,
-  resolveUiMode,
   toUiResultQueryOptions,
 } from '@justybase/ui-core';
-import type { UiResultColumn, UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
+import type { UiExecutionMode, UiExecutionState, UiResultColumn, UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import {
   CellValueViewer,
   createDataGridClipboardPayload,
@@ -51,10 +49,13 @@ import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor } from './SharedSqlEditor';
 import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
+import { AdminPanel } from './AdminPanel';
+import { InspectorPanel } from './InspectorPanel';
+import { AuditPanel, ConnectionForm, EditorSettings } from './workspacePanels';
 import { createWorkspaceStorage, migrateLegacyWorkspace, readLegacyWorkspaceValue, type WorkspaceStorage } from './workspacePersistence';
+import { persistSharedWorkspace, restoreSharedWorkspace, sharedDocumentSourceId, type RestoredSharedWorkspace } from './sharedWorkspacePersistence';
 import { readSharedResultView, writeSharedResultView } from './sharedResultViewPersistence';
 import { readSharedSchemaShortcuts, rememberSharedSchemaObject, sharedSchemaObjectIdentity, toggleSharedSchemaFavorite, writeSharedSchemaShortcuts } from './sharedSchemaPersistence';
-import { ConnectionForm } from './workspacePanels';
 
 const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'workspace', status: 'available', owner: 'ui-core', documentation: 'Shared workspace state and presentation.', removalCondition: 'Keep the shared workspace owner.' },
@@ -62,10 +63,14 @@ const sharedCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'results.write', status: 'read-only', owner: 'web-api-adapter', reason: 'Writes require the guarded preview/apply workflow.', documentation: 'API guarded-write routes.', removalCondition: 'Expose the guarded write port in shared mode.' },
   { key: 'designer', status: 'available', owner: 'web-api-adapter', documentation: 'Guarded designer preview/apply API.', removalCondition: 'Keep the guarded designer workflow.' },
   { key: 'history', status: 'available', owner: 'web-api-adapter', documentation: 'User-scoped query history.', removalCondition: 'Keep the shared history port.' },
+  { key: 'settings', status: 'available', owner: 'web-api-adapter', documentation: 'User-scoped editor preferences.', removalCondition: 'Keep the authoring preferences API.' },
+  { key: 'audit', status: 'available', owner: 'web-api-adapter', documentation: 'User-scoped execution audit.', removalCondition: 'Keep the audit API.' },
+  { key: 'admin', status: 'available', owner: 'web-api-adapter', documentation: 'Role-gated administration.', removalCondition: 'Keep the admin API and capability gate.' },
 ];
 
 const DOCUMENT_ID = 'shared-scratch';
 const RESULT_PAGE_SIZE = 10_000;
+let sharedDocumentSequence = 0;
 const SHARED_SCHEMA_FILTERS = [
   // Keep these labels identical to the VS Code schema explorer. In
   // particular, do not turn TABLE into the old web-only "TABLEs" label.
@@ -98,15 +103,6 @@ function filterOptionList(values: readonly unknown[]): DataGridFilterValueOption
   }).sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
-interface WebRuntimeConfig {
-  readonly __JUSTYBASE_UI_MODE__?: unknown;
-}
-
-export function configuredWebUiMode(): UiMode {
-  const value = (globalThis as WebRuntimeConfig).__JUSTYBASE_UI_MODE__;
-  return resolveUiMode(value);
-}
-
 export function redactedWebProfile(profile: ConnectionProfileSummary) {
   return {
     id: profile.id,
@@ -120,22 +116,16 @@ export function redactedWebProfile(profile: ConnectionProfileSummary) {
   } as const;
 }
 
-function sourceIdFor(user: WebUser): string {
-  return `web:${user.id}`;
-}
-
-function createSharedStore(user: WebUser): UiStore {
-  const sourceId = sourceIdFor(user);
-  const store = createUiStore(createInitialUiState({ productId: 'web', userId: user.id, workspaceId: `web:${user.id}`, sourceId }, {
+function createSharedStore(user: WebUser, restored: RestoredSharedWorkspace): UiStore {
+  const sourceId = sharedDocumentSourceId(user.id, restored.activeDocumentId);
+  const store = createUiStore(createInitialUiState({ productId: 'web', userId: user.id, workspaceId: `web:${user.id}`, sourceId, documentId: restored.activeDocumentId }, {
     mode: 'shared',
     auth: { status: 'authenticated', userId: user.id, username: user.username },
     capabilities: sharedCapabilities,
     persistenceScope: 'user',
   }));
-  store.dispatch({
-    type: 'workspace/open-document',
-    document: { id: DOCUMENT_ID, sourceId, title: 'scratch.sql', content: 'SELECT 1;', dirty: false, databaseKind: 'netezza' },
-  });
+  for (const document of restored.documents) store.dispatch({ type: 'workspace/open-document', document });
+  store.dispatch({ type: 'workspace/select-document', documentId: restored.activeDocumentId });
   return store;
 }
 
@@ -184,8 +174,13 @@ function visibleSchemaNodes<T extends { readonly id: string; readonly parentId?:
   return visible;
 }
 
-function queryResultId(queryId: string): string {
-  return `${queryId}:0`;
+function queryResultId(queryId: string, statementIndex = 0): string {
+  return `${queryId}:${statementIndex}`;
+}
+
+function nextSharedDocumentId(prefix = 'query'): string {
+  sharedDocumentSequence += 1;
+  return `${prefix}-${Date.now().toString(36)}-${sharedDocumentSequence.toString(36)}`;
 }
 
 function mapQueryColumn(column: { readonly name: string; readonly type?: string; readonly scale?: number }) {
@@ -251,14 +246,23 @@ interface ActiveQuery {
   readonly resultSetId: string;
   readonly sourceId: string;
   readonly executionId: string;
-  readonly statementIndex: number;
+  readonly documentId: string;
+  readonly mode: UiExecutionMode;
+  readonly statementCount: number;
+  statementIndex: number;
   subscription?: QueryEventSubscription;
+}
+
+interface PendingQueryStart {
+  readonly documentId: string;
+  cancelled: boolean;
 }
 
 interface RunOverride {
   readonly sql: string;
   readonly connection: ConnectionProfileSummary;
   readonly database: string;
+  readonly documentId?: string;
 }
 
 interface SharedDocumentContext {
@@ -283,8 +287,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     storageRef.current = { userId: user.id, storage: createWorkspaceStorage(user.id) };
   }
   const workspaceStorage = storageRef.current.storage;
+  const restoredWorkspaceRef = useRef<{ readonly userId: string; readonly workspace: RestoredSharedWorkspace } | undefined>(undefined);
+  if (!restoredWorkspaceRef.current || restoredWorkspaceRef.current.userId !== user.id) {
+    restoredWorkspaceRef.current = { userId: user.id, workspace: restoreSharedWorkspace(workspaceStorage, user.id) };
+  }
+  const restoredWorkspace = restoredWorkspaceRef.current.workspace;
   const storeRef = useRef<UiStore | undefined>(undefined);
-  if (!storeRef.current) storeRef.current = createSharedStore(user);
+  if (!storeRef.current || storeRef.current.getState().identity.userId !== user.id) storeRef.current = createSharedStore(user, restoredWorkspace);
   const store = storeRef.current;
   const subscribe = useCallback((listener: () => void) => store.subscribe(() => listener()), [store]);
   const getSnapshot = useCallback(() => store.getState(), [store]);
@@ -305,6 +314,15 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [schemaFavorites, setSchemaFavorites] = useState<SchemaTreeNode[]>([]);
   const [schemaRecent, setSchemaRecent] = useState<SchemaTreeNode[]>([]);
   const [schemaShortcutsReadyKey, setSchemaShortcutsReadyKey] = useState<string | undefined>(undefined);
+  const [databases, setDatabases] = useState<MetadataDatabase[]>([]);
+  const [databaseLoadState, setDatabaseLoadState] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle');
+  const [databaseLoadError, setDatabaseLoadError] = useState<string | undefined>(undefined);
+  const [databaseReloadToken, setDatabaseReloadToken] = useState(0);
+  const [columns, setColumns] = useState<MetadataColumn[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [audit, setAudit] = useState<Awaited<ReturnType<ApiClient['audit']>>>([]);
   const [connectionEditor, setConnectionEditor] = useState<{ readonly initial?: ConnectionProfileSummary } | undefined>(undefined);
   const [designerTarget, setDesignerTarget] = useState<SchemaTreeNode | undefined>(undefined);
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
@@ -317,9 +335,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
   const rowsByResultRef = useRef(rowsByResult);
-  const activeQueryRef = useRef<ActiveQuery | undefined>(undefined);
-  const runGenerationRef = useRef(0);
+  const activeQueriesRef = useRef(new Map<string, ActiveQuery>());
+  const pendingQueryStartsRef = useRef(new Map<string, PendingQueryStart>());
+  const runGenerationRef = useRef(new Map<string, number>());
   const queryByResultRef = useRef(new Map<string, string>());
+  const resultSequenceRef = useRef(new Map<string, number>());
   const pageHydrationRef = useRef(new Set<string>());
   const pageStateRef = useRef(new Map<string, { readonly totalRows: number; readonly hasMore: boolean }>());
   const schemaLoadedParentsRef = useRef(new Set<string>());
@@ -329,19 +349,35 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const restoredResultViewsRef = useRef(new Set<string>());
   const pendingResultViewWritesRef = useRef(new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly write: () => void }>());
   const filterMenuGenerationRef = useRef(0);
-  const selectedConnectionId = state.connections.selectedConnectionId;
-  const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
+  const selectedConnectionId = activeDocument?.connectionId !== undefined
+    ? state.connections.profiles.some(profile => profile.id === activeDocument.connectionId) ? activeDocument.connectionId : undefined
+    : state.connections.profiles.some(profile => profile.id === state.connections.selectedConnectionId)
+      ? state.connections.selectedConnectionId
+      : undefined;
+  const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
   const runtimeDatabaseKind = selectedConnection?.dbType ?? 'netezza';
   const authoringDatabaseKind = activeDocument?.databaseKind ?? runtimeDatabaseKind;
+  const documentResults = activeDocument
+    ? Object.values(state.results.byResultSetId).filter(result => result.sourceId === activeDocument.sourceId)
+    : [];
   const activeResult = state.results.activeResultSetId
-    ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
+    ? documentResults.find(result => result.resultSetId === state.results.activeResultSetId)
     : undefined;
   const activeRows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
   const activeResultKey = activeResult ? `${activeResult.sourceId}\u0000${activeResult.resultSetId}` : undefined;
   const clientProcessing = activeResultKey !== undefined && clientProcessableResultKeys.has(activeResultKey);
   const visibleRows = displayRows(activeResult, activeRows);
   const visibleSchema = visibleSchemaNodes(schemaNodes, state.metadata.expandedNodeIds);
+
+  useEffect(() => {
+    // Documents own their connection context. Keep the legacy/global
+    // selection mirrored for consumers that still read the connection slice,
+    // without allowing it to override an active document binding.
+    if (state.connections.selectedConnectionId !== selectedConnectionId) {
+      store.dispatch({ type: 'connections/select', connectionId: selectedConnectionId });
+    }
+  }, [selectedConnectionId, state.connections.selectedConnectionId, store]);
 
   const flushResultViewWrites = useCallback((): void => {
     for (const [key, pending] of pendingResultViewWritesRef.current) {
@@ -350,6 +386,15 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       pendingResultViewWritesRef.current.delete(key);
     }
   }, []);
+
+  const cleanupActiveQueries = useCallback(async (): Promise<void> => {
+    for (const pending of pendingQueryStartsRef.current.values()) pending.cancelled = true;
+    pendingQueryStartsRef.current.clear();
+    const activeQueries = [...activeQueriesRef.current.values()];
+    activeQueriesRef.current.clear();
+    for (const active of activeQueries) active.subscription?.close();
+    await Promise.all(activeQueries.map(active => api.cancelQuery(active.queryId).catch(() => undefined)));
+  }, [api]);
 
   const scheduleResultViewWrite = useCallback((result: UiResultSurfaceState, view: UiResultSurfaceState['view']): void => {
     const key = `${result.sourceId}\u0000${result.resultSetId}`;
@@ -369,27 +414,45 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       const profiles = (await api.connections()).map(redactedWebProfile);
       store.dispatch({ type: 'connections/set-profiles', profiles });
       const currentId = store.getState().connections.selectedConnectionId;
-      const nextId = preferredId && profiles.some(profile => profile.id === preferredId)
-        ? preferredId
-        : profiles.some(profile => profile.id === currentId) ? currentId : profiles[0]?.id;
+      const active = store.getState().workspace.activeDocumentId
+        ? store.getState().workspace.documents[store.getState().workspace.activeDocumentId!]
+        : undefined;
+      const documentConnectionId = active?.connectionId;
+      const hasDocumentBinding = documentConnectionId !== undefined;
+      const documentProfile = profiles.find(profile => profile.id === documentConnectionId);
+      const restoredPreferredId = restoredWorkspace.selectedConnectionId;
+      const explicitPreferredProfile = preferredId === undefined ? undefined : profiles.find(profile => profile.id === preferredId);
+      // A persisted document binding is authoritative. In particular, do not
+      // retarget it to the preferred/global profile during reload. If the
+      // profile disappeared, keep the document unresolved until the user
+      // explicitly chooses a replacement.
+      // An explicit profile passed after a user action (for example, saving a
+      // new connection) is that explicit replacement and is allowed to retarget
+      // the active document.
+      const nextId = explicitPreferredProfile?.id
+        ?? (hasDocumentBinding
+          ? documentProfile?.id
+          : restoredPreferredId && profiles.some(profile => profile.id === restoredPreferredId)
+            ? restoredPreferredId
+            : profiles.some(profile => profile.id === currentId) ? currentId : profiles[0]?.id);
+      const documentId = active?.id;
       store.dispatch({ type: 'connections/select', connectionId: nextId });
-      const currentDocumentId = store.getState().workspace.activeDocumentId;
       const nextProfile = profiles.find(profile => profile.id === nextId);
-      if (currentDocumentId) store.dispatch({
+      if (documentId && nextProfile && (!hasDocumentBinding || explicitPreferredProfile !== undefined)) store.dispatch({
         type: 'workspace/update-document',
-        documentId: currentDocumentId,
+        documentId,
         patch: {
-          connectionId: nextId,
-          database: nextProfile?.database ?? '',
+          connectionId: nextProfile.id,
+          database: nextProfile.database,
           schema: '',
-          databaseKind: nextProfile?.dbType ?? 'netezza',
+          databaseKind: nextProfile.dbType,
         },
       });
       store.dispatch({ type: 'connections/status', status: 'complete' });
     } catch (error: unknown) {
       store.dispatch({ type: 'connections/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load connections.' });
     }
-  }, [api, store]);
+  }, [api, restoredWorkspace.selectedConnectionId, store]);
 
   const reloadHistory = useCallback(async (): Promise<void> => {
     store.dispatch({ type: 'history/status', status: 'loading' });
@@ -406,6 +469,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
 
   useEffect(() => {
+    if (activeDocument) store.dispatch({ type: 'results/select-source', sourceId: activeDocument.sourceId });
+  }, [activeDocument?.id, activeDocument?.sourceId, store]);
+
+  useEffect(() => {
     resultAnalysisGenerationRef.current += 1;
     setResultAnalysis(undefined);
     setResultAnalysisError(undefined);
@@ -413,15 +480,45 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [activeResult?.sourceId, activeResult?.resultSetId]);
 
   useEffect(() => () => {
-    const active = activeQueryRef.current;
-    active?.subscription?.close();
-    if (active) void api.cancelQuery(active.queryId).catch(() => undefined);
+    void cleanupActiveQueries();
     store.dispose();
-  }, [api, store]);
+  }, [cleanupActiveQueries, store]);
 
   useEffect(() => {
     void reloadConnections();
   }, [reloadConnections]);
+
+  useEffect(() => {
+    const connectionId = selectedConnectionId;
+    if (!connectionId) {
+      setDatabases([]);
+      setDatabaseLoadState('idle');
+      setDatabaseLoadError(undefined);
+      return undefined;
+    }
+    let live = true;
+    setDatabases([]);
+    setDatabaseLoadState('loading');
+    setDatabaseLoadError(undefined);
+    void api.databases(connectionId).then(items => {
+      if (!live) return;
+      const next = Array.isArray(items) ? items.filter(item => item && typeof item.name === 'string') : [];
+      setDatabases(next);
+      setDatabaseLoadState(next.length > 0 ? 'ready' : 'empty');
+      const document = store.getState().workspace.activeDocumentId
+        ? store.getState().workspace.documents[store.getState().workspace.activeDocumentId!]
+        : undefined;
+      if (document && document.connectionId === connectionId && document.database && next.some(item => item.name === document.database)) return;
+      const nextDatabase = next[0]?.name;
+      if (document && nextDatabase !== undefined) store.dispatch({ type: 'workspace/update-document', documentId: document.id, patch: { database: nextDatabase, schema: '' } });
+    }).catch(error => {
+      if (!live) return;
+      setDatabases([]);
+      setDatabaseLoadState('error');
+      setDatabaseLoadError(error instanceof Error ? error.message : 'Could not load databases.');
+    });
+    return () => { live = false; };
+  }, [api, databaseReloadToken, selectedConnectionId, store]);
 
   useEffect(() => {
     let live = true;
@@ -433,7 +530,17 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   useEffect(() => {
     migrateLegacyWorkspace(workspaceStorage);
-  }, [workspaceStorage]);
+    try {
+      persistSharedWorkspace(workspaceStorage, user.id, {
+        documents: Object.values(state.workspace.documents),
+        documentOrder: state.workspace.documentOrder,
+        activeDocumentId: state.workspace.activeDocumentId ?? state.workspace.documentOrder[0] ?? DOCUMENT_ID,
+        selectedConnectionId: state.connections.selectedConnectionId,
+      });
+    } catch {
+      setNotice('Workspace persistence is unavailable in this browser.');
+    }
+  }, [state.connections.selectedConnectionId, state.workspace.activeDocumentId, state.workspace.documentOrder, state.workspace.documents, user.id, workspaceStorage]);
 
   useEffect(() => {
     if (!activeResult) return;
@@ -449,13 +556,16 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const flush = (): void => flushResultViewWrites();
+    const flush = (): void => {
+      flushResultViewWrites();
+      void cleanupActiveQueries();
+    };
     window.addEventListener('pagehide', flush);
     return () => {
       window.removeEventListener('pagehide', flush);
       flushResultViewWrites();
     };
-  }, [flushResultViewWrites]);
+  }, [cleanupActiveQueries, flushResultViewWrites]);
 
   useEffect(() => {
     if (!selectedConnectionId) {
@@ -520,7 +630,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     setSchemaSearchLoading(false);
     store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
     if (selectedConnectionId) void loadSchemaChildren();
-  }, [loadSchemaChildren, selectedConnectionId, store]);
+  }, [activeDocument?.database, loadSchemaChildren, selectedConnectionId, store]);
 
   useEffect(() => {
     const term = schemaSearch.trim();
@@ -552,7 +662,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       live = false;
       window.clearTimeout(timer);
     };
-  }, [api, schemaFilters, schemaSearch, schemaSearchRevision, selectedConnectionId, store]);
+  }, [activeDocument?.database, api, schemaFilters, schemaSearch, schemaSearchRevision, selectedConnectionId, store]);
 
   const toggleSchemaNode = useCallback((node: ReturnType<typeof mapSchemaNode>): void => {
     const isExpanded = state.metadata.expandedNodeIds.includes(node.id);
@@ -607,46 +717,128 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (generation === schemaGenerationRef.current) store.dispatch({ type: 'metadata/set-expanded', nodeIds: [...expanded] });
   }, [loadSchemaChildren, schemaNodes, selectedConnectionId, store]);
 
-  const dispatchQueryEvent = useCallback((active: ActiveQuery, event: QueryEvent, nextSequence: () => number): void => {
-    const base = { sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId };
+  const dispatchQueryEvent = useCallback((active: ActiveQuery, event: QueryEvent): void => {
+    const defaultStatementIndex = event.type === 'started' ? 0 : active.statementIndex;
+    const statementIndex = event.statementIndex ?? defaultStatementIndex;
+    if (event.type !== 'batch-complete') active.statementIndex = statementIndex;
+    const resultSetId = queryResultId(active.queryId, statementIndex);
+    const resultKey = `${active.sourceId}\u0000${resultSetId}`;
+    const nextSequence = (): number => {
+      const next = (resultSequenceRef.current.get(resultKey) ?? 0) + 1;
+      resultSequenceRef.current.set(resultKey, next);
+      return next;
+    };
+    const eventStatementCount = event.statementCount ?? active.statementCount;
+    const eventMode = event.type === 'started' ? event.mode : undefined;
+    const startResult = (statementSql?: string): void => {
+      queryByResultRef.current.set(resultSetId, active.queryId);
+      if (!(resultSetId in rowsByResultRef.current)) {
+        rowsByResultRef.current = { ...rowsByResultRef.current, [resultSetId]: [] };
+        setRowsByResult(rowsByResultRef.current);
+      }
+      const current = store.getState();
+      const result = current.results.byResultSetId[`${active.sourceId}\u0000${resultSetId}`];
+      const execution = current.executions.byExecutionId[active.executionId];
+      const currentStatement = execution?.sourceId === active.sourceId ? execution.statements[statementIndex] : undefined;
+      const needsStart = !result
+        || result.executionId !== active.executionId
+        || statementSql !== undefined && currentStatement?.sql !== statementSql
+        || eventStatementCount !== execution?.statementCount;
+      if (!needsStart) return;
+      store.dispatch({
+        type: 'execution/start',
+        sourceId: active.sourceId,
+        executionId: active.executionId,
+        resultSetId,
+        statementIndex,
+        mode: active.mode,
+        statementCount: eventStatementCount,
+        ...(statementSql === undefined ? {} : { statementSql }),
+      });
+    };
+    const base = { sourceId: active.sourceId, executionId: active.executionId, resultSetId, statementIndex };
     let mapped: UiResultEvent | undefined;
     switch (event.type) {
-      case 'started': mapped = { ...base, sequence: nextSequence(), type: 'started' }; break;
-      case 'statement-started': mapped = { ...base, sequence: nextSequence(), type: 'statement-started' }; break;
-      case 'columns': mapped = { ...base, sequence: nextSequence(), type: 'columns', columns: event.columns.map(mapQueryColumn) }; break;
+      case 'started':
+        startResult();
+        mapped = { ...base, sequence: nextSequence(), type: 'started', ...(eventMode === undefined ? {} : { mode: eventMode }), ...(event.statementCount === undefined ? {} : { statementCount: event.statementCount }) };
+        break;
+      case 'statement-started':
+        startResult(event.statementSql);
+        mapped = { ...base, sequence: nextSequence(), type: 'statement-started', ...(event.statementSql === undefined ? {} : { statementSql: event.statementSql }) };
+        break;
+      case 'columns':
+        startResult();
+        mapped = { ...base, sequence: nextSequence(), type: 'columns', columns: event.columns.map(mapQueryColumn) };
+        break;
+      case 'session':
+        startResult();
+        mapped = { ...base, sequence: nextSequence(), type: 'session', storageId: event.sessionId, totalRowCount: event.totalRows };
+        break;
       case 'rows': {
-        const rows = rowsByResultRef.current[active.resultSetId] ?? [];
+        startResult();
+        const rows = rowsByResultRef.current[resultSetId] ?? [];
         // The stream is a progress channel. Keep only the first bounded page
         // here; the finalized page endpoint remains the source for scrolling
         // through large results and prevents a 150k-row query from causing a
         // render/copy of the complete result in the browser.
         const nextRows = [...rows, ...event.rows.map(row => [...row])].slice(0, RESULT_PAGE_SIZE);
-        rowsByResultRef.current = { ...rowsByResultRef.current, [active.resultSetId]: nextRows };
+        rowsByResultRef.current = { ...rowsByResultRef.current, [resultSetId]: nextRows };
         setRowsByResult(rowsByResultRef.current);
         mapped = { ...base, sequence: nextSequence(), type: 'rows', rowCount: nextRows.length, totalRowCount: event.totalRows };
         break;
       }
-      case 'progress': mapped = { ...base, sequence: nextSequence(), type: 'progress', totalRowCount: event.totalRows }; break;
+      case 'progress':
+        startResult();
+        mapped = { ...base, sequence: nextSequence(), type: 'progress', totalRowCount: event.totalRows };
+        break;
       case 'complete': {
+        startResult();
         const current = Object.values(store.getState().results.byResultSetId)
-          .find(result => result.sourceId === active.sourceId && result.resultSetId === active.resultSetId && result.executionId === active.executionId);
-        const streamedRows = rowsByResultRef.current[active.resultSetId] ?? [];
+          .find(result => result.sourceId === active.sourceId && result.resultSetId === resultSetId && result.executionId === active.executionId);
+        const streamedRows = rowsByResultRef.current[resultSetId] ?? [];
         // A complete bounded stream is safe to process in the shared renderer.
         // Keep the marker tied to the unfiltered execution so clearing a
         // server-side filter on a large result cannot mistake a one-row page
         // for the complete source result.
         if (event.totalRows > 0 && streamedRows.length >= event.totalRows && current && !hasUiResultQuery(current.view)) {
-          const resultKey = `${active.sourceId}\u0000${active.resultSetId}`;
           setClientProcessableResultKeys(previous => previous.has(resultKey) ? previous : new Set([...previous, resultKey]));
         }
         mapped = { ...base, sequence: nextSequence(), type: 'complete', totalRowCount: event.totalRows, message: event.message };
         break;
       }
-      case 'error': mapped = { ...base, sequence: nextSequence(), type: 'error', message: event.message }; break;
-      case 'cancelled': mapped = { ...base, sequence: nextSequence(), type: 'cancelled', totalRowCount: event.totalRows }; break;
-      case 'session':
-      case 'batch-complete':
+      case 'error':
+        startResult();
+        mapped = { ...base, sequence: nextSequence(), type: 'error', message: event.message };
         break;
+      case 'cancelled': {
+        const targets = event.scope === 'batch'
+          ? Object.values(store.getState().results.byResultSetId).filter(result => result.sourceId === active.sourceId && result.executionId === active.executionId)
+          : [];
+        if (targets.length > 0) {
+          for (const target of targets) {
+            const targetKey = `${target.sourceId}\u0000${target.resultSetId}`;
+            const sequence = (resultSequenceRef.current.get(targetKey) ?? 0) + 1;
+            resultSequenceRef.current.set(targetKey, sequence);
+            store.dispatch({ type: 'execution/event', event: { sourceId: target.sourceId, executionId: target.executionId, resultSetId: target.resultSetId, statementIndex: target.statementIndex, sequence, type: 'cancelled', totalRowCount: event.totalRows } });
+          }
+          return;
+        }
+        startResult();
+        mapped = { ...base, sequence: nextSequence(), type: 'cancelled', totalRowCount: event.totalRows };
+        break;
+      }
+      case 'batch-complete':
+        store.dispatch({
+          type: 'execution/batch-complete',
+          sourceId: active.sourceId,
+          executionId: active.executionId,
+          status: event.status === 'complete' ? 'success' : event.status,
+          statementCount: event.statementCount ?? active.statementCount,
+          completedStatements: event.completedStatements,
+          ...(event.message === undefined ? {} : { message: event.message }),
+        });
+        return;
     }
     if (mapped) store.dispatch({ type: 'execution/event', event: mapped });
   }, [store]);
@@ -712,73 +904,166 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     void loadResultPage(active, 0, true);
   }, [loadResultPage]);
 
-  const run = useCallback(async (mode: 'single' | 'explain' = 'single', override?: RunOverride): Promise<void> => {
+  const run = useCallback(async (mode: UiExecutionMode = 'single', override?: RunOverride): Promise<boolean> => {
     const connection = override?.connection ?? selectedConnection;
+    const document = override?.documentId
+      ? store.getState().workspace.documents[override.documentId]
+      : activeDocument;
     // Monaco owns the live document while the user is typing. Read it
     // directly so Run never races the editor's debounced React persistence.
-    const sql = override?.sql ?? editorRef.current?.getModel()?.getValue() ?? activeDocument?.content ?? '';
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    const selection = editor?.getSelection();
+    const selectedSql = model && selection && !selection.isEmpty() ? model.getValueInRange(selection) : undefined;
+    const sql = override?.sql ?? (mode === 'smart' ? selectedSql : undefined) ?? model?.getValue() ?? document?.content ?? '';
     if (!connection) {
       setNotice('Select a connection before running SQL.');
-      return;
+      return false;
+    }
+    if (!document) {
+      setNotice('Open a query document before running SQL.');
+      return false;
     }
     if (!sql.trim()) {
       setNotice('Enter SQL before running the document.');
-      return;
+      return false;
     }
-    const runGeneration = ++runGenerationRef.current;
-    const previous = activeQueryRef.current;
-    activeQueryRef.current = undefined;
-    previous?.subscription?.close();
-    if (previous) {
-      const previousResult = Object.values(store.getState().results.byResultSetId)
-        .find(result => result.sourceId === previous.sourceId && result.executionId === previous.executionId);
-      if (previousResult?.status === 'loading' || previousResult?.status === 'streaming') {
-        void api.cancelQuery(previous.queryId).catch(() => undefined);
-      }
+    const apiMode = mode === 'script' ? 'script' : mode === 'explain' ? 'explain' : 'single';
+    const cursorOffset = mode === 'smart' && !selectedSql && model && selection
+      ? model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn })
+      : undefined;
+    const request = {
+      connectionId: connection.id,
+      database: override?.database ?? document.database ?? connection.database,
+      sql,
+      mode: apiMode,
+      ...(cursorOffset === undefined ? {} : { cursorOffset }),
+    } as const;
+    const runGeneration = (runGenerationRef.current.get(document.id) ?? 0) + 1;
+    runGenerationRef.current.set(document.id, runGeneration);
+    for (const [pendingKey, pending] of pendingQueryStartsRef.current) {
+      if (pending.documentId !== document.id) continue;
+      pending.cancelled = true;
+      pendingQueryStartsRef.current.delete(pendingKey);
     }
+    const previous = [...activeQueriesRef.current.values()].filter(item => item.documentId === document.id);
+    for (const item of previous) {
+      item.subscription?.close();
+      activeQueriesRef.current.delete(item.queryId);
+      void api.cancelQuery(item.queryId).catch(() => undefined);
+    }
+    const oldResultIds = Object.values(store.getState().results.byResultSetId)
+      .filter(result => result.sourceId === document.sourceId)
+      .map(result => result.resultSetId);
+    store.dispatch({ type: 'results/reconcile-source', sourceId: document.sourceId, resultSetIds: [] });
+    const nextRows = { ...rowsByResultRef.current };
+    for (const resultSetId of oldResultIds) {
+      delete nextRows[resultSetId];
+      queryByResultRef.current.delete(resultSetId);
+      pageStateRef.current.delete(resultSetId);
+      resultSequenceRef.current.delete(`${document.sourceId}\u0000${resultSetId}`);
+    }
+    rowsByResultRef.current = nextRows;
+    setRowsByResult(nextRows);
+    setClientProcessableResultKeys(previousKeys => new Set([...previousKeys].filter(key => !key.startsWith(`${document.sourceId}\u0000`))));
     setNotice(undefined);
+    const pendingKey = `query-start:${document.id}:${runGeneration}`;
+    const pendingStart: PendingQueryStart = { documentId: document.id, cancelled: false };
+    pendingQueryStartsRef.current.set(pendingKey, pendingStart);
+    const isStale = (): boolean => pendingStart.cancelled || runGenerationRef.current.get(document.id) !== runGeneration;
+    let startedQueryId: string | undefined;
     try {
-      const started = await api.startQuery({ connectionId: connection.id, database: override?.database ?? connection.database, sql, mode });
-      if (runGenerationRef.current !== runGeneration) {
-        await api.cancelQuery(started.queryId).catch(() => undefined);
-        return;
+      let started;
+      try {
+        started = await api.startQuery(request);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : '';
+        if (!message.includes('Write confirmation required')) throw error;
+        const preview = await api.previewQuery(request);
+        if (isStale()) return false;
+        const previewText = preview.statements.map(statement => `${statement.index + 1}. ${statement.commandType}: ${statement.sql.trim()}${statement.warnings.length > 0 ? `\n   ${statement.warnings.join(' ')}` : ''}`).join('\n\n');
+        if (typeof window !== 'undefined' && !window.confirm(`This SQL can modify data or schema. Confirm execution?\n\nDatabase: ${preview.database}\n\n${previewText.slice(0, 2_000)}${previewText.length > 2_000 ? '\n…' : ''}`)) {
+          setNotice('Write execution cancelled.');
+          return false;
+        }
+        started = await api.startQuery({ ...request, writeConfirmed: true, writePreviewToken: preview.previewToken });
       }
-      const active: ActiveQuery = { queryId: started.queryId, resultSetId: queryResultId(started.queryId), sourceId: sourceIdFor(user), executionId: started.queryId, statementIndex: 0 };
-      activeQueryRef.current = active;
+      startedQueryId = started.queryId;
+      if (isStale()) {
+        await api.cancelQuery(started.queryId).catch(() => undefined);
+        return false;
+      }
+      const active: ActiveQuery = {
+        queryId: started.queryId,
+        resultSetId: queryResultId(started.queryId),
+        sourceId: document.sourceId,
+        executionId: started.queryId,
+        documentId: document.id,
+        mode,
+        statementCount: started.statementCount ?? (mode === 'script' ? 1 : 1),
+        statementIndex: 0,
+      };
+      activeQueriesRef.current.set(active.queryId, active);
       queryByResultRef.current.set(active.resultSetId, active.queryId);
+      resultSequenceRef.current.set(`${active.sourceId}\u0000${active.resultSetId}`, 0);
       pageStateRef.current.delete(active.resultSetId);
       rowsByResultRef.current = { ...rowsByResultRef.current, [active.resultSetId]: [] };
       setRowsByResult(rowsByResultRef.current);
       setSelectedRow(undefined);
-      store.dispatch({ type: 'execution/start', sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId });
+      store.dispatch({ type: 'execution/start', sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId, mode, statementCount: active.statementCount, statementSql: sql });
       store.dispatch({ type: 'results/select-source', sourceId: active.sourceId });
       store.dispatch({ type: 'results/select', sourceId: active.sourceId, resultSetId: active.resultSetId });
-      let sequence = 0;
-      const nextSequence = (): number => { sequence += 1; return sequence; };
       const subscriptionRef: { current?: QueryEventSubscription } = {};
       const closeActiveStream = (): void => {
         subscriptionRef.current?.close();
-        if (activeQueryRef.current?.queryId === active.queryId) activeQueryRef.current = undefined;
+        if (activeQueriesRef.current.get(active.queryId)?.queryId === active.queryId) activeQueriesRef.current.delete(active.queryId);
       };
       const subscription = api.connectToQueryEvents(started.queryId, event => {
-        if (activeQueryRef.current?.queryId !== active.queryId) return;
-        dispatchQueryEvent(active, event, nextSequence);
-        if (event.type === 'complete') hydrateResultPage(active);
-        if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') queueMicrotask(closeActiveStream);
+        if (activeQueriesRef.current.get(active.queryId)?.queryId !== active.queryId) return;
+        dispatchQueryEvent(active, event);
+        if (event.type === 'complete') {
+          const statementIndex = event.statementIndex ?? active.statementIndex;
+          hydrateResultPage({ ...active, resultSetId: queryResultId(active.queryId, statementIndex), statementIndex });
+        }
+        const terminal = event.type === 'batch-complete'
+          || event.type === 'error' && active.mode !== 'script'
+          || event.type === 'cancelled' && (event.scope !== 'statement' || active.mode !== 'script')
+          || event.type === 'complete' && active.mode !== 'script';
+        if (terminal) queueMicrotask(closeActiveStream);
       }, error => {
-        if (activeQueryRef.current?.queryId !== active.queryId) return;
-        store.dispatch({ type: 'execution/event', event: { sourceId: active.sourceId, executionId: active.executionId, resultSetId: active.resultSetId, sequence: nextSequence(), type: 'error', message: error.message } });
+        if (activeQueriesRef.current.get(active.queryId)?.queryId !== active.queryId) return;
+        dispatchQueryEvent(active, { type: 'error', queryId: active.queryId, statementIndex: active.statementIndex, message: error.message });
+        if (active.mode === 'script') {
+          const execution = store.getState().executions.byExecutionId[active.executionId];
+          store.dispatch({
+            type: 'execution/batch-complete',
+            sourceId: active.sourceId,
+            executionId: active.executionId,
+            status: 'error',
+            statementCount: active.statementCount,
+            completedStatements: execution?.completedStatements ?? 0,
+            message: error.message,
+          });
+        }
         setNotice(error.message);
         queueMicrotask(closeActiveStream);
       });
       subscriptionRef.current = subscription;
       active.subscription = subscription;
-      activeQueryRef.current = active;
+      return true;
     } catch (error) {
-      if (runGenerationRef.current !== runGeneration) return;
+      if (startedQueryId) {
+        activeQueriesRef.current.get(startedQueryId)?.subscription?.close();
+        activeQueriesRef.current.delete(startedQueryId);
+        void api.cancelQuery(startedQueryId).catch(() => undefined);
+      }
+      if (isStale()) return false;
       setNotice(error instanceof Error ? error.message : 'Could not start query.');
+      return false;
+    } finally {
+      pendingQueryStartsRef.current.delete(pendingKey);
     }
-  }, [activeDocument?.content, api, dispatchQueryEvent, hydrateResultPage, selectedConnection, store, user]);
+  }, [activeDocument, api, dispatchQueryEvent, hydrateResultPage, selectedConnection, store]);
 
   const loadMoreRows = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
@@ -794,20 +1079,23 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       resultSetId: activeResult.resultSetId,
       sourceId: activeResult.sourceId,
       executionId: activeResult.executionId,
+      documentId: activeDocument?.id ?? activeResult.sourceId,
+      mode: state.executions.byExecutionId[activeResult.executionId]?.mode ?? 'single',
+      statementCount: state.executions.byExecutionId[activeResult.executionId]?.statementCount ?? 1,
       statementIndex: activeResult.statementIndex,
     }, loadedRows, false);
-  }, [activeResult, loadResultPage]);
+  }, [activeDocument?.id, activeResult, loadResultPage, state.executions.byExecutionId]);
 
-  const openSharedDocument = useCallback((id: string, title: string, content: string, context: SharedDocumentContext = {}): void => {
+  const openSharedDocument = useCallback((id: string, title: string, content: string, context: SharedDocumentContext = {}): string | undefined => {
     if (!selectedConnection) {
       setNotice('Select a connection before opening a schema document.');
-      return;
+      return undefined;
     }
     store.dispatch({
       type: 'workspace/open-document',
       document: {
         id,
-        sourceId: id,
+        sourceId: sharedDocumentSourceId(user.id, id),
         title,
         content,
         dirty: false,
@@ -818,17 +1106,19 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       },
     });
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
-  }, [authoringDatabaseKind, selectedConnection, store]);
+    return id;
+  }, [authoringDatabaseKind, selectedConnection, store, user.id]);
 
   const openHistoryEntry = useCallback((entry: HistoryViewEntry): void => {
     const historyEntry = history.find(item => item.id === entry.id);
     if (!historyEntry) return;
     const profile = state.connections.profiles.find(item => item.id === historyEntry.connectionId);
-    const sourceId = sourceIdFor(user);
+    const documentId = `history:${historyEntry.id}`;
+    const sourceId = sharedDocumentSourceId(user.id, documentId);
     store.dispatch({
       type: 'workspace/open-document',
       document: {
-        id: `history:${historyEntry.id}`,
+        id: documentId,
         sourceId,
         title: entry.label || 'History query',
         content: historyEntry.sql,
@@ -850,7 +1140,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       return;
     }
     openHistoryEntry(entry);
-    void run('single', { sql: historyEntry.sql, connection: profile, database: historyEntry.database });
+    void run('single', { sql: historyEntry.sql, connection: profile, database: historyEntry.database, documentId: `history:${historyEntry.id}` });
   }, [history, openHistoryEntry, run, state.connections.profiles]);
 
   const copyHistoryEntry = useCallback((entry: HistoryViewEntry): void => {
@@ -867,20 +1157,20 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (node.kind !== 'object') return;
     const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
     const title = `Top 1000 · ${node.label}`;
-    openSharedDocument(`schema:${node.id}:top`, title, sql, { database: node.database, schema: node.schema });
-    if (selectedConnection) void run('single', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database });
+    const documentId = openSharedDocument(`schema:${node.id}:top`, title, sql, { database: node.database, schema: node.schema });
+    if (selectedConnection && documentId) void run('single', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database, documentId });
   }, [authoringDatabaseKind, openSharedDocument, run, selectedConnection]);
 
   const explainSchemaObject = useCallback((node: SchemaTreeNode): void => {
     if (node.kind !== 'object') return;
     const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
     const title = `Explain · ${node.label}`;
-    openSharedDocument(`schema:${node.id}:explain`, title, sql, { database: node.database, schema: node.schema });
+    const documentId = openSharedDocument(`schema:${node.id}:explain`, title, sql, { database: node.database, schema: node.schema });
     store.dispatch({ type: 'shell/surface', surface: 'explain' });
-    if (selectedConnection) {
+    if (selectedConnection && documentId) {
       try {
         buildExplainQuery(sql, authoringDatabaseKind);
-        void run('explain', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database });
+        void run('explain', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database, documentId });
       } catch (error: unknown) {
         setNotice(error instanceof Error ? error.message : 'Explain plans are not available for this connection.');
       }
@@ -978,17 +1268,69 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, []);
 
   const cancel = useCallback(async (): Promise<void> => {
-    const active = activeQueryRef.current;
-    if (!active) return;
-    const requestId = `cancel-${Date.now().toString(36)}`;
-    store.dispatch({ type: 'execution/cancel-requested', sourceId: active.sourceId, executionId: active.executionId, requestId });
-    try {
-      await api.cancelQuery(active.queryId);
-      store.dispatch({ type: 'execution/cancel-acknowledged', sourceId: active.sourceId, executionId: active.executionId, requestId });
-    } catch (error) {
-      store.dispatch({ type: 'execution/cancel-failed', sourceId: active.sourceId, executionId: active.executionId, requestId, message: error instanceof Error ? error.message : 'Cancellation failed.' });
+    const documentId = activeDocument?.id;
+    const pendingStarts = [...pendingQueryStartsRef.current.entries()].filter(([, pending]) => documentId === undefined || pending.documentId === documentId);
+    for (const [pendingKey, pending] of pendingStarts) {
+      pending.cancelled = true;
+      pendingQueryStartsRef.current.delete(pendingKey);
     }
-  }, [api, store]);
+    const activeQueries = [...activeQueriesRef.current.values()].filter(query => documentId === undefined || query.documentId === documentId);
+    const affectedDocumentIds = new Set([...pendingStarts.map(([, pending]) => pending.documentId), ...activeQueries.map(query => query.documentId)]);
+    for (const affectedDocumentId of affectedDocumentIds) {
+      runGenerationRef.current.set(affectedDocumentId, (runGenerationRef.current.get(affectedDocumentId) ?? 0) + 1);
+    }
+    if (pendingStarts.length > 0) setNotice('Execution cancelled.');
+    await Promise.all(activeQueries.map(async active => {
+      const requestId = `cancel-${Date.now().toString(36)}-${active.queryId}`;
+      store.dispatch({ type: 'execution/cancel-requested', sourceId: active.sourceId, executionId: active.executionId, requestId });
+      try {
+        await api.cancelQuery(active.queryId);
+        store.dispatch({ type: 'execution/cancel-acknowledged', sourceId: active.sourceId, executionId: active.executionId, requestId });
+      } catch (error) {
+        store.dispatch({ type: 'execution/cancel-failed', sourceId: active.sourceId, executionId: active.executionId, requestId, message: error instanceof Error ? error.message : 'Cancellation failed.' });
+      }
+    }));
+  }, [activeDocument?.id, api, store]);
+
+  const retryStatement = useCallback((statementIndex: number): void => {
+    const executionId = activeResult?.executionId;
+    const execution = executionId ? state.executions.byExecutionId[executionId] : undefined;
+    const statement = execution?.statements[statementIndex];
+    const connection = selectedConnection;
+    if (!statement?.sql || !connection) {
+      setNotice('The failed statement is no longer available for retry.');
+      return;
+    }
+    const id = nextSharedDocumentId(`retry-${statementIndex + 1}`);
+    store.dispatch({
+      type: 'workspace/open-document',
+      document: {
+        id,
+        sourceId: sharedDocumentSourceId(user.id, id),
+        title: `Retry · Statement ${statementIndex + 1}`,
+        content: statement.sql,
+        dirty: false,
+        connectionId: connection.id,
+        database: activeDocument?.database ?? connection.database,
+        databaseKind: activeDocument?.databaseKind ?? connection.dbType,
+      },
+    });
+    void run('single', { sql: statement.sql, connection, database: activeDocument?.database ?? connection.database, documentId: id });
+  }, [activeDocument?.database, activeDocument?.databaseKind, activeResult?.executionId, run, selectedConnection, state.executions.byExecutionId, store, user.id]);
+
+  const openAudit = useCallback((): void => {
+    setShowAudit(true);
+    void api.audit().then(entries => setAudit(Array.isArray(entries) ? entries : [])).catch(error => {
+      setAudit([]);
+      setNotice(error instanceof Error ? error.message : 'Could not load audit log.');
+    });
+  }, [api]);
+
+  const handleLogout = useCallback(async (): Promise<void> => {
+    flushResultViewWrites();
+    await cleanupActiveQueries();
+    try { await api.logout(); } finally { onLogout(); }
+  }, [api, cleanupActiveQueries, flushResultViewWrites, onLogout]);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
@@ -1001,9 +1343,12 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       resultSetId: activeResult.resultSetId,
       sourceId: activeResult.sourceId,
       executionId: activeResult.executionId,
+      documentId: activeDocument?.id ?? activeResult.sourceId,
+      mode: state.executions.byExecutionId[activeResult.executionId]?.mode ?? 'single',
+      statementCount: state.executions.byExecutionId[activeResult.executionId]?.statementCount ?? 1,
       statementIndex: activeResult.statementIndex,
     }, 0, true);
-  }, [activeResult, loadResultPage]);
+  }, [activeDocument?.id, activeResult, loadResultPage, state.executions.byExecutionId]);
 
   const updateSql = useCallback((content: string): void => {
     if (!activeDocument) return;
@@ -1011,14 +1356,38 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [activeDocument, store]);
 
   const selectConnection = useCallback((connectionId: string): void => {
+    if (connectionId === '') {
+      store.dispatch({ type: 'connections/select', connectionId: undefined });
+      if (activeDocument) store.dispatch({
+        type: 'workspace/update-document',
+        documentId: activeDocument.id,
+        patch: { connectionId: undefined, database: undefined, schema: undefined },
+      });
+      return;
+    }
     const profile = state.connections.profiles.find(item => item.id === connectionId);
-    store.dispatch({ type: 'connections/select', connectionId });
+    if (!profile) return;
+    store.dispatch({ type: 'connections/select', connectionId: profile.id });
     if (activeDocument) store.dispatch({
       type: 'workspace/update-document',
       documentId: activeDocument.id,
-      patch: { connectionId, database: profile?.database ?? '', schema: '', databaseKind: profile?.dbType ?? 'netezza' },
+      patch: { connectionId: profile.id, database: profile.database, schema: '', databaseKind: profile.dbType },
     });
   }, [activeDocument, state.connections.profiles, store]);
+
+  const selectDatabase = useCallback((database: string): void => {
+    if (!activeDocument) return;
+    store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { database, schema: '' } });
+    schemaGenerationRef.current += 1;
+    schemaLoadedParentsRef.current.clear();
+    schemaLoadingParentsRef.current.clear();
+    setSchemaNodes([]);
+    setSchemaSearch('');
+    setSchemaSearchResults([]);
+    setSchemaSearchLoading(false);
+    setSchemaSearchRevision(previous => previous + 1);
+    store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
+  }, [activeDocument, store]);
 
   const saveConnection = useCallback((profile: ConnectionProfileSummary): void => {
     setConnectionEditor(undefined);
@@ -1039,6 +1408,112 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
 
   const selectAuthoringDialect = useCallback((databaseKind: DatabaseKind): void => {
     if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { databaseKind } });
+  }, [activeDocument, store]);
+
+  const createDocument = useCallback((): void => {
+    const id = nextSharedDocumentId();
+    const document = {
+      id,
+      sourceId: sharedDocumentSourceId(user.id, id),
+      title: `Query ${state.workspace.documentOrder.length + 1}`,
+      content: 'SELECT 1;',
+      dirty: false,
+      ...(selectedConnection === undefined ? {} : { connectionId: selectedConnection.id, database: selectedConnection.database, databaseKind: selectedConnection.dbType }),
+    };
+    store.dispatch({ type: 'workspace/open-document', document });
+    store.dispatch({ type: 'shell/surface', surface: 'workspace' });
+  }, [selectedConnection, state.workspace.documentOrder.length, store, user.id]);
+
+  const selectDocument = useCallback((documentId: string): void => {
+    const current = store.getState();
+    const nextDocument = current.workspace.documents[documentId];
+    if (!nextDocument) return;
+    // The keyed editor is disposed before the next document mounts. Clear the
+    // parent reference synchronously so toolbar actions cannot target the old
+    // Monaco model during that hand-off.
+    editorRef.current = null;
+    const currentConnectionId = current.connections.selectedConnectionId;
+    const nextConnectionId = nextDocument.connectionId !== undefined
+      ? current.connections.profiles.some(profile => profile.id === nextDocument.connectionId) ? nextDocument.connectionId : undefined
+      : current.connections.profiles.some(profile => profile.id === currentConnectionId) ? currentConnectionId : undefined;
+    store.dispatch({ type: 'workspace/select-document', documentId });
+    store.dispatch({ type: 'connections/select', connectionId: nextConnectionId });
+    if (nextDocument.connectionId === undefined && nextConnectionId !== undefined) {
+      const profile = current.connections.profiles.find(item => item.id === nextConnectionId);
+      if (profile) store.dispatch({
+        type: 'workspace/update-document',
+        documentId,
+        patch: {
+          connectionId: profile.id,
+          database: nextDocument.database ?? profile.database,
+          databaseKind: nextDocument.databaseKind ?? profile.dbType,
+        },
+      });
+    }
+  }, [store]);
+
+  const closeDocument = useCallback((documentId: string): void => {
+    const document = store.getState().workspace.documents[documentId];
+    if (!document) return;
+    if (document.dirty && typeof window !== 'undefined' && !window.confirm(`Close modified document “${document.title}”?`)) return;
+    runGenerationRef.current.set(documentId, (runGenerationRef.current.get(documentId) ?? 0) + 1);
+    for (const [pendingKey, pending] of pendingQueryStartsRef.current) {
+      if (pending.documentId !== documentId) continue;
+      pending.cancelled = true;
+      pendingQueryStartsRef.current.delete(pendingKey);
+    }
+    if (store.getState().workspace.activeDocumentId === documentId) editorRef.current = null;
+    const activeQueries = [...activeQueriesRef.current.values()].filter(query => query.documentId === documentId);
+    for (const active of activeQueries) {
+      active.subscription?.close();
+      activeQueriesRef.current.delete(active.queryId);
+      void api.cancelQuery(active.queryId).catch(() => undefined);
+    }
+    const resultIds = Object.values(store.getState().results.byResultSetId).filter(result => result.sourceId === document.sourceId).map(result => result.resultSetId);
+    store.dispatch({ type: 'results/reconcile-source', sourceId: document.sourceId, resultSetIds: [] });
+    const nextRows = { ...rowsByResultRef.current };
+    for (const resultSetId of resultIds) {
+      delete nextRows[resultSetId];
+      queryByResultRef.current.delete(resultSetId);
+      pageStateRef.current.delete(resultSetId);
+      resultSequenceRef.current.delete(`${document.sourceId}\u0000${resultSetId}`);
+    }
+    rowsByResultRef.current = nextRows;
+    setRowsByResult(nextRows);
+    store.dispatch({ type: 'workspace/close-document', documentId });
+  }, [api, store]);
+
+  const saveDocument = useCallback(async (): Promise<void> => {
+    if (!activeDocument) return;
+    const editor = editorRef.current;
+    if (preferences?.formatOnSave) await editor?.getAction('editor.action.formatDocument')?.run();
+    const content = editor?.getModel()?.getValue() ?? activeDocument.content;
+    store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: false } });
+    setNotice('Document saved locally.');
+  }, [activeDocument, preferences?.formatOnSave, store]);
+
+  const formatDocument = useCallback((): void => {
+    void editorRef.current?.getAction('editor.action.formatDocument')?.run();
+  }, []);
+
+  const commentDocument = useCallback((): void => {
+    const editor = editorRef.current;
+    if (editor) {
+      void editor.getAction('editor.action.commentLine')?.run();
+      return;
+    }
+    if (!activeDocument) return;
+    const lines = activeDocument.content.split('\n');
+    const allCommented = lines.every(line => line.trim() === '' || line.trim().startsWith('--'));
+    store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: {
+      content: lines.map(line => {
+        const trimmed = line.trimStart();
+        if (allCommented && trimmed.startsWith('--')) return line.replace(/^\s*--\s?/u, '');
+        if (!allCommented && trimmed && !trimmed.startsWith('--')) return line.startsWith(' ') || line.startsWith('\t') ? line.replace(/^(\s*)/u, '$1-- ') : `-- ${line}`;
+        return line;
+      }).join('\n'),
+      dirty: true,
+    } });
   }, [activeDocument, store]);
 
   const selectSurface = useCallback((surface: string): void => {
@@ -1138,11 +1613,14 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
           resultSetId: activeResult.resultSetId,
           sourceId: activeResult.sourceId,
           executionId: activeResult.executionId,
+          documentId: activeDocument?.id ?? activeResult.sourceId,
+          mode: state.executions.byExecutionId[activeResult.executionId]?.mode ?? 'single',
+          statementCount: state.executions.byExecutionId[activeResult.executionId]?.statementCount ?? 1,
           statementIndex: activeResult.statementIndex,
         }, 0, true, nextView);
       }
     }
-  }, [activeResult, clientProcessing, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
+  }, [activeDocument?.id, activeResult, clientProcessing, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, state.executions.byExecutionId, store]);
 
   const closeColumnFilter = useCallback((): void => {
     filterMenuGenerationRef.current += 1;
@@ -1348,22 +1826,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       setNotice('Result export is unavailable for this result.');
       return;
     }
-    const columnFilters: QueryColumnFilterSpec[] = Object.entries(activeResult.view.columnFilters)
-      .flatMap(([column, value]) => {
-        const columnIndex = activeResult.columns.findIndex((item, index) => item.name === column || String(index) === column);
-        return columnIndex >= 0 && value.trim() ? [{ columnIndex, value }] : [];
-      });
-    const sorting: QuerySortSpec[] = activeResult.view.sorting.flatMap(item => {
-      const columnIndex = activeResult.columns.findIndex((column, index) => column.name === item.column || String(index) === item.column);
-      return columnIndex >= 0 ? [{ columnIndex, desc: item.descending }] : [];
-    });
     try {
       const downloaded = await api.exportQuery(queryId, {
         statementIndex: activeResult.statementIndex,
         format: exportFormat,
-        globalFilter: activeResult.view.globalFilter,
-        columnFilters,
-        sorting,
+        ...resultQueryOptions(activeResult, activeResult.view),
       });
       const url = URL.createObjectURL(downloaded.blob);
       const link = document.createElement('a');
@@ -1382,11 +1849,41 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const selectedNode = state.metadata.selectedNodeId
     ? schemaNodes.find(node => node.id === state.metadata.selectedNodeId) ?? schemaSearchResults.find(node => node.id === state.metadata.selectedNodeId)
     : undefined;
+  useEffect(() => {
+    if (!selectedConnection || selectedNode?.kind !== 'object' || !selectedNode.database || !selectedNode.schema || !selectedNode.objectName) {
+      setColumns([]);
+      return undefined;
+    }
+    let live = true;
+    setColumns([]);
+    void api.columns(selectedConnection.id, selectedNode.database, selectedNode.schema, selectedNode.objectName).then(items => {
+      if (live) setColumns(Array.isArray(items) ? items : []);
+    }).catch(error => {
+      if (live) setNotice(error instanceof Error ? error.message : 'Could not load columns.');
+    });
+    return () => { live = false; };
+  }, [api, selectedConnection?.id, selectedNode?.database, selectedNode?.kind, selectedNode?.objectName, selectedNode?.schema]);
   const resultState = resultAsyncState(activeResult, visibleRows.length);
   const resultMessage = activeResult?.message;
+  const activeExecution: UiExecutionState | undefined = activeResult ? state.executions.byExecutionId[activeResult.executionId] : undefined;
+  const hasActiveQuery = activeDocument !== undefined && (
+    [...activeQueriesRef.current.values()].some(query => query.documentId === activeDocument.id)
+      || [...pendingQueryStartsRef.current.values()].some(query => query.documentId === activeDocument.id)
+  );
+  const runAndExport = useCallback(async (): Promise<void> => {
+    if (activeResult && ['complete', 'empty', 'error', 'cancelled'].includes(activeResult.status)) {
+      await exportResults();
+      return;
+    }
+    const started = await run();
+    if (started) setNotice('Query started. Export is available when the result is ready.');
+  }, [activeResult, exportResults, run]);
+  const inspectorDatabase = selectedNode?.database ?? activeDocument?.database ?? selectedConnection?.database ?? '';
+  const inspectorSchema = selectedNode?.schema ?? activeDocument?.schema ?? '';
 
-  return <UiShell title="JustyBase" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
-    <section className="shared-connections" aria-label="Connections"><div className="shared-sidebar-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" aria-label="Add connection" title="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <div className="shared-sidebar-empty">No connections configured.<button type="button" onClick={() => setConnectionEditor({})}>Add connection</button></div> : state.connections.profiles.map(profile => <div className="shared-connection-item" key={profile.id}><button type="button" className={profile.id === selectedConnectionId ? 'active' : ''} aria-label={profile.name} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="shared-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="shared-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} title="Edit connection" onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} title="Delete connection" onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
+  return <ApiClientProvider client={api}><UiShell title="JustyBase" className="shared-ui-shell" activeSurface={state.shell.activeSurface} onSurfaceChange={selectSurface} surfaces={[{ id: 'workspace', label: 'Workspace' }, { id: 'history', label: 'History' }, { id: 'explain', label: 'Explain' }, { id: 'designer', label: 'Designer' }]} sidebar={<div className="shared-sidebar">
+    <section className="shared-connections" aria-label="Connections"><div className="shared-sidebar-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" aria-label="Add connection" title="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.status === 'loading' && <div role="status">Loading connections…</div>}{state.connections.status === 'error' && <div role="alert">{state.connections.message ?? 'Could not load connections.'}<button type="button" onClick={() => void reloadConnections()}>Retry connections</button></div>}{state.connections.profiles.length === 0 && state.connections.status !== 'loading' ? <div className="shared-sidebar-empty">No connections configured.<button type="button" onClick={() => setConnectionEditor({})}>Add connection</button></div> : state.connections.profiles.map(profile => <div className="shared-connection-item" key={profile.id}><button type="button" className={profile.id === selectedConnectionId ? 'active' : ''} aria-label={profile.name} aria-pressed={profile.id === selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="shared-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="shared-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} title="Edit connection" onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} title="Delete connection" onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
+    <label className="shared-context-picker">Database<select aria-label="Database" value={activeDocument?.database ?? ''} disabled={!selectedConnection || databaseLoadState === 'loading' || (databaseLoadState !== 'ready' && databaseLoadState !== 'empty')} onChange={event => selectDatabase(event.target.value)}><option value="">{databaseLoadState === 'loading' ? 'Loading databases…' : databaseLoadState === 'empty' ? 'No databases' : 'Select database'}</option>{activeDocument?.database && !databases.some(item => item.name === activeDocument.database) && <option value={activeDocument.database}>{activeDocument.database}</option>}{databases.map(database => <option key={database.name} value={database.name}>{database.name}</option>)}</select>{databaseLoadState === 'error' && <span className="field-help" role="alert">{databaseLoadError ?? 'Could not load databases.'} <button type="button" onClick={() => setDatabaseReloadToken(previous => previous + 1)}>Retry</button></span>}</label>
     <SchemaTree
       nodes={visibleSchema}
       selectedId={state.metadata.selectedNodeId}
@@ -1417,20 +1914,25 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       onExpandAll={expandSchema}
       onCollapseAll={collapseSchema}
     />
-    <button type="button" onClick={onLogout}>Log out</button>
+    <InspectorPanel database={inspectorDatabase} schema={inspectorSchema} columns={columns} selectedObject={selectedNode} onInsertColumn={column => insertSchemaNode({ id: `column:${column.name}`, kind: 'column', label: column.name, database: selectedNode?.database ?? activeDocument?.database, schema: selectedNode?.schema ?? activeDocument?.schema, objectName: selectedNode?.objectName, hasChildren: false })} connectionName={selectedConnection?.name} />
+    <section className="shared-capabilities" aria-label="Capabilities"><strong>Capabilities</strong><button type="button" onClick={() => setShowSettings(true)}>Settings</button><button type="button" onClick={openAudit}>Audit</button>{user.role === 'admin' ? <button type="button" onClick={() => setShowAdmin(true)}>Admin</button> : <span role="status">Admin: unavailable for this account</span>}</section>
+    <button type="button" onClick={() => void handleLogout()}>Log out</button>
   </div>}>
     {state.shell.activeSurface === 'history' ? <HistoryView entries={historyItems} state={state.history.status === 'error' ? 'error' : state.history.status === 'loading' ? 'loading' : historyItems.length === 0 ? 'empty' : 'ready'} message={state.history.message} onOpen={openHistoryEntry} onRerun={rerunHistoryEntry} onCopy={copyHistoryEntry} onRefresh={() => void reloadHistory()} />
       : state.shell.activeSurface === 'explain' ? <ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={cancel} />
         : state.shell.activeSurface === 'designer' ? <div className="shared-designer-launch"><h2>Object Designer</h2><p>Select a table, view, or routine in the schema explorer and choose <em>Open Object Designer</em> from its context menu.</p>{selectedNode?.kind === 'object' && <button type="button" onClick={() => openSchemaDesigner(selectedNode as SchemaTreeNode)}>Open selected object</button>}</div>
           : <>
-            <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} />
-            <div className="shared-editor-stack"><SharedSqlEditor documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: activeDocument?.database ?? selectedConnection?.database, schema: activeDocument?.schema, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onReady={editor => { editorRef.current = editor; }} onProblemsChange={setProblems} /></div>
+            <div className="shared-document-toolbar" role="toolbar" aria-label="Document actions"><div className="shared-document-summary"><span className="shared-toolbar-caption">Document</span><strong>{activeDocument?.title ?? 'scratch.sql'}</strong>{activeDocument?.dirty && <span className="shared-document-dirty">Unsaved</span>}</div><div className="shared-document-actions"><button type="button" onClick={createDocument}>New query</button><button type="button" onClick={() => void saveDocument()} disabled={!activeDocument}>Save</button><button type="button" onClick={commentDocument} disabled={!activeDocument}>Comment</button><button type="button" onClick={formatDocument} disabled={!activeDocument}>Format</button></div></div>
+            <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={selectDocument} onClose={closeDocument} />
+            <div className="shared-editor-actions" role="toolbar" aria-label="SQL execution actions"><span className="shared-toolbar-caption">Execute</span><div className="shared-run-actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('smart')}>Smart</button><button type="button" onClick={() => void run('script')}>Batch</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void runAndExport()}>Run → Export</button><button type="button" onClick={() => void cancel()} disabled={!hasActiveQuery}>Cancel</button></div><span className="shared-toolbar-divider" aria-hidden="true" /><div className="shared-context-controls"><label className="shared-connection-picker">Connection<select aria-label="Connection" value={selectedConnectionId ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div></div>
+            <div className="shared-editor-stack"><SharedSqlEditor key={activeDocument?.id ?? DOCUMENT_ID} documentId={activeDocument?.id ?? DOCUMENT_ID} value={activeDocument?.content ?? ''} api={api} preferences={preferences} getContext={() => ({ connectionId: selectedConnection?.id, database: activeDocument?.database ?? selectedConnection?.database, schema: activeDocument?.schema, databaseKind: authoringDatabaseKind })} onChange={updateSql} onRun={() => void run()} onReady={editor => { if (store.getState().workspace.activeDocumentId === (activeDocument?.id ?? DOCUMENT_ID)) editorRef.current = editor; }} onProblemsChange={setProblems} /></div>
             <div className="shared-result-panel">
-              <div className="shared-editor-actions" role="toolbar" aria-label="SQL editor actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div>
               {notice && <div role="status">{notice}</div>}
               <ResultPanel
-                results={Object.values(state.results.byResultSetId)}
+                results={documentResults}
                 activeResult={activeResult}
+                execution={activeExecution}
+                onRetryStatement={retryStatement}
                 rows={activeRows}
                 resultState={resultState}
                 resultMessage={resultMessage}
@@ -1478,9 +1980,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               />
             </div>
           </>}
-    {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
+    {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={importTarget.database ?? activeDocument?.database ?? selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}
     {designerTarget && selectedConnection && <ApiClientProvider client={api}><ObjectDesigner connectionId={selectedConnection.id} database={designerTarget.database ?? selectedConnection.database} databaseKind={selectedConnection.dbType} target={designerTarget} onClose={() => setDesignerTarget(undefined)} onApplied={() => { setDesignerTarget(undefined); setNotice('Object designer change applied. Refresh the schema to see the updated definition.'); refreshSchema(); }} /></ApiClientProvider>}
     {connectionEditor && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setConnectionEditor(undefined); }}><section className="modal-card connection-card" role="dialog" aria-modal="true" aria-labelledby="shared-connection-dialog-title"><div className="section-title"><span id="shared-connection-dialog-title">{connectionEditor.initial ? 'Edit connection' : 'Add connection'}</span><button type="button" className="icon-button" aria-label="Close connection dialog" onClick={() => setConnectionEditor(undefined)}>×</button></div><ConnectionForm api={api} initial={connectionEditor.initial} onCreated={saveConnection} onCancel={() => setConnectionEditor(undefined)} /></section></div>}
+    {showSettings && preferences && <EditorSettings value={preferences} onSave={next => { setPreferences(next); setShowSettings(false); setNotice('Settings saved.'); }} onClose={() => setShowSettings(false)} />}
+    {showSettings && !preferences && <div className="modal-backdrop"><section className="modal-card" role="dialog" aria-modal="true" aria-label="Editor settings"><div role="status">Loading settings…</div><button type="button" onClick={() => setShowSettings(false)}>Close</button></section></div>}
+    {showAudit && <AuditPanel entries={audit} onClose={() => setShowAudit(false)} />}
+    {showAdmin && user.role === 'admin' && <AdminPanel onClose={() => setShowAdmin(false)} />}
     {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
-  </UiShell>;
+  </UiShell></ApiClientProvider>;
 }

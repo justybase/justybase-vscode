@@ -52,6 +52,44 @@ export interface UiConnectionState {
 export type UiResultStatus = 'idle' | 'loading' | 'streaming' | 'complete' | 'empty' | 'error' | 'cancelled';
 export type UiCancellationStatus = 'none' | 'requested' | 'acknowledged' | 'cancelled' | 'failed';
 
+/** Execution modes exposed by the shared authoring surface. */
+export type UiExecutionMode = 'single' | 'smart' | 'script' | 'explain';
+/** Modes accepted by the server-backed execution port. Smart is an authoring
+ * convenience and is resolved to a concrete mode before crossing the port. */
+export type UiExecutionRequestMode = Exclude<UiExecutionMode, 'smart'>;
+export type UiExecutionStatus = 'idle' | 'running' | 'success' | 'error' | 'cancelled';
+export type UiStatementExecutionStatus = 'pending' | 'running' | 'success' | 'error' | 'cancelled' | 'skipped';
+
+/** State for one statement in a single or script execution. */
+export interface UiStatementExecutionState {
+  readonly statementIndex: number;
+  readonly status: UiStatementExecutionStatus;
+  readonly resultSetId?: string;
+  readonly sql?: string;
+  readonly message?: string;
+}
+
+/**
+ * Execution-level state is deliberately separate from result state. A script
+ * can have several result sets, including a failed statement and skipped
+ * statements, while each result surface keeps its own row/event lifecycle.
+ */
+export interface UiExecutionState {
+  readonly sourceId: string;
+  readonly executionId: string;
+  readonly mode: UiExecutionMode;
+  readonly statementCount: number;
+  readonly completedStatements: number;
+  readonly status: UiExecutionStatus;
+  readonly message?: string;
+  readonly statements: Readonly<Record<number, UiStatementExecutionState>>;
+}
+
+export interface UiExecutionsState {
+  readonly activeExecutionId?: string;
+  readonly byExecutionId: Readonly<Record<string, UiExecutionState>>;
+}
+
 /** Typed filter state shared by the grid renderer and query adapters. */
 export interface UiResultColumnFilterDefinition {
   readonly operator: QueryColumnFilterOperator;
@@ -106,6 +144,8 @@ export interface UiResultSurfaceState {
   readonly lastSequence: number;
   readonly cancellation: UiCancellationStatus;
   readonly cancelRequestId?: string;
+  readonly batchStatus?: UiExecutionStatus;
+  readonly batchMessage?: string;
   readonly view: UiResultViewState;
 }
 
@@ -145,6 +185,7 @@ export interface UiState {
   readonly shell: UiShellState;
   readonly workspace: UiWorkspaceState;
   readonly connections: UiConnectionState;
+  readonly executions: UiExecutionsState;
   readonly results: UiResultsState;
   readonly metadata: UiMetadataState;
   readonly history: UiHistoryState;
@@ -161,9 +202,10 @@ export interface UiResultEventBase {
 }
 
 export type UiResultEvent =
-  | (UiResultEventBase & { readonly type: 'started' })
-  | (UiResultEventBase & { readonly type: 'statement-started' })
+  | (UiResultEventBase & { readonly type: 'started'; readonly mode?: Exclude<UiExecutionMode, 'smart'>; readonly statementCount?: number })
+  | (UiResultEventBase & { readonly type: 'statement-started'; readonly statementSql?: string })
   | (UiResultEventBase & { readonly type: 'columns'; readonly columns: readonly UiResultColumn[] })
+  | (UiResultEventBase & { readonly type: 'session'; readonly storageId: string; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'rows'; readonly rowCount: number; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'progress'; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'complete'; readonly totalRowCount: number; readonly message?: string })
@@ -185,8 +227,10 @@ export type UiAction =
   | { readonly type: 'connections/status'; readonly status: UiOperationStatus; readonly message?: string }
   | { readonly type: 'connections/set-profiles'; readonly profiles: readonly RedactedConnectionProfile[] }
   | { readonly type: 'connections/select'; readonly connectionId?: string }
-  | { readonly type: 'execution/start'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly statementIndex?: number; readonly storageId?: string }
+  | { readonly type: 'execution/start'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly statementIndex?: number; readonly storageId?: string; readonly mode?: UiExecutionMode; readonly statementCount?: number; readonly statementSql?: string }
   | { readonly type: 'execution/event'; readonly event: UiResultEvent }
+  | { readonly type: 'execution/statement-status'; readonly sourceId: string; readonly executionId: string; readonly statementIndex: number; readonly status: UiStatementExecutionStatus; readonly resultSetId?: string; readonly sql?: string; readonly message?: string }
+  | { readonly type: 'execution/batch-complete'; readonly sourceId: string; readonly executionId: string; readonly status: Exclude<UiExecutionStatus, 'idle' | 'running'>; readonly statementCount?: number; readonly completedStatements: number; readonly message?: string }
   | { readonly type: 'execution/stream-failed'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly message: string }
   | {
     readonly type: 'results/hydrate';

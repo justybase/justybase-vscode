@@ -545,11 +545,12 @@ Remote-WSL gates remain explicit follow-up evidence.
 
 ### R9 — Cautious cross-product UI parity rollout
 
-Status: in progress. The shared `ui-core`/`ui-react` foundation, coverage
-enforcement, authenticated Electron development/test shell, Web shared
-composition, and opt-in Web/Electron/VS Code Result Panel vertical slices are now in
-the working tree. Full first-tier parity remains open; `legacy` is still the
-default until each slice passes all three product gates. R9 is a
+Status: the historical R9 extraction is complete for the production Web
+renderer. The shared `ui-core`/`ui-react` foundation, authenticated Electron
+development/test shell, Shared Web composition, and VS Code adapter boundary
+are in place. Web no longer has a legacy/Dockyard runtime switch; VS Code keeps
+its host-owned renderer. Remaining gaps are explicitly platform-specific
+capabilities rather than a Web renderer rollout blocker. R9 is a
 strangler-style product-surface migration after the
 R0–R8 refactoring closure. It targets near-parity for the main workflows in
 the Web editor, the Electron development/test shell, and VS Code webviews. The objective is
@@ -670,11 +671,11 @@ twice merely to compare old and new UI paths.
 
 #### R9.4 — Migrate vertical slices in risk order
 
-Every slice follows the same order:
+Every slice followed the same order:
 `characterization test → port/state extraction → adapter → Web → Electron →
-VS Code → all-product tests → removal of the old path`. The `legacy/shared`
-feature flag defaults to `legacy`; `shared` becomes the default only after the
-slice passes all gates.
+VS Code → all-product tests → removal of the old path`. The historical
+`legacy/shared` flag was used during migration; production Web now always uses
+Shared UI, while VS Code retains its host-owned mode where required.
 
 1. **Foundation:** create the ports, capability descriptors, tokens,
    persistence adapters, route/command mapping, feature flag, and Electron
@@ -731,9 +732,9 @@ slice passes all gates.
 | Changed UI coverage enforcement | CI and local changed-coverage input include `media`, `apps/web`, `apps/electron`, `packages/ui-core`, and `packages/ui-react`; each changed UI file has an LCOV/package gate at least 80% lines and 70% branches. |
 | `ui-core` / `ui-react` / `ui-monaco` | Reducer, port, capability, persistence, React component, focus, keyboard, accessibility, Monaco registration, marker mapping, and portable editor tests, including loading/empty/error/cancel states; changed-code coverage must include the UI paths before their shared flag is enabled. |
 | Result Panel | `npm run test:result-core`, Web tests, `test-harness/tests/table-rendering.spec.ts`, `npm run test:extension-host`, `npm run test:extension-host:filter-performance`, `JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host`, `npm run test:electron:live`, `npm run benchmark:data-grid`, `npm run test:playwright:data-grid-performance`, and `npm run test:playwright:data-grid-visual`; current Linux evidence also includes 3 result sets/11 trace phases in Extension Host, 11/11 Electron live checks, 6/6 browser performance tests, 19/19 rendering tests, and the shared 1280×720 visual fixture. |
-| Workspace/LSP | `npm run test:web`, `npm run test:playwright:web-api`, `npm run test:extension-host:authoring`, parser/completion/parity tests, and a Web smoke against a controlled API. |
+| Workspace/LSP | `npm run test:web`, `npm run test:playwright:web-shared`, `npm run test:extension-host:authoring`, parser/completion/parity tests, and a Web smoke against a controlled API. |
 | Schema/designers/companions | `designer-core` tests, API/Web tests, `npm run test:extension-host:designer`, `npm run build:companions`, and the relevant companion verification gates. |
-| Final R9 | `npm run verify:pr`, `npm run test`, `npm run test:playwright`, `npm run test:playwright:web-api`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, main/companion builds, and packaging. |
+| Final R9 | `npm run verify:pr`, `npm run test`, `npm run test:playwright`, `npm run test:playwright:web-shared`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, main/companion builds, and packaging. |
 | Additional environments | Live database suites only with required variables; Windows and Remote-WSL are separate evidence, never default skips. |
 
 High-risk changed code keeps at least 80% line and 70% branch coverage. The
@@ -757,17 +758,20 @@ The implementation rule for the entire R9 is: work only in the working tree,
 never run `git commit` or `git push`, and keep generated/test artifacts
 temporary and ignored until the user makes a separate release decision.
 
-### R10 — Dockyard web workspace and test-harness login
+### R10 — Dockyard web workspace and test-harness login (historical)
 
-Status: implementation complete for the Web Dockyard path and its controlled
-test harness on Linux (2026-09-13); the required cross-platform browser
-workflow is now in place, but its Windows/macOS evidence remains pending an
-external CI run. Cross-product parity outside the R10 Web boundary remains
-follow-up work. R10 starts after the R9 foundation is in place.
-It replaces the Web editor's default shell with the web-only Dockyard adapter
-while keeping `ui-core` and `ui-react` platform-neutral. Dockyard is used as a
-retained-DOM layout engine; it is not treated as a verified AvalonDock/XAML
-port.
+Status: historical implementation record. The Dockyard path was evaluated but
+is not the production Web renderer; Shared Web is now the default and the
+Dockyard composition, recovery path, and mode switch are not mounted. The
+cross-platform browser workflow is maintained as `web-shared.yml`.
+
+The remainder of this section records the retired experiment for traceability;
+new Web work must follow the Shared Web contract and must not restore Dockyard
+runtime branching.
+The historical experiment replaced the Web editor's default shell with the
+web-only Dockyard adapter while keeping `ui-core` and `ui-react` platform-
+neutral. It is retained here only as an implementation record, not as an
+active renderer or supported Web layout engine.
 
 #### R10.1 — Vendored layout boundary
 
@@ -819,7 +823,7 @@ port.
    `JUSTYBASE_ADMIN_USER`/`JUSTYBASE_ADMIN_PASSWORD`, shares normal session,
    CSRF-cookie, and session-creation logic, and is absent in all other modes.
    The regular username/password form and login route remain unchanged.
-3. `test:playwright:web-api` builds with the test flag and starts the API with
+3. The historical browser gate built with the test flag and started the API with
    the server-side flag. Specs use the button instead of repeating
    credentials. Documentation must make clear that this path is for local/CI
    harnesses only and must never be enabled in production.
@@ -832,7 +836,7 @@ port.
 | Test login | Web client/component tests; API route tests for bodyless login, matching cookies/session, and absence outside controlled test mode. |
 | Dockyard lifecycle | Layout migration/validation tests plus adapter disposal tests covering hosts, listeners, subscriptions, stale content, and failed initialization. |
 | Web workspace | `npm run test:web`, `npm run build:web`, and the deterministic Playwright flow covering login, query documents, reorder, float, auto-hide, dock-back, reload, history, Explain, modals, cancellation, and narrow viewport. |
-| Cross-platform browser | `.github/workflows/web-dockyard.yml` runs the controlled Chromium/API flow on `ubuntu-latest`, `windows-latest`, and `macos-14`; all three matrix jobs must pass before R10 evidence is closed. |
+| Cross-platform browser | `.github/workflows/web-shared.yml` runs the controlled Chromium/API flow on `ubuntu-latest`, `windows-latest`, and `macos-14`; the Shared Web matrix is the active gate. |
 | Final R10 | `npm run verify:pr`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, and the applicable browser/API/package gates. |
 
 R10 is complete only when the Web Dockyard layout survives reload and user
@@ -865,7 +869,7 @@ integration: `npm run verify:pr`, `npm run docs:check`,
 `npm run version:check`. SQL additionally requires sql-core, parity, parser,
 Extension Host authoring, and the LSP benchmark; MSSQL/Oracle construction
 must remain below 2000 ms. Results require Extension Host, Playwright
-table-rendering, the deterministic `npm run test:playwright:web-api` smoke,
+table-rendering, the deterministic `npm run test:playwright:web-shared` smoke,
 and web components. Metadata requires disk restart and both
 SchemaProviders. Dialects require verify, integration, companion activation,
 and packaging. Verify VS Code on Linux and Windows; Remote-WSL requires a

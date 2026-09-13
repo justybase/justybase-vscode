@@ -464,6 +464,17 @@ FROM seq`;
     await loginWithTestData(page);
     await expect(page.getByRole('heading', { name: 'JustyBase' })).toBeVisible();
     await expect(page.getByRole('tree', { name: 'Schema' })).toBeVisible();
+    const executionToolbar = page.getByRole('toolbar', { name: 'SQL execution actions' });
+    const editorStack = page.locator('.shared-editor-stack');
+    await expect(executionToolbar).toBeVisible();
+    await expect(editorStack).toBeVisible();
+    const executionToolbarBox = await executionToolbar.boundingBox();
+    const editorStackBox = await editorStack.boundingBox();
+    expect(executionToolbarBox).not.toBeNull();
+    expect(editorStackBox).not.toBeNull();
+    expect(executionToolbarBox!.y + executionToolbarBox!.height).toBeLessThanOrEqual(editorStackBox!.y);
+    await expect(executionToolbar.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
+    await expect(executionToolbar.getByRole('button', { name: 'Smart', exact: true })).toBeVisible();
     // Results and Problems share one output panel. Verify the diagnostics
     // tab explicitly instead of assuming both panels are mounted together.
     await page.getByRole('tab', { name: /Problems/ }).click();
@@ -568,7 +579,10 @@ FROM seq`;
     await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
 
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
-    const contextCell = page.locator('tr[data-source-index]').first().locator('td').nth(1);
+    // Use the exact row restored by the scroll-anchor assertion above. A
+    // locator based on the last virtualized row can be re-evaluated after the
+    // menu closes and scroll that row beneath the sticky column header.
+    const contextCell = page.locator('tr[data-source-index="300"]').locator('td').nth(1);
     await contextCell.click({ button: 'right' });
     const contextMenu = page.getByRole('menu', { name: /Actions for row/u });
     await expect(contextMenu).toBeVisible();

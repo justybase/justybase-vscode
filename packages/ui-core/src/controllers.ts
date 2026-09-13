@@ -70,6 +70,7 @@ export function createExecutionController(store: UiStore, execution: ExecutionPo
       sourceId: handle.sourceId,
       executionId: handle.executionId,
       resultSetId: handle.resultSetId,
+      mode: input.mode,
     });
     void consumeEvents(handle);
     return handle;
@@ -111,8 +112,8 @@ export function createExecutionController(store: UiStore, execution: ExecutionPo
     run,
     async cancel(sourceId: string, executionId: string): Promise<void> {
       if (disposed) return;
-      const resultSetId = resultIdForExecution(store.getState(), sourceId, executionId);
-      if (!resultSetId) return;
+      const hasExecutionResult = Object.values(store.getState().results.byResultSetId).some(result => result.sourceId === sourceId && result.executionId === executionId);
+      if (!hasExecutionResult) return;
       const requestId = nextCancellationRequestId();
       store.dispatch({ type: 'execution/cancel-requested', sourceId, executionId, requestId });
       try {
