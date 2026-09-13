@@ -6,6 +6,8 @@ export type { DataGridColumnFilterPanelProps, DataGridColumnFilterState, DataGri
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
 export { ResultAnalysisPanel } from './resultAnalysis';
 export type { ResultAnalysisKind, ResultAnalysisPanelProps, ResultAnalysisTable } from './resultAnalysis';
+export { ResultPanel } from './resultPanel';
+export type { ResultPanelProps } from './resultPanel';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,

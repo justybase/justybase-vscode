@@ -2,20 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ReactElement } from 'react';
 import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryAggregateFunction, QueryColumnFilterSpec, QueryExportFormat, QueryGroupAggregate, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
-import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
+import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, hasUiResultQuery, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
 import {
   AsyncStateView,
   CellValueViewer,
   CapabilityGate,
-  DataGrid,
-  DataGridColumnFilterPanel,
   ExplainView,
   HistoryView,
-  ResultOutputTabs,
-  ResultTabs,
-  ResultAnalysisPanel,
-  ResultViewToolbar,
-  RowDetail,
+  ResultPanel,
   SqlDialectSelect,
   ObjectDesigner,
   UiShell,
@@ -30,7 +24,7 @@ import type { DataGridCellContext, DataGridColumnFilterState, DataGridClipboardF
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { createElectronApiClient } from './api';
 import { createElectronExecutionPort, fetchResultPage, RESULT_PAGE_SIZE } from './execution';
-import { ProblemsPanel, SqlEditor } from './SqlEditor';
+import { SqlEditor } from './SqlEditor';
 import type { SqlEditorProblem } from './SqlEditor';
 import { SchemaExplorer } from './SchemaExplorer';
 import { EditRowPanel } from './EditRowPanel';
@@ -186,6 +180,7 @@ export function App(): ReactElement {
 
   const [booting, setBooting] = useState(true);
   const [rowsByResult, setRowsByResult] = useState<ElectronRows>({});
+  const [clientProcessableResultKeys, setClientProcessableResultKeys] = useState<ReadonlySet<string>>(() => new Set());
   const rowsByResultRef = useRef<ElectronRows>({});
   const [selectedRow, setSelectedRow] = useState<number | undefined>(undefined);
   const [cellViewer, setCellViewer] = useState<{ readonly column: UiResultColumn; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
@@ -239,6 +234,12 @@ export function App(): ReactElement {
         });
       },
       onPage: (sourceId, resultSetId, rows, totalRowCount, columns, executionId, _offset, hasMore) => {
+        const current = Object.values(store.getState().results.byResultSetId)
+          .find(result => result.sourceId === sourceId && result.resultSetId === resultSetId && result.executionId === executionId);
+        if (totalRowCount > 0 && rows.length >= totalRowCount && current && !hasUiResultQuery(current.view)) {
+          const resultKey = `${sourceId}\u0000${resultSetId}`;
+          setClientProcessableResultKeys(previous => previous.has(resultKey) ? previous : new Set([...previous, resultKey]));
+        }
         pageStateRef.current.set(resultSetId, { totalRows: totalRowCount, hasMore });
         applyHydratedPage(store, sourceId, resultSetId, rows, totalRowCount, columns, executionId, (id, nextRows) => {
           const next = { ...rowsByResultRef.current, [id]: nextRows };
@@ -313,6 +314,8 @@ export function App(): ReactElement {
     ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
     : undefined;
   const rows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
+  const activeResultKey = activeResult ? `${activeResult.sourceId}\u0000${activeResult.resultSetId}` : undefined;
+  const clientProcessing = activeResultKey !== undefined && clientProcessableResultKeys.has(activeResultKey);
   const selectedConnection = state.connections.profiles.find(profile => profile.id === state.connections.selectedConnectionId);
   const resultState = resultAsyncState(activeResult, rows.length);
   const resultMessage = activeResult?.message;
@@ -775,11 +778,11 @@ export function App(): ReactElement {
     const nextView = { ...activeResult.view, ...patch };
     store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
     scheduleResultViewWrite(activeResult, nextView);
-    if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.columnFilterDefinitions !== undefined || patch.sorting !== undefined) {
+    if ((patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.columnFilterDefinitions !== undefined || patch.sorting !== undefined) && !clientProcessing) {
       pageStateRef.current.delete(activeResult.resultSetId);
       void loadResultPage({ ...activeResult, view: nextView }, 0, true, nextView);
     }
-  }, [activeResult, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
+  }, [activeResult, clientProcessing, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
 
   const closeColumnFilter = useCallback((): void => {
     filterMenuGenerationRef.current += 1;
@@ -1087,17 +1090,56 @@ export function App(): ReactElement {
           </div>
           {notice && <div className="electron-notice" role="status">{notice}</div>}
           <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: activeDocument?.connectionId ?? selectedConnection?.id, database: activeDocument?.database ?? database, schema: activeDocument?.schema ?? schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
-          <div className="electron-result-panel">
-            <ResultOutputTabs activeTab={activeOutputTab} problemCount={problems.length} onChange={setActiveOutputTab} />
-            {activeOutputTab === 'problems' ? <div className="ui-result-output-content"><ProblemsPanel problems={problems} onSelect={selectProblem} /></div> : <>
-              <div className="electron-result-heading"><strong>Results</strong><ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} /></div>
-              {activeResult && <div className="electron-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => updateView({ grouping: activeResult.view.grouping.length > 0 ? [] : activeResult.columns[0] ? [activeResult.columns[0].name] : [] })} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copyActive()} onExport={() => void exportActive()} /><label className="electron-export-format">Export<select aria-label="Electron export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-              {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
-              <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel="Streaming result data…"><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} clientProcessing={false} showInlineColumnFilters onOpenColumnFilter={openColumnFilter} onViewChange={updateView} onLoadMore={loadMoreRows} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onCopySelection={copyGridSelection} onViewCell={openCellValue} onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined} onRowSelect={setSelectedRow} /></AsyncStateView>
-              {filterMenu && <DataGridColumnFilterPanel state={filterMenu} onChange={updateColumnFilterMenu} onApply={applyColumnFilter} onClear={clearColumnFilter} onClose={closeColumnFilter} />}
-              {activeResult && selectedRow !== undefined && rows[selectedRow] && <RowDetail columns={detailColumns} row={rows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
-            </>}
-          </div>
+          <ResultPanel
+            results={Object.values(state.results.byResultSetId)}
+            activeResult={activeResult}
+            rows={rows}
+            resultState={resultState}
+            resultMessage={resultMessage}
+            activeTab={activeOutputTab}
+            problemCount={problems.length}
+            problems={problems}
+            onOutputTabChange={setActiveOutputTab}
+            onProblemSelect={selectProblem}
+            onResultSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })}
+            onViewChange={updateView}
+            clientProcessing={clientProcessing}
+            onLoadMore={loadMoreRows}
+            onScroll={onScroll}
+            selectedRowIndex={selectedRow}
+            onRowSelect={setSelectedRow}
+            onCopySelection={copyGridSelection}
+            onViewCell={openCellValue}
+            onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined}
+            onOpenColumnFilter={openColumnFilter}
+            filterMenu={filterMenu}
+            onFilterMenuChange={updateColumnFilterMenu}
+            onApplyColumnFilter={applyColumnFilter}
+            onClearColumnFilter={clearColumnFilter}
+            onCloseColumnFilter={closeColumnFilter}
+            onRefresh={() => void refresh()}
+            onCopy={() => void copyActive()}
+            onExport={() => void exportActive()}
+            onAggregate={() => toggleResultAnalysis('aggregate')}
+            onGroup={() => updateView({ grouping: activeResult?.view.grouping.length ? [] : activeResult?.columns[0] ? [activeResult.columns[0].name] : [] })}
+            onPivot={() => toggleResultAnalysis('pivot')}
+            activeAnalysis={resultAnalysis?.kind}
+            analysisBusy={resultAnalysisLoading}
+            resultAnalysis={resultAnalysis}
+            resultAnalysisLoading={resultAnalysisLoading}
+            resultAnalysisError={resultAnalysisError}
+            onCloseResultAnalysis={closeResultAnalysis}
+            onViewAnalysisCell={openAnalysisCellValue}
+            onCopyAnalysisSelection={copyGridSelection}
+            detailColumns={detailColumns}
+            onCloseRowDetail={() => setSelectedRow(undefined)}
+            exportFormat={exportFormat}
+            onExportFormatChange={value => setExportFormat(value as QueryExportFormat)}
+            exportFormatAriaLabel="Electron export format"
+            showContextMenu
+            showInlineColumnFilters
+            loadingLabel="Streaming result data…"
+          />
         </div>}
     </UiShell>
     {connectionEditor && <ConnectionPanel initial={connectionEditor.initial} onSaved={saveConnection} onCancel={() => setConnectionEditor(undefined)} />}

@@ -24,26 +24,20 @@ import {
   createAggregateAnalysisTable,
   createGroupAnalysisTable,
   createPivotAnalysisTable,
+  hasUiResultQuery,
   resultAsyncState as getResultAsyncState,
   resolveUiMode,
   toUiResultQueryOptions,
 } from '@justybase/ui-core';
 import type { UiResultColumn, UiResultEvent, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import {
-  AsyncStateView,
   CellValueViewer,
-  DataGrid,
-  DataGridColumnFilterPanel,
   createDataGridClipboardPayload,
   formatDataGridClipboard,
   processDataGridRows,
   ExplainView,
   HistoryView,
-  ResultOutputTabs,
-  ResultTabs,
-  ResultAnalysisPanel,
-  ResultViewToolbar,
-  RowDetail,
+  ResultPanel,
   resolveDataGridColumns,
   SchemaTree,
   SqlDialectSelect,
@@ -54,7 +48,7 @@ import type { DataGridClipboardFormat, DataGridColumnFilterState, DataGridCopyPa
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { ApiClientProvider } from './api';
 import type { ApiClient, QueryEventSubscription } from './api';
-import { SharedSqlEditor, SharedSqlProblems } from './SharedSqlEditor';
+import { SharedSqlEditor } from './SharedSqlEditor';
 import { ObjectDesigner } from './ObjectDesigner';
 import { ImportPanel } from './ImportPanel';
 import { createWorkspaceStorage, migrateLegacyWorkspace, readLegacyWorkspaceValue, type WorkspaceStorage } from './workspacePersistence';
@@ -296,6 +290,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const getSnapshot = useCallback(() => store.getState(), [store]);
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const [rowsByResult, setRowsByResult] = useState<Record<string, readonly (readonly unknown[])[]>>({});
+  const [clientProcessableResultKeys, setClientProcessableResultKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
@@ -343,6 +338,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     ? Object.values(state.results.byResultSetId).find(result => result.sourceId === state.results.activeSourceId && result.resultSetId === state.results.activeResultSetId)
     : undefined;
   const activeRows = activeResult ? rowsByResult[activeResult.resultSetId] ?? [] : [];
+  const activeResultKey = activeResult ? `${activeResult.sourceId}\u0000${activeResult.resultSetId}` : undefined;
+  const clientProcessing = activeResultKey !== undefined && clientProcessableResultKeys.has(activeResultKey);
   const visibleRows = displayRows(activeResult, activeRows);
   const visibleSchema = visibleSchemaNodes(schemaNodes, state.metadata.expandedNodeIds);
 
@@ -630,7 +627,21 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         break;
       }
       case 'progress': mapped = { ...base, sequence: nextSequence(), type: 'progress', totalRowCount: event.totalRows }; break;
-      case 'complete': mapped = { ...base, sequence: nextSequence(), type: 'complete', totalRowCount: event.totalRows, message: event.message }; break;
+      case 'complete': {
+        const current = Object.values(store.getState().results.byResultSetId)
+          .find(result => result.sourceId === active.sourceId && result.resultSetId === active.resultSetId && result.executionId === active.executionId);
+        const streamedRows = rowsByResultRef.current[active.resultSetId] ?? [];
+        // A complete bounded stream is safe to process in the shared renderer.
+        // Keep the marker tied to the unfiltered execution so clearing a
+        // server-side filter on a large result cannot mistake a one-row page
+        // for the complete source result.
+        if (event.totalRows > 0 && streamedRows.length >= event.totalRows && current && !hasUiResultQuery(current.view)) {
+          const resultKey = `${active.sourceId}\u0000${active.resultSetId}`;
+          setClientProcessableResultKeys(previous => previous.has(resultKey) ? previous : new Set([...previous, resultKey]));
+        }
+        mapped = { ...base, sequence: nextSequence(), type: 'complete', totalRowCount: event.totalRows, message: event.message };
+        break;
+      }
       case 'error': mapped = { ...base, sequence: nextSequence(), type: 'error', message: event.message }; break;
       case 'cancelled': mapped = { ...base, sequence: nextSequence(), type: 'cancelled', totalRowCount: event.totalRows }; break;
       case 'session':
@@ -663,6 +674,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         .find(result => result.sourceId === active.sourceId && result.resultSetId === active.resultSetId);
       if (!current || current.executionId !== active.executionId || view && resultViewRequestKey(current.view) !== viewKey) return;
       const pageRows = page.rows.map(row => [...row]);
+      if (page.totalRows > 0 && pageRows.length >= page.totalRows && view && !hasUiResultQuery(view)) {
+        const resultKey = `${active.sourceId}\u0000${active.resultSetId}`;
+        setClientProcessableResultKeys(previous => previous.has(resultKey) ? previous : new Set([...previous, resultKey]));
+      }
       const previousRows = rowsByResultRef.current[active.resultSetId] ?? [];
       const pageOffset = Math.max(0, page.offset);
       const nextRows = replace || pageOffset === 0
@@ -1111,7 +1126,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     const nextView = { ...activeResult.view, ...patch };
     store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
     scheduleResultViewWrite(activeResult, nextView);
-    if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.columnFilterDefinitions !== undefined || patch.sorting !== undefined) {
+    if ((patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.columnFilterDefinitions !== undefined || patch.sorting !== undefined) && !clientProcessing) {
       const queryId = queryByResultRef.current.get(activeResult.resultSetId);
       if (queryId) {
         pageHydrationRef.current.clear();
@@ -1127,7 +1142,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         }, 0, true, nextView);
       }
     }
-  }, [activeResult, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
+  }, [activeResult, clientProcessing, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
 
   const closeColumnFilter = useCallback((): void => {
     filterMenuGenerationRef.current += 1;
@@ -1413,15 +1428,54 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
             <div className="shared-result-panel">
               <div className="shared-editor-actions" role="toolbar" aria-label="SQL editor actions"><button type="button" onClick={() => void run()}>Run</button><button type="button" onClick={() => void run('explain')}>Explain</button><button type="button" onClick={() => void cancel()} disabled={!activeQueryRef.current}>Cancel</button><SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" /></div>
               {notice && <div role="status">{notice}</div>}
-              <ResultOutputTabs activeTab={activeOutputTab} problemCount={problems.length} onChange={setActiveOutputTab} />
-              {activeOutputTab === 'problems' ? <div className="ui-result-output-content"><SharedSqlProblems problems={problems} onSelect={revealProblem} /></div> : <>
-                <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-                {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => updateResultView({ grouping: activeResult.view.grouping.length > 0 ? [] : activeResult.columns[0] ? [activeResult.columns[0].name] : [] })} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
-                {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
-                <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={false} showContextMenu showInlineColumnFilters onOpenColumnFilter={openColumnFilter} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onViewCell={openCellValue} onRowSelect={setSelectedRow} /></AsyncStateView>
-                {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
-                {filterMenu && <DataGridColumnFilterPanel state={filterMenu} onChange={updateColumnFilterMenu} onApply={applyColumnFilter} onClear={clearColumnFilter} onClose={closeColumnFilter} />}
-              </>}
+              <ResultPanel
+                results={Object.values(state.results.byResultSetId)}
+                activeResult={activeResult}
+                rows={activeRows}
+                resultState={resultState}
+                resultMessage={resultMessage}
+                activeTab={activeOutputTab}
+                problemCount={problems.length}
+                problems={problems}
+                onOutputTabChange={setActiveOutputTab}
+                onProblemSelect={revealProblem}
+                onResultSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })}
+                onViewChange={updateResultView}
+                clientProcessing={clientProcessing}
+                onLoadMore={loadMoreRows}
+                onScroll={onScroll}
+                selectedRowIndex={selectedRow}
+                onRowSelect={setSelectedRow}
+                onCopySelection={copyGridSelection}
+                onViewCell={openCellValue}
+                onOpenColumnFilter={openColumnFilter}
+                filterMenu={filterMenu}
+                onFilterMenuChange={updateColumnFilterMenu}
+                onApplyColumnFilter={applyColumnFilter}
+                onClearColumnFilter={clearColumnFilter}
+                onCloseColumnFilter={closeColumnFilter}
+                onRefresh={() => void refresh()}
+                onCopy={() => void copySelected()}
+                onExport={() => void exportResults()}
+                onAggregate={() => toggleResultAnalysis('aggregate')}
+                onGroup={() => updateResultView({ grouping: activeResult?.view.grouping.length ? [] : activeResult?.columns[0] ? [activeResult.columns[0].name] : [] })}
+                onPivot={() => toggleResultAnalysis('pivot')}
+                activeAnalysis={resultAnalysis?.kind}
+                analysisBusy={resultAnalysisLoading}
+                resultAnalysis={resultAnalysis}
+                resultAnalysisLoading={resultAnalysisLoading}
+                resultAnalysisError={resultAnalysisError}
+                onCloseResultAnalysis={closeResultAnalysis}
+                onViewAnalysisCell={openAnalysisCellValue}
+                onCopyAnalysisSelection={copyGridSelection}
+                detailColumns={detailColumns}
+                onCloseRowDetail={() => setSelectedRow(undefined)}
+                exportFormat={exportFormat}
+                onExportFormatChange={value => setExportFormat(value as QueryExportFormat)}
+                exportFormatAriaLabel="Shared export format"
+                showContextMenu
+                showInlineColumnFilters
+              />
             </div>
           </>}
     {importTarget && selectedConnection && <ImportPanel connectionId={selectedConnection.id} target={importTarget} database={selectedConnection.database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed.'); }} />}

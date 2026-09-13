@@ -1019,6 +1019,23 @@ SELECT * FROM CTE1`);
       );
     });
 
+    it("returns Netezza table-like objects across schemas for DB.. completion", async () => {
+      metadataProvider.setTables("JUST_DATA", ["DIMDATE", "DEPARTMENT"]);
+      const items = await complete("SELECT * FROM JUST_DATA..|");
+
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["DIMDATE", "DEPARTMENT", "V_SALES", "EMPLOYEE_V"]),
+      );
+      expect(metadataProvider.getTables).toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+      );
+      expect(metadataProvider.getViews).toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+      );
+    });
+
     it("returns database/table suggestions for UPDATE target table", async () => {
       const items = await complete("UPDATE |");
       expect(labels(items)).toEqual(
@@ -1279,6 +1296,23 @@ SELECT * FROM CTE1`);
         expect.any(String),
         "BAZA",
         "USERS",
+        undefined,
+        { allowDatabaseFetch: false, requestSource: "completion" },
+      );
+    });
+
+    it("resolves Netezza DB.. aliases to columns", async () => {
+      const items = await complete(
+        "SELECT * FROM JUST_DATA..DIMDATE D WHERE D.|",
+      );
+
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["DATEKEY", "CALENDARQUARTER"]),
+      );
+      expect(metadataProvider.getColumns).toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+        "DIMDATE",
         undefined,
         { allowDatabaseFetch: false, requestSource: "completion" },
       );

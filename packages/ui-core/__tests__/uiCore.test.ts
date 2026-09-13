@@ -12,6 +12,7 @@ import {
   PersistenceDecodeError,
   reduceUiState,
   createUiStore,
+  hasUiResultQuery,
   resolveUiMode,
   toUiResultQueryOptions,
 } from '../src';
@@ -107,6 +108,14 @@ describe('ui-core reducer', () => {
 });
 
 describe('portable result query mapping', () => {
+  it('identifies only active filter and sort criteria', () => {
+    expect(hasUiResultQuery({ globalFilter: '', columnFilters: {}, sorting: [] })).toBe(false);
+    expect(hasUiResultQuery({ globalFilter: 'orders', columnFilters: {}, sorting: [] })).toBe(true);
+    expect(hasUiResultQuery({ globalFilter: '', columnFilters: {}, sorting: [{ column: 'ID', descending: false }] })).toBe(true);
+    expect(hasUiResultQuery({ globalFilter: '', columnFilters: {}, columnFilterDefinitions: { ID: { operator: 'in', value: '' } }, sorting: [] })).toBe(false);
+    expect(hasUiResultQuery({ globalFilter: '', columnFilters: {}, columnFilterDefinitions: { ID: { operator: 'isNull', value: 'isNull' } }, sorting: [] })).toBe(true);
+  });
+
   it('normalises semantic and positional view keys to strict API indexes', () => {
     expect(toUiResultQueryOptions(
       [{ name: 'ID' }, { name: 'CreatedAt' }],
