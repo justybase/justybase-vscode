@@ -31,6 +31,8 @@
 !packages/metadata-core/**
 !packages/ui-core/
 !packages/ui-core/**
+!packages/ui-monaco/
+!packages/ui-monaco/**
 !packages/ui-react/
 !packages/ui-react/**
 !packages/database-utils/

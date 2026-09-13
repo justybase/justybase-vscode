@@ -23,11 +23,19 @@ async function main() {
   // browser bundles and let the webview HTML load it as a stylesheet.
   const sharedGridStyleSource = './packages/ui-react/src/resultGrid.css';
   const sharedGridStyleTarget = 'dist/media/sharedResultGrid.css';
-  const syncSharedGridStyle = () => {
+  const syncSharedGridStyle = async () => {
     fs.mkdirSync('dist/media', { recursive: true });
-    fs.copyFileSync(sharedGridStyleSource, sharedGridStyleTarget);
+    await esbuild.build({
+      entryPoints: [sharedGridStyleSource],
+      bundle: true,
+      loader: { '.css': 'css' },
+      outfile: sharedGridStyleTarget,
+      sourcemap: false,
+      minify,
+      logLevel: 'silent',
+    });
   };
-  syncSharedGridStyle();
+  await syncSharedGridStyle();
 
   // These libraries are loaded as globals by several webviews. Build them from
   // their published ESM sources instead of shipping upstream production/minified

@@ -3,8 +3,10 @@ import type { ReactElement } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import type { EditorPreferences, SqlLanguageContext } from '@justybase/contracts';
-import { configureSqlMonacoTheme, EditorSurface, registerSqlLanguageFeatures, SqlProblemsPanel, sqlProblemsFromMarkers } from '@justybase/ui-react';
-import type { SqlLanguageApi, SqlLanguageFeatureHandle, SqlProblem } from '@justybase/ui-react';
+import { configureSqlMonacoTheme, registerSqlLanguageFeatures, sqlProblemsFromMarkers } from '@justybase/ui-monaco';
+import type { SqlLanguageApi, SqlLanguageFeatureHandle } from '@justybase/ui-monaco';
+import { EditorSurface, SqlProblemsPanel } from '@justybase/ui-react';
+import type { SqlProblem } from '@justybase/ui-core';
 
 export type SharedSqlEditorProblem = SqlProblem;
 

@@ -174,7 +174,7 @@ export function parseQueryPageRequest(value: unknown): QueryPageRequest {
   return {
     statementIndex: optionalInteger(record.statementIndex, 'statementIndex', 0, Number.MAX_SAFE_INTEGER),
     offset: optionalInteger(record.offset, 'offset', 0, Number.MAX_SAFE_INTEGER),
-    limit: optionalInteger(record.limit, 'limit', 1, 1_000),
+    limit: optionalInteger(record.limit, 'limit', 1, 10_000),
     globalFilter: optionalString(record.globalFilter, 'globalFilter', MAX_FILTER_LENGTH),
     columnFilters: queryColumnFilters(record.columnFilters),
     sorting: querySort(record.sorting),

@@ -19,11 +19,11 @@ import {
   UiShell,
   WorkspaceTabs,
   createDataGridClipboardPayload,
-  disposeSqlLanguageFeatures,
   formatDataGridClipboard,
   processDataGridRows,
   resolveDataGridColumns,
 } from '@justybase/ui-react';
+import { disposeSqlLanguageFeatures } from '@justybase/ui-monaco';
 import type { DataGridCellContext, DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind } from '@justybase/ui-react';
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { createElectronApiClient } from './api';
@@ -38,6 +38,12 @@ import { getElectronResultViewStorage, readElectronResultView, writeElectronResu
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
+
+interface OpenDocumentOptions {
+  readonly sourceId?: string;
+  readonly database?: string;
+  readonly schema?: string;
+}
 
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
   return getResultAsyncState(result, rowCount);
@@ -392,16 +398,23 @@ export function App(): ReactElement {
     setRowsByResult(next);
   }, []);
 
-  const openDocument = useCallback((content: string, title: string, sourceId = `electron:document:${documentSequenceRef.current++}`): void => {
+  const openDocument = useCallback((content: string, title: string, options: OpenDocumentOptions = {}): void => {
     const connectionId = selectedConnection?.id;
-    documentContextRef.current.set(sourceId, { database: database || selectedConnection?.database || '', schema });
+    const sourceId = options.sourceId ?? `electron:document:${documentSequenceRef.current++}`;
+    // A newly opened SQL document starts in the database configured by the
+    // selected connection. The database selector is document context and may
+    // differ for an already-open document, so do not inherit the previous
+    // tab's transient selection here.
+    const documentDatabase = options.database ?? selectedConnection?.database ?? '';
+    const documentSchema = options.schema ?? '';
+    documentContextRef.current.set(sourceId, { database: documentDatabase, schema: documentSchema });
     store.dispatch({
       type: 'workspace/open-document',
       document: { id: sourceId, sourceId, title, content, dirty: false, connectionId, databaseKind: selectedConnection?.dbType ?? 'netezza' },
     });
     store.dispatch({ type: 'workspace/select-document', documentId: sourceId });
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
-  }, [database, schema, selectedConnection?.database, selectedConnection?.id, store]);
+  }, [selectedConnection?.database, selectedConnection?.id, store]);
 
   const closeDocument = useCallback((documentId: string): void => {
     if (state.workspace.documentOrder.length <= 1) return;
@@ -426,7 +439,12 @@ export function App(): ReactElement {
   const selectConnection = useCallback((connectionId: string): void => {
     store.dispatch({ type: 'connections/select', connectionId });
     const profile = state.connections.profiles.find(item => item.id === connectionId);
-    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
+    if (activeDocument) {
+      documentContextRef.current.set(activeDocument.id, { database: profile?.database ?? '', schema: '' });
+      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
+    }
+    setDatabase(profile?.database ?? '');
+    setSchema('');
   }, [activeDocument, state.connections.profiles, store]);
 
   const selectAuthoringDialect = useCallback((databaseKind: DatabaseKind): void => {
@@ -439,7 +457,10 @@ export function App(): ReactElement {
       : [...state.connections.profiles, profile];
     store.dispatch({ type: 'connections/set-profiles', profiles });
     store.dispatch({ type: 'connections/select', connectionId: profile.id });
-    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id, databaseKind: profile.dbType } });
+    if (activeDocument) {
+      documentContextRef.current.set(activeDocument.id, { database: profile.database, schema: '' });
+      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: profile.id, databaseKind: profile.dbType } });
+    }
     setDatabase(profile.database);
     setSchema('');
     setConnectionEditor(undefined);
@@ -455,7 +476,16 @@ export function App(): ReactElement {
       if (state.connections.selectedConnectionId === profile.id) {
         const next = profiles[0];
         store.dispatch({ type: 'connections/select', connectionId: next?.id });
-        if (activeDocument && next) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id, databaseKind: next.dbType } });
+        if (activeDocument && next) {
+          documentContextRef.current.set(activeDocument.id, { database: next.database, schema: '' });
+          store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId: next.id, databaseKind: next.dbType } });
+          setDatabase(next.database);
+          setSchema('');
+        } else if (activeDocument) {
+          documentContextRef.current.delete(activeDocument.id);
+          setDatabase('');
+          setSchema('');
+        }
       }
       setNotice(`Connection “${profile.name}” deleted.`);
     } catch (reason: unknown) {
@@ -465,9 +495,9 @@ export function App(): ReactElement {
 
   const selectDatabase = useCallback((nextDatabase: string): void => {
     setDatabase(nextDatabase);
-    if (activeDocument) documentContextRef.current.set(activeDocument.id, { database: nextDatabase, schema });
     setSchema('');
-  }, [activeDocument, schema]);
+    if (activeDocument) documentContextRef.current.set(activeDocument.id, { database: nextDatabase, schema: '' });
+  }, [activeDocument]);
 
   const handleEditorProblems = useCallback((nextProblems: readonly SqlEditorProblem[]): void => {
     setProblems(nextProblems);
@@ -482,13 +512,11 @@ export function App(): ReactElement {
   }, []);
 
   const openSchemaQuery = useCallback((sql: string, title: string, node?: SchemaTreeNode): void => {
-    if (node?.database) setDatabase(node.database);
-    if (node?.schema) setSchema(node.schema);
-    openDocument(sql, title);
+    openDocument(sql, title, { database: node?.database, schema: node?.schema });
   }, [openDocument]);
 
   const openHistoryEntry = useCallback((entry: HistoryEntry): void => {
-    openDocument(entry.sql, `History · ${entry.createdAt.slice(0, 19)}`, `electron:history:${entry.id}`);
+    openDocument(entry.sql, `History · ${entry.createdAt.slice(0, 19)}`, { sourceId: `electron:history:${entry.id}`, database: entry.database });
   }, [openDocument]);
 
   const refreshHistory = useCallback((): void => {
@@ -515,9 +543,7 @@ export function App(): ReactElement {
   }, [history]);
 
   const openDdl = useCallback((sql: string, title: string, node: SchemaTreeNode): void => {
-    if (node.database) setDatabase(node.database);
-    if (node.schema) setSchema(node.schema);
-    openDocument(sql, title);
+    openDocument(sql, title, { database: node.database, schema: node.schema });
   }, [openDocument]);
 
   const openObjectDesigner = useCallback((node: SchemaTreeNode): void => {
@@ -744,13 +770,13 @@ export function App(): ReactElement {
     }
   }, [activeResult, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
 
-  const loadMoreRows = useCallback((): void => {
+  const loadMoreRows = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
     const loadedRows = rowsByResultRef.current[activeResult.resultSetId]?.length ?? 0;
     const pageState = pageStateRef.current.get(activeResult.resultSetId);
     const totalRows = pageState?.totalRows ?? activeResult.totalRowCount;
     if (loadedRows >= totalRows || pageState?.hasMore === false) return;
-    void loadResultPage(activeResult, loadedRows, false);
+    await loadResultPage(activeResult, loadedRows, false);
   }, [activeResult, loadResultPage]);
 
   const detailColumns = useMemo(
@@ -906,7 +932,12 @@ export function App(): ReactElement {
     connectionId: entry.connectionId,
   }));
   const onScroll = (position: GridScrollPosition): void => {
-    if (activeResult && position.resultSetId === activeResult.resultSetId) updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
+    if (activeResult && position.resultSetId === activeResult.resultSetId
+      && (position.top !== activeResult.view.scrollTop
+        || position.left !== activeResult.view.scrollLeft
+        || position.anchorRow !== activeResult.view.anchorRow)) {
+      updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
+    }
   };
 
   return <CapabilityGate capability={workspaceCapability}><>

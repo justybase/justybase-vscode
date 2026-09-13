@@ -127,7 +127,7 @@ describe('Electron renderer composition', () => {
     const fetcher = jest.fn(async (input: RequestInfo | URL) => {
       const route = String(input);
       if (route === '/api/query') return jsonResponse({ queryId: 'query-1', statementCount: 1 });
-      if (route.includes('/page')) return jsonResponse({ queryId: 'query-1', sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }], rows: [[1, 'Alpha']], offset: 0, limit: 500, totalRows: 1, hasMore: false });
+      if (route.includes('/page')) return jsonResponse({ queryId: 'query-1', sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }], rows: [[1, 'Alpha']], offset: 0, limit: 10_000, totalRows: 1, hasMore: false });
       if (route.includes('/aggregate')) return jsonResponse({ queryId: 'query-1', filteredRowCount: 1, values: [{ columnIndex: 0, count: 1, sum: 1, avg: 1, min: 1, max: 1 }] });
       if (route.includes('/cancel')) return jsonResponse({ ok: true });
       return jsonResponse({});
@@ -182,6 +182,30 @@ describe('Electron renderer composition', () => {
     expect(await screen.findByText('History is not available in this Electron shell yet.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Explain' }));
     expect(await screen.findByText('Explain is not available in this Electron shell yet.')).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it('starts a new SQL document in the selected connection default database', async () => {
+    const profile = { id: 'connection-1', name: 'Netezza', host: 'db', port: 5480, database: 'SYSTEM', user: 'admin', dbType: 'netezza', readOnly: true } as const;
+    installApi({ status: 'authenticated' }, 'available', [profile]);
+    const fetcher = jest.fn(async (input: RequestInfo | URL) => {
+      const route = String(input);
+      if (route.includes('/api/metadata/databases')) return jsonResponse([{ name: 'SYSTEM' }, { name: 'REPORTING' }]);
+      return jsonResponse({});
+    });
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: fetcher });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: FakeQueryWebSocket });
+
+    const view = render(<App />);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'JustyBase' })).toBeTruthy());
+    const databaseSelect = await screen.findByLabelText('Editor database');
+    await waitFor(() => expect(databaseSelect).toHaveValue('SYSTEM'));
+
+    fireEvent.change(databaseSelect, { target: { value: 'REPORTING' } });
+    expect(databaseSelect).toHaveValue('REPORTING');
+    fireEvent.click(screen.getAllByRole('button', { name: '＋ SQL' })[0]!);
+
+    await waitFor(() => expect(screen.getByLabelText('Editor database')).toHaveValue('SYSTEM'));
     view.unmount();
   });
 

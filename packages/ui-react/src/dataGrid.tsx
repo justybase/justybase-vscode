@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
 import type { UiResultViewState } from '@justybase/ui-core';
 import {
   formatDataGridCellValue,
@@ -9,7 +9,6 @@ import {
   matchesDataGridFilterValue,
 } from './resultGridFormatting';
 import type { DataGridCellMetadata } from './resultGridFormatting';
-import { formatDataGridClipboard } from './dataGridClipboard';
 import type { DataGridClipboardFormat } from './dataGridClipboard';
 import type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
 
@@ -52,7 +51,7 @@ export interface DataGridProps {
   readonly scroll?: GridScrollPosition;
   readonly onScroll?: (position: GridScrollPosition) => void;
   /** Requests the next adapter-owned page when the rendered rows near the end. */
-  readonly onLoadMore?: () => void;
+  readonly onLoadMore?: () => void | Promise<void>;
   /** Index into the supplied raw rows, even when displayed rows are filtered, sorted, or grouped. */
   readonly onRowSelect?: (rowIndex: number) => void;
   /** Opens the host-owned guarded row editor for the context-menu row. */
@@ -65,6 +64,8 @@ export interface DataGridProps {
   readonly onSelectionChange?: (selection: DataGridSelection | undefined) => void;
   readonly onContextMenu?: (context: DataGridCellContext) => void;
   readonly onCopySelection?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void;
+  /** Optional host-owned writer used when no rich copy callback is supplied. */
+  readonly clipboardWriter?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void | Promise<void>;
   /** Opens the host-specific large-value viewer for a context-menu cell. */
   readonly onViewCell?: (context: DataGridCellContext) => void;
   /** Opens the host-specific full-row detail view for a context-menu row. */
@@ -75,6 +76,8 @@ export interface DataGridProps {
   readonly showContextMenu?: boolean;
   /** Shows the shared column visibility/order/pinning menu. */
   readonly showColumnMenu?: boolean;
+  /** Allows analysis grids to reuse the renderer without exposing a second grouping surface. */
+  readonly showGroupingPanel?: boolean;
   /** Opens the host-owned Excel-like filter surface for a column. */
   readonly onOpenColumnFilter?: (request: DataGridColumnFilterRequest) => void;
   /** Keeps the legacy inline text field for hosts without a filter surface. */
@@ -91,12 +94,15 @@ interface RenderedGroup {
   readonly id: string;
   readonly label: string;
   readonly count: number;
+  readonly ancestorIds: readonly string[];
+  readonly level: number;
 }
 
 interface RenderedDataRow extends IndexedRow {
   readonly kind: 'data';
   readonly displayIndex: number;
   readonly groupId?: string;
+  readonly ancestorIds: readonly string[];
 }
 
 type RenderedRow = RenderedGroup | RenderedDataRow;
@@ -142,6 +148,26 @@ export function calculateDataGridVirtualWindow(
     paddingTop: startIndex * ROW_HEIGHT,
     paddingBottom: Math.max(0, count - endIndex) * ROW_HEIGHT,
   };
+}
+
+/**
+ * Moves one grouping key to an insertion point in the grouping order. The
+ * insertion point is measured before removing the source item, which keeps
+ * drag-and-drop predictable in both directions.
+ */
+export function reorderDataGridGrouping(
+  grouping: readonly string[],
+  sourceIndex: number,
+  insertionIndex: number,
+): readonly string[] {
+  if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= grouping.length) return grouping;
+  if (!Number.isInteger(insertionIndex) || insertionIndex < 0 || insertionIndex > grouping.length) return grouping;
+  const next = [...grouping];
+  const moved = next.splice(sourceIndex, 1)[0];
+  if (moved === undefined) return grouping;
+  const targetIndex = insertionIndex > sourceIndex ? insertionIndex - 1 : insertionIndex;
+  next.splice(Math.max(0, Math.min(targetIndex, next.length)), 0, moved);
+  return next;
 }
 
 function normaliseView(view: DataGridViewState | undefined): DataGridViewState {
@@ -439,29 +465,40 @@ function indexedRows(
 }
 
 function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow[], grouping: readonly string[], getCellMetadata?: CellMetadataResolver): readonly RenderedRow[] {
-  if (grouping.length === 0) return rows.map((row, displayIndex) => ({ ...row, kind: 'data', displayIndex }));
-  const groups = new Map<string, IndexedRow[]>();
-  for (const row of rows) {
-    const values = grouping.map(key => {
-      const index = resolveColumnIndex(columns, key);
-      const column = index >= 0 ? columns[index] : undefined;
-      const value = index >= 0 ? row.values[index] : undefined;
-      const metadata = column === undefined ? undefined : getCellMetadata?.(value, row.sourceIndex, index, column) ?? column;
-      return formatDataGridCellValue(value, metadata?.type, metadata);
-    });
-    const id = JSON.stringify(values);
-    const group = groups.get(id) ?? [];
-    group.push(row);
-    groups.set(id, group);
-  }
+  if (grouping.length === 0) return rows.map((row, displayIndex) => ({ ...row, kind: 'data', displayIndex, ancestorIds: [] }));
   const rendered: RenderedRow[] = [];
   let displayIndex = 0;
-  for (const [id, group] of groups) {
-    const label = JSON.parse(id).join(' · ') as string;
-    rendered.push({ kind: 'group', id, label, count: group.length });
-    group.forEach((row, groupIndex) => rendered.push({ ...row, kind: 'data', displayIndex: displayIndex + groupIndex, groupId: id }));
-    displayIndex += group.length;
-  }
+
+  const appendLevel = (level: number, levelRows: readonly IndexedRow[], ancestorIds: readonly string[]): void => {
+    const groupingKey = grouping[level];
+    if (groupingKey === undefined) {
+      levelRows.forEach(row => {
+        rendered.push({ ...row, kind: 'data', displayIndex, groupId: ancestorIds[ancestorIds.length - 1], ancestorIds });
+        displayIndex += 1;
+      });
+      return;
+    }
+    const columnIndex = resolveColumnIndex(columns, groupingKey);
+    const column = columnIndex >= 0 ? columns[columnIndex] : undefined;
+    const groups = new Map<string, { readonly value: string; readonly rows: IndexedRow[] }>();
+    for (const row of levelRows) {
+      const value = columnIndex >= 0 ? row.values[columnIndex] : undefined;
+      const metadata = column === undefined ? undefined : getCellMetadata?.(value, row.sourceIndex, columnIndex, column) ?? column;
+      const formattedValue = formatDataGridCellValue(value, metadata?.type, metadata);
+      const key = JSON.stringify(formattedValue);
+      const existing = groups.get(key);
+      if (existing) existing.rows.push(row);
+      else groups.set(key, { value: formattedValue, rows: [row] });
+    }
+    for (const [valueKey, group] of groups) {
+      const id = JSON.stringify([...ancestorIds, valueKey]);
+      const label = `${column?.name ?? groupingKey}: ${group.value}`;
+      rendered.push({ kind: 'group', id, label, count: group.rows.length, ancestorIds, level });
+      appendLevel(level + 1, group.rows, [...ancestorIds, id]);
+    }
+  };
+
+  appendLevel(0, rows, []);
   return rendered;
 }
 
@@ -509,17 +546,40 @@ export function DataGrid({
   onSelectionChange,
   onContextMenu,
   onCopySelection,
+  clipboardWriter,
   onViewCell,
   onViewRow,
   onOpenResultFormatting,
   showContextMenu = true,
   showColumnMenu = true,
+  showGroupingPanel = true,
   onOpenColumnFilter,
   showInlineColumnFilters = true,
 }: DataGridProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
-  const activeView = normaliseView(view ?? internalView);
+  // Result surfaces also persist scroll coordinates in their view object. Do
+  // not rebuild the processing view for every scroll event; doing so would
+  // re-filter/re-sort all loaded rows while the browser is trying to paint.
+  const activeView = useMemo(() => normaliseView(view ?? internalView), [
+    view === undefined,
+    view?.globalFilter,
+    view?.columnFilters,
+    view?.sorting,
+    view?.grouping,
+    view?.columnVisibility,
+    view?.columnOrder,
+    view?.pinnedColumns,
+    view?.columnWidths,
+    internalView.globalFilter,
+    internalView.columnFilters,
+    internalView.sorting,
+    internalView.grouping,
+    internalView.columnVisibility,
+    internalView.columnOrder,
+    internalView.pinnedColumns,
+    internalView.columnWidths,
+  ]);
   const resolvedColumnsCacheRef = useRef<{
     readonly resultSetId: string;
     readonly signature: string;
@@ -560,18 +620,35 @@ export function DataGrid({
   const [contextMenuPosition, setContextMenuPosition] = useState({ left: 8, top: 8 });
   const dragSelectingRef = useRef(false);
   const draggedColumnRef = useRef<number | undefined>(undefined);
+  const draggedGroupingRef = useRef<number | undefined>(undefined);
+  const [groupingDropIndex, setGroupingDropIndex] = useState<number | undefined>(undefined);
   const resizeRef = useRef<{ columnId: string; startX: number; startWidth: number } | undefined>(undefined);
   const activeViewRef = useRef<DataGridViewState>(activeView);
   const updateViewRef = useRef<(patch: Partial<UiResultViewState>) => void>(() => undefined);
   const selectionScopeRef = useRef<string | undefined>(undefined);
   const selectionChangeRef = useRef(onSelectionChange);
+  const onLoadMoreRef = useRef(onLoadMore);
+  const loadMoreInFlightRef = useRef(false);
   const emptyPageRequestRef = useRef<{ readonly key: string; readonly count: number } | undefined>(undefined);
   const virtualScrollFrameRef = useRef<number | undefined>(undefined);
   const virtualViewportSyncRef = useRef<(() => void) | undefined>(undefined);
   const virtualViewportRef = useRef({ scrollTop: 0, height: DEFAULT_VIEWPORT_HEIGHT });
+  const scrollReportFrameRef = useRef<number | undefined>(undefined);
+  const scrollReportRef = useRef<{ readonly position: GridScrollPosition; readonly callback: (position: GridScrollPosition) => void } | undefined>(undefined);
+  const userScrollPositionRef = useRef<{ readonly resultSetId: string; readonly top: number; readonly left: number } | undefined>(undefined);
   const [virtualViewport, setVirtualViewport] = useState(virtualViewportRef.current);
   activeViewRef.current = activeView;
   selectionChangeRef.current = onSelectionChange;
+  onLoadMoreRef.current = onLoadMore;
+
+  useEffect(() => () => {
+    if (scrollReportFrameRef.current !== undefined && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(scrollReportFrameRef.current);
+    }
+    scrollReportFrameRef.current = undefined;
+    scrollReportRef.current = undefined;
+    userScrollPositionRef.current = undefined;
+  }, []);
 
   const updateView = (patch: Partial<UiResultViewState>): void => {
     if (view === undefined) setInternalView(previous => normaliseView({ ...previous, ...patch }));
@@ -665,10 +742,13 @@ export function DataGrid({
 
   const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
   const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing, getCellMetadata), [resolvedColumns, rows, activeView, clientProcessing, getCellMetadata]);
+  // Grouping is a renderer concern for every host. Server-backed adapters may
+  // page/filter the input rows, but a group must still be a tree row in this
+  // grid rather than a second aggregate table below it.
   const renderedRows = useMemo(() => groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata), [resolvedColumns, processedRows, activeView.grouping, getCellMetadata]);
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const visibleRenderedRows = useMemo(
-    () => renderedRows.filter(row => row.kind === 'group' || row.groupId === undefined || !collapsedGroups.has(row.groupId)),
+    () => renderedRows.filter(row => !row.ancestorIds.some(groupId => collapsedGroups.has(groupId))),
     [collapsedGroups, renderedRows],
   );
   const virtualWindow = useMemo(
@@ -682,6 +762,29 @@ export function DataGrid({
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
+  const requestMoreRows = useCallback((): void => {
+    const loader = onLoadMoreRef.current;
+    if (!hasMoreRows || !loader || loadMoreInFlightRef.current) return;
+    loadMoreInFlightRef.current = true;
+    try {
+      const operation = loader();
+      if (operation === undefined) {
+        // Synchronous adapters have completed their request by contract.
+        loadMoreInFlightRef.current = false;
+        return;
+      }
+      void operation.then(
+        () => { loadMoreInFlightRef.current = false; },
+        () => { loadMoreInFlightRef.current = false; },
+      );
+    } catch (error: unknown) {
+      loadMoreInFlightRef.current = false;
+      throw error;
+    }
+  }, [hasMoreRows]);
+  useEffect(() => {
+    loadMoreInFlightRef.current = false;
+  }, [resultSetId]);
   const emptyPageRequestKey = useMemo(() => JSON.stringify({
     resultSetId,
     totalRowCount,
@@ -727,15 +830,20 @@ export function DataGrid({
       key: emptyPageRequestKey,
       count: previous?.key === emptyPageRequestKey ? previous.count + 1 : 1,
     };
-    onLoadMore?.();
-  }, [emptyPageRequestKey, hasMoreRows, onLoadMore, processedRows.length]);
+    requestMoreRows();
+  }, [emptyPageRequestKey, hasMoreRows, processedRows.length, requestMoreRows]);
 
   useEffect(() => {
     const restore = (): void => {
       const element = scroller.current;
       if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
-      element.scrollTop = Math.max(0, scroll.top);
-      element.scrollLeft = Math.max(0, scroll.left);
+      const userPosition = userScrollPositionRef.current;
+      if (userPosition?.resultSetId === resultSetId
+        && (userPosition.top !== scroll.top || userPosition.left !== scroll.left)) return;
+      const nextTop = Math.max(0, scroll.top);
+      const nextLeft = Math.max(0, scroll.left);
+      if (element.scrollTop !== nextTop) element.scrollTop = nextTop;
+      if (element.scrollLeft !== nextLeft) element.scrollLeft = nextLeft;
       virtualViewportSyncRef.current?.();
     };
     const element = scroller.current;
@@ -755,6 +863,8 @@ export function DataGrid({
 
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
+    const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / ROW_HEIGHT) };
+    userScrollPositionRef.current = position;
     virtualViewportRef.current = {
       scrollTop: Math.max(0, element.scrollTop),
       height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,
@@ -768,9 +878,27 @@ export function DataGrid({
       if (typeof requestAnimationFrame === 'function') virtualScrollFrameRef.current = requestAnimationFrame(flush);
       else flush();
     }
-    onScroll?.({ ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / ROW_HEIGHT) });
+    if (onScroll) {
+      scrollReportRef.current = {
+        position,
+        callback: onScroll,
+      };
+      if (scrollReportFrameRef.current === undefined) {
+        const flushScrollReport = (): void => {
+          scrollReportFrameRef.current = undefined;
+          const pending = scrollReportRef.current;
+          scrollReportRef.current = undefined;
+          if (pending && userScrollPositionRef.current?.resultSetId === pending.position.resultSetId
+            && userScrollPositionRef.current.top === pending.position.top
+            && userScrollPositionRef.current.left === pending.position.left) userScrollPositionRef.current = undefined;
+          pending?.callback(pending.position);
+        };
+        if (typeof requestAnimationFrame === 'function') scrollReportFrameRef.current = requestAnimationFrame(flushScrollReport);
+        else flushScrollReport();
+      }
+    }
     const distanceFromEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (onLoadMore && rows.length < totalRowCount && distanceFromEnd <= 160) onLoadMore();
+    if (distanceFromEnd <= 160) requestMoreRows();
   }
 
   function setSelectionValue(next: DataGridSelection | undefined): void {
@@ -870,9 +998,7 @@ export function DataGrid({
       onCopySelection(payload);
       return;
     }
-    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
-    const text = formatDataGridClipboard(payload, 'text');
-    void navigator.clipboard.writeText(text);
+    void clipboardWriter?.(payload, 'text');
   }
 
   function copyContextPayload(payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): void {
@@ -881,9 +1007,7 @@ export function DataGrid({
       else onCopySelection(payload, format);
       return;
     }
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
-    const text = formatDataGridClipboard(payload, format);
-    void navigator.clipboard.writeText(text);
+    void clipboardWriter?.(payload, format);
   }
 
   function copyContextValue(context: DataGridCellContext, row: readonly unknown[]): void {
@@ -941,6 +1065,56 @@ export function DataGrid({
     setContextMenu(undefined);
   }
 
+  function addDraggedGrouping(columnIndex: number): void {
+    const column = resolvedColumns[columnIndex];
+    if (!column) return;
+    if (activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key))) return;
+    updateView({ grouping: [...activeView.grouping, columnKey(column, columnIndex)] });
+  }
+
+  function groupingInsertionIndex(event: ReactDragEvent<HTMLElement>, targetIndex: number): number {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientX > bounds.left + bounds.width / 2 ? targetIndex + 1 : targetIndex;
+  }
+
+  function handleGroupingDragStart(event: ReactDragEvent<HTMLButtonElement>, groupingIndex: number): void {
+    draggedGroupingRef.current = groupingIndex;
+    setGroupingDropIndex(groupingIndex);
+    event.dataTransfer?.setData('application/x-justybase-grouping-index', String(groupingIndex));
+    event.dataTransfer?.setData('text/plain', activeView.grouping[groupingIndex] ?? '');
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleGroupingDragEnd(): void {
+    draggedGroupingRef.current = undefined;
+    setGroupingDropIndex(undefined);
+  }
+
+  function handleGroupingDrop(event: ReactDragEvent<HTMLElement>, targetIndex: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const dataIndex = event.dataTransfer?.getData('application/x-justybase-grouping-index');
+    const parsedIndex = dataIndex === undefined || dataIndex === '' ? undefined : Number(dataIndex);
+    const sourceIndex = draggedGroupingRef.current ?? (Number.isInteger(parsedIndex) ? parsedIndex : undefined);
+    if (sourceIndex !== undefined) {
+      const insertionIndex = groupingInsertionIndex(event, targetIndex);
+      const nextGrouping = reorderDataGridGrouping(activeView.grouping, sourceIndex, insertionIndex);
+      if (nextGrouping.length === activeView.grouping.length && nextGrouping.some((key, index) => key !== activeView.grouping[index])) {
+        updateView({ grouping: nextGrouping });
+      }
+    } else if (draggedColumnRef.current !== undefined) {
+      addDraggedGrouping(draggedColumnRef.current);
+    }
+    handleGroupingDragEnd();
+    draggedColumnRef.current = undefined;
+  }
+
+  function removeGrouping(key: string): void {
+    const columnIndex = resolveColumnIndex(resolvedColumns, key);
+    const column = columnIndex >= 0 ? resolvedColumns[columnIndex] : undefined;
+    updateView({ grouping: activeView.grouping.filter(item => column === undefined || !columnMatchesKey(column, columnIndex, item)) });
+  }
+
   function hideContextColumn(columnIndex: number): void {
     toggleColumnVisibility(columnIndex, false);
     setContextMenu(undefined);
@@ -980,8 +1154,52 @@ export function DataGrid({
         })}
       </div>
     </details>}
+    {showGroupingPanel && <div
+      className={`ui-data-grid-group-panel${activeView.grouping.length > 0 ? ' ui-data-grid-group-panel-active' : ''}`}
+      role="group"
+      aria-label="Grouping panel"
+      onDragOver={event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+      }}
+      onDrop={event => {
+        event.preventDefault();
+        const source = draggedColumnRef.current;
+        if (source !== undefined) addDraggedGrouping(source);
+        draggedColumnRef.current = undefined;
+        draggedGroupingRef.current = undefined;
+        setGroupingDropIndex(undefined);
+      }}
+    >
+      <span className="ui-data-grid-group-panel-label">Group by</span>
+      {activeView.grouping.map((key, groupingIndex) => {
+        const columnIndex = resolveColumnIndex(resolvedColumns, key);
+        const column = columnIndex >= 0 ? resolvedColumns[columnIndex] : undefined;
+        const label = column?.name ?? key;
+        const dropBefore = groupingDropIndex === groupingIndex;
+        const dropAfter = groupingDropIndex === groupingIndex + 1;
+        return <div
+          className={`ui-data-grid-group-chip${dropBefore ? ' ui-data-grid-group-chip-drop-before' : ''}${dropAfter ? ' ui-data-grid-group-chip-drop-after' : ''}`}
+          key={key}
+          role="listitem"
+          title={`${label} · grouping priority ${groupingIndex + 1}`}
+          onDragOver={event => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = 'move';
+            setGroupingDropIndex(groupingInsertionIndex(event, groupingIndex));
+          }}
+          onDrop={event => handleGroupingDrop(event, groupingIndex)}
+        >
+          <button type="button" className="ui-data-grid-group-drag-handle" draggable aria-label={`Reorder grouping ${label}`} title={`Drag to change grouping priority for ${label}`} onDragStart={event => handleGroupingDragStart(event, groupingIndex)} onDragEnd={handleGroupingDragEnd}>⠿</button>
+          <span>{label}</span>
+          <button type="button" aria-label={`Remove grouping ${label}`} onClick={() => removeGrouping(key)}>×</button>
+        </div>;
+      })}
+      <span className="ui-data-grid-group-panel-placeholder">{activeView.grouping.length > 0 ? 'Drag another column here' : 'Drag columns here to group'}</span>
+    </div>}
     <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}>
-      {processedRows.length === 0 ? <div className="ui-grid-empty" role="status">No matching rows.{hasMoreRows && <button type="button" onClick={onLoadMore}>Load more rows</button>}</div> : <table className="ui-data-grid">
+      {processedRows.length === 0 ? <div className="ui-grid-empty" role="status">No matching rows.{hasMoreRows && <button type="button" onClick={requestMoreRows}>Load more rows</button>}</div> : <table className="ui-data-grid">
         <thead><tr>
           <th scope="col" className="ui-data-grid-row-number">#</th>
           {visibleColumnIndexes.map(columnIndex => {
@@ -1010,7 +1228,7 @@ export function DataGrid({
           {virtualRenderedRows.map(rendered => {
           if (rendered.kind === 'group') {
             const collapsed = collapsedGroups.has(rendered.id);
-            return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
+            return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1} style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
           }
           const rowSelected = selectedRowIndex === rendered.sourceIndex;
           const rowLabel = rendered.values.map((value, columnIndex) => {

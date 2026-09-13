@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import {
@@ -24,6 +24,7 @@ import {
   formatDataGridCellValue,
   formatDataGridClipboard,
   processDataGridRows,
+  reorderDataGridGrouping,
 } from '../src';
 
 const result: UiResultSurfaceState = {
@@ -41,6 +42,11 @@ const result: UiResultSurfaceState = {
 };
 
 describe('shared React presentation', () => {
+  it('keeps grouping reorder insertion indexes stable in both directions', () => {
+    expect(reorderDataGridGrouping(['A', 'B', 'C'], 2, 0)).toEqual(['C', 'A', 'B']);
+    expect(reorderDataGridGrouping(['A', 'B', 'C'], 0, 3)).toEqual(['B', 'C', 'A']);
+  });
+
   it('uses the canonical VS Code boolean cell representation', () => {
     expect(formatDataGridCellValue(true, 'BOOLEAN')).toBe('✓ true');
     expect(formatDataGridCellValue('t', 'BOOL')).toBe('✓ true');
@@ -171,7 +177,7 @@ describe('shared React presentation', () => {
     await user.click(screen.getByRole('button', { name: 'Close two.sql' }));
   });
 
-  it('restores both scroll axes by stable result-set identity and reports changes', () => {
+  it('restores both scroll axes by stable result-set identity and reports changes', async () => {
     const onScroll = jest.fn();
     const onRowSelect = jest.fn();
     render(<DataGrid resultSetId={result.resultSetId} columns={[{ name: 'ID' }, { name: 'DETAILS' }]} rows={[[1, { value: 'x' }], [2, [3]]]} scroll={{ resultSetId: result.resultSetId, top: 128, left: 64, anchorRow: 4 }} onScroll={onScroll} onRowSelect={onRowSelect} />);
@@ -179,7 +185,7 @@ describe('shared React presentation', () => {
     expect(grid.scrollTop).toBe(128);
     expect(grid.scrollLeft).toBe(64);
     fireEvent.scroll(grid);
-    expect(onScroll).toHaveBeenCalledWith(expect.objectContaining({ resultSetId: result.resultSetId }));
+    await waitFor(() => expect(onScroll).toHaveBeenCalledWith(expect.objectContaining({ resultSetId: result.resultSetId })));
     fireEvent.click(screen.getByRole('row', { name: /1/ }));
     expect(onRowSelect).toHaveBeenCalledWith(0);
     render(<DataGrid resultSetId={result.resultSetId} columns={result.columns} rows={[[1]]} scroll={{ resultSetId: 'different-result', top: -1, left: -1 }} />);
@@ -212,6 +218,10 @@ describe('shared React presentation', () => {
       paddingTop: 0,
       paddingBottom: 90,
     });
+
+    const largeResult = calculateDataGridVirtualWindow(150_000, 0, 480);
+    expect(largeResult.endIndex - largeResult.startIndex).toBeLessThan(40);
+    expect(largeResult.paddingBottom).toBe((150_000 - largeResult.endIndex) * 30);
   });
 
   it('renders only the visible result window and moves it without changing row identity', () => {
@@ -312,6 +322,23 @@ describe('shared React presentation', () => {
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
   });
 
+  it('delegates clipboard writes to the host port with the typed payload', () => {
+    const clipboardWriter = jest.fn();
+    render(<DataGrid
+      resultSetId="clipboard-port"
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[42]]}
+      clipboardWriter={clipboardWriter}
+    />);
+    const cell = screen.getByRole('cell', { name: '42' });
+    fireEvent.mouseDown(cell, { button: 0 });
+    fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
+    expect(clipboardWriter).toHaveBeenCalledWith(expect.objectContaining({
+      columns: [expect.objectContaining({ name: 'ID' })],
+      rows: [[42]],
+    }), 'text');
+  });
+
   it('keeps the grid context actions identical for shared hosts', () => {
     const onViewChange = jest.fn();
     const onCopySelection = jest.fn();
@@ -377,6 +404,44 @@ describe('shared React presentation', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'View full row' }));
     expect(onRowSelect).toHaveBeenLastCalledWith(0);
     expect(onViewRow).toHaveBeenLastCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 40, clientY: 60 });
+  });
+
+  it('supports dragging a column into the grouping panel and removing its chip', () => {
+    const onViewChange = jest.fn();
+    const firstRender = render(<DataGrid
+      resultSetId="group-panel"
+      columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[['A', 1], ['B', 2]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+      onViewChange={onViewChange}
+    />);
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Reorder TEAM' }));
+    fireEvent.drop(screen.getByRole('group', { name: 'Grouping panel' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ grouping: ['TEAM'] });
+    firstRender.unmount();
+
+    const reorderRender = render(<DataGrid
+      resultSetId="group-panel-reorder"
+      columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[['A', 1], ['B', 2]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['TEAM', 'VALUE'] }}
+      onViewChange={onViewChange}
+    />);
+    const groupingItems = screen.getAllByRole('listitem');
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Reorder grouping VALUE' }));
+    fireEvent.drop(groupingItems[0]);
+    expect(onViewChange).toHaveBeenLastCalledWith({ grouping: ['VALUE', 'TEAM'] });
+    reorderRender.unmount();
+
+    render(<DataGrid
+      resultSetId="group-panel"
+      columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[['A', 1], ['B', 2]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['TEAM'] }}
+      onViewChange={onViewChange}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove grouping TEAM' }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ grouping: [] });
   });
 
   it('keeps the full grid context menu inside the viewport', () => {
@@ -502,10 +567,10 @@ describe('shared React presentation', () => {
     />);
     expect(screen.getByText('1 rows')).toBeInTheDocument();
     expect(screen.getByText('2 rows')).toBeInTheDocument();
-    const group = screen.getByRole('button', { name: 'Collapse group A' });
+    const group = screen.getByRole('button', { name: 'Collapse group TEAM: A' });
     fireEvent.click(group);
     expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Expand group A' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand group TEAM: A' }));
     expect(screen.getByRole('row', { name: /A 1/ })).toBeInTheDocument();
   });
 
@@ -527,7 +592,7 @@ describe('shared React presentation', () => {
       const spacerHeight = (): number => Array.from(container.querySelectorAll<HTMLTableRowElement>('.ui-data-grid-virtual-spacer'))
         .reduce((sum, spacer) => sum + Number.parseFloat(spacer.firstElementChild?.getAttribute('style')?.match(/height:\s*([\d.]+)px/u)?.[1] ?? '0'), 0);
       const before = spacerHeight();
-      fireEvent.click(screen.getByRole('button', { name: 'Collapse group A' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse group TEAM: A' }));
       act(() => { jest.runOnlyPendingTimers(); });
       const after = spacerHeight();
       expect(after).toBeLessThan(before);
@@ -584,6 +649,34 @@ describe('shared React presentation', () => {
     const scroller = screen.getByRole('status').parentElement as HTMLDivElement;
     fireEvent.scroll(scroller);
     expect(onLoadMore.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('does not start concurrent loads while the virtual scroll remains at the end', async () => {
+    let resolveLoad: (() => void) | undefined;
+    const onLoadMore = jest.fn(() => new Promise<void>(resolve => { resolveLoad = resolve; }));
+    const { container } = render(<DataGrid
+      resultSetId="guarded-paging"
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1]]}
+      totalRowCount={3}
+      onLoadMore={onLoadMore}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1_000 });
+    scroller.scrollTop = 900;
+    fireEvent.scroll(scroller);
+    fireEvent.scroll(scroller);
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveLoad?.();
+      await Promise.resolve();
+    });
+    fireEvent.scroll(scroller);
+    expect(onLoadMore).toHaveBeenCalledTimes(2);
   });
 
   it('focuses the grid for copy shortcuts and clears cell selection for a new result', () => {

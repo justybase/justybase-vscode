@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, ReactElement } from 'react';
 import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
-import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterOperator, QueryColumnFilterSpec, QueryDistinctResponse, QueryExportFormat, QueryGroupResponse, QuerySortSpec } from '@justybase/contracts';
+import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterOperator, QueryColumnFilterSpec, QueryDistinctResponse, QueryExportFormat, QuerySortSpec } from '@justybase/contracts';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { CellValueViewer, DataGrid, createDataGridClipboardPayload, formatDataGridCellValue, formatDataGridClipboard, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
 import type { DataGridCellContext, DataGridCellMetadata, DataGridClipboardFormat, DataGridColumnFilterRequest, DataGridCopyPayload, GridScrollPosition } from '@justybase/ui-react';
@@ -14,7 +14,6 @@ import { type ResultState } from './queryState';
 interface GridRow { values: readonly unknown[]; }
 
 interface SavedGridState {
-  pageSize?: number;
   sorting?: SortingState;
   columnFilters?: ColumnFiltersState;
   columnFilterDefinitions?: Record<string, { operator: QueryColumnFilterOperator; value: string; values?: readonly unknown[] }>;
@@ -70,6 +69,13 @@ interface PivotResult {
 }
 
 type ResultGridColumnMetadata = DataGridCellMetadata & { readonly name: string };
+
+/**
+ * The API still transfers a bounded page at a time, but that is an
+ * implementation detail of the infinite result surface. The user sees one
+ * continuous, virtualized grid and never has to navigate pages.
+ */
+const RESULT_ROW_BATCH_SIZE = 10_000;
 
 function gridStateKey(resultSetId: string): string {
   return `grid_v2_${resultSetId}`;
@@ -184,8 +190,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const storage = useWorkspaceStorage();
   const [rows, setRows] = useState<unknown[][]>(result.rows);
   const [totalRows, setTotalRows] = useState(result.totalRows);
-  const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(200);
+  const [hasMoreRows, setHasMoreRows] = useState(false);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnFilterDefinitions, setColumnFilterDefinitions] = useState<Record<string, ColumnFilterDefinition>>({});
@@ -210,15 +215,17 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [aggregates, setAggregates] = useState<QueryAggregateResponse | null>(null);
   const [aggregatesLoading, setAggregatesLoading] = useState(false);
   const [gridHydratedKey, setGridHydratedKey] = useState<string | null>(null);
-  const [grouped, setGrouped] = useState<QueryGroupResponse | null>(null);
   const [pivot, setPivot] = useState<PivotResult | null>(null);
   const [grouping, setGrouping] = useState(false);
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
   const [groupingDraft, setGroupingDraft] = useState<string[]>([]);
-  const [groupCountEnabled, setGroupCountEnabled] = useState(true);
-  const [groupNumericSumsEnabled, setGroupNumericSumsEnabled] = useState(true);
   const [filterMenu, setFilterMenu] = useState<FilterMenuState | undefined>(undefined);
   const requestGeneration = useRef(0);
+  const loadedRowsRef = useRef<readonly unknown[][]>(result.rows);
+  const totalRowsRef = useRef(result.totalRows);
+  const hasMoreRowsRef = useRef(false);
+  const pageHydrationRef = useRef(new Set<string>());
+  const serverLoadSignatureRef = useRef<string | undefined>(undefined);
   const filterMenuGeneration = useRef(0);
   const resultSetId = result.resultSetId ?? `${queryId}::statement-${statementIndex}`;
   const gridKey = gridStateKey(resultSetId);
@@ -272,13 +279,58 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   }, [gridColumnSignature, gridRows, result.columns, result.columnScales, result.columnTypes, resultSetId]);
   const localFilterColumns = useMemo<ResultColumn[]>(() => gridColumns.map(({ name, type, scale }) => ({ name, type, scale })), [gridColumns]);
 
+  const loadResultPage = useCallback(async (generation: number, offset: number, replace: boolean): Promise<void> => {
+    if (!queryId || !result.sessionId) return;
+    const requestKey = `${generation}:${offset}`;
+    if (pageHydrationRef.current.has(requestKey)) return;
+    pageHydrationRef.current.add(requestKey);
+    setLoading(true);
+    try {
+      const response = await api.queryPage(queryId, {
+        statementIndex,
+        offset,
+        limit: RESULT_ROW_BATCH_SIZE,
+        sorting: requestSorting,
+        columnFilters: requestFilters,
+        globalFilter,
+      });
+      if (generation !== requestGeneration.current) return;
+      const pageOffset = Number.isFinite(response.offset) ? Math.max(0, response.offset) : offset;
+      const responseHasMore = response.hasMore ?? pageOffset + response.rows.length < response.totalRows;
+      const nextRows = replace || pageOffset === 0
+        ? response.rows.map(row => [...row])
+        : [
+          ...loadedRowsRef.current.slice(0, pageOffset),
+          ...response.rows.map(row => [...row]),
+          ...loadedRowsRef.current.slice(pageOffset + response.rows.length),
+        ];
+      loadedRowsRef.current = nextRows;
+      totalRowsRef.current = response.totalRows;
+      hasMoreRowsRef.current = responseHasMore;
+      setRows(nextRows);
+      setTotalRows(response.totalRows);
+      setHasMoreRows(responseHasMore);
+    } catch (reason: unknown) {
+      if (generation === requestGeneration.current) setError(reason instanceof Error ? reason.message : 'Could not load result rows.');
+    } finally {
+      pageHydrationRef.current.delete(requestKey);
+      if (generation === requestGeneration.current && ![...pageHydrationRef.current].some(key => key.startsWith(`${generation}:`))) setLoading(false);
+    }
+  }, [api, globalFilter, queryId, requestFilters, requestSorting, result.sessionId, statementIndex]);
+
   useEffect(() => {
+    requestGeneration.current += 1;
+    pageHydrationRef.current.clear();
+    loadedRowsRef.current = result.rows;
+    totalRowsRef.current = result.totalRows;
+    hasMoreRowsRef.current = false;
     setRows(result.rows);
     setTotalRows(result.totalRows);
-    setPageIndex(0);
+    setHasMoreRows(false);
     setRowSelection({});
     setError('');
     setAggregates(null);
+    setPivot(null);
     setDetailRowIndex(null);
     setCellViewer(undefined);
     setFilterMenu(undefined);
@@ -291,7 +343,6 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     const defaultOrder = result.columns.map((_, i) => String(i));
     const savedOrder = saved?.columnOrder?.filter(column => defaultOrder.includes(column)) ?? [];
     const mergedOrder = [...savedOrder, ...defaultOrder.filter(column => !savedOrder.includes(column))];
-    setPageSize(saved?.pageSize && saved.pageSize >= 1 && saved.pageSize <= 1000 ? saved.pageSize : 200);
     setSorting(Array.isArray(saved?.sorting) ? saved.sorting : []);
     setColumnFilters(Array.isArray(saved?.columnFilters) ? saved.columnFilters : []);
     setColumnFilterDefinitions(Object.fromEntries(Object.entries(saved?.columnFilterDefinitions ?? {}).map(([id, definition]) => [id, {
@@ -315,32 +366,57 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   useEffect(() => {
     if (gridHydratedKey !== gridKey) return;
     try {
-      const state: SavedGridState = { pageSize, sorting, columnFilters, columnFilterDefinitions, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, grouping: gridGrouping, scrollTop, scrollLeft, scrollAnchorRow };
+      const state: SavedGridState = { sorting, columnFilters, columnFilterDefinitions, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, grouping: gridGrouping, scrollTop, scrollLeft, scrollAnchorRow };
       const envelope: PersistedGridStateEnvelope = { version: 2, resultSetId, state };
       storage.set(gridKey, JSON.stringify(envelope));
     } catch {
       // A full localStorage should not make the result grid unusable.
     }
-  }, [gridKey, gridHydratedKey, resultSetId, pageSize, sorting, columnFilters, columnFilterDefinitions, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, gridGrouping, scrollTop, scrollLeft, scrollAnchorRow, storage]);
+  }, [gridKey, gridHydratedKey, resultSetId, sorting, columnFilters, columnFilterDefinitions, globalFilter, columnVisibility, columnPinning, columnOrder, columnWidths, gridGrouping, scrollTop, scrollLeft, scrollAnchorRow, storage]);
 
   useEffect(() => {
     if (!queryId || !result.sessionId) return;
+    if (gridHydratedKey !== gridKey) return;
+    const loadSignature = JSON.stringify({ queryId, resultSetId, sessionId: result.sessionId, statementIndex, status: result.status, globalFilter, columnFilters: requestFilters, sorting: requestSorting });
+    if (serverLoadSignatureRef.current === loadSignature) return;
+    serverLoadSignatureRef.current = loadSignature;
     const generation = ++requestGeneration.current;
-    setLoading(true);
-    void api.queryPage(queryId, { statementIndex, offset: pageIndex * pageSize, limit: pageSize, sorting: requestSorting, columnFilters: requestFilters, globalFilter }).then(response => {
-      if (generation !== requestGeneration.current) return;
-      setRows(response.rows);
-      setTotalRows(response.totalRows);
-    }).catch(reason => { if (generation === requestGeneration.current) setError(reason instanceof Error ? reason.message : 'Could not load result page.'); }).finally(() => { if (generation === requestGeneration.current) setLoading(false); });
-  }, [queryId, statementIndex, result.sessionId, result.status, pageIndex, pageSize, requestSorting, requestFilters, globalFilter]);
+    pageHydrationRef.current.clear();
+    loadedRowsRef.current = [];
+    hasMoreRowsRef.current = true;
+    setRows([]);
+    setTotalRows(result.totalRows);
+    setHasMoreRows(true);
+    void loadResultPage(generation, 0, true);
+  }, [globalFilter, gridHydratedKey, gridKey, loadResultPage, queryId, requestFilters, requestSorting, result.sessionId, result.status, resultSetId, statementIndex]);
+
+  const loadMoreRows = useCallback(async (): Promise<void> => {
+    if (!result.sessionId || !hasMoreRowsRef.current) return;
+    const generation = requestGeneration.current;
+    const offset = loadedRowsRef.current.length;
+    if (offset >= totalRowsRef.current) return;
+    await loadResultPage(generation, offset, false);
+  }, [loadResultPage, result.sessionId]);
 
   async function openColumnFilter(request: DataGridColumnFilterRequest): Promise<void> {
     const generation = ++filterMenuGeneration.current;
     const id = String(request.columnIndex);
     const saved = columnFilterDefinitions[id];
     const anchor = request.anchor;
-    const top = Math.min(anchor.bottom + 4, Math.max(12, window.innerHeight - 430));
-    const left = Math.min(Math.max(8, anchor.left), Math.max(8, window.innerWidth - 332));
+    const viewportMargin = 10;
+    const anchorGap = 5;
+    const popupWidth = Math.min(340, Math.max(240, window.innerWidth - viewportMargin * 2));
+    const popupHeight = Math.min(520, Math.max(160, window.innerHeight - viewportMargin * 2));
+    const minimumUsableHeight = Math.min(280, popupHeight);
+    const left = Math.min(
+      Math.max(viewportMargin, anchor.left),
+      Math.max(viewportMargin, window.innerWidth - popupWidth - viewportMargin),
+    );
+    const availableHeightBelow = Math.max(0, window.innerHeight - anchor.bottom - viewportMargin - anchorGap);
+    const availableHeightAbove = Math.max(0, anchor.top - viewportMargin - anchorGap);
+    const placeAbove = availableHeightBelow < minimumUsableHeight && availableHeightAbove > availableHeightBelow;
+    const preferredTop = placeAbove ? anchor.top - popupHeight - anchorGap : anchor.bottom + anchorGap;
+    const top = Math.max(viewportMargin, Math.min(preferredTop, window.innerHeight - popupHeight - viewportMargin));
     setFilterMenu({
       columnIndex: request.columnIndex,
       columnName: request.column.name,
@@ -414,7 +490,19 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     }
     setColumnFilterDefinitions(nextDefinitions);
     setColumnFilters(nextFilters);
-    setPageIndex(0);
+    closeColumnFilter();
+  }
+
+  function clearColumnFilter(): void {
+    const menu = filterMenu;
+    if (!menu) return;
+    const id = String(menu.columnIndex);
+    setColumnFilterDefinitions(previous => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+    setColumnFilters(previous => previous.filter(item => item.id !== id));
     closeColumnFilter();
   }
 
@@ -493,25 +581,22 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     if (Number.isInteger(columnIndex)) addGroupingColumn(columnIndex);
   }
 
-  async function groupResults(): Promise<void> {
-    const groupByColumnIndices = groupingDraft.map(Number).filter(index => Number.isInteger(index) && index >= 0 && index < result.columns.length);
+  function runGrouping(groupingKeys: readonly string[]): void {
+    const groupByColumnIndices = groupingKeys.map(key => {
+      const numericIndex = Number(key);
+      if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < result.columns.length) return numericIndex;
+      return result.columns.findIndex(column => column === key);
+    }).filter((index, position, indexes) => Number.isInteger(index) && index >= 0 && index < result.columns.length && indexes.indexOf(index) === position);
     if (groupByColumnIndices.length === 0) { setError('No valid grouping columns were selected.'); return; }
-    setGrouping(true);
+    const nextGrouping = groupByColumnIndices.map(index => result.columns[index] ?? String(index));
+    setGridGrouping(nextGrouping);
+    setGroupingDraft(groupByColumnIndices.map(String));
+    setPivot(null);
     setError('');
-    try {
-      const aggregates = [
-        ...(groupCountEnabled ? [{ function: 'count' as const }] : []),
-        ...(groupNumericSumsEnabled ? result.columns.map((_column, index) => ({ index, function: 'sum' as const })).filter(item => isNumericType(result.columnTypes[item.index], result.columnScales[item.index])).map(item => ({ function: item.function, columnIndex: item.index })) : []),
-      ];
-      if (aggregates.length === 0) { setError('Select at least one aggregate.'); return; }
-      setGridGrouping(groupingDraft);
-      setGrouped(await api.group(queryId, { statementIndex, groupByColumnIndices, aggregates, globalFilter, columnFilters: requestFilters, groupLimit: 2_000 }));
-      setPivot(null);
-    } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'Could not group results.');
-    } finally {
-      setGrouping(false);
-    }
+  }
+
+  function groupResults(): void {
+    runGrouping(groupingDraft);
   }
 
   async function pivotResults(): Promise<void> {
@@ -540,7 +625,6 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
         columnScales: [result.columnScales[indices[0]], ...pivotValues.map(() => valueScale)],
         rows: rowValues.map(rowValue => [rowValue, ...pivotValues.map(pivotValue => rowMap.get(rowValue)?.get(pivotValue) ?? null)]),
       });
-      setGrouped(null);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not pivot results.');
     } finally {
@@ -602,9 +686,9 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     data,
     columns,
     state: { sorting, columnFilters, globalFilter, rowSelection, columnVisibility, columnPinning, columnOrder },
-    onSortingChange: updater => { setSorting(updater); setPageIndex(0); },
-    onColumnFiltersChange: updater => { setColumnFilters(updater); setPageIndex(0); },
-    onGlobalFilterChange: updater => { setGlobalFilter(updater); setPageIndex(0); },
+    onSortingChange: updater => { setSorting(updater); },
+    onColumnFiltersChange: updater => { setColumnFilters(updater); },
+    onGlobalFilterChange: updater => { setGlobalFilter(updater); },
     onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnPinningChange: setColumnPinning,
@@ -628,7 +712,6 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
         return rawIndex >= 0 ? rawIndex : undefined;
       })();
   const effectiveTotalRows = result.sessionId ? totalRows : data.length;
-  const totalPages = Math.max(1, Math.ceil(effectiveTotalRows / pageSize));
   const sharedGridView = useMemo(() => ({
     globalFilter,
     columnFilters: Object.fromEntries(columnFilters.map(item => [item.id, typeof item.value === 'string' ? item.value : ''])),
@@ -681,46 +764,51 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     };
   }, [aggregates, result.columns, gridColumns]);
 
-  const groupedGrid = useMemo(() => {
-    if (!grouped && !pivot) return undefined;
-    if (pivot) {
-      return {
-        columns: analysisGridColumns(pivot.columns.map((name, index) => ({ name, type: pivot.columnTypes[index], scale: pivot.columnScales[index] }))),
-        rows: pivot.rows,
-      };
-    }
-    return { columns: analysisGridColumns(grouped?.columns ?? []), rows: grouped?.rows ?? [] };
-  }, [grouped, pivot]);
+  const pivotGrid = useMemo(() => pivot ? {
+    columns: analysisGridColumns(pivot.columns.map((name, index) => ({ name, type: pivot.columnTypes[index], scale: pivot.columnScales[index] }))),
+    rows: pivot.rows,
+  } : undefined, [pivot]);
 
   function updateSharedGridView(patch: Partial<UiResultViewState>): void {
-    if (patch.globalFilter !== undefined) { setGlobalFilter(patch.globalFilter); setPageIndex(0); }
+    if (patch.globalFilter !== undefined) setGlobalFilter(patch.globalFilter);
     if (patch.columnFilters !== undefined) {
       setColumnFilters(Object.entries(patch.columnFilters).filter(([, value]) => value.length > 0).map(([id, value]) => {
         const index = result.columns.findIndex(column => column === id);
         return { id: index >= 0 ? String(index) : id, value };
       }));
       setColumnFilterDefinitions(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => patch.columnFilters?.[id] !== undefined)));
-      setPageIndex(0);
     }
     if (patch.sorting !== undefined) {
       setSorting(patch.sorting.map(item => {
         const index = result.columns.findIndex(column => column === item.column);
         return { id: index >= 0 ? String(index) : item.column, desc: item.descending };
       }));
-      setPageIndex(0);
     }
     if (patch.columnVisibility !== undefined) setColumnVisibility({ ...patch.columnVisibility });
     if (patch.columnOrder !== undefined) setColumnOrder([...patch.columnOrder]);
     if (patch.pinnedColumns !== undefined) setColumnPinning({ left: [...patch.pinnedColumns], right: [] });
     if (patch.columnWidths !== undefined) setColumnWidths({ ...patch.columnWidths });
-    if (patch.grouping !== undefined) setGridGrouping([...patch.grouping]);
-    if (patch.grouping !== undefined) setGroupingDraft([...patch.grouping]);
+    if (patch.grouping !== undefined) {
+      const nextGrouping = [...patch.grouping];
+      if (nextGrouping.length === 0) {
+        setGridGrouping([]);
+        setGroupingDraft([]);
+        setPivot(null);
+        setError('');
+      } else {
+        runGrouping(nextGrouping);
+      }
+    }
     if (patch.scrollTop !== undefined) setScrollTop(Math.max(0, patch.scrollTop));
     if (patch.scrollLeft !== undefined) setScrollLeft(Math.max(0, patch.scrollLeft));
     if (patch.anchorRow !== undefined) setScrollAnchorRow(Math.max(0, patch.anchorRow));
   }
 
   function handleGridScroll(position: GridScrollPosition): void {
+    if (position.resultSetId !== resultSetId
+      || (position.top === scrollTop
+        && position.left === scrollLeft
+        && position.anchorRow === scrollAnchorRow)) return;
     updateSharedGridView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
   }
 
@@ -766,7 +854,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setCellViewer({
       column,
       value: row[context.columnIndex],
-      rowNumber: (result.sessionId ? pageIndex * pageSize : 0) + context.rowIndex + 1,
+      rowNumber: context.rowIndex + 1,
     });
   }
 
@@ -780,6 +868,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     const selected = selectedRows.length > 0 ? selectedRows : table.getRowModel().rows;
     void copyGridPayload({ columns: gridColumns, rows: selected.map(row => row.original.values) });
   }
+
+  const visibleFilterOptions = filterMenu?.options.filter(option => option.label.toLocaleLowerCase().includes(filterMenu.search.toLocaleLowerCase())) ?? [];
 
   async function exportResult(): Promise<void> {
     setExporting(true);
@@ -814,32 +904,32 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
       </div>
       <div className="grid-grouping-options">
         <label>Add column<select aria-label="Add grouping column" value="" onChange={event => { addGroupingColumn(Number(event.target.value)); event.currentTarget.value = ''; }}><option value="">Choose a column…</option>{result.columns.map((column, index) => <option key={`${column}:${index}`} value={index} disabled={groupingDraft.includes(String(index))}>{column}</option>)}</select></label>
-        <label className="grid-grouping-check"><input type="checkbox" checked={groupCountEnabled} onChange={event => setGroupCountEnabled(event.target.checked)} />Count rows</label>
-        <label className="grid-grouping-check"><input type="checkbox" checked={groupNumericSumsEnabled} onChange={event => setGroupNumericSumsEnabled(event.target.checked)} />Sum numeric columns</label>
-        <button type="button" className="secondary small" disabled={grouping || groupingDraft.length === 0} onClick={() => void groupResults()}>{grouping ? 'Running grouping…' : 'Run grouping'}</button>
+        <button type="button" className="secondary small" disabled={groupingDraft.length === 0} onClick={groupResults}>Apply grouping</button>
       </div>
     </section>}
-    {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
-    {(grouped || pivot) && groupedGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">{pivot ? 'Pivot view' : `Grouped view · ${grouped?.totalGroups.toLocaleString() ?? 0} groups`}<button type="button" className="secondary small" onClick={() => { setGrouped(null); setPivot(null); }}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:${pivot ? 'pivot' : 'grouped'}`} columns={groupedGrid.columns} rows={groupedGrid.rows} totalRowCount={groupedGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} /></div></div>}
-    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu showInlineColumnFilters onOpenColumnFilter={openColumnFilter} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow }} onScroll={handleGridScroll} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onViewRow={context => setDetailRowIndex(context.rowIndex)} onViewCell={openCellValue} onEditRow={onEditRow ? context => { const row = gridRows[context.rowIndex]; if (row) onEditRow([...row]); } : undefined} />
+    {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} showGroupingPanel={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
+    {pivot && pivotGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">Pivot view<button type="button" className="secondary small" onClick={() => setPivot(null)}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:pivot`} columns={pivotGrid.columns} rows={pivotGrid.rows} totalRowCount={pivotGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} showGroupingPanel={false} /></div></div>}
+    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu showInlineColumnFilters={false} onOpenColumnFilter={openColumnFilter} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow }} onScroll={handleGridScroll} onLoadMore={result.sessionId ? loadMoreRows : undefined} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onViewRow={context => setDetailRowIndex(context.rowIndex)} onViewCell={openCellValue} onEditRow={onEditRow ? context => { const row = gridRows[context.rowIndex]; if (row) onEditRow([...row]); } : undefined} />
     {filterMenu && <div className="grid-column-filter-menu" role="dialog" aria-label={`Filter ${filterMenu.columnName}`} style={{ left: filterMenu.left, top: filterMenu.top }} onMouseDown={event => event.stopPropagation()}>
-      <div className="grid-column-filter-heading"><strong>{filterMenu.columnName}</strong><button type="button" className="grid-column-filter-close" aria-label="Close filter" onClick={closeColumnFilter}>×</button></div>
-      <label className="grid-column-filter-condition">Condition<select aria-label={`Filter condition for ${filterMenu.columnName}`} value={filterMenu.operator} onChange={event => updateColumnFilterMenu({ operator: event.target.value as QueryColumnFilterOperator })}><option value="in">Values</option><option value="contains">Contains</option><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="startsWith">Starts with</option><option value="endsWith">Ends with</option><option value="greaterThan">Greater than</option><option value="greaterThanOrEqual">Greater than or equal</option><option value="lessThan">Less than</option><option value="lessThanOrEqual">Less than or equal</option><option value="isNull">Is blank</option><option value="isNotNull">Is not blank</option></select></label>
-      {filterMenu.operator === 'in' ? <>
-        <input className="grid-column-filter-search" aria-label={`Search values for ${filterMenu.columnName}`} placeholder="Search values…" value={filterMenu.search} onChange={event => updateColumnFilterMenu({ search: event.target.value })} />
-        <div className="grid-column-filter-selection-actions"><button type="button" className="secondary small" onClick={() => updateColumnFilterMenu({ selectedKeys: filterMenu.options.map(option => option.key) })}>Select all</button><button type="button" className="secondary small" onClick={() => updateColumnFilterMenu({ selectedKeys: [] })}>Clear</button></div>
-        <div className="grid-column-filter-values" role="group" aria-label={`Values for ${filterMenu.columnName}`}>
-          {filterMenu.options.filter(option => option.label.toLocaleLowerCase().includes(filterMenu.search.toLocaleLowerCase())).map(option => <label key={option.key}><input type="checkbox" checked={filterMenu.selectedKeys.includes(option.key)} onChange={event => updateColumnFilterMenu({ selectedKeys: event.target.checked ? [...filterMenu.selectedKeys, option.key] : filterMenu.selectedKeys.filter(key => key !== option.key) })} /><span title={option.label}>{option.label}</span></label>)}
-          {!filterMenu.loading && filterMenu.options.length === 0 && <span className="grid-column-filter-empty">No values available.</span>}
-        </div>
-        <small className="grid-column-filter-summary">{filterMenu.selectedKeys.length.toLocaleString()} selected{filterMenu.truncated ? ' · first 500 values' : ''}</small>
-      </> : filterMenu.operator !== 'isNull' && filterMenu.operator !== 'isNotNull' ? <input className="grid-column-filter-value" aria-label={`Filter value for ${filterMenu.columnName}`} placeholder="Enter a value…" value={filterMenu.value} onChange={event => updateColumnFilterMenu({ value: event.target.value })} onKeyDown={event => { if (event.key === 'Enter') applyColumnFilter(); }} /> : <p className="grid-column-filter-hint">Rows are matched against NULL values.</p>}
-      {filterMenu.loading && <span className="grid-column-filter-loading" role="status">Loading distinct values…</span>}
-      {filterMenu.error && <span className="grid-column-filter-error" role="alert">{filterMenu.error}</span>}
-      <div className="grid-column-filter-footer"><button type="button" className="secondary small" onClick={() => { updateColumnFilterMenu({ operator: 'in', selectedKeys: [], value: '' }); window.setTimeout(applyColumnFilter, 0); }}>Clear filter</button><span /><button type="button" className="secondary small" onClick={closeColumnFilter}>Cancel</button><button type="button" className="primary small" disabled={filterMenu.loading} onClick={applyColumnFilter}>Apply</button></div>
+      <div className="grid-column-filter-heading"><div className="grid-column-filter-title"><span>FILTER COLUMN</span><strong>{filterMenu.columnName}</strong></div><button type="button" className="grid-column-filter-close" aria-label="Close filter" onClick={closeColumnFilter}>×</button></div>
+      <div className="grid-column-filter-body">
+        <label className="grid-column-filter-condition"><span>Filter by</span><select aria-label={`Filter condition for ${filterMenu.columnName}`} value={filterMenu.operator} onChange={event => updateColumnFilterMenu({ operator: event.target.value as QueryColumnFilterOperator })}><option value="in">Values</option><option value="contains">Contains</option><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="startsWith">Starts with</option><option value="endsWith">Ends with</option><option value="greaterThan">Greater than</option><option value="greaterThanOrEqual">Greater than or equal</option><option value="lessThan">Less than</option><option value="lessThanOrEqual">Less than or equal</option><option value="isNull">Is blank</option><option value="isNotNull">Is not blank</option></select></label>
+        {filterMenu.operator === 'in' ? <>
+          <input className="grid-column-filter-search" aria-label={`Search values for ${filterMenu.columnName}`} placeholder="Search values…" value={filterMenu.search} onChange={event => updateColumnFilterMenu({ search: event.target.value })} />
+          <div className="grid-column-filter-selection-actions"><button type="button" onClick={() => updateColumnFilterMenu({ selectedKeys: [...new Set([...filterMenu.selectedKeys, ...visibleFilterOptions.map(option => option.key)])] })}>Select all</button><button type="button" onClick={() => updateColumnFilterMenu({ selectedKeys: filterMenu.selectedKeys.filter(key => !visibleFilterOptions.some(option => option.key === key)) })}>Deselect all</button><button type="button" onClick={() => updateColumnFilterMenu({ selectedKeys: [...new Set([...filterMenu.selectedKeys.filter(key => !visibleFilterOptions.some(option => option.key === key)), ...visibleFilterOptions.filter(option => !filterMenu.selectedKeys.includes(option.key)).map(option => option.key)])] })}>Invert</button></div>
+          <div className="grid-column-filter-values" role="group" aria-label={`Values for ${filterMenu.columnName}`}>
+            {visibleFilterOptions.map(option => <label key={option.key}><input type="checkbox" checked={filterMenu.selectedKeys.includes(option.key)} onChange={event => updateColumnFilterMenu({ selectedKeys: event.target.checked ? [...filterMenu.selectedKeys, option.key] : filterMenu.selectedKeys.filter(key => key !== option.key) })} /><span title={option.label}>{option.label}</span></label>)}
+            {!filterMenu.loading && filterMenu.options.length === 0 && <span className="grid-column-filter-empty">No values available.</span>}
+          </div>
+          <small className="grid-column-filter-summary">{filterMenu.selectedKeys.length.toLocaleString()} selected{filterMenu.truncated ? ' · first 500 values' : ''}</small>
+        </> : filterMenu.operator !== 'isNull' && filterMenu.operator !== 'isNotNull' ? <input className="grid-column-filter-value" aria-label={`Filter value for ${filterMenu.columnName}`} placeholder="Enter a value…" value={filterMenu.value} onChange={event => updateColumnFilterMenu({ value: event.target.value })} onKeyDown={event => { if (event.key === 'Enter') applyColumnFilter(); }} /> : <p className="grid-column-filter-hint">Rows are matched against NULL values.</p>}
+        {filterMenu.loading && <span className="grid-column-filter-loading" role="status">Loading distinct values…</span>}
+        {filterMenu.error && <span className="grid-column-filter-error" role="alert">{filterMenu.error}</span>}
+      </div>
+      <div className="grid-column-filter-footer"><button type="button" className="grid-column-filter-clear" onClick={clearColumnFilter}>Clear filter</button><span className="grid-column-filter-footer-spacer" /><button type="button" onClick={closeColumnFilter}>Cancel</button><button type="button" className="primary" disabled={filterMenu.loading} onClick={applyColumnFilter}>Apply</button></div>
     </div>}
     {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
     {detailRowIndex !== null && gridRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{gridRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, gridColumns[index]).text}</dd></div>)}</dl></aside>}
-    <div className="grid-pagination"><span>{effectiveTotalRows.toLocaleString()} rows · page {pageIndex + 1} / {totalPages}</span><label>Page size<select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageIndex(0); }}><option value="100">100</option><option value="200">200</option><option value="500">500</option><option value="1000">1000</option></select></label><button className="secondary small" disabled={pageIndex === 0 || loading} onClick={() => setPageIndex(value => value - 1)}>Previous</button><button className="secondary small" disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex(value => value + 1)}>Next</button></div>
+    <div className="grid-statusbar" role="status"><span>{effectiveTotalRows.toLocaleString()} rows</span><span>{loading ? `Loading… ${rows.length.toLocaleString()} loaded` : hasMoreRows ? `${rows.length.toLocaleString()} loaded · scroll for more` : 'All rows loaded'}</span></div>
   </section>;
 }

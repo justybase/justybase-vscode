@@ -27,7 +27,7 @@ interface OpenSession {
 }
 
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
-const MAX_PAGE_SIZE = 1000;
+const MAX_PAGE_SIZE = 10_000;
 
 function jsonValue(value: unknown): string {
   return JSON.stringify(value, (_key, candidate: unknown) => typeof candidate === 'bigint' ? candidate.toString() : candidate);

@@ -1,6 +1,6 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
-export { calculateDataGridVirtualWindow, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
+export { calculateDataGridVirtualWindow, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, reorderDataGridGrouping, resolveDataGridColumnIndexes, resolveDataGridColumns } from './dataGrid';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
 export { ResultAnalysisPanel } from './resultAnalysis';
 export type { ResultAnalysisKind, ResultAnalysisPanelProps, ResultAnalysisTable } from './resultAnalysis';
@@ -22,12 +22,8 @@ export type {
   DataGridNumericKind,
 } from './resultGridFormatting';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
-export { configureSqlMonacoTheme, disposeSqlLanguageFeatures, registerSqlLanguageFeatures } from './sqlLanguage';
-export type { SqlLanguageApi, SqlLanguageFeatureHandle } from './sqlLanguage';
-export { SqlProblemsPanel, sqlProblemsFromMarkers } from './sqlProblems';
+export { SqlProblemsPanel } from './sqlProblems';
 export type { SqlProblem, SqlProblemSeverity, SqlProblemsPanelProps } from './sqlProblems';
-export { registerSqlShortcuts, sqlShortcutEdit, SQL_SHORTCUTS } from './sqlShortcuts';
-export type { SqlShortcutEdit } from './sqlShortcuts';
 export {
   AsyncStateView,
   CellValueViewer,

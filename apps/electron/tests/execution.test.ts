@@ -59,7 +59,7 @@ describe('Electron renderer execution adapter', () => {
       columns: [{ name: 'value', type: 'INTEGER' }],
       rows: [[9]],
       offset: 0,
-      limit: 500,
+      limit: 10_000,
       totalRows: 1,
       hasMore: false,
     }));
@@ -71,7 +71,7 @@ describe('Electron renderer execution adapter', () => {
     fixture.emit({ queryId: 'query-1', type: 'complete', statementIndex: 2, totalRows: 1, limitReached: false });
     for await (const _event of handle.events) void _event;
     await new Promise<void>(resolve => queueMicrotask(resolve));
-    expect(fixture.client.queryPage).toHaveBeenCalledWith('query-1', { statementIndex: 2, offset: 0, limit: 500 });
+    expect(fixture.client.queryPage).toHaveBeenCalledWith('query-1', { statementIndex: 2, offset: 0, limit: 10_000 });
     expect(pages).toEqual([[[9]]]);
     await port.dispose();
   });
@@ -84,7 +84,7 @@ describe('Electron renderer execution adapter', () => {
         columns: [{ name: 'value', type: 'INTEGER' }],
         rows: [[1], [2]],
         offset: 0,
-        limit: 500,
+        limit: 10_000,
         totalRows: 3,
         hasMore: true,
       }
@@ -93,7 +93,7 @@ describe('Electron renderer execution adapter', () => {
         columns: [{ name: 'value', type: 'INTEGER' }],
         rows: [[3]],
         offset: 2,
-        limit: 500,
+        limit: 10_000,
         totalRows: 3,
         hasMore: false,
       });
@@ -109,7 +109,7 @@ describe('Electron renderer execution adapter', () => {
       if (event.type === 'complete') order.push('complete');
     }
 
-    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 500 });
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 10_000 });
     expect(fixture.client.queryPage).toHaveBeenCalledTimes(1);
     expect(pages).toEqual([[[1], [2]]]);
     expect(order).toEqual(['page', 'complete']);
@@ -124,7 +124,7 @@ describe('Electron renderer execution adapter', () => {
       columns: [{ name: 'value', type: 'INTEGER' }],
       rows: [[input.statementIndex ?? 0]],
       offset: 0,
-      limit: 500,
+      limit: 10_000,
       totalRows: 1,
       hasMore: false,
     }));
@@ -156,8 +156,8 @@ describe('Electron renderer execution adapter', () => {
       'query-1:1:complete:3',
     ]);
     expect(pages).toEqual(['query-1:0', 'query-1:1']);
-    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 500 });
-    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(2, 'query-1', { statementIndex: 1, offset: 0, limit: 500 });
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(1, 'query-1', { statementIndex: 0, offset: 0, limit: 10_000 });
+    expect(fixture.client.queryPage).toHaveBeenNthCalledWith(2, 'query-1', { statementIndex: 1, offset: 0, limit: 10_000 });
     expect(fixture.subscription.closed).toBe(true);
     await port.dispose();
   });

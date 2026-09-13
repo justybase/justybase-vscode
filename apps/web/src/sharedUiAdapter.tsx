@@ -70,6 +70,7 @@ const sharedCapabilities: readonly CapabilityDescriptor[] = [
 ];
 
 const DOCUMENT_ID = 'shared-scratch';
+const RESULT_PAGE_SIZE = 10_000;
 const SHARED_SCHEMA_FILTERS = [
   { id: 'TABLE', label: 'Tables' },
   { id: 'VIEW', label: 'Views' },
@@ -610,7 +611,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (pageHydrationRef.current.has(hydrationKey)) return;
     pageHydrationRef.current.add(hydrationKey);
     try {
-      const page = await api.queryPage(active.queryId, { statementIndex: active.statementIndex, offset, limit: 500 });
+      const page = await api.queryPage(active.queryId, { statementIndex: active.statementIndex, offset, limit: RESULT_PAGE_SIZE });
       if (queryByResultRef.current.get(active.resultSetId) !== active.queryId) return;
       const pageRows = page.rows.map(row => [...row]);
       const previousRows = rowsByResultRef.current[active.resultSetId] ?? [];
@@ -715,7 +716,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }
   }, [activeDocument?.content, api, dispatchQueryEvent, hydrateResultPage, selectedConnection, store, user]);
 
-  const loadMoreRows = useCallback((): void => {
+  const loadMoreRows = useCallback(async (): Promise<void> => {
     if (!activeResult) return;
     const queryId = queryByResultRef.current.get(activeResult.resultSetId);
     if (!queryId) return;
@@ -724,7 +725,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     const totalRows = pageState?.totalRows ?? activeResult.totalRowCount;
     if (!pageState?.hasMore && pageState !== undefined) return;
     if (loadedRows >= totalRows) return;
-    void loadResultPage({
+    await loadResultPage({
       queryId,
       resultSetId: activeResult.resultSetId,
       sourceId: activeResult.sourceId,
@@ -1056,8 +1057,12 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   }, [activeResult, closeResultAnalysis, resultAnalysis, scheduleResultViewWrite, store]);
 
   const onScroll = useCallback((position: GridScrollPosition): void => {
+    if (!activeResult || position.resultSetId !== activeResult.resultSetId
+      || (position.top === activeResult.view.scrollTop
+        && position.left === activeResult.view.scrollLeft
+        && position.anchorRow === activeResult.view.anchorRow)) return;
     updateResultView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
-  }, [updateResultView]);
+  }, [activeResult, updateResultView]);
 
   const detailColumns = useMemo(
     () => activeResult ? resolveDataGridColumns(activeResult.columns, activeRows) : [],

@@ -317,6 +317,7 @@ export class NetezzaWebLspCore {
     if (context.parts.length === 3 && firstIsDatabase) {
       return this.resolveNetezzaObjects(
         documentUri,
+        state,
         first!,
         second || undefined,
         third ?? "",
@@ -329,6 +330,7 @@ export class NetezzaWebLspCore {
     if (context.parts.length === 2 && state.context.effectiveDatabase) {
       return this.resolveNetezzaObjects(
         documentUri,
+        state,
         state.context.effectiveDatabase,
         first || undefined,
         second ?? "",
@@ -348,7 +350,7 @@ export class NetezzaWebLspCore {
       .map((name) => ({ label: name, kind: LSP_COMPLETION_MODULE, detail: "Netezza database" }));
     if (!state.context.effectiveDatabase) return dedupeCoreCompletionItems(result);
     result.push(...await this.resolveNetezzaSchemas(documentUri, state.context.effectiveDatabase, partial));
-    result.push(...await this.resolveNetezzaObjects(documentUri, state.context.effectiveDatabase, undefined, partial));
+    result.push(...await this.resolveNetezzaObjects(documentUri, state, state.context.effectiveDatabase, undefined, partial));
     return dedupeCoreCompletionItems(result);
   }
 
@@ -368,23 +370,22 @@ export class NetezzaWebLspCore {
 
   private async resolveNetezzaObjects(
     documentUri: string,
+    state: DocumentState,
     database: string,
     schema: string | undefined,
     partial: string,
   ): Promise<CoreCompletionItem[]> {
-    const [tablesResponse, viewsResponse] = await Promise.all([
-      this.safeMetadataRequest({ documentUri, kind: "tables", database, schema }),
-      this.safeMetadataRequest({ documentUri, kind: "views", database, schema }),
-    ]);
-    const objects = [
-      ...parseMetadataList(tablesResponse),
-      ...parseMetadataList(viewsResponse),
-    ];
+    // Keep path completion on the same document-scoped metadata cache as
+    // ordinary table completion. An omitted schema is intentional for the
+    // Netezza `DB..TABLE` form: the runtime returns objects from every schema.
+    await this.ensureTableList(documentUri, state, database, schema, schema === undefined);
     return dedupeCoreCompletionItems(
-      objects
-        .filter((item) => item.table && startsWithIgnoreCase(item.table, partial))
+      Array.from(state.tables.values())
+        .filter((table) => table.database?.toUpperCase() === database.toUpperCase())
+        .filter((table) => schema === undefined || table.schema?.toUpperCase() === schema.toUpperCase())
+        .filter((table) => startsWithIgnoreCase(table.name, partial))
         .map((item) => ({
-          label: item.table!,
+          label: item.name,
           kind: item.objectType === "VIEW" ? LSP_COMPLETION_VIEW : LSP_COMPLETION_TABLE,
           detail: item.objectType ?? "TABLE",
         })),
@@ -1041,28 +1042,44 @@ export class NetezzaWebLspCore {
     return state;
   }
 
-  private async ensureTableList(documentUri: string, state: DocumentState): Promise<void> {
-    if (!state.context.effectiveDatabase) return;
-    const key = `${state.context.effectiveDatabase}|${state.context.effectiveSchema ?? ""}`.toUpperCase();
+  private async ensureTableList(
+    documentUri: string,
+    state: DocumentState,
+    database = state.context.effectiveDatabase,
+    schema = state.context.effectiveSchema,
+    allSchemas = false,
+  ): Promise<void> {
+    if (!database) return;
+    // JavaScript applies a parameter default to an explicitly passed
+    // `undefined` too. The boolean keeps the Netezza `DB..TABLE` request
+    // distinguishable from the ordinary active-schema request.
+    const requestedSchema = allSchemas ? undefined : schema;
+    const key = `${database}|${requestedSchema ?? ""}`.toUpperCase();
     if (state.tableLists.has(key)) return;
     const responses = [
       await this.safeMetadataRequest({
         documentUri,
         kind: "tables",
-        database: state.context.effectiveDatabase,
-        schema: state.context.effectiveSchema,
+        database,
+        schema: requestedSchema,
       }),
       await this.safeMetadataRequest({
         documentUri,
         kind: "views",
-        database: state.context.effectiveDatabase,
-        schema: state.context.effectiveSchema,
+        database,
+        schema: requestedSchema,
       }),
     ];
     for (const response of responses) {
       for (const item of parseMetadataList(response)) {
         const table = toTableInfo(item);
-        if (table) state.tables.set(tableKey(table.database, table.schema, table.name), table);
+        if (!table) continue;
+        const normalizedTable = {
+          ...table,
+          database: table.database ?? database,
+          schema: table.schema ?? requestedSchema,
+        };
+        state.tables.set(tableKey(normalizedTable.database, normalizedTable.schema, normalizedTable.name), normalizedTable);
       }
     }
     state.tableLists.add(key);
@@ -1560,10 +1577,11 @@ function extractNetezzaPathCompletion(sql: string, offset: number): NetezzaPathC
     expectingIdentifier = false;
   }
   if (parts.length > 3) return undefined;
-  // Unqualified relation names are already handled by the cached table-list
-  // completion path. Restrict this special branch to a blank source or an
-  // actual qualified path so repeated `FROM CU` completion keeps its cache.
-  if (parts.length === 1 && parts[0] !== "") return undefined;
+  // Keep bare FROM/JOIN names in this path as well. The VS Code completion
+  // engine treats an incomplete relation name as a namespace-aware request:
+  // database containers, schemas and relations from the active database are
+  // all candidates, filtered by the same partial. Falling through to the
+  // generic keyword/table cache would hide database names in `FROM JUS|`.
   return { parts, sourceContext };
 }
 

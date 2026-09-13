@@ -52,7 +52,7 @@ function fixtureApi(): ApiClient {
     if (url.includes('/api/schema/tree')) return jsonResponse({ nodes: [{ id: 'table-1', kind: 'object', label: 'orders', database: 'main', schema: 'main', objectName: 'orders', objectType: 'TABLE', hasChildren: false }] });
     if (url.includes('/api/designer/capabilities')) return jsonResponse({ target: { connectionId: 'connection-1', database: ':memory:', schema: 'main', objectName: 'orders', objectType: 'TABLE' }, capabilities: getDatabaseDesignerCapabilities('sqlite'), runtimeAvailable: true, readOnly: true });
     if (url.endsWith('/api/query')) return jsonResponse({ queryId: 'query-1' });
-    if (url.includes('/page')) return jsonResponse({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }], rows: [[7]], offset: 0, limit: 500, totalRows: 1, hasMore: false });
+    if (url.includes('/page')) return jsonResponse({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }], rows: [[7]], offset: 0, limit: 10_000, totalRows: 1, hasMore: false });
     if (url.includes('/cancel')) return jsonResponse({ ok: true });
     return jsonResponse({ ok: true });
   });

@@ -115,6 +115,100 @@ describe('shared Netezza web SQL core', () => {
     ]));
   });
 
+  it('completes relations in an explicitly qualified schema before the table name exists', async () => {
+    const uri = 'file:///netezza-schema-table-prefix.sql';
+    const metadataRequests: Array<{ kind: string; database?: string; schema?: string }> = [];
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      metadataRequests.push({ kind: params.kind, database: params.database, schema: params.schema });
+      if (params.kind === 'context') return { effectiveDatabase: 'SYSTEM', effectiveSchema: 'ADMIN', databaseKind: 'netezza' };
+      if (params.kind === 'databases') return [{ name: 'JUST_DATA' }, { name: 'SYSTEM' }];
+      if (params.kind === 'tables' && params.database === 'JUST_DATA' && params.schema === 'ADMIN') {
+        return [{ name: 'DIMDATE', database: 'JUST_DATA', schema: 'ADMIN', objectType: 'TABLE' }];
+      }
+      if (params.kind === 'views' && params.database === 'JUST_DATA' && params.schema === 'ADMIN') {
+        return [{ name: 'V_DIMDATE', database: 'JUST_DATA', schema: 'ADMIN', objectType: 'VIEW' }];
+      }
+      return [];
+    } });
+    core.setContext(uri, { effectiveDatabase: 'SYSTEM', effectiveSchema: 'ADMIN', databaseKind: 'netezza' });
+
+    const sql = 'SELECT * FROM JUST_DATA.ADMIN. D WHERE D.';
+    const tablePrefixOffset = 'SELECT * FROM JUST_DATA.ADMIN.'.length;
+    const items = await core.completion(uri, 1, sql, { line: 0, character: tablePrefixOffset });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'DIMDATE', kind: 7, detail: 'TABLE' }),
+      expect.objectContaining({ label: 'V_DIMDATE', kind: 17, detail: 'VIEW' }),
+    ]));
+    expect(metadataRequests).toEqual(expect.arrayContaining([
+      { kind: 'tables', database: 'JUST_DATA', schema: 'ADMIN' },
+      { kind: 'views', database: 'JUST_DATA', schema: 'ADMIN' },
+    ]));
+  });
+
+  it('keeps database names and active-database relations for a bare FROM prefix', async () => {
+    const uri = 'file:///netezza-bare-source-completion.sql';
+    const metadataRequests: Array<{ kind: string; database?: string; schema?: string }> = [];
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      metadataRequests.push({ kind: params.kind, database: params.database, schema: params.schema });
+      if (params.kind === 'context') return { effectiveDatabase: 'JUST_DATA', effectiveSchema: 'ADMIN', databaseKind: 'netezza' };
+      if (params.kind === 'databases') return [{ name: 'JUST_DATA' }, { name: 'REPORTING' }];
+      if (params.kind === 'schemas' && params.database === 'JUST_DATA') return [{ name: 'ADMIN' }];
+      if (params.kind === 'tables' && params.database === 'JUST_DATA' && params.schema === undefined) {
+        return [{ name: 'JUST_TABLE', database: 'JUST_DATA', schema: 'ADMIN', objectType: 'TABLE' }];
+      }
+      if (params.kind === 'views' && params.database === 'JUST_DATA' && params.schema === undefined) {
+        return [{ name: 'JUST_VIEW', database: 'JUST_DATA', schema: 'REPORTING', objectType: 'VIEW' }];
+      }
+      return [];
+    } });
+    core.setContext(uri, { effectiveDatabase: 'JUST_DATA', effectiveSchema: 'ADMIN', databaseKind: 'netezza' });
+
+    const sql = 'SELECT * FROM JUS';
+    const items = await core.completion(uri, 1, sql, { line: 0, character: sql.length });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'JUST_DATA', kind: 9, detail: 'Netezza database' }),
+      expect.objectContaining({ label: 'JUST_TABLE', kind: 7, detail: 'TABLE' }),
+      expect.objectContaining({ label: 'JUST_VIEW', kind: 17, detail: 'VIEW' }),
+    ]));
+    expect(metadataRequests).toEqual(expect.arrayContaining([
+      { kind: 'databases' },
+      { kind: 'tables', database: 'JUST_DATA' },
+      { kind: 'views', database: 'JUST_DATA' },
+    ]));
+  });
+
+  it('completes all-schema tables and views after a Netezza database double dot', async () => {
+    const uri = 'file:///netezza-double-dot-completion.sql';
+    const metadataRequests: Array<{ kind: string; database?: string; schema?: string }> = [];
+    const core = new NetezzaWebLspCore({ requestMetadata: async params => {
+      metadataRequests.push({ kind: params.kind, database: params.database, schema: params.schema });
+      if (params.kind === 'context') return { effectiveDatabase: 'SYSTEM', effectiveSchema: 'ADMIN', databaseKind: 'netezza' };
+      if (params.kind === 'databases') return [{ name: 'JUST_DATA' }, { name: 'SYSTEM' }];
+      if (params.kind === 'tables' && params.database === 'JUST_DATA' && params.schema === undefined) {
+        return [{ name: 'DIMDATE', database: 'JUST_DATA', schema: 'ADMIN', objectType: 'TABLE' }];
+      }
+      if (params.kind === 'views' && params.database === 'JUST_DATA' && params.schema === undefined) {
+        return [{ name: 'V_DIMDATE', database: 'JUST_DATA', schema: 'REPORTING', objectType: 'VIEW' }];
+      }
+      return [];
+    } });
+    core.setContext(uri, { effectiveDatabase: 'SYSTEM', effectiveSchema: 'ADMIN', databaseKind: 'netezza' });
+
+    const sql = 'SELECT * FROM JUST_DATA..V_DIM';
+    const items = await core.completion(uri, 1, sql, { line: 0, character: sql.length });
+
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'V_DIMDATE', kind: 17, detail: 'VIEW' }),
+    ]));
+    expect(metadataRequests).toEqual(expect.arrayContaining([
+      { kind: 'tables', database: 'JUST_DATA' },
+      { kind: 'views', database: 'JUST_DATA' },
+    ]));
+    expect(metadataRequests).not.toContainEqual(expect.objectContaining({ database: 'JUST_DATA', schema: 'ADMIN', kind: 'tables' }));
+  });
+
   it('isolates HTTP metadata cache by connection and invalidates the matching entry', async () => {
     const store = { getConnection: jest.fn().mockReturnValue({ id: 'connection-1' }) } as unknown as AppStore;
     (listObjects as jest.Mock).mockResolvedValue([

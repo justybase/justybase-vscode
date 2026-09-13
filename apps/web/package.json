@@ -19,6 +19,7 @@
     "@justybase/dialect-utils": "*",
     "@justybase/result-core": "*",
     "@justybase/ui-core": "*",
+    "@justybase/ui-monaco": "*",
     "@justybase/ui-react": "*",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-query": "^5.90.0",

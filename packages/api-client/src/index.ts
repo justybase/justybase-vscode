@@ -92,26 +92,43 @@ export interface QueryEventSubscription {
   getLastSequence(): number;
 }
 
-export interface WorkspaceApi {
+export interface AuthApi {
   me(): Promise<{ user: WebUser }>;
   login(username: string, password: string): Promise<AuthResponse>;
   testLogin(): Promise<AuthResponse>;
   logout(): Promise<{ ok: true }>;
+}
+
+export interface ConnectionsApi {
   connections(): Promise<ConnectionProfileSummary[]>;
   createConnection(input: ConnectionProfileInput): Promise<ConnectionProfileSummary>;
   updateConnection(id: string, input: ConnectionProfileUpdate): Promise<ConnectionProfileSummary>;
   deleteConnection(id: string): Promise<{ ok: true }>;
   testConnectionProfile(input: ConnectionProfileInput): Promise<{ ok: true }>;
   testConnection(id: string): Promise<{ ok: true }>;
+}
+
+export interface MetadataApi {
   databases(connectionId: string): Promise<MetadataDatabase[]>;
   schemas(connectionId: string, database: string): Promise<MetadataSchema[]>;
   objects(connectionId: string, database: string, schema?: string): Promise<MetadataObject[]>;
   columns(connectionId: string, database: string, schema: string, table: string): Promise<MetadataColumn[]>;
   ddl(input: MetadataDdlRequest): Promise<MetadataDdlResponse>;
+  schemaTree(connectionId: string, parentId?: string): Promise<SchemaTreeResponse>;
+  searchSchema(input: SchemaSearchRequest): Promise<SchemaSearchResponse>;
+}
+
+export interface DesignerApi {
   designerCapabilities(input: DesignerCapabilitiesRequest): Promise<DesignerCapabilitiesResponse>;
   designerSnapshot(input: DesignerCapabilitiesRequest): Promise<DesignerSnapshotResponse>;
+}
+
+export interface HistoryApi {
   history(): Promise<HistoryEntry[]>;
   audit(limit?: number): Promise<QueryAuditEntry[]>;
+}
+
+export interface QueryApi {
   startQuery(input: QueryStartRequest): Promise<QueryStartResponse>;
   previewQuery(input: QueryStartRequest): Promise<QueryPreviewResponse>;
   editPreview(input: QueryEditPreviewRequest): Promise<WriteOperationPreviewResponse>;
@@ -126,22 +143,36 @@ export interface WorkspaceApi {
   aggregate(queryId: string, input?: QueryAggregateRequest): Promise<QueryAggregateResponse>;
   group(queryId: string, input: QueryGroupRequest): Promise<QueryGroupResponse>;
   exportQuery(queryId: string, input: QueryExportRequest): Promise<{ blob: Blob; fileName: string }>;
+}
+
+export interface AuthoringApi {
   editorPreferences(): Promise<EditorPreferences>;
   updateEditorPreferences(input: EditorPreferencesPatch): Promise<EditorPreferences>;
-  schemaTree(connectionId: string, parentId?: string): Promise<SchemaTreeResponse>;
-  searchSchema(input: SchemaSearchRequest): Promise<SchemaSearchResponse>;
   completion(input: SqlCompletionRequest): Promise<SqlCompletionResponse>;
   diagnostics(input: SqlDiagnosticsRequest): Promise<SqlDiagnosticsResponse>;
   formatSql(input: SqlFormatRequest): Promise<SqlFormatResponse>;
   snippets(databaseKind?: DatabaseKind): Promise<{ snippets: Array<{ prefix: string[]; body: string[]; description?: string }> }>;
+}
+
+export interface AdminApi {
   adminUsers(): Promise<AdminUserSummary[]>;
   createAdminUser(input: AdminUserCreateRequest): Promise<AdminUserSummary>;
   updateAdminUser(id: string, input: AdminUserUpdateRequest): Promise<AdminUserSummary>;
   adminBackup(): Promise<{ blob: Blob; fileName: string }>;
   adminRestore(input: AdminRestoreRequest): Promise<AdminRestoreResponse>;
+}
+
+export interface QueryStreamApi {
   openWebSocket(path: string): WebSocket;
   connectToQueryEvents(queryId: string, onEvent: (event: QueryEvent) => void, onError?: (error: Error) => void): QueryEventSubscription;
 }
+
+/**
+ * Backwards-compatible aggregate used by both product adapters.
+ * Domain-specific consumers can depend on the narrow interfaces above without
+ * changing the HTTP/WebSocket protocol or the createApiClient factory.
+ */
+export interface WorkspaceApi extends AuthApi, ConnectionsApi, MetadataApi, DesignerApi, HistoryApi, QueryApi, AuthoringApi, AdminApi, QueryStreamApi {}
 
 const queryEventTypes = new Set<QueryEvent['type']>([
   'started',

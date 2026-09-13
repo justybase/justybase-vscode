@@ -4,7 +4,6 @@ import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityD
 import type { MetadataNode } from '@justybase/ui-core';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
-import { uiTokens } from './tokens';
 import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
 import type { ResultAnalysisKind } from './resultAnalysis';
@@ -53,7 +52,7 @@ export interface UiShellProps {
 }
 
 export function UiShell({ title, activeSurface, onSurfaceChange, surfaces = [], sidebar, children }: UiShellProps): ReactNode {
-  return <div className="ui-shell" data-active-surface={activeSurface} style={{ color: uiTokens.color.text, background: uiTokens.color.background }}>
+  return <div className="ui-shell" data-active-surface={activeSurface}>
     <header className="ui-shell-header"><h1>{title}</h1><nav aria-label="Workspace surfaces">{surfaces.map(surface => <button type="button" key={surface.id} aria-current={surface.id === activeSurface ? 'page' : undefined} onClick={() => onSurfaceChange?.(surface.id)}>{surface.label}</button>)}</nav></header>
     <div className="ui-shell-body">{sidebar && <aside className="ui-shell-sidebar" aria-label="Sidebar">{sidebar}</aside>}<main className="ui-shell-main">{children}</main></div>
   </div>;

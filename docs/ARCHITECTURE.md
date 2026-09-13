@@ -46,6 +46,7 @@ VS Code adapter / API backend / Electron main backend
     -> Node database-runtime / dialect-<kind>-runtime -> driver or Node database API
     -> pure SQL / metadata / result engines -> contracts
 Desktop webview / Web / Electron React renderer -> `ui-react` -> pure engines and contracts
+Web / Electron SQL editor -> `ui-monaco` -> `sql-core` authoring API
 React renderer -> `@justybase/api-client` -> API backend
 ```
 
@@ -61,6 +62,7 @@ React renderer -> `@justybase/api-client` -> API backend
 | Cross-product HTTP/CSRF/WebSocket workspace transport | `@justybase/api-client` |
 | Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
 | Shared React presentation and tokens | `@justybase/ui-react`; effects enter through product ports |
+| Monaco editor/LSP registration and marker mapping | `@justybase/ui-monaco`; transport and lifecycle remain adapter-owned |
 | Product-specific DOM/webview/window integration | VS Code, Web, or Electron adapter |
 
 These are ownership decisions, not a claim that every future engine already
@@ -303,16 +305,20 @@ explicit exceptions, production-file filtering, malformed configuration, and
 the complete current graph. Run `npm run check:architecture` for the blocking
 fail-closed gate.
 
-`pureSources` covers contracts and `*-core` packages, including future
-metadata/result engines. Register each future pure dialect package in that
-list when its first implementation is added. Pure packages cannot import a
+`pureSources` covers contracts, `*-core` packages, and the portable
+`ui-monaco` browser boundary, including future metadata/result engines.
+Register each future pure dialect package in that list when its first
+implementation is added. Pure packages cannot import a
 shared Node runtime, even through an alias. External imports require an exact
 approved specifier; Node built-ins (bare and `node:`), VS Code, LSP libraries,
 and Electron are rejected. `ui-react` is the deliberate pure presentation
 exception: its exact React import is documented in
 `quality/architecture-rules.json`; it still cannot import Node, VS Code,
-Electron, database runtimes, or drivers. This also rejects existing or new
-database drivers without relying on a driver-name blacklist.
+Electron, database runtimes, or drivers. `ui-monaco` is a separate pure
+browser package whose only editor dependency is the explicitly approved
+`monaco-editor`; it does not import React, Electron, VS Code, or database
+runtimes. This also rejects existing or new database drivers without relying
+on a driver-name blacklist.
 Shared packages reject `vscode` and `electron`; Node runtimes may use Node and
 drivers. Companions may import their own implementation, shared contracts and
 shared engines/runtime helpers, but cannot import another companion directly.

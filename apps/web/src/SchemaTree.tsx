@@ -246,7 +246,6 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [searchItems, setSearchItems] = useState<SchemaSearchResult[]>([]);
-  const [activeDatabase, setActiveDatabase] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(OBJECT_TYPES.map(t => t.key)));
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [objectMenu, setObjectMenu] = useState<{ x: number; y: number; node: SchemaTreeNode } | null>(null);
@@ -309,14 +308,14 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     setChildren({});
     setExpanded({ [ROOT]: true, [connectionNode.id]: true });
     setColumnMeta({});
-    setActiveDatabase('');
     setError('');
     void loadFn(ROOT);
   }, [loadFn]);
 
-  // Mirror the desktop tree's useful starting point: connection → active
-  // database (or JUST_DATA in a fresh Netezza workspace) → TABLE.
-  // Each level remains lazy, so this does not materialise the whole catalog.
+  // Keep the whole database catalog visible, like the VS Code explorer. Only
+  // the active document database is opened automatically; the database
+  // selector in the query toolbar is an authoring context, not a schema-tree
+  // filter. Each level remains lazy, so this does not materialise the catalog.
   const rootNodes = children[ROOT];
   const databaseNode = rootNodes?.find(node => node.kind === 'database' && node.database?.toLocaleLowerCase() === ((database ?? '').trim() || 'just_data').toLocaleLowerCase());
   const databaseNodes = databaseNode ? children[databaseNode.id] : undefined;
@@ -351,7 +350,10 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     const timer = window.setTimeout(() => {
       void api.searchSchema({
         connectionId,
-        database: database || activeDatabase || undefined,
+        // Schema search is intentionally connection-wide. The database
+        // dropdown belongs to the active SQL document and must not hide other
+        // databases from the explorer.
+        searchAllDatabases: true,
         term,
         objectTypes: Array.from(activeFilters),
       }).then(response => setSearchItems(response.items)).catch(reason =>
@@ -359,7 +361,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       );
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [connectionId, database, activeDatabase, search, activeFilters]);
+  }, [connectionId, search, activeFilters]);
 
   // Refresh
   function refresh(): void {
@@ -457,11 +459,9 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       return;
     }
     if (node.kind === 'database') {
-      setActiveDatabase(node.database ?? '');
       onContextChange(node.database, undefined);
     }
     if (node.kind === 'schema') {
-      setActiveDatabase(node.database ?? '');
       onContextChange(node.database, node.schema);
     }
     const isExpanded = expanded[node.id] === true;
@@ -494,10 +494,8 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
 
   function selectNode(node: SchemaTreeNode): void {
     if (node.kind === 'database') {
-      setActiveDatabase(node.database ?? '');
       onContextChange(node.database, undefined);
     } else if (node.kind === 'schema') {
-      setActiveDatabase(node.database ?? '');
       onContextChange(node.database, node.schema);
     } else if (node.kind === 'object') {
       onContextChange(node.database, node.schema);
@@ -714,9 +712,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
               depth={0}
               childrenMap={{
                 ...children,
-                [connectionNode.id]: database
-                  ? (rootNodes ?? []).filter(node => node.kind !== 'database' || node.database?.toLocaleLowerCase() === database.trim().toLocaleLowerCase())
-                  : rootNodes ?? [],
+                [connectionNode.id]: rootNodes ?? [],
                 ...(databaseNode && objectGroupNodes ? { [databaseNode.id]: objectGroupNodes } : {}),
               }}
               expanded={expanded}

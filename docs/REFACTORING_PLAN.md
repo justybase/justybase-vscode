@@ -597,17 +597,22 @@ twice merely to compare old and new UI paths.
    components, design tokens, layout primitives, focus management, keyboard
    navigation, and loading/empty/error/cancel presentations. It cannot import
    VS Code, Electron, Node, database runtimes, or platform effects directly.
-3. Define ports for storage, clipboard, dialogs/notifications,
+3. Add the private `@justybase/ui-monaco` boundary for Monaco/LSP provider
+   registration, SQL completion/diagnostics/formatting transport, editor
+   shortcuts, and marker-to-`ui-core` Problems conversion. `ui-react` remains
+   independent of Monaco; Web and Electron inject transport and lifecycle into
+   `ui-monaco`, while the VS Code editor/LSP path remains separate.
+4. Define ports for storage, clipboard, dialogs/notifications,
    document open/save, command dispatch, navigation, capability discovery,
    editor/LSP, metadata, execution, and results. The result port supports
    paging, streaming chunks, cancellation, hydration, filtering, sorting,
    grouping, aggregation, pivot/alternate views, row detail, guarded edits,
    export, and stable `resultSetId` identity.
-4. Extend `quality/architecture-rules.json`, the architecture checker and its
+5. Extend `quality/architecture-rules.json`, the architecture checker and its
    negative tests, TypeScript/build configuration, and architecture docs for
    the UI and Electron layers. Do not add import exceptions or cycles to make
    the boundary pass.
-5. Before the first R9 UI production file is added, extend the changed-code
+6. Before the first R9 UI production file is added, extend the changed-code
    coverage enforcement: `quality/quality-baseline.json`, the diff scope in
    CI and `test:coverage:changed`, and the LCOV/package gates must cover
    `media`, `apps/web`, `apps/electron`, `packages/ui-core`, and
@@ -615,7 +620,7 @@ twice merely to compare old and new UI paths.
    separate package/app LCOV gates and aggregate their failures. The 80% line
    and 70% branch rule must be executable for these paths, not only stated in
    this plan.
-6. Keep HTTP, WebSocket, webview, and companion contracts additive. New DTOs
+7. Keep HTTP, WebSocket, webview, and companion contracts additive. New DTOs
    belong in `@justybase/contracts` and contain no credentials, driver
    instances, VS Code handles, or DOM objects.
 
@@ -724,8 +729,8 @@ slice passes all gates.
 | --- | --- |
 | Baseline and every slice | `npm run check:architecture`, `npm run check-types`, `npm run lint`, `npm run lint:extended:check`, and focused tests; skipped environment gates are recorded, not passed. |
 | Changed UI coverage enforcement | CI and local changed-coverage input include `media`, `apps/web`, `apps/electron`, `packages/ui-core`, and `packages/ui-react`; each changed UI file has an LCOV/package gate at least 80% lines and 70% branches. |
-| `ui-core` / `ui-react` | Reducer, port, capability, persistence, React component, focus, keyboard, and accessibility tests, including loading/empty/error/cancel states; changed-code coverage must include the UI paths before their shared flag is enabled. |
-| Result Panel | `npm run test:result-core`, Web tests, `test-harness/tests/table-rendering.spec.ts`, `npm run test:extension-host`, `npm run test:extension-host:filter-performance`, `JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host`, `npm run test:electron:live`, `npm run benchmark:data-grid`, and `npm run test:playwright:data-grid-performance`; current Linux evidence also includes 3 result sets/11 trace phases in Extension Host, 11/11 Electron live checks, 6/6 browser performance tests, and 19/19 rendering tests. |
+| `ui-core` / `ui-react` / `ui-monaco` | Reducer, port, capability, persistence, React component, focus, keyboard, accessibility, Monaco registration, marker mapping, and portable editor tests, including loading/empty/error/cancel states; changed-code coverage must include the UI paths before their shared flag is enabled. |
+| Result Panel | `npm run test:result-core`, Web tests, `test-harness/tests/table-rendering.spec.ts`, `npm run test:extension-host`, `npm run test:extension-host:filter-performance`, `JUSTYBASE_EXTENSION_HOST_REPEAT=20 npm run test:extension-host`, `npm run test:electron:live`, `npm run benchmark:data-grid`, `npm run test:playwright:data-grid-performance`, and `npm run test:playwright:data-grid-visual`; current Linux evidence also includes 3 result sets/11 trace phases in Extension Host, 11/11 Electron live checks, 6/6 browser performance tests, 19/19 rendering tests, and the shared 1280×720 visual fixture. |
 | Workspace/LSP | `npm run test:web`, `npm run test:playwright:web-api`, `npm run test:extension-host:authoring`, parser/completion/parity tests, and a Web smoke against a controlled API. |
 | Schema/designers/companions | `designer-core` tests, API/Web tests, `npm run test:extension-host:designer`, `npm run build:companions`, and the relevant companion verification gates. |
 | Final R9 | `npm run verify:pr`, `npm run test`, `npm run test:playwright`, `npm run test:playwright:web-api`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, main/companion builds, and packaging. |

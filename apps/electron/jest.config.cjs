@@ -14,6 +14,7 @@ module.exports = {
     '^@justybase/sql-core$': '<rootDir>/../../packages/sql-core/src/index.ts',
     '^@justybase/sql-core/(.*)$': '<rootDir>/../../packages/sql-core/src/$1',
     '^@justybase/ui-core$': '<rootDir>/../../packages/ui-core/src',
+    '^@justybase/ui-monaco$': '<rootDir>/../../packages/ui-monaco/src',
     '^@justybase/ui-react$': '<rootDir>/../../packages/ui-react/src',
     '^@chevrotain/(.+)$': '<rootDir>/../../node_modules/@chevrotain/$1/lib/src/api.js',
   },
