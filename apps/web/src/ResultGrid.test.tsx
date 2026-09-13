@@ -73,7 +73,10 @@ describe('legacy Web ResultGrid compatibility surface', () => {
     expect(screen.getAllByRole('table')).toHaveLength(1);
     expect(document.querySelectorAll('.ui-data-grid-group-row')).toHaveLength(2);
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/query/server-group-query/group'), expect.anything());
+    expect(screen.getAllByRole('group', { name: 'Grouping panel' })).toHaveLength(1);
     expect(screen.getByRole('group', { name: 'Grouping panel' })).toHaveTextContent('CATEGORY');
+    expect(screen.getByRole('textbox', { name: 'Filter CATEGORY' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Filter AMOUNT' })).toBeInTheDocument();
   });
 
   it('uses one virtualized result surface and loads the next batch on scroll', async () => {

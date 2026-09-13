@@ -2,6 +2,15 @@ import type { QueryColumnFilterSpec, QueryPageRequest, QuerySortSpec } from '@ju
 import type { UiResultColumn, UiResultViewState } from './types';
 
 export type UiResultQueryOptions = Pick<QueryPageRequest, 'globalFilter' | 'columnFilters' | 'sorting'>;
+type UiResultQueryView = Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'columnFilterDefinitions' | 'sorting'>;
+
+/** Returns whether a result view contains criteria that must be applied to rows. */
+export function hasUiResultQuery(view: UiResultQueryView): boolean {
+  return view.globalFilter.trim().length > 0
+    || Object.values(view.columnFilters).some(value => value.trim().length > 0)
+    || Object.values(view.columnFilterDefinitions ?? {}).some(definition => definition.operator !== 'in' || (definition.values?.length ?? 0) > 0)
+    || view.sorting.length > 0;
+}
 
 /** Resolves a persisted semantic or legacy positional column key. */
 export function resolveUiResultColumnIndex(columns: readonly UiResultColumn[], key: string): number {
@@ -22,7 +31,7 @@ export function resolveUiResultColumnIndex(columns: readonly UiResultColumn[], k
 /** Converts shared view state to the strict API query shape. */
 export function toUiResultQueryOptions(
   columns: readonly UiResultColumn[],
-  view: Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'columnFilterDefinitions' | 'sorting'>,
+  view: UiResultQueryView,
 ): UiResultQueryOptions {
   const filterKeys = new Set([...Object.keys(view.columnFilters), ...Object.keys(view.columnFilterDefinitions ?? {})]);
   const columnFilters: QueryColumnFilterSpec[] = [...filterKeys]

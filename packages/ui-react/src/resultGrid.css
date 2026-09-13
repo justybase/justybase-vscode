@@ -1358,6 +1358,121 @@ body,
   font: inherit;
 }
 
+/* The result surface is a shared composition, not a host-specific panel. */
+.ui-result-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 160px;
+  flex: 1 1 55%;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--justybase-grid-border);
+  background: var(--justybase-grid-bg);
+}
+
+.ui-result-panel > .ui-result-output-content {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.ui-result-heading {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  font-size: 11px;
+}
+
+.ui-result-heading > strong { flex: 0 0 auto; }
+
+.ui-result-heading > .ui-result-tabs {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+}
+
+.ui-result-controls {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  background: var(--justybase-grid-bg);
+}
+
+.ui-result-controls > .ui-result-toolbar {
+  min-width: 280px;
+  flex: 1 1 520px;
+  flex-wrap: wrap;
+}
+
+.ui-result-controls .ui-result-toolbar label {
+  display: inline-flex;
+  min-width: min(220px, 32vw);
+  align-items: center;
+  gap: 5px;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+}
+
+.ui-result-controls .ui-result-toolbar input {
+  min-width: 100px;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  font: inherit;
+}
+
+.ui-result-controls .ui-result-toolbar input:focus {
+  border-color: var(--justybase-grid-accent);
+  outline: none;
+}
+
+.ui-export-format {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--justybase-grid-muted);
+  font-size: 10px;
+}
+
+.ui-export-format select {
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+  font: inherit;
+}
+
+.ui-result-panel > .ui-result-grid,
+.ui-result-panel > .ui-async-state {
+  min-height: 0;
+}
+
+.ui-result-panel > .ui-async-state {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+}
+
 .electron-sidebar-content {
   display: flex;
   min-height: 0;

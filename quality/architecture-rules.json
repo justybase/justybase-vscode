@@ -108,6 +108,13 @@
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },
     {
+      "source": "packages/ui-react/src/dataGridFilter.tsx",
+      "target": "react",
+      "reason": "The shared Excel-style result filter is a React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
       "source": "packages/ui-react/src/dataGrid.tsx",
       "target": "react",
       "reason": "The shared result grid is a React presentation component consumed by web, Electron and VS Code adapters.",
@@ -118,6 +125,13 @@
       "source": "packages/ui-react/src/resultAnalysis.tsx",
       "target": "react",
       "reason": "Shared result analysis is a React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/resultPanel.tsx",
+      "target": "react",
+      "reason": "The canonical result panel composition is a React presentation component shared by Web and Electron adapters.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },

@@ -13,6 +13,7 @@ import {
   HistoryView,
   ResultTabs,
   ResultAnalysisPanel,
+  ResultPanel,
   ResultViewToolbar,
   RowDetail,
   SchemaTree,
@@ -42,6 +43,40 @@ const result: UiResultSurfaceState = {
 };
 
 describe('shared React presentation', () => {
+  it('keeps Results and Problems as tabs in one shared output panel', () => {
+    const { rerender } = render(<ResultPanel
+      results={[result]}
+      activeResult={result}
+      rows={[[1]]}
+      resultState="ready"
+      activeTab="results"
+      problemCount={1}
+      problems={[{ severity: 'error', message: 'Invalid SQL', startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 7 }]}
+      onOutputTabChange={jest.fn()}
+      onResultSelect={jest.fn()}
+      onViewChange={jest.fn()}
+    />);
+
+    expect(document.querySelectorAll('.ui-result-panel')).toHaveLength(1);
+    expect(screen.getByRole('tab', { name: 'Results' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /Problems/ })).toHaveTextContent('1');
+
+    rerender(<ResultPanel
+      results={[result]}
+      activeResult={result}
+      rows={[[1]]}
+      resultState="ready"
+      activeTab="problems"
+      problemCount={1}
+      problems={[{ severity: 'error', message: 'Invalid SQL', startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 7 }]}
+      onOutputTabChange={jest.fn()}
+      onResultSelect={jest.fn()}
+      onViewChange={jest.fn()}
+    />);
+    expect(screen.getByRole('region', { name: 'SQL Problems' })).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
   it('keeps grouping reorder insertion indexes stable in both directions', () => {
     expect(reorderDataGridGrouping(['A', 'B', 'C'], 2, 0)).toEqual(['C', 'A', 'B']);
     expect(reorderDataGridGrouping(['A', 'B', 'C'], 0, 3)).toEqual(['B', 'C', 'A']);
