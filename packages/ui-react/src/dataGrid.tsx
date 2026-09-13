@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
-import type { UiResultViewState } from '@justybase/ui-core';
+import type { UiResultColumnFilterDefinition, UiResultViewState } from '@justybase/ui-core';
 import {
   formatDataGridCellValue,
   inferDataGridColumnMetadata,
@@ -15,7 +15,7 @@ import type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './d
 export { formatDataGridCellValue } from './resultGridFormatting';
 export type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
 
-export type DataGridViewState = Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'sorting' | 'grouping'> &
+export type DataGridViewState = Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'columnFilterDefinitions' | 'sorting' | 'grouping'> &
   Partial<Pick<UiResultViewState, 'columnVisibility' | 'columnOrder' | 'pinnedColumns' | 'columnWidths'>>;
 
 export interface GridScrollPosition {
@@ -174,6 +174,7 @@ function normaliseView(view: DataGridViewState | undefined): DataGridViewState {
   return {
     globalFilter: view?.globalFilter ?? '',
     columnFilters: view?.columnFilters ?? {},
+    columnFilterDefinitions: view?.columnFilterDefinitions,
     sorting: view?.sorting ?? [],
     grouping: view?.grouping ?? [],
     columnVisibility: view?.columnVisibility,
@@ -331,6 +332,17 @@ function filterValue(view: DataGridViewState, column: DataGridColumn, index: num
   return filters[columnKey(column, index)] ?? filters[column.name] ?? '';
 }
 
+function filterDefinition(view: DataGridViewState, column: DataGridColumn, index: number): UiResultColumnFilterDefinition | undefined {
+  const definitions = view.columnFilterDefinitions;
+  if (!definitions) return undefined;
+  return definitions[columnKey(column, index)] ?? definitions[column.name] ?? definitions[String(index)];
+}
+
+function filterValueKey(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+}
+
 function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): number {
   const named = columns.findIndex(column => column.name === key);
   if (named >= 0) return named;
@@ -402,6 +414,25 @@ function matchesRow(
   return columns.every((column, columnIndex) => {
     const filter = filterValue(view, column, columnIndex).trim();
     const metadata = getCellMetadata?.(values[columnIndex], sourceIndex, columnIndex, column) ?? column;
+    const definition = filterDefinition(view, column, columnIndex);
+    if (definition) {
+      if (definition.operator === 'isNull') return values[columnIndex] === null || values[columnIndex] === undefined;
+      if (definition.operator === 'isNotNull') return values[columnIndex] !== null && values[columnIndex] !== undefined;
+      if (definition.operator === 'in') return definition.values?.some(candidate => filterValueKey(candidate) === filterValueKey(values[columnIndex])) ?? false;
+      const left = cellText(values[columnIndex], metadata).toLocaleLowerCase();
+      const right = definition.value.toLocaleLowerCase();
+      switch (definition.operator) {
+        case 'contains': return left.includes(right);
+        case 'equals': return left === right;
+        case 'notEquals': return left !== right;
+        case 'startsWith': return left.startsWith(right);
+        case 'endsWith': return left.endsWith(right);
+        case 'greaterThan': return compareValues(values[columnIndex], definition.value, metadata) > 0;
+        case 'greaterThanOrEqual': return compareValues(values[columnIndex], definition.value, metadata) >= 0;
+        case 'lessThan': return compareValues(values[columnIndex], definition.value, metadata) < 0;
+        case 'lessThanOrEqual': return compareValues(values[columnIndex], definition.value, metadata) <= 0;
+      }
+    }
     return !filter || matchesDataGridFilterValue(values[columnIndex], filter, metadata);
   });
 }
@@ -565,6 +596,7 @@ export function DataGrid({
     view === undefined,
     view?.globalFilter,
     view?.columnFilters,
+    view?.columnFilterDefinitions,
     view?.sorting,
     view?.grouping,
     view?.columnVisibility,
@@ -573,6 +605,7 @@ export function DataGrid({
     view?.columnWidths,
     internalView.globalFilter,
     internalView.columnFilters,
+    internalView.columnFilterDefinitions,
     internalView.sorting,
     internalView.grouping,
     internalView.columnVisibility,
@@ -801,7 +834,8 @@ export function DataGrid({
     totalRowCount,
     globalFilter: activeView.globalFilter,
     columnFilters: activeView.columnFilters,
-  }), [activeView.columnFilters, activeView.globalFilter, resultSetId, totalRowCount]);
+    columnFilterDefinitions: activeView.columnFilterDefinitions,
+  }), [activeView.columnFilterDefinitions, activeView.columnFilters, activeView.globalFilter, resultSetId, totalRowCount]);
   const selectionScope = useMemo(() => JSON.stringify({
     sourceId,
     resultSetId,
@@ -810,13 +844,14 @@ export function DataGrid({
     view: {
       globalFilter: activeView.globalFilter,
       columnFilters: activeView.columnFilters,
+      columnFilterDefinitions: activeView.columnFilterDefinitions,
       sorting: activeView.sorting,
       grouping: activeView.grouping,
       columnVisibility: activeView.columnVisibility,
       columnOrder: activeView.columnOrder,
       pinnedColumns: activeView.pinnedColumns,
     },
-  }), [activeView.columnFilters, activeView.columnOrder, activeView.columnVisibility, activeView.grouping, activeView.pinnedColumns, activeView.globalFilter, activeView.sorting, clientProcessing, columns, resolvedColumns, resultSetId, sourceId]);
+  }), [activeView.columnFilterDefinitions, activeView.columnFilters, activeView.columnOrder, activeView.columnVisibility, activeView.grouping, activeView.pinnedColumns, activeView.globalFilter, activeView.sorting, clientProcessing, columns, resolvedColumns, resultSetId, sourceId]);
 
   useEffect(() => {
     const previousScope = selectionScopeRef.current;
@@ -922,6 +957,7 @@ export function DataGrid({
 
   function selectCell(rowIndex: number, columnIndex: number, event: ReactMouseEvent<HTMLElement>): void {
     if (event.button !== 0) return;
+    event.preventDefault();
     scroller.current?.focus({ preventScroll: true });
     const previous = selectionRef.current;
     const next = event.shiftKey && previous
@@ -940,6 +976,7 @@ export function DataGrid({
     const firstColumn = visibleColumnIndexes[0];
     const lastColumn = visibleColumnIndexes[visibleColumnIndexes.length - 1];
     if (event.button !== 0 || firstColumn === undefined || lastColumn === undefined) return;
+    event.preventDefault();
     scroller.current?.focus({ preventScroll: true });
     const previous = selectionRef.current;
     const next = event.shiftKey && previous
@@ -965,7 +1002,12 @@ export function DataGrid({
     const nextFilters = { ...activeView.columnFilters };
     if (value) nextFilters[id] = value;
     else delete nextFilters[id];
-    updateView({ columnFilters: nextFilters });
+    const nextDefinitions = { ...(activeView.columnFilterDefinitions ?? {}) };
+    delete nextDefinitions[id];
+    updateView({
+      columnFilters: nextFilters,
+      ...(activeView.columnFilterDefinitions === undefined ? {} : { columnFilterDefinitions: nextDefinitions }),
+    });
   }
 
   function togglePin(columnIndex: number): void {

@@ -6,7 +6,7 @@ import { readSchemaExplorerShortcuts, rememberSchemaObject, schemaObjectIdentity
 
 interface SchemaApi {
   schemaTree(connectionId: string, parentId?: string): Promise<{ nodes: SchemaTreeNode[] }>;
-  searchSchema(input: { connectionId: string; term: string; database?: string; objectTypes?: string[] }): Promise<{ items: SchemaSearchResult[] }>;
+  searchSchema(input: { connectionId: string; term: string; database?: string; objectTypes?: string[]; searchAllDatabases?: boolean }): Promise<{ items: SchemaSearchResult[] }>;
   columns(connectionId: string, database: string, schema: string, table: string): Promise<readonly MetadataColumn[]>;
   ddl(input: { connectionId: string; database: string; schema: string; objectName: string; objectType: string }): Promise<MetadataDdlResponse>;
 }
@@ -67,7 +67,7 @@ export interface SchemaExplorerProps {
   readonly refreshNonce?: number;
 }
 
-export function SchemaExplorer({ api, connectionId, database, databaseKind, onInsert, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport, refreshNonce = 0 }: SchemaExplorerProps): ReactElement {
+export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport, refreshNonce = 0 }: SchemaExplorerProps): ReactElement {
   const [children, setChildren] = useState<Record<string, readonly SchemaTreeNode[]>>({});
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
@@ -170,12 +170,12 @@ export function SchemaExplorer({ api, connectionId, database, databaseKind, onIn
       return undefined;
     }
     const timer = window.setTimeout(() => {
-      void api.searchSchema({ connectionId, term, database: database || undefined, objectTypes: [...activeFilters] })
+      void api.searchSchema({ connectionId, term, objectTypes: [...activeFilters], searchAllDatabases: true })
         .then(response => setSearchItems(Array.isArray(response.items) ? response.items : []))
         .catch(reason => setError(reason instanceof Error ? reason.message : 'Schema search failed.'));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [activeFilters, api, connectionId, database, refreshNonce, search]);
+  }, [activeFilters, api, connectionId, refreshNonce, search]);
 
   useEffect(() => {
     if (!menu) return undefined;

@@ -1,5 +1,5 @@
 import type { PersistenceScope, UiIdentity } from '@justybase/contracts';
-import type { UiResultViewState } from './types';
+import type { UiResultColumnFilterDefinition, UiResultViewState } from './types';
 import { PersistenceCodec, PersistenceDecodeError } from './persistence';
 
 export const RESULT_VIEW_PERSISTENCE_SCHEMA_VERSION = 1 as const;
@@ -27,6 +27,39 @@ function stringRecord(value: unknown): Readonly<Record<string, string>> | undefi
   const entries = Object.entries(value);
   if (!entries.every(([, item]) => typeof item === 'string')) return undefined;
   return Object.fromEntries(entries) as Readonly<Record<string, string>>;
+}
+
+const FILTER_OPERATORS = new Set<UiResultColumnFilterDefinition['operator']>([
+  'contains',
+  'equals',
+  'notEquals',
+  'startsWith',
+  'endsWith',
+  'greaterThan',
+  'greaterThanOrEqual',
+  'lessThan',
+  'lessThanOrEqual',
+  'isNull',
+  'isNotNull',
+  'in',
+]);
+
+function columnFilterDefinitions(value: unknown): Readonly<Record<string, UiResultColumnFilterDefinition>> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value);
+  if (!entries.every(([, item]) => isRecord(item)
+    && typeof item.operator === 'string'
+    && FILTER_OPERATORS.has(item.operator as UiResultColumnFilterDefinition['operator'])
+    && typeof item.value === 'string'
+    && (item.values === undefined || Array.isArray(item.values)))) return undefined;
+  return Object.fromEntries(entries.map(([key, item]) => {
+    const definition = item as Record<string, unknown>;
+    return [key, {
+      operator: definition.operator as UiResultColumnFilterDefinition['operator'],
+      value: definition.value as string,
+      ...(definition.values === undefined ? {} : { values: definition.values as readonly unknown[] }),
+    }];
+  })) as Readonly<Record<string, UiResultColumnFilterDefinition>>;
 }
 
 function booleanRecord(value: unknown): Readonly<Record<string, boolean>> | undefined {
@@ -66,6 +99,7 @@ export function normalizeResultView(value: unknown): UiResultViewState | undefin
   if (!isRecord(value)) return undefined;
   if (value.globalFilter !== undefined && typeof value.globalFilter !== 'string') return undefined;
   if (value.columnFilters !== undefined && stringRecord(value.columnFilters) === undefined) return undefined;
+  if (value.columnFilterDefinitions !== undefined && columnFilterDefinitions(value.columnFilterDefinitions) === undefined) return undefined;
   if (value.sorting !== undefined && sorting(value.sorting) === undefined) return undefined;
   if (value.grouping !== undefined && stringArray(value.grouping) === undefined) return undefined;
   if (value.aggregation !== undefined && typeof value.aggregation !== 'string') return undefined;
@@ -81,6 +115,7 @@ export function normalizeResultView(value: unknown): UiResultViewState | undefin
   const next = {
     globalFilter: typeof value.globalFilter === 'string' ? value.globalFilter : '',
     columnFilters: value.columnFilters === undefined ? {} : stringRecord(value.columnFilters)!,
+    ...(value.columnFilterDefinitions !== undefined ? { columnFilterDefinitions: columnFilterDefinitions(value.columnFilterDefinitions)! } : {}),
     sorting: value.sorting === undefined ? [] : sorting(value.sorting)!,
     grouping: value.grouping === undefined ? [] : stringArray(value.grouping)!,
     scrollTop: value.scrollTop === undefined ? 0 : nonNegativeNumber(value.scrollTop)!,
@@ -182,6 +217,7 @@ export function decodeLegacyResultView(value: unknown, expectedResultSetId?: str
   return normalizeResultView({
     globalFilter: state.globalFilter,
     columnFilters,
+    columnFilterDefinitions: state.columnFilterDefinitions,
     sorting: sortingValue,
     grouping: state.grouping,
     columnVisibility: state.columnVisibility,

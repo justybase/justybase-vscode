@@ -3,6 +3,7 @@ import type {
   CapabilityDescriptor,
   DatabaseKind,
   PersistenceScope,
+  QueryColumnFilterOperator,
   RedactedConnectionProfile,
   UiAuthState,
   UiIdentity,
@@ -51,9 +52,18 @@ export interface UiConnectionState {
 export type UiResultStatus = 'idle' | 'loading' | 'streaming' | 'complete' | 'empty' | 'error' | 'cancelled';
 export type UiCancellationStatus = 'none' | 'requested' | 'acknowledged' | 'cancelled' | 'failed';
 
+/** Typed filter state shared by the grid renderer and query adapters. */
+export interface UiResultColumnFilterDefinition {
+  readonly operator: QueryColumnFilterOperator;
+  readonly value: string;
+  readonly values?: readonly unknown[];
+}
+
 export interface UiResultViewState {
   readonly globalFilter: string;
   readonly columnFilters: Readonly<Record<string, string>>;
+  /** Optional typed definition for Excel-style operators and value lists. */
+  readonly columnFilterDefinitions?: Readonly<Record<string, UiResultColumnFilterDefinition>>;
   readonly sorting: readonly { readonly column: string; readonly descending: boolean }[];
   readonly grouping: readonly string[];
   readonly aggregation?: string;

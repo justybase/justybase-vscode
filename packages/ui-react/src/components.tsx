@@ -262,7 +262,11 @@ export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect,
   }, [contextMenu]);
 
   const openMenu = (event: ReactMouseEvent<HTMLDivElement>, node: MetadataNode): void => {
-    if (node.kind !== 'object' && node.kind !== 'column') return;
+    // Database, schema and object nodes all represent usable SQL name
+    // segments. Keep the context menu available for them; restricting it to
+    // objects made the tree look interactive while silently dropping the
+    // actions users need most often (copy/insert qualified name).
+    if (node.kind === 'group') return;
     event.preventDefault();
     event.stopPropagation();
     onSelect?.(node);
@@ -274,6 +278,7 @@ export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect,
     if (node) action?.(node);
   };
   const hasObjectActions = contextMenu?.node.kind === 'object';
+  const hasQualifiedName = contextMenu !== undefined && contextMenu.node.kind !== 'group';
   const activate = (node: MetadataNode): void => {
     onSelect?.(node);
     onActivate?.(node);
@@ -315,14 +320,14 @@ export function SchemaTree({ nodes, selectedId, expandedIds, onToggle, onSelect,
     </div> : nodes.map(node => renderNode(node))}
     {contextMenu && <div className="ui-schema-context-menu" role="menu" aria-label={`Actions for ${contextMenu.node.label}`} style={{ left: contextMenu.clientX, top: contextMenu.clientY }} onClick={event => event.stopPropagation()}>
       <strong>{contextMenu.node.label}</strong>
-      {onInsert && <button type="button" role="menuitem" onClick={() => runAction(onInsert)}>Insert qualified name</button>}
+      {hasQualifiedName && onInsert && <button type="button" role="menuitem" onClick={() => runAction(onInsert)}>Insert qualified name</button>}
       {hasObjectActions && onOpenQuery && <button type="button" role="menuitem" onClick={() => runAction(onOpenQuery)}>View top 1000</button>}
       {hasObjectActions && onOpenExplain && <button type="button" role="menuitem" onClick={() => runAction(onOpenExplain)}>Explain plan</button>}
       {hasObjectActions && onOpenDesigner && <button type="button" role="menuitem" onClick={() => runAction(onOpenDesigner)}>Open Object Designer</button>}
       {hasObjectActions && onOpenDdl && <button type="button" role="menuitem" onClick={() => runAction(onOpenDdl)}>Open DDL</button>}
       {hasObjectActions && onCopyDdl && <button type="button" role="menuitem" onClick={() => runAction(onCopyDdl)}>Copy DDL</button>}
       {hasObjectActions && onImport && <button type="button" role="menuitem" onClick={() => runAction(onImport)}>Import CSV/XLSX</button>}
-      {onCopyName && <button type="button" role="menuitem" onClick={() => runAction(onCopyName)}>Copy qualified name</button>}
+      {hasQualifiedName && onCopyName && <button type="button" role="menuitem" onClick={() => runAction(onCopyName)}>Copy qualified name</button>}
       {hasObjectActions && onToggleFavorite && <button type="button" role="menuitem" onClick={() => runAction(onToggleFavorite)}>{(isFavorite?.(contextMenu.node) ?? favorites.some(node => node.id === contextMenu.node.id)) ? 'Remove from favorites' : 'Add to favorites'}</button>}
     </div>}
   </div>;

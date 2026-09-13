@@ -33,6 +33,7 @@ import {
   AsyncStateView,
   CellValueViewer,
   DataGrid,
+  DataGridColumnFilterPanel,
   createDataGridClipboardPayload,
   formatDataGridClipboard,
   processDataGridRows,
@@ -49,7 +50,7 @@ import {
   UiShell,
   WorkspaceTabs,
 } from '@justybase/ui-react';
-import type { DataGridClipboardFormat, DataGridCopyPayload, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind, ResultOutputTab } from '@justybase/ui-react';
+import type { DataGridClipboardFormat, DataGridColumnFilterState, DataGridCopyPayload, DataGridFilterValueOption, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind, ResultOutputTab } from '@justybase/ui-react';
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { ApiClientProvider } from './api';
 import type { ApiClient, QueryEventSubscription } from './api';
@@ -72,11 +73,36 @@ const sharedCapabilities: readonly CapabilityDescriptor[] = [
 const DOCUMENT_ID = 'shared-scratch';
 const RESULT_PAGE_SIZE = 10_000;
 const SHARED_SCHEMA_FILTERS = [
-  { id: 'TABLE', label: 'Tables' },
-  { id: 'VIEW', label: 'Views' },
-  { id: 'PROCEDURE', label: 'Procedures' },
-  { id: 'SYNONYM', label: 'Synonyms' },
+  // Keep these labels identical to the VS Code schema explorer. In
+  // particular, do not turn TABLE into the old web-only "TABLEs" label.
+  { id: 'TABLE', label: 'TABLE' },
+  { id: 'VIEW', label: 'VIEW' },
+  { id: 'PROCEDURE', label: 'PROCEDURE' },
+  { id: 'SYNONYM', label: 'SYNONYM' },
 ] as const;
+
+function filterValueKey(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+}
+
+function filterValueLabel(value: unknown): string {
+  if (value === null || value === undefined) return '(Blanks)';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+function filterOptionList(values: readonly unknown[]): DataGridFilterValueOption[] {
+  const seen = new Set<string>();
+  return values.flatMap(value => {
+    const key = filterValueKey(value);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, value, label: filterValueLabel(value) }];
+  }).sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' }));
+}
 
 interface WebRuntimeConfig {
   readonly __JUSTYBASE_UI_MODE__?: unknown;
@@ -241,6 +267,15 @@ interface RunOverride {
   readonly database: string;
 }
 
+interface SharedDocumentContext {
+  /** Database used for unqualified SQL in this document. */
+  readonly database?: string;
+  /** Optional schema used for unqualified SQL in this document. */
+  readonly schema?: string;
+  readonly connectionId?: string;
+  readonly databaseKind?: DatabaseKind;
+}
+
 export interface SharedWebWorkspaceProps {
   readonly api: ApiClient;
   readonly user: WebUser;
@@ -265,6 +300,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly import('./SharedSqlEditor').SharedSqlEditorProblem[]>([]);
   const [activeOutputTab, setActiveOutputTab] = useState<ResultOutputTab>('results');
+  const [filterMenu, setFilterMenu] = useState<DataGridColumnFilterState | undefined>(undefined);
   const [schemaNodes, setSchemaNodes] = useState<ReturnType<typeof mapSchemaNode>[]>([]);
   const [schemaSearch, setSchemaSearch] = useState('');
   const [schemaSearchRevision, setSchemaSearchRevision] = useState(0);
@@ -297,6 +333,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const resultAnalysisGenerationRef = useRef(0);
   const restoredResultViewsRef = useRef(new Set<string>());
   const pendingResultViewWritesRef = useRef(new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly write: () => void }>());
+  const filterMenuGenerationRef = useRef(0);
   const selectedConnectionId = state.connections.selectedConnectionId;
   const selectedConnection = state.connections.profiles.find(profile => profile.id === selectedConnectionId);
   const activeDocument = state.workspace.activeDocumentId ? state.workspace.documents[state.workspace.activeDocumentId] : undefined;
@@ -341,7 +378,16 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       store.dispatch({ type: 'connections/select', connectionId: nextId });
       const currentDocumentId = store.getState().workspace.activeDocumentId;
       const nextProfile = profiles.find(profile => profile.id === nextId);
-      if (currentDocumentId) store.dispatch({ type: 'workspace/update-document', documentId: currentDocumentId, patch: { connectionId: nextId, databaseKind: nextProfile?.dbType ?? 'netezza' } });
+      if (currentDocumentId) store.dispatch({
+        type: 'workspace/update-document',
+        documentId: currentDocumentId,
+        patch: {
+          connectionId: nextId,
+          database: nextProfile?.database ?? '',
+          schema: '',
+          databaseKind: nextProfile?.dbType ?? 'netezza',
+        },
+      });
       store.dispatch({ type: 'connections/status', status: 'complete' });
     } catch (error: unknown) {
       store.dispatch({ type: 'connections/status', status: 'error', message: error instanceof Error ? error.message : 'Could not load connections.' });
@@ -493,6 +539,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         connectionId: selectedConnectionId,
         term,
         objectTypes: [...schemaFilters],
+        searchAllDatabases: true,
       }).then(response => {
         if (!live) return;
         setSchemaSearchResults(response.items.map(mapSchemaSearchResult));
@@ -589,13 +636,28 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (mapped) store.dispatch({ type: 'execution/event', event: mapped });
   }, [store]);
 
-  const loadResultPage = useCallback(async (active: ActiveQuery, offset: number, replace: boolean): Promise<void> => {
-    const hydrationKey = `${active.sourceId}\u0000${active.resultSetId}\u0000${active.queryId}\u0000${offset}`;
+  const resultViewRequestKey = useCallback((view: UiResultSurfaceState['view']): string => JSON.stringify({
+    globalFilter: view.globalFilter,
+    columnFilters: view.columnFilters,
+    columnFilterDefinitions: view.columnFilterDefinitions,
+    sorting: view.sorting,
+  }), []);
+
+  const loadResultPage = useCallback(async (active: ActiveQuery, offset: number, replace: boolean, requestedView?: UiResultSurfaceState['view']): Promise<void> => {
+    const currentBeforeRequest = Object.values(store.getState().results.byResultSetId)
+      .find(result => result.sourceId === active.sourceId && result.resultSetId === active.resultSetId && result.executionId === active.executionId);
+    const view = requestedView ?? currentBeforeRequest?.view;
+    const viewKey = view ? resultViewRequestKey(view) : '';
+    const queryOptions = currentBeforeRequest && view ? resultQueryOptions(currentBeforeRequest, view) : {};
+    const hydrationKey = `${active.sourceId}\u0000${active.resultSetId}\u0000${active.queryId}\u0000${offset}\u0000${viewKey}`;
     if (pageHydrationRef.current.has(hydrationKey)) return;
     pageHydrationRef.current.add(hydrationKey);
     try {
-      const page = await api.queryPage(active.queryId, { statementIndex: active.statementIndex, offset, limit: RESULT_PAGE_SIZE });
+      const page = await api.queryPage(active.queryId, { statementIndex: active.statementIndex, offset, limit: RESULT_PAGE_SIZE, ...queryOptions });
       if (queryByResultRef.current.get(active.resultSetId) !== active.queryId) return;
+      const current = Object.values(store.getState().results.byResultSetId)
+        .find(result => result.sourceId === active.sourceId && result.resultSetId === active.resultSetId);
+      if (!current || current.executionId !== active.executionId || view && resultViewRequestKey(current.view) !== viewKey) return;
       const pageRows = page.rows.map(row => [...row]);
       const previousRows = rowsByResultRef.current[active.resultSetId] ?? [];
       const pageOffset = Math.max(0, page.offset);
@@ -625,7 +687,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     } finally {
       pageHydrationRef.current.delete(hydrationKey);
     }
-  }, [api, store]);
+  }, [api, resultViewRequestKey, store]);
 
   const hydrateResultPage = useCallback((active: ActiveQuery): void => {
     void loadResultPage(active, 0, true);
@@ -717,7 +779,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     }, loadedRows, false);
   }, [activeResult, loadResultPage]);
 
-  const openSharedDocument = useCallback((id: string, title: string, content: string): void => {
+  const openSharedDocument = useCallback((id: string, title: string, content: string, context: SharedDocumentContext = {}): void => {
     if (!selectedConnection) {
       setNotice('Select a connection before opening a schema document.');
       return;
@@ -730,8 +792,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         title,
         content,
         dirty: false,
-        connectionId: selectedConnection.id,
-        databaseKind: authoringDatabaseKind,
+        connectionId: context.connectionId ?? selectedConnection.id,
+        database: context.database ?? selectedConnection.database,
+        schema: context.schema,
+        databaseKind: context.databaseKind ?? authoringDatabaseKind,
       },
     });
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
@@ -751,6 +815,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         content: historyEntry.sql,
         dirty: false,
         connectionId: profile?.id ?? historyEntry.connectionId,
+        database: historyEntry.database ?? profile?.database,
+        schema: '',
         databaseKind: profile?.dbType ?? runtimeDatabaseKind,
       },
     });
@@ -782,7 +848,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (node.kind !== 'object') return;
     const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
     const title = `Top 1000 · ${node.label}`;
-    openSharedDocument(`schema:${node.id}:top`, title, sql);
+    openSharedDocument(`schema:${node.id}:top`, title, sql, { database: node.database, schema: node.schema });
     if (selectedConnection) void run('single', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database });
   }, [authoringDatabaseKind, openSharedDocument, run, selectedConnection]);
 
@@ -790,7 +856,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (node.kind !== 'object') return;
     const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
     const title = `Explain · ${node.label}`;
-    openSharedDocument(`schema:${node.id}:explain`, title, sql);
+    openSharedDocument(`schema:${node.id}:explain`, title, sql, { database: node.database, schema: node.schema });
     store.dispatch({ type: 'shell/surface', surface: 'explain' });
     if (selectedConnection) {
       try {
@@ -813,7 +879,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         objectType: node.objectType?.toUpperCase() || 'TABLE',
       });
       if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
-      openSharedDocument(`schema:${node.id}:ddl`, `DDL · ${node.label}`, result.ddlCode);
+      openSharedDocument(`schema:${node.id}:ddl`, `DDL · ${node.label}`, result.ddlCode, { database: node.database, schema: node.schema });
       setNotice(result.ddlFidelity === 'reconstructed' ? 'Reconstructed DDL opened; review metadata warnings before executing it.' : 'DDL opened.');
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not generate DDL.');
@@ -928,7 +994,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
   const selectConnection = useCallback((connectionId: string): void => {
     const profile = state.connections.profiles.find(item => item.id === connectionId);
     store.dispatch({ type: 'connections/select', connectionId });
-    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { connectionId, databaseKind: profile?.dbType ?? 'netezza' } });
+    if (activeDocument) store.dispatch({
+      type: 'workspace/update-document',
+      documentId: activeDocument.id,
+      patch: { connectionId, database: profile?.database ?? '', schema: '', databaseKind: profile?.dbType ?? 'netezza' },
+    });
   }, [activeDocument, state.connections.profiles, store]);
 
   const saveConnection = useCallback((profile: ConnectionProfileSummary): void => {
@@ -1037,7 +1107,145 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     const nextView = { ...activeResult.view, ...patch };
     store.dispatch({ type: 'results/view', sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, patch });
     scheduleResultViewWrite(activeResult, nextView);
-  }, [activeResult, closeResultAnalysis, resultAnalysis, scheduleResultViewWrite, store]);
+    if (patch.globalFilter !== undefined || patch.columnFilters !== undefined || patch.columnFilterDefinitions !== undefined || patch.sorting !== undefined) {
+      const queryId = queryByResultRef.current.get(activeResult.resultSetId);
+      if (queryId) {
+        pageHydrationRef.current.clear();
+        pageStateRef.current.delete(activeResult.resultSetId);
+        rowsByResultRef.current = { ...rowsByResultRef.current, [activeResult.resultSetId]: [] };
+        setRowsByResult(rowsByResultRef.current);
+        void loadResultPage({
+          queryId,
+          resultSetId: activeResult.resultSetId,
+          sourceId: activeResult.sourceId,
+          executionId: activeResult.executionId,
+          statementIndex: activeResult.statementIndex,
+        }, 0, true, nextView);
+      }
+    }
+  }, [activeResult, closeResultAnalysis, loadResultPage, resultAnalysis, scheduleResultViewWrite, store]);
+
+  const closeColumnFilter = useCallback((): void => {
+    filterMenuGenerationRef.current += 1;
+    setFilterMenu(undefined);
+  }, []);
+
+  const openColumnFilter = useCallback(async (request: import('@justybase/ui-react').DataGridColumnFilterRequest): Promise<void> => {
+    if (!activeResult) return;
+    const generation = ++filterMenuGenerationRef.current;
+    const key = request.column.name || String(request.columnIndex);
+    const saved = activeResult.view.columnFilterDefinitions?.[key];
+    const anchor = request.anchor;
+    const popupWidth = Math.min(340, Math.max(240, window.innerWidth - 20));
+    const popupHeight = Math.min(520, Math.max(160, window.innerHeight - 20));
+    const margin = 10;
+    const gap = 5;
+    const left = Math.min(Math.max(margin, anchor.left), Math.max(margin, window.innerWidth - popupWidth - margin));
+    const below = Math.max(0, window.innerHeight - anchor.bottom - margin - gap);
+    const above = Math.max(0, anchor.top - margin - gap);
+    const top = Math.max(margin, Math.min(above >= below && below < 280 ? anchor.top - popupHeight - gap : anchor.bottom + gap, window.innerHeight - popupHeight - margin));
+    setFilterMenu({
+      columnIndex: request.columnIndex,
+      columnName: request.column.name,
+      left,
+      top,
+      options: [],
+      selectedKeys: saved?.operator === 'in' ? (saved.values ?? []).map(filterValueKey) : [],
+      operator: saved?.operator ?? 'in',
+      value: saved?.value ?? '',
+      search: '',
+      loading: true,
+      truncated: false,
+    });
+    try {
+      const queryId = queryByResultRef.current.get(activeResult.resultSetId);
+      let values: readonly unknown[];
+      let truncated = false;
+      if (queryId) {
+        const filters = { ...activeResult.view.columnFilters };
+        delete filters[key];
+        const definitions = { ...(activeResult.view.columnFilterDefinitions ?? {}) };
+        delete definitions[key];
+        const response = await api.distinct(queryId, {
+          statementIndex: activeResult.statementIndex,
+          columnIndex: request.columnIndex,
+          limit: 500,
+          ...resultQueryOptions(activeResult, { ...activeResult.view, columnFilters: filters, columnFilterDefinitions: definitions }),
+        });
+        values = response.values;
+        truncated = response.truncated;
+      } else {
+        values = activeRows.map(row => row[request.columnIndex]);
+      }
+      if (generation !== filterMenuGenerationRef.current) return;
+      const options = filterOptionList(values);
+      const selectedKeys = saved?.operator === 'in'
+        ? (saved.values ?? []).map(filterValueKey).filter(valueKey => options.some(option => option.key === valueKey))
+        : options.map(option => option.key);
+      setFilterMenu(current => current && current.columnIndex === request.columnIndex ? { ...current, options, selectedKeys, loading: false, truncated } : current);
+    } catch (error: unknown) {
+      if (generation !== filterMenuGenerationRef.current) return;
+      setFilterMenu(current => current && current.columnIndex === request.columnIndex ? { ...current, loading: false, error: error instanceof Error ? error.message : 'Could not load column values.' } : current);
+    }
+  }, [activeResult, activeRows, api]);
+
+  const updateColumnFilterMenu = useCallback((patch: Partial<DataGridColumnFilterState>): void => {
+    setFilterMenu(current => current ? { ...current, ...patch } : current);
+  }, []);
+
+  const applyColumnFilter = useCallback((): void => {
+    const menu = filterMenu;
+    if (!menu || !activeResult) return;
+    const key = menu.columnName || String(menu.columnIndex);
+    const nextDefinitions = { ...(activeResult.view.columnFilterDefinitions ?? {}) };
+    const nextFilters = { ...activeResult.view.columnFilters };
+    delete nextDefinitions[key];
+    delete nextFilters[key];
+    if (menu.operator === 'in') {
+      const selected = menu.options.filter(option => menu.selectedKeys.includes(option.key));
+      const allLoadedValuesSelected = selected.length === menu.options.length && !menu.truncated;
+      if (selected.length > 0 && !allLoadedValuesSelected) {
+        nextDefinitions[key] = { operator: 'in', value: `${selected.length} selected`, values: selected.map(option => option.value) };
+        nextFilters[key] = `${selected.length} selected`;
+      }
+    } else if (menu.operator === 'isNull' || menu.operator === 'isNotNull') {
+      nextDefinitions[key] = { operator: menu.operator, value: menu.operator };
+      nextFilters[key] = menu.operator;
+    } else if (menu.value.trim()) {
+      nextDefinitions[key] = { operator: menu.operator, value: menu.value.trim() };
+      nextFilters[key] = menu.value.trim();
+    }
+    updateResultView({ columnFilters: nextFilters, columnFilterDefinitions: nextDefinitions });
+    closeColumnFilter();
+  }, [activeResult, closeColumnFilter, filterMenu, updateResultView]);
+
+  const clearColumnFilter = useCallback((): void => {
+    const menu = filterMenu;
+    if (!menu || !activeResult) return;
+    const key = menu.columnName || String(menu.columnIndex);
+    const columnFilters = { ...activeResult.view.columnFilters };
+    const columnFilterDefinitions = { ...(activeResult.view.columnFilterDefinitions ?? {}) };
+    delete columnFilters[key];
+    delete columnFilterDefinitions[key];
+    updateResultView({ columnFilters, columnFilterDefinitions });
+    closeColumnFilter();
+  }, [activeResult, closeColumnFilter, filterMenu, updateResultView]);
+
+  useEffect(() => {
+    if (!filterMenu) return undefined;
+    const closeOnOutsideClick = (event: MouseEvent): void => {
+      const target = event.target;
+      if (target instanceof Element && (target.closest('.ui-data-grid-filter-menu') || target.closest('.ui-data-grid-filter-action'))) return;
+      closeColumnFilter();
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape') closeColumnFilter(); };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [closeColumnFilter, filterMenu]);
 
   const onScroll = useCallback((position: GridScrollPosition): void => {
     if (!activeResult || position.resultSetId !== activeResult.resultSetId
@@ -1204,10 +1412,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
               <ResultOutputTabs activeTab={activeOutputTab} problemCount={problems.length} onChange={setActiveOutputTab} />
               {activeOutputTab === 'problems' ? <div className="ui-result-output-content"><SharedSqlProblems problems={problems} onSelect={revealProblem} /></div> : <>
                 <ResultTabs results={Object.values(state.results.byResultSetId)} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })} />
-                {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => toggleResultAnalysis('group')} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
+                {activeResult && <div className="shared-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={updateResultView} onAggregate={() => toggleResultAnalysis('aggregate')} onGroup={() => updateResultView({ grouping: activeResult.view.grouping.length > 0 ? [] : activeResult.columns[0] ? [activeResult.columns[0].name] : [] })} onPivot={() => toggleResultAnalysis('pivot')} activeAnalysis={resultAnalysis?.kind} analysisBusy={resultAnalysisLoading} onRefresh={() => void refresh()} onCopy={() => void copySelected()} onExport={() => void exportResults()} /><label className="shared-export-format">Export<select aria-label="Shared export format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label></div>}
                 {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={closeResultAnalysis} onCopySelection={copyGridSelection} onViewCell={openAnalysisCellValue} />}
-                <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={true} showContextMenu selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onViewCell={openCellValue} onRowSelect={setSelectedRow} /></AsyncStateView>
+                <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display."><DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={activeRows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={updateResultView} clientProcessing={false} showContextMenu showInlineColumnFilters onOpenColumnFilter={openColumnFilter} selectedRowIndex={selectedRow} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={loadMoreRows} onCopySelection={copyGridSelection} onViewCell={openCellValue} onRowSelect={setSelectedRow} /></AsyncStateView>
                 {selectedRow !== undefined && activeRows[selectedRow] && activeResult && <RowDetail columns={detailColumns} row={activeRows[selectedRow]} onClose={() => setSelectedRow(undefined)} />}
+                {filterMenu && <DataGridColumnFilterPanel state={filterMenu} onChange={updateColumnFilterMenu} onApply={applyColumnFilter} onClear={clearColumnFilter} onClose={closeColumnFilter} />}
               </>}
             </div>
           </>}

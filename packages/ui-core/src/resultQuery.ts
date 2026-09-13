@@ -22,12 +22,21 @@ export function resolveUiResultColumnIndex(columns: readonly UiResultColumn[], k
 /** Converts shared view state to the strict API query shape. */
 export function toUiResultQueryOptions(
   columns: readonly UiResultColumn[],
-  view: Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'sorting'>,
+  view: Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'columnFilterDefinitions' | 'sorting'>,
 ): UiResultQueryOptions {
-  const columnFilters: QueryColumnFilterSpec[] = Object.entries(view.columnFilters)
-    .flatMap(([key, value]) => {
+  const filterKeys = new Set([...Object.keys(view.columnFilters), ...Object.keys(view.columnFilterDefinitions ?? {})]);
+  const columnFilters: QueryColumnFilterSpec[] = [...filterKeys]
+    .flatMap(key => {
+      const value = view.columnFilters[key] ?? '';
       const columnIndex = resolveUiResultColumnIndex(columns, key);
-      return columnIndex >= 0 && value.trim().length > 0 ? [{ columnIndex, value }] : [];
+      const definition = view.columnFilterDefinitions?.[key];
+      if (columnIndex < 0 || !definition && value.trim().length === 0) return [];
+      if (definition) {
+        return definition.operator === 'in' && (!definition.values || definition.values.length === 0)
+          ? []
+          : [{ columnIndex, value: definition.value, operator: definition.operator, ...(definition.values === undefined ? {} : { values: definition.values }) }];
+      }
+      return [{ columnIndex, value }];
     });
   const sorting: QuerySortSpec[] = view.sorting.flatMap(item => {
     const columnIndex = resolveUiResultColumnIndex(columns, item.column);
