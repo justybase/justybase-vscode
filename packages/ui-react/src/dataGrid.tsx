@@ -40,6 +40,18 @@ export interface DataGridColumnFilterRequest {
   readonly anchor: DOMRect;
 }
 
+interface ScrollRestorationState {
+  readonly scope: string;
+  readonly top: number;
+  readonly left: number;
+}
+
+interface PendingScrollRestoration {
+  readonly scope: string;
+  readonly top: number;
+  readonly left: number;
+}
+
 export interface DataGridProps {
   readonly sourceId?: string;
   readonly resultSetId: string;
@@ -668,7 +680,8 @@ export function DataGrid({
   const virtualViewportRef = useRef({ scrollTop: 0, height: DEFAULT_VIEWPORT_HEIGHT });
   const scrollReportFrameRef = useRef<number | undefined>(undefined);
   const scrollReportRef = useRef<{ readonly position: GridScrollPosition; readonly callback: (position: GridScrollPosition) => void } | undefined>(undefined);
-  const userScrollPositionRef = useRef<{ readonly resultSetId: string; readonly top: number; readonly left: number } | undefined>(undefined);
+  const scrollRestorationRef = useRef<ScrollRestorationState | undefined>(undefined);
+  const pendingScrollRestorationRef = useRef<PendingScrollRestoration | undefined>(undefined);
   const [virtualViewport, setVirtualViewport] = useState(virtualViewportRef.current);
   activeViewRef.current = activeView;
   selectionChangeRef.current = onSelectionChange;
@@ -680,7 +693,8 @@ export function DataGrid({
     }
     scrollReportFrameRef.current = undefined;
     scrollReportRef.current = undefined;
-    userScrollPositionRef.current = undefined;
+    scrollRestorationRef.current = undefined;
+    pendingScrollRestorationRef.current = undefined;
   }, []);
 
   const updateView = (patch: Partial<UiResultViewState>): void => {
@@ -880,28 +894,49 @@ export function DataGrid({
   }, [emptyPageRequestKey, hasMoreRows, processedRows.length, requestMoreRows]);
 
   useLayoutEffect(() => {
-    const restore = (): void => {
-      const element = scroller.current;
-      if (!element || !scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) return;
-      const userPosition = userScrollPositionRef.current;
-      // A page can arrive before the throttled host callback has committed
-      // the latest scroll coordinates. Prefer that local position during the
-      // commit so appending rows cannot restore the stale controlled value.
-      const preferredPosition = userPosition?.resultSetId === resultSetId ? userPosition : scroll;
-      const nextTop = Math.max(0, preferredPosition.top);
-      const nextLeft = Math.max(0, preferredPosition.left);
-      if (element.scrollTop !== nextTop) element.scrollTop = nextTop;
-      if (element.scrollLeft !== nextLeft) element.scrollLeft = nextLeft;
-      virtualViewportSyncRef.current?.();
-    };
     const element = scroller.current;
     if (!element) return;
-    restore();
+    if (!scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) {
+      scrollRestorationRef.current = undefined;
+      pendingScrollRestorationRef.current = undefined;
+      return;
+    }
+    const scope = `${sourceId ?? ''}\u0000${resultSetId}`;
+    const nextTop = Math.max(0, Number.isFinite(scroll.top) ? scroll.top : 0);
+    const nextLeft = Math.max(0, Number.isFinite(scroll.left) ? scroll.left : 0);
+    const previous = scrollRestorationRef.current;
+    const pending = pendingScrollRestorationRef.current;
+    const positionChanged = previous?.scope !== scope || previous.top !== nextTop || previous.left !== nextLeft;
+    // Appending a page changes the virtual spacer height, but it must not be
+    // treated as a new controlled scroll position. Only a new result, an
+    // explicit host position change, or an outstanding zero-size restoration
+    // is allowed to write scrollTop/scrollLeft back to the DOM.
+    const shouldRestore = positionChanged || pending?.scope === scope;
+    const target: PendingScrollRestoration = { scope, top: nextTop, left: nextLeft };
+    const restore = (position: PendingScrollRestoration = target): void => {
+      const current = scroller.current;
+      if (!current || position.scope !== scope) return;
+      if (current.scrollTop !== position.top) current.scrollTop = position.top;
+      if (current.scrollLeft !== position.left) current.scrollLeft = position.left;
+      virtualViewportSyncRef.current?.();
+    };
+    if (shouldRestore) restore();
+    const needsLayoutRetry = shouldRestore && element.clientHeight <= 0 && typeof ResizeObserver !== 'undefined';
+    pendingScrollRestorationRef.current = needsLayoutRetry ? target : undefined;
+    scrollRestorationRef.current = target;
     let frame: number | undefined;
-    if (typeof requestAnimationFrame === 'function') {
+    if (shouldRestore && typeof requestAnimationFrame === 'function') {
       frame = requestAnimationFrame(() => { frame = undefined; restore(); });
     }
-    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => restore());
+    const observer = pendingScrollRestorationRef.current && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => {
+        if (element.clientHeight <= 0) return;
+        const pendingTarget = pendingScrollRestorationRef.current;
+        if (!pendingTarget || pendingTarget.scope !== scope) return;
+        restore(pendingTarget);
+        pendingScrollRestorationRef.current = undefined;
+      })
+      : undefined;
     observer?.observe(element);
     return () => {
       if (frame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
@@ -912,7 +947,6 @@ export function DataGrid({
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
     const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(element.scrollTop / ROW_HEIGHT) };
-    userScrollPositionRef.current = position;
     virtualViewportRef.current = {
       scrollTop: Math.max(0, element.scrollTop),
       height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,
@@ -936,9 +970,6 @@ export function DataGrid({
           scrollReportFrameRef.current = undefined;
           const pending = scrollReportRef.current;
           scrollReportRef.current = undefined;
-          if (pending && userScrollPositionRef.current?.resultSetId === pending.position.resultSetId
-            && userScrollPositionRef.current.top === pending.position.top
-            && userScrollPositionRef.current.left === pending.position.left) userScrollPositionRef.current = undefined;
           pending?.callback(pending.position);
         };
         if (typeof requestAnimationFrame === 'function') scrollReportFrameRef.current = requestAnimationFrame(flushScrollReport);

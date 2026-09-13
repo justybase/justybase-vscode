@@ -1,7 +1,7 @@
 import type { QueryEvent } from '@justybase/contracts';
 import { createExecutionController, createInitialUiState, createUiStore } from '@justybase/ui-core';
 import type { ElectronApiClient, QueryEventSubscription } from '../src/renderer/api';
-import { createElectronExecutionPort } from '../src/renderer/execution';
+import { createElectronExecutionPort, fetchResultPage } from '../src/renderer/execution';
 
 function fakeSubscription(): QueryEventSubscription & { closed: boolean } {
   return { closed: false, close() { this.closed = true; }, getLastSequence: () => 0 };
@@ -14,6 +14,7 @@ function fakeClient() {
   const client: ElectronApiClient = {
     startQuery: jest.fn(async () => ({ queryId: 'query-1', statementCount: 1 })),
     queryPage: jest.fn(async () => ({ sessionId: 'session-1', columns: [], rows: [], offset: 0, limit: 10, totalRows: 0, hasMore: false })),
+    distinct: jest.fn(async () => ({ statementIndex: 0, values: [], truncated: false })),
     cancelQuery: jest.fn(async () => ({ ok: true as const })),
     exportQuery: jest.fn(async () => ({ blob: new Blob(), fileName: 'result.csv' })),
     connectToQueryEvents: jest.fn((_queryId, onEvent, onError) => {
@@ -74,6 +75,32 @@ describe('Electron renderer execution adapter', () => {
     expect(fixture.client.queryPage).toHaveBeenCalledWith('query-1', { statementIndex: 2, offset: 0, limit: 10_000 });
     expect(pages).toEqual([[[9]]]);
     await port.dispose();
+  });
+
+  it('forwards typed column filters and sorting to the finalized page endpoint', async () => {
+    const fixture = fakeClient();
+    fixture.client.queryPage = jest.fn(async (_queryId, input) => ({
+      sessionId: 'session-1',
+      columns: [{ name: 'value', type: 'INTEGER' }],
+      rows: [[9]],
+      offset: input.offset ?? 0,
+      limit: input.limit ?? 10_000,
+      totalRows: 1,
+      hasMore: false,
+    }));
+    await fetchResultPage(fixture.client, 'query-1', 0, 0, 10_000, {
+      globalFilter: '9',
+      columnFilters: [{ columnIndex: 0, value: '9', operator: 'in', values: [9] }],
+      sorting: [{ columnIndex: 0, desc: true }],
+    });
+    expect(fixture.client.queryPage).toHaveBeenCalledWith('query-1', {
+      statementIndex: 0,
+      offset: 0,
+      limit: 10_000,
+      globalFilter: '9',
+      columnFilters: [{ columnIndex: 0, value: '9', operator: 'in', values: [9] }],
+      sorting: [{ columnIndex: 0, desc: true }],
+    });
   });
 
   it('hydrates only the first finalized page before completing the stream', async () => {
