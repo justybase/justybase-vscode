@@ -56,7 +56,7 @@ async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> 
   await page.keyboard.insertText(sql);
   // Monaco virtualizes view lines. Move the caret to the end so the marker
   // used below is in the rendered viewport even for long diagnostic fixtures.
-  await page.keyboard.press('Control+End');
+  await page.keyboard.press('ControlOrMeta+End');
   // Monaco may append an auto-closing parenthesis when a multi-line paste
   // contains a CTE. Remove only that generated trailing delimiter; the
   // source fixture remains the exact SQL sent to the API.
@@ -518,7 +518,7 @@ FROM seq`;
       await expect(dialect).toHaveValue(kind);
       await replaceMonacoTextAndWait(page, `SELECT * FROM T ${prefix}`);
       await page.locator('.monaco-editor').click();
-      await page.keyboard.press('Control+Space');
+      await page.keyboard.press('ControlOrMeta+Space');
       const dialectSuggestionWidget = page.locator('.suggest-widget');
       await expect(dialectSuggestionWidget).toBeVisible({ timeout: 30_000 });
       await expect(dialectSuggestionWidget).toContainText(expected);
@@ -533,7 +533,7 @@ FROM seq`;
     await replaceMonacoTextAndWait(page, 'SELECT NU');
     const editor = page.locator('.monaco-editor');
     await editor.click();
-    await page.keyboard.press('Control+Space');
+    await page.keyboard.press('ControlOrMeta+Space');
     const suggestionWidget = page.locator('.suggest-widget');
     await expect(suggestionWidget).toBeVisible({ timeout: 30_000 });
     await expect(suggestionWidget).toContainText(/NULLIF|SUBSTR|NVL2/u);
@@ -548,7 +548,7 @@ FROM seq`;
     const typoProblem = page.locator('.ui-sql-problem').filter({ hasText: 'PAR004' }).first();
     await expect(typoProblem).toBeVisible({ timeout: 30_000 });
     await typoProblem.click();
-    await page.keyboard.press('Control+.');
+    await page.keyboard.press('ControlOrMeta+.');
     const codeActionWidget = page.locator('.action-widget');
     await expect(codeActionWidget).toBeVisible({ timeout: 30_000 });
     await expect(codeActionWidget).toContainText(/Fix typo|Apply PAR004/u);
