@@ -28,26 +28,46 @@ body {
 .electron-dockyard-topbar {
   display: flex;
   min-width: 0;
-  min-height: 48px;
+  min-height: 50px;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--justybase-grid-border);
+  gap: 0;
+  padding: 0 14px;
+  border-bottom: 1px solid #303841;
   color: var(--justybase-grid-text);
-  background: var(--justybase-grid-surface);
+  background: linear-gradient(180deg, #1d2228 0%, #1a1e23 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
 }
 
 .electron-dockyard-brand {
+  position: relative;
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
   margin: 0;
+  padding-left: 11px;
   flex: 0 0 auto;
-  color: #60a5fa;
+  color: #b8cad8;
   font-weight: 700;
-  letter-spacing: .02em;
+  letter-spacing: .025em;
+}
+
+.electron-dockyard-brand::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: #6b879d;
+  box-shadow: 0 0 0 1px rgb(107 135 157 / 16%);
 }
 
 .electron-dockyard-title {
   flex: 0 0 auto;
-  color: var(--justybase-grid-muted);
+  margin-left: 15px;
+  padding-left: 15px;
+  border-left: 1px solid #353e47;
+  color: #8f9ca9;
   font-size: 12px;
 }
 
@@ -61,6 +81,7 @@ body {
 
 .electron-dockyard-tool-buttons {
   flex: 1 1 auto;
+  margin-left: 20px;
   overflow-x: auto;
 }
 
@@ -71,20 +92,40 @@ body {
 
 .electron-dockyard-button {
   min-height: 27px;
-  padding: 4px 8px;
+  padding: 0 9px;
   border: 1px solid transparent;
-  border-radius: 3px;
-  color: var(--justybase-grid-muted);
+  border-radius: 4px;
+  color: #9eabb7;
   background: transparent;
   font-size: 11px;
+  font-weight: 500;
   white-space: nowrap;
+  transition: border-color .14s, background .14s, color .14s;
 }
 
 .electron-dockyard-button:hover,
 .electron-dockyard-button:focus-visible {
-  border-color: var(--justybase-grid-border);
-  color: var(--justybase-grid-text);
-  background: var(--justybase-grid-hover);
+  border-color: #3b4650;
+  color: #e0e6eb;
+  background: #252c33;
+}
+
+.electron-dockyard-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(107 135 157 / 16%);
+}
+
+.electron-dockyard-tool-buttons .electron-dockyard-new-query {
+  margin-left: 5px;
+  border-color: #3d4b57;
+  color: #c2d1dc;
+  background: #232a31;
+}
+
+.electron-dockyard-tool-buttons .electron-dockyard-new-query:hover,
+.electron-dockyard-tool-buttons .electron-dockyard-new-query:focus-visible {
+  border-color: #69869d;
+  background: #2c3944;
 }
 
 .electron-dockyard-workspace-shell {
@@ -162,5 +203,9 @@ body {
   .electron-dockyard-topbar {
     gap: 6px;
     padding-inline: 7px;
+  }
+
+  .electron-dockyard-tool-buttons {
+    margin-left: 10px;
   }
 }

@@ -711,19 +711,19 @@ export function DockyardWorkspace({
       <h1 className="brand">JustyBase</h1>
       <div className="workspace-title">Netezza SQL Workspace</div>
       <nav className="dockyard-tool-buttons" aria-label="Dockyard tools">
-        <button className="secondary small" data-dockyard-tool="connections" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.connections)}>Connections</button>
-        <button className="secondary small" data-dockyard-tool="schema" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.schema)}>Schema</button>
-        <button className="secondary small" data-dockyard-tool="inspector" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.inspector)}>Inspector</button>
-        <button className="secondary small" data-dockyard-tool="history" onClick={() => { onHistoryRefresh(); activateTool(DOCKYARD_CONTENT_IDS.history); }}>History</button>
-        {activeTab && <button className="secondary small" data-dockyard-tool="explain" onClick={() => activateTool(explainToolId(activeTab.id))}>Explain</button>}
-        <button className="secondary small" onClick={onAddTab}>New query</button>
+        <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="connections" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.connections)}>Connections</button>
+        <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="schema" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.schema)}>Schema</button>
+        <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="inspector" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.inspector)}>Inspector</button>
+        <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="history" onClick={() => { onHistoryRefresh(); activateTool(DOCKYARD_CONTENT_IDS.history); }}>History</button>
+        {activeTab && <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="explain" onClick={() => activateTool(explainToolId(activeTab.id))}>Explain</button>}
+        <button type="button" className="secondary small dockyard-topbar-button dockyard-topbar-new-query" onClick={onAddTab}>New query</button>
       </nav>
       <div className="topbar-user">
-        <button className="secondary small" onClick={onOpenAudit}>Audit</button>
-        {user.role === 'admin' && <button className="secondary small" onClick={onOpenAdmin}>Admin</button>}
-        <button className="secondary small" onClick={onOpenSettings}>⚙ Settings</button>
-        <span>{user.username}</span>
-        <button className="secondary small" onClick={onLogout}>Log out</button>
+        <button type="button" className="secondary small topbar-action" onClick={onOpenAudit}>Audit</button>
+        {user.role === 'admin' && <button type="button" className="secondary small topbar-action" onClick={onOpenAdmin}>Admin</button>}
+        <button type="button" className="secondary small topbar-action" onClick={onOpenSettings}>⚙ Settings</button>
+        <span className="topbar-user-name"><span className="topbar-user-badge" aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span>{user.username}</span>
+        <button type="button" className="secondary small topbar-action topbar-logout" onClick={onLogout}>Log out</button>
       </div>
     </header>
 

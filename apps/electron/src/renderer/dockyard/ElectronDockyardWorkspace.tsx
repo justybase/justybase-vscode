@@ -225,8 +225,8 @@ export function ElectronDockyardWorkspace({
       <nav className="electron-dockyard-tool-buttons" aria-label="Dockyard tools">
         {dockyardTools.map(tool => <button type="button" className="electron-dockyard-button" data-dockyard-tool={tool.id} key={tool.id} onClick={() => activate(tool.id)}>{tool.title}</button>)}
         {surfaces?.map(surface => <button type="button" className="electron-dockyard-button" aria-current={surface.id === activeSurface ? 'page' : undefined} key={surface.id} onClick={() => onSurfaceChange?.(surface.id)}>{surface.label}</button>)}
-        {onNewDocument && <button type="button" className="electron-dockyard-button" onClick={onNewDocument}>New query</button>}
-        {onResetLayout && <button type="button" className="electron-dockyard-button" onClick={() => { adapter?.resetLayout(); onResetLayout(); }}>Reset layout</button>}
+        {onNewDocument && <button type="button" className="electron-dockyard-button electron-dockyard-new-query" onClick={onNewDocument}>New query</button>}
+        {onResetLayout && <button type="button" className="electron-dockyard-button electron-dockyard-reset-layout" onClick={() => { adapter?.resetLayout(); onResetLayout(); }}>Reset layout</button>}
       </nav>
       <div className="electron-dockyard-actions">{headerActions}</div>
     </header>

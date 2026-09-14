@@ -223,33 +223,39 @@ export function EditorToolbar({
       {/* Right group */}
       <div className="toolbar-right">
         <SqlDialectSelect value={databaseKind} onChange={onSelectDialect} ariaLabel="SQL authoring dialect" />
-        <select
-          className="tb-select"
-          title="Connection"
-          value={connectionId || ''}
-          onChange={e => onSelectConnection(e.target.value)}
-        >
-          <option value="">{connections.length === 0 ? 'No connections' : '—'}</option>
-          {connections.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
+        <div className="tb-context-field">
+          <span className="tb-context-label">Connection</span>
+          <select
+            className="tb-select"
+            title="Connection"
+            value={connectionId || ''}
+            onChange={e => onSelectConnection(e.target.value)}
+          >
+            <option value="">{connections.length === 0 ? 'No connections' : '—'}</option>
+            {connections.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
 
-        <select
-          className="tb-select"
-          title="Database"
-          value={database || ''}
-          onChange={e => onSelectDatabase(e.target.value)}
-          disabled={!connectionId}
-        >
-          {databases.length === 0
-            ? <option value="">{!connectionId ? 'Select connection' : effectiveDatabaseState === 'loading' ? 'Loading databases…' : effectiveDatabaseState === 'error' ? 'Database list unavailable' : effectiveDatabaseState === 'empty' ? 'No accessible databases' : 'Select database'}</option>
-            : <option value="">—</option>
-          }
-          {databases.map(db => (
-            <option key={db.name} value={db.name}>{db.name}</option>
-          ))}
-        </select>
+        <div className="tb-context-field">
+          <span className="tb-context-label">Database</span>
+          <select
+            className="tb-select"
+            title="Database"
+            value={database || ''}
+            onChange={e => onSelectDatabase(e.target.value)}
+            disabled={!connectionId}
+          >
+            {databases.length === 0
+              ? <option value="">{!connectionId ? 'Select connection' : effectiveDatabaseState === 'loading' ? 'Loading databases…' : effectiveDatabaseState === 'error' ? 'Database list unavailable' : effectiveDatabaseState === 'empty' ? 'No accessible databases' : 'Select database'}</option>
+              : <option value="">—</option>
+            }
+            {databases.map(db => (
+              <option key={db.name} value={db.name}>{db.name}</option>
+            ))}
+          </select>
+        </div>
         {effectiveDatabaseState === 'error' && onRetryDatabases && <button type="button" className="tb-btn tb-retry-databases" title={databaseLoadError || 'Retry loading databases'} onClick={onRetryDatabases}>Retry</button>}
       </div>
     </div>

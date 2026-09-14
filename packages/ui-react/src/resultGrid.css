@@ -1971,39 +1971,90 @@ body,
   align-items: center;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 5px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--justybase-grid-border);
-  background: var(--justybase-grid-bg);
+  gap: 6px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #303841;
+  background: #1d2228;
+  box-shadow: inset 0 -1px 0 rgb(255 255 255 / 2%);
 }
 
 .electron-editor-toolbar label {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  color: var(--justybase-grid-muted);
-  font-size: 10px;
+  gap: 2px;
+  color: #788693;
+  font-size: 9px;
+  letter-spacing: .08em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .electron-editor-toolbar select {
   min-width: 100px;
   max-width: 170px;
-  min-height: 25px;
-  padding: 2px 5px;
-  border: 1px solid var(--justybase-grid-border);
-  border-radius: 3px;
-  color: var(--justybase-grid-text);
-  background: var(--justybase-grid-surface);
-  font: inherit;
+  min-height: 27px;
+  padding: 3px 7px;
+  border: 1px solid #3d4954;
+  border-radius: 4px;
+  color: #d5dde4;
+  background: #232a31;
+  font-size: 11px;
+}
+
+.electron-editor-toolbar select:hover:not(:disabled) {
+  border-color: #5a7184;
+  background: #28313a;
+}
+
+.electron-editor-toolbar select:focus {
+  border-color: #6b879d;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(107 135 157 / 16%);
+}
+
+.electron-editor-toolbar > button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #9daab6;
+  background: transparent;
+  font-size: 11px;
+  transition: border-color .14s, background .14s, color .14s;
+}
+
+.electron-editor-toolbar > button:hover:not(:disabled) {
+  border-color: #3b4650;
+  color: #e1e7ec;
+  background: #252c33;
+}
+
+.electron-editor-toolbar > button:focus-visible {
+  border-color: #6b879d;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(107 135 157 / 16%);
 }
 
 .electron-editor-toolbar .electron-run-button {
-  border-color: color-mix(in srgb, var(--justybase-grid-accent) 60%, transparent);
-  color: #fff;
-  background: #0e639c;
+  border-color: var(--jb-color-action-border);
+  color: var(--jb-color-action-text);
+  background: var(--jb-color-action);
+  font-weight: 600;
 }
 
-.electron-editor-toolbar button:disabled { cursor: not-allowed; opacity: .5; }
+.electron-editor-toolbar .electron-run-button:hover:not(:disabled) {
+  border-color: #7b96aa;
+  color: #fff;
+  background: var(--jb-color-action-hover);
+}
+
+.electron-editor-toolbar .electron-run-button:active:not(:disabled) {
+  background: var(--jb-color-action-active);
+}
+
+.electron-editor-toolbar button:disabled { cursor: not-allowed; opacity: .42; }
 
 .electron-notice {
   flex: 0 0 auto;
