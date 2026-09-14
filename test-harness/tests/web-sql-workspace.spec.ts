@@ -152,7 +152,7 @@ async function monacoDocumentText(page: Page): Promise<string> {
 }
 
 test.describe('deterministic SQLite API-backed web workspace', () => {
-  test('runs a controlled fixture through authentication, connection, result, and history @web-api', async ({ page }) => {
+  test('runs a controlled fixture through authentication, connection, result, and history @web-dockyard', async ({ page }) => {
     const profileName = `Playwright SQLite ${Date.now()}`;
     const fixtureQuery = `SELECT 1 AS SCENARIO_ID, 'SQLITE_FIXTURE' AS ENGINE_NAME
 UNION ALL
@@ -202,7 +202,7 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await expect(page.locator('.history-entry').first()).toContainText('SQLITE_FIXTURE');
   });
 
-  test('keeps Monaco input focused in a short editor pane while typing @web-api', async ({ page }) => {
+  test('keeps Monaco input focused in a short editor pane while typing @web-dockyard', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
     await loginWithTestData(page);
@@ -228,7 +228,7 @@ SELECT 3, 'SQLITE_FIXTURE'`;
     await expect.poll(async () => page.evaluate(() => document.activeElement?.className ?? ''), { timeout: 15_000 }).toContain('native-edit-context');
   });
 
-  test('keeps query documents and Dockyard tool layout across reorder, float, auto-hide, and reload @web-api', async ({ page }) => {
+  test('keeps query documents and Dockyard tool layout across reorder, float, auto-hide, and reload @web-dockyard', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
     await loginWithTestData(page);
@@ -354,18 +354,24 @@ SELECT 3, 'SQLITE_FIXTURE'`;
   });
 });
 
-test.describe('shared React web workspace', () => {
-  test('opens and copies reconstructed SQLite table/view DDL from the schema explorer @web-shared', async ({ page }) => {
+test.describe('Dockyard React web workspace', () => {
+  test('opens and copies reconstructed SQLite table/view DDL from the schema explorer @web-dockyard', async ({ page }) => {
     const profileName = `Shared DDL SQLite ${Date.now()}`;
     const database = `shared-ddl-${Date.now()}.sqlite`;
     const tableName = `pw_ddl_table_${Date.now()}`;
     const viewName = `pw_ddl_view_${Date.now()}`;
+    const queryStartRequests: string[] = [];
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/query' && request.method() === 'POST') queryStartRequests.push(request.url());
+    });
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
     await loginWithTestData(page);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
-    await page.locator('.shared-sidebar-heading button[aria-label="Add connection"]').click();
+    await page.getByRole('button', { name: 'Connections', exact: true }).click();
+    await expect(page.locator('.dockyard-connections-tool:visible')).toBeVisible();
+    await page.locator('.dockyard-connections-tool .section-title .icon-button').click();
     const dialog = page.getByRole('dialog', { name: 'Add connection' });
     await dialog.getByLabel('Database type').selectOption('sqlite');
     await dialog.getByLabel('Profile name').fill(profileName);
@@ -376,14 +382,15 @@ test.describe('shared React web workspace', () => {
     await expect(page.getByRole('button', { name: profileName, exact: true })).toBeVisible();
 
     const connectionId = await connectionIdByName(page, profileName);
+    await page.getByRole('button', { name: 'Schema', exact: true }).click();
     await executeWriteStatement(page, connectionId, `CREATE TABLE ${tableName} (id INTEGER PRIMARY KEY, label TEXT NOT NULL, amount NUMERIC);`, 'main');
     await executeWriteStatement(page, connectionId, `CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName};`, 'main');
 
-    const schema = page.getByRole('tree', { name: 'Schema' });
+    const schema = page.locator('.dockyard-schema-tool:visible');
     await page.getByRole('button', { name: 'Refresh schema' }).click();
-    const search = page.getByRole('textbox', { name: 'Search schema' });
+    const search = schema.getByPlaceholder('Search tables, views…');
     await search.fill(tableName);
-    const tableNode = schema.getByRole('treeitem').filter({ hasText: tableName }).first();
+    const tableNode = schema.locator('.schema-search-result').filter({ hasText: tableName }).first();
     await expect(tableNode).toBeVisible({ timeout: 30_000 });
     await tableNode.click({ button: 'right' });
     const tableMenu = page.getByRole('menu', { name: `Actions for ${tableName}` });
@@ -392,12 +399,14 @@ test.describe('shared React web workspace', () => {
     await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain(`CREATE TABLE main.${tableName}`);
     await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
 
+    const queryCountBeforeOpenDdl = queryStartRequests.length;
     await tableNode.click({ button: 'right' });
     await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Open DDL', exact: true }).click();
-    await expect(page.getByRole('tab', { name: `DDL · ${tableName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: new RegExp(`DDL · ${tableName}`) })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain('label TEXT');
     await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL opened' })).toBeVisible();
+    await expect.poll(() => queryStartRequests.length).toBe(queryCountBeforeOpenDdl);
 
     await tableNode.click({ button: 'right' });
     await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Open Object Designer', exact: true }).click();
@@ -413,18 +422,18 @@ test.describe('shared React web workspace', () => {
     await expect(designer.getByText('1 statement(s)')).toBeVisible();
     await designer.getByRole('button', { name: 'Apply preview', exact: true }).click();
     await expect(designer).toHaveCount(0, { timeout: 30_000 });
-    await expect(page.getByRole('status').filter({ hasText: 'Object designer change applied' })).toBeVisible();
+    await expect(page.getByText('Object designer change submitted. Refresh the schema to see the new definition.', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Refresh schema' }).click();
     await search.fill(tableName);
-    const refreshedTableNode = schema.getByRole('treeitem').filter({ hasText: tableName }).first();
+    const refreshedTableNode = schema.locator('.schema-search-result').filter({ hasText: tableName }).first();
     await expect(refreshedTableNode).toBeVisible({ timeout: 30_000 });
     await refreshedTableNode.click({ button: 'right' });
     await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Copy DDL', exact: true }).click();
     await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain('designer_added TEXT');
 
     await search.fill(viewName);
-    const viewNode = schema.getByRole('treeitem').filter({ hasText: viewName }).first();
+    const viewNode = schema.locator('.schema-search-result').filter({ hasText: viewName }).first();
     await expect(viewNode).toBeVisible({ timeout: 30_000 });
     await viewNode.click({ button: 'right' });
     const viewMenu = page.getByRole('menu', { name: `Actions for ${viewName}` });
@@ -434,11 +443,11 @@ test.describe('shared React web workspace', () => {
 
     await viewNode.click({ button: 'right' });
     await page.getByRole('menu', { name: `Actions for ${viewName}` }).getByRole('menuitem', { name: 'Open DDL', exact: true }).click();
-    await expect(page.getByRole('tab', { name: `DDL · ${viewName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: new RegExp(`DDL · ${viewName}`) })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
   });
 
-  test('uses the shared authoring and Result Grid contract in a real browser @web-shared', async ({ page }) => {
+  test('uses the Dockyard authoring and Result Grid contract in a real browser @web-dockyard', async ({ page }) => {
     const profileName = `Shared SQLite ${Date.now()}`;
     const fixtureQuery = `WITH RECURSIVE seq(value) AS (
   SELECT 1
@@ -463,9 +472,9 @@ FROM seq`;
     await expect(page.getByRole('heading', { name: 'Web database editor' })).toBeVisible();
     await loginWithTestData(page);
     await expect(page.getByRole('heading', { name: 'JustyBase' })).toBeVisible();
-    await expect(page.getByRole('tree', { name: 'Schema' })).toBeVisible();
-    const executionToolbar = page.getByRole('toolbar', { name: 'SQL execution actions' });
-    const editorStack = page.locator('.shared-editor-stack');
+    await expect(page.locator('.dockyard-schema-tool:visible')).toBeVisible();
+    const executionToolbar = page.locator('.editor-toolbar:visible').first();
+    const editorStack = page.locator('.dockyard-query-editor:visible').first();
     await expect(executionToolbar).toBeVisible();
     await expect(editorStack).toBeVisible();
     const executionToolbarBox = await executionToolbar.boundingBox();
@@ -474,14 +483,18 @@ FROM seq`;
     expect(editorStackBox).not.toBeNull();
     expect(executionToolbarBox!.y + executionToolbarBox!.height).toBeLessThanOrEqual(editorStackBox!.y);
     await expect(executionToolbar.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
-    await expect(executionToolbar.getByRole('button', { name: 'Smart', exact: true })).toBeVisible();
+    await executionToolbar.getByTitle('More run options').click();
+    await expect(page.getByRole('button', { name: 'Smart run (split by ;)', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
     // Results and Problems share one output panel. Verify the diagnostics
     // tab explicitly instead of assuming both panels are mounted together.
     await page.getByRole('tab', { name: /Problems/ }).click();
     await expect(page.getByRole('region', { name: 'SQL Problems' })).toBeVisible();
     await page.getByRole('tab', { name: 'Results', exact: true }).click();
 
-    await page.locator('.shared-sidebar-heading button[aria-label="Add connection"]').click();
+    await page.getByRole('button', { name: 'Connections', exact: true }).click();
+    await expect(page.locator('.dockyard-connections-tool:visible')).toBeVisible();
+    await page.locator('.dockyard-connections-tool .section-title .icon-button').click();
     const dialog = page.getByRole('dialog', { name: 'Add connection' });
     await dialog.getByLabel('Database type').selectOption('sqlite');
     await dialog.getByLabel('Profile name').fill(profileName);
@@ -555,10 +568,11 @@ FROM seq`;
 
     // A filter that is outside the first hydrated page must drive the shared
     // adapter through subsequent pages before it is considered complete.
-    const resultFilter = page.getByLabel('Filter results');
+    const resultFilter = page.getByLabel('Filter all result values');
     await resultFilter.fill('shared-grid-1199');
-    await expect(page.locator('tr[data-source-index="1198"]')).toHaveCount(1, { timeout: 30_000 });
-    await expect(page.locator('tr[data-source-index="1198"]')).toContainText('shared-grid-1199');
+    const filteredRow = page.locator('tr[data-source-index]').filter({ hasText: 'shared-grid-1199' }).first();
+    await expect(filteredRow).toBeVisible({ timeout: 30_000 });
+    await expect(filteredRow).toContainText('shared-grid-1199');
     await resultFilter.fill('');
     await expect.poll(async () => await page.locator('tr[data-source-index]').count()).toBeGreaterThan(0);
 
@@ -572,8 +586,8 @@ FROM seq`;
     await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 9_000, left: 320 }));
     await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
     await page.getByRole('button', { name: 'History', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Query history' })).toBeVisible();
-    await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+    await expect(page.locator('.dockyard-history-tool .section-title')).toContainText('Query history');
+    await page.locator('.ad-document-pane .ad-tab').first().click();
     await expect(grid).toBeVisible();
     await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 9_000, left: 320 }));
     await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
@@ -596,7 +610,7 @@ FROM seq`;
 
     await contextCell.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'View full row' }).click();
-    await expect(page.getByRole('heading', { name: 'Row details' })).toBeVisible();
+    await expect(page.getByText('Row details', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Close', exact: true }).click();
 
     const download = page.waitForEvent('download');

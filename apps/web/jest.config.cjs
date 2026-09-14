@@ -9,6 +9,7 @@ module.exports = {
     '^@justybase/api-client$': '<rootDir>/../../packages/api-client/src',
     '^@justybase/api-client/(.*)$': '<rootDir>/../../packages/api-client/src/$1',
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
+    '^@justybase/dockyard-layout$': '<rootDir>/../../packages/dockyard-layout/src',
     '^@justybase/designer-core$': '<rootDir>/../../packages/designer-core/src',
     '^@justybase/designer-core/(.*)$': '<rootDir>/../../packages/designer-core/src/$1',
     '^@justybase/result-core$': '<rootDir>/../../packages/result-core/src',

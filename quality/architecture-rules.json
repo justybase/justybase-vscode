@@ -50,6 +50,10 @@
     "packages/ui-core": [
       "packages/contracts"
     ],
+    "packages/dockyard-layout": [
+      "packages/contracts",
+      "packages/ui-core"
+    ],
     "packages/ui-monaco": [
       "packages/contracts",
       "packages/ui-core"
@@ -93,6 +97,7 @@
     "packages/database-utils/src/**",
     "packages/dialect-utils/src/**",
     "packages/*-core/src/**",
+    "packages/dockyard-layout/src/**",
     "packages/ui-react/src/**",
     "packages/ui-monaco/src/**"
   ],

@@ -1,0 +1,166 @@
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-bg);
+  font-family: var(--vscode-font-family, Inter, ui-sans-serif, system-ui, sans-serif);
+}
+
+.electron-dockyard-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--justybase-grid-bg);
+}
+
+.electron-dockyard-topbar {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-surface);
+}
+
+.electron-dockyard-brand {
+  margin: 0;
+  flex: 0 0 auto;
+  color: #60a5fa;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.electron-dockyard-title {
+  flex: 0 0 auto;
+  color: var(--justybase-grid-muted);
+  font-size: 12px;
+}
+
+.electron-dockyard-tool-buttons,
+.electron-dockyard-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.electron-dockyard-tool-buttons {
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+
+.electron-dockyard-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.electron-dockyard-button {
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--justybase-grid-muted);
+  background: transparent;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.electron-dockyard-button:hover,
+.electron-dockyard-button:focus-visible {
+  border-color: var(--justybase-grid-border);
+  color: var(--justybase-grid-text);
+  background: var(--justybase-grid-hover);
+}
+
+.electron-dockyard-workspace-shell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.electron-dockyard-host {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.electron-dockyard-react-content-host {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.electron-dockyard-react-content-host > * {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.electron-dockyard-init-error {
+  position: absolute;
+  z-index: 5;
+  inset: 16px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid #7f1d1d;
+  border-radius: 8px;
+  color: #fecaca;
+  background: #1f2937;
+  text-align: center;
+  box-shadow: 0 12px 40px #0008;
+}
+
+.electron-dockyard-init-error span {
+  max-width: 620px;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.electron-dockyard-statusbar {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 10px;
+  border-top: 1px solid var(--justybase-grid-border);
+  color: var(--justybase-grid-muted);
+  background: var(--justybase-grid-surface);
+  font-size: 10px;
+}
+
+@media (max-width: 760px) {
+  .electron-dockyard-title,
+  .electron-dockyard-actions > span {
+    display: none;
+  }
+
+  .electron-dockyard-topbar {
+    gap: 6px;
+    padding-inline: 7px;
+  }
+}

@@ -17,6 +17,7 @@
   "dependencies": {
     "@justybase/api-client": "*",
     "@justybase/contracts": "*",
+    "@justybase/dockyard-layout": "*",
     "@justybase/dialect-utils": "*",
     "@justybase/ui-core": "*",
     "@justybase/ui-monaco": "*",

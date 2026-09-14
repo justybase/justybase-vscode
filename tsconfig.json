@@ -15,6 +15,8 @@
       "@justybase/api-client/*": ["./packages/api-client/src/*"],
       "@justybase/contracts": ["./packages/contracts/src"],
       "@justybase/contracts/*": ["./packages/contracts/src/*"],
+      "@justybase/dockyard-layout": ["./packages/dockyard-layout/src"],
+      "@justybase/dockyard-layout/*": ["./packages/dockyard-layout/src/*"],
       "@justybase/database-utils": ["./packages/database-utils/src"],
       "@justybase/database-utils/*": ["./packages/database-utils/src/*"],
       "@justybase/tabular-import-runtime": ["./packages/tabular-import-runtime/src"],

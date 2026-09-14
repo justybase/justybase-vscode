@@ -227,7 +227,7 @@ const OBJECT_TYPES = [
 
 // ── Main SchemaTree component ───────────────────────────
 
-export function SchemaTree({ connectionId, database, databaseKind = 'netezza', onInsert, onContextChange, onObjectSelect, onOpenDesigner, onOpenQuery, onImport }: {
+export function SchemaTree({ connectionId, database, databaseKind = 'netezza', onInsert, onContextChange, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport }: {
   connectionId: string;
   database?: string;
   databaseKind?: DatabaseKind;
@@ -236,6 +236,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
   onObjectSelect?(node: SchemaTreeNode): void;
   onOpenDesigner?(node: SchemaTreeNode): void;
   onOpenQuery?(sql: string, title: string, node: SchemaTreeNode): void;
+  onOpenDdl?(sql: string, title: string, node: SchemaTreeNode): void;
   onImport?(node: SchemaTreeNode): void;
 }): ReactElement {
   const api = useApiClient();
@@ -488,8 +489,21 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     }
   }
 
+  function searchResultNode(item: SchemaSearchResult): SchemaTreeNode {
+    return {
+      id: `search:${item.database}.${item.schema ?? ''}.${item.name}`,
+      kind: 'object',
+      label: item.name,
+      database: item.database,
+      schema: item.schema,
+      objectName: item.name,
+      objectType: item.objectType,
+      hasChildren: false,
+    };
+  }
+
   function insertSearchResult(item: SchemaSearchResult): void {
-    onInsert(qualifySchemaNode({ id: `search:${item.database}.${item.schema}.${item.name}`, kind: 'object', label: item.name, database: item.database, schema: item.schema, objectName: item.name, hasChildren: false }, databaseKind));
+    onInsert(qualifySchemaNode(searchResultNode(item), databaseKind));
   }
 
   function selectNode(node: SchemaTreeNode): void {
@@ -577,22 +591,40 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
     setObjectMenu(null);
   }
 
+  async function loadObjectDdl(node: SchemaTreeNode): Promise<{ ddl: string; reconstructed: boolean }> {
+    const objectType = node.objectType?.trim().toUpperCase() || 'TABLE';
+    const result = await api.ddl({
+      connectionId,
+      database: node.database ?? database ?? '',
+      schema: node.schema ?? '',
+      objectName: node.objectName ?? node.label,
+      objectType,
+    });
+    if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
+    return { ddl: result.ddlCode, reconstructed: result.ddlFidelity === 'reconstructed' };
+  }
+
   async function copyObjectDdl(node: SchemaTreeNode): Promise<void> {
     try {
-      const objectType = node.objectType?.trim().toUpperCase() || 'TABLE';
-      const result = await api.ddl({
-        connectionId,
-        database: node.database ?? database ?? '',
-        schema: node.schema ?? '',
-        objectName: node.objectName ?? node.label,
-        objectType,
-      });
-      if (!result.success || !result.ddlCode) throw new Error(result.error ?? 'The database returned no DDL.');
-      const ddl = result.ddlCode;
+      const { ddl, reconstructed } = await loadObjectDdl(node);
       await navigator.clipboard.writeText(ddl);
-      setError(result.ddlFidelity === 'reconstructed'
+      setError(reconstructed
         ? 'Reconstructed DDL copied to clipboard; inspect the metadata warnings before executing it.'
         : 'DDL copied to clipboard.');
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Could not generate DDL.');
+    } finally {
+      setObjectMenu(null);
+    }
+  }
+
+  async function openObjectDdl(node: SchemaTreeNode): Promise<void> {
+    try {
+      const { ddl, reconstructed } = await loadObjectDdl(node);
+      onOpenDdl?.(ddl, `DDL · ${node.label}`, node);
+      setError(reconstructed
+        ? 'Reconstructed DDL opened; inspect the metadata warnings before executing it.'
+        : 'DDL opened.');
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not generate DDL.');
     } finally {
@@ -675,7 +707,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
         {recentObjects.length > 0 && <div><div className="schema-shortcuts-title">Recent</div>{recentObjects.slice(0, 5).map(node => <button key={node.id} className="schema-shortcut" onClick={() => insertNode(node)} onContextMenu={event => openObjectMenu(event, node)}><span>↻</span>{node.label}<small>{node.schema}</small></button>)}</div>}
       </div>}
 
-      {error && <div className="error schema-error">{error}</div>}
+      {error && <div className="error schema-error" role="status">{error}</div>}
 
       {/* Search results or tree */}
       {search.trim() ? (
@@ -687,6 +719,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
                   className="schema-search-result"
                   key={`${item.database}.${item.schema}.${item.name}`}
                   onClick={() => insertSearchResult(item)}
+                  onContextMenu={event => openObjectMenu(event, searchResultNode(item))}
                 >
                   <span className="schema-search-result-icon">
                     {item.objectType === 'VIEW' ? <ViewIcon /> :
@@ -745,6 +778,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
           <button type="button" role="menuitem" onClick={() => openDesigner(objectMenu.node)}>Open Object Designer</button>
           <button type="button" role="menuitem" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button>
           <button type="button" role="menuitem" onClick={() => explainObject(objectMenu.node)}>Explain plan</button>
+          <button type="button" role="menuitem" onClick={() => void openObjectDdl(objectMenu.node)}>Open DDL</button>
           <button type="button" role="menuitem" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button>
           <button type="button" role="menuitem" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button>
           <button type="button" role="menuitem" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button>

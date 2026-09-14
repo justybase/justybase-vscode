@@ -3,6 +3,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 
 const root = path.resolve(import.meta.dirname);
+const repositoryRoot = path.resolve(root, '../..');
 const dist = path.join(root, 'dist');
 
 await build({
@@ -39,6 +40,10 @@ await build({
   format: 'esm',
   outfile: path.join(dist, 'renderer/renderer.js'),
   sourcemap: true,
+  alias: {
+    '@justybase/dockyard-layout': path.join(repositoryRoot, 'packages/dockyard-layout/src/index.ts'),
+    'avalondock-web': path.join(repositoryRoot, 'vendor/dockyard/src/index.js'),
+  },
 });
 fs.mkdirSync(path.join(dist, 'renderer'), { recursive: true });
 fs.copyFileSync(path.join(root, 'src/renderer/index.html'), path.join(dist, 'renderer/index.html'));

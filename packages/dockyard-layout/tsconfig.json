@@ -3,10 +3,8 @@
     "module": "commonjs",
     "moduleResolution": "bundler",
     "target": "es2022",
-    "lib": ["es2022", "dom", "dom.iterable"],
-    "jsx": "react-jsx",
-    "types": ["node", "jest", "@testing-library/jest-dom"],
-    "rootDir": "../..",
+    "lib": ["es2022", "dom"],
+    "rootDir": "src",
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
@@ -19,10 +17,9 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "paths": {
-      "@justybase/dockyard-layout": ["../../packages/dockyard-layout/src"],
       "avalondock-web": ["../../vendor/dockyard/src/index.d.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

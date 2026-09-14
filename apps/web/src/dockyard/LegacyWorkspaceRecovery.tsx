@@ -56,6 +56,7 @@ export function LegacyWorkspaceRecovery({
   onObjectSelect,
   onOpenDesigner,
   onOpenQuery,
+  onOpenDdl,
   onImport,
   onInsertColumn,
   onEditRow,
@@ -95,6 +96,7 @@ export function LegacyWorkspaceRecovery({
         onObjectSelect={onObjectSelect}
         onOpenDesigner={onOpenDesigner}
         onOpenQuery={onOpenQuery}
+        onOpenDdl={onOpenDdl}
         onImport={onImport}
       /> : <div className="sidebar-empty-state"><strong>No connections</strong><span>Add a connection to browse its schema.</span><button type="button" className="secondary small" onClick={onOpenConnectionForm}>Add connection</button></div>}
     </aside>

@@ -12,8 +12,6 @@ import {
   ResultPanel,
   SqlDialectSelect,
   ObjectDesigner,
-  UiShell,
-  WorkspaceTabs,
   createDataGridClipboardPayload,
   formatDataGridClipboard,
   processDataGridRows,
@@ -31,6 +29,7 @@ import { EditRowPanel } from './EditRowPanel';
 import { ImportPanel } from './ImportPanel';
 import { ConnectionPanel } from './ConnectionPanel';
 import { getElectronResultViewStorage, readElectronResultView, writeElectronResultView } from './resultViewPersistence';
+import { ElectronDockyardWorkspace } from './dockyard/ElectronDockyardWorkspace';
 
 type ElectronRow = readonly unknown[];
 type ElectronRows = Readonly<Record<string, readonly ElectronRow[]>>;
@@ -443,11 +442,12 @@ export function App(): ReactElement {
     store.dispatch({ type: 'shell/surface', surface: 'workspace' });
   }, [selectedConnection?.database, selectedConnection?.id, store]);
 
-  const closeDocument = useCallback((documentId: string): void => {
-    if (state.workspace.documentOrder.length <= 1) return;
+  const closeDocument = useCallback((documentId: string): boolean => {
+    if (state.workspace.documentOrder.length <= 1) return false;
     const document = state.workspace.documents[documentId];
-    if (document?.dirty && typeof window !== 'undefined' && !window.confirm(`Close modified document “${document.title}”?`)) return;
+    if (document?.dirty && typeof window !== 'undefined' && !window.confirm(`Close modified document “${document.title}”?`)) return false;
     store.dispatch({ type: 'workspace/close-document', documentId });
+    return true;
   }, [state.workspace.documentOrder.length, state.workspace.documents, store]);
 
   const insertSql = useCallback((value: string): void => {
@@ -1018,11 +1018,6 @@ export function App(): ReactElement {
     }
   }, [activeResult?.columns, database, rows, selectedConnection?.id, selectedObject]);
 
-  const selectSurface = useCallback((surface: string): void => {
-    const next = asSurface(surface);
-    if (next) store.dispatch({ type: 'shell/surface', surface: next });
-  }, [store]);
-
   if (booting) return <AsyncStateView state="loading" loadingLabel="Starting authenticated workspace…" /> as ReactElement;
   if (state.auth.status !== 'authenticated') return <AsyncStateView state="error" message={state.auth.message ?? 'Authentication is unavailable.'} /> as ReactElement;
 
@@ -1032,12 +1027,6 @@ export function App(): ReactElement {
   const metadataCapability = state.capabilities.find(descriptor => descriptor.key === 'metadata');
   const runtimeDatabaseKind = (selectedConnection?.dbType ?? 'netezza') as DatabaseKind;
   const authoringDatabaseKind = activeDocument?.databaseKind ?? runtimeDatabaseKind;
-  const surfaces: readonly { id: UiSurface; label: string }[] = [
-    { id: 'workspace', label: 'Workspace' },
-    { id: 'results', label: 'Results' },
-    { id: 'history', label: 'History' },
-    { id: 'explain', label: 'Explain' },
-  ];
   const historyItems: HistoryViewEntry[] = history.map(entry => ({
     id: entry.id,
     label: entry.sql.slice(0, 120) || '(empty SQL)',
@@ -1057,91 +1046,104 @@ export function App(): ReactElement {
       updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
     }
   };
+  const workspaceDocumentContent = <div className="electron-workspace-content">
+    <div className="electron-editor-toolbar" role="toolbar" aria-label="SQL editor actions">
+      <button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>＋ SQL</button>
+      <button type="button" onClick={saveDocument}>Save</button>
+      <button type="button" onClick={commentDocument}>Comment</button>
+      <button type="button" onClick={formatDocument}>Format</button>
+      <span className="electron-toolbar-spacer" />
+      <SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" />
+      <label>Connection<select aria-label="Editor connection" value={selectedConnection?.id ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+      <label>Database<select aria-label="Editor database" value={database} disabled={!selectedConnection} onChange={event => selectDatabase(event.target.value)}><option value="">{selectedConnection ? 'Select database' : 'Select connection'}</option>{databases.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+      <button type="button" className="electron-run-button" aria-label="Run" onClick={() => void run()} disabled={!activeDocument}>▶ Run</button>
+      <button type="button" onClick={() => void run('script')} disabled={!selectedConnection || !activeDocument}>Run script</button>
+      <button type="button" aria-label="Explain current SQL" onClick={() => void run('explain')} disabled={!selectedConnection || !activeDocument}>Explain</button>
+      <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
+    </div>
+    {notice && <div className="electron-notice" role="status">{notice}</div>}
+    <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: activeDocument?.connectionId ?? selectedConnection?.id, database: activeDocument?.database ?? database, schema: activeDocument?.schema ?? schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
+    <ResultPanel
+      results={Object.values(state.results.byResultSetId)}
+      activeResult={activeResult}
+      rows={rows}
+      resultState={resultState}
+      resultMessage={resultMessage}
+      activeTab={activeOutputTab}
+      problemCount={problems.length}
+      problems={problems}
+      onOutputTabChange={setActiveOutputTab}
+      onProblemSelect={selectProblem}
+      onResultSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })}
+      onViewChange={updateView}
+      clientProcessing={clientProcessing}
+      onLoadMore={loadMoreRows}
+      onScroll={onScroll}
+      selectedRowIndex={selectedRow}
+      onRowSelect={setSelectedRow}
+      onCopySelection={copyGridSelection}
+      onViewCell={openCellValue}
+      onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined}
+      onOpenColumnFilter={openColumnFilter}
+      filterMenu={filterMenu}
+      onFilterMenuChange={updateColumnFilterMenu}
+      onApplyColumnFilter={applyColumnFilter}
+      onClearColumnFilter={clearColumnFilter}
+      onCloseColumnFilter={closeColumnFilter}
+      onRefresh={() => void refresh()}
+      onCopy={() => void copyActive()}
+      onExport={() => void exportActive()}
+      onAggregate={() => toggleResultAnalysis('aggregate')}
+      onGroup={() => updateView({ grouping: activeResult?.view.grouping.length ? [] : activeResult?.columns[0] ? [activeResult.columns[0].name] : [] })}
+      onPivot={() => toggleResultAnalysis('pivot')}
+      activeAnalysis={resultAnalysis?.kind}
+      analysisBusy={resultAnalysisLoading}
+      resultAnalysis={resultAnalysis}
+      resultAnalysisLoading={resultAnalysisLoading}
+      resultAnalysisError={resultAnalysisError}
+      onCloseResultAnalysis={closeResultAnalysis}
+      onViewAnalysisCell={openAnalysisCellValue}
+      onCopyAnalysisSelection={copyGridSelection}
+      detailColumns={detailColumns}
+      onCloseRowDetail={() => setSelectedRow(undefined)}
+      exportFormat={exportFormat}
+      onExportFormatChange={value => setExportFormat(value as QueryExportFormat)}
+      exportFormatAriaLabel="Electron export format"
+      showContextMenu
+      showInlineColumnFilters
+      loadingLabel="Streaming result data…"
+    />
+  </div>;
+  const dockyardDocuments = state.workspace.documentOrder.flatMap(documentId => {
+    const document = state.workspace.documents[documentId];
+    if (!document) return [];
+    return [{
+      id: document.id,
+      title: document.title,
+      dirty: document.dirty,
+      content: document.id === activeDocument?.id ? workspaceDocumentContent : null,
+    }];
+  });
 
   return <CapabilityGate capability={workspaceCapability}><>
-    <UiShell
+    <ElectronDockyardWorkspace
+    documents={dockyardDocuments}
+    activeDocumentId={activeDocument?.id}
     title="JustyBase"
-    activeSurface={state.shell.activeSurface}
-    onSurfaceChange={selectSurface}
-    surfaces={surfaces}
-    sidebar={<div className="electron-sidebar-content">
-      <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
-      <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" className="electron-section-action" aria-label="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <div className="electron-connection-item" key={profile.id}><button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="electron-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
-      <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={runtimeDatabaseKind} refreshNonce={schemaRefreshNonce} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenDesigner={openObjectDesigner} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
-    </div>}
-  >
-    {state.shell.activeSurface === 'history' ? <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} onCopy={copyHistoryEntry} onRefresh={refreshHistory} /></CapabilityGate>
-      : state.shell.activeSurface === 'explain' ? <CapabilityGate capability={explainCapability} fallback={<AsyncStateView state="empty" emptyLabel="Explain is not available in this Electron shell yet." />}><ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={() => void cancel()} /></CapabilityGate>
-        : <div className="electron-workspace-content">
-          <WorkspaceTabs tabs={state.workspace.documentOrder.map(id => ({ id, label: state.workspace.documents[id]?.title ?? id, dirty: state.workspace.documents[id]?.dirty }))} activeId={state.workspace.activeDocumentId} onSelect={id => store.dispatch({ type: 'workspace/select-document', documentId: id })} onClose={closeDocument} />
-          <div className="electron-editor-toolbar" role="toolbar" aria-label="SQL editor actions">
-            <button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>＋ SQL</button>
-            <button type="button" onClick={saveDocument}>Save</button>
-            <button type="button" onClick={commentDocument}>Comment</button>
-            <button type="button" onClick={formatDocument}>Format</button>
-            <span className="electron-toolbar-spacer" />
-            <SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" />
-            <label>Connection<select aria-label="Editor connection" value={selectedConnection?.id ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-            <label>Database<select aria-label="Editor database" value={database} disabled={!selectedConnection} onChange={event => selectDatabase(event.target.value)}><option value="">{selectedConnection ? 'Select database' : 'Select connection'}</option>{databases.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
-            <button type="button" className="electron-run-button" aria-label="Run" onClick={() => void run()} disabled={!activeDocument}>▶ Run</button>
-            <button type="button" onClick={() => void run('script')} disabled={!selectedConnection || !activeDocument}>Run script</button>
-            <button type="button" aria-label="Explain current SQL" onClick={() => void run('explain')} disabled={!selectedConnection || !activeDocument}>Explain</button>
-            <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
-          </div>
-          {notice && <div className="electron-notice" role="status">{notice}</div>}
-          <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: activeDocument?.connectionId ?? selectedConnection?.id, database: activeDocument?.database ?? database, schema: activeDocument?.schema ?? schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
-          <ResultPanel
-            results={Object.values(state.results.byResultSetId)}
-            activeResult={activeResult}
-            rows={rows}
-            resultState={resultState}
-            resultMessage={resultMessage}
-            activeTab={activeOutputTab}
-            problemCount={problems.length}
-            problems={problems}
-            onOutputTabChange={setActiveOutputTab}
-            onProblemSelect={selectProblem}
-            onResultSelect={(resultSetId, sourceId) => store.dispatch({ type: 'results/select', sourceId, resultSetId })}
-            onViewChange={updateView}
-            clientProcessing={clientProcessing}
-            onLoadMore={loadMoreRows}
-            onScroll={onScroll}
-            selectedRowIndex={selectedRow}
-            onRowSelect={setSelectedRow}
-            onCopySelection={copyGridSelection}
-            onViewCell={openCellValue}
-            onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined}
-            onOpenColumnFilter={openColumnFilter}
-            filterMenu={filterMenu}
-            onFilterMenuChange={updateColumnFilterMenu}
-            onApplyColumnFilter={applyColumnFilter}
-            onClearColumnFilter={clearColumnFilter}
-            onCloseColumnFilter={closeColumnFilter}
-            onRefresh={() => void refresh()}
-            onCopy={() => void copyActive()}
-            onExport={() => void exportActive()}
-            onAggregate={() => toggleResultAnalysis('aggregate')}
-            onGroup={() => updateView({ grouping: activeResult?.view.grouping.length ? [] : activeResult?.columns[0] ? [activeResult.columns[0].name] : [] })}
-            onPivot={() => toggleResultAnalysis('pivot')}
-            activeAnalysis={resultAnalysis?.kind}
-            analysisBusy={resultAnalysisLoading}
-            resultAnalysis={resultAnalysis}
-            resultAnalysisLoading={resultAnalysisLoading}
-            resultAnalysisError={resultAnalysisError}
-            onCloseResultAnalysis={closeResultAnalysis}
-            onViewAnalysisCell={openAnalysisCellValue}
-            onCopyAnalysisSelection={copyGridSelection}
-            detailColumns={detailColumns}
-            onCloseRowDetail={() => setSelectedRow(undefined)}
-            exportFormat={exportFormat}
-            onExportFormatChange={value => setExportFormat(value as QueryExportFormat)}
-            exportFormatAriaLabel="Electron export format"
-            showContextMenu
-            showInlineColumnFilters
-            loadingLabel="Streaming result data…"
-          />
-        </div>}
-    </UiShell>
+    tools={[
+      { id: 'electron-explorer', title: 'Explorer', defaultDock: 'left' as const, content: <div className="electron-sidebar-content">
+        <div className="electron-sidebar-title"><strong>Explorer</strong><button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>New SQL</button></div>
+        <section className="electron-connections" aria-label="Connections"><div className="electron-section-heading"><strong>Connections</strong><span>{state.connections.profiles.length}</span><button type="button" className="electron-section-action" aria-label="Add connection" onClick={() => setConnectionEditor({})}>＋</button></div>{state.connections.profiles.length === 0 ? <span className="electron-schema-empty">No connections configured.</span> : state.connections.profiles.map(profile => <div className="electron-connection-item" key={profile.id}><button type="button" className={profile.id === state.connections.selectedConnectionId ? 'active' : ''} aria-pressed={profile.id === state.connections.selectedConnectionId} onClick={() => selectConnection(profile.id)}><span className="electron-connection-dot" /><span>{profile.name}</span><small>{profile.dbType}</small></button><div className="electron-connection-actions"><button type="button" aria-label={`Edit ${profile.name} connection`} onClick={() => setConnectionEditor({ initial: profile })}>✎</button><button type="button" aria-label={`Delete ${profile.name} connection`} onClick={() => void deleteConnection(profile)}>×</button></div></div>)}</section>
+        <CapabilityGate capability={metadataCapability} fallback={<div className="electron-capability-muted">{metadataCapability?.reason ?? 'Schema metadata unavailable.'}</div>}><SchemaExplorer api={clientRef.current!} connectionId={selectedConnection?.id} database={database} databaseKind={runtimeDatabaseKind} refreshNonce={schemaRefreshNonce} onInsert={insertSql} onObjectSelect={setSelectedObject} onOpenDesigner={openObjectDesigner} onOpenQuery={openSchemaQuery} onOpenDdl={openDdl} onImport={setImportTarget} /></CapabilityGate>
+      </div> },
+      { id: 'electron-history', title: 'History', defaultDock: 'hidden' as const, content: <CapabilityGate capability={historyCapability} fallback={<AsyncStateView state="empty" emptyLabel="History is not available in this Electron shell yet." />}><HistoryView entries={historyItems} state={historyState} message={historyMessage} onOpen={entry => { const item = history.find(candidate => candidate.id === entry.id); if (item) openHistoryEntry(item); }} onCopy={copyHistoryEntry} onRefresh={refreshHistory} /></CapabilityGate> },
+      { id: 'electron-explain', title: 'Explain', defaultDock: 'hidden' as const, content: <CapabilityGate capability={explainCapability} fallback={<AsyncStateView state="empty" emptyLabel="Explain is not available in this Electron shell yet." />}><ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={() => void cancel()} /></CapabilityGate> },
+    ]}
+    onNewDocument={() => openDocument('SELECT 1;', 'query.sql')}
+    onActiveDocumentChanged={documentId => store.dispatch({ type: 'workspace/select-document', documentId })}
+    onDocumentClosing={closeDocument}
+    onToolActivated={toolId => store.dispatch({ type: 'shell/surface', surface: toolId === 'electron-history' ? 'history' : toolId === 'electron-explain' ? 'explain' : 'workspace' })}
+    />
     {connectionEditor && <ConnectionPanel initial={connectionEditor.initial} onSaved={saveConnection} onCancel={() => setConnectionEditor(undefined)} />}
     {designerTarget && selectedConnection && clientRef.current && <ObjectDesigner api={clientRef.current} connectionId={selectedConnection.id} database={designerTarget.database ?? (database || selectedConnection.database)} databaseKind={selectedConnection.dbType} target={designerTarget} onClose={() => setDesignerTarget(undefined)} onApplied={() => { setDesignerTarget(undefined); setSchemaRefreshNonce(previous => previous + 1); setNotice('Object designer change applied. Schema metadata refreshed.'); }} />}
     {importTarget && selectedConnection && clientRef.current && <ImportPanel api={clientRef.current} connectionId={selectedConnection.id} target={importTarget} database={database} onClose={() => setImportTarget(undefined)} onCompleted={() => { setImportTarget(undefined); setNotice('Import completed. Refresh the schema or rerun the query to see new rows.'); }} />}
