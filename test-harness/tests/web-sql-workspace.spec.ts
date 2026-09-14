@@ -58,10 +58,26 @@ async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> 
   // used below is in the rendered viewport even for long diagnostic fixtures.
   await page.keyboard.press('ControlOrMeta+End');
   // Monaco may append an auto-closing parenthesis when a multi-line paste
-  // contains a CTE. Remove only that generated trailing delimiter; the
-  // source fixture remains the exact SQL sent to the API.
-  if (sql.includes('(')) {
-    await page.keyboard.press('Backspace');
+  // contains a CTE. Remove it only when it is actually present. Some
+  // platforms do not auto-close a parenthesis for the same paste, so an
+  // unconditional Backspace would delete the final SQL character instead.
+  const readVisibleMarker = async (): Promise<string> => (await page.locator('.monaco-editor .view-line').allTextContents())
+    .map(line => line.trim())
+    .filter(Boolean)
+    .at(-1) ?? '';
+  const expectedVisibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
+  const currentVisibleMarker = await readVisibleMarker();
+  if (sql.includes('(') && currentVisibleMarker !== expectedVisibleMarker) {
+    // Depending on the host platform, the caret can be before or after the
+    // generated delimiter (and Monaco can put it on its own line). Try the
+    // forward deletion first, then use Backspace only if the marker proves
+    // that the delimiter is still present.
+    await page.keyboard.press('Delete');
+    try {
+      await expect.poll(readVisibleMarker, { timeout: 1_000 }).toBe(expectedVisibleMarker);
+    } catch {
+      await page.keyboard.press('Backspace');
+    }
   }
   const visibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
   const expectedMarker = sql.trim().toUpperCase() === 'SX' ? 'SELECT' : visibleMarker;
@@ -483,14 +499,6 @@ FROM seq`;
     expect(editorStackBox).not.toBeNull();
     expect(executionToolbarBox!.y + executionToolbarBox!.height).toBeLessThanOrEqual(editorStackBox!.y);
     await expect(executionToolbar.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
-    await executionToolbar.getByTitle('More run options').click();
-    await expect(page.getByRole('button', { name: 'Smart run (split by ;)', exact: true })).toBeVisible();
-    await page.keyboard.press('Escape');
-    // Results and Problems share one output panel. Verify the diagnostics
-    // tab explicitly instead of assuming both panels are mounted together.
-    await page.getByRole('tab', { name: /Problems/ }).click();
-    await expect(page.getByRole('region', { name: 'SQL Problems' })).toBeVisible();
-    await page.getByRole('tab', { name: 'Results', exact: true }).click();
 
     await page.getByRole('button', { name: 'Connections', exact: true }).click();
     await expect(page.locator('.dockyard-connections-tool:visible')).toBeVisible();
@@ -504,6 +512,15 @@ FROM seq`;
     const connection = page.getByRole('button', { name: profileName, exact: true });
     await expect(connection).toBeVisible();
     await expect(connection).toHaveAttribute('aria-pressed', 'true');
+
+    await executionToolbar.getByTitle('More run options').click();
+    await expect(page.getByRole('button', { name: 'Smart run (split by ;)', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    // Results and Problems share one output panel. Verify the diagnostics
+    // tab explicitly instead of assuming both panels are mounted together.
+    await page.getByRole('tab', { name: /Problems/ }).click();
+    await expect(page.getByRole('region', { name: 'SQL Problems' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Results', exact: true }).click();
 
     const dialect = page.getByLabel('SQL authoring dialect');
     const authoringCompletionChecks = [
