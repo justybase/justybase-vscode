@@ -67,15 +67,24 @@ async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> 
     .at(-1) ?? '';
   const expectedVisibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
   const currentVisibleMarker = await readVisibleMarker();
-  if (sql.includes('(') && currentVisibleMarker !== expectedVisibleMarker) {
+  if (sql.includes('(') && (currentVisibleMarker === ')' || currentVisibleMarker === `${expectedVisibleMarker})`)) {
     // Depending on the host platform, the caret can be before or after the
-    // generated delimiter (and Monaco can put it on its own line). Try the
-    // forward deletion first, then use Backspace only if the marker proves
-    // that the delimiter is still present.
-    await page.keyboard.press('Delete');
-    try {
-      await expect.poll(readVisibleMarker, { timeout: 1_000 }).toBe(expectedVisibleMarker);
-    } catch {
+    // generated delimiter (and Monaco can put it on its own line). Delete
+    // forward a couple of times to consume a joined line break and/or the
+    // delimiter itself. If the caret was already after the delimiter, move to
+    // the end of the line before using Backspace so the SQL marker is safe.
+    let markerIsCorrect = false;
+    for (let attempt = 0; attempt < 2 && !markerIsCorrect; attempt += 1) {
+      await page.keyboard.press('Delete');
+      try {
+        await expect.poll(readVisibleMarker, { timeout: 1_000 }).toBe(expectedVisibleMarker);
+        markerIsCorrect = true;
+      } catch {
+        // The first Delete may only join an auto-closed line to the SQL.
+      }
+    }
+    if (!markerIsCorrect) {
+      await page.keyboard.press('End');
       await page.keyboard.press('Backspace');
     }
   }
