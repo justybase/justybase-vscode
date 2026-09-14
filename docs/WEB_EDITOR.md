@@ -52,13 +52,16 @@ the `ws:`/`wss:` origin from the HTTP base URL. If both are omitted, the client
 uses same-origin `/api` and WebSocket URLs. The WebSocket setting is an origin
 and the client appends `/api/ws` and `/api/lsp`.
 
-The authenticated Web workspace always uses the Shared UI composition. There
-is no production `VITE_UI_MODE` switch and the retired Dockyard composition is
-not part of the Web runtime. Shared UI keeps stable, user-scoped query
-documents and restores their order, active document, and connection context;
-credentials, SQL result data, DOM nodes, and runtime handles are never written
-to workspace persistence. Existing `tabs` and older global Web keys are read
-through a versioned migration.
+The authenticated Web workspace uses its own Dockyard composition root, just
+like the Electron renderer uses its own Dockyard composition root. The two
+products share portable state, persistence, API contracts, Monaco/result
+primitives, and the Dockyard model adapter, while each owns its DOM and
+lifecycle. There is no production `VITE_UI_MODE` switch. Web persistence keeps
+stable, user-scoped query documents and restores their order, active document,
+connection context, and Dockyard layout; credentials, SQL result data, DOM
+nodes, and runtime handles are never written to workspace persistence.
+Existing `tabs` and older global Web keys are read through a versioned
+migration.
 
 ## Controlled test login
 
@@ -71,11 +74,14 @@ the normal session and CSRF cookies. Test specs must use this control instead
 of repeating credentials. Do not enable either flag in a production build or
 deployment; the route is not registered outside test mode.
 
-The deterministic Shared Web gate is:
+The deterministic Dockyard Web gate is:
 
 ```bash
-npm run test:playwright:web-shared
+npm run test:playwright:web-dockyard
 ```
+
+`test:playwright:web-shared` remains a compatibility alias for CI and older
+local scripts.
 
 The API must also be configured with the exact frontend origin(s), separated
 by commas, in `JUSTYBASE_WEB_ORIGINS` (for example,
@@ -95,7 +101,7 @@ The web editor includes:
 - Monaco editor with Netezza SQL completion and diagnostics from the same parser core as the VS Code extension,
 - query tabs, per-user editor preferences, and query history,
 - query cancellation and streaming results over WebSocket,
-- disk-backed result sessions with filtering, sorting, pinning, and pagination in TanStack Table,
+- disk-backed result sessions with filtering, sorting, pinning, and pagination in the integrated Result Grid,
 - export of the filtered view to CSV, CSV gzip/zstd, JSON, XML, SQL INSERT, Markdown, and XLSX.
 
 Results are not sent as a single large JSON blob to the browser. The API stores them in a separate SQLite database at `JUSTYBASE_DATA_DIR/query-sessions`, and the grid fetches pages on demand. Sessions expire after one hour by default.
@@ -106,7 +112,7 @@ Results are not sent as a single large JSON blob to the browser. The API stores 
 - `packages/sql-core` — bundled Netezza parser/completion/validator used by the WebSocket LSP,
 - `packages/database-runtime` — UI-independent Netezza query and metadata runtime,
 - `apps/api` — Fastify server: sessions, profiles, metadata, query sessions, exports, and LSP WebSocket,
-- `apps/web` — React frontend: Monaco, Schema Tree, and TanStack Table.
+- `apps/web` — React frontend: Dockyard, Monaco, Schema Tree, and Result Grid.
 
 For quick validation of web changes:
 

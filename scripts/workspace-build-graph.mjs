@@ -27,6 +27,7 @@ const nodes = {
   'metadata-core': { packageName: '@justybase/metadata-core' },
   'result-core': { packageName: '@justybase/result-core' },
   'api-client': { packageName: '@justybase/api-client', dependencies: ['contracts'] },
+  'dockyard-layout': { packageName: '@justybase/dockyard-layout', dependencies: ['contracts', 'ui-core'] },
   'ui-core': { packageName: '@justybase/ui-core', dependencies: ['contracts'] },
   'ui-monaco': { packageName: '@justybase/ui-monaco', dependencies: ['contracts', 'ui-core'] },
   'ui-react': { packageName: '@justybase/ui-react', dependencies: ['contracts', 'dialect-utils', 'designer-core', 'ui-core'] },
@@ -41,8 +42,8 @@ const nodes = {
   'web-api': { packageName: '@justybase/web-api', dependencies: ['contracts', 'database-runtime', 'dialect-utils', 'designer-core', 'duckdb-runtime', 'metadata-core', 'netezza-runtime', 'sqlite-runtime', 'sql-core'] },
   // Vite is run once at the end so --test can be applied without rebuilding
   // the dependency graph a second time.
-  web: { packageName: '@justybase/web', script: null, dependencies: ['api-client', 'contracts', 'designer-core', 'dialect-utils', 'result-core', 'ui-core', 'ui-monaco', 'ui-react'] },
-  'electron-bundle': { packageName: '@justybase/electron-shell', script: 'build:bundle', dependencies: ['api-client', 'contracts', 'ui-core', 'ui-monaco', 'ui-react', 'web-api'] },
+  web: { packageName: '@justybase/web', script: null, dependencies: ['api-client', 'contracts', 'designer-core', 'dialect-utils', 'dockyard-layout', 'result-core', 'ui-core', 'ui-monaco', 'ui-react'] },
+  'electron-bundle': { packageName: '@justybase/electron-shell', script: 'build:bundle', dependencies: ['api-client', 'contracts', 'dockyard-layout', 'ui-core', 'ui-monaco', 'ui-react', 'web-api'] },
 };
 
 const targets = {

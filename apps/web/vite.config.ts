@@ -15,6 +15,7 @@ export default defineConfig({
     alias: {
       '@justybase/api-client': path.join(repositoryRoot, 'packages/api-client/src'),
       '@justybase/contracts': path.join(repositoryRoot, 'packages/contracts/src'),
+      '@justybase/dockyard-layout': path.join(repositoryRoot, 'packages/dockyard-layout/src'),
       '@justybase/designer-core': path.join(repositoryRoot, 'packages/designer-core/src'),
       '@justybase/dialect-utils': path.join(repositoryRoot, 'packages/dialect-utils/src'),
       '@justybase/sql-core': path.join(repositoryRoot, 'packages/sql-core/src'),
@@ -22,6 +23,7 @@ export default defineConfig({
       '@justybase/ui-core': path.join(repositoryRoot, 'packages/ui-core/src'),
       '@justybase/ui-monaco': path.join(repositoryRoot, 'packages/ui-monaco/src'),
       '@justybase/ui-react': path.join(repositoryRoot, 'packages/ui-react/src'),
+      'avalondock-web': path.join(repositoryRoot, 'vendor/dockyard/src/index.js'),
     },
   },
   server: { port: 5173, proxy: { '/api': { target: 'http://127.0.0.1:3000', ws: true } } },

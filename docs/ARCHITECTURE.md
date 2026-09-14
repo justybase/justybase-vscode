@@ -15,6 +15,9 @@ adapter. It does not replace the quality backlog.
 
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
+The Web/Electron Dockyard composition boundary, result-grid decision, and
+manual/browser acceptance checklist are documented in
+[Dockyard Web and Electron workspace](DOCKYARD_WEB_ELECTRON.md).
 The SQL boundary is now implemented as a platform-neutral Netezza core:
 `@justybase/sql-core` owns the lexer, parser, semantic validator, incremental
 validation primitives, authoring helpers, quality rules and validation model.

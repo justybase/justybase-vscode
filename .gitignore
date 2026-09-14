@@ -11,6 +11,8 @@
 !packages/contracts/**
 !packages/api-client/
 !packages/api-client/**
+!packages/dockyard-layout/
+!packages/dockyard-layout/**
 !packages/database-runtime/
 !packages/database-runtime/**
 !packages/sqlite-runtime/

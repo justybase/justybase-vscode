@@ -3,5 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import '../../../../packages/ui-react/src/resultGrid.css';
 import '../../../../packages/ui-react/src/objectDesigner.css';
+import './dockyard.css';
+import '../../../../vendor/dockyard/src/avalondock.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

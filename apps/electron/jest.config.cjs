@@ -9,6 +9,8 @@ module.exports = {
     '^@justybase/api-client$': '<rootDir>/../../packages/api-client/src',
     '^@justybase/api-client/(.*)$': '<rootDir>/../../packages/api-client/src/$1',
     '^@justybase/contracts$': '<rootDir>/../../packages/contracts/src',
+    '^@justybase/dockyard-layout$': '<rootDir>/../../packages/dockyard-layout/dist',
+    '^avalondock-web$': '<rootDir>/../web/src/dockyard/avalondockTestShim.ts',
     '^@justybase/dialect-utils$': '<rootDir>/../../packages/dialect-utils/src',
     '^@justybase/dialect-utils/(.*)$': '<rootDir>/../../packages/dialect-utils/src/$1',
     '^@justybase/sql-core$': '<rootDir>/../../packages/sql-core/src/index.ts',

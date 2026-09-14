@@ -20,6 +20,7 @@
     "paths": {
       "@justybase/api-client": ["../../packages/api-client/src"],
       "@justybase/contracts": ["../../packages/contracts/src"],
+      "@justybase/dockyard-layout": ["../../packages/dockyard-layout/src"],
       "@justybase/designer-core": ["../../packages/designer-core/src"],
       "@justybase/dialect-utils": ["../../packages/dialect-utils/src"],
       "@justybase/sql-core": ["../../packages/sql-core/src"],

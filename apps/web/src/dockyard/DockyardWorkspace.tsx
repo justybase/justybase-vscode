@@ -90,6 +90,7 @@ export interface DockyardWorkspaceProps {
   onObjectSelect(node: SchemaTreeNode): void;
   onOpenDesigner(node: SchemaTreeNode): void;
   onOpenQuery(sql: string, title: string, node: SchemaTreeNode): void;
+  onOpenDdl(sql: string, title: string, node: SchemaTreeNode): void;
   onImport(node: SchemaTreeNode): void;
   onInsertColumn(column: MetadataColumn): void;
   onEditRow(tabId: string, values: unknown[]): void;
@@ -409,7 +410,7 @@ function ExplorerTool({ connections, selected, database, onOpenConnectionForm, o
     <div className="sidebar-section">
       <div className="section-title">Connections <button className="icon-button" onClick={onOpenConnectionForm}>+</button></div>
       {connections.map(connection => <div className="connection-row-wrap" key={connection.id}>
-        <button className={`tree-row connection-row ${selected?.id === connection.id ? 'active' : ''}`} onClick={() => onSelectConnection(connection.id)}>
+        <button className={`tree-row connection-row ${selected?.id === connection.id ? 'active' : ''}`} aria-pressed={selected?.id === connection.id} onClick={() => onSelectConnection(connection.id)}>
           <span className="status-dot" />{connection.name}
         </button>
         <div className="connection-actions">
@@ -431,10 +432,11 @@ interface SchemaToolProps {
   onObjectSelect(node: SchemaTreeNode): void;
   onOpenDesigner(node: SchemaTreeNode): void;
   onOpenQuery(sql: string, title: string, node: SchemaTreeNode): void;
+  onOpenDdl(sql: string, title: string, node: SchemaTreeNode): void;
   onImport(node: SchemaTreeNode): void;
 }
 
-function SchemaTool({ selected, database, onInsertSql, onContextChange, onObjectSelect, onOpenDesigner, onOpenQuery, onImport }: SchemaToolProps): ReactElement {
+function SchemaTool({ selected, database, onInsertSql, onContextChange, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport }: SchemaToolProps): ReactElement {
   return <div className="dockyard-tool-content sidebar dockyard-schema-tool">
     {selected ? <SchemaTree
       connectionId={selected.id}
@@ -445,6 +447,7 @@ function SchemaTool({ selected, database, onInsertSql, onContextChange, onObject
       onObjectSelect={onObjectSelect}
       onOpenDesigner={onOpenDesigner}
       onOpenQuery={onOpenQuery}
+      onOpenDdl={onOpenDdl}
       onImport={onImport}
     /> : <div className="sidebar-empty-state"><strong>No connections</strong><span>Add a connection to browse its schema.</span></div>}
   </div>;
@@ -512,6 +515,7 @@ export function DockyardWorkspace({
   onObjectSelect,
   onOpenDesigner,
   onOpenQuery,
+  onOpenDdl,
   onImport,
   onInsertColumn,
   onEditRow,
@@ -695,7 +699,7 @@ export function DockyardWorkspace({
       />;
     }
     if (definition.id === DOCKYARD_CONTENT_IDS.connections) return <ExplorerTool connections={connections} selected={selected} database={database} onOpenConnectionForm={onOpenConnectionForm} onSelectConnection={connectionId => onSelectConnection(activeTabId, connectionId)} onEditConnection={onEditConnection} onDeleteConnection={onDeleteConnection} />;
-    if (definition.id === DOCKYARD_CONTENT_IDS.schema) return <SchemaTool selected={selected} database={database} onInsertSql={onInsertSql} onContextChange={onContextChange} onObjectSelect={onObjectSelect} onOpenDesigner={onOpenDesigner} onOpenQuery={onOpenQuery} onImport={onImport} />;
+    if (definition.id === DOCKYARD_CONTENT_IDS.schema) return <SchemaTool selected={selected} database={database} onInsertSql={onInsertSql} onContextChange={onContextChange} onObjectSelect={onObjectSelect} onOpenDesigner={onOpenDesigner} onOpenQuery={onOpenQuery} onOpenDdl={onOpenDdl} onImport={onImport} />;
     if (definition.id === DOCKYARD_CONTENT_IDS.inspector) return <div className="dockyard-tool-content inspector dockyard-inspector-tool"><InspectorPanel database={database} schema={schema} columns={columns} selectedObject={inspectedObject} onInsertColumn={onInsertColumn} connectionName={selected?.name} /></div>;
     if (definition.id === DOCKYARD_CONTENT_IDS.history) return <HistoryTool entries={history} onRefresh={onHistoryRefresh} onOpen={onHistoryOpen} />;
     if (definition.id.startsWith('explain:')) return <ExplainTool tab={tabs.find(tab => tab.id === definition.id.slice('explain:'.length))} />;
@@ -704,7 +708,7 @@ export function DockyardWorkspace({
 
   return <div className="app-shell dockyard-shell">
     <header className="topbar">
-      <div className="brand">JustyBase</div>
+      <h1 className="brand">JustyBase</h1>
       <div className="workspace-title">Netezza SQL Workspace</div>
       <nav className="dockyard-tool-buttons" aria-label="Dockyard tools">
         <button className="secondary small" data-dockyard-tool="connections" onClick={() => activateTool(DOCKYARD_CONTENT_IDS.connections)}>Connections</button>

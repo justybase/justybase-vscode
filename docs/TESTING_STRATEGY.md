@@ -23,7 +23,7 @@ test behavior.
 | Electron | Main/preload secret boundary, renderer presentation, lifecycle | `npm run test:electron` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
-| Web/API browser | Deterministic authenticated Shared Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-shared` |
+| Web/API browser | Deterministic authenticated Dockyard Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-dockyard` |
 | Extension Host | Real VS Code activation, commands, webview protocol | `npm run test:extension-host` |
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
@@ -175,11 +175,11 @@ flows. Serious or critical accessibility violations fail the gate. Verify
 accessible names, focus entry/return, modal focus containment, Escape/Enter,
 grid selection/copy, high-contrast themes, zoom, and reduced-motion behavior.
 
-## Shared Web and controlled login
+## Dockyard Web and controlled login
 
-The Web workspace uses the Shared UI composition by default. Test stable
-document/source/result identities rather than generated DOM ids. Stateful
-tests must cover query-document create/close/reorder, reload, legacy
+The Web and Electron workspaces have separate Dockyard composition roots. Test
+stable document/source/result identities rather than generated DOM ids.
+Stateful tests must cover query-document create/close/reorder, reload, legacy
 persistence migration, corrupt/future snapshot handling, reconnect, and
 `dispose()` with no remaining subscriptions, timers, sockets, or late
 callbacks. The browser scenario also runs at a narrow viewport.
@@ -191,7 +191,8 @@ The request is bodyless and obtains the configured test administrator through
 the server; credentials must not be repeated in Playwright specs or enter
 React state, DOM, URL, localStorage, logs, or the frontend bundle. The normal
 username/password login path remains covered independently. Use
-`npm run test:playwright:web-shared` for the controlled API/SQLite browser gate;
+`npm run test:playwright:web-dockyard` for the controlled API/SQLite browser gate
+(`test:playwright:web-shared` is a compatibility alias);
 never enable these flags in a production build or deployment.
 
 ## Live test hygiene

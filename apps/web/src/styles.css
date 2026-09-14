@@ -696,6 +696,7 @@ tbody tr:hover td { background: #1e293b; }
 
 /* ── Dockyard web workspace ───────────────────────── */
 .dockyard-shell { min-width: 0; min-height: 0; }
+.dockyard-shell .brand { margin: 0; font-size: 16px; }
 .dockyard-shell > .topbar { flex: 0 0 48px; min-width: 0; }
 .dockyard-tool-buttons { display: flex; align-items: center; gap: 5px; min-width: 0; overflow-x: auto; }
 .dockyard-workspace-shell { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
