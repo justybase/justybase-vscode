@@ -53,41 +53,22 @@ async function replaceMonacoTextAndWait(page: Page, sql: string): Promise<void> 
   await editor.click();
   await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.press('Backspace');
-  await page.keyboard.insertText(sql);
+  if (sql.trim().toUpperCase() === 'SX') {
+    // The SX shortcut intentionally depends on Monaco receiving the Space
+    // keydown, so it must use real key events rather than clipboard paste.
+    await page.keyboard.type(sql);
+  } else {
+    // Use the browser paste path for multi-line fixtures. Monaco's synthetic
+    // insert-text path can add an auto-closing delimiter at a different
+    // cursor position on macOS, which makes a test accidentally alter the
+    // SQL it is trying to verify.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
+    await page.evaluate(text => navigator.clipboard.writeText(text), sql);
+    await page.keyboard.press('ControlOrMeta+V');
+  }
   // Monaco virtualizes view lines. Move the caret to the end so the marker
   // used below is in the rendered viewport even for long diagnostic fixtures.
   await page.keyboard.press('ControlOrMeta+End');
-  // Monaco may append an auto-closing parenthesis when a multi-line paste
-  // contains a CTE. Remove it only when it is actually present. Some
-  // platforms do not auto-close a parenthesis for the same paste, so an
-  // unconditional Backspace would delete the final SQL character instead.
-  const readVisibleMarker = async (): Promise<string> => (await page.locator('.monaco-editor .view-line').allTextContents())
-    .map(line => line.trim())
-    .filter(Boolean)
-    .at(-1) ?? '';
-  const expectedVisibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
-  const currentVisibleMarker = await readVisibleMarker();
-  if (sql.includes('(') && (currentVisibleMarker === ')' || currentVisibleMarker === `${expectedVisibleMarker})`)) {
-    // Depending on the host platform, the caret can be before or after the
-    // generated delimiter (and Monaco can put it on its own line). Delete
-    // forward a couple of times to consume a joined line break and/or the
-    // delimiter itself. If the caret was already after the delimiter, move to
-    // the end of the line before using Backspace so the SQL marker is safe.
-    let markerIsCorrect = false;
-    for (let attempt = 0; attempt < 2 && !markerIsCorrect; attempt += 1) {
-      await page.keyboard.press('Delete');
-      try {
-        await expect.poll(readVisibleMarker, { timeout: 1_000 }).toBe(expectedVisibleMarker);
-        markerIsCorrect = true;
-      } catch {
-        // The first Delete may only join an auto-closed line to the SQL.
-      }
-    }
-    if (!markerIsCorrect) {
-      await page.keyboard.press('End');
-      await page.keyboard.press('Backspace');
-    }
-  }
   const visibleMarker = sql.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).at(-1) ?? '';
   const expectedMarker = sql.trim().toUpperCase() === 'SX' ? 'SELECT' : visibleMarker;
   await expect.poll(async () => (await page.locator('.monaco-editor .view-line').allTextContents()).join('\n').replaceAll('\u00a0', ' ')).toContain(expectedMarker);
