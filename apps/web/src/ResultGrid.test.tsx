@@ -38,6 +38,46 @@ describe('legacy Web ResultGrid compatibility surface', () => {
     expect(tables[1]).toHaveTextContent('7.50');
   });
 
+  it('opens a browser-safe pivot configuration and builds a local pivot', async () => {
+    const user = userEvent.setup();
+    const prompt = jest.spyOn(window, 'prompt').mockImplementation(() => { throw new Error('prompt unsupported'); });
+    const api = createApiClient({ fetch: jest.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response)) });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'legacy-pivot-result',
+      columns: ['CATEGORY', 'MONTH', 'AMOUNT'],
+      columnTypes: ['VARCHAR', 'VARCHAR', 'NUMERIC'],
+      columnScales: [undefined, undefined, 2],
+      rows: [['EU', 'Jan', '10.25'], ['EU', 'Feb', '5.00'], ['US', 'Jan', '7.50']],
+      totalRows: 3,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-pivot-test')}>
+          <ResultGrid queryId="legacy-pivot-query" result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Pivot' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Pivot results' });
+    expect(within(dialog).getByRole('combobox', { name: 'Row column' })).toHaveValue('0');
+    expect(within(dialog).getByRole('combobox', { name: 'Pivot column' })).toHaveValue('1');
+    expect(within(dialog).getByRole('combobox', { name: 'Value column' })).toHaveValue('2');
+    await user.click(within(dialog).getByRole('button', { name: 'Create pivot' }));
+
+    const pivotTable = await screen.findByText('Pivot view');
+    expect(pivotTable).toBeInTheDocument();
+    const tables = screen.getAllByRole('table');
+    expect(tables[1]).toHaveTextContent('Jan');
+    expect(tables[1]).toHaveTextContent('10.25');
+    expect(tables[1]).toHaveTextContent('7.50');
+    expect(prompt).not.toHaveBeenCalled();
+    prompt.mockRestore();
+  });
+
   it('renders grouping immediately as tree rows in the same shared grid', async () => {
     const user = userEvent.setup();
     const fetch = jest.fn(async (input: RequestInfo | URL) => {
@@ -68,7 +108,7 @@ describe('legacy Web ResultGrid compatibility surface', () => {
       </ApiClientProvider>,
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Group', exact: true }));
+    await user.click(await screen.findByRole('button', { name: /^Group$/ }));
     expect(await screen.findByText('CATEGORY: EU')).toBeInTheDocument();
     expect(screen.getAllByRole('table')).toHaveLength(1);
     expect(document.querySelectorAll('.ui-data-grid-group-row')).toHaveLength(2);
