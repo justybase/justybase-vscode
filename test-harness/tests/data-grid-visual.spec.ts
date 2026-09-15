@@ -34,3 +34,24 @@ test('renders the canonical shared result grid in stable and interactive states'
   await expect(page.locator('.ui-data-grid-group-panel')).toContainText('CATEGORY');
   await expect(page.locator('.shared-grid-harness')).toHaveScreenshot('shared-grid-interactive.png');
 });
+
+test('autoscrolls the virtual result grid while extending a selection outside the viewport', async ({ page }) => {
+  await page.goto('/test-harness/shared-data-grid.html?profile=comparison', { waitUntil: 'networkidle' });
+  await expect(page.locator('.shared-grid-harness')).toHaveAttribute('data-ready', 'true');
+  await settleLayout(page);
+
+  const grid = page.locator('.ui-data-grid-scroll');
+  const firstCell = page.locator('td[data-column-index="1"]').first();
+  const bounds = await grid.boundingBox();
+  expect(bounds).not.toBeNull();
+  if (!bounds) return;
+  const cellBounds = await firstCell.boundingBox();
+  expect(cellBounds).not.toBeNull();
+  if (!cellBounds) return;
+
+  await page.mouse.move(cellBounds.x + cellBounds.width / 2, cellBounds.y + cellBounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + Math.min(bounds.width - 20, cellBounds.x - bounds.x + cellBounds.width / 2), bounds.y + bounds.height + 80, { steps: 8 });
+  await expect.poll(async () => await grid.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  await page.mouse.up();
+});

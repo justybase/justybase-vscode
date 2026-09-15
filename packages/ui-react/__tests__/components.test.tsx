@@ -186,6 +186,41 @@ describe('shared React presentation', () => {
     expect(screen.getByRole('button', { name: 'Preview' })).toBeEnabled();
   });
 
+  it('keeps a dragged rectangular selection moving while the pointer leaves the grid viewport', () => {
+    const onSelectionChange = jest.fn();
+    const { container } = render(<DataGrid
+      resultSetId="selection-autoscroll"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'DETAILS', type: 'VARCHAR' }]}
+      rows={Array.from({ length: 100 }, (_value, index) => [index + 1, `row-${index + 1}`])}
+      onSelectionChange={onSelectionChange}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    const firstCell = screen.getByRole('cell', { name: 'row-1' });
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 2_600 });
+    jest.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 120, left: 0, right: 600, width: 600, height: 120, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+
+    fireEvent.mouseDown(firstCell, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.mouseMove(window, { clientX: 80, clientY: 180 });
+
+    expect(scroller.scrollTop).toBeGreaterThan(0);
+    expect(onSelectionChange).toHaveBeenLastCalledWith(expect.objectContaining({ focusRow: expect.any(Number) }));
+  });
+
+  it('sizes result columns for the complete header, including action buttons', async () => {
+    render(<DataGrid
+      resultSetId="header-widths"
+      columns={[{ name: 'VERY_LONG_COLUMN_NAME_WITH_FILTER_ACTIONS', type: 'VARCHAR' }]}
+      rows={[['value']]}
+      onOpenColumnFilter={jest.fn()}
+      showInlineColumnFilters={false}
+    />);
+    const header = screen.getByRole('columnheader', { name: /VERY_LONG_COLUMN_NAME_WITH_FILTER_ACTIONS/ });
+    await waitFor(() => expect(Number(header.getAttribute('style')?.match(/width:\s*([\d.]+)px/)?.[1] ?? 0)).toBeGreaterThan(144));
+  });
+
   it('offers the shared authoring dialect catalog without changing runtime connection state', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();
