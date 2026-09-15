@@ -1,6 +1,6 @@
 ---
 title: Copilot SQL Assistant
-description: Canonical pointer for the current Copilot, Language Model Tool, and read-only MCP workflow.
+description: Canonical pointer for the current Copilot, guarded procedure repair, Language Model Tool, and read-only MCP workflow.
 last_verified: 2026-08-19
 product_version: 3.17.14
 ---
@@ -18,6 +18,7 @@ It documents the current workflow and boundaries:
 - privacy confirmations and the data that may be sent to GitHub Copilot;
 - the current Language Model Tool contracts and their database requirements;
 - `validateSqlOnDatabase` as a guarded, read-only database validation/EXPLAIN operation;
+- `netezza_repair_procedure` as a bounded, explicitly confirmed procedure compile/test workflow;
 - read-only MCP over stdio or localhost HTTP;
 - the difference between an AI suggestion and a user-approved execution.
 
