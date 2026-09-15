@@ -407,7 +407,7 @@ test.describe('Dockyard React web workspace', () => {
 
     const queryCountBeforeOpenDdl = queryStartRequests.length;
     await tableNode.click({ button: 'right' });
-    await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Open DDL', exact: true }).click();
+    await page.getByRole('menu', { name: `Actions for ${tableName}` }).getByRole('menuitem', { name: 'Create DDL Code', exact: true }).click();
     await expect(page.getByRole('tab', { name: new RegExp(`DDL · ${tableName}`) })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain('label TEXT');
@@ -448,7 +448,7 @@ test.describe('Dockyard React web workspace', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
 
     await viewNode.click({ button: 'right' });
-    await page.getByRole('menu', { name: `Actions for ${viewName}` }).getByRole('menuitem', { name: 'Open DDL', exact: true }).click();
+    await page.getByRole('menu', { name: `Actions for ${viewName}` }).getByRole('menuitem', { name: 'Create DDL Code', exact: true }).click();
     await expect(page.getByRole('tab', { name: new RegExp(`DDL · ${viewName}`) })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoDocumentText(page), { timeout: 30_000 }).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
   });

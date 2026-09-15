@@ -317,7 +317,7 @@ async function run() {
     await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
 
     await tableNode.click({ button: 'right' });
-    await page.getByRole('menu').filter({ hasText: tableName }).first().getByRole('button', { name: 'Open DDL', exact: true }).click();
+    await page.getByRole('menu').filter({ hasText: tableName }).first().getByRole('button', { name: 'Create DDL Code', exact: true }).click();
     await expect(page.getByRole('tab', { name: `DDL · ${tableName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(`CREATE TABLE main.${tableName}`);
     await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain('label TEXT');
@@ -358,7 +358,7 @@ async function run() {
     await expect(page.getByRole('status').filter({ hasText: 'Reconstructed DDL copied' })).toBeVisible();
 
     await viewNode.click({ button: 'right' });
-    await page.getByRole('menu').filter({ hasText: viewName }).first().getByRole('button', { name: 'Open DDL', exact: true }).click();
+    await page.getByRole('menu').filter({ hasText: viewName }).first().getByRole('button', { name: 'Create DDL Code', exact: true }).click();
     await expect(page.getByRole('tab', { name: `DDL · ${viewName}`, exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => monacoText(page), { timeout: 30_000 }).toContain(`CREATE VIEW ${viewName} AS SELECT id, label FROM ${tableName}`);
     checks.push('schema explorer table/view DDL open/copy through guarded SQLite metadata');
