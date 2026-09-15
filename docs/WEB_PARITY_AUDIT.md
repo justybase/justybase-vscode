@@ -1,6 +1,6 @@
 # Web Editor ↔ VS Code Extension — Parity Audit & Backlog
 
-Last updated: 2026-09-13
+Last updated: 2026-09-15
 
 This document is the **feature-by-feature parity audit** between the two products shipped
 from this repository:
@@ -21,13 +21,22 @@ from this repository:
 
 ## Current Web renderer status
 
-The production Web entrypoint always mounts `SharedWebWorkspace`; the former
-Dockyard composition and `VITE_UI_MODE` runtime switch are not active Web
-paths. Shared Web now owns durable query documents, per-document execution and
+The production Web entrypoint always mounts `DockyardWorkspace`; the retired
+`SharedWebWorkspace` composition is not an active Web path and is retained only
+as a component-test fixture for portable reducer and presentation tests. There
+is no `VITE_UI_MODE` runtime switch and no shared-renderer rollback path. Shell
+composition is owned by [Dockyard Web and Electron](DOCKYARD_WEB_ELECTRON.md)
+and the [cross-product UI parity matrix](CROSS_PRODUCT_UI_PARITY.md); this audit
+covers feature parity inside that shell, not shell selection.
+
+The shipped shell owns durable query documents, per-document execution and
 result identities, multi-statement status/cancellation, typed result export,
 schema/database context, history, Explain, guarded designer flows, and the
-common React Result Grid. Persistence is a versioned user-scoped envelope and
-does not contain credentials, result rows, or runtime handles.
+common React Result Grid through the shared `ui-core`/`ui-react` controllers.
+Persistence is a versioned, product-scoped envelope containing document
+metadata/content, document order, the active document, connection context, and
+the Dockyard layout snapshot; it excludes credentials, result rows, DOM nodes,
+and runtime handles.
 
 Notebook, chart, tuning, and other host-specific database operations remain
 explicit capability gaps rather than implied parity. VS Code keeps its own
