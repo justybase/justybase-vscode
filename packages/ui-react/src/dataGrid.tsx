@@ -1063,6 +1063,14 @@ export function DataGrid({
     const previous = scrollRestorationRef.current;
     const pending = pendingScrollRestorationRef.current;
     const positionChanged = previous?.scope !== scope || previous.top !== nextTop || previous.left !== nextLeft;
+    if (dragSelectingRef.current && positionChanged) {
+      // A drag owns scrolling until mouseup. The host receives a throttled
+      // onScroll update, so restoring its previous prop here would make the
+      // viewport visibly oscillate between two horizontal positions.
+      scrollRestorationRef.current = { scope, top: element.scrollTop, left: element.scrollLeft };
+      pendingScrollRestorationRef.current = undefined;
+      return;
+    }
     // Appending a page changes the virtual spacer height, but it must not be
     // treated as a new controlled scroll position. Only a new result, an
     // explicit host position change, or an outstanding zero-size restoration
@@ -1103,11 +1111,27 @@ export function DataGrid({
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
     const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT), rowHeight: ROW_HEIGHT };
-    virtualViewportRef.current = {
+    // Record the browser-owned position before notifying a controlled host.
+    // This prevents the restoration effect from briefly writing the previous
+    // prop value back while a drag is advancing through horizontal frames.
+    if (dragSelectingRef.current) {
+      scrollRestorationRef.current = {
+        scope: `${sourceId ?? ''}\u0000${resultSetId}`,
+        top: position.top,
+        left: position.left,
+      };
+      pendingScrollRestorationRef.current = undefined;
+    }
+    const nextViewport = {
       scrollTop: Math.max(0, element.scrollTop),
       height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,
     };
-    if (virtualScrollFrameRef.current === undefined) {
+    const viewportChanged = virtualViewportRef.current.scrollTop !== nextViewport.scrollTop
+      || virtualViewportRef.current.height !== nextViewport.height;
+    if (viewportChanged) {
+      virtualViewportRef.current = nextViewport;
+    }
+    if (viewportChanged && virtualScrollFrameRef.current === undefined) {
       const flush = (): void => {
         virtualScrollFrameRef.current = undefined;
         const next = virtualViewportRef.current;
@@ -1183,7 +1207,7 @@ export function DataGrid({
       const nextScrollLeft = Math.max(0, Math.min(maximum, previousScrollLeft + horizontalDirection * speed));
       if (nextScrollLeft !== previousScrollLeft) element.scrollLeft = nextScrollLeft;
     }
-    if (element.scrollTop !== previousScrollTop || element.scrollLeft !== previousScrollLeft) {
+    if (element.scrollTop !== previousScrollTop) {
       virtualViewportSyncRef.current?.();
     }
 
