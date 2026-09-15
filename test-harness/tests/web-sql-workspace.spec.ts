@@ -572,6 +572,17 @@ FROM seq`;
     await expect.poll(async () => await grid.getAttribute('aria-label'), { timeout: 30_000 }).toBe('Data grid with 1200 rows');
     await expect(page.locator('table.ui-data-grid')).toBeVisible();
     await expect(page.locator('tr[data-source-index]').first()).toBeVisible();
+    const compactGrid = page.locator('.ui-result-grid.ui-data-grid-compact');
+    await expect(compactGrid).toBeVisible();
+    const firstDataRow = page.locator('tr[data-source-index]').first();
+    await expect.poll(async () => await firstDataRow.evaluate(row => row.getBoundingClientRect().height)).toBeLessThanOrEqual(26);
+    await expect.poll(async () => await firstDataRow.locator('th[scope="row"] button').evaluate(button => button.getBoundingClientRect().height)).toBeLessThanOrEqual(26);
+    await expect(page.getByRole('textbox', { name: 'Filter LABEL' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open filter for LABEL' }).click();
+    const labelFilter = page.getByRole('dialog', { name: 'Filter LABEL' });
+    await expect(labelFilter).toBeVisible();
+    await expect(labelFilter.getByRole('button', { name: 'Select all', exact: true })).toBeVisible();
+    await labelFilter.getByRole('button', { name: 'Cancel' }).click();
 
     // A filter that is outside the first hydrated page must drive the shared
     // adapter through subsequent pages before it is considered complete.
@@ -586,17 +597,17 @@ FROM seq`;
     // The common renderer must preserve both axes and the exact virtual row
     // anchor when the result surface is unmounted and mounted again.
     await grid.evaluate(element => {
-      element.scrollTop = 9_000;
+      element.scrollTop = 7_800;
       element.scrollLeft = 320;
       element.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
-    await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 9_000, left: 320 }));
+    await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 7_800, left: 320 }));
     await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
     await page.getByRole('button', { name: 'History', exact: true }).click();
     await expect(page.locator('.dockyard-history-tool .section-title')).toContainText('Query history');
     await page.locator('.ad-document-pane .ad-tab').first().click();
     await expect(grid).toBeVisible();
-    await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 9_000, left: 320 }));
+    await expect.poll(async () => await grid.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(expect.objectContaining({ top: 7_800, left: 320 }));
     await expect(page.locator('tr[data-source-index="300"]')).toBeVisible();
 
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });

@@ -44,7 +44,7 @@
   --jb-color-action-text: #f0f4f7;
   --jb-color-chrome: #1b2026;
   --jb-color-chrome-raised: #232a32;
-  --jb-grid-row-height: 30px;
+  --jb-grid-row-height: 26px;
   --jb-grid-header-height: 34px;
   /* Column headers include the inline filter row. */
   --jb-grid-column-header-height: 62px;

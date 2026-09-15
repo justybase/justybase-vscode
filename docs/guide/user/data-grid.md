@@ -4,7 +4,7 @@ description: Explore streamed, multi-result, memory-backed, and disk-backed resu
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-08-19
+last_verified: 2026-09-15
 product_version: 3.17.14
 ---
 
@@ -20,6 +20,22 @@ The Result Panel is a data exploration workspace, not only a table widget. It vi
 4. Group or pivot when the result shape supports it, then use charts or time views to inspect patterns.
 5. Open **Row View** for side-by-side rows or **Value Viewer** for a long cell.
 6. Pin important result sets and let grid state (column order, filters, sorting, visibility, and pinning) persist for the file.
+
+## Column filters and grouped tree rows
+
+Web and Electron use the same compact result grid. Click the funnel icon in a
+column header to open the Excel-like filter menu. It can search the visible
+values, select or invert distinct values, use text/numeric comparison
+operators, and match blank or non-blank values. Click **Apply** to keep the
+filter; **Clear filter** removes it. The older inline text fields are retained
+only for hosts that do not provide the rich filter menu.
+
+Use **Group** to open the grouping surface and start with the first result
+column, or use **Group by column** in a header/context menu. Drag additional
+columns into the grouping surface to create nested groups; the chip order is
+the grouping priority. Each group is rendered as a tree row with an expand/
+collapse chevron, indentation, row count, and preserved row selection/copy
+coordinates. Removing the last grouping returns the flat result grid.
 
 <figure>
   <img src="screenshots/row-view.png" alt="Row View showing a result row side by side with values">

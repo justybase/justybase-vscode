@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ConnectionProfileSummary, DatabaseKind, MetadataDatabase } from '@justybase/contracts';
+import { resolveDatabasePicker } from '@justybase/ui-core';
 import { SqlDialectSelect } from '@justybase/ui-react';
 
 // ── SVG Icons ──────────────────────────────────────────
@@ -130,6 +131,7 @@ export function EditorToolbar({
   const runMenuRef = useRef<HTMLDivElement | null>(null);
   const modKey = typeof navigator !== 'undefined' && /Mac|iP(hone|od|ad)/.test(navigator.platform) ? '⌘' : 'Ctrl';
   const effectiveDatabaseState: DatabaseLoadState = databaseLoadState ?? (databases.length > 0 ? 'ready' : connectionId ? 'empty' : 'idle');
+  const databasePicker = resolveDatabasePicker(databases, database);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -243,15 +245,15 @@ export function EditorToolbar({
           <select
             className="tb-select"
             title="Database"
-            value={database || ''}
+            value={databasePicker.value}
             onChange={e => onSelectDatabase(e.target.value)}
             disabled={!connectionId}
           >
-            {databases.length === 0
+            {databasePicker.options.length === 0
               ? <option value="">{!connectionId ? 'Select connection' : effectiveDatabaseState === 'loading' ? 'Loading databases…' : effectiveDatabaseState === 'error' ? 'Database list unavailable' : effectiveDatabaseState === 'empty' ? 'No accessible databases' : 'Select database'}</option>
               : <option value="">—</option>
             }
-            {databases.map(db => (
+            {databasePicker.options.map(db => (
               <option key={db.name} value={db.name}>{db.name}</option>
             ))}
           </select>

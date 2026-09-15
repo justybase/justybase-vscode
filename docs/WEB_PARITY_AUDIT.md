@@ -175,7 +175,7 @@ still behind its implemented functionality; see the quality roadmap.
 | --- | --- | --- | --- | --- |
 | Pagination + manual page size | ✅ | ✅ | ✅ | 100/200/500/1000. |
 | Sorting (server) | ✅ | ✅ | ✅ | `manualSorting` on `QueryPageRequest`. |
-| Column filtering (server) | ✅ | ✅ | ✅ | per-column filter inputs. |
+| Column filtering (server) | ✅ | ✅ | ✅ | compact Excel-like header menu with distinct values, operators, search, and blank/non-blank predicates; inline fields remain only as a host fallback. |
 | Global text filter (server) | ✅ | ✅ | ✅ | toolbar input. |
 | Column resize / pin / reorder | ✅ | ✅ | ✅ | |
 | Row selection + Copy as TSV | ✅ | ✅ copy current page | 🟡 | desktop copies *all* rows (spool); web copies loaded page (current view). |
@@ -188,7 +188,7 @@ still behind its implemented functionality; see the quality roadmap.
 | Row detail / full row viewer | ✅ `rowView.ts` | ✅ | ✅ | Web renders all fields for the loaded row. |
 | Large-data virtualization | ✅ disk-backed 200k+ | ✅ shared virtualized page + server spool | 🟡 | Web and Electron use the same React/TanStack renderer and virtualized page contract; VS Code keeps its disk-backed DOM renderer. |
 | Result tabs / multi-query panel | ✅ tabs + container | ✅ editor and statement result tabs | ✅ | Results and statement status are retained per editor tab. |
-| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ shared Web/Electron | 🟡 | Page size, sort, filters, visibility, pinning, order, and both scroll axes are restored by stable result identity; the shared React state still needs schema-version migration. |
+| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ shared Web/Electron | 🟡 | Page size, sort, filters, visibility, pinning, order, and both scroll axes are restored by stable result identity; persisted scroll geometry carries the compact row height and legacy anchors migrate from the old 30px layout. |
 
 ### D3 deep-dive — current web grid and remaining backlog
 

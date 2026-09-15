@@ -82,6 +82,7 @@ interface ApiOptions {
   readonly schemaError?: boolean;
   readonly schemaObject?: boolean;
   readonly pageError?: boolean;
+  readonly distinctTruncated?: boolean;
   readonly startError?: boolean;
   readonly cancelError?: boolean;
   readonly connectionActions?: boolean;
@@ -143,7 +144,7 @@ function edgeApi(options: ApiOptions = {}): { api: ApiClient; fetchMock: jest.Mo
       return response({ sessionId: 'session-1', columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'TEXT' }, { name: 'AMOUNT', type: 'NUMERIC(12,2)', scale: 2 }], rows, offset: 0, limit: 10_000, totalRows: rows.length, hasMore: false });
     }
     if (url.includes('/api/query/query-1/distinct')) {
-      return response({ statementIndex: 0, values: ['b', 'a'], truncated: false });
+      return response({ statementIndex: 0, values: ['b', 'a'], truncated: options.distinctTruncated ?? false });
     }
     if (url.includes('/api/query/query-1/aggregate')) {
       return response({ filteredRowCount: 2, values: [{ columnIndex: 0, count: 2, sum: 3, avg: '1.5', min: 1, max: 2 }, { columnIndex: 2, count: 2, sum: '30.00', avg: '15.00', min: '10.00', max: '20.00' }] });
@@ -205,13 +206,17 @@ describe('shared Web UI adapter edge contracts', () => {
     await screen.findByRole('table');
     await user.click(screen.getByRole('button', { name: 'Sort' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter results' }), 'a');
-    await user.type(screen.getByRole('textbox', { name: 'Filter NAME' }), 'a');
+    await user.click(screen.getByRole('button', { name: 'Open filter for NAME' }));
+    const filterDialog = await screen.findByRole('dialog', { name: 'Filter NAME' });
+    await user.selectOptions(within(filterDialog).getByRole('combobox', { name: 'Filter condition for NAME' }), 'contains');
+    await user.type(within(filterDialog).getByRole('textbox', { name: 'Filter value for NAME' }), 'a');
+    await user.click(within(filterDialog).getByRole('button', { name: 'Apply' }));
     expect(screen.getByText('a')).toBeInTheDocument();
     expect(screen.queryByText('b')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Open filter for NAME' }));
-    const filterDialog = await screen.findByRole('dialog', { name: 'Filter NAME' });
-    expect(filterDialog).toHaveClass('ui-data-grid-filter-menu');
-    await user.click(within(filterDialog).getByRole('button', { name: 'Cancel' }));
+    const reopenedFilterDialog = await screen.findByRole('dialog', { name: 'Filter NAME' });
+    expect(reopenedFilterDialog).toHaveClass('ui-data-grid-filter-menu');
+    await user.click(within(reopenedFilterDialog).getByRole('button', { name: 'Cancel' }));
     const grid = screen.getByRole('table').parentElement as HTMLDivElement;
     grid.scrollTop = 64;
     grid.scrollLeft = 32;
@@ -236,7 +241,8 @@ describe('shared Web UI adapter edge contracts', () => {
     expect(JSON.parse(String((exportCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({
       format: 'json',
       globalFilter: 'a',
-      columnFilters: [{ columnIndex: 1, value: 'a' }],
+      statementIndex: 0,
+      columnFilters: [{ columnIndex: 1, operator: 'contains', value: 'a' }],
       sorting: [{ columnIndex: 0, desc: false }],
     }));
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
@@ -269,6 +275,23 @@ describe('shared Web UI adapter edge contracts', () => {
     await user.click(screen.getByRole('button', { name: /SELECT 7/ }));
     expect(screen.getByLabelText('SQL editor')).toHaveValue('SELECT 7');
     anchorClick.mockRestore();
+  });
+
+  it('leaves an untouched truncated value menu unfiltered', async () => {
+    const user = userEvent.setup();
+    const { api, fetchMock } = edgeApi({ distinctTruncated: true });
+    render(<SharedWebWorkspace api={api} user={{ id: 'truncated-filter-user', username: 'alice', role: 'user' }} onLogout={() => undefined} />);
+    await screen.findByRole('button', { name: 'SQLite' });
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+    await screen.findByRole('table');
+    const pageCallsBeforeApply = fetchMock.mock.calls.filter(([input]) => String(input).includes('/api/query/query-1/page')).length;
+    await user.click(screen.getByRole('button', { name: 'Open filter for NAME' }));
+    const filterDialog = await screen.findByRole('dialog', { name: 'Filter NAME' });
+    expect(within(filterDialog).getByText(/first 500 values/)).toBeInTheDocument();
+    await user.click(within(filterDialog).getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('cell', { name: 'a' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'b' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/api/query/query-1/page')).length).toBe(pageCallsBeforeApply);
   });
 
   it('keeps missing selections, API failures and cancellation failures visible', async () => {
@@ -415,6 +438,7 @@ describe('shared Web UI adapter edge contracts', () => {
       scrollTop: 4_500,
       scrollLeft: 192,
       anchorRow: 150,
+      scrollRowHeight: 26,
     });
     const view = render(<SharedWebWorkspace api={api} user={{ id: storage.userId, username: 'persisted', role: 'user' }} onLogout={() => undefined} />);
     await screen.findByRole('button', { name: 'SQLite' });

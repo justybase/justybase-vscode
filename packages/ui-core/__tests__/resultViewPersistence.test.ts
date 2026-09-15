@@ -29,6 +29,7 @@ const view: UiResultViewState = {
   scrollTop: 9_000,
   scrollLeft: 320,
   anchorRow: 300,
+  scrollRowHeight: 26,
 };
 
 describe('result view persistence', () => {
