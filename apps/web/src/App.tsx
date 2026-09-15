@@ -1013,6 +1013,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     onOpenQuery={openSchemaQuery}
     onOpenDdl={openSchemaDdl}
     onImport={node => setImportTarget(node)}
+    onImportData={() => { if (inspectedObject) setImportTarget(inspectedObject); }}
     onInsertColumn={selectColumn}
     onEditRow={openEditRow}
     onOpenConnectionForm={() => { setEditingConnection(null); setShowConnectionForm(true); }}
@@ -1077,6 +1078,7 @@ function WorkspaceContent({ user, onLogout }: { user: WebUser; onLogout(): void 
     onOpenQuery={openSchemaQuery}
     onOpenDdl={openSchemaDdl}
     onImport={node => setImportTarget(node)}
+    onImportData={() => { if (inspectedObject) setImportTarget(inspectedObject); }}
     onInsertColumn={selectColumn}
     onEditRow={openEditRow}
     onOpenConnectionForm={() => { setEditingConnection(null); setShowConnectionForm(true); }}

@@ -128,6 +128,25 @@ body {
   background: #2c3944;
 }
 
+.electron-dockyard-import-data {
+  border-color: #455968;
+  color: #b9cbd8;
+  background: #202a32;
+}
+
+.electron-dockyard-import-data:hover:not(:disabled),
+.electron-dockyard-import-data:focus-visible:not(:disabled) {
+  border-color: #6d8799;
+  color: #e0e6eb;
+  background: #2a3944;
+}
+
+.electron-dockyard-import-data:disabled {
+  cursor: not-allowed;
+  color: #64717c;
+  opacity: .7;
+}
+
 .electron-dockyard-workspace-shell {
   position: relative;
   display: flex;

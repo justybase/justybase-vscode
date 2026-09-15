@@ -92,6 +92,8 @@ export interface DockyardWorkspaceProps {
   onOpenQuery(sql: string, title: string, node: SchemaTreeNode): void;
   onOpenDdl(sql: string, title: string, node: SchemaTreeNode): void;
   onImport(node: SchemaTreeNode): void;
+  /** Opens the guarded file-import flow for the currently inspected table. */
+  onImportData?(): void;
   onInsertColumn(column: MetadataColumn): void;
   onEditRow(tabId: string, values: unknown[]): void;
   onOpenConnectionForm(): void;
@@ -517,6 +519,7 @@ export function DockyardWorkspace({
   onOpenQuery,
   onOpenDdl,
   onImport,
+  onImportData,
   onInsertColumn,
   onEditRow,
   onOpenConnectionForm,
@@ -717,6 +720,7 @@ export function DockyardWorkspace({
         <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="history" onClick={() => { onHistoryRefresh(); activateTool(DOCKYARD_CONTENT_IDS.history); }}>History</button>
         {activeTab && <button type="button" className="secondary small dockyard-topbar-button" data-dockyard-tool="explain" onClick={() => activateTool(explainToolId(activeTab.id))}>Explain</button>}
         <button type="button" className="secondary small dockyard-topbar-button dockyard-topbar-new-query" onClick={onAddTab}>New query</button>
+        {onImportData && <button type="button" className="secondary small dockyard-topbar-button dockyard-topbar-import" onClick={onImportData} disabled={!inspectedObject} title={inspectedObject ? `Import data into ${inspectedObject.schema}.${inspectedObject.objectName ?? inspectedObject.label}` : 'Select a table in Schema first'}>Import data</button>}
       </nav>
       <div className="topbar-user">
         <button type="button" className="secondary small topbar-action" onClick={onOpenAudit}>Audit</button>

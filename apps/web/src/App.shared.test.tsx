@@ -29,6 +29,7 @@ describe('Web Dockyard composition root', () => {
     await waitFor(() => expect(screen.getByText('JustyBase')).toBeInTheDocument());
     expect(screen.getByRole('navigation', { name: 'Dockyard tools' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connections' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import data' })).toBeDisabled();
   });
 
   it('uses the async state during startup and restores the Dockyard shell after login', async () => {
