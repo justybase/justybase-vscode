@@ -34,6 +34,7 @@ import { CopilotToolsHandler } from './copilot/CopilotToolsHandler';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import { logWithFallback } from '../utils/logger';
 import { isAiToolAllowed } from './copilotTools/aiToolPolicy';
+import type { ProcedureRepairInput } from './copilot/tools/procedureRepairUtils';
 
 interface RewriteValidationCheck {
     hasBlockingErrors: boolean;
@@ -1082,6 +1083,10 @@ Please:
 
     public async validateSqlOnDatabase(sql: string, database?: string): Promise<string> {
         return this.toolsHandler.validateSqlOnDatabase(sql, database);
+    }
+
+    public async repairProcedure(input: ProcedureRepairInput, token?: vscode.CancellationToken): Promise<string> {
+        return this.toolsHandler.repairProcedure(input, token);
     }
 
     public async getSqlDiagnostics(includeWarnings: boolean = true): Promise<string> {

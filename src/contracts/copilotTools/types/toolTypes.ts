@@ -118,6 +118,21 @@ export interface SqlToolInput extends BaseToolInput {
     sql: string;
 }
 
+export type ProcedureRepairMode = 'compile_only' | 'compile_and_call';
+
+export type ProcedureCallArgumentType = 'string' | 'number' | 'boolean' | 'null' | 'date' | 'timestamp';
+
+export interface ProcedureCallArgument {
+    type: ProcedureCallArgumentType;
+    value: string | number | boolean | null;
+}
+
+export interface ProcedureRepairInput {
+    mode: ProcedureRepairMode;
+    sql?: string;
+    callArguments?: ProcedureCallArgument[];
+}
+
 /**
  * Typ dla table reference
  */

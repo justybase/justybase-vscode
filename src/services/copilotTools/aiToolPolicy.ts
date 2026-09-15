@@ -20,6 +20,7 @@ export const ALLOWED_AI_TOOL_NAMES = [
     'netezza_get_favorites',
     'netezza_validate_sql',
     'netezza_validate_sql_on_database',
+    'netezza_repair_procedure',
     'netezza_get_sql_diagnostics',
     'netezza_inspect_import_file',
     'netezza_propose_import_mapping',

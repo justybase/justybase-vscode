@@ -22,7 +22,8 @@ import {
     FindTableLocationsTool,
     GetCommentsTool,
     FavoritesTool,
-    GetDDLTool
+    GetDDLTool,
+    ProcedureRepairTool
 } from '../services/copilotService';
 import { withContractEnforcement } from '../services/copilotTools/contractEnforcedTool';
 import { isAiToolAllowed } from '../services/copilotTools/aiToolPolicy';
@@ -151,6 +152,7 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
         { name: 'netezza_get_dependencies', register: () => registerToolWithContract('netezza_get_dependencies', new DependenciesTool(copilotService)) },
         { name: 'netezza_validate_sql', register: () => registerToolWithContract('netezza_validate_sql', new ValidateSqlTool(copilotService)) },
         { name: 'netezza_validate_sql_on_database', register: () => registerToolWithContract('netezza_validate_sql_on_database', new ValidateSqlOnDatabaseTool(copilotService)) },
+        { name: 'netezza_repair_procedure', register: () => registerToolWithContract('netezza_repair_procedure', new ProcedureRepairTool(copilotService)) },
         { name: 'netezza_get_sql_diagnostics', register: () => registerToolWithContract('netezza_get_sql_diagnostics', new GetSqlDiagnosticsTool(copilotService)) },
         { name: 'netezza_inspect_import_file', register: () => registerToolWithContract('netezza_inspect_import_file', new InspectImportFileTool(copilotService)) },
         { name: 'netezza_propose_import_mapping', register: () => registerToolWithContract('netezza_propose_import_mapping', new ProposeImportMappingTool(copilotService)) },
