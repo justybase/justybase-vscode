@@ -38,8 +38,11 @@ var VirtualCore = (() => {
   });
 
   // node_modules/@tanstack/virtual-core/dist/esm/lazy-measurements.js
-  function createLazyMeasurementsView(count, flat, getItemKey) {
-    const cache = new Array(count);
+  function getMeasurementKey(item) {
+    return typeof item === "object" ? item.key : item;
+  }
+  function createLazyMeasurementsView(cache, flat) {
+    const count = cache.length;
     return new Proxy(cache, {
       get(target, prop, receiver) {
         if (typeof prop === "string") {
@@ -48,11 +51,11 @@ var VirtualCore = (() => {
             const i = +prop;
             if (Number.isInteger(i) && i >= 0 && i < count) {
               let v = target[i];
-              if (!v) {
+              if (typeof v !== "object") {
                 const s = flat[i * 2];
                 v = target[i] = {
                   index: i,
-                  key: getItemKey(i),
+                  key: v,
                   start: s,
                   size: flat[i * 2 + 1],
                   end: s + flat[i * 2 + 1],
@@ -243,7 +246,7 @@ var VirtualCore = (() => {
     let offset = 0;
     const fallback = registerScrollendEvent ? null : debounce(
       targetWindow,
-      () => cb(offset, false),
+      () => cb(readOffset(element), false),
       instance.options.isScrollingResetDelay
     );
     const createHandler = (isScrolling) => () => {
@@ -311,6 +314,27 @@ var VirtualCore = (() => {
   };
   var windowScroll = scrollWithAdjustments;
   var elementScroll = scrollWithAdjustments;
+  function isAppendWithTrim(prevCount, nextCount, getPreviousKey, getNextKey) {
+    if (nextCount === 0) return false;
+    const firstKey = getNextKey(0);
+    const removedKeys = /* @__PURE__ */ new Set();
+    let removedCount = 0;
+    while (removedCount < prevCount) {
+      const key = getPreviousKey(removedCount);
+      if (key === firstKey) break;
+      removedKeys.add(key);
+      removedCount++;
+    }
+    const retainedCount = prevCount - removedCount;
+    if (retainedCount === 0 || retainedCount >= nextCount) return false;
+    for (let i = 0; i < retainedCount; i++) {
+      if (getNextKey(i) !== getPreviousKey(removedCount + i)) return false;
+    }
+    for (let i = retainedCount; i < nextCount; i++) {
+      if (removedKeys.has(getNextKey(i))) return false;
+    }
+    return true;
+  }
   var Virtualizer = class {
     constructor(opts) {
       this.unsubs = [];
@@ -319,7 +343,7 @@ var VirtualCore = (() => {
       this.isScrolling = false;
       this.scrollState = null;
       this.measurementsCache = [];
-      this._flatMeasurements = null;
+      this._singleLaneMeasurements = null;
       this.itemSizeCache = /* @__PURE__ */ new Map();
       this.itemSizeCacheVersion = 0;
       this.laneAssignments = /* @__PURE__ */ new Map();
@@ -337,6 +361,7 @@ var VirtualCore = (() => {
       this._iosJustTouchEnded = false;
       this._iosTouchEndTimerId = null;
       this._intendedScrollOffset = null;
+      this._clampedAdjustment = null;
       this.elementsCache = /* @__PURE__ */ new Map();
       this.now = () => {
         var _a, _b, _c;
@@ -396,7 +421,7 @@ var VirtualCore = (() => {
       })();
       this.range = null;
       this.setOptions = (opts2) => {
-        var _a, _b;
+        var _a;
         const merged = {
           debug: false,
           initialOffset: 0,
@@ -440,8 +465,10 @@ var VirtualCore = (() => {
           const prevCount = prevOptions.count;
           const nextCount = merged.count;
           const measurements = this.getMeasurements();
-          const prevFirstKey = prevCount > 0 ? ((_a = measurements[0]) == null ? void 0 : _a.key) ?? prevOptions.getItemKey(0) : null;
-          const prevLastKey = prevCount > 0 ? ((_b = measurements[prevCount - 1]) == null ? void 0 : _b.key) ?? prevOptions.getItemKey(prevCount - 1) : null;
+          const previousItems = ((_a = this._singleLaneMeasurements) == null ? void 0 : _a.items) ?? measurements;
+          const getPreviousKey = (index) => getMeasurementKey(previousItems[index]);
+          const prevFirstKey = prevCount > 0 ? getPreviousKey(0) : null;
+          const prevLastKey = prevCount > 0 ? getPreviousKey(prevCount - 1) : null;
           const didCountChange = nextCount !== prevCount;
           const didEdgeKeysChange = didCountChange || prevCount > 0 && nextCount > 0 && (merged.getItemKey(0) !== prevFirstKey || merged.getItemKey(nextCount - 1) !== prevLastKey);
           if (didEdgeKeysChange) {
@@ -451,8 +478,15 @@ var VirtualCore = (() => {
               anchor = [item.key, this.getScrollOffset() - item.start];
             }
             const behavior = merged.followOnAppend === true ? "auto" : merged.followOnAppend || null;
-            if (behavior && nextCount > prevCount && this.isAtEnd(prevOptions.scrollEndThreshold) && (prevCount === 0 || merged.getItemKey(nextCount - 1) !== prevLastKey)) {
-              followOnAppend = behavior;
+            if (behavior && nextCount > 0 && this.isAtEnd(prevOptions.scrollEndThreshold) && (prevCount === 0 || merged.getItemKey(nextCount - 1) !== prevLastKey)) {
+              if (nextCount > prevCount || isAppendWithTrim(
+                prevCount,
+                nextCount,
+                getPreviousKey,
+                merged.getItemKey
+              )) {
+                followOnAppend = behavior;
+              }
             }
           }
         }
@@ -475,7 +509,7 @@ var VirtualCore = (() => {
             const anchorItem = newMeasurements[idx];
             if (anchorItem) {
               const newOffset = Math.max(0, anchorItem.start + anchorOffset);
-              if (newOffset !== this.scrollOffset) {
+              if (!followOnAppend && newOffset !== this.scrollOffset) {
                 anchorDelta = newOffset - this.scrollOffset;
                 this.scrollOffset = newOffset;
                 anchorResolved = true;
@@ -532,6 +566,7 @@ var VirtualCore = (() => {
         this._iosDeferredAdjustment = 0;
         this._iosTouching = false;
         this._iosJustTouchEnded = false;
+        this._clampedAdjustment = null;
         this.scrollElement = null;
         this.targetWindow = null;
       };
@@ -541,7 +576,7 @@ var VirtualCore = (() => {
         };
       };
       this._willUpdate = () => {
-        var _a;
+        var _a, _b;
         const scrollElement = this.options.enabled ? this.options.getScrollElement() : null;
         if (this.scrollElement !== scrollElement) {
           this.cleanup();
@@ -573,6 +608,9 @@ var VirtualCore = (() => {
                 offset = this._intendedScrollOffset;
               }
               this._intendedScrollOffset = null;
+              if (this._clampedAdjustment !== null && Math.abs(offset - this._clampedAdjustment.maxAtWrite) >= 1.5) {
+                this._clampedAdjustment = null;
+              }
               this.scrollAdjustments = 0;
               const prevOffset = this.getScrollOffset();
               this.scrollDirection = isScrolling ? prevOffset === offset ? this.scrollDirection : prevOffset < offset ? "forward" : "backward" : null;
@@ -640,7 +678,11 @@ var VirtualCore = (() => {
               if (anchorDelta !== 0) {
                 this._iosDeferredAdjustment += anchorDelta;
               }
-            } else {
+            } else if (((_b = this.scrollState) == null ? void 0 : _b.behavior) === "smooth" && !approxEqual(
+              this.getScrollOffset() - anchorDelta,
+              this.scrollState.lastTargetOffset
+            )) ;
+            else {
               this._scrollToOffset(this.getScrollOffset(), {
                 adjustments: void 0,
                 behavior: void 0
@@ -650,6 +692,21 @@ var VirtualCore = (() => {
           if (followOnAppend) {
             this.scrollToEnd({ behavior: followOnAppend });
           }
+        }
+        this._retryClampedAdjustment();
+      };
+      this._retryClampedAdjustment = () => {
+        if (this._clampedAdjustment === null || !this.scrollElement || !this.options.enabled) {
+          return;
+        }
+        const { target, maxAtWrite } = this._clampedAdjustment;
+        const max = this.getMaxScrollOffset();
+        if (max > maxAtWrite + 0.5) {
+          this._clampedAdjustment = target > max + 0.5 ? { target, maxAtWrite: max } : null;
+          this._scrollToOffset(target, {
+            adjustments: void 0,
+            behavior: void 0
+          });
         }
       };
       this._flushIosDeferredIfReady = () => {
@@ -734,9 +791,11 @@ var VirtualCore = (() => {
           laneAssignmentMode,
           gap
         }, _itemSizeCacheVersion) => {
+          var _a;
           const itemSizeCache = this.itemSizeCache;
           if (!enabled) {
             this.measurementsCache = [];
+            this._singleLaneMeasurements = null;
             this.itemSizeCache.clear();
             this.laneAssignments.clear();
             return [];
@@ -752,6 +811,7 @@ var VirtualCore = (() => {
             this.lanesChangedFlag = false;
             this.lanesSettling = true;
             this.measurementsCache = [];
+            this._singleLaneMeasurements = null;
             this.itemSizeCache.clear();
             this.laneAssignments.clear();
             this.pendingMin = null;
@@ -769,13 +829,13 @@ var VirtualCore = (() => {
           }
           if (lanes === 1) {
             const need = count * 2;
-            let flat = this._flatMeasurements;
+            let flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
             if (!flat || flat.length < need) {
               const next = new Float64Array(need);
               if (flat && min > 0) next.set(flat.subarray(0, min * 2));
               flat = next;
-              this._flatMeasurements = flat;
             }
+            const items = min === 0 ? new Array(count) : this._singleLaneMeasurements.items.slice();
             let runningStart;
             if (min === 0) {
               runningStart = paddingStart + scrollMargin;
@@ -785,13 +845,15 @@ var VirtualCore = (() => {
             }
             for (let i = min; i < count; i++) {
               const key = getItemKey(i);
+              items[i] = key;
               const measuredSize = itemSizeCache.get(key);
               const size = typeof measuredSize === "number" ? measuredSize : this.options.estimateSize(i);
               flat[i * 2] = runningStart;
               flat[i * 2 + 1] = size;
               runningStart += size + gap;
             }
-            const view = createLazyMeasurementsView(count, flat, getItemKey);
+            this._singleLaneMeasurements = { flat, items };
+            const view = createLazyMeasurementsView(items, flat);
             this.measurementsCache = view;
             return view;
           }
@@ -886,7 +948,7 @@ var VirtualCore = (() => {
             lanes,
             // Pass the typed array so binary search + forward-walk can read
             // start/end directly from Float64Array, skipping the Proxy traps.
-            lanes === 1 && this._flatMeasurements != null ? this._flatMeasurements : null
+            lanes === 1 && this._singleLaneMeasurements !== null ? this._singleLaneMeasurements.flat : null
           );
           return this.range;
         },
@@ -983,13 +1045,13 @@ var VirtualCore = (() => {
         }
       };
       this.resizeItem = (index, size) => {
-        var _a, _b;
+        var _a, _b, _c;
         if (!this.isIndexInRange(index)) return;
         let cachedSize;
         let itemStart;
         let key;
-        const flat = this._flatMeasurements;
-        if (this.options.lanes === 1 && flat !== null) {
+        const flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
+        if (this.options.lanes === 1 && flat != null) {
           key = this.options.getItemKey(index);
           itemStart = flat[index * 2];
           cachedSize = flat[index * 2 + 1];
@@ -1003,7 +1065,7 @@ var VirtualCore = (() => {
         const itemSize = this.itemSizeCache.get(key) ?? cachedSize;
         const delta = size - itemSize;
         if (delta !== 0) {
-          const wasAtEnd = this.options.anchorTo === "end" && ((_a = this.scrollState) == null ? void 0 : _a.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
+          const wasAtEnd = this.options.anchorTo === "end" && ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
           const prevTotalSize = wasAtEnd ? this.getTotalSize() : 0;
           const scrollOffsetWithAdj = this.getScrollOffset() + this.scrollAdjustments;
           const isFirstMeasure = !this.itemSizeCache.has(key);
@@ -1022,7 +1084,7 @@ var VirtualCore = (() => {
             // scrolling up" cascade.
             itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
           );
-          const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
+          const shouldAdjustScroll = ((_c = this.scrollState) == null ? void 0 : _c.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
             // The callback expects a VirtualItem; build one lazily only
             // when the consumer actually supplied a custom predicate.
             this.measurementsCache[index] ?? {
@@ -1050,6 +1112,7 @@ var VirtualCore = (() => {
             adjustedSync = this.applyScrollAdjustment(delta);
           }
           this.notify(adjustedSync);
+          this._retryClampedAdjustment();
         }
       };
       this.getVirtualItems = memo(
@@ -1069,11 +1132,12 @@ var VirtualCore = (() => {
         }
       );
       this.getVirtualItemForOffset = (offset) => {
+        var _a;
         const measurements = this.getMeasurements();
         if (measurements.length === 0) {
           return void 0;
         }
-        const flat = this._flatMeasurements;
+        const flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
         const useFlat = this.options.lanes === 1 && flat != null;
         const idx = findNearestBinarySearch(
           0,
@@ -1208,18 +1272,18 @@ var VirtualCore = (() => {
         });
       };
       this.getTotalSize = () => {
-        var _a;
+        var _a, _b;
         const measurements = this.getMeasurements();
         let end;
         if (measurements.length === 0) {
           end = this.options.paddingStart;
         } else if (this.options.lanes === 1) {
           const lastIdx = measurements.length - 1;
-          const flat = this._flatMeasurements;
+          const flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
           if (flat != null) {
             end = flat[lastIdx * 2] + flat[lastIdx * 2 + 1];
           } else {
-            end = ((_a = measurements[lastIdx]) == null ? void 0 : _a.end) ?? 0;
+            end = ((_b = measurements[lastIdx]) == null ? void 0 : _b.end) ?? 0;
           }
         } else {
           const endByLane = Array(this.options.lanes).fill(null);
@@ -1285,6 +1349,10 @@ var VirtualCore = (() => {
         this._iosDeferredAdjustment += delta;
         return false;
       } else {
+        const target = this.getScrollOffset() + this.scrollAdjustments + delta;
+        const el = this.scrollElement;
+        const maxAtWrite = el !== null && ("scrollHeight" in el || "document" in el) ? this.getMaxScrollOffset() : null;
+        this._clampedAdjustment = maxAtWrite !== null && target > maxAtWrite + 0.5 ? { target, maxAtWrite } : null;
         this._scrollToOffset(this.getScrollOffset(), {
           adjustments: this.scrollAdjustments += delta,
           behavior

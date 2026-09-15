@@ -4777,6 +4777,7 @@
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
+    "esbuild@0.28.2": true,
     "keytar@7.9.0": true,
     "unrs-resolver@1.12.2": true,
     "@vscode/vsce-sign@2.0.9": true
