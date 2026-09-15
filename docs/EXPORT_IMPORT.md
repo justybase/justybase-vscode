@@ -47,7 +47,7 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 - **Multi-sheet support** — each sheet appears as a separate tab in the data grid (for `.xlsx` and `.xlsb` files)
 - **Sorting** — click the sort icon on a column header to sort ascending/descending; **Shift+Click** adds another sort column (numbered badges show sort priority)
 - **Filtering** — global text filter across all columns with debounced search
-- **Grouping** — drag column headers to the grouping panel
+- **Grouping** — use **Group by column** or drag headers to the grouping panel; nested groups render as collapsible tree rows
 - **Cell Selection** — click, Shift+click, Ctrl+click, arrow keys, Ctrl+A
 - **Copy** — copy selected cells with or without headers (Markdown or tabbed format)
 - **Row View** — compare up to 10 selected rows side by side
