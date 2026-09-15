@@ -8,7 +8,7 @@ import {
 } from '../../../core/connectionFactory';
 import { runQuery } from '../../../core/queryRunner';
 import { getQueryConfig } from '../../../core/queryBatchExecutor';
-import { ConnectionDetails, ResultSet } from '../../../types';
+import type { ConnectionDetails, DatabaseCommand, DatabaseDataReader, ResultSet } from '../../../types';
 import { ResultPanelView } from '../../../views/resultPanelView';
 
 export interface ProcedureStatementExecutionResult {
@@ -161,15 +161,17 @@ export class CopilotToolRuntime {
         }
 
         const connection = await createConnectedDatabaseConnectionFromDetails(connectionDetails);
-        const command = connection.createCommand(sql);
-        command.commandTimeout = getQueryConfig().queryTimeout;
-        let reader: Awaited<ReturnType<typeof command.executeReader>> | undefined;
+        let command: DatabaseCommand | undefined;
+        let reader: DatabaseDataReader | undefined;
         let cancellationDisposable: vscode.Disposable | undefined;
 
         try {
+            command = connection.createCommand(sql);
+            command.commandTimeout = getQueryConfig().queryTimeout;
+
             if (cancellationToken) {
                 cancellationDisposable = cancellationToken.onCancellationRequested(() => {
-                    void command.cancel().catch(() => undefined);
+                    void command?.cancel().catch(() => undefined);
                 });
             }
 
