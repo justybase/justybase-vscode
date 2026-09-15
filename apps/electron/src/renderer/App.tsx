@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ReactElement } from 'react';
 import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryAggregateFunction, QueryColumnFilterSpec, QueryExportFormat, QueryGroupAggregate, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
-import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, hasUiResultQuery, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
+import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, hasUiResultQuery, resolveDatabasePicker, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
 import {
   AsyncStateView,
   CellValueViewer,
@@ -794,6 +794,10 @@ export function App(): ReactElement {
     const generation = ++filterMenuGenerationRef.current;
     const key = request.column.name || String(request.columnIndex);
     const saved = activeResult.view.columnFilterDefinitions?.[key];
+    const legacyValue = activeResult.view.columnFilters[key];
+    const definition = saved ?? (legacyValue?.trim()
+      ? { operator: 'contains' as const, value: legacyValue.trim(), values: [] as readonly unknown[] }
+      : undefined);
     const anchor = request.anchor;
     const popupWidth = Math.min(340, Math.max(240, window.innerWidth - 20));
     const popupHeight = Math.min(520, Math.max(160, window.innerHeight - 20));
@@ -809,12 +813,13 @@ export function App(): ReactElement {
       left,
       top,
       options: [],
-      selectedKeys: saved?.operator === 'in' ? (saved.values ?? []).map(filterValueKey) : [],
-      operator: saved?.operator ?? 'in',
-      value: saved?.value ?? '',
+      selectedKeys: definition?.operator === 'in' ? (definition.values ?? []).map(filterValueKey) : [],
+      operator: definition?.operator ?? 'in',
+      value: definition?.value ?? '',
       search: '',
       loading: true,
       truncated: false,
+      dirty: false,
     });
     try {
       const queryId = activeResult.executionId;
@@ -830,8 +835,8 @@ export function App(): ReactElement {
       });
       if (generation !== filterMenuGenerationRef.current) return;
       const options = filterOptionList(response.values);
-      const selectedKeys = saved?.operator === 'in'
-        ? (saved.values ?? []).map(filterValueKey).filter(valueKey => options.some(option => option.key === valueKey))
+      const selectedKeys = definition?.operator === 'in'
+        ? (definition.values ?? []).map(filterValueKey).filter(valueKey => options.some(option => option.key === valueKey))
         : options.map(option => option.key);
       setFilterMenu(current => current && current.columnIndex === request.columnIndex ? { ...current, options, selectedKeys, loading: false, truncated: response.truncated } : current);
     } catch (error: unknown) {
@@ -853,6 +858,10 @@ export function App(): ReactElement {
     delete nextDefinitions[key];
     delete nextFilters[key];
     if (menu.operator === 'in') {
+      if (!menu.dirty) {
+        closeColumnFilter();
+        return;
+      }
       const selected = menu.options.filter(option => menu.selectedKeys.includes(option.key));
       const allLoadedValuesSelected = selected.length === menu.options.length && !menu.truncated;
       if (selected.length > 0 && !allLoadedValuesSelected) {
@@ -1027,6 +1036,7 @@ export function App(): ReactElement {
   const metadataCapability = state.capabilities.find(descriptor => descriptor.key === 'metadata');
   const runtimeDatabaseKind = (selectedConnection?.dbType ?? 'netezza') as DatabaseKind;
   const authoringDatabaseKind = activeDocument?.databaseKind ?? runtimeDatabaseKind;
+  const databasePicker = resolveDatabasePicker(databases, database);
   const historyItems: HistoryViewEntry[] = history.map(entry => ({
     id: entry.id,
     label: entry.sql.slice(0, 120) || '(empty SQL)',
@@ -1042,8 +1052,9 @@ export function App(): ReactElement {
     if (activeResult && position.resultSetId === activeResult.resultSetId
       && (position.top !== activeResult.view.scrollTop
         || position.left !== activeResult.view.scrollLeft
-        || position.anchorRow !== activeResult.view.anchorRow)) {
-      updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
+        || position.anchorRow !== activeResult.view.anchorRow
+        || position.rowHeight !== activeResult.view.scrollRowHeight)) {
+      updateView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow, scrollRowHeight: position.rowHeight });
     }
   };
   const workspaceDocumentContent = <div className="electron-workspace-content">
@@ -1055,7 +1066,7 @@ export function App(): ReactElement {
       <span className="electron-toolbar-spacer" />
       <SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" />
       <label>Connection<select aria-label="Editor connection" value={selectedConnection?.id ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-      <label>Database<select aria-label="Editor database" value={database} disabled={!selectedConnection} onChange={event => selectDatabase(event.target.value)}><option value="">{selectedConnection ? 'Select database' : 'Select connection'}</option>{databases.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+      <label>Database<select aria-label="Editor database" value={databasePicker.value} disabled={!selectedConnection} onChange={event => selectDatabase(event.target.value)}><option value="">{selectedConnection ? 'Select database' : 'Select connection'}</option>{databasePicker.options.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
       <button type="button" className="electron-run-button" aria-label="Run" onClick={() => void run()} disabled={!activeDocument}>▶ Run</button>
       <button type="button" onClick={() => void run('script')} disabled={!selectedConnection || !activeDocument}>Run script</button>
       <button type="button" aria-label="Explain current SQL" onClick={() => void run('explain')} disabled={!selectedConnection || !activeDocument}>Explain</button>
@@ -1110,7 +1121,7 @@ export function App(): ReactElement {
       onExportFormatChange={value => setExportFormat(value as QueryExportFormat)}
       exportFormatAriaLabel="Electron export format"
       showContextMenu
-      showInlineColumnFilters
+      showInlineColumnFilters={false}
       loadingLabel="Streaming result data…"
     />
   </div>;

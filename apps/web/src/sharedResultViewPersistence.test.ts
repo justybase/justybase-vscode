@@ -36,6 +36,7 @@ const view: UiResultViewState = {
   scrollTop: 7_500,
   scrollLeft: 192,
   anchorRow: 250,
+  scrollRowHeight: 26,
 };
 
 describe('shared Web result view persistence adapter', () => {

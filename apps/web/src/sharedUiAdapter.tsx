@@ -1632,6 +1632,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     const generation = ++filterMenuGenerationRef.current;
     const key = request.column.name || String(request.columnIndex);
     const saved = activeResult.view.columnFilterDefinitions?.[key];
+    const legacyValue = activeResult.view.columnFilters[key];
+    const definition = saved ?? (legacyValue?.trim()
+      ? { operator: 'contains' as const, value: legacyValue.trim(), values: [] as readonly unknown[] }
+      : undefined);
     const anchor = request.anchor;
     const popupWidth = Math.min(340, Math.max(240, window.innerWidth - 20));
     const popupHeight = Math.min(520, Math.max(160, window.innerHeight - 20));
@@ -1647,12 +1651,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       left,
       top,
       options: [],
-      selectedKeys: saved?.operator === 'in' ? (saved.values ?? []).map(filterValueKey) : [],
-      operator: saved?.operator ?? 'in',
-      value: saved?.value ?? '',
+      selectedKeys: definition?.operator === 'in' ? (definition.values ?? []).map(filterValueKey) : [],
+      operator: definition?.operator ?? 'in',
+      value: definition?.value ?? '',
       search: '',
       loading: true,
       truncated: false,
+      dirty: false,
     });
     try {
       const queryId = queryByResultRef.current.get(activeResult.resultSetId);
@@ -1676,8 +1681,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       }
       if (generation !== filterMenuGenerationRef.current) return;
       const options = filterOptionList(values);
-      const selectedKeys = saved?.operator === 'in'
-        ? (saved.values ?? []).map(filterValueKey).filter(valueKey => options.some(option => option.key === valueKey))
+      const selectedKeys = definition?.operator === 'in'
+        ? (definition.values ?? []).map(filterValueKey).filter(valueKey => options.some(option => option.key === valueKey))
         : options.map(option => option.key);
       setFilterMenu(current => current && current.columnIndex === request.columnIndex ? { ...current, options, selectedKeys, loading: false, truncated } : current);
     } catch (error: unknown) {
@@ -1699,6 +1704,10 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     delete nextDefinitions[key];
     delete nextFilters[key];
     if (menu.operator === 'in') {
+      if (!menu.dirty) {
+        closeColumnFilter();
+        return;
+      }
       const selected = menu.options.filter(option => menu.selectedKeys.includes(option.key));
       const allLoadedValuesSelected = selected.length === menu.options.length && !menu.truncated;
       if (selected.length > 0 && !allLoadedValuesSelected) {
@@ -1748,8 +1757,9 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (!activeResult || position.resultSetId !== activeResult.resultSetId
       || (position.top === activeResult.view.scrollTop
         && position.left === activeResult.view.scrollLeft
-        && position.anchorRow === activeResult.view.anchorRow)) return;
-    updateResultView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow });
+        && position.anchorRow === activeResult.view.anchorRow
+        && position.rowHeight === activeResult.view.scrollRowHeight)) return;
+    updateResultView({ scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow, scrollRowHeight: position.rowHeight });
   }, [activeResult, updateResultView]);
 
   const detailColumns = useMemo(
@@ -1976,7 +1986,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
                 onExportFormatChange={value => setExportFormat(value as QueryExportFormat)}
                 exportFormatAriaLabel="Shared export format"
                 showContextMenu
-                showInlineColumnFilters
+                showInlineColumnFilters={false}
               />
             </div>
           </>}

@@ -111,6 +111,7 @@ export function normalizeResultView(value: unknown): UiResultViewState | undefin
   if (value.scrollTop !== undefined && nonNegativeNumber(value.scrollTop) === undefined) return undefined;
   if (value.scrollLeft !== undefined && nonNegativeNumber(value.scrollLeft) === undefined) return undefined;
   if (value.anchorRow !== undefined && nonNegativeInteger(value.anchorRow) === undefined) return undefined;
+  if (value.scrollRowHeight !== undefined && nonNegativeInteger(value.scrollRowHeight) === undefined) return undefined;
 
   const next = {
     globalFilter: typeof value.globalFilter === 'string' ? value.globalFilter : '',
@@ -127,6 +128,7 @@ export function normalizeResultView(value: unknown): UiResultViewState | undefin
     ...(value.pinnedColumns !== undefined ? { pinnedColumns: stringArray(value.pinnedColumns)! } : {}),
     ...(value.columnWidths !== undefined ? { columnWidths: widthRecord(value.columnWidths)! } : {}),
     ...(value.anchorRow !== undefined ? { anchorRow: nonNegativeInteger(value.anchorRow)! } : {}),
+    ...(value.scrollRowHeight !== undefined ? { scrollRowHeight: nonNegativeInteger(value.scrollRowHeight)! } : {}),
   } satisfies UiResultViewState;
   return next;
 }
@@ -227,6 +229,7 @@ export function decodeLegacyResultView(value: unknown, expectedResultSetId?: str
     scrollTop: state.scrollTop,
     scrollLeft: state.scrollLeft,
     anchorRow: state.scrollAnchorRow ?? state.anchorRow,
+    scrollRowHeight: state.scrollRowHeight,
     aggregation: state.aggregation,
     pivotColumn: state.pivotColumn,
   });

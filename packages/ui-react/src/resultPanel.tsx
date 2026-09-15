@@ -145,7 +145,7 @@ export function ResultPanel({
   showContextMenu = true,
   showColumnMenu = true,
   showGroupingPanel = true,
-  showInlineColumnFilters = true,
+  showInlineColumnFilters = false,
   loadingLabel = 'Streaming result data…',
 }: ResultPanelProps): ReactElement {
   const detailRow = selectedRowIndex === undefined ? undefined : rows[selectedRowIndex];
@@ -163,7 +163,7 @@ export function ResultPanel({
       </div>}
       {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={onCloseResultAnalysis ?? (() => undefined)} onCopySelection={onCopyAnalysisSelection ?? onCopySelection} onViewCell={onViewAnalysisCell ?? onViewCell} />}
       <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel={loadingLabel}>
-        <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={onViewChange} clientProcessing={clientProcessing} showContextMenu={showContextMenu} showColumnMenu={showColumnMenu} showGroupingPanel={showGroupingPanel} showInlineColumnFilters={showInlineColumnFilters} onOpenColumnFilter={onOpenColumnFilter} selectedRowIndex={selectedRowIndex} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow } : undefined} onScroll={onScroll} onLoadMore={onLoadMore} onCopySelection={onCopySelection} onViewCell={onViewCell} onViewRow={onViewRow} onEditRow={onEditRow} onRowSelect={onRowSelect} />
+        <DataGrid sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'empty'} columns={activeResult?.columns ?? []} rows={rows} totalRowCount={activeResult?.totalRowCount} view={activeResult?.view} onViewChange={onViewChange} clientProcessing={clientProcessing} showContextMenu={showContextMenu} showColumnMenu={showColumnMenu} showGroupingPanel={showGroupingPanel} showInlineColumnFilters={showInlineColumnFilters} onOpenColumnFilter={onOpenColumnFilter} selectedRowIndex={selectedRowIndex} scroll={activeResult ? { sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow, ...(activeResult.view.scrollRowHeight === undefined ? {} : { rowHeight: activeResult.view.scrollRowHeight }) } : undefined} onScroll={onScroll} onLoadMore={onLoadMore} onCopySelection={onCopySelection} onViewCell={onViewCell} onViewRow={onViewRow} onEditRow={onEditRow} onRowSelect={onRowSelect} />
       </AsyncStateView>
       {filterMenu && onFilterMenuChange && onApplyColumnFilter && onClearColumnFilter && onCloseColumnFilter && <DataGridColumnFilterPanel state={filterMenu} onChange={onFilterMenuChange} onApply={onApplyColumnFilter} onClear={onClearColumnFilter} onClose={onCloseColumnFilter} />}
       {detailRow !== undefined && activeResult && onCloseRowDetail && <RowDetail columns={detailColumnSet} row={detailRow} onClose={onCloseRowDetail} />}

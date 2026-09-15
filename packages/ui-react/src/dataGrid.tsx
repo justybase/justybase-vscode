@@ -24,6 +24,8 @@ export interface GridScrollPosition {
   readonly top: number;
   readonly left: number;
   readonly anchorRow?: number;
+  /** Row height used by the virtualizer when this position was measured. */
+  readonly rowHeight?: number;
 }
 
 export interface DataGridCellContext {
@@ -123,13 +125,32 @@ const ROW_NUMBER_WIDTH = 48;
 const DEFAULT_COLUMN_WIDTH = 144;
 const MIN_COLUMN_WIDTH = 72;
 const MAX_EMPTY_PAGE_REQUESTS = 3;
-const ROW_HEIGHT = 30;
+const ROW_HEIGHT = 26;
+const LEGACY_ROW_HEIGHT = 30;
 // The shared grid header contains the column label and inline filter rows.
 // Virtual row math must start below this sticky header, otherwise the first
 // rendered row after a programmatic scroll can be covered by the header.
 const COLUMN_HEADER_HEIGHT = 62;
+const COMPACT_COLUMN_HEADER_HEIGHT = 42;
 const DEFAULT_VIEWPORT_HEIGHT = 480;
 const VIRTUAL_OVERSCAN_ROWS = 8;
+
+function DataGridFilterIcon(): ReactNode {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" width="12" height="12"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5Z" /></svg>;
+}
+
+/**
+ * Restores a persisted position without losing the logical row anchor after
+ * the compact-grid migration. New positions carry their geometry and retain
+ * the exact pixel offset; older positions are reconstructed from anchorRow.
+ */
+export function resolveDataGridScrollTop(top: number, anchorRow?: number, rowHeight?: number): number {
+  const safeTop = Math.max(0, Number.isFinite(top) ? top : 0);
+  const safeAnchor = Number.isInteger(anchorRow) && (anchorRow ?? 0) > 0 ? anchorRow : undefined;
+  if (safeAnchor === undefined || rowHeight === ROW_HEIGHT) return safeTop;
+  if (rowHeight === undefined || rowHeight === LEGACY_ROW_HEIGHT || rowHeight > 0) return safeAnchor * ROW_HEIGHT;
+  return safeTop;
+}
 
 export interface DataGridVirtualWindow {
   readonly startIndex: number;
@@ -815,9 +836,10 @@ export function DataGrid({
     () => groupedRows?.filter(row => !row.ancestorIds.some(groupId => collapsedGroups.has(groupId))),
     [collapsedGroups, groupedRows],
   );
+  const columnHeaderHeight = onOpenColumnFilter && !showInlineColumnFilters ? COMPACT_COLUMN_HEADER_HEIGHT : COLUMN_HEADER_HEIGHT;
   const virtualWindow = useMemo(
-    () => calculateDataGridVirtualWindow(visibleGroupedRows?.length ?? visibleRowCount, virtualViewport.scrollTop, virtualViewport.height, VIRTUAL_OVERSCAN_ROWS, COLUMN_HEADER_HEIGHT),
-    [visibleGroupedRows?.length, visibleRowCount, virtualViewport.height, virtualViewport.scrollTop],
+    () => calculateDataGridVirtualWindow(visibleGroupedRows?.length ?? visibleRowCount, virtualViewport.scrollTop, virtualViewport.height, VIRTUAL_OVERSCAN_ROWS, columnHeaderHeight),
+    [columnHeaderHeight, visibleGroupedRows?.length, visibleRowCount, virtualViewport.height, virtualViewport.scrollTop],
   );
   const virtualRenderedRows = useMemo(
     () => visibleGroupedRows === undefined
@@ -915,7 +937,7 @@ export function DataGrid({
       return;
     }
     const scope = `${sourceId ?? ''}\u0000${resultSetId}`;
-    const nextTop = Math.max(0, Number.isFinite(scroll.top) ? scroll.top : 0);
+    const nextTop = resolveDataGridScrollTop(scroll.top, scroll.anchorRow, scroll.rowHeight);
     const nextLeft = Math.max(0, Number.isFinite(scroll.left) ? scroll.left : 0);
     const previous = scrollRestorationRef.current;
     const pending = pendingScrollRestorationRef.current;
@@ -955,11 +977,11 @@ export function DataGrid({
       if (frame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
       observer?.disconnect();
     };
-  }, [resultSetId, sourceId, scroll?.sourceId, scroll?.resultSetId, scroll?.top, scroll?.left, scroll?.anchorRow, rows.length, columns.length, totalRowCount]);
+  }, [resultSetId, sourceId, scroll?.sourceId, scroll?.resultSetId, scroll?.top, scroll?.left, scroll?.anchorRow, scroll?.rowHeight, rows.length, columns.length, totalRowCount]);
 
   function handleScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
-    const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT) };
+    const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT), rowHeight: ROW_HEIGHT };
     virtualViewportRef.current = {
       scrollTop: Math.max(0, element.scrollTop),
       height: Math.max(0, element.clientHeight) || DEFAULT_VIEWPORT_HEIGHT,
@@ -1314,7 +1336,7 @@ export function DataGrid({
                 <button type="button" className="ui-data-grid-header-label" onClick={() => sortColumn(columnIndex)} title={`Sort by ${column.name}`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : sort.descending ? 'Sorted descending' : 'Sorted ascending'}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}</span></button>
                 <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column)}`}>{typeBadge(column)}</span>
                 <button type="button" className={`ui-data-grid-header-action ${pinned ? 'active' : ''}`} aria-label={pinned ? `Unpin ${column.name}` : `Pin ${column.name}`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}>📌</button>
-                {onOpenColumnFilter && <button type="button" className={`ui-data-grid-filter-action ${filterValue(activeView, column, columnIndex) ? 'active' : ''}`} aria-label={`Open filter for ${column.name}`} title={`Filter ${column.name}`} onClick={event => { event.stopPropagation(); onOpenColumnFilter({ columnIndex, column, anchor: event.currentTarget.getBoundingClientRect() }); }}>⌕</button>}
+                {onOpenColumnFilter && <button type="button" className={`ui-data-grid-filter-action ${filterValue(activeView, column, columnIndex) ? 'active' : ''}`} aria-label={`Open filter for ${column.name}`} title={`Filter ${column.name}`} onClick={event => { event.stopPropagation(); onOpenColumnFilter({ columnIndex, column, anchor: event.currentTarget.getBoundingClientRect() }); }}><DataGridFilterIcon /></button>}
                 {(!onOpenColumnFilter || showInlineColumnFilters) && <input className="ui-data-grid-column-filter" aria-label={`Filter ${column.name}`} placeholder="filter…" value={filterValue(activeView, column, columnIndex)} onChange={event => filterColumn(columnIndex, event.target.value)} />}
                 <button type="button" className="ui-data-grid-group-action" aria-label={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? `Ungroup ${column.name}` : `Group by ${column.name}`} title={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? 'Remove grouping' : 'Group by column'} onClick={() => { const grouping = activeView.grouping.filter(key => !columnMatchesKey(column, columnIndex, key)); if (grouping.length === activeView.grouping.length) grouping.push(id); updateView({ grouping }); }}>▦</button>
                 <span className="ui-data-grid-resizer" role="separator" aria-label={`Resize ${column.name}`} onMouseDown={event => { event.preventDefault(); event.stopPropagation(); resizeRef.current = { columnId: id, startX: event.clientX, startWidth: width }; }} />
@@ -1327,7 +1349,7 @@ export function DataGrid({
           {virtualRenderedRows.map(rendered => {
           if (rendered.kind === 'group') {
             const collapsed = collapsedGroups.has(rendered.id);
-            return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1} style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
+            return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} aria-level={rendered.level + 1} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={visibleColumnIndexes.length + 1} style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><span className="ui-data-grid-group-tree-indent" aria-hidden="true">{Array.from({ length: rendered.level }, (_value, level) => <span key={level} />)}</span><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} aria-expanded={!collapsed} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
           }
           const rowSelected = selectedRowIndex === rendered.sourceIndex;
           const rowLabel = rendered.values.map((value, columnIndex) => {

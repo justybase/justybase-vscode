@@ -26,6 +26,7 @@ import {
   formatDataGridClipboard,
   processDataGridRows,
   reorderDataGridGrouping,
+  resolveDataGridScrollTop,
 } from '../src';
 
 const result: UiResultSurfaceState = {
@@ -215,7 +216,7 @@ describe('shared React presentation', () => {
   it('restores both scroll axes by stable result-set identity and reports changes', async () => {
     const onScroll = jest.fn();
     const onRowSelect = jest.fn();
-    render(<DataGrid resultSetId={result.resultSetId} columns={[{ name: 'ID' }, { name: 'DETAILS' }]} rows={[[1, { value: 'x' }], [2, [3]]]} scroll={{ resultSetId: result.resultSetId, top: 128, left: 64, anchorRow: 4 }} onScroll={onScroll} onRowSelect={onRowSelect} />);
+    render(<DataGrid resultSetId={result.resultSetId} columns={[{ name: 'ID' }, { name: 'DETAILS' }]} rows={[[1, { value: 'x' }], [2, [3]]]} scroll={{ resultSetId: result.resultSetId, top: 128, left: 64, anchorRow: 4, rowHeight: 26 }} onScroll={onScroll} onRowSelect={onRowSelect} />);
     const grid = screen.getByRole('table').parentElement as HTMLDivElement;
     expect(grid.scrollTop).toBe(128);
     expect(grid.scrollLeft).toBe(64);
@@ -229,6 +230,9 @@ describe('shared React presentation', () => {
   });
 
   it('calculates a bounded virtual window with stable pixel padding', () => {
+    expect(resolveDataGridScrollTop(15_000, 500)).toBe(13_000);
+    expect(resolveDataGridScrollTop(128, 4, 26)).toBe(128);
+    expect(resolveDataGridScrollTop(96)).toBe(96);
     expect(calculateDataGridVirtualWindow(0, 120, 300, 2)).toEqual({
       startIndex: 0,
       endIndex: 0,
@@ -237,32 +241,32 @@ describe('shared React presentation', () => {
     });
     expect(calculateDataGridVirtualWindow(1000, 0, 300, 2)).toEqual({
       startIndex: 0,
-      endIndex: 12,
+      endIndex: 14,
       paddingTop: 0,
-      paddingBottom: 29_640,
+      paddingBottom: 25_636,
     });
     expect(calculateDataGridVirtualWindow(1000, 900, 300, 2)).toEqual({
-      startIndex: 28,
-      endIndex: 42,
-      paddingTop: 840,
-      paddingBottom: 28_740,
+      startIndex: 32,
+      endIndex: 48,
+      paddingTop: 832,
+      paddingBottom: 24_752,
     });
     expect(calculateDataGridVirtualWindow(1000, 900, 300, 2, 62)).toEqual({
-      startIndex: 28,
-      endIndex: 40,
-      paddingTop: 840,
-      paddingBottom: 28_800,
+      startIndex: 32,
+      endIndex: 46,
+      paddingTop: 832,
+      paddingBottom: 24_804,
     });
     expect(calculateDataGridVirtualWindow(4, Number.NaN, 0, -2)).toEqual({
       startIndex: 0,
       endIndex: 1,
       paddingTop: 0,
-      paddingBottom: 90,
+      paddingBottom: 78,
     });
 
     const largeResult = calculateDataGridVirtualWindow(150_000, 0, 480);
     expect(largeResult.endIndex - largeResult.startIndex).toBeLessThan(40);
-    expect(largeResult.paddingBottom).toBe((150_000 - largeResult.endIndex) * 30);
+    expect(largeResult.paddingBottom).toBe((150_000 - largeResult.endIndex) * 26);
   });
 
   it('renders only the visible result window and moves it without changing row identity', () => {
@@ -285,8 +289,8 @@ describe('shared React presentation', () => {
       fireEvent.scroll(scroller);
       act(() => { jest.runOnlyPendingTimers(); });
       expect(renderedRows().length).toBeLessThan(100);
-      expect(renderedRows()[0]).toHaveTextContent('493');
-      expect(renderedRows()[renderedRows().length - 1]).toHaveTextContent('510');
+      expect(renderedRows()[0]).toHaveTextContent('569');
+      expect(renderedRows()[renderedRows().length - 1]).toHaveTextContent('587');
       expect(container.querySelector('.ui-data-grid-virtual-spacer')?.getAttribute('aria-hidden')).toBe('true');
     } finally {
       jest.useRealTimers();
@@ -305,11 +309,11 @@ describe('shared React presentation', () => {
       act(() => { jest.runOnlyPendingTimers(); });
       fireEvent.scroll(scroller);
       act(() => { jest.runOnlyPendingTimers(); });
-      expect(scroller.scrollTop).toBe(15_000);
+      expect(scroller.scrollTop).toBe(13_000);
       expect(scroller.scrollLeft).toBe(240);
       const renderedRows = container.querySelectorAll<HTMLTableRowElement>('tbody tr:not(.ui-data-grid-virtual-spacer)');
       expect(renderedRows[0]).toHaveTextContent('493');
-      expect(renderedRows[renderedRows.length - 1]).toHaveTextContent('510');
+      expect(renderedRows[renderedRows.length - 1]).toHaveTextContent('511');
     } finally {
       jest.useRealTimers();
     }
@@ -370,6 +374,27 @@ describe('shared React presentation', () => {
     expect(onContextMenu).toHaveBeenCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 20, clientY: 40 });
     fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
+  });
+
+  it('uses the compact Excel-like filter action instead of inline fields', () => {
+    const onOpenColumnFilter = jest.fn();
+    const { container } = render(<DataGrid
+      resultSetId="compact-filter-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'VARCHAR' }]}
+      rows={[[1, 'alpha']]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+      onOpenColumnFilter={onOpenColumnFilter}
+      showInlineColumnFilters={false}
+    />);
+
+    expect(container.querySelector('.ui-data-grid-compact')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Filter NAME' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open filter for NAME' }));
+    expect(onOpenColumnFilter).toHaveBeenCalledWith(expect.objectContaining({
+      columnIndex: 1,
+      column: expect.objectContaining({ name: 'NAME' }),
+      anchor: expect.anything(),
+    }));
   });
 
   it('delegates clipboard writes to the host port with the typed payload', () => {

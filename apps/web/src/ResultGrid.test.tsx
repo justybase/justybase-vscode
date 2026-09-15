@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiClientProvider, createApiClient } from './api';
 import { ResultGrid } from './ResultGrid';
@@ -68,15 +68,17 @@ describe('legacy Web ResultGrid compatibility surface', () => {
       </ApiClientProvider>,
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Group by CATEGORY' }));
+    await user.click(await screen.findByRole('button', { name: 'Group', exact: true }));
     expect(await screen.findByText('CATEGORY: EU')).toBeInTheDocument();
     expect(screen.getAllByRole('table')).toHaveLength(1);
     expect(document.querySelectorAll('.ui-data-grid-group-row')).toHaveLength(2);
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/query/server-group-query/group'), expect.anything());
     expect(screen.getAllByRole('group', { name: 'Grouping panel' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Close group panel' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Grouping panel' })).toHaveTextContent('CATEGORY');
-    expect(screen.getByRole('textbox', { name: 'Filter CATEGORY' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Filter AMOUNT' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Filter CATEGORY' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Filter AMOUNT' })).not.toBeInTheDocument();
+    expect(screen.getByRole('table').closest('.ui-data-grid-compact')).toBeInTheDocument();
   });
 
   it('uses one virtualized result surface and loads the next batch on scroll', async () => {
@@ -124,8 +126,8 @@ describe('legacy Web ResultGrid compatibility surface', () => {
     expect(scroller).not.toBeNull();
     if (!scroller) return;
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 120 });
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 300_120 });
-    scroller.scrollTop = 300_000;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 260_120 });
+    scroller.scrollTop = 260_000;
     fireEvent.scroll(scroller);
 
     await waitFor(() => expect(pageRequests).toHaveLength(2));
@@ -172,5 +174,84 @@ describe('legacy Web ResultGrid compatibility surface', () => {
     expect(screen.getByRole('button', { name: 'Deselect all' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Invert' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Values for CATEGORY' })).toHaveTextContent('(Blanks)');
+  });
+
+  it('preserves a legacy simple filter when the compact menu is opened and applied', async () => {
+    const user = userEvent.setup();
+    const storage = createWorkspaceStorage('result-grid-legacy-filter-test');
+    storage.set('grid_v2_legacy-filter-result', JSON.stringify({
+      version: 2,
+      resultSetId: 'legacy-filter-result',
+      state: { columnFilters: [{ id: '0', value: 'EU' }] },
+    }));
+    const api = createApiClient({ fetch: jest.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response)) });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'legacy-filter-result',
+      columns: ['CATEGORY'],
+      columnTypes: ['VARCHAR'],
+      rows: [['EU'], ['US']],
+      totalRows: 2,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={storage}>
+          <ResultGrid queryId="legacy-filter-query" result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Open filter for CATEGORY' }));
+    const filter = await screen.findByRole('dialog', { name: 'Filter CATEGORY' });
+    expect(within(filter).getByRole('combobox', { name: 'Filter condition for CATEGORY' })).toHaveValue('contains');
+    expect(within(filter).getByRole('textbox', { name: 'Filter value for CATEGORY' })).toHaveValue('EU');
+    await user.click(within(filter).getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('cell', { name: 'EU' })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: 'US' })).not.toBeInTheDocument();
+  });
+
+  it('does not turn an untouched truncated value list into a first-page filter', async () => {
+    const user = userEvent.setup();
+    const pageRequests: string[] = [];
+    const fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/page')) pageRequests.push(url);
+      const json = url.includes('/distinct')
+        ? { values: ['EU'], truncated: true }
+        : url.includes('/page')
+          ? { sessionId: 'session-truncated-filter', columns: [{ name: 'CATEGORY', type: 'VARCHAR' }], rows: [['EU'], ['US']], offset: 0, limit: 10_000, totalRows: 2, hasMore: false }
+          : {};
+      return { ok: true, status: 200, headers: new Headers(), json: async () => json, blob: async () => new Blob() } as unknown as Response;
+    });
+    const api = createApiClient({ fetch });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'truncated-filter-result',
+      sessionId: 'session-truncated-filter',
+      columns: ['CATEGORY'],
+      columnTypes: ['VARCHAR'],
+      rows: [['EU'], ['US']],
+      totalRows: 2,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-truncated-filter-test')}>
+          <ResultGrid queryId="truncated-filter-query" result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    await waitFor(() => expect(pageRequests).toHaveLength(1));
+    await user.click(await screen.findByRole('button', { name: 'Open filter for CATEGORY' }));
+    const filter = await screen.findByRole('dialog', { name: 'Filter CATEGORY' });
+    expect(within(filter).getByText(/first 500 values/)).toBeInTheDocument();
+    await user.click(within(filter).getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('cell', { name: 'EU' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'US' })).toBeInTheDocument();
+    expect(pageRequests).toHaveLength(1);
   });
 });

@@ -65,6 +65,8 @@ export { createExecutionController, createWorkspaceController } from './controll
 export type { ExecutionController, WorkspaceController } from './controllers';
 export { resultAsyncState } from './resultState';
 export type { UiResultAsyncState, UiResultAsyncStateOptions } from './resultState';
+export { resolveDatabasePicker } from './databasePicker';
+export type { DatabasePickerState } from './databasePicker';
 export { createAggregateAnalysisTable, createGroupAnalysisTable, createPivotAnalysisTable } from './resultAnalysis';
 export type { UiResultAnalysisKind, UiResultAnalysisTable } from './resultAnalysis';
 export { hasUiResultQuery, resolveUiResultColumnIndex, toUiResultQueryOptions } from './resultQuery';

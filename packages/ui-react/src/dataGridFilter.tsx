@@ -20,6 +20,8 @@ export interface DataGridColumnFilterState {
   readonly search: string;
   readonly loading: boolean;
   readonly truncated: boolean;
+  /** True after the user changes a filter control; opening and applying is a no-op. */
+  readonly dirty?: boolean;
   readonly error?: string;
 }
 
@@ -65,7 +67,7 @@ export function DataGridColumnFilterPanel({ state, onChange, onApply, onClear, o
     const next = state.selectedKeys.filter(key => !visibleKeys.has(key));
     if (mode === 'all') next.push(...visibleOptions.map(option => option.key));
     if (mode === 'invert') next.push(...visibleOptions.filter(option => !selected.has(option.key)).map(option => option.key));
-    onChange({ selectedKeys: [...new Set(next)] });
+    onChange({ selectedKeys: [...new Set(next)], dirty: true });
   };
 
   return <div className="ui-data-grid-filter-menu grid-column-filter-menu" role="dialog" aria-label={`Filter ${state.columnName}`} style={{ left: state.left, top: state.top }} onMouseDown={event => event.stopPropagation()}>
@@ -74,16 +76,16 @@ export function DataGridColumnFilterPanel({ state, onChange, onApply, onClear, o
       <button type="button" className="ui-data-grid-filter-close" aria-label="Close filter" onClick={onClose}>×</button>
     </div>
     <div className="ui-data-grid-filter-body">
-      <label className="ui-data-grid-filter-condition"><span>Filter by</span><select aria-label={`Filter condition for ${state.columnName}`} value={state.operator} onChange={event => onChange({ operator: event.target.value as QueryColumnFilterOperator })}>{FILTER_OPERATORS.map(operator => <option key={operator.value} value={operator.value}>{operator.label}</option>)}</select></label>
+      <label className="ui-data-grid-filter-condition"><span>Filter by</span><select aria-label={`Filter condition for ${state.columnName}`} value={state.operator} onChange={event => onChange({ operator: event.target.value as QueryColumnFilterOperator, dirty: true })}>{FILTER_OPERATORS.map(operator => <option key={operator.value} value={operator.value}>{operator.label}</option>)}</select></label>
       {state.operator === 'in' ? <>
         <input className="ui-data-grid-filter-search" aria-label={`Search values for ${state.columnName}`} placeholder="Search values…" value={state.search} onChange={event => onChange({ search: event.target.value })} />
         <div className="ui-data-grid-filter-selection-actions"><button type="button" onClick={() => selectVisible('all')}>Select all</button><button type="button" onClick={() => selectVisible('none')}>Deselect all</button><button type="button" onClick={() => selectVisible('invert')}>Invert</button></div>
         <div className="ui-data-grid-filter-values" role="group" aria-label={`Values for ${state.columnName}`}>
-          {visibleOptions.map(option => <label key={option.key}><input type="checkbox" checked={selected.has(option.key)} onChange={event => onChange({ selectedKeys: event.target.checked ? [...new Set([...state.selectedKeys, option.key])] : state.selectedKeys.filter(key => key !== option.key) })} /><span title={option.label}>{option.label}</span></label>)}
+          {visibleOptions.map(option => <label key={option.key}><input type="checkbox" checked={selected.has(option.key)} onChange={event => onChange({ selectedKeys: event.target.checked ? [...new Set([...state.selectedKeys, option.key])] : state.selectedKeys.filter(key => key !== option.key), dirty: true })} /><span title={option.label}>{option.label}</span></label>)}
           {!state.loading && state.options.length === 0 && <span className="ui-data-grid-filter-empty">No values available.</span>}
         </div>
         <small className="ui-data-grid-filter-summary">{state.selectedKeys.length.toLocaleString()} selected{state.truncated ? ' · first 500 values' : ''}</small>
-      </> : isValueOperator ? <input className="ui-data-grid-filter-value" aria-label={`Filter value for ${state.columnName}`} placeholder="Enter a value…" value={state.value} onChange={event => onChange({ value: event.target.value })} onKeyDown={event => { if (event.key === 'Enter') onApply(); }} /> : <p className="ui-data-grid-filter-hint">Rows are matched against NULL values.</p>}
+      </> : isValueOperator ? <input className="ui-data-grid-filter-value" aria-label={`Filter value for ${state.columnName}`} placeholder="Enter a value…" value={state.value} onChange={event => onChange({ value: event.target.value, dirty: true })} onKeyDown={event => { if (event.key === 'Enter') onApply(); }} /> : <p className="ui-data-grid-filter-hint">Rows are matched against NULL values.</p>}
       {state.loading && <span className="ui-data-grid-filter-loading" role="status">Loading distinct values…</span>}
       {state.error && <span className="ui-data-grid-filter-error" role="alert">{state.error}</span>}
     </div>

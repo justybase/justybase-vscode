@@ -114,6 +114,8 @@ export interface UiResultViewState {
   readonly scrollTop: number;
   readonly scrollLeft: number;
   readonly anchorRow?: number;
+  /** Row geometry used when scrollTop was persisted; absent means legacy geometry. */
+  readonly scrollRowHeight?: number;
 }
 
 /** Renderer-safe metadata required for canonical result-cell formatting. */
