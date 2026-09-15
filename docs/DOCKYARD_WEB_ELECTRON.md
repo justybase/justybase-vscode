@@ -93,7 +93,9 @@ Netezza profile when credentials are available.
 2. Create two SQL tabs; edit one, reorder tabs, float/dock it, auto-hide Schema,
    pin it again, reload, and verify the layout and dirty markers persist.
 3. In Schema, use search and the object context menu for top rows, Explain,
-   Copy DDL, Open DDL, Object Designer, Import CSV/XLSX, and refresh.
+   Copy DDL, Open DDL, Object Designer, Import CSV/XLSX, and refresh. After
+   selecting a table, also verify that **Import data** is available in the
+   main bar in both Web and Electron.
 4. In Monaco, verify completion, hover/diagnostics, Problems selection, code
    action/quick fix, dialect switching, and the editor remains focused after a
    result or tool is activated.

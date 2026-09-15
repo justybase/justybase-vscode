@@ -1151,6 +1151,7 @@ export function App(): ReactElement {
       { id: 'electron-explain', title: 'Explain', defaultDock: 'hidden' as const, content: <CapabilityGate capability={explainCapability} fallback={<AsyncStateView state="empty" emptyLabel="Explain is not available in this Electron shell yet." />}><ExplainView state={activeResult ? resultState : 'empty'} plan={activeResult?.message} message={resultMessage} onCancel={() => void cancel()} /></CapabilityGate> },
     ]}
     onNewDocument={() => openDocument('SELECT 1;', 'query.sql')}
+    headerActions={<button type="button" className="electron-dockyard-button electron-dockyard-import-data" onClick={() => { if (selectedObject) setImportTarget(selectedObject); }} disabled={!selectedObject} title={selectedObject ? `Import data into ${selectedObject.schema}.${selectedObject.objectName ?? selectedObject.label}` : 'Select a table in Explorer first'}>Import data</button>}
     onActiveDocumentChanged={documentId => store.dispatch({ type: 'workspace/select-document', documentId })}
     onDocumentClosing={closeDocument}
     onToolActivated={toolId => store.dispatch({ type: 'shell/surface', surface: toolId === 'electron-history' ? 'history' : toolId === 'electron-explain' ? 'explain' : 'workspace' })}

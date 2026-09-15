@@ -727,6 +727,9 @@ tbody tr:hover td { background: #1e293b; }
 .dockyard-topbar-button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(107 135 157 / 16%); }
 .dockyard-topbar-new-query { margin-left: 5px; border-color: #3d4b57; color: #c2d1dc; background: #232a31; }
 .dockyard-topbar-new-query:hover, .dockyard-topbar-new-query:focus-visible { border-color: #69869d; background: #2c3944; }
+.dockyard-topbar-import { border-color: #455968; color: #b9cbd8; background: #202a32; }
+.dockyard-topbar-import:hover:not(:disabled), .dockyard-topbar-import:focus-visible:not(:disabled) { border-color: #6d8799; color: #e0e6eb; background: #2a3944; }
+.dockyard-topbar-import:disabled { cursor: not-allowed; color: #64717c; opacity: .7; }
 .dockyard-shell .topbar-user { gap: 2px; }
 .dockyard-shell .topbar-action { min-height: 29px; padding: 0 8px; border: 1px solid transparent; border-radius: 4px; color: #9eabb7; background: transparent; }
 .dockyard-shell .topbar-action:hover, .dockyard-shell .topbar-action:focus-visible { border-color: #3b4650; color: #e0e6eb; background: #252c33; }

@@ -58,6 +58,7 @@ export function LegacyWorkspaceRecovery({
   onOpenQuery,
   onOpenDdl,
   onImport,
+  onImportData,
   onInsertColumn,
   onEditRow,
   onOpenConnectionForm,
@@ -112,6 +113,7 @@ export function LegacyWorkspaceRecovery({
         <button type="button" className="secondary small" onClick={onHistoryRefresh}>History</button>
         <button type="button" className="secondary small" onClick={onOpenAudit}>Audit</button>
         {user.role === 'admin' && <button type="button" className="secondary small" onClick={onOpenAdmin}>Admin</button>}
+        {onImportData && <button type="button" className="secondary small" onClick={onImportData} disabled={!inspectedObject} title={inspectedObject ? `Import data into ${inspectedObject.schema}.${inspectedObject.objectName ?? inspectedObject.label}` : 'Select a table in Schema first'}>Import data</button>}
         <button type="button" className="secondary small" onClick={onOpenSettings}>⚙ Settings</button>
         <button type="button" className="secondary small" onClick={onLogout}>Log out</button>
       </div>
