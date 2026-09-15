@@ -547,8 +547,10 @@ Remote-WSL gates remain explicit follow-up evidence.
 
 Status: the historical R9 extraction is complete for the production Web
 renderer. The shared `ui-core`/`ui-react` foundation, authenticated Electron
-development/test shell, Shared Web composition, and VS Code adapter boundary
-are in place. Web no longer has a legacy/Dockyard runtime switch; VS Code keeps
+development/test shell, Dockyard Web composition (R10), and VS Code adapter
+boundary are in place. Web has no legacy renderer and no `VITE_UI_MODE` runtime
+switch: the Dockyard shell is the only production composition root, and the
+retired `SharedWebWorkspace` is a component-test fixture; VS Code keeps
 its host-owned renderer. Remaining gaps are explicitly platform-specific
 capabilities rather than a Web renderer rollout blocker. R9 is a
 strangler-style product-surface migration after the
@@ -758,20 +760,26 @@ The implementation rule for the entire R9 is: work only in the working tree,
 never run `git commit` or `git push`, and keep generated/test artifacts
 temporary and ignored until the user makes a separate release decision.
 
-### R10 — Dockyard web workspace and test-harness login (historical)
+### R10 — Dockyard web workspace and test-harness login (current shell)
 
-Status: historical implementation record. The Dockyard path was evaluated but
-is not the production Web renderer; Shared Web is now the default and the
-Dockyard composition, recovery path, and mode switch are not mounted. The
-cross-platform browser workflow is maintained as `web-shared.yml`.
+Status: implemented and current. The Dockyard path replaced the Web editor's
+default shell while keeping `ui-core` and `ui-react` platform-neutral. It was
+briefly reverted to the Shared Web composition on 2026-09-13 and restored as the
+production/default Web shell on 2026-09-14 (`fix(workspace): restore Dockyard
+shell lifecycle parity`). `DockyardWorkspace` is mounted unconditionally by the
+Web composition root, and the composition, layout-persistence, and
+initialization-recovery paths are live.
 
-The remainder of this section records the retired experiment for traceability;
-new Web work must follow the Shared Web contract and must not restore Dockyard
-runtime branching.
-The historical experiment replaced the Web editor's default shell with the
-web-only Dockyard adapter while keeping `ui-core` and `ui-react` platform-
-neutral. It is retained here only as an implementation record, not as an
-active renderer or supported Web layout engine.
+There is no `VITE_UI_MODE` runtime switch and no shared-renderer rollback path.
+`SharedWebWorkspace` is retained only as a component-test fixture for portable
+reducer and presentation tests. It must not be re-promoted to a production
+shell; a future shell change has to be recorded in the
+[cross-product UI parity matrix](CROSS_PRODUCT_UI_PARITY.md) and
+[Dockyard Web and Electron](DOCKYARD_WEB_ELECTRON.md), which own the current
+composition contract.
+
+The sections below record the extraction itself and remain authoritative for
+the vendored layout boundary, persistence rules, and acceptance gates.
 
 #### R10.1 — Vendored layout boundary
 
@@ -807,10 +815,11 @@ active renderer or supported Web layout engine.
    runtime handles. A rejected snapshot resets to the safe default layout.
    The previous shell is retained as a temporary initialization-recovery path
    until the Dockyard rollout is fully closed.
-4. The Dockyard path is the default Web shell without a long A/B rollout.
-   `VITE_UI_MODE=shared` remains an explicit R9 shared-composition probe;
-   failure to initialize Dockyard presents a recoverable reload/reset state
-   rather than blocking authentication or data access.
+4. The Dockyard path is the default Web shell without a long A/B rollout; the
+   `VITE_UI_MODE=shared` probe was removed with the 2026-09-14 restoration, so
+   the shell has no runtime switch. Failure to initialize Dockyard presents a
+   recoverable reload/reset state rather than blocking authentication or data
+   access.
 
 #### R10.3 — Controlled test login
 
@@ -836,7 +845,7 @@ active renderer or supported Web layout engine.
 | Test login | Web client/component tests; API route tests for bodyless login, matching cookies/session, and absence outside controlled test mode. |
 | Dockyard lifecycle | Layout migration/validation tests plus adapter disposal tests covering hosts, listeners, subscriptions, stale content, and failed initialization. |
 | Web workspace | `npm run test:web`, `npm run build:web`, and the deterministic Playwright flow covering login, query documents, reorder, float, auto-hide, dock-back, reload, history, Explain, modals, cancellation, and narrow viewport. |
-| Cross-platform browser | `.github/workflows/web-shared.yml` runs the controlled Chromium/API flow on `ubuntu-latest`, `windows-latest`, and `macos-14`; the Shared Web matrix is the active gate. |
+| Cross-platform browser | `.github/workflows/web-shared.yml` runs the controlled Chromium/API flow on `ubuntu-latest`, `windows-latest`, and `macos-14`; the gate exercises the Dockyard Web scenario (`npm run test:playwright:web-dockyard`), and `npm run test:playwright:web-shared` is a compatibility alias for that same gate. |
 | Final R10 | `npm run verify:pr`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, and the applicable browser/API/package gates. |
 
 R10 is complete only when the Web Dockyard layout survives reload and user

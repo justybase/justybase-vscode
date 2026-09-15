@@ -40,11 +40,12 @@ deployment because cross-site cookies require `SameSite=None; Secure`.
 HTTP origins remain useful for same-site local development and receive
 `SameSite=Lax` cookies.
 
-The authenticated Web workspace uses Shared UI by default and in production.
-There is no runtime rollback flag or `VITE_UI_MODE` switch; the retired
-Dockyard composition is not mounted by the Web entrypoint. Shared UI provides
-durable query documents, connections, schema browsing, history, Explain,
-guarded designer flows, and the common Result Grid.
+The authenticated Web workspace uses the Dockyard composition root by default
+and in production. There is no runtime rollback flag or `VITE_UI_MODE` switch;
+the retired Shared UI composition is not mounted by the Web entrypoint. The
+shared `ui-core`/`ui-react` layer provides durable query documents,
+connections, schema browsing, history, Explain, guarded designer flows, and the
+common Result Grid.
 
 ## Required configuration
 
