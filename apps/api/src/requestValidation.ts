@@ -45,8 +45,8 @@ export function parseDesignerCapabilitiesRequest(value: unknown): DesignerCapabi
 export function parseMetadataDdlRequest(value: unknown): MetadataDdlRequest {
   const record = objectValue(value, 'query');
   const objectType = requiredString(record.objectType, 'objectType').toUpperCase();
-  if (objectType !== 'TABLE' && objectType !== 'VIEW') {
-    throw new RequestValidationError('objectType must be TABLE or VIEW.');
+  if (!['TABLE', 'VIEW', 'PROCEDURE', 'EXTERNAL TABLE', 'SYNONYM'].includes(objectType)) {
+    throw new RequestValidationError('objectType must be TABLE, VIEW, PROCEDURE, EXTERNAL TABLE or SYNONYM.');
   }
   return {
     connectionId: requiredString(record.connectionId, 'connectionId'),

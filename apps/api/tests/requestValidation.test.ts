@@ -62,8 +62,14 @@ describe('API request validation', () => {
     expect(() => parseQueryGroupRequest({ groupByColumnIndices: [0], aggregates: [{ function: 'drop' }] })).toThrow('not supported');
   });
 
-  it('limits schema DDL requests to supported object types', () => {
+  it('accepts all object types supported by the schema DDL service', () => {
     expect(parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 't', objectType: 'table' }).objectType).toBe('TABLE');
-    expect(() => parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 't', objectType: 'procedure' })).toThrow('objectType must be TABLE or VIEW');
+    expect(parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 'ext', objectType: 'external table' }).objectType).toBe('EXTERNAL TABLE');
+    expect(parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 'p', objectType: 'procedure' }).objectType).toBe('PROCEDURE');
+    expect(parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 'syn', objectType: 'synonym' }).objectType).toBe('SYNONYM');
+  });
+
+  it('rejects unsupported schema DDL object types', () => {
+    expect(() => parseMetadataDdlRequest({ connectionId: 'c', database: 'db', schema: 's', objectName: 'f', objectType: 'function' })).toThrow('objectType must be TABLE, VIEW, PROCEDURE, EXTERNAL TABLE or SYNONYM');
   });
 });
