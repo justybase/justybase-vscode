@@ -37,6 +37,19 @@ the grouping priority. Each group is rendered as a tree row with an expand/
 collapse chevron, indentation, row count, and preserved row selection/copy
 coordinates. Removing the last grouping returns the flat result grid.
 
+Click **Pivot** to choose a row column, a pivot column, and a numeric value
+column. The Web editor opens this configuration in an in-app dialog, so the
+operation also works in browsers where `window.prompt` is unavailable. The
+result is a separate, closable grid and respects the active filters; for a
+server-backed result the aggregation is performed by the database, while a
+local result is aggregated in the browser.
+
+Drag a cell or row selection beyond the top or bottom edge of the result
+viewport to keep extending it while the grid scrolls. Header widths include
+the type badge and the drag, pin, filter, and grouping controls. A manually
+saved width is still respected, but it cannot be reduced below the readable
+header minimum; use horizontal scrolling for a wide result.
+
 <figure>
   <img src="screenshots/row-view.png" alt="Row View showing a result row side by side with values">
   <figcaption>Row View and Value Viewer open long cells without leaving the result workspace.</figcaption>
