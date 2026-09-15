@@ -9,6 +9,8 @@ export interface IProcedureRepairToolParameters {
 }
 
 export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureRepairToolParameters> {
+    private readonly confirmedDdlTargets = new Map<string, number>();
+
     constructor(private readonly copilotService: CopilotToolService) { }
 
     async prepareInvocation(
@@ -21,15 +23,21 @@ export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureR
         const sqlPreview = truncateSql(inputSql || editorSql || 'the complete procedure block from the active editor');
         const identity = inputSql ? extractProcedureIdentity(inputSql) : undefined;
         const targetName = identity?.name || 'the selected procedure';
+        const confirmationKey = buildConfirmationKey(options.input);
+        const now = Date.now();
+        const confirmedAt = this.confirmedDdlTargets.get(confirmationKey);
+        const ddlConfirmationValid = confirmedAt !== undefined && now - confirmedAt < 10 * 60 * 1000;
         const callNotice = mode === 'compile_and_call'
             ? '\n\nAfter compilation, a separate modal confirmation will be required before the test CALL is executed. The CALL may modify database data.'
             : '';
 
-        return {
+        const prepared: vscode.PreparedToolInvocation = {
             invocationMessage: mode === 'compile_and_call'
                 ? `Compile and test ${targetName}...`
                 : `Compile ${targetName}...`,
-            confirmationMessages: {
+        };
+        if (!ddlConfirmationValid) {
+            prepared.confirmationMessages = {
                 title: 'Compile or repair Netezza procedure',
                 message: new vscode.MarkdownString(
                     `This operation executes the procedure DDL against the connection assigned to the active SQL document.\n\n` +
@@ -37,8 +45,9 @@ export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureR
                     `\`\`\`sql\n${sqlPreview}\n\`\`\`\n\n` +
                     `The repair workflow allows at most three attempts.${callNotice}`
                 )
-            }
-        };
+            };
+        }
+        return prepared;
     }
 
     async invoke(
@@ -46,6 +55,7 @@ export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureR
         token: vscode.CancellationToken,
     ): Promise<vscode.LanguageModelToolResult> {
         try {
+            this.confirmedDdlTargets.set(buildConfirmationKey(options.input), Date.now());
             const result = await this.copilotService.repairProcedure(options.input, token);
             return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result)]);
         } catch (error: unknown) {
@@ -58,4 +68,18 @@ export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureR
 function truncateSql(sql: string): string {
     const maxLength = 1200;
     return sql.length <= maxLength ? sql : `${sql.slice(0, maxLength)}\n...`;
+}
+
+function buildConfirmationKey(input: IProcedureRepairToolParameters): string {
+    const editor = vscode.window.activeTextEditor;
+    const candidateSql = input.sql?.trim()
+        || (editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection).trim() : '')
+        || 'active-editor-procedure';
+    const identity = extractProcedureIdentity(candidateSql);
+    return [
+        editor?.document.uri.toString() || 'no-editor',
+        input.mode,
+        identity?.name?.toUpperCase() || candidateSql.slice(0, 160),
+        JSON.stringify(input.callArguments || [])
+    ].join('|');
 }
