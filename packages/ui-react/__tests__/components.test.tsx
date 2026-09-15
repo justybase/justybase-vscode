@@ -919,6 +919,7 @@ describe('shared React presentation', () => {
       onInsert: jest.fn(),
       onOpenQuery: jest.fn(),
       onOpenExplain: jest.fn(),
+      onOpenEditData: jest.fn(),
       onOpenDdl: jest.fn(),
       onCopyDdl: jest.fn(),
       onImport: jest.fn(),
@@ -928,10 +929,13 @@ describe('shared React presentation', () => {
     render(<SchemaTree nodes={[table]} onSelect={jest.fn()} {...actions} />);
     fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
     expect(screen.getByRole('menu', { name: 'Actions for ORDERS' })).toBeInTheDocument();
-    await user.click(screen.getByRole('menuitem', { name: 'View top 1000' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Select Top 1000' }));
     expect(actions.onOpenQuery).toHaveBeenCalledWith(expect.objectContaining({ id: 'table-1' }));
     fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
-    await user.click(screen.getByRole('menuitem', { name: 'Open DDL' }));
+    await user.click(screen.getByRole('menuitem', { name: 'View/Edit Data (Limit 50k)' }));
+    expect(actions.onOpenEditData).toHaveBeenCalledTimes(1);
+    fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
+    await user.click(screen.getByRole('menuitem', { name: 'Create DDL Code' }));
     expect(actions.onOpenDdl).toHaveBeenCalledTimes(1);
     fireEvent.contextMenu(screen.getByRole('treeitem'), { clientX: 80, clientY: 120 });
     await user.click(screen.getByRole('menuitem', { name: 'Copy DDL' }));

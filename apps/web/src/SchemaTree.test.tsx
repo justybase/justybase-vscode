@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { SchemaTreeNode } from '@justybase/contracts';
+import type { SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
 import type { ApiClient } from './api';
 import { ApiClientProvider } from './api';
 import { SchemaTree } from './SchemaTree';
@@ -54,5 +54,51 @@ describe('legacy Web schema explorer', () => {
       searchAllDatabases: true,
     })), { timeout: 1_000 });
     expect(searchSchema.mock.calls[0]?.[0]?.database).toBeUndefined();
+  });
+
+  it('exposes the common VS Code schema object menu vocabulary in the same order', async () => {
+    const schemaObject: SchemaSearchResult = {
+      database: 'JUST_DATA',
+      schema: 'ADMIN',
+      name: 'DIMDATE',
+      objectType: 'TABLE',
+      matchType: 'name',
+    };
+    const schemaTree = jest.fn(async () => ({ nodes: [] }));
+    const searchSchema = jest.fn(async () => ({ items: [schemaObject] }));
+    const api = { schemaTree, searchSchema } as unknown as ApiClient;
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={storage()}>
+          <SchemaTree
+            connectionId="connection-1"
+            database="JUST_DATA"
+            onInsert={() => undefined}
+            onContextChange={() => undefined}
+            onOpenDesigner={() => undefined}
+            onOpenQuery={() => undefined}
+            onOpenDdl={() => undefined}
+            onImport={() => undefined}
+          />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search tables, views…'), { target: { value: 'dimdate' } });
+    const result = await screen.findByRole('button', { name: /DIMDATE/ });
+    fireEvent.contextMenu(result);
+
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
+      'Insert qualified name',
+      'Copy Name',
+      'Select Top 1000',
+      'Explain plan',
+      'View/Edit Data (Limit 50k)',
+      'Open Object Designer',
+      'Create DDL Code',
+      'Copy DDL',
+      'Import Data',
+      'Add to favorites',
+    ]);
   });
 });

@@ -1161,6 +1161,14 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (selectedConnection && documentId) void run('single', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database, documentId });
   }, [authoringDatabaseKind, openSharedDocument, run, selectedConnection]);
 
+  const openSchemaEditData = useCallback((node: SchemaTreeNode): void => {
+    if (node.kind !== 'object') return;
+    const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind, 50_000);
+    const title = `View/Edit · ${node.label}`;
+    const documentId = openSharedDocument(`schema:${node.id}:edit`, title, sql, { database: node.database, schema: node.schema });
+    if (selectedConnection && documentId) void run('single', { sql, connection: selectedConnection, database: node.database ?? selectedConnection.database, documentId });
+  }, [authoringDatabaseKind, openSharedDocument, run, selectedConnection]);
+
   const explainSchemaObject = useCallback((node: SchemaTreeNode): void => {
     if (node.kind !== 'object') return;
     const sql = buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName ?? node.label }, authoringDatabaseKind);
@@ -1388,6 +1396,15 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     setSchemaSearchRevision(previous => previous + 1);
     store.dispatch({ type: 'metadata/set-expanded', nodeIds: [] });
   }, [activeDocument, store]);
+
+  const setSchemaActiveContext = useCallback((node: SchemaTreeNode): void => {
+    const nextDatabase = node.database ?? (node.kind === 'database' ? node.label : undefined);
+    if (!activeDocument || !nextDatabase) return;
+    selectDatabase(nextDatabase);
+    if (node.kind === 'schema') {
+      store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { database: nextDatabase, schema: node.schema ?? node.label } });
+    }
+  }, [activeDocument, selectDatabase, store]);
 
   const saveConnection = useCallback((profile: ConnectionProfileSummary): void => {
     setConnectionEditor(undefined);
@@ -1902,8 +1919,11 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       onSelect={node => store.dispatch({ type: 'metadata/select', nodeId: node.id })}
       onActivate={activateSchemaNode}
       onInsert={insertSchemaNode}
+      onSetActiveContext={node => setSchemaActiveContext(node as SchemaTreeNode)}
+      onRefreshNode={() => refreshSchema()}
       onOpenQuery={openSchemaQuery}
       onOpenExplain={explainSchemaObject}
+      onOpenEditData={openSchemaEditData}
       onOpenDesigner={node => openSchemaDesigner(node as SchemaTreeNode)}
       onOpenDdl={node => { void openSchemaDdl(node); }}
       onCopyDdl={node => { void copySchemaDdl(node); }}

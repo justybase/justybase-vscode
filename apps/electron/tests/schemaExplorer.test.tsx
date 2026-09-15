@@ -46,7 +46,7 @@ describe('Electron schema explorer SQL templates', () => {
     render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" onInsert={() => undefined} onOpenQuery={onOpenQuery} />);
     await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
     fireEvent.contextMenu(schemaLabel());
-    fireEvent.click(screen.getByRole('button', { name: 'View top 1000' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Select Top 1000' }));
     expect(onOpenQuery).toHaveBeenCalledWith('SELECT TOP 1000 *\nFROM [DB1].[dbo].[Orders]', 'Top 1000 · Orders', table);
   });
 
@@ -56,10 +56,31 @@ describe('Electron schema explorer SQL templates', () => {
     render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" onInsert={() => undefined} onOpenQuery={onOpenQuery} />);
     await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
     fireEvent.contextMenu(schemaLabel());
-    fireEvent.click(screen.getByRole('button', { name: 'Explain plan' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Explain plan' }));
     expect(onOpenQuery).toHaveBeenCalledWith(expect.stringContaining('SET SHOWPLAN_TEXT ON;\nGO'), 'Explain · Orders', table);
     expect(onOpenQuery.mock.calls[0]?.[0]).toContain('SELECT TOP 1000 *\nFROM [DB1].[dbo].[Orders];');
     expect(onOpenQuery.mock.calls[0]?.[0]).toContain('SET SHOWPLAN_TEXT OFF;\nGO');
+  });
+
+  it('exposes the common VS Code schema object menu vocabulary in the same order', async () => {
+    const api = apiFixture();
+    render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" onInsert={() => undefined} onOpenQuery={() => undefined} onOpenDesigner={() => undefined} onOpenDdl={() => undefined} onImport={() => undefined} />);
+    await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
+    fireEvent.contextMenu(schemaLabel());
+
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
+      'Refresh Selected Metadata',
+      'Insert qualified name',
+      'Copy Name',
+      'Select Top 1000',
+      'Explain plan',
+      'View/Edit Data (Limit 50k)',
+      'Open Object Designer',
+      'Create DDL Code',
+      'Copy DDL',
+      'Import Data',
+      'Add to favorites',
+    ]);
   });
 
   it('opens the shared Object Designer from the object context menu', async () => {
@@ -68,7 +89,7 @@ describe('Electron schema explorer SQL templates', () => {
     render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="mssql" onInsert={() => undefined} onOpenDesigner={onOpenDesigner} />);
     await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
     fireEvent.contextMenu(schemaLabel());
-    fireEvent.click(screen.getByRole('button', { name: 'Open Object Designer' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open Object Designer' }));
     expect(onOpenDesigner).toHaveBeenCalledWith(table);
   });
 
@@ -78,7 +99,7 @@ describe('Electron schema explorer SQL templates', () => {
     render(<SchemaExplorer api={api} connectionId="connection-1" database="DB1" databaseKind="postgresql" onInsert={() => undefined} onOpenQuery={onOpenQuery} />);
     await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
     fireEvent.contextMenu(schemaLabel());
-    fireEvent.click(screen.getByRole('button', { name: 'View top 1000' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Select Top 1000' }));
     expect(onOpenQuery).toHaveBeenCalledWith('SELECT *\nFROM "dbo"."Orders"\nLIMIT 1000', 'Top 1000 · Orders', table);
   });
 
@@ -95,11 +116,11 @@ describe('Electron schema explorer SQL templates', () => {
     expect(screen.getByText('Recent')).toBeInTheDocument();
 
     fireEvent.contextMenu(tableButton);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to favorites' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add to favorites' }));
     expect(screen.getByText('Favorites')).toBeInTheDocument();
 
     fireEvent.contextMenu(tableButton);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy qualified name' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Name' }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith('[DB1].[dbo].[Orders]'));
 
     first.unmount();
@@ -117,7 +138,7 @@ describe('Electron schema explorer SQL templates', () => {
     await waitFor(() => expect(document.querySelector('.electron-schema-label')).toBeTruthy());
     const tableButton = schemaLabel();
     fireEvent.contextMenu(tableButton);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy DDL' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy DDL' }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith('CREATE TABLE dbo.Orders (id INT);'));
     expect(await screen.findByRole('status')).toHaveTextContent('Reconstructed DDL copied');
   });

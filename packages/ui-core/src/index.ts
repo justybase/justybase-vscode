@@ -67,6 +67,12 @@ export { resultAsyncState } from './resultState';
 export type { UiResultAsyncState, UiResultAsyncStateOptions } from './resultState';
 export { resolveDatabasePicker } from './databasePicker';
 export type { DatabasePickerState } from './databasePicker';
+export {
+  hasSchemaContextName,
+  SCHEMA_CONTEXT_MENU_LABELS,
+  SCHEMA_OBJECT_CONTEXT_MENU_ORDER,
+} from './schemaContextMenu';
+export type { SchemaContextMenuLabel } from './schemaContextMenu';
 export { createAggregateAnalysisTable, createGroupAnalysisTable, createPivotAnalysisTable } from './resultAnalysis';
 export type { UiResultAnalysisKind, UiResultAnalysisTable } from './resultAnalysis';
 export { hasUiResultQuery, resolveUiResultColumnIndex, toUiResultQueryOptions } from './resultQuery';
