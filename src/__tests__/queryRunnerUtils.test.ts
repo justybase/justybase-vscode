@@ -94,6 +94,14 @@ describe("queryRunnerUtils", () => {
       );
     });
 
+    it("should detect Netezza invalid protocol errors that require reconnect", () => {
+      expect(
+        isConnectionBrokenError(
+          new Error("Connection protocol is invalid; reconnect is required"),
+        ),
+      ).toBe(true);
+    });
+
     it("should detect broken connection on nested error cause", () => {
       expect(
         isConnectionBrokenError(

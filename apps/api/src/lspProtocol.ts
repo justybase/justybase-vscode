@@ -5,6 +5,7 @@ import type { AppStore } from './store';
 import { ApiMetadataService } from './metadataCache';
 import { STALE_TTL_MULTIPLIER } from '@justybase/metadata-core';
 import { getSqlAuthoring } from './sqlAuthoring';
+import { formatQualifiedObjectName } from '@justybase/dialect-utils/identifierUtils';
 
 interface WebSocketLike {
   readyState: number;
@@ -136,13 +137,20 @@ export async function requestMetadata(
       .filter(item => item.objectType?.toUpperCase() !== 'PROCEDURE')
       .map(item => {
         const schema = item.schema ?? requestedSchema ?? '';
-        const qualifiedText = schema
-          ? `${database}.${schema}.${requestedName}`
-          : `${database}..${requestedName}`;
+        // Netezza folds unquoted identifiers to upper case. Use the catalog
+        // spelling instead of the user's lower-case source spelling so the
+        // proposal does not turn into a case-sensitive quoted identifier.
+        const tableName = item.name;
+        const qualifiedText = formatQualifiedObjectName(
+          database,
+          schema || undefined,
+          tableName,
+          context?.databaseKind ?? 'netezza',
+        );
         return {
           database,
           ...(schema ? { schema } : {}),
-          name: requestedName,
+          name: tableName,
           qualifiedText,
           isPreferred: Boolean(effectiveSchema && schema && effectiveSchema.toUpperCase() === schema.toUpperCase()),
         };

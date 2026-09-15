@@ -48,6 +48,37 @@ describe("tableQualificationResolver", () => {
     ]);
   });
 
+  it("keeps lower-case Netezza table references unquoted in SQL048 proposals", () => {
+    const cache = createCache();
+    cache.setDatabases("conn1", [{ DATABASE: "JUST_DATA" }]);
+    cache.setTables(
+      "conn1",
+      "JUST_DATA.ADMIN",
+      [{ OBJNAME: "DIMDATE", SCHEMA: "ADMIN", label: "DIMDATE", objType: "TABLE" }],
+      new Map([["JUST_DATA.ADMIN.DIMDATE", 1]]),
+    );
+
+    const proposals = proposeTableQualification(
+      {
+        metadataCache: cache,
+        connectionManager: createConnectionManager({
+          getConnectionMetadata: jest.fn(() => ({
+            name: "conn1",
+            host: "host",
+            database: "JUST_DATA",
+            user: "user",
+          })),
+        } as Partial<ConnectionManager>),
+      },
+      { name: "dimdate" },
+    );
+
+    expect(proposals.map((proposal) => proposal.qualifiedText)).toEqual([
+      "JUST_DATA.ADMIN.DIMDATE",
+    ]);
+    expect(proposals[0]?.qualifiedText).not.toContain('"dimdate"');
+  });
+
   it("qualifies DB..TABLE using current schema as preferred among cached schemas", () => {
     const cache = createCache();
     cache.setDatabases("conn1", [{ DATABASE: "DB1" }]);

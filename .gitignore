@@ -446,3 +446,4 @@ tools/access-java-verify/lib/
 tools/access-java-verify/classes/
 .agents
 .husky/
+apps/api/.justybase-web-manual/query-sessions/

@@ -56,6 +56,36 @@ describe('web LSP metadata requests', () => {
     expect(listObjects).toHaveBeenCalledWith(profile, 'DB', undefined);
   });
 
+  it('uses the catalog spelling for lower-case Netezza qualification requests', async () => {
+    const profile = { id: 'connection-1' };
+    const getConnection = jest.fn().mockReturnValue(profile);
+    const store = { getConnection } as unknown as AppStore;
+    const documents = new Map([['file:///query.sql', {
+      text: '',
+      version: 1,
+      context: { connectionId: 'connection-1', database: 'JUST_DATA', schema: 'ADMIN' },
+    }]]);
+    (listObjects as jest.Mock).mockResolvedValue([
+      { name: 'DIMDATE', schema: 'ADMIN', objectType: 'TABLE' },
+    ]);
+
+    await expect(requestMetadata(
+      { documentUri: 'file:///query.sql', kind: 'qualifyTable', table: 'dimdate' },
+      documents,
+      store,
+      runtimes,
+      'user-1',
+    )).resolves.toEqual([
+      {
+        database: 'JUST_DATA',
+        schema: 'ADMIN',
+        name: 'DIMDATE',
+        qualifiedText: 'JUST_DATA.ADMIN.DIMDATE',
+        isPreferred: true,
+      },
+    ]);
+  });
+
   it('resolves DB..TABLE columns from the table schema instead of the default schema', async () => {
     const profile = { id: 'connection-1' };
     const getConnection = jest.fn().mockReturnValue(profile);
