@@ -70,6 +70,12 @@ interface PivotResult {
   rows: unknown[][];
 }
 
+interface PivotConfig {
+  readonly rowColumnIndex: number;
+  readonly pivotColumnIndex: number;
+  readonly valueColumnIndex: number;
+}
+
 type ResultGridColumnMetadata = DataGridCellMetadata & { readonly name: string };
 
 /**
@@ -167,6 +173,56 @@ function isNumericType(type?: string, scale?: number): boolean {
   return isDataGridNumericColumn({ type, scale });
 }
 
+function defaultPivotConfig(columns: readonly string[], types: readonly (string | undefined)[], scales: readonly (number | undefined)[]): PivotConfig | undefined {
+  if (columns.length < 3) return undefined;
+  const valueColumnIndex = types.findIndex((type, index) => index > 1 && isNumericType(type, scales[index]));
+  if (valueColumnIndex < 0) return undefined;
+  return { rowColumnIndex: 0, pivotColumnIndex: 1, valueColumnIndex };
+}
+
+function localPivotGroups(rows: readonly (readonly unknown[])[], config: PivotConfig): unknown[][] {
+  const grouped = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const rowKey = String(row[config.rowColumnIndex] ?? 'NULL');
+    const pivotKey = String(row[config.pivotColumnIndex] ?? 'NULL');
+    const value = Number(row[config.valueColumnIndex]);
+    if (!Number.isFinite(value)) continue;
+    const pivotValues = grouped.get(rowKey) ?? new Map<string, number>();
+    pivotValues.set(pivotKey, (pivotValues.get(pivotKey) ?? 0) + value);
+    grouped.set(rowKey, pivotValues);
+  }
+  return [...grouped.entries()].flatMap(([rowKey, values]) => [...values.entries()].map(([pivotKey, value]) => [rowKey, pivotKey, value]));
+}
+
+function buildPivotResult(
+  groupedRows: readonly (readonly unknown[])[],
+  columns: readonly string[],
+  columnTypes: readonly (string | undefined)[],
+  columnScales: readonly (number | undefined)[],
+  config: PivotConfig,
+): PivotResult {
+  const pivotValues: string[] = [];
+  const rowValues: string[] = [];
+  const rowMap = new Map<string, Map<string, unknown>>();
+  for (const row of groupedRows) {
+    const rowKey = String(row[0] ?? 'NULL');
+    const pivotKey = String(row[1] ?? 'NULL');
+    if (!rowValues.includes(rowKey)) rowValues.push(rowKey);
+    if (!pivotValues.includes(pivotKey)) pivotValues.push(pivotKey);
+    const values = rowMap.get(rowKey) ?? new Map<string, unknown>();
+    values.set(pivotKey, row[2]);
+    rowMap.set(rowKey, values);
+  }
+  const valueType = columnTypes[config.valueColumnIndex];
+  const valueScale = columnScales[config.valueColumnIndex];
+  return {
+    columns: [columns[config.rowColumnIndex] ?? 'Row', ...pivotValues],
+    columnTypes: [columnTypes[config.rowColumnIndex], ...pivotValues.map(() => valueType)],
+    columnScales: [columnScales[config.rowColumnIndex], ...pivotValues.map(() => valueScale)],
+    rows: rowValues.map(rowValue => [rowValue, ...pivotValues.map(pivotValue => rowMap.get(rowValue)?.get(pivotValue) ?? null)]),
+  };
+}
+
 function formatCellValue(value: unknown, metadata: DataGridCellMetadata = {}): { text: string; isNull: boolean; colorClass: string; } {
   if (value === null || value === undefined) return { text: 'NULL', isNull: true, colorClass: '' };
   const text = formatDataGridCellValue(value, metadata.type, metadata);
@@ -219,6 +275,8 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [aggregatesLoading, setAggregatesLoading] = useState(false);
   const [gridHydratedKey, setGridHydratedKey] = useState<string | null>(null);
   const [pivot, setPivot] = useState<PivotResult | null>(null);
+  const [pivotConfigOpen, setPivotConfigOpen] = useState(false);
+  const [pivotConfig, setPivotConfig] = useState<PivotConfig>({ rowColumnIndex: 0, pivotColumnIndex: 1, valueColumnIndex: 2 });
   const [grouping, setGrouping] = useState(false);
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
   const [filterMenu, setFilterMenu] = useState<FilterMenuState | undefined>(undefined);
@@ -333,6 +391,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setError('');
     setAggregates(null);
     setPivot(null);
+    setPivotConfigOpen(false);
     setDetailRowIndex(null);
     setCellViewer(undefined);
     setFilterMenu(undefined);
@@ -405,8 +464,9 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     const id = String(request.columnIndex);
     const saved = columnFilterDefinitions[id];
     const legacyValue = columnFilters.find(item => item.id === id)?.value;
-    const definition = saved ?? (legacyValue?.trim()
-      ? { operator: 'contains' as const, value: legacyValue.trim(), values: [] as readonly unknown[] }
+    const legacyText = typeof legacyValue === 'string' ? legacyValue.trim() : '';
+    const definition = saved ?? (legacyText
+      ? { operator: 'contains' as const, value: legacyText, values: [] as readonly unknown[] }
       : undefined);
     const anchor = request.anchor;
     const viewportMargin = 10;
@@ -572,36 +632,53 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     }
   }
 
-  function columnIndexes(value: string): number[] {
-    return [...new Set(value.split(',').map(part => Number(part.trim()) - 1).filter(index => Number.isInteger(index) && index >= 0 && index < result.columns.length))];
+  function openPivotConfiguration(): void {
+    const next = defaultPivotConfig(result.columns, gridColumns.map(column => column.type), gridColumns.map(column => column.scale));
+    if (!next) {
+      setError('Pivot requires at least three columns and a numeric value column after the row and pivot columns.');
+      return;
+    }
+    setPivotConfig(next);
+    setPivotConfigOpen(true);
+    setError('');
   }
 
-  async function pivotResults(): Promise<void> {
-    const selected = window.prompt('Pivot columns: row column, pivot column, numeric value column (1-based):', '1,2,3');
-    if (!selected) return;
-    const indices = columnIndexes(selected);
-    if (indices.length !== 3) { setError('Pivot requires exactly three column numbers.'); return; }
+  function updatePivotConfig(field: keyof PivotConfig, value: number): void {
+    setPivotConfig(previous => {
+      const next = { ...previous, [field]: value };
+      if ((field === 'rowColumnIndex' || field === 'pivotColumnIndex') && (next.valueColumnIndex === next.rowColumnIndex || next.valueColumnIndex === next.pivotColumnIndex)) {
+        const replacement = gridColumns.findIndex((column, index) => index !== next.rowColumnIndex && index !== next.pivotColumnIndex && isNumericType(column.type, column.scale));
+        if (replacement >= 0) next.valueColumnIndex = replacement;
+      }
+      return next;
+    });
+  }
+
+  async function pivotResults(config: PivotConfig): Promise<void> {
+    const indexes = [config.rowColumnIndex, config.pivotColumnIndex, config.valueColumnIndex];
+    if (new Set(indexes).size !== indexes.length || indexes.some(index => index < 0 || index >= result.columns.length)) {
+      setError('Pivot requires three different columns.');
+      return;
+    }
+    const valueColumn = gridColumns[config.valueColumnIndex];
+    if (!valueColumn || !isNumericType(valueColumn.type, valueColumn.scale)) {
+      setError('Pivot requires a numeric value column.');
+      return;
+    }
+    setPivotConfigOpen(false);
     setGrouping(true);
     setError('');
     try {
-      const response = await api.group(queryId, { statementIndex, groupByColumnIndices: indices.slice(0, 2), aggregates: [{ function: 'sum', columnIndex: indices[2] }], globalFilter, columnFilters: requestFilters, groupLimit: 2_000 });
-      const pivotValues = [...new Set(response.rows.map(row => String(row[1] ?? 'NULL')))];
-      const rowValues = [...new Set(response.rows.map(row => String(row[0] ?? 'NULL')))];
-      const rowMap = new Map<string, Map<string, unknown>>();
-      response.rows.forEach(row => {
-        const rowKey = String(row[0] ?? 'NULL');
-        const values = rowMap.get(rowKey) ?? new Map<string, unknown>();
-        values.set(String(row[1] ?? 'NULL'), row[2]);
-        rowMap.set(rowKey, values);
-      });
-      const valueType = result.columnTypes[indices[2]];
-      const valueScale = result.columnScales[indices[2]];
-      setPivot({
-        columns: [result.columns[indices[0]] ?? 'Row', ...pivotValues],
-        columnTypes: [result.columnTypes[indices[0]], ...pivotValues.map(() => valueType)],
-        columnScales: [result.columnScales[indices[0]], ...pivotValues.map(() => valueScale)],
-        rows: rowValues.map(rowValue => [rowValue, ...pivotValues.map(pivotValue => rowMap.get(rowValue)?.get(pivotValue) ?? null)]),
-      });
+      const groupedRows = result.sessionId
+        ? (await api.group(queryId, { statementIndex, groupByColumnIndices: [config.rowColumnIndex, config.pivotColumnIndex], aggregates: [{ function: 'sum', columnIndex: config.valueColumnIndex }], globalFilter, columnFilters: requestFilters, groupLimit: 2_000 })).rows
+        : localPivotGroups(displayRows, config);
+      setPivot(buildPivotResult(
+        groupedRows,
+        result.columns,
+        gridColumns.map(column => column.type),
+        gridColumns.map(column => column.scale),
+        config,
+      ));
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not pivot results.');
     } finally {
@@ -885,10 +962,21 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     <div className="grid-toolbar">
       <input className="grid-global-filter" aria-label="Filter all result values" placeholder="Filter results…" value={globalFilter} onChange={event => setGlobalFilter(event.target.value)} />
       <div className="grid-tool-group grid-copy-actions"><button className="secondary small copy-btn" aria-label="Copy selected result rows" onClick={copySelection}>Copy</button></div>
-      <div className="grid-tool-group grid-analysis-actions"><button className="secondary small" disabled={aggregatesLoading} onClick={() => { const next = !showAggregates; setShowAggregates(next); if (!next) setAggregates(null); }}>{aggregatesLoading ? 'Calculating…' : showAggregates ? 'Hide aggregates' : 'Aggregates'}</button><button className="secondary small" disabled={grouping} aria-expanded={groupPanelOpen} aria-pressed={gridGrouping.length > 0} onClick={() => { if (gridGrouping.length === 0 && gridColumns[0]) { updateSharedGridView({ grouping: [gridColumns[0].name] }); return; } setGroupPanelOpen(previous => !previous); }}>{grouping ? 'Grouping…' : groupPanelOpen ? 'Close group panel' : gridGrouping.length > 0 ? 'Open group panel' : 'Group'}</button><button className="secondary small" disabled={grouping} onClick={() => void pivotResults()}>Pivot</button></div>
+      <div className="grid-tool-group grid-analysis-actions"><button className="secondary small" disabled={aggregatesLoading} onClick={() => { const next = !showAggregates; setShowAggregates(next); if (!next) setAggregates(null); }}>{aggregatesLoading ? 'Calculating…' : showAggregates ? 'Hide aggregates' : 'Aggregates'}</button><button className="secondary small" disabled={grouping} aria-expanded={groupPanelOpen} aria-pressed={gridGrouping.length > 0} onClick={() => { if (gridGrouping.length === 0 && gridColumns[0]) { updateSharedGridView({ grouping: [gridColumns[0].name] }); return; } setGroupPanelOpen(previous => !previous); }}>{grouping ? 'Grouping…' : groupPanelOpen ? 'Close group panel' : gridGrouping.length > 0 ? 'Open group panel' : 'Group'}</button><button className="secondary small" disabled={grouping} onClick={openPivotConfiguration}>Pivot</button></div>
       <div className="grid-tool-group grid-export-actions"><label className="grid-export-label">Export<select className="grid-export-format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)} aria-label="Export format"><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB (preferred, faster)</option></select></label><button className="secondary small" disabled={exporting} onClick={() => void exportResult()}>{exporting ? 'Exporting…' : 'Export'}</button></div>
       {loading && <span className="running">Loading…</span>}{notice && <span className="grid-notice" role="status">{notice}</span>}{error && <span className="grid-error" role="alert">{error}</span>}
     </div>
+    {pivotConfigOpen && <div className="modal-backdrop pivot-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setPivotConfigOpen(false); }}>
+      <section className="modal-card pivot-modal" role="dialog" aria-modal="true" aria-label="Pivot results" onMouseDown={event => event.stopPropagation()}>
+        <div className="pivot-modal-header"><div><h2>Pivot results</h2><p>Choose the row, pivot and numeric value columns.</p></div><button type="button" className="secondary small" aria-label="Close Pivot configuration" onClick={() => setPivotConfigOpen(false)}>×</button></div>
+        <div className="pivot-modal-fields">
+          <label>Row column<select value={pivotConfig.rowColumnIndex} onChange={event => updatePivotConfig('rowColumnIndex', Number(event.target.value))}>{result.columns.map((name, index) => <option key={`row:${index}`} value={index}>{index + 1}. {name}</option>)}</select></label>
+          <label>Pivot column<select value={pivotConfig.pivotColumnIndex} onChange={event => updatePivotConfig('pivotColumnIndex', Number(event.target.value))}>{result.columns.map((name, index) => <option key={`pivot:${index}`} value={index}>{index + 1}. {name}</option>)}</select></label>
+          <label>Value column<select value={pivotConfig.valueColumnIndex} onChange={event => updatePivotConfig('valueColumnIndex', Number(event.target.value))}>{gridColumns.map((column, index) => isNumericType(column.type, column.scale) && index !== pivotConfig.rowColumnIndex && index !== pivotConfig.pivotColumnIndex ? <option key={`value:${index}`} value={index}>{index + 1}. {column.name}</option> : null)}</select></label>
+        </div>
+        <div className="pivot-modal-footer"><button type="button" className="secondary small" onClick={() => setPivotConfigOpen(false)}>Cancel</button><button type="button" className="primary small" disabled={grouping} onClick={() => void pivotResults(pivotConfig)}>Create pivot</button></div>
+      </section>
+    </div>}
     {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} showGroupingPanel={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
     {pivot && pivotGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">Pivot view<button type="button" className="secondary small" onClick={() => setPivot(null)}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:pivot`} columns={pivotGrid.columns} rows={pivotGrid.rows} totalRowCount={pivotGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} showGroupingPanel={false} /></div></div>}
     <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu showGroupingPanel={groupPanelOpen} showInlineColumnFilters={false} onOpenColumnFilter={openColumnFilter} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow, ...(scrollRowHeight === undefined ? {} : { rowHeight: scrollRowHeight }) }} onScroll={handleGridScroll} onLoadMore={result.sessionId ? loadMoreRows : undefined} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onViewRow={context => setDetailRowIndex(context.rowIndex)} onViewCell={openCellValue} onEditRow={onEditRow ? context => { const row = gridRows[context.rowIndex]; if (row) onEditRow([...row]); } : undefined} />

@@ -585,6 +585,17 @@ tbody tr:hover td { background: #1e293b; }
 
 .modal-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: #0008; }
 .modal-card { width: min(560px, 100%); max-height: min(90vh, 760px); overflow: auto; padding: 18px; border: 1px solid #4b5563; border-radius: 8px; background: #1f2937; box-shadow: 0 20px 60px #0009; }
+.pivot-modal-backdrop { z-index: 120; }
+.pivot-modal { width: min(440px, 100%); padding: 16px; }
+.pivot-modal-header, .pivot-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pivot-modal-header { padding-bottom: 14px; border-bottom: 1px solid #374151; }
+.pivot-modal-header h2 { margin: 0 0 4px; color: #f8fafc; font-size: 16px; }
+.pivot-modal-header p { margin: 0; color: #94a3b8; font-size: 12px; }
+.pivot-modal-fields { display: grid; gap: 12px; padding: 16px 0; }
+.pivot-modal-fields label { display: grid; gap: 5px; color: #cbd5e1; font-size: 12px; font-weight: 600; }
+.pivot-modal-fields select { width: 100%; padding: 7px 8px; border: 1px solid #475569; border-radius: 4px; color: #e2e8f0; background: #111827; font: inherit; }
+.pivot-modal-fields select:focus { border-color: var(--jb-color-accent); outline: none; }
+.pivot-modal-footer { justify-content: flex-end; padding-top: 12px; border-top: 1px solid #374151; }
 .object-designer-backdrop { z-index: 120; }
 .object-designer-modal { display: flex; flex-direction: column; width: min(1000px, 100%); max-height: min(94vh, 900px); overflow: hidden; border: 1px solid #4b5563; border-radius: 10px; background: #17202d; box-shadow: 0 24px 80px #000b; }
 .object-designer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 18px 20px 14px; border-bottom: 1px solid #374151; background: #1f2937; }
