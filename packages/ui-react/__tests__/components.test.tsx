@@ -209,6 +209,35 @@ describe('shared React presentation', () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith(expect.objectContaining({ focusRow: expect.any(Number) }));
   });
 
+  it('scrolls horizontally when a dragged rectangular selection reaches a side edge', () => {
+    const { container } = render(<DataGrid
+      resultSetId="selection-horizontal-autoscroll"
+      columns={[
+        { name: 'ID', type: 'INTEGER' },
+        { name: 'DETAILS', type: 'VARCHAR' },
+        { name: 'STATUS', type: 'VARCHAR' },
+        { name: 'CREATED_AT', type: 'DATE' },
+        { name: 'OWNER', type: 'VARCHAR' },
+      ]}
+      rows={[[1, 'row-1', 'ready', '2026-01-01', 'alice']]}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    const firstCell = screen.getByRole('cell', { name: 'row-1' });
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 120 });
+    Object.defineProperty(scroller, 'scrollWidth', { configurable: true, value: 1_000 });
+    jest.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 120, left: 0, right: 120, width: 120, height: 120, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+
+    fireEvent.mouseDown(firstCell, { button: 0, clientX: 60, clientY: 80 });
+    fireEvent.mouseMove(window, { clientX: 180, clientY: 80 });
+
+    expect(scroller.scrollLeft).toBeGreaterThan(0);
+    scroller.scrollLeft = 500;
+    fireEvent.mouseMove(window, { clientX: -60, clientY: 80 });
+    expect(scroller.scrollLeft).toBeLessThan(500);
+  });
+
   it('sizes result columns for the complete header, including action buttons', async () => {
     render(<DataGrid
       resultSetId="header-widths"

@@ -189,10 +189,11 @@ export interface ResultViewToolbarProps {
   readonly onPivot?: () => void;
   readonly activeAnalysis?: ResultAnalysisKind;
   readonly analysisBusy?: boolean;
+  readonly columnMenu?: ReactNode;
 }
 
 /** Product-neutral controls for the common result view state. */
-export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onExport, onAggregate, onGroup, onPivot, activeAnalysis, analysisBusy = false }: ResultViewToolbarProps): ReactNode {
+export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onExport, onAggregate, onGroup, onPivot, activeAnalysis, analysisBusy = false, columnMenu }: ResultViewToolbarProps): ReactNode {
   const firstColumn = columns[0]?.name;
   const canSelectColumn = firstColumn !== undefined;
   const aggregateActive = activeAnalysis === 'aggregate' || (activeAnalysis === undefined && view.aggregation !== undefined);
@@ -207,6 +208,7 @@ export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, 
     {onRefresh && <button type="button" onClick={onRefresh}>Refresh</button>}
     {onCopy && <button type="button" onClick={onCopy}>Copy</button>}
     {onExport && <button type="button" onClick={onExport}>Export</button>}
+    {columnMenu}
   </div>;
 }
 
