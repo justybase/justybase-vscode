@@ -132,10 +132,9 @@ function buildSchemaProposals(
   databaseKind: DatabaseKind | undefined,
 ): QualificationProposal[] {
   const preferredSchema = resolvePreferredSchema(deps, connectionName, database);
-  const schemaCandidates = findSchemaCandidates(
-    deps.metadataCache.getObjectsWithSchema(connectionName, database),
-    tableLookupName,
-  );
+  const objects = deps.metadataCache.getObjectsWithSchema(connectionName, database);
+  const schemaCandidates = findSchemaCandidates(objects, tableLookupName);
+  const canonicalTableName = findCanonicalTableName(objects, tableLookupName);
   const resolvedPreferredSchema = preferredSchema
     ?? schemaCandidates.find((schema) => equalName(schema, "ADMIN"));
   const schemas = schemaCandidates.length > 0
@@ -147,7 +146,7 @@ function buildSchemaProposals(
   return toSchemaProposals(
     displayDatabase,
     schemas,
-    originalTableName,
+    canonicalTableName ?? originalTableName,
     resolvedPreferredSchema,
     databaseKind,
   );
@@ -174,6 +173,13 @@ function buildDatabaseProposals(
     : effectiveDb
       ? [effectiveDb]
       : [];
+  const canonicalTableName = databases
+    .map((database) => findCanonicalTableName(
+      deps.metadataCache.getObjectsWithSchema(connectionName, database),
+      tableLookupName,
+      schema,
+    ))
+    .find((name): name is string => !!name);
 
   return dedupeProposals(
     databases.map((database) => {
@@ -181,11 +187,11 @@ function buildDatabaseProposals(
       return {
         database,
         schema: displaySchema,
-        name: originalTableName,
+        name: canonicalTableName ?? originalTableName,
         qualifiedText: formatQualifiedObjectName(
           database,
           displaySchema,
-          originalTableName,
+          canonicalTableName ?? originalTableName,
           databaseKind,
         ),
         isPreferred,
@@ -235,6 +241,9 @@ function buildMysqlProposals(
     equalName(getObjectName(objectInfo), tableLookupName),
   );
   const metadataSchema = matchingObjects[0]?.schema;
+  const metadataTableName = matchingObjects[0]
+    ? getObjectName(matchingObjects[0])
+    : undefined;
   const databaseName = matchingObjects.length > 0
     ? database
     : effectiveDatabase && equalName(effectiveDatabase, database)
@@ -248,11 +257,11 @@ function buildMysqlProposals(
   return [{
     database: databaseName,
     schema: metadataSchema ?? "",
-    name: originalTableName,
+    name: metadataTableName ?? originalTableName,
     qualifiedText: formatQualifiedObjectName(
       databaseName,
       metadataSchema,
-      originalTableName,
+      metadataTableName ?? originalTableName,
       "mysql",
     ),
     isPreferred: !!effectiveDatabase && equalName(databaseName, effectiveDatabase),
@@ -278,6 +287,18 @@ function findSchemaCandidates(
     }
   }
   return schemas;
+}
+
+function findCanonicalTableName(
+  objects: ObjectWithSchema[],
+  tableLookupName: string,
+  schema?: string,
+): string | undefined {
+  const matchingObject = objects.find((objectInfo) =>
+    (!schema || equalName(objectInfo.schema, schema))
+    && equalName(getObjectName(objectInfo), tableLookupName),
+  );
+  return matchingObject ? getObjectName(matchingObject) : undefined;
 }
 
 function findDatabaseCandidates(

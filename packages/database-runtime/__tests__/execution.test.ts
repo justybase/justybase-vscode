@@ -15,6 +15,7 @@ import {
   type ExecutionBackend,
   type ExecutionObserver,
   type ExecutionScheduler,
+  isConnectionBrokenError,
 } from '../src';
 
 interface Deferred<T> {
@@ -274,6 +275,30 @@ describe('ExecutionOrchestrator', () => {
     expect(backend.reconnect).toHaveBeenCalledTimes(1);
     expect(events.map(event => event.type)).toContain('retrying');
     expect(events.filter(event => event.type === 'execution-terminal')).toHaveLength(1);
+  });
+
+  it('retries once when Netezza reports an invalid connection protocol', async () => {
+    let calls = 0;
+    const reconnect = jest.fn(async () => undefined);
+    const backend: ExecutionBackend<string> = {
+      execute: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('Connection protocol is invalid; reconnect is required');
+        return { totalRows: 1, limitReached: false };
+      },
+      isSafeToRetrySql: sql => /^SELECT\b/iu.test(sql.trim()),
+      reconnect,
+    };
+
+    expect(isConnectionBrokenError(new Error('Connection protocol is invalid; reconnect is required'))).toBe(true);
+    const summary = await new ExecutionOrchestrator({ backend }).start(request({
+      connectionMode: 'persistent',
+      retryPolicy: 'safe-read-only-on-broken-connection',
+    })).settled;
+
+    expect(summary.status).toBe('success');
+    expect(calls).toBe(2);
+    expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
   it('binds backend classifier methods to their owning adapter instance', async () => {

@@ -111,6 +111,7 @@ export function isConnectionBrokenError(error: unknown): boolean {
     msg.includes("connection reset") ||
     msg.includes("connection is closed") ||
     msg.includes("connection closed") ||
+    /connection\s+protocol\s+is\s+invalid\s*;\s*reconnect\s+is\s+required/i.test(msg) ||
     msg.includes("econnreset") ||
     msg.includes("epipe") ||
     msg.includes("broken pipe")

@@ -268,7 +268,7 @@ function defaultIsCancellationError(error: unknown): boolean {
 
 export function isConnectionBrokenError(error: unknown): boolean {
   return hasErrorCode(error, ['ECONNRESET', 'EPIPE', 'ERR_SOCKET_CLOSED', 'ERR_SOCKET_DESTROYED'])
-    || /socket\s+(?:closed|destroyed)|connection\s+(?:reset|closed|is\s+closed)|econnreset|epipe|broken\s+pipe/i.test(errorMessage(error));
+    || /socket\s+(?:closed|destroyed)|connection\s+(?:reset|closed|is\s+closed)|connection\s+protocol\s+is\s+invalid\s*;\s*reconnect\s+is\s+required|econnreset|epipe|broken\s+pipe/i.test(errorMessage(error));
 }
 
 function failureFrom(error: unknown, kind?: ExecutionFailure['kind']): ExecutionFailure {
