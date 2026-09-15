@@ -124,6 +124,7 @@ type RenderedRow = RenderedGroup | RenderedDataRow;
 const ROW_NUMBER_WIDTH = 48;
 const DEFAULT_COLUMN_WIDTH = 144;
 const MIN_COLUMN_WIDTH = 72;
+const MAX_COLUMN_WIDTH = 520;
 const MAX_EMPTY_PAGE_REQUESTS = 3;
 const ROW_HEIGHT = 26;
 const LEGACY_ROW_HEIGHT = 30;
@@ -348,15 +349,43 @@ function visibilityFor(column: DataGridColumn, index: number, view: DataGridView
     && visibility[String(index)] !== false;
 }
 
-function columnWidthFor(column: DataGridColumn, index: number, view: DataGridViewState): number {
+function columnWidthFor(
+  column: DataGridColumn,
+  index: number,
+  view: DataGridViewState,
+  measuredWidths: Readonly<Record<string, number>> = {},
+): number {
   const widths = view.columnWidths;
-  if (!widths) return DEFAULT_COLUMN_WIDTH;
   // Prefer the semantic id written by the shared grid, then accept both
   // historical name and positional keys from saved web/desktop views.
-  return widths[columnKey(column, index)]
-    ?? widths[column.name]
-    ?? widths[String(index)]
+  const configuredWidth = widths?.[columnKey(column, index)]
+    ?? widths?.[column.name]
+    ?? widths?.[String(index)]
     ?? DEFAULT_COLUMN_WIDTH;
+  return Math.max(configuredWidth, measuredWidths[columnKey(column, index)] ?? 0);
+}
+
+function measuredHeaderMinimumWidth(column: DataGridColumn, cell: HTMLTableCellElement, inlineFilter: boolean): number {
+  const content = cell.querySelector<HTMLElement>('.ui-data-grid-header-content');
+  const labelText = content?.querySelector<HTMLElement>('.ui-data-grid-header-label > span:first-child');
+  const sort = content?.querySelector<HTMLElement>('.ui-data-grid-sort');
+  const type = content?.querySelector<HTMLElement>('.ui-data-grid-type-badge');
+  const actions = content
+    ? [...content.querySelectorAll<HTMLElement>('.ui-data-grid-drag-handle, .ui-data-grid-header-action, .ui-data-grid-filter-action, .ui-data-grid-group-action')]
+    : [];
+  const textWidth = Math.max(
+    labelText?.scrollWidth ?? 0,
+    labelText?.getBoundingClientRect().width ?? 0,
+    column.name.length * 7.25,
+  );
+  const sortWidth = Math.max(sort?.scrollWidth ?? 0, sort?.getBoundingClientRect().width ?? 0, 12);
+  const typeWidth = Math.max(type?.scrollWidth ?? 0, type?.getBoundingClientRect().width ?? 0, typeBadge(column).length * 6 + 8);
+  const actionWidth = actions.reduce((total, action) => total + Math.max(action.getBoundingClientRect().width, action.scrollWidth, 20), 0);
+  const childCount = content?.children.length ?? 0;
+  const gapWidth = Math.max(0, childCount - 1) * 3;
+  const filterMinimum = inlineFilter ? 96 : 0;
+  const required = Math.ceil(14 + textWidth + sortWidth + typeWidth + actionWidth + gapWidth);
+  return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, filterMinimum, required));
 }
 
 function orderColumns(columns: readonly DataGridColumn[], view: DataGridViewState): readonly number[] {
@@ -694,6 +723,10 @@ export function DataGrid({
   }, [columnMetadataSignature, columns, resultSetId, rows]);
   const [selection, setSelection] = useState<DataGridSelection | undefined>(undefined);
   const selectionRef = useRef<DataGridSelection | undefined>(undefined);
+  const selectionPointerRef = useRef<{ readonly clientX: number; readonly clientY: number } | undefined>(undefined);
+  const selectionAutoScrollFrameRef = useRef<number | undefined>(undefined);
+  const columnHeaderRefs = useRef(new Map<string, HTMLTableCellElement>());
+  const [measuredColumnWidths, setMeasuredColumnWidths] = useState<Readonly<Record<string, number>>>({});
   const [contextMenu, setContextMenu] = useState<DataGridCellContext | undefined>(undefined);
   const contextMenuElementRef = useRef<HTMLDivElement>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState({ left: 8, top: 8 });
@@ -712,6 +745,7 @@ export function DataGrid({
   const virtualScrollFrameRef = useRef<number | undefined>(undefined);
   const virtualViewportSyncRef = useRef<(() => void) | undefined>(undefined);
   const virtualViewportRef = useRef({ scrollTop: 0, height: DEFAULT_VIEWPORT_HEIGHT });
+  const selectionMetricsRef = useRef({ rowCount: 0, headerHeight: COLUMN_HEADER_HEIGHT });
   const scrollReportFrameRef = useRef<number | undefined>(undefined);
   const scrollReportRef = useRef<{ readonly position: GridScrollPosition; readonly callback: (position: GridScrollPosition) => void } | undefined>(undefined);
   const scrollRestorationRef = useRef<ScrollRestorationState | undefined>(undefined);
@@ -725,8 +759,13 @@ export function DataGrid({
     if (scrollReportFrameRef.current !== undefined && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(scrollReportFrameRef.current);
     }
+    if (selectionAutoScrollFrameRef.current !== undefined && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(selectionAutoScrollFrameRef.current);
+    }
     scrollReportFrameRef.current = undefined;
     scrollReportRef.current = undefined;
+    selectionAutoScrollFrameRef.current = undefined;
+    selectionPointerRef.current = undefined;
     scrollRestorationRef.current = undefined;
     pendingScrollRestorationRef.current = undefined;
   }, []);
@@ -740,14 +779,22 @@ export function DataGrid({
   useEffect(() => {
     const handleMouseUp = (): void => {
       dragSelectingRef.current = false;
+      selectionPointerRef.current = undefined;
+      if (selectionAutoScrollFrameRef.current !== undefined && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(selectionAutoScrollFrameRef.current);
+      }
+      selectionAutoScrollFrameRef.current = undefined;
       resizeRef.current = undefined;
     };
     const handleMouseMove = (event: MouseEvent): void => {
       const resize = resizeRef.current;
-      if (!resize) return;
-      const nextWidth = Math.max(MIN_COLUMN_WIDTH, resize.startWidth + event.clientX - resize.startX);
-      const widths = { ...(activeViewRef.current.columnWidths ?? {}), [resize.columnId]: nextWidth };
-      updateViewRef.current({ columnWidths: widths });
+      if (resize) {
+        const nextWidth = Math.max(MIN_COLUMN_WIDTH, resize.startWidth + event.clientX - resize.startX);
+        const widths = { ...(activeViewRef.current.columnWidths ?? {}), [resize.columnId]: nextWidth };
+        updateViewRef.current({ columnWidths: widths });
+        return;
+      }
+      if (dragSelectingRef.current) updateSelectionFromPointer(event.clientX, event.clientY);
     };
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('mousemove', handleMouseMove);
@@ -837,6 +884,10 @@ export function DataGrid({
     [collapsedGroups, groupedRows],
   );
   const columnHeaderHeight = onOpenColumnFilter && !showInlineColumnFilters ? COMPACT_COLUMN_HEADER_HEIGHT : COLUMN_HEADER_HEIGHT;
+  selectionMetricsRef.current = {
+    rowCount: visibleGroupedRows?.length ?? visibleRowCount,
+    headerHeight: columnHeaderHeight,
+  };
   const virtualWindow = useMemo(
     () => calculateDataGridVirtualWindow(visibleGroupedRows?.length ?? visibleRowCount, virtualViewport.scrollTop, virtualViewport.height, VIRTUAL_OVERSCAN_ROWS, columnHeaderHeight),
     [columnHeaderHeight, visibleGroupedRows?.length, visibleRowCount, virtualViewport.height, virtualViewport.scrollTop],
@@ -852,6 +903,23 @@ export function DataGrid({
       : visibleGroupedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex),
     [processedRows, virtualWindow.endIndex, virtualWindow.startIndex, visibleGroupedRows],
   );
+  const visibleColumnSignature = visibleColumnIndexes.join(',');
+  const hasColumnFilterSurface = onOpenColumnFilter !== undefined;
+  useLayoutEffect(() => {
+    const next: Record<string, number> = {};
+    for (const [index, column] of resolvedColumns.entries()) {
+      const id = columnKey(column, index);
+      const cell = columnHeaderRefs.current.get(`${id}:${index}`);
+      if (!cell || !visibleColumnIndexes.includes(index)) continue;
+      next[id] = measuredHeaderMinimumWidth(column, cell, showInlineColumnFilters || !hasColumnFilterSurface);
+    }
+    setMeasuredColumnWidths(previous => {
+      const previousKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (previousKeys.length === nextKeys.length && nextKeys.every(key => previous[key] === next[key])) return previous;
+      return next;
+    });
+  }, [columnMetadataSignature, hasColumnFilterSurface, resolvedColumns, showInlineColumnFilters, visibleColumnIndexes, visibleColumnSignature]);
   const range = selectedRange(selection);
   const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
   const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
@@ -1019,6 +1087,63 @@ export function DataGrid({
     selectionRef.current = next;
     setSelection(next);
     onSelectionChange?.(next);
+  }
+
+  function scheduleSelectionAutoScroll(): void {
+    if (selectionAutoScrollFrameRef.current !== undefined || typeof requestAnimationFrame !== 'function') return;
+    selectionAutoScrollFrameRef.current = requestAnimationFrame(() => {
+      selectionAutoScrollFrameRef.current = undefined;
+      const pointer = selectionPointerRef.current;
+      if (!dragSelectingRef.current || !pointer) return;
+      updateSelectionFromPointer(pointer.clientX, pointer.clientY);
+    });
+  }
+
+  function updateSelectionFromPointer(clientX: number, clientY: number): void {
+    if (!dragSelectingRef.current || !selectionRef.current) return;
+    const element = scroller.current;
+    if (!element) return;
+    selectionPointerRef.current = { clientX, clientY };
+    const bounds = element.getBoundingClientRect();
+    const edge = 28;
+    const direction = clientY < bounds.top + edge ? -1 : clientY > bounds.bottom - edge ? 1 : 0;
+    const previousScrollTop = element.scrollTop;
+    if (direction !== 0) {
+      const distance = direction < 0
+        ? Math.max(0, bounds.top + edge - clientY)
+        : Math.max(0, clientY - (bounds.bottom - edge));
+      const speed = Math.min(48, Math.max(10, 8 + Math.ceil(distance / 4)));
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
+      const nextScrollTop = Math.max(0, Math.min(maximum, previousScrollTop + direction * speed));
+      if (nextScrollTop !== previousScrollTop) {
+        element.scrollTop = nextScrollTop;
+        virtualViewportSyncRef.current?.();
+      }
+    }
+
+    const pointedElement = typeof document === 'undefined' || typeof document.elementFromPoint !== 'function'
+      ? undefined
+      : document.elementFromPoint(clientX, clientY);
+    const pointedRow = pointedElement?.closest<HTMLElement>('tr[data-row-index]');
+    const pointedRowIndex = pointedRow ? Number(pointedRow.dataset.rowIndex) : undefined;
+    const pointedCell = pointedElement?.closest<HTMLElement>('td[data-column-index]');
+    const pointedColumnIndex = pointedCell ? Number(pointedCell.dataset.columnIndex) : undefined;
+    const rowCount = selectionMetricsRef.current.rowCount;
+    let focusRow = Number.isInteger(pointedRowIndex) && (pointedRowIndex ?? -1) >= 0 ? pointedRowIndex! : selectionRef.current.focusRow;
+    if (direction !== 0 && rowCount > 0) {
+      const viewportHeight = Math.max(ROW_HEIGHT, element.clientHeight || virtualViewportRef.current.height);
+      const visibleRows = Math.max(1, Math.ceil((viewportHeight - selectionMetricsRef.current.headerHeight) / ROW_HEIGHT));
+      const firstVisibleRow = Math.min(rowCount - 1, Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT));
+      const lastVisibleRow = Math.min(rowCount - 1, firstVisibleRow + visibleRows - 1);
+      focusRow = direction < 0 ? firstVisibleRow : lastVisibleRow;
+    }
+    const focusColumn = Number.isInteger(pointedColumnIndex) && (pointedColumnIndex ?? -1) >= 0
+      ? pointedColumnIndex!
+      : selectionRef.current.focusColumn;
+    if (focusRow !== selectionRef.current.focusRow || focusColumn !== selectionRef.current.focusColumn) {
+      setSelectionValue({ ...selectionRef.current, focusRow, focusColumn });
+    }
+    if (direction !== 0 && element.scrollTop !== previousScrollTop) scheduleSelectionAutoScroll();
   }
 
   function selectCell(rowIndex: number, columnIndex: number, event: ReactMouseEvent<HTMLElement>): void {
@@ -1327,10 +1452,10 @@ export function DataGrid({
             const column = resolvedColumns[columnIndex]!;
             const id = columnKey(column, columnIndex);
             const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView), 0) : undefined;
+            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView, measuredColumnWidths), 0) : undefined;
             const sort = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
-            const width = columnWidthFor(column, columnIndex, activeView);
-            return <th scope="col" key={id} className={pinned ? 'ui-data-grid-pinned' : undefined} style={{ width, minWidth: width, ...(left === undefined ? {} : { left }) }} onDragOver={event => event.preventDefault()} onDrop={() => { const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex); draggedColumnRef.current = undefined; }}>
+            const width = columnWidthFor(column, columnIndex, activeView, measuredColumnWidths);
+            return <th scope="col" key={id} ref={element => { const refKey = `${id}:${columnIndex}`; if (element) columnHeaderRefs.current.set(refKey, element); else columnHeaderRefs.current.delete(refKey); }} className={pinned ? 'ui-data-grid-pinned' : undefined} style={{ width, minWidth: width, ...(left === undefined ? {} : { left }) }} onDragOver={event => event.preventDefault()} onDrop={() => { const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex); draggedColumnRef.current = undefined; }}>
               <div className="ui-data-grid-header-content">
                 <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} onDragStart={event => { draggedColumnRef.current = columnIndex; event.dataTransfer?.setData('application/x-justybase-column-index', String(columnIndex)); event.dataTransfer?.setData('text/plain', String(columnIndex)); }} onDragEnd={() => { draggedColumnRef.current = undefined; }}>⠿</button>
                 <button type="button" className="ui-data-grid-header-label" onClick={() => sortColumn(columnIndex)} title={`Sort by ${column.name}`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : sort.descending ? 'Sorted descending' : 'Sorted ascending'}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}</span></button>
@@ -1363,13 +1488,13 @@ export function DataGrid({
             {visibleColumnIndexes.map(columnIndex => {
               const column = resolvedColumns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView), 0) : undefined;
+              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView, measuredColumnWidths), 0) : undefined;
               const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];
               const metadata = getCellMetadata?.(value, rendered.sourceIndex, columnIndex, column) ?? column;
               const displayValue = formatDataGridCellValue(value, metadata.type, metadata);
-              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, metadata)}`, isDataGridNumericColumn(metadata) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); const context = { rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }; onContextMenu?.(context); if (showContextMenu) setContextMenu(context); }} title={displayValue}>{displayValue}</td>;
+              return <td key={`${rendered.sourceIndex}:${columnKey(column, columnIndex)}`} data-column-index={columnIndex} className={[pinned ? 'ui-data-grid-pinned' : '', selected ? 'ui-data-grid-cell-selected' : '', `ui-data-grid-value-${valueClass(value, metadata)}`, isDataGridNumericColumn(metadata) ? 'ui-data-grid-cell-numeric' : ''].filter(Boolean).join(' ')} style={left === undefined ? undefined : { left }} onMouseDown={event => selectCell(rendered.displayIndex, columnIndex, event)} onMouseEnter={() => extendSelection(rendered.displayIndex, columnIndex)} onContextMenu={event => { event.preventDefault(); const context = { rowIndex: rendered.sourceIndex, columnIndex, clientX: event.clientX, clientY: event.clientY }; onContextMenu?.(context); if (showContextMenu) setContextMenu(context); }} title={displayValue}>{displayValue}</td>;
             })}
           </tr>;
         })}
