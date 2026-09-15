@@ -1,12 +1,22 @@
 import type {
   ElectronRendererApi,
+  ElectronSqlFile,
+  ElectronSqlSaveResult,
   OpaqueCredentialRequestId,
   RedactedConnectionProfile,
   UiConnectionProfileInput,
   UiAuthState,
   UiCapabilitySnapshot,
 } from '@justybase/contracts';
-import { isRedactedConnectionProfile, isUiAuthState, isUiCapabilitySnapshot, isUiConnectionProfileInput } from '@justybase/contracts';
+import {
+  HARD_SQL_FILE_MAX_BYTES,
+  isElectronSqlFile,
+  isElectronSqlSaveResult,
+  isRedactedConnectionProfile,
+  isUiAuthState,
+  isUiCapabilitySnapshot,
+  isUiConnectionProfileInput,
+} from '@justybase/contracts';
 
 export interface RendererIpcMessage {
   readonly method: string;
@@ -81,6 +91,33 @@ export function createPreloadBridge(invoke: IpcInvoker): ElectronRendererApi {
       const response = await invokeResponse(invoke, { method: 'capabilities/list' });
       if (!isUiCapabilitySnapshot(response.capabilities)) malformedField('capability snapshot');
       return response.capabilities;
+    },
+    openSqlFile: async (): Promise<ElectronSqlFile | null> => {
+      const response = await invokeResponse(invoke, { method: 'filesystem/open-sql' });
+      if (response.file === null || response.file === undefined) return null;
+      if (!isElectronSqlFile(response.file)) malformedField('SQL file');
+      return response.file;
+    },
+    saveSqlFile: async (filePath: string, content: string): Promise<ElectronSqlSaveResult> => {
+      if (typeof filePath !== 'string' || filePath.length === 0 || typeof content !== 'string') malformedField('SQL file');
+      if (content.length > HARD_SQL_FILE_MAX_BYTES) malformedField('SQL file');
+      const response = await invokeResponse(invoke, { method: 'filesystem/save-sql', payload: { filePath, content } });
+      if (!isElectronSqlSaveResult(response.saved)) malformedField('SQL save result');
+      return response.saved;
+    },
+    saveSqlFileAs: async (suggestedName: string | undefined, content: string): Promise<ElectronSqlSaveResult | null> => {
+      if (typeof content !== 'string') malformedField('SQL file');
+      if (content.length > HARD_SQL_FILE_MAX_BYTES) malformedField('SQL file');
+      if (suggestedName !== undefined && (typeof suggestedName !== 'string' || suggestedName.length === 0)) {
+        malformedField('SQL file name');
+      }
+      const response = await invokeResponse(invoke, {
+        method: 'filesystem/save-sql-as',
+        payload: { ...(suggestedName === undefined ? {} : { suggestedName }), content },
+      });
+      if (response.saved === null || response.saved === undefined) return null;
+      if (!isElectronSqlSaveResult(response.saved)) malformedField('SQL save result');
+      return response.saved;
     },
   });
 }

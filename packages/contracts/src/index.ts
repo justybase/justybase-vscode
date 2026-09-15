@@ -16,7 +16,14 @@ export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnIn
 export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
 export {
   UI_CONTRACT_VERSION,
+  HARD_SQL_FILE_MAX_BYTES,
+  MAX_SQL_FILE_PATH_LENGTH,
+  SOFT_SQL_FILE_WARN_BYTES,
+  SQL_FILE_EXTENSION,
   isCapabilityDescriptor,
+  isElectronSqlFile,
+  isElectronSqlFilePath,
+  isElectronSqlSaveResult,
   isUiAuthState,
   isUiCapabilitySnapshot,
   isRedactedConnectionProfile,
@@ -25,6 +32,8 @@ export type {
   CapabilityDescriptor,
   CapabilityStatus,
   ElectronRendererApi,
+  ElectronSqlFile,
+  ElectronSqlSaveResult,
   OpaqueCredentialRequestId,
   UiConnectionProfileInput,
   PersistenceEnvelope,
