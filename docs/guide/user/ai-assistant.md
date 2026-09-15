@@ -10,7 +10,7 @@ product_version: 3.17.14
 
 # AI SQL Assistant
 
-JustyBase adds SQL context to GitHub Copilot workflows without making the model the executor. The intended loop is:
+JustyBase adds SQL context to GitHub Copilot workflows while keeping database-side effects behind explicit tool confirmations. The intended loop is:
 
 ```text
 diagnostic → schema/DDL context → Copilot explanation → suggested fix → diff review → user execution
@@ -29,8 +29,9 @@ diagnostic → schema/DDL context → Copilot explanation → suggested fix → 
 - **Best Practices** — rewrite toward the selected dialect’s documented practices.
 - **Custom Question** — ask about the selected SQL and its context.
 - **Generate SQL** — describe a query goal and review the generated SQL before saving or running it.
+- **Repair Netezza procedure** — compile one complete `CREATE PROCEDURE` or `CREATE OR REPLACE PROCEDURE` block, return database diagnostics, and let Copilot prepare bounded corrections.
 
-These actions produce text, chat interaction, or a guarded rewrite proposal. The user decides whether to apply, save, or execute the result.
+These actions produce text, chat interaction, or a guarded rewrite proposal. Procedure repair can update the active editor after a successful compilation, but never saves the file automatically.
 
 ## Context that may be gathered
 
@@ -62,6 +63,13 @@ Language Model Tools are registered from the current tool contracts in `src/cont
 
 `validateSqlOnDatabase` is a guarded database-side validation/`EXPLAIN` path. It is not a general-purpose “run whatever SQL Copilot writes” operation. The user still reviews the SQL and decides whether to execute a statement through the normal query workflow.
 
+`netezza_repair_procedure` is the explicitly write-capable exception for Netezza
+procedures. It accepts `compile_only` and `compile_and_call` modes and stops
+after three attempts. In `compile_and_call` mode, typed arguments are converted
+to a single `CALL` statement and a separate modal confirmation is required
+after compilation. Each retry may repeat procedure side effects, so use a
+controlled test connection/database.
+
 The exact names and current count are generated in the [AI and MCP reference](guide/reference/web-api/), so examples do not drift from the registered code.
 
 ## MCP: read-only by design
@@ -77,7 +85,8 @@ Enable MCP under **JustyBase Settings → MCP Server**, choose the saved Netezza
 3. Compare the proposed diff, including identifiers, predicates, joins, and transaction behavior.
 4. Re-run parser/linter diagnostics.
 5. Use `EXPLAIN` or `validateSqlOnDatabase` for a read-only plan check where appropriate.
-6. Execute manually with the correct connection and safe-execute confirmation.
+6. For a Netezza procedure, choose `compile_only` unless a controlled test `CALL` is intended; review the separate `CALL` confirmation and typed arguments.
+7. Save the corrected procedure only after reviewing the editor diff.
 
 ## Troubleshooting
 
