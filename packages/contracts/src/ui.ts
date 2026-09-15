@@ -185,6 +185,8 @@ export type UiPreloadResponse =
   | { readonly ok: true; readonly profiles: readonly RedactedConnectionProfile[] }
   | { readonly ok: true; readonly operation: 'deleted' | 'tested' }
   | { readonly ok: true; readonly capabilities: UiCapabilitySnapshot }
+  | { readonly ok: true; readonly file: ElectronSqlFile | null }
+  | { readonly ok: true; readonly saved: ElectronSqlSaveResult | null }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
 export interface UiRendererBootstrap {
@@ -192,6 +194,29 @@ export interface UiRendererBootstrap {
   readonly productId: string;
   readonly sessionId: string;
   readonly capabilities: UiCapabilitySnapshot;
+}
+
+/** Soft warning threshold for SQL files opened in the Electron shell (warning, not an error). */
+export const SOFT_SQL_FILE_WARN_BYTES = 2 * 1024 * 1024;
+/** Hard safety cap for SQL file IPC payloads; aligns with the query file import limit. */
+export const HARD_SQL_FILE_MAX_BYTES = 25 * 1024 * 1024;
+export const SQL_FILE_EXTENSION = 'sql';
+export const MAX_SQL_FILE_PATH_LENGTH = 4096;
+
+/** SQL file payload crossing the Electron main/renderer boundary. `null` means the native dialog was cancelled. */
+export interface ElectronSqlFile {
+  readonly filePath: string;
+  readonly fileName: string;
+  readonly content: string;
+  readonly sizeBytes: number;
+  /** True when the file exceeds the soft warning threshold but is still below the hard cap. */
+  readonly oversize: boolean;
+}
+
+export interface ElectronSqlSaveResult {
+  readonly filePath: string;
+  readonly fileName: string;
+  readonly sizeBytes: number;
 }
 
 /** Allowlisted preload surface exposed to a renderer; methods never carry raw credentials. */
@@ -205,6 +230,9 @@ export interface ElectronRendererApi {
   readonly testConnection: (id: string) => Promise<void>;
   readonly testConnectionProfile: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<void>;
   readonly listCapabilities: () => Promise<UiCapabilitySnapshot>;
+  readonly openSqlFile: () => Promise<ElectronSqlFile | null>;
+  readonly saveSqlFile: (filePath: string, content: string) => Promise<ElectronSqlSaveResult>;
+  readonly saveSqlFileAs: (suggestedName: string | undefined, content: string) => Promise<ElectronSqlSaveResult | null>;
 }
 
 function nonEmptyString(value: unknown, maxLength = 512): value is string {
@@ -238,5 +266,48 @@ export function isRedactedConnectionProfile(value: unknown): value is RedactedCo
     && typeof candidate.user === 'string'
     && typeof candidate.dbType === 'string'
     && typeof candidate.readOnly === 'boolean'
+    && !hasSecretKey(candidate);
+}
+
+function isSqlFilePathShape(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (value.length === 0 || value.length > MAX_SQL_FILE_PATH_LENGTH) return false;
+  if (value.includes('\0')) return false;
+  return value.toLowerCase().endsWith(`.${SQL_FILE_EXTENSION}`);
+}
+
+/** Guard for an absolute renderer-supplied SQL file path (contract-level, platform-agnostic). */
+export function isElectronSqlFilePath(value: unknown): value is string {
+  return isSqlFilePathShape(value);
+}
+
+function isSqlFileSize(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= HARD_SQL_FILE_MAX_BYTES;
+}
+
+/** Guard for the SQL file payload returned through the preload bridge. */
+export function isElectronSqlFile(value: unknown): value is ElectronSqlFile {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return isSqlFilePathShape(candidate.filePath)
+    && typeof candidate.fileName === 'string'
+    && candidate.fileName.length > 0
+    && candidate.fileName.length <= 512
+    && typeof candidate.content === 'string'
+    && candidate.content.length <= HARD_SQL_FILE_MAX_BYTES
+    && isSqlFileSize(candidate.sizeBytes)
+    && typeof candidate.oversize === 'boolean'
+    && !hasSecretKey(candidate);
+}
+
+/** Guard for the SQL save result returned through the preload bridge. */
+export function isElectronSqlSaveResult(value: unknown): value is ElectronSqlSaveResult {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return isSqlFilePathShape(candidate.filePath)
+    && typeof candidate.fileName === 'string'
+    && candidate.fileName.length > 0
+    && candidate.fileName.length <= 512
+    && isSqlFileSize(candidate.sizeBytes)
     && !hasSecretKey(candidate);
 }

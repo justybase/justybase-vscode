@@ -1,5 +1,7 @@
 import type {
   CapabilityDescriptor,
+  ElectronSqlFile,
+  ElectronSqlSaveResult,
   OpaqueCredentialRequestId,
   RedactedConnectionProfile,
   UiConnectionProfileInput,
@@ -7,7 +9,16 @@ import type {
   UiCapabilitySnapshot,
   UiPreloadResponse,
 } from '@justybase/contracts';
-import { isRedactedConnectionProfile, isUiAuthState, isUiCapabilitySnapshot, isUiConnectionProfileInput } from '@justybase/contracts';
+import {
+  HARD_SQL_FILE_MAX_BYTES,
+  MAX_SQL_FILE_PATH_LENGTH,
+  isElectronSqlFile,
+  isElectronSqlSaveResult,
+  isRedactedConnectionProfile,
+  isUiAuthState,
+  isUiCapabilitySnapshot,
+  isUiConnectionProfileInput,
+} from '@justybase/contracts';
 import type { MainCredentialBroker } from './credentialBroker';
 
 export const IPC_METHODS = [
@@ -19,6 +30,9 @@ export const IPC_METHODS = [
   'connections/delete',
   'connections/test',
   'capabilities/list',
+  'filesystem/open-sql',
+  'filesystem/save-sql',
+  'filesystem/save-sql-as',
 ] as const;
 export type IpcMethod = typeof IPC_METHODS[number];
 
@@ -37,6 +51,9 @@ export interface IpcHandlers {
   readonly testConnection: (id: string) => Promise<void>;
   readonly testConnectionProfile: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<void>;
   readonly listCapabilities: () => Promise<UiCapabilitySnapshot> | UiCapabilitySnapshot;
+  readonly openSqlFile: () => Promise<ElectronSqlFile | null>;
+  readonly saveSqlFile: (filePath: string, content: string) => Promise<ElectronSqlSaveResult>;
+  readonly saveSqlFileAs: (suggestedName: string | undefined, content: string) => Promise<ElectronSqlSaveResult | null>;
 }
 
 interface ProfilePayload {
@@ -78,6 +95,50 @@ function parseIdPayload(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const id = (value as { id?: unknown }).id;
   return typeof id === 'string' && id.length > 0 && id.length <= 256 ? id : undefined;
+}
+
+interface SqlSavePayload {
+  readonly filePath: string;
+  readonly content: string;
+}
+
+interface SqlSaveAsPayload {
+  readonly suggestedName?: string;
+  readonly content: string;
+}
+
+function isSqlContent(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= HARD_SQL_FILE_MAX_BYTES;
+}
+
+function isSqlFilePath(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= MAX_SQL_FILE_PATH_LENGTH
+    && !value.includes('\0')
+    && value.toLowerCase().endsWith('.sql');
+}
+
+function parseSqlSavePayload(value: unknown): SqlSavePayload | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (!isSqlFilePath(candidate.filePath) || !isSqlContent(candidate.content)) return undefined;
+  return { filePath: candidate.filePath, content: candidate.content };
+}
+
+function parseSqlSaveAsPayload(value: unknown): SqlSaveAsPayload | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (!isSqlContent(candidate.content)) return undefined;
+  if (candidate.suggestedName !== undefined) {
+    if (typeof candidate.suggestedName !== 'string' || candidate.suggestedName.length === 0 || candidate.suggestedName.length > 512) {
+      return undefined;
+    }
+  }
+  return {
+    ...(candidate.suggestedName === undefined ? {} : { suggestedName: candidate.suggestedName as string }),
+    content: candidate.content as string,
+  };
 }
 
 function hasSecretKey(value: unknown): boolean {
@@ -161,6 +222,31 @@ export async function dispatchIpcMessage(message: unknown, handlers: IpcHandlers
         return isUiCapabilitySnapshot(capabilities)
           ? { ok: true, capabilities }
           : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid capability snapshot.' };
+      }
+      case 'filesystem/open-sql': {
+        if (candidate.payload !== undefined) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'filesystem/open-sql does not accept a payload.' };
+        const file = await handlers.openSqlFile();
+        if (file === null) return { ok: true, file: null };
+        return isElectronSqlFile(file)
+          ? { ok: true, file }
+          : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid SQL file.' };
+      }
+      case 'filesystem/save-sql': {
+        const payload = parseSqlSavePayload(candidate.payload);
+        if (!payload) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'A .sql file path and content are required.' };
+        const saved = await handlers.saveSqlFile(payload.filePath, payload.content);
+        return isElectronSqlSaveResult(saved)
+          ? { ok: true, saved }
+          : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid save result.' };
+      }
+      case 'filesystem/save-sql-as': {
+        const payload = parseSqlSaveAsPayload(candidate.payload);
+        if (!payload) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'SQL content is required.' };
+        const saved = await handlers.saveSqlFileAs(payload.suggestedName, payload.content);
+        if (saved === null) return { ok: true, saved: null };
+        return isElectronSqlSaveResult(saved)
+          ? { ok: true, saved }
+          : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid save result.' };
       }
     }
   } catch (error: unknown) {

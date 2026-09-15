@@ -46,7 +46,7 @@ const defaultCapabilities: readonly CapabilityDescriptor[] = [
   { key: 'import-export', status: 'available', owner: 'electron-api-adapter', documentation: 'Sandboxed renderer file selection plus authenticated preview/confirm API and result download.', removalCondition: 'Keep format capability and file-size limits aligned with the API.' },
   { key: 'notebooks', status: 'unsupported', owner: 'electron-api-adapter', reason: 'Notebook workflows are not portable in this shell yet.', documentation: 'Cross-product UI parity matrix.', removalCondition: 'Define a portable notebook contract and lifecycle gate.' },
   { key: 'administration', status: 'unsupported', owner: 'electron-api-adapter', reason: 'Administrative operations remain adapter-owned.', documentation: 'Cross-product UI parity matrix.', removalCondition: 'Add audited, authorized, dialect-specific workflows.' },
-  { key: 'filesystem.native-dialog', status: 'unsupported', owner: 'electron-main', reason: 'R9 does not add native filesystem integration.', documentation: 'Cross-product UI parity matrix.', removalCondition: 'Add a reviewed main-process file dialog port.' },
+  { key: 'filesystem.native-dialog', status: 'available', owner: 'electron-main', documentation: 'Native .sql open/save dialogs through the main-process file port.', removalCondition: 'Keep the dialog-gated file port and .sql guardrails.' },
 ];
 
 function randomValue(bytes = 24): string {

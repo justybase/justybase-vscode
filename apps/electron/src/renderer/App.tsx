@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryAggregateFunction, QueryColumnFilterSpec, QueryExportFormat, QueryGroupAggregate, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
+import { SOFT_SQL_FILE_WARN_BYTES } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, hasUiResultQuery, resolveDatabasePicker, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
 import {
@@ -38,6 +39,34 @@ interface OpenDocumentOptions {
   readonly sourceId?: string;
   readonly database?: string;
   readonly schema?: string;
+  readonly uri?: string;
+}
+
+function sqlByteLength(content: string): number {
+  try {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(content).length;
+  } catch {
+    // Fall through to the character-length approximation below.
+  }
+  return content.length;
+}
+
+function formatSqlMegabytes(sizeBytes: number): string {
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function confirmLargeSqlOpen(fileName: string, sizeBytes: number): boolean {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true;
+  return window.confirm(
+    `“${fileName}” is ${formatSqlMegabytes(sizeBytes)} (over 2 MB). The editor may respond slowly. Open it anyway?`,
+  );
+}
+
+function confirmLargeSqlSave(sizeBytes: number): boolean {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true;
+  return window.confirm(
+    `This document is ${formatSqlMegabytes(sizeBytes)} (over 2 MB). Saving may be slow. Save it anyway?`,
+  );
 }
 
 export function resultAsyncState(result: UiResultSurfaceState | undefined, rowCount: number) {
@@ -436,6 +465,7 @@ export function App(): ReactElement {
         database: documentDatabase,
         schema: documentSchema,
         databaseKind: selectedConnection?.dbType ?? 'netezza',
+        ...(options.uri === undefined ? {} : { uri: options.uri }),
       },
     });
     store.dispatch({ type: 'workspace/select-document', documentId: sourceId });
@@ -522,6 +552,14 @@ export function App(): ReactElement {
     if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { database: nextDatabase, schema: '' } });
   }, [activeDocument, store]);
 
+  const selectSchemaContext = useCallback((nextDatabase?: string, nextSchema?: string): void => {
+    const databaseContext = nextDatabase ?? '';
+    const schemaContext = nextSchema ?? '';
+    setDatabase(databaseContext);
+    setSchema(schemaContext);
+    if (activeDocument) store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { database: databaseContext, schema: schemaContext } });
+  }, [activeDocument, store]);
+
   const handleEditorProblems = useCallback((nextProblems: readonly SqlEditorProblem[]): void => {
     setProblems(nextProblems);
   }, []);
@@ -578,11 +616,100 @@ export function App(): ReactElement {
     setDesignerTarget(node);
   }, [selectedConnection]);
 
-  const saveDocument = useCallback((): void => {
-    if (!activeDocument) return;
-    store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { dirty: false } });
-    setNotice('Document saved for this Electron profile.');
+  const openSqlFileFromDisk = useCallback(async (): Promise<void> => {
+    const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
+    if (!bridge?.openSqlFile) {
+      setNotice('Opening SQL files is unavailable in this shell.');
+      return;
+    }
+    let file: Awaited<ReturnType<typeof bridge.openSqlFile>>;
+    try {
+      file = await bridge.openSqlFile();
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not open the SQL file.');
+      return;
+    }
+    if (!file) return;
+    if (file.oversize && !confirmLargeSqlOpen(file.fileName, file.sizeBytes)) return;
+    const existing = Object.values(state.workspace.documents).find(document => document.uri === file.filePath);
+    if (existing) {
+      if (existing.content !== file.content) {
+        if (existing.dirty && typeof window !== 'undefined' && !window.confirm(`Replace unsaved changes in “${existing.title}” with the file content?`)) {
+          store.dispatch({ type: 'workspace/select-document', documentId: existing.id });
+          return;
+        }
+        store.dispatch({
+          type: 'workspace/update-document',
+          documentId: existing.id,
+          patch: { content: file.content, title: file.fileName, uri: file.filePath, dirty: false },
+        });
+      }
+      store.dispatch({ type: 'workspace/select-document', documentId: existing.id });
+      store.dispatch({ type: 'shell/surface', surface: 'workspace' });
+      setNotice(`Opened ${file.fileName}.`);
+      return;
+    }
+    openDocument(file.content, file.fileName, { uri: file.filePath });
+    setNotice(`Opened ${file.fileName}.`);
+  }, [openDocument, state.workspace.documents, store]);
+
+  const saveActiveDocumentAs = useCallback(async (): Promise<boolean> => {
+    if (!activeDocument) return false;
+    const content = activeDocument.content;
+    const pendingBytes = sqlByteLength(content);
+    if (pendingBytes > SOFT_SQL_FILE_WARN_BYTES && !confirmLargeSqlSave(pendingBytes)) return false;
+    const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
+    if (!bridge?.saveSqlFileAs) {
+      setNotice('Saving SQL files is unavailable in this shell.');
+      return false;
+    }
+    let saved: Awaited<ReturnType<typeof bridge.saveSqlFileAs>>;
+    try {
+      saved = await bridge.saveSqlFileAs(activeDocument.title, content);
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not save the SQL file.');
+      return false;
+    }
+    if (!saved) return false;
+    store.dispatch({
+      type: 'workspace/update-document',
+      documentId: activeDocument.id,
+      patch: { uri: saved.filePath, title: saved.fileName, dirty: false },
+    });
+    setNotice(`Saved ${saved.fileName}.`);
+    return true;
   }, [activeDocument, store]);
+
+  const saveActiveDocument = useCallback(async (): Promise<boolean> => {
+    if (!activeDocument) return false;
+    const content = activeDocument.content;
+    const pendingBytes = sqlByteLength(content);
+    if (pendingBytes > SOFT_SQL_FILE_WARN_BYTES && !confirmLargeSqlSave(pendingBytes)) return false;
+    const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
+    if (activeDocument.uri) {
+      if (!bridge?.saveSqlFile) {
+        setNotice('Saving SQL files is unavailable in this shell.');
+        return false;
+      }
+      try {
+        const saved = await bridge.saveSqlFile(activeDocument.uri, content);
+        store.dispatch({
+          type: 'workspace/update-document',
+          documentId: activeDocument.id,
+          patch: { uri: saved.filePath, title: saved.fileName, dirty: false },
+        });
+        setNotice(`Saved ${saved.fileName}.`);
+        return true;
+      } catch (error: unknown) {
+        if (error instanceof Error && /save location first/iu.test(error.message)) {
+          return saveActiveDocumentAs();
+        }
+        setNotice(error instanceof Error ? error.message : 'Could not save the SQL file.');
+        return false;
+      }
+    }
+    return saveActiveDocumentAs();
+  }, [activeDocument, saveActiveDocumentAs, store]);
 
   const formatDocument = useCallback((): void => {
     void editorRef.current?.getAction('editor.action.formatDocument')?.run();
@@ -1027,6 +1154,34 @@ export function App(): ReactElement {
     }
   }, [activeResult?.columns, database, rows, selectedConnection?.id, selectedObject]);
 
+  const handleEditorReady = useCallback((editor: import('monaco-editor').editor.IStandaloneCodeEditor, monaco: typeof import('monaco-editor')): void => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO, () => void openSqlFileFromDisk());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveActiveDocument());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyS, () => void saveActiveDocumentAs());
+  }, [openSqlFileFromDisk, saveActiveDocument, saveActiveDocumentAs]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || booting || state.auth.status !== 'authenticated') return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === 'o') {
+        event.preventDefault();
+        void openSqlFileFromDisk();
+      } else if (key === 's' && event.shiftKey) {
+        event.preventDefault();
+        void saveActiveDocumentAs();
+      } else if (key === 's') {
+        event.preventDefault();
+        void saveActiveDocument();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [booting, openSqlFileFromDisk, saveActiveDocument, saveActiveDocumentAs, state.auth.status]);
+
   if (booting) return <AsyncStateView state="loading" loadingLabel="Starting authenticated workspace…" /> as ReactElement;
   if (state.auth.status !== 'authenticated') return <AsyncStateView state="error" message={state.auth.message ?? 'Authentication is unavailable.'} /> as ReactElement;
 
@@ -1060,9 +1215,12 @@ export function App(): ReactElement {
   const workspaceDocumentContent = <div className="electron-workspace-content">
     <div className="electron-editor-toolbar" role="toolbar" aria-label="SQL editor actions">
       <button type="button" onClick={() => openDocument('SELECT 1;', 'query.sql')}>＋ SQL</button>
-      <button type="button" onClick={saveDocument}>Save</button>
+      <button type="button" aria-label="Open SQL file" title="Open SQL file (Ctrl+O)" onClick={() => void openSqlFileFromDisk()}>Open</button>
+      <button type="button" aria-label="Save SQL file" title="Save SQL file (Ctrl+S)" onClick={() => void saveActiveDocument()}>Save</button>
+      <button type="button" aria-label="Save SQL file as" title="Save SQL file as (Ctrl+Shift+S)" onClick={() => void saveActiveDocumentAs()}>Save As</button>
       <button type="button" onClick={commentDocument}>Comment</button>
       <button type="button" onClick={formatDocument}>Format</button>
+      {activeDocument?.uri ? <span className="electron-document-path" title={activeDocument.uri}>{activeDocument.uri}</span> : null}
       <span className="electron-toolbar-spacer" />
       <SqlDialectSelect value={authoringDatabaseKind} onChange={selectAuthoringDialect} ariaLabel="SQL authoring dialect" />
       <label>Connection<select aria-label="Editor connection" value={selectedConnection?.id ?? ''} onChange={event => selectConnection(event.target.value)}><option value="">Select connection</option>{state.connections.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
@@ -1073,7 +1231,7 @@ export function App(): ReactElement {
       <button type="button" onClick={() => void cancel()} disabled={activeResult?.status !== 'loading' && activeResult?.status !== 'streaming'}>Cancel</button>
     </div>
     {notice && <div className="electron-notice" role="status">{notice}</div>}
-    <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: activeDocument?.connectionId ?? selectedConnection?.id, database: activeDocument?.database ?? database, schema: activeDocument?.schema ?? schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }} onProblemsChange={handleEditorProblems} /></div>
+    <div className="electron-editor-area"><SqlEditor documentId={activeDocument?.id ?? 'empty'} value={activeDocument?.content ?? ''} api={clientRef.current!} preferences={preferences} getContext={() => ({ connectionId: activeDocument?.connectionId ?? selectedConnection?.id, database: activeDocument?.database ?? database, schema: activeDocument?.schema ?? schema, databaseKind: authoringDatabaseKind })} onChange={content => activeDocument && store.dispatch({ type: 'workspace/update-document', documentId: activeDocument.id, patch: { content, dirty: true } })} onRun={() => void run()} onReady={handleEditorReady} onProblemsChange={handleEditorProblems} /></div>
     <ResultPanel
       results={Object.values(state.results.byResultSetId)}
       activeResult={activeResult}

@@ -1,13 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { app, BrowserWindow, safeStorage, session } from 'electron';
+import { app, BrowserWindow, dialog, safeStorage, session } from 'electron';
 import type { OpaqueCredentialRequestId } from '@justybase/contracts';
 import { CapabilityRegistry } from '@justybase/ui-core';
 import { MainCredentialBroker } from './credentialBroker';
 import { createNativeCredentialProvider } from './credentialPrompt';
 import { registerIpcHandlers } from './ipc';
 import { redactConnectionProfile, redactConnectionProfiles } from './redaction';
+import { createSqlFileService } from './sqlFileService';
 import { startElectronSession, type ElectronSessionHandle } from './startup';
 
 let runtime: ElectronSessionHandle | undefined;
@@ -153,6 +154,16 @@ async function start(): Promise<void> {
     void requestQuit(true);
   });
   await currentRuntime.applyAuthenticationCookie({ set: details => session.defaultSession.cookies.set(details) });
+  const sqlFiles = createSqlFileService({
+    dialog,
+    owner: () => currentWindow,
+    fs: {
+      readFile: (filePath, encoding) => readFile(filePath, encoding),
+      writeFile: (filePath, content, encoding) => writeFile(filePath, content, encoding),
+      statSize: async filePath => (await stat(filePath)).size,
+      byteLength: content => Buffer.byteLength(content, 'utf8'),
+    },
+  });
   ipcRegistration = registerIpcHandlers({
     authStatus: () => ({ status: 'authenticated', sessionId: currentRuntime.bootstrap.sessionId }),
     credentialBroker: broker,
@@ -190,6 +201,9 @@ async function start(): Promise<void> {
       });
     },
     listCapabilities: () => ({ descriptors: capabilities.list() }),
+    openSqlFile: () => sqlFiles.openSqlFile(),
+    saveSqlFile: (filePath, content) => sqlFiles.saveSqlFile(filePath, content),
+    saveSqlFileAs: (suggestedName, content) => sqlFiles.saveSqlFileAs(suggestedName, content),
   });
   await currentWindow.loadURL(`${currentRuntime.url}/`);
   // Showing only after the authenticated cookie and preload bridge are ready
