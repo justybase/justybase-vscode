@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactElement } from 'react';
 import type { DatabaseKind, MetadataColumn, MetadataDdlResponse, SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
 import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
+import { SCHEMA_CONTEXT_MENU_LABELS } from '@justybase/ui-core';
 import { readSchemaExplorerShortcuts, rememberSchemaObject, schemaObjectIdentity, schemaExplorerStorageKey, toggleSchemaFavorite, writeSchemaExplorerShortcuts } from './schemaExplorerState';
 
 interface SchemaApi {
@@ -59,6 +60,7 @@ export interface SchemaExplorerProps {
   readonly database?: string;
   readonly databaseKind: DatabaseKind;
   readonly onInsert: (value: string) => void;
+  readonly onContextChange?: (database?: string, schema?: string) => void;
   readonly onObjectSelect?: (node: SchemaTreeNode) => void;
   readonly onOpenDesigner?: (node: SchemaTreeNode) => void;
   readonly onOpenQuery?: (sql: string, title: string, node: SchemaTreeNode) => void;
@@ -67,7 +69,7 @@ export interface SchemaExplorerProps {
   readonly refreshNonce?: number;
 }
 
-export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport, refreshNonce = 0 }: SchemaExplorerProps): ReactElement {
+export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onContextChange, onObjectSelect, onOpenDesigner, onOpenQuery, onOpenDdl, onImport, refreshNonce = 0 }: SchemaExplorerProps): ReactElement {
   const [children, setChildren] = useState<Record<string, readonly SchemaTreeNode[]>>({});
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
@@ -207,7 +209,11 @@ export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onOb
 
   const selectNode = (node: SchemaTreeNode): void => {
     onObjectSelect?.(node);
-    if (node.kind === 'object') {
+    if (node.kind === 'database') {
+      onContextChange?.(node.database, undefined);
+    } else if (node.kind === 'schema') {
+      onContextChange?.(node.database, node.schema);
+    } else if (node.kind === 'object') {
       setRecentObjects(previous => rememberSchemaObject(previous, node));
       onInsert(qualifiedName(node, databaseKind));
     } else if (node.kind === 'column') {
@@ -223,6 +229,19 @@ export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onOb
     setError(undefined);
     setNotice(undefined);
     void loadChildren(ROOT);
+  };
+
+  const refreshNode = async (node: SchemaTreeNode): Promise<void> => {
+    setMenu(undefined);
+    generationRef.current += 1;
+    requestSequenceRef.current.clear();
+    setChildren(previous => {
+      const next = { ...previous };
+      delete next[node.id];
+      return next;
+    });
+    setExpanded(previous => new Set(previous).add(node.id));
+    await loadChildren(node.id, node);
   };
 
   const collapseAll = (): void => setExpanded(new Set([ROOT]));
@@ -314,7 +333,7 @@ export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onOb
   };
 
   const openObjectMenu = (event: ReactMouseEvent<HTMLElement>, node: SchemaTreeNode): void => {
-    if (node.kind !== 'object') return;
+    if (node.kind === 'group' || node.kind === 'connection') return;
     event.preventDefault();
     event.stopPropagation();
     onObjectSelect?.(node);
@@ -337,7 +356,25 @@ export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onOb
     </div>}
     {search.trim() ? <div className="electron-schema-search-results">{searchItems.length === 0 ? <span className="electron-schema-empty">No matching objects.</span> : searchItems.map(item => <button type="button" key={`${item.database}.${item.schema}.${item.name}`} onClick={() => selectSearchResult(item)}><span>{item.objectType === 'VIEW' ? '◌' : '▤'}</span><span><strong>{item.name}</strong><small>{item.database}.{item.schema} · {item.objectType}</small></span></button>)}</div>
       : <div className="electron-schema-tree">{loading.has(ROOT) && rootNodes.length === 0 ? <span className="electron-schema-loading">Loading schema…</span> : visibleRootNodes.map(node => <SchemaNode key={node.id} node={node} depth={0} children={children} expanded={expanded} loading={loading} databaseKind={databaseKind} onToggle={toggleNode} onSelect={selectNode} onContextMenu={openObjectMenu} />)}</div>}
-    {menu && <div className="electron-schema-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}><strong>{menu.node.label}</strong><button type="button" onClick={() => { onInsert(objectSql(menu.node, databaseKind)); setMenu(undefined); }}>Insert qualified name</button><button type="button" onClick={() => void copyName(menu.node)}>Copy qualified name</button><button type="button" onClick={() => { onOpenQuery?.(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), `Top 1000 · ${menu.node.label}`, menu.node); setMenu(undefined); }}>View top 1000</button><button type="button" onClick={() => { try { onOpenQuery?.(buildExplainQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), databaseKind), `Explain · ${menu.node.label}`, menu.node); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Explain plans are not available for this connection.'); } setMenu(undefined); }}>Explain plan</button>{onOpenDesigner && <button type="button" onClick={() => { onOpenDesigner(menu.node); setMenu(undefined); }}>Open Object Designer</button>}<button type="button" onClick={() => void openDdl(menu.node)}>Open DDL</button><button type="button" onClick={() => void copyDdl(menu.node)}>Copy DDL</button>{onImport && <button type="button" onClick={() => { onImport(menu.node); setMenu(undefined); }}>Import CSV/XLSX</button>}<button type="button" onClick={() => toggleFavorite(menu.node)}>{favorites.some(item => schemaObjectIdentity(item) === schemaObjectIdentity(menu.node)) ? 'Remove from favorites' : 'Add to favorites'}</button></div>}
+    {menu && <div className="electron-schema-menu" role="menu" aria-label={`Actions for ${menu.node.label}`} style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}>
+      <strong>{menu.node.label}</strong>
+      <small>{menu.node.kind === 'object' ? menu.node.objectType ?? 'Object' : menu.node.kind}</small>
+      {(menu.node.kind === 'database' || menu.node.kind === 'schema') && <button type="button" role="menuitem" onClick={() => { selectNode(menu.node); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.setActiveContext}</button>}
+      {menu.node.hasChildren && <button type="button" role="menuitem" onClick={() => void refreshNode(menu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.refreshSelectedMetadata}</button>}
+      {(menu.node.kind === 'database' || menu.node.kind === 'schema' || menu.node.kind === 'object' || menu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => { onInsert(objectSql(menu.node, databaseKind)); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.insertQualifiedName}</button>}
+      {(menu.node.kind === 'database' || menu.node.kind === 'schema' || menu.node.kind === 'object' || menu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => void copyName(menu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.copyName}</button>}
+      {menu.node.kind === 'column' && <button type="button" role="menuitem" onClick={() => { onInsert(menu.node.label); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.insertColumnName}</button>}
+      {menu.node.kind === 'object' && <>
+        {onOpenQuery && <button type="button" role="menuitem" onClick={() => { onOpenQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), `Top 1000 · ${menu.node.label}`, menu.node); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.selectTop1000}</button>}
+        {onOpenQuery && <button type="button" role="menuitem" onClick={() => { try { onOpenQuery(buildExplainQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind), databaseKind), `Explain · ${menu.node.label}`, menu.node); } catch (reason: unknown) { setError(reason instanceof Error ? reason.message : 'Explain plans are not available for this connection.'); } setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.explainPlan}</button>}
+        {onOpenQuery && <button type="button" role="menuitem" onClick={() => { onOpenQuery(buildTopRowsQuery({ database: menu.node.database, schema: menu.node.schema, objectName: menu.node.objectName ?? menu.node.label }, databaseKind, 50_000), `View/Edit · ${menu.node.label}`, menu.node); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.viewEditData}</button>}
+        {onOpenDesigner && <button type="button" role="menuitem" onClick={() => { onOpenDesigner(menu.node); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.openObjectDesigner}</button>}
+        <button type="button" role="menuitem" onClick={() => void openDdl(menu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.createDdlCode}</button>
+        <button type="button" role="menuitem" onClick={() => void copyDdl(menu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.copyDdl}</button>
+        {onImport && <button type="button" role="menuitem" onClick={() => { onImport(menu.node); setMenu(undefined); }}>{SCHEMA_CONTEXT_MENU_LABELS.importData}</button>}
+        <button type="button" role="menuitem" onClick={() => toggleFavorite(menu.node)}>{favorites.some(item => schemaObjectIdentity(item) === schemaObjectIdentity(menu.node)) ? SCHEMA_CONTEXT_MENU_LABELS.removeFromFavorites : SCHEMA_CONTEXT_MENU_LABELS.addToFavorites}</button>
+      </>}
+    </div>}
   </section>;
 }
 

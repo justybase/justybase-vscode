@@ -252,7 +252,7 @@ share one renderer.**
 | Insert object/column name into editor | ✅ | ✅ | ✅ | `SchemaTree.insertNode`. |
 | Drag & drop into editor | ✅ | ✅ (basic) | 🟡 | |
 | Inspector (columns, PK/FK, comments) | ✅ | ✅ `InspectorPanel` | ✅ | |
-| Top 1000 / Copy DDL | ✅ | ✅ context menu | 🟡 | Web DDL generation is simpler than provider-specific desktop generators; a dedicated Copy Name action remains absent. |
+| Top 1000 / Copy Name / Copy DDL | ✅ | ✅ common context menu | 🟡 | Web and Electron use the same core Schema menu vocabulary; provider-specific desktop generators still have broader DDL coverage. |
 | Favorites / recent objects | ✅ `favoritesManager`, `schemaRecentObjects` | ✅ local favorites | 🟡 | Favorites exist; desktop has deeper recent-object integration. |
 | Refresh/invalidate metadata | ✅ | ✅ | ✅ | Successful guarded schema writes invalidate the scoped API metadata/LSP cache; SchemaTree Refresh clears the loaded tree and reruns an active search. |
 

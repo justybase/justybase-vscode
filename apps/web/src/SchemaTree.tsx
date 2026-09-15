@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement, DragEvent } from 'react';
 import type { DatabaseKind, SchemaSearchResult, SchemaTreeNode } from '@justybase/contracts';
 import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
+import { SCHEMA_CONTEXT_MENU_LABELS } from '@justybase/ui-core';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage } from './workspacePersistence';
 
@@ -551,7 +552,8 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       delete next[node.id];
       return next;
     });
-    await loadFn(node.id);
+    if (node.kind === 'object' && node.objectName) await loadColumns(node);
+    else await loadFn(node.id);
     setExpanded(previous => ({ ...previous, [node.id]: true }));
     setObjectMenu(null);
   }
@@ -574,6 +576,11 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
 
   function openObjectData(node: SchemaTreeNode): void {
     onOpenQuery?.(buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName || node.label }, databaseKind), `Top 1000 · ${node.label}`, node);
+    setObjectMenu(null);
+  }
+
+  function openObjectEditData(node: SchemaTreeNode): void {
+    onOpenQuery?.(buildTopRowsQuery({ database: node.database, schema: node.schema, objectName: node.objectName || node.label }, databaseKind, 50_000), `View/Edit · ${node.label}`, node);
     setObjectMenu(null);
   }
 
@@ -769,19 +776,20 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
       {objectMenu && <div className="schema-context-menu" role="menu" aria-label={`Actions for ${objectMenu.node.label}`} style={{ left: objectMenu.x, top: objectMenu.y }} onClick={event => event.stopPropagation()}>
         <strong>{objectMenu.node.label}</strong>
         <small>{objectMenu.node.kind === 'object' ? objectMenu.node.objectType ?? 'Object' : objectMenu.node.kind}</small>
-        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema') && <button type="button" role="menuitem" onClick={() => { selectNode(objectMenu.node); setObjectMenu(null); }}>Set as active context</button>}
-        {objectMenu.node.hasChildren && <button type="button" role="menuitem" onClick={() => void refreshNode(objectMenu.node)}>Refresh children</button>}
-        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema' || objectMenu.node.kind === 'object' || objectMenu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => insertQualifiedNode(objectMenu.node)}>Insert qualified name</button>}
-        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema' || objectMenu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => void copyNodeName(objectMenu.node)}>Copy qualified name</button>}
-        {objectMenu.node.kind === 'column' && <button type="button" role="menuitem" onClick={() => { onInsert(objectMenu.node.label); setObjectMenu(null); }}>Insert column name</button>}
+        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema') && <button type="button" role="menuitem" onClick={() => { selectNode(objectMenu.node); setObjectMenu(null); }}>{SCHEMA_CONTEXT_MENU_LABELS.setActiveContext}</button>}
+        {objectMenu.node.hasChildren && <button type="button" role="menuitem" onClick={() => void refreshNode(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.refreshSelectedMetadata}</button>}
+        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema' || objectMenu.node.kind === 'object' || objectMenu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => insertQualifiedNode(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.insertQualifiedName}</button>}
+        {(objectMenu.node.kind === 'database' || objectMenu.node.kind === 'schema' || objectMenu.node.kind === 'object' || objectMenu.node.kind === 'column') && <button type="button" role="menuitem" onClick={() => void copyNodeName(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.copyName}</button>}
+        {objectMenu.node.kind === 'column' && <button type="button" role="menuitem" onClick={() => { onInsert(objectMenu.node.label); setObjectMenu(null); }}>{SCHEMA_CONTEXT_MENU_LABELS.insertColumnName}</button>}
         {objectMenu.node.kind === 'object' && <>
-          <button type="button" role="menuitem" onClick={() => openDesigner(objectMenu.node)}>Open Object Designer</button>
-          <button type="button" role="menuitem" onClick={() => openObjectData(objectMenu.node)}>View top 1000</button>
-          <button type="button" role="menuitem" onClick={() => explainObject(objectMenu.node)}>Explain plan</button>
-          <button type="button" role="menuitem" onClick={() => void openObjectDdl(objectMenu.node)}>Open DDL</button>
-          <button type="button" role="menuitem" onClick={() => void copyObjectDdl(objectMenu.node)}>Copy DDL</button>
-          <button type="button" role="menuitem" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>Import CSV/XLSX</button>
-          <button type="button" role="menuitem" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? 'Remove from favorites' : 'Add to favorites'}</button>
+          <button type="button" role="menuitem" onClick={() => openObjectData(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.selectTop1000}</button>
+          <button type="button" role="menuitem" onClick={() => explainObject(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.explainPlan}</button>
+          <button type="button" role="menuitem" onClick={() => openObjectEditData(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.viewEditData}</button>
+          <button type="button" role="menuitem" onClick={() => openDesigner(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.openObjectDesigner}</button>
+          <button type="button" role="menuitem" onClick={() => void openObjectDdl(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.createDdlCode}</button>
+          <button type="button" role="menuitem" onClick={() => void copyObjectDdl(objectMenu.node)}>{SCHEMA_CONTEXT_MENU_LABELS.copyDdl}</button>
+          <button type="button" role="menuitem" onClick={() => { onImport?.(objectMenu.node); setObjectMenu(null); }}>{SCHEMA_CONTEXT_MENU_LABELS.importData}</button>
+          <button type="button" role="menuitem" onClick={() => toggleFavorite(objectMenu.node)}>{favorites.some(item => item.id === objectMenu.node.id) ? SCHEMA_CONTEXT_MENU_LABELS.removeFromFavorites : SCHEMA_CONTEXT_MENU_LABELS.addToFavorites}</button>
         </>}
       </div>}
     </div>

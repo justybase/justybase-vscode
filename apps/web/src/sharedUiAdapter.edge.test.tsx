@@ -350,7 +350,7 @@ describe('shared Web UI adapter edge contracts', () => {
     await screen.findByRole('button', { name: 'SQLite' });
     const treeItem = await screen.findByRole('treeitem', { name: /orders/i });
     fireEvent.contextMenu(treeItem, { clientX: 40, clientY: 40 });
-    await user.click(screen.getByRole('menuitem', { name: 'View top 1000' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Select Top 1000' }));
     await waitFor(() => expect((screen.getByLabelText('SQL editor') as HTMLTextAreaElement).value).toContain('FROM "public"."orders"'));
     const startCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/query'));
     expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ database: 'main' }));
