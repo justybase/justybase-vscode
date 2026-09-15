@@ -51,7 +51,8 @@ runQueryRaw
   → return QueryResult
 ```
 
-**Retry logic:** On `isConnectionBrokenError`, the shared owner retries a
+**Retry logic:** On `isConnectionBrokenError` (including Netezza's
+`Connection protocol is invalid; reconnect is required`), the shared owner retries a
 persistent execution
 once only when both the original and fully expanded SQL contain one
 allow-listed, call-free read-only statement. Writes, executable macros,
@@ -217,7 +218,8 @@ Column type resolution follows this priority:
 ## Retry Protocol
 
 **Conditions for retry:**
-- Error matches `isConnectionBrokenError` (TCP reset, ECONNRESET, etc.)
+- Error matches `isConnectionBrokenError` (TCP reset, ECONNRESET, or Netezza's
+  `Connection protocol is invalid; reconnect is required`, etc.)
 - No prior reconnect attempt in the logical execution
 - Document has a persistent connection (`keepConnectionOpen`)
 - Original and expanded SQL resolve to one conservatively allow-listed
