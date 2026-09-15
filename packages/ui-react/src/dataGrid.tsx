@@ -1387,15 +1387,16 @@ export function DataGrid({
 
   return <div className={`ui-result-grid result-grid${onOpenColumnFilter && !showInlineColumnFilters ? ' ui-data-grid-compact' : ''}`}>
     {showColumnMenu && <details className="ui-data-grid-column-menu">
-      <summary>Columns</summary>
+      <summary><span className="ui-data-grid-column-menu-title">Columns</span><span className="ui-data-grid-column-menu-count">{visibleColumnIndexes.length}/{resolvedColumns.length}</span></summary>
       <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
+        <div className="ui-data-grid-column-menu-heading"><strong>Visible columns</strong><span>{visibleColumnIndexes.length} of {resolvedColumns.length}</span></div>
         {resolvedColumns.map((column, columnIndex) => {
           const id = columnKey(column, columnIndex);
           const visible = visibleColumnIndexes.includes(columnIndex);
           const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
           return <div className="ui-data-grid-column-menu-item" key={id}>
-            <label><input type="checkbox" checked={visible} onChange={event => toggleColumnVisibility(columnIndex, event.target.checked)} />{column.name}</label>
-            <button type="button" aria-label={pinned ? `Unpin ${column.name} in column menu` : `Pin ${column.name} in column menu`} onClick={() => togglePin(columnIndex)}>{pinned ? 'Unpin' : 'Pin'}</button>
+            <label title={column.name}><input type="checkbox" checked={visible} onChange={event => toggleColumnVisibility(columnIndex, event.target.checked)} /><span className="ui-data-grid-column-menu-name">{column.name}</span></label>
+            <button type="button" className={`ui-data-grid-column-menu-pin${pinned ? ' active' : ''}`} aria-label={pinned ? `Unpin ${column.name} in column menu` : `Pin ${column.name} in column menu`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m14.4 3.2 6.4 6.4-2.2 2.2-1.8-1.8-4.2 4.2 1.8 1.8-2.2 2.2-6.4-6.4L8 9.6 6.2 7.8l2.2-2.2L10.2 7l4.2-4.2Z" /><path d="m11.8 13.8-7.2 7.2M4.6 21H3v-1.6" /></svg></button>
           </div>;
         })}
       </div>
