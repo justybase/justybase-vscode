@@ -44,4 +44,5 @@ export { FavoritesTool } from './favoritesTool';
 export type { IFavoritesToolParameters } from './favoritesTool';
 export { GetDDLTool } from './getDDLTool';
 export type { IGetDDLToolParameters } from './getDDLTool';
-
+export { ProcedureRepairTool } from './procedureRepairTool';
+export type { IProcedureRepairToolParameters } from './procedureRepairTool';

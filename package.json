@@ -1483,6 +1483,73 @@
         }
       },
       {
+        "name": "netezza_repair_procedure",
+        "displayName": "Repair Netezza Procedure",
+        "toolReferenceName": "repairProcedure",
+        "icon": "$(tools)",
+        "userDescription": "Compiles a Netezza stored procedure and optionally runs a user-confirmed typed test CALL",
+        "modelDescription": "Use this tool to compile and repair one complete CREATE PROCEDURE or CREATE OR REPLACE PROCEDURE block from the active SQL editor. The tool returns database compilation diagnostics and permits at most three attempts. Set mode='compile_only' to repair from compilation errors. Set mode='compile_and_call' and provide typed callArguments to run a test CALL after compilation; a separate explicit user confirmation is always required because CALL may modify database data. Pass the corrected complete procedure SQL in sql on subsequent attempts.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "sql",
+          "procedure",
+          "nzplsql",
+          "compile",
+          "repair",
+          "database",
+          "write"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "compile_only",
+                "compile_and_call"
+              ],
+              "description": "Repair mode. compile_only uses compilation diagnostics; compile_and_call also tests the procedure with typed callArguments."
+            },
+            "sql": {
+              "type": "string",
+              "description": "Optional complete corrected CREATE PROCEDURE or CREATE OR REPLACE PROCEDURE block. If omitted, uses the selected or current procedure block in the active editor."
+            },
+            "callArguments": {
+              "type": "array",
+              "description": "Typed values for CALL in declaration order. Required for compile_and_call; use [] for a no-argument procedure.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "null",
+                      "date",
+                      "timestamp"
+                    ]
+                  },
+                  "value": {
+                    "description": "Value matching the declared type. Dates use YYYY-MM-DD."
+                  }
+                },
+                "required": [
+                  "type",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
         "name": "netezza_get_sql_diagnostics",
         "displayName": "Get SQL Diagnostics",
         "toolReferenceName": "getSqlDiagnostics",

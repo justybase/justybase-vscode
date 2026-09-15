@@ -22,6 +22,10 @@ import {
     sqlString,
     netezzaObjectName
 } from './validators';
+import type {
+    ProcedureCallArgument,
+    ProcedureRepairInput,
+} from './types';
 
 /**
  * ============================================
@@ -111,6 +115,9 @@ export interface IValidateSqlOnDatabaseToolInput {
     sql?: string;
     database?: string;
 }
+
+/** ProcedureRepairTool input */
+export type IProcedureRepairToolInput = ProcedureRepairInput;
 
 /** GetSqlDiagnosticsTool input */
 export interface IGetSqlDiagnosticsToolInput {
@@ -683,6 +690,107 @@ function validateProposeImportMappingToolInput(input: unknown): ValidationResult
     };
 }
 
+/** Validates ProcedureRepairTool input */
+function validateProcedureRepairToolInput(input: unknown): ValidationResult<IProcedureRepairToolInput> {
+    if (typeof input !== 'object' || input === null) {
+        return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
+    }
+
+    const obj = input as Record<string, unknown>;
+    const modeResult = enumValidator(['compile_only', 'compile_and_call'] as const, obj.mode, 'mode');
+    const sqlResult = optionalString(obj.sql, 'sql');
+    const errors: ValidationError[] = [
+        ...(modeResult.success ? [] : modeResult.errors),
+        ...(sqlResult.success ? [] : sqlResult.errors)
+    ];
+
+    const rawArguments = obj.callArguments;
+    let callArguments: ProcedureCallArgument[] | undefined;
+    if (rawArguments !== undefined) {
+        if (!Array.isArray(rawArguments)) {
+            errors.push({ field: 'callArguments', message: 'Field \'callArguments\' must be an array', code: 'INVALID_TYPE' });
+        } else {
+            callArguments = [];
+            rawArguments.forEach((rawArgument, index) => {
+                const argumentResult = validateProcedureCallArgument(rawArgument, `callArguments[${index}]`);
+                if (!argumentResult.success) {
+                    errors.push(...argumentResult.errors);
+                } else {
+                    callArguments!.push(argumentResult.data);
+                }
+            });
+        }
+    }
+
+    const mode = modeResult.success ? modeResult.data : undefined;
+    if (mode === 'compile_and_call' && rawArguments === undefined) {
+        errors.push({
+            field: 'callArguments',
+            message: 'Field \'callArguments\' is required for compile_and_call (use [] for a no-argument procedure)',
+            code: 'REQUIRED'
+        });
+    }
+
+    if (errors.length > 0 || !modeResult.success || !sqlResult.success) {
+        return { success: false, errors };
+    }
+
+    return {
+        success: true,
+        data: {
+            mode: (modeResult as { success: true; data: IProcedureRepairToolInput['mode'] }).data,
+            sql: sqlResult.data,
+            ...(callArguments === undefined ? {} : { callArguments })
+        }
+    };
+}
+
+function validateProcedureCallArgument(value: unknown, field: string): ValidationResult<ProcedureCallArgument> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return { success: false, errors: [{ field, message: `${field} must be an object`, code: 'INVALID_TYPE' }] };
+    }
+
+    const argument = value as Record<string, unknown>;
+    const typeResult = enumValidator(
+        ['string', 'number', 'boolean', 'null', 'date', 'timestamp'] as const,
+        argument.type,
+        `${field}.type`
+    );
+    const validationErrors: ValidationError[] = typeResult.success ? [] : typeResult.errors;
+    if (!typeResult.success) {
+        return { success: false, errors: validationErrors };
+    }
+
+    const argumentType = typeResult.data;
+    const argumentValue = argument.value;
+    const validValue = argumentType === 'string' || argumentType === 'date' || argumentType === 'timestamp'
+        ? typeof argumentValue === 'string'
+        : argumentType === 'number'
+            ? typeof argumentValue === 'number' && Number.isFinite(argumentValue)
+            : argumentType === 'boolean'
+                ? typeof argumentValue === 'boolean'
+                : argumentValue === null;
+
+    if (!validValue) {
+        return {
+            success: false,
+            errors: [{ field: `${field}.value`, message: `${field}.value does not match type '${argumentType}'`, code: 'INVALID_TYPE' }]
+        };
+    }
+
+    if (argumentType === 'date' && !/^\d{4}-\d{2}-\d{2}$/u.test(argumentValue as string)) {
+        return {
+            success: false,
+            errors: [{ field: `${field}.value`, message: `${field}.value must use YYYY-MM-DD`, code: 'INVALID_FORMAT' }]
+        };
+    }
+
+    return {
+        success: true,
+        data: { type: argumentType, value: argumentValue as ProcedureCallArgument['value'] }
+    };
+}
+
 
 
 /** Validates DependenciesTool input */
@@ -925,6 +1033,19 @@ export const ValidateSqlOnDatabaseToolContract: ToolContract<IValidateSqlOnDatab
     tags: ['database', 'explain', 'netezza', 'runtime', 'sql', 'validation']
 };
 
+/** ProcedureRepairTool Contract */
+export const ProcedureRepairToolContract: ToolContract<IProcedureRepairToolInput, string> = {
+    name: 'netezza_repair_procedure',
+    displayName: 'Repair Netezza Procedure',
+    description: 'Compiles a procedure and optionally runs a user-confirmed typed test CALL with a bounded repair loop',
+    toolReferenceName: 'repairProcedure',
+    validateInput: validateProcedureRepairToolInput,
+    validateOutput: validateToolOutput,
+    errorCodes: commonErrorCodes,
+    requiresConnection: true,
+    tags: ['compile', 'database', 'nzplsql', 'procedure', 'repair', 'sql', 'write']
+};
+
 /** GetSqlDiagnosticsTool Contract */
 export const GetSqlDiagnosticsToolContract: ToolContract<IGetSqlDiagnosticsToolInput, string> = {
     name: 'netezza_get_sql_diagnostics',
@@ -1086,6 +1207,7 @@ export const ToolContractRegistry: Map<string, ToolContract<unknown, unknown>> =
     [GetDDLToolContract.name, GetDDLToolContract],
     [ValidateSqlToolContract.name, ValidateSqlToolContract],
     [ValidateSqlOnDatabaseToolContract.name, ValidateSqlOnDatabaseToolContract],
+    [ProcedureRepairToolContract.name, ProcedureRepairToolContract],
     [GetSqlDiagnosticsToolContract.name, GetSqlDiagnosticsToolContract],
     [DatabasesToolContract.name, DatabasesToolContract],
     [SchemasToolContract.name, SchemasToolContract],

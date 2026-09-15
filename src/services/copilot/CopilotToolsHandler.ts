@@ -9,6 +9,8 @@ import { CopilotSchemaIntrospectionTools } from './tools/CopilotSchemaIntrospect
 import { CopilotExplainTuningTools } from './tools/CopilotExplainTuningTools';
 import { CopilotValidationTools } from './tools/CopilotValidationTools';
 import { CopilotDependencyTools } from './tools/CopilotDependencyTools';
+import { CopilotProcedureRepairService } from './tools/procedureRepairService';
+import type { ProcedureRepairInput } from './tools/procedureRepairUtils';
 
 export class CopilotToolsHandler {
     private readonly runtime: CopilotToolRuntime;
@@ -18,6 +20,7 @@ export class CopilotToolsHandler {
     private readonly explainTuningTools: CopilotExplainTuningTools;
     private readonly validationTools: CopilotValidationTools;
     private readonly dependencyTools: CopilotDependencyTools;
+    private readonly procedureRepairService: CopilotProcedureRepairService;
 
     constructor(
         connectionManager: ConnectionManager,
@@ -63,6 +66,8 @@ export class CopilotToolsHandler {
             connectionManager,
             runtime: this.runtime
         });
+
+        this.procedureRepairService = new CopilotProcedureRepairService(this.runtime);
 
     }
 
@@ -129,6 +134,10 @@ export class CopilotToolsHandler {
 
     async validateSqlOnDatabase(sql: string, database?: string): Promise<string> {
         return this.validationTools.validateSqlOnDatabase(sql, database);
+    }
+
+    async repairProcedure(input: ProcedureRepairInput, token?: vscode.CancellationToken): Promise<string> {
+        return this.procedureRepairService.repairProcedure(input, token);
     }
 
     async validateSql(sql: string): Promise<string> {

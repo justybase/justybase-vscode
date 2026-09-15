@@ -7,8 +7,15 @@ import {
     executeDatabaseQuery
 } from '../../../core/connectionFactory';
 import { runQuery } from '../../../core/queryRunner';
+import { getQueryConfig } from '../../../core/queryBatchExecutor';
 import { ConnectionDetails, ResultSet } from '../../../types';
 import { ResultPanelView } from '../../../views/resultPanelView';
+
+export interface ProcedureStatementExecutionResult {
+    rowCount: number;
+    columnNames: string[];
+    rowLimitReached: boolean;
+}
 
 export interface CopilotToolRuntimeDeps {
     connectionManager: ConnectionManager;
@@ -129,6 +136,71 @@ export class CopilotToolRuntime {
             return `${description.charAt(0).toUpperCase() + description.slice(1)} FAILED in database "${database}": ${msg}`;
         } finally {
             await connection.close();
+        }
+    }
+
+    /**
+     * Executes one procedure DDL or CALL statement against the connection
+     * selected for the active SQL document. This deliberately bypasses the
+     * general query retry path: replaying DDL or a procedure call after an
+     * ambiguous connection failure could apply side effects twice.
+     */
+    async executeProcedureStatement(
+        sql: string,
+        documentUri: string,
+        cancellationToken?: vscode.CancellationToken,
+    ): Promise<ProcedureStatementExecutionResult> {
+        const connectionName = this.deps.connectionManager.getConnectionForExecution(documentUri);
+        if (!connectionName) {
+            throw new Error('No database connection is assigned to the active SQL document.');
+        }
+
+        const connectionDetails = await this.deps.connectionManager.getConnection(connectionName);
+        if (!connectionDetails) {
+            throw new Error(`Connection "${connectionName}" not found.`);
+        }
+
+        const connection = await createConnectedDatabaseConnectionFromDetails(connectionDetails);
+        const command = connection.createCommand(sql);
+        command.commandTimeout = getQueryConfig().queryTimeout;
+        let reader: Awaited<ReturnType<typeof command.executeReader>> | undefined;
+        let cancellationDisposable: vscode.Disposable | undefined;
+
+        try {
+            if (cancellationToken) {
+                cancellationDisposable = cancellationToken.onCancellationRequested(() => {
+                    void command.cancel().catch(() => undefined);
+                });
+            }
+
+            if (cancellationToken?.isCancellationRequested) {
+                throw new Error('Procedure operation cancelled by user.');
+            }
+
+            reader = await command.executeReader();
+            const columnNames = Array.from({ length: reader.fieldCount }, (_unused, index) => reader!.getName(index));
+            const maxRows = 200;
+            let rowCount = 0;
+
+            while (rowCount < maxRows && await reader.read()) {
+                if (cancellationToken?.isCancellationRequested) {
+                    throw new Error('Procedure operation cancelled by user.');
+                }
+                rowCount++;
+            }
+
+            return {
+                rowCount,
+                columnNames,
+                rowLimitReached: rowCount >= maxRows
+            };
+        } finally {
+            cancellationDisposable?.dispose();
+            try {
+                await reader?.close();
+            } finally {
+                await connection.close();
+            }
         }
     }
 

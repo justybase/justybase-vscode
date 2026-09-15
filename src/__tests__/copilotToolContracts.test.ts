@@ -27,6 +27,7 @@ const TOOL_FILE_BY_NAME: Record<string, string> = {
     netezza_get_favorites: 'src/services/copilotTools/favoritesTool.ts',
     netezza_validate_sql: 'src/services/copilotTools/validateSqlTool.ts',
     netezza_validate_sql_on_database: 'src/services/copilotTools/validateSqlOnDatabaseTool.ts',
+    netezza_repair_procedure: 'src/services/copilotTools/procedureRepairTool.ts',
     netezza_get_sql_diagnostics: 'src/services/copilotTools/getSqlDiagnosticsTool.ts',
     netezza_inspect_import_file: 'src/services/copilotTools/inspectImportFileTool.ts',
     netezza_propose_import_mapping: 'src/services/copilotTools/proposeImportMappingTool.ts',

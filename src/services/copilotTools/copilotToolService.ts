@@ -4,6 +4,9 @@
  * Keeping the port beside the tools prevents the tool registry facade from
  * importing the CopilotService implementation back through its type imports.
  */
+
+import type * as vscode from 'vscode';
+import type { ProcedureRepairInput } from '../copilot/tools/procedureRepairUtils';
 export interface CopilotToolService {
     getColumnsForTables(tables: string[], database?: string): Promise<string>;
     getComments(tableName: string, database?: string, schema?: string, includeColumns?: boolean): Promise<string>;
@@ -46,5 +49,6 @@ export interface CopilotToolService {
     searchSchema(pattern: string, searchType: string, database?: string): Promise<string>;
     validateSql(sql: string): Promise<string>;
     validateSqlOnDatabase(sql: string, database?: string): Promise<string>;
+    repairProcedure(input: ProcedureRepairInput, token?: vscode.CancellationToken): Promise<string>;
     findTableLocations(tableName: string): Promise<string>;
 }

@@ -322,7 +322,7 @@ describe('AI-01: Copilot Tool Contracts', () => {
 
         it('getAllToolContracts should return the allowed contracts', () => {
             const contracts = getAllToolContracts();
-            expect(contracts).toHaveLength(22);
+            expect(contracts).toHaveLength(23);
         });
     });
 
