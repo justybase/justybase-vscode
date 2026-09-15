@@ -98,6 +98,12 @@ export interface DataGridProps {
   readonly showInlineColumnFilters?: boolean;
 }
 
+export interface DataGridColumnMenuProps {
+  readonly columns: readonly DataGridColumn[];
+  readonly view?: DataGridViewState;
+  readonly onViewChange: (patch: Partial<UiResultViewState>) => void;
+}
+
 interface IndexedRow {
   readonly values: readonly unknown[];
   readonly sourceIndex: number;
@@ -354,6 +360,7 @@ function columnWidthFor(
   index: number,
   view: DataGridViewState,
   measuredWidths: Readonly<Record<string, number>> = {},
+  headerActionCount = 4,
 ): number {
   const widths = view.columnWidths;
   // Prefer the semantic id written by the shared grid, then accept both
@@ -362,7 +369,10 @@ function columnWidthFor(
     ?? widths?.[column.name]
     ?? widths?.[String(index)]
     ?? DEFAULT_COLUMN_WIDTH;
-  return Math.max(configuredWidth, measuredWidths[columnKey(column, index)] ?? 0);
+  const estimatedTextWidth = Math.max(40, column.name.length * 7.25);
+  const estimatedTypeWidth = typeBadge(column).length * 6 + 8;
+  const estimatedHeaderWidth = Math.ceil(14 + estimatedTextWidth + 12 + estimatedTypeWidth + headerActionCount * 20 + (headerActionCount + 1) * 3);
+  return Math.max(configuredWidth, estimatedHeaderWidth, measuredWidths[columnKey(column, index)] ?? 0);
 }
 
 function measuredHeaderMinimumWidth(column: DataGridColumn, cell: HTMLTableCellElement, inlineFilter: boolean): number {
@@ -426,6 +436,49 @@ function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): nu
     if (numeric >= 0 && numeric < columns.length) return numeric;
   }
   return -1;
+}
+
+/** Compact visibility/pinning control used by both the standalone grid and result toolbar. */
+export function DataGridColumnMenu({ columns, view, onViewChange }: DataGridColumnMenuProps): ReactNode {
+  const activeView = normaliseView(view);
+  const visibleColumnIndexes = resolveDataGridColumnIndexes(columns, activeView);
+
+  function toggleColumnVisibility(columnIndex: number, visible: boolean): void {
+    const column = columns[columnIndex];
+    if (!column) return;
+    const id = columnKey(column, columnIndex);
+    const visibility = { ...(activeView.columnVisibility ?? {}) };
+    if (visible) delete visibility[id];
+    else visibility[id] = false;
+    onViewChange({ columnVisibility: visibility });
+  }
+
+  function togglePin(columnIndex: number): void {
+    const column = columns[columnIndex];
+    if (!column) return;
+    const id = columnKey(column, columnIndex);
+    const pinned = [...(activeView.pinnedColumns ?? [])];
+    const index = pinned.findIndex(key => columnMatchesKey(column, columnIndex, key));
+    if (index >= 0) pinned.splice(index, 1);
+    else pinned.push(id);
+    onViewChange({ pinnedColumns: pinned });
+  }
+
+  return <details className="ui-data-grid-column-menu">
+    <summary><span className="ui-data-grid-column-menu-title">Columns</span><span className="ui-data-grid-column-menu-count">{visibleColumnIndexes.length}/{columns.length}</span></summary>
+    <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
+      <div className="ui-data-grid-column-menu-heading"><strong>Visible columns</strong><span>{visibleColumnIndexes.length} of {columns.length}</span></div>
+      {columns.map((column, columnIndex) => {
+        const id = columnKey(column, columnIndex);
+        const visible = visibleColumnIndexes.includes(columnIndex);
+        const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
+        return <div className="ui-data-grid-column-menu-item" key={id}>
+          <label title={column.name}><input type="checkbox" checked={visible} onChange={event => toggleColumnVisibility(columnIndex, event.target.checked)} /><span className="ui-data-grid-column-menu-name">{column.name}</span></label>
+          <button type="button" className={`ui-data-grid-column-menu-pin${pinned ? ' active' : ''}`} aria-label={pinned ? `Unpin ${column.name} in column menu` : `Pin ${column.name} in column menu`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m14.4 3.2 6.4 6.4-2.2 2.2-1.8-1.8-4.2 4.2 1.8 1.8-2.2 2.2-6.4-6.4L8 9.6 6.2 7.8l2.2-2.2L10.2 7l4.2-4.2Z" /><path d="m11.8 13.8-7.2 7.2M4.6 21H3v-1.6" /></svg></button>
+        </div>;
+      })}
+    </div>
+  </details>;
 }
 
 /** Returns raw column indexes in the order and visibility of a grid view. */
@@ -1106,36 +1159,55 @@ export function DataGrid({
     selectionPointerRef.current = { clientX, clientY };
     const bounds = element.getBoundingClientRect();
     const edge = 28;
-    const direction = clientY < bounds.top + edge ? -1 : clientY > bounds.bottom - edge ? 1 : 0;
+    const verticalDirection = clientY < bounds.top + edge ? -1 : clientY > bounds.bottom - edge ? 1 : 0;
+    const horizontalDirection = clientX < bounds.left + edge ? -1 : clientX > bounds.right - edge ? 1 : 0;
     const previousScrollTop = element.scrollTop;
-    if (direction !== 0) {
-      const distance = direction < 0
+    const previousScrollLeft = element.scrollLeft;
+    if (verticalDirection !== 0) {
+      const distance = verticalDirection < 0
         ? Math.max(0, bounds.top + edge - clientY)
         : Math.max(0, clientY - (bounds.bottom - edge));
       const speed = Math.min(48, Math.max(10, 8 + Math.ceil(distance / 4)));
       const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
-      const nextScrollTop = Math.max(0, Math.min(maximum, previousScrollTop + direction * speed));
+      const nextScrollTop = Math.max(0, Math.min(maximum, previousScrollTop + verticalDirection * speed));
       if (nextScrollTop !== previousScrollTop) {
         element.scrollTop = nextScrollTop;
-        virtualViewportSyncRef.current?.();
       }
+    }
+    if (horizontalDirection !== 0) {
+      const distance = horizontalDirection < 0
+        ? Math.max(0, bounds.left + edge - clientX)
+        : Math.max(0, clientX - (bounds.right - edge));
+      const speed = Math.min(48, Math.max(10, 8 + Math.ceil(distance / 4)));
+      const maximum = Math.max(0, element.scrollWidth - element.clientWidth);
+      const nextScrollLeft = Math.max(0, Math.min(maximum, previousScrollLeft + horizontalDirection * speed));
+      if (nextScrollLeft !== previousScrollLeft) element.scrollLeft = nextScrollLeft;
+    }
+    if (element.scrollTop !== previousScrollTop || element.scrollLeft !== previousScrollLeft) {
+      virtualViewportSyncRef.current?.();
     }
 
     const pointedElement = typeof document === 'undefined' || typeof document.elementFromPoint !== 'function'
       ? undefined
       : document.elementFromPoint(clientX, clientY);
-    const pointedRow = pointedElement?.closest<HTMLElement>('tr[data-row-index]');
+    const edgeElement = horizontalDirection === 0 || typeof document === 'undefined' || typeof document.elementFromPoint !== 'function'
+      ? undefined
+      : document.elementFromPoint(
+        Math.min(bounds.right - 1, Math.max(bounds.left + 1, horizontalDirection < 0 ? bounds.left + edge + 1 : bounds.right - edge - 1)),
+        Math.min(bounds.bottom - 1, Math.max(bounds.top + selectionMetricsRef.current.headerHeight + 1, clientY)),
+      );
+    const pointedRow = pointedElement?.closest<HTMLElement>('tr[data-row-index]') ?? edgeElement?.closest<HTMLElement>('tr[data-row-index]');
     const pointedRowIndex = pointedRow ? Number(pointedRow.dataset.rowIndex) : undefined;
-    const pointedCell = pointedElement?.closest<HTMLElement>('td[data-column-index]');
+    const pointedCell = pointedElement?.closest<HTMLElement>('td[data-column-index]') ?? edgeElement?.closest<HTMLElement>('td[data-column-index]');
     const pointedColumnIndex = pointedCell ? Number(pointedCell.dataset.columnIndex) : undefined;
     const rowCount = selectionMetricsRef.current.rowCount;
     let focusRow = Number.isInteger(pointedRowIndex) && (pointedRowIndex ?? -1) >= 0 ? pointedRowIndex! : selectionRef.current.focusRow;
-    if (direction !== 0 && rowCount > 0) {
+    if (verticalDirection !== 0 && rowCount > 0) {
       const viewportHeight = Math.max(ROW_HEIGHT, element.clientHeight || virtualViewportRef.current.height);
       const visibleRows = Math.max(1, Math.ceil((viewportHeight - selectionMetricsRef.current.headerHeight) / ROW_HEIGHT));
       const firstVisibleRow = Math.min(rowCount - 1, Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT));
       const lastVisibleRow = Math.min(rowCount - 1, firstVisibleRow + visibleRows - 1);
-      focusRow = direction < 0 ? firstVisibleRow : lastVisibleRow;
+      focusRow = verticalDirection < 0 ? firstVisibleRow : lastVisibleRow;
     }
     const focusColumn = Number.isInteger(pointedColumnIndex) && (pointedColumnIndex ?? -1) >= 0
       ? pointedColumnIndex!
@@ -1143,7 +1215,10 @@ export function DataGrid({
     if (focusRow !== selectionRef.current.focusRow || focusColumn !== selectionRef.current.focusColumn) {
       setSelectionValue({ ...selectionRef.current, focusRow, focusColumn });
     }
-    if (direction !== 0 && element.scrollTop !== previousScrollTop) scheduleSelectionAutoScroll();
+    if ((verticalDirection !== 0 || horizontalDirection !== 0)
+      && (element.scrollTop !== previousScrollTop || element.scrollLeft !== previousScrollLeft)) {
+      scheduleSelectionAutoScroll();
+    }
   }
 
   function selectCell(rowIndex: number, columnIndex: number, event: ReactMouseEvent<HTMLElement>): void {
@@ -1386,21 +1461,7 @@ export function DataGrid({
   const contextColumn = contextMenu ? resolvedColumns[contextMenu.columnIndex] : undefined;
 
   return <div className={`ui-result-grid result-grid${onOpenColumnFilter && !showInlineColumnFilters ? ' ui-data-grid-compact' : ''}`}>
-    {showColumnMenu && <details className="ui-data-grid-column-menu">
-      <summary><span className="ui-data-grid-column-menu-title">Columns</span><span className="ui-data-grid-column-menu-count">{visibleColumnIndexes.length}/{resolvedColumns.length}</span></summary>
-      <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
-        <div className="ui-data-grid-column-menu-heading"><strong>Visible columns</strong><span>{visibleColumnIndexes.length} of {resolvedColumns.length}</span></div>
-        {resolvedColumns.map((column, columnIndex) => {
-          const id = columnKey(column, columnIndex);
-          const visible = visibleColumnIndexes.includes(columnIndex);
-          const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-          return <div className="ui-data-grid-column-menu-item" key={id}>
-            <label title={column.name}><input type="checkbox" checked={visible} onChange={event => toggleColumnVisibility(columnIndex, event.target.checked)} /><span className="ui-data-grid-column-menu-name">{column.name}</span></label>
-            <button type="button" className={`ui-data-grid-column-menu-pin${pinned ? ' active' : ''}`} aria-label={pinned ? `Unpin ${column.name} in column menu` : `Pin ${column.name} in column menu`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m14.4 3.2 6.4 6.4-2.2 2.2-1.8-1.8-4.2 4.2 1.8 1.8-2.2 2.2-6.4-6.4L8 9.6 6.2 7.8l2.2-2.2L10.2 7l4.2-4.2Z" /><path d="m11.8 13.8-7.2 7.2M4.6 21H3v-1.6" /></svg></button>
-          </div>;
-        })}
-      </div>
-    </details>}
+    {showColumnMenu && <DataGridColumnMenu columns={resolvedColumns} view={activeView} onViewChange={updateView} />}
     {showGroupingPanel && <div
       className={`ui-data-grid-group-panel${activeView.grouping.length > 0 ? ' ui-data-grid-group-panel-active' : ''}`}
       role="group"
@@ -1453,9 +1514,9 @@ export function DataGrid({
             const column = resolvedColumns[columnIndex]!;
             const id = columnKey(column, columnIndex);
             const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView, measuredColumnWidths), 0) : undefined;
+            const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView, measuredColumnWidths, onOpenColumnFilter ? 5 : 4), 0) : undefined;
             const sort = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
-            const width = columnWidthFor(column, columnIndex, activeView, measuredColumnWidths);
+            const width = columnWidthFor(column, columnIndex, activeView, measuredColumnWidths, onOpenColumnFilter ? 5 : 4);
             return <th scope="col" key={id} ref={element => { const refKey = `${id}:${columnIndex}`; if (element) columnHeaderRefs.current.set(refKey, element); else columnHeaderRefs.current.delete(refKey); }} className={pinned ? 'ui-data-grid-pinned' : undefined} style={{ width, minWidth: width, ...(left === undefined ? {} : { left }) }} onDragOver={event => event.preventDefault()} onDrop={() => { const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex); draggedColumnRef.current = undefined; }}>
               <div className="ui-data-grid-header-content">
                 <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} onDragStart={event => { draggedColumnRef.current = columnIndex; event.dataTransfer?.setData('application/x-justybase-column-index', String(columnIndex)); event.dataTransfer?.setData('text/plain', String(columnIndex)); }} onDragEnd={() => { draggedColumnRef.current = undefined; }}>⠿</button>
@@ -1489,7 +1550,7 @@ export function DataGrid({
             {visibleColumnIndexes.map(columnIndex => {
               const column = resolvedColumns[columnIndex]!;
               const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView, measuredColumnWidths), 0) : undefined;
+              const left = pinned ? ROW_NUMBER_WIDTH + visibleColumnIndexes.slice(0, visibleColumnIndexes.indexOf(columnIndex)).filter(index => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[index]!, index, key))).reduce((sum, index) => sum + columnWidthFor(resolvedColumns[index]!, index, activeView, measuredColumnWidths, onOpenColumnFilter ? 5 : 4), 0) : undefined;
               const columnPosition = visibleColumnIndexes.indexOf(columnIndex);
               const selected = range !== undefined && columnRange !== undefined && rendered.displayIndex >= range.minRow && rendered.displayIndex <= range.maxRow && columnPosition >= columnRange.minColumn && columnPosition <= columnRange.maxColumn;
               const value = rendered.values[columnIndex];

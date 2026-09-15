@@ -153,6 +153,21 @@ body,
   font-size: 11px;
 }
 
+.ui-result-toolbar > .ui-data-grid-column-menu,
+.grid-toolbar > .ui-data-grid-column-menu {
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: 30;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.ui-result-toolbar > .ui-data-grid-column-menu .ui-data-grid-column-menu-panel,
+.grid-toolbar > .ui-data-grid-column-menu .ui-data-grid-column-menu-panel {
+  top: calc(100% + 6px);
+}
+
 .ui-data-grid-column-menu summary {
   display: inline-flex;
   align-items: center;
@@ -208,6 +223,7 @@ body,
   border-radius: 4px;
   background: var(--justybase-grid-surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  text-align: left;
 }
 
 .ui-data-grid-column-menu-heading {
@@ -253,6 +269,16 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Web's global form-label rule adds a top margin and a minimum width. Reset
+   it here so every column row keeps one clean baseline in Web and Electron. */
+.ui-result-toolbar .ui-data-grid-column-menu-item label,
+.grid-toolbar .ui-data-grid-column-menu-item label {
+  min-width: 0;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
 }
 
 .ui-data-grid-column-menu-name {

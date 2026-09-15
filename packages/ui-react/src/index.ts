@@ -1,6 +1,7 @@
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
-export { calculateDataGridVirtualWindow, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, reorderDataGridGrouping, resolveDataGridColumnIndexes, resolveDataGridColumns, resolveDataGridScrollTop } from './dataGrid';
+export { calculateDataGridVirtualWindow, DataGridColumnMenu, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, reorderDataGridGrouping, resolveDataGridColumnIndexes, resolveDataGridColumns, resolveDataGridScrollTop } from './dataGrid';
+export type { DataGridColumnMenuProps } from './dataGrid';
 export { DataGridColumnFilterPanel } from './dataGridFilter';
 export type { DataGridColumnFilterPanelProps, DataGridColumnFilterState, DataGridFilterValueOption } from './dataGridFilter';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
