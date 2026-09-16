@@ -2,7 +2,7 @@
     "name": "justybaselite-duckdb",
     "displayName": "JustyBase SQL Editor (DuckDB + Files)",
     "description": "Optional DuckDB companion for JustyBase SQL Editor. Query Excel (XLSX/XLSB), Access, CSV, Parquet and Avro files with SQL.",
-    "version": "3.17.14",
+    "version": "3.17.15",
     "publisher": "krzysztof-d",
     "license": "Apache-2.0",
     "icon": "icon.png",
@@ -147,9 +147,9 @@
         "prepackage": "npm run verify:runtime-deps",
         "package": "node ../../scripts/package-optional-vsix.js package"
     },
-  "dependencies": {
-    "@duckdb/node-api": "^1.5.0-r.1",
-    "@justybase/spreadsheet-tasks": "2.1.1",
+    "dependencies": {
+        "@duckdb/node-api": "^1.5.0-r.1",
+        "@justybase/spreadsheet-tasks": "2.1.1",
         "mdb-reader": "^3.2.0"
     },
     "devDependencies": {
