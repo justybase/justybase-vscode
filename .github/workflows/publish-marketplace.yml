@@ -819,7 +819,7 @@ jobs:
         run: npm ci
 
       - name: Build shared workspace packages
-        run: npm run build:designer-core
+        run: npm run build:designer-core && npm run build:database-utils
 
       - name: Install extension dependencies
         working-directory: extensions/${{ matrix.id }}
