@@ -371,6 +371,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Bootstrap pinned Access index-code reference
+        run: tools/access-ddl-compare/bootstrap.sh
+
       - name: Build Access file package
         run: npm run build:access-file
 
