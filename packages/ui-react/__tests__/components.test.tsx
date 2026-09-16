@@ -401,6 +401,63 @@ describe('shared React presentation', () => {
     expect(grid.scrollTop).toBe(420);
   });
 
+  it('keeps a controlled native scroll until the host confirms it, even when a page is appended', async () => {
+    const onScroll = jest.fn();
+    const { rerender } = render(<DataGrid
+      resultSetId="controlled-append"
+      columns={[{ name: 'ID' }]}
+      rows={[[1]]}
+      scroll={{ resultSetId: 'controlled-append', top: 0, left: 0 }}
+      onScroll={onScroll}
+    />);
+    const grid = screen.getByRole('table').parentElement as HTMLDivElement;
+    expect(grid.scrollTop).toBe(0);
+
+    grid.scrollTop = 420;
+    grid.scrollLeft = 64;
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(onScroll).toHaveBeenCalledWith(expect.objectContaining({
+      resultSetId: 'controlled-append',
+      top: 420,
+      left: 64,
+    })));
+
+    // The controlled host still reports the stale 0/0 for one frame while a
+    // page is appended. The grid must not restore the stale prop back.
+    rerender(<DataGrid
+      resultSetId="controlled-append"
+      columns={[{ name: 'ID' }]}
+      rows={[[1], [2]]}
+      scroll={{ resultSetId: 'controlled-append', top: 0, left: 0 }}
+      onScroll={onScroll}
+    />);
+    expect(grid.scrollTop).toBe(420);
+    expect(grid.scrollLeft).toBe(64);
+
+    // The host confirms the native position. The pending guard clears without
+    // moving the viewport.
+    rerender(<DataGrid
+      resultSetId="controlled-append"
+      columns={[{ name: 'ID' }]}
+      rows={[[1], [2]]}
+      scroll={{ resultSetId: 'controlled-append', top: 420, left: 64 }}
+      onScroll={onScroll}
+    />);
+    expect(grid.scrollTop).toBe(420);
+    expect(grid.scrollLeft).toBe(64);
+
+    // An explicit host position change after the confirmation still restores.
+    rerender(<DataGrid
+      resultSetId="controlled-append"
+      columns={[{ name: 'ID' }]}
+      rows={[[1], [2], [3]]}
+      scroll={{ resultSetId: 'controlled-append', top: 0, left: 0 }}
+      onScroll={onScroll}
+    />);
+    expect(grid.scrollTop).toBe(0);
+    expect(grid.scrollLeft).toBe(0);
+  });
+
   it('keeps filtering, sorting, selection, grouping and column actions in the shared grid', () => {
     const onViewChange = jest.fn();
     const onSelectionChange = jest.fn();

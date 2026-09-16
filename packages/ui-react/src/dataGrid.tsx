@@ -802,6 +802,7 @@ export function DataGrid({
   const scrollReportFrameRef = useRef<number | undefined>(undefined);
   const scrollReportRef = useRef<{ readonly position: GridScrollPosition; readonly callback: (position: GridScrollPosition) => void } | undefined>(undefined);
   const scrollRestorationRef = useRef<ScrollRestorationState | undefined>(undefined);
+  const nativeScrollRef = useRef<ScrollRestorationState | undefined>(undefined);
   const pendingScrollRestorationRef = useRef<PendingScrollRestoration | undefined>(undefined);
   const [virtualViewport, setVirtualViewport] = useState(virtualViewportRef.current);
   activeViewRef.current = activeView;
@@ -820,6 +821,7 @@ export function DataGrid({
     selectionAutoScrollFrameRef.current = undefined;
     selectionPointerRef.current = undefined;
     scrollRestorationRef.current = undefined;
+    nativeScrollRef.current = undefined;
     pendingScrollRestorationRef.current = undefined;
   }, []);
 
@@ -1054,6 +1056,7 @@ export function DataGrid({
     if (!element) return;
     if (!scroll || scroll.resultSetId !== resultSetId || (scroll.sourceId !== undefined && scroll.sourceId !== sourceId)) {
       scrollRestorationRef.current = undefined;
+      nativeScrollRef.current = undefined;
       pendingScrollRestorationRef.current = undefined;
       return;
     }
@@ -1063,13 +1066,23 @@ export function DataGrid({
     const previous = scrollRestorationRef.current;
     const pending = pendingScrollRestorationRef.current;
     const positionChanged = previous?.scope !== scope || previous.top !== nextTop || previous.left !== nextLeft;
-    if (dragSelectingRef.current && positionChanged) {
-      // A drag owns scrolling until mouseup. The host receives a throttled
-      // onScroll update, so restoring its previous prop here would make the
-      // viewport visibly oscillate between two horizontal positions.
-      scrollRestorationRef.current = { scope, top: element.scrollTop, left: element.scrollLeft };
+    const nativeScroll = nativeScrollRef.current;
+    const nativeScrollAhead = nativeScroll?.scope === scope
+      && (nativeScroll.top !== nextTop || nativeScroll.left !== nextLeft);
+    if ((dragSelectingRef.current || nativeScrollAhead) && positionChanged) {
+      // A drag or a controlled native scroll owns the viewport until mouseup
+      // or until the host confirms the same position through props. Restoring
+      // the previous prop during that window makes the grid visibly oscillate.
+      const currentPosition = { scope, top: element.scrollTop, left: element.scrollLeft };
+      scrollRestorationRef.current = currentPosition;
+      if (nativeScrollAhead) nativeScrollRef.current = currentPosition;
       pendingScrollRestorationRef.current = undefined;
       return;
+    }
+    if (nativeScroll?.scope === scope && nativeScroll.top === nextTop && nativeScroll.left === nextLeft) {
+      nativeScrollRef.current = undefined;
+    } else if (nativeScroll !== undefined && nativeScroll.scope !== scope) {
+      nativeScrollRef.current = undefined;
     }
     // Appending a page changes the virtual spacer height, but it must not be
     // treated as a new controlled scroll position. Only a new result, an
@@ -1090,7 +1103,20 @@ export function DataGrid({
     scrollRestorationRef.current = target;
     let frame: number | undefined;
     if (shouldRestore && typeof requestAnimationFrame === 'function') {
-      frame = requestAnimationFrame(() => { frame = undefined; restore(); });
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        const currentRestoration = scrollRestorationRef.current;
+        if (currentRestoration !== undefined
+          && (currentRestoration.scope !== target.scope
+            || currentRestoration.top !== target.top
+            || currentRestoration.left !== target.left)) {
+          // A native scroll or drag advanced the viewport after this frame was
+          // scheduled. Restoring the stale target now would reintroduce the
+          // oscillation the pending guard exists to prevent.
+          return;
+        }
+        restore();
+      });
     }
     const observer = pendingScrollRestorationRef.current && typeof ResizeObserver !== 'undefined'
       ? new ResizeObserver(() => {
@@ -1113,13 +1139,18 @@ export function DataGrid({
     const position: GridScrollPosition = { ...(sourceId === undefined ? {} : { sourceId }), resultSetId, top: element.scrollTop, left: element.scrollLeft, anchorRow: Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT), rowHeight: ROW_HEIGHT };
     // Record the browser-owned position before notifying a controlled host.
     // This prevents the restoration effect from briefly writing the previous
-    // prop value back while a drag is advancing through horizontal frames.
-    if (dragSelectingRef.current) {
-      scrollRestorationRef.current = {
+    // prop value back while a drag is advancing through frames, or while a
+    // controlled host still reports the stale position for one frame after a
+    // programmatic scroll. The native pending position owns the viewport until
+    // the host confirms it through props.
+    if (dragSelectingRef.current || onScroll) {
+      const nativePosition = {
         scope: `${sourceId ?? ''}\u0000${resultSetId}`,
         top: position.top,
         left: position.left,
       };
+      scrollRestorationRef.current = nativePosition;
+      if (onScroll) nativeScrollRef.current = nativePosition;
       pendingScrollRestorationRef.current = undefined;
     }
     const nextViewport = {

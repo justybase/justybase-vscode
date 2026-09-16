@@ -223,6 +223,7 @@ const OBJECT_TYPES = [
   { key: 'TABLE', label: 'TABLE' },
   { key: 'VIEW', label: 'VIEW' },
   { key: 'PROCEDURE', label: 'PROCEDURE' },
+  { key: 'EXTERNAL TABLE', label: 'EXTERNAL TABLE' },
   { key: 'SYNONYM', label: 'SYNONYM' },
 ] as const;
 
@@ -492,7 +493,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
 
   function searchResultNode(item: SchemaSearchResult): SchemaTreeNode {
     return {
-      id: `search:${item.database}.${item.schema ?? ''}.${item.name}`,
+      id: `search:${item.database}.${item.schema ?? ''}.${item.name}.${item.objectType.toUpperCase()}`,
       kind: 'object',
       label: item.name,
       database: item.database,
@@ -724,7 +725,7 @@ export function SchemaTree({ connectionId, database, databaseKind = 'netezza', o
             : searchItems.map(item => (
                 <button
                   className="schema-search-result"
-                  key={`${item.database}.${item.schema}.${item.name}`}
+                  key={`${item.database}.${item.schema ?? ''}.${item.name}.${item.objectType.toUpperCase()}`}
                   onClick={() => insertSearchResult(item)}
                   onContextMenu={event => openObjectMenu(event, searchResultNode(item))}
                 >

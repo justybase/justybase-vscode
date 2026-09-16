@@ -4706,7 +4706,7 @@
     "@justybase/sqlite-runtime": "*",
     "@justybase/duckdb-runtime": "*",
     "@justybase/netezza-runtime": "*",
-    "@justybase/netezza-driver": "^3.0.0",
+    "@justybase/netezza-driver": "^3.2.0",
     "@justybase/spreadsheet-tasks": "^2.1.1",
     "adm-zip": "^0.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",

@@ -15,7 +15,10 @@ export function schemaExplorerStorageKey(connectionId: string): string {
 
 /**
  * IDs returned by the metadata API can change after a refresh. Shortcuts use
- * the catalog identity instead, so a refresh never silently breaks them.
+ * the catalog identity instead, so a refresh never silently breaks them. The
+ * object type is part of the identity so same-named objects of different
+ * kinds (for example a TABLE and an EXTERNAL TABLE, or a TABLE and a
+ * SYNONYM) never collapse into a single favorite or recent entry.
  */
 export function schemaObjectIdentity(node: SchemaTreeNode): string {
   return [
@@ -23,6 +26,7 @@ export function schemaObjectIdentity(node: SchemaTreeNode): string {
     node.database ?? '',
     node.schema ?? '',
     node.objectName ?? node.label,
+    node.objectType?.toUpperCase() ?? '',
   ].join('\u001f');
 }
 
