@@ -373,7 +373,7 @@ describe('shared Web UI adapter edge contracts', () => {
     fireEvent.contextMenu(result, { clientX: 32, clientY: 48 });
     expect(screen.getByRole('menuitem', { name: 'Remove from favorites' })).toBeInTheDocument();
     const searchCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/schema/search'));
-    expect(JSON.parse(String((searchCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ term: 'ord', searchAllDatabases: true, objectTypes: ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] }));
+    expect(JSON.parse(String((searchCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ term: 'ord', searchAllDatabases: true, objectTypes: ['TABLE', 'VIEW', 'PROCEDURE', 'EXTERNAL TABLE', 'SYNONYM'] }));
   });
 
   it('exposes guarded connection add, edit and delete actions in shared Web mode', async () => {

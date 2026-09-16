@@ -42,6 +42,13 @@ describe('Electron schema explorer persistence', () => {
     expect(toggleSchemaFavorite([orders], refreshed)).toEqual([]);
   });
 
+  it('keeps same-named objects of different types distinct', () => {
+    const external = { ...orders, id: 'external-id', objectType: 'EXTERNAL TABLE' };
+    expect(schemaObjectIdentity(orders)).not.toBe(schemaObjectIdentity(external));
+    expect(rememberSchemaObject([orders], external)).toHaveLength(2);
+    expect(toggleSchemaFavorite([orders], external)).toHaveLength(2);
+  });
+
   it('writes only bounded object shortcuts and excludes non-object metadata', () => {
     const schemas = Array.from({ length: 25 }, (_, index) => ({ ...orders, id: `id-${index}`, label: `Table${index}`, objectName: `Table${index}` }));
     writeSchemaExplorerShortcuts('connection-1', {

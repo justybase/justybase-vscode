@@ -13,7 +13,7 @@ interface SchemaApi {
 }
 
 const ROOT = '__root__';
-const OBJECT_FILTERS = ['TABLE', 'VIEW', 'PROCEDURE', 'SYNONYM'] as const;
+const OBJECT_FILTERS = ['TABLE', 'VIEW', 'PROCEDURE', 'EXTERNAL TABLE', 'SYNONYM'] as const;
 
 function qualifiedName(node: SchemaTreeNode, databaseKind: DatabaseKind): string {
   if (node.kind === 'column') {
@@ -43,7 +43,7 @@ function objectSql(node: SchemaTreeNode, databaseKind: DatabaseKind): string {
 
 function searchResultNode(item: SchemaSearchResult): SchemaTreeNode {
   return {
-    id: `search:${item.database}.${item.schema}.${item.name}`,
+    id: `search:${item.database}.${item.schema ?? ''}.${item.name}.${item.objectType.toUpperCase()}`,
     kind: 'object',
     label: item.name,
     database: item.database,
@@ -354,7 +354,7 @@ export function SchemaExplorer({ api, connectionId, databaseKind, onInsert, onCo
       {favorites.length > 0 && <div><div className="electron-schema-shortcuts-title">Favorites</div>{favorites.map(node => <button type="button" className="electron-schema-shortcut" key={`favorite:${schemaObjectIdentity(node)}`} onClick={() => selectNode(node)} onContextMenu={event => openObjectMenu(event, node)}><span>★</span><span>{node.label}</span><small>{node.schema}</small></button>)}</div>}
       {recentObjects.length > 0 && <div><div className="electron-schema-shortcuts-title">Recent</div>{recentObjects.slice(0, 5).map(node => <button type="button" className="electron-schema-shortcut" key={`recent:${schemaObjectIdentity(node)}`} onClick={() => selectNode(node)} onContextMenu={event => openObjectMenu(event, node)}><span>↻</span><span>{node.label}</span><small>{node.schema}</small></button>)}</div>}
     </div>}
-    {search.trim() ? <div className="electron-schema-search-results">{searchItems.length === 0 ? <span className="electron-schema-empty">No matching objects.</span> : searchItems.map(item => <button type="button" key={`${item.database}.${item.schema}.${item.name}`} onClick={() => selectSearchResult(item)}><span>{item.objectType === 'VIEW' ? '◌' : '▤'}</span><span><strong>{item.name}</strong><small>{item.database}.{item.schema} · {item.objectType}</small></span></button>)}</div>
+    {search.trim() ? <div className="electron-schema-search-results">{searchItems.length === 0 ? <span className="electron-schema-empty">No matching objects.</span> : searchItems.map(item => <button type="button" key={`${item.database}.${item.schema ?? ''}.${item.name}.${item.objectType.toUpperCase()}`} onClick={() => selectSearchResult(item)}><span>{item.objectType === 'VIEW' ? '◌' : '▤'}</span><span><strong>{item.name}</strong><small>{item.database}.{item.schema} · {item.objectType}</small></span></button>)}</div>
       : <div className="electron-schema-tree">{loading.has(ROOT) && rootNodes.length === 0 ? <span className="electron-schema-loading">Loading schema…</span> : visibleRootNodes.map(node => <SchemaNode key={node.id} node={node} depth={0} children={children} expanded={expanded} loading={loading} databaseKind={databaseKind} onToggle={toggleNode} onSelect={selectNode} onContextMenu={openObjectMenu} />)}</div>}
     {menu && <div className="electron-schema-menu" role="menu" aria-label={`Actions for ${menu.node.label}`} style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()}>
       <strong>{menu.node.label}</strong>

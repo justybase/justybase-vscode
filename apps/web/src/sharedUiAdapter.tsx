@@ -77,6 +77,7 @@ const SHARED_SCHEMA_FILTERS = [
   { id: 'TABLE', label: 'TABLE' },
   { id: 'VIEW', label: 'VIEW' },
   { id: 'PROCEDURE', label: 'PROCEDURE' },
+  { id: 'EXTERNAL TABLE', label: 'EXTERNAL TABLE' },
   { id: 'SYNONYM', label: 'SYNONYM' },
 ] as const;
 

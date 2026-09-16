@@ -36,6 +36,14 @@ describe('shared Web schema shortcut persistence', () => {
     expect(toggleSharedSchemaFavorite([], refreshed)[0]).toEqual(expect.objectContaining({ objectName: 'ORDERS' }));
   });
 
+  it('keeps same-named objects of different types distinct', () => {
+    const table = { ...objectNode('table-id', 'ORDERS'), objectType: 'TABLE' };
+    const external = { ...objectNode('external-id', 'ORDERS'), objectType: 'EXTERNAL TABLE' };
+    expect(sharedSchemaObjectIdentity(table)).not.toBe(sharedSchemaObjectIdentity(external));
+    expect(rememberSharedSchemaObject([table], external)).toHaveLength(2);
+    expect(toggleSharedSchemaFavorite([table], external)).toHaveLength(2);
+  });
+
   it('bounds persisted shortcut collections', () => {
     const storage = memoryStorage();
     const favorites = Array.from({ length: 25 }, (_value, index) => objectNode(`favorite-${index}`));
