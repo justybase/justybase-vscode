@@ -252,6 +252,241 @@ describe('legacy Web ResultGrid compatibility surface', () => {
     expect(screen.queryByRole('cell', { name: 'US' })).not.toBeInTheDocument();
   });
 
+  it('copies the full server spool instead of only the loaded page', async () => {
+    const user = userEvent.setup();
+    const pageRequests: Array<{ offset?: number; limit?: number }> = [];
+    const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes('/page')) return { ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response;
+      const request = JSON.parse(String(init?.body ?? '{}')) as { offset?: number; limit?: number };
+      pageRequests.push(request);
+      const offset = request.offset ?? 0;
+      const all = [['a1'], ['a2'], ['a3'], ['a4'], ['a5']];
+      const rows = all.slice(offset, offset + (request.limit ?? 10_000));
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({ sessionId: 'session-copy-all', columns: [{ name: 'NAME', type: 'VARCHAR' }], rows, offset, limit: request.limit ?? 10_000, totalRows: all.length, hasMore: offset + rows.length < all.length }),
+        blob: async () => new Blob(),
+      } as unknown as Response;
+    });
+    const writeText = jest.fn();
+    writeText.mockImplementation(async (text: string) => {
+      void text;
+    });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const api = createApiClient({ fetch });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'copy-all-result',
+      sessionId: 'session-copy-all',
+      columns: ['NAME'],
+      columnTypes: ['VARCHAR'],
+      rows: [],
+      totalRows: 5,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-copy-all-test')}>
+          <ResultGrid queryId='copy-all-query' result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Copy full result (all rows)' }));
+    expect(await screen.findByText(/Copied 5 rows \(full result\)/)).toBeInTheDocument();
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const lastCall = writeText.mock.calls.at(-1);
+    const copied = String(lastCall?.[0] ?? '');
+    for (const value of ['a1', 'a2', 'a3', 'a4', 'a5']) expect(copied).toContain(value);
+    const copyOffsets = pageRequests.map(request => request.offset ?? 0);
+    expect(copyOffsets).toContain(0);
+    expect(pageRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('persists both scroll axes with a stable anchor across hydration', async () => {
+    const storage = createWorkspaceStorage('result-grid-scroll-test');
+    storage.set('grid_v2_scroll-result', JSON.stringify({
+      version: 2,
+      resultSetId: 'scroll-result',
+      state: { scrollTop: 9000, scrollLeft: 320, scrollAnchorRow: 300, scrollRowHeight: 30 },
+    }));
+    const api = createApiClient({ fetch: jest.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response)) });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'scroll-result',
+      columns: ['ID'],
+      columnTypes: ['INTEGER'],
+      rows: [[1], [2]],
+      totalRows: 2,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={storage}>
+          <ResultGrid queryId='scroll-query' result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    await waitFor(() => {
+      const persisted = storage.get('grid_v2_scroll-result');
+      expect(persisted).toContain('9000');
+      expect(persisted).toContain('320');
+      expect(persisted).toContain('300');
+    });
+  });
+
+  it('announces full-spool copy progress and keeps focus on the invoking control', async () => {
+    const user = userEvent.setup();
+    let releasePage!: (page: { rows: unknown[][]; offset: number; totalRows: number; hasMore: boolean }) => void;
+    const gate = new Promise<{ rows: unknown[][]; offset: number; totalRows: number; hasMore: boolean }>(resolve => { releasePage = resolve; });
+    const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes('/page')) return { ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response;
+      const request = JSON.parse(String(init?.body ?? '{}')) as { offset?: number };
+      if ((request.offset ?? 0) > 0) {
+        return { ok: true, status: 200, headers: new Headers(), json: async () => ({ sessionId: 'session-a11y', columns: [{ name: 'NAME' }], rows: [], offset: 1, limit: 10_000, totalRows: 1, hasMore: false }), blob: async () => new Blob() } as unknown as Response;
+      }
+      const page = await gate;
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ sessionId: 'session-a11y', columns: [{ name: 'NAME' }], rows: page.rows, offset: 0, limit: 10_000, totalRows: page.totalRows, hasMore: page.hasMore }), blob: async () => new Blob() } as unknown as Response;
+    });
+    const writeText = jest.fn();
+    writeText.mockImplementation(async (text: string) => { void text; });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const api = createApiClient({ fetch });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'copy-a11y-result',
+      sessionId: 'session-a11y',
+      columns: ['NAME'],
+      columnTypes: ['VARCHAR'],
+      rows: [],
+      totalRows: 1,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-copy-a11y-test')}>
+          <ResultGrid queryId='copy-a11y-query' result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    const copyAll = await screen.findByRole('button', { name: 'Copy full result (all rows)' });
+    await user.click(copyAll);
+    expect(await screen.findByRole('button', { name: 'Cancel full result copy' })).toBeInTheDocument();
+    releasePage({ rows: [['a1']], offset: 0, totalRows: 1, hasMore: false });
+    expect(await screen.findByText(/Copied 1 rows \(full result\)/)).toBeInTheDocument();
+    expect(copyAll).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Cancel full result copy' })).not.toBeInTheDocument();
+  });
+
+  it('shows a row-limit banner when the server stopped at its limit', async () => {
+    const api = createApiClient({ fetch: jest.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response)) });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'limit-banner-result',
+      columns: ['ID'],
+      columnTypes: ['INTEGER'],
+      rows: [[1]],
+      totalRows: 200_000,
+      limitReached: true,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-limit-test')}>
+          <ResultGrid queryId='limit-query' result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    const banner = await screen.findByRole('alert');
+    expect(banner).toHaveTextContent(/Row limit reached/);
+    expect(banner).toHaveTextContent(/200,000/);
+  });
+
+  it('warns when a server pivot is truncated to the group cap', async () => {
+    const user = userEvent.setup();
+    const fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const url = String(input);
+      const json = url.includes('/group')
+        ? { columns: [{ name: 'CATEGORY' }, { name: 'MONTH' }, { name: 'SUM(AMOUNT)' }], rows: [['EU', 'Jan', '10.25']], totalGroups: 10_000 }
+        : url.includes('/page')
+          ? { sessionId: 'session-pivot', columns: [{ name: 'CATEGORY' }, { name: 'MONTH' }, { name: 'AMOUNT' }], rows: [], offset: 0, limit: 10_000, totalRows: 0, hasMore: false }
+          : {};
+      return { ok: true, status: 200, headers: new Headers(), json: async () => json, blob: async () => new Blob() } as unknown as Response;
+    });
+    const api = createApiClient({ fetch });
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'pivot-truncated-result',
+      sessionId: 'session-pivot',
+      columns: ['CATEGORY', 'MONTH', 'AMOUNT'],
+      columnTypes: ['VARCHAR', 'VARCHAR', 'NUMERIC'],
+      columnScales: [undefined, undefined, 2],
+      rows: [],
+      totalRows: 0,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-pivot-truncated-test')}>
+          <ResultGrid queryId='pivot-truncated-query' result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Pivot' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Pivot results' });
+    await user.click(within(dialog).getByRole('button', { name: 'Create pivot' }));
+    expect(await screen.findByText(/Pivot truncated to the first 1 of 10,000 groups/)).toBeInTheDocument();
+    const groupCall = fetch.mock.calls.find(([input]) => String(input).includes('/group'));
+    expect(groupCall).toBeDefined();
+    expect(JSON.parse(String((groupCall?.[1] as RequestInit | undefined)?.body))).toEqual(expect.objectContaining({ groupLimit: 10_000 }));
+  });
+
+  it('exports the context-menu selection as a CSV download', async () => {
+    const user = userEvent.setup();
+    const api = createApiClient({ fetch: jest.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}), blob: async () => new Blob() } as unknown as Response)) });
+    const createObjectURL = jest.fn(() => 'blob:selection');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    const anchorClick = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const result: ResultState = {
+      ...emptyResult,
+      resultSetId: 'export-selection-result',
+      columns: ['NAME'],
+      columnTypes: ['VARCHAR'],
+      rows: [['alpha'], ['beta']],
+      totalRows: 2,
+      status: 'complete',
+    };
+
+    render(
+      <ApiClientProvider client={api}>
+        <WorkspaceStorageProvider storage={createWorkspaceStorage('result-grid-export-selection-test')}>
+          <ResultGrid queryId='export-selection-query' result={result} />
+        </WorkspaceStorageProvider>
+      </ApiClientProvider>,
+    );
+
+    fireEvent.contextMenu(await screen.findByRole('cell', { name: 'alpha' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Export selection as CSV' }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(await screen.findByText(/Exported .* selected rows/)).toBeInTheDocument();
+    anchorClick.mockRestore();
+  });
+
   it('does not turn an untouched truncated value list into a first-page filter', async () => {
     const user = userEvent.setup();
     const pageRequests: string[] = [];

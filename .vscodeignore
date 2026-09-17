@@ -15,6 +15,10 @@ CONTRIBUTING.md
 test/
 fixtures/
 jest.*.config.js
+jest.*.config.cjs
+jest.*.config.mjs
+jest.config.cjs
+jest.config.mjs
 **/.DS_Store
 coverage/
 .husky/

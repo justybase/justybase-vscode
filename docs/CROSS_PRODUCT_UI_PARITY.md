@@ -30,8 +30,10 @@ migrate into that envelope; SQL credentials, result rows, DOM nodes, and
 runtime handles are excluded.
 
 The status table below separates current implementation, R9 target, and
-removal conditions. Electron remains a development/test shell rather than a
-packaged product, but its authenticated renderer now exercises the shared
+removal conditions. Electron is a packaged desktop product (single-instance
+lock, `justybase://` protocol, multi-window shell, application menu, crash
+reporting, opt-in update feed, signed Windows artifact with checksums), and
+its authenticated renderer exercises the shared
 first-tier workspace, results, schema, history, Explain, designer, and
 import/export workflows through the real loopback API.
 

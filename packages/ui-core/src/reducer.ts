@@ -345,6 +345,7 @@ function applyResultEvent(state: UiState, event: UiResultEvent): UiState {
         totalRowCount: event.totalRowCount,
         loadedRowCount: previous.loadedRowCount,
         message: event.message,
+        ...(event.limitReached === undefined ? {} : { limitReached: event.limitReached }),
       };
       break;
     case 'empty':

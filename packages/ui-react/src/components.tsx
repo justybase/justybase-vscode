@@ -10,6 +10,7 @@ import type { ResultAnalysisKind } from './resultAnalysis';
 export { DataGrid, formatDataGridCellValue, ResultGrid } from './dataGrid';
 export type { DataGridCellContext, DataGridColumn, DataGridColumnFilterRequest, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
+export { downloadBlobFile } from './download';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
 
 export type AsyncViewState = 'loading' | 'empty' | 'error' | 'cancelled' | 'ready';
@@ -182,6 +183,9 @@ export interface ResultViewToolbarProps {
   readonly onChange: (patch: Partial<UiResultViewState>) => void;
   readonly onRefresh?: () => void;
   readonly onCopy?: () => void;
+  readonly onCopyAll?: () => void;
+  readonly copyingAll?: boolean;
+  readonly copyAllLabel?: string;
   readonly onExport?: () => void;
   /** Optional adapter actions for the shared analysis surface. */
   readonly onAggregate?: () => void;
@@ -193,7 +197,7 @@ export interface ResultViewToolbarProps {
 }
 
 /** Product-neutral controls for the common result view state. */
-export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onExport, onAggregate, onGroup, onPivot, activeAnalysis, analysisBusy = false, columnMenu }: ResultViewToolbarProps): ReactNode {
+export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onCopyAll, copyingAll = false, copyAllLabel, onExport, onAggregate, onGroup, onPivot, activeAnalysis, analysisBusy = false, columnMenu }: ResultViewToolbarProps): ReactNode {
   const firstColumn = columns[0]?.name;
   const canSelectColumn = firstColumn !== undefined;
   const aggregateActive = activeAnalysis === 'aggregate' || (activeAnalysis === undefined && view.aggregation !== undefined);
@@ -207,6 +211,7 @@ export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, 
     <button type="button" aria-pressed={pivotActive} disabled={analysisBusy || (!canSelectColumn && view.pivotColumn === undefined)} onClick={() => onPivot ? onPivot() : onChange({ pivotColumn: view.pivotColumn === undefined ? firstColumn : undefined })}>Pivot</button>
     {onRefresh && <button type="button" onClick={onRefresh}>Refresh</button>}
     {onCopy && <button type="button" onClick={onCopy}>Copy</button>}
+    {onCopyAll && <button type="button" aria-label={copyAllLabel ?? 'Copy full result (all rows)'} title="Copy every filtered row from the server spool, not just the loaded page" onClick={onCopyAll}>{copyingAll ? 'Copying…' : 'Copy all'}</button>}
     {onExport && <button type="button" onClick={onExport}>Export</button>}
     {columnMenu}
   </div>;

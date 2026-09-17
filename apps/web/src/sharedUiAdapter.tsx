@@ -16,6 +16,7 @@ import type {
   SchemaTreeNode,
   WebUser,
 } from '@justybase/contracts';
+import { MAX_QUERY_GROUP_LIMIT } from '@justybase/contracts';
 import { buildExplainQuery, buildTopRowsQuery, formatQueryObjectName, formatQuerySchemaName, quoteIdentifierForQuery } from '@justybase/dialect-utils';
 import {
   createInitialUiState,
@@ -31,6 +32,7 @@ import type { UiExecutionMode, UiExecutionState, UiResultColumn, UiResultEvent, 
 import {
   CellValueViewer,
   createDataGridClipboardPayload,
+  downloadBlobFile,
   formatDataGridClipboard,
   processDataGridRows,
   ExplainView,
@@ -44,6 +46,7 @@ import {
 } from '@justybase/ui-react';
 import type { DataGridClipboardFormat, DataGridColumnFilterState, DataGridCopyPayload, DataGridFilterValueOption, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind, ResultOutputTab } from '@justybase/ui-react';
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
+import { collectFullSpoolRows } from '@justybase/result-core';
 import { ApiClientProvider } from './api';
 import type { ApiClient, QueryEventSubscription } from './api';
 import { SharedSqlEditor } from './SharedSqlEditor';
@@ -805,7 +808,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         if (event.totalRows > 0 && streamedRows.length >= event.totalRows && current && !hasUiResultQuery(current.view)) {
           setClientProcessableResultKeys(previous => previous.has(resultKey) ? previous : new Set([...previous, resultKey]));
         }
-        mapped = { ...base, sequence: nextSequence(), type: 'complete', totalRowCount: event.totalRows, message: event.message };
+        mapped = { ...base, sequence: nextSequence(), type: 'complete', totalRowCount: event.totalRows, message: event.message, ...(event.limitReached === undefined ? {} : { limitReached: event.limitReached }) };
         break;
       }
       case 'error':
@@ -1584,7 +1587,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
             ...options,
             groupByColumnIndices,
             aggregates,
-            groupLimit: 2_000,
+            groupLimit: MAX_QUERY_GROUP_LIMIT,
           });
           if (generation !== resultAnalysisGenerationRef.current) return;
           setResultAnalysis(createGroupAnalysisTable(response));
@@ -1597,7 +1600,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
             ...options,
             groupByColumnIndices: [0, 1],
             aggregates: [{ function: 'sum', columnIndex: valueColumnIndex }],
-            groupLimit: 2_000,
+            groupLimit: MAX_QUERY_GROUP_LIMIT,
           });
           if (generation !== resultAnalysisGenerationRef.current) return;
           setResultAnalysis(createPivotAnalysisTable(result.columns, response, 0, 1, valueColumnIndex));
@@ -1834,6 +1837,17 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     void copyGridPayload(payload, format);
   }, [copyGridPayload]);
 
+  const exportSelection = useCallback((payload: DataGridCopyPayload, format: 'csv' | 'json'): void => {
+    try {
+      const content = formatDataGridClipboard(payload, format, { includeHeaders: payload.includeHeaders ?? true });
+      const blob = new Blob([content], { type: format === 'json' ? 'application/json; charset=utf-8' : 'text/csv; charset=utf-8' });
+      downloadBlobFile(`justybase-selection.${format}`, blob);
+      setNotice(`Exported ${payload.rows.length.toLocaleString()} selected rows.`);
+    } catch {
+      setNotice('Could not export the selection.');
+    }
+  }, []);
+
   const copyCellValue = useCallback((): void => {
     const item = cellViewer;
     if (!item) return;
@@ -1846,6 +1860,60 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
     if (!row) return;
     await copyGridPayload({ columns: activeResult.columns, rows: [row] });
   }, [activeResult, activeRows, copyGridPayload, selectedRow]);
+
+  const [copyingAll, setCopyingAll] = useState(false);
+  const copyAbortRef = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => {
+    copyAbortRef.current?.abort(new Error('Copy cancelled.'));
+  }, []);
+
+  const copyFullSpool = useCallback(async (): Promise<void> => {
+    if (!activeResult) return;
+    if (copyingAll) {
+      copyAbortRef.current?.abort(new Error('Copy cancelled.'));
+      return;
+    }
+    const queryId = queryByResultRef.current.get(activeResult.resultSetId) ?? activeResult.executionId;
+    if (!queryId) {
+      setNotice('Full result copy is unavailable for this result.');
+      return;
+    }
+    const controller = new AbortController();
+    copyAbortRef.current = controller;
+    setCopyingAll(true);
+    try {
+      const queryOptions = resultQueryOptions(activeResult, activeResult.view);
+      const allRows = await collectFullSpoolRows(
+        async (offset, limit, signal) => {
+          const page = await api.queryPage(queryId, {
+            statementIndex: activeResult.statementIndex,
+            offset,
+            limit,
+            ...queryOptions,
+          }, signal ? { signal } : undefined);
+          return { rows: page.rows, hasMore: page.hasMore ?? offset + page.rows.length < page.totalRows, totalRows: page.totalRows };
+        },
+        {
+          signal: controller.signal,
+          onProgress: progress => {
+            if (!controller.signal.aborted) setNotice(`Copying… ${progress.loadedRows.toLocaleString()} / ${progress.totalRows.toLocaleString()} rows…`);
+          },
+        },
+      );
+      if (controller.signal.aborted) return;
+      await copyGridPayload({ columns: activeResult.columns, rows: allRows });
+      if (!controller.signal.aborted) setNotice(`Copied ${allRows.length.toLocaleString()} rows (full result).`);
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        setNotice('Copy cancelled.');
+        return;
+      }
+      setNotice(error instanceof Error ? error.message : 'Could not copy the full result.');
+    } finally {
+      if (copyAbortRef.current === controller) copyAbortRef.current = undefined;
+      setCopyingAll(false);
+    }
+  }, [activeResult, api, copyGridPayload, copyingAll]);
 
   const exportResults = useCallback(async (): Promise<void> => {
     if (!activeResult || typeof document === 'undefined') return;
@@ -1860,13 +1928,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
         format: exportFormat,
         ...resultQueryOptions(activeResult, activeResult.view),
       });
-      const url = URL.createObjectURL(downloaded.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = downloaded.fileName;
-      link.click();
-      const revokeObjectUrl = URL.revokeObjectURL;
-      if (typeof revokeObjectUrl === 'function') window.setTimeout(() => revokeObjectUrl(url), 100);
+      downloadBlobFile(downloaded.fileName, downloaded.blob);
       setNotice('Result exported.');
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not export results.');
@@ -1980,6 +2042,7 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
                 selectedRowIndex={selectedRow}
                 onRowSelect={setSelectedRow}
                 onCopySelection={copyGridSelection}
+                onExportSelection={exportSelection}
                 onViewCell={openCellValue}
                 onOpenColumnFilter={openColumnFilter}
                 filterMenu={filterMenu}
@@ -1989,6 +2052,8 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
                 onCloseColumnFilter={closeColumnFilter}
                 onRefresh={() => void refresh()}
                 onCopy={() => void copySelected()}
+                onCopyAll={() => void copyFullSpool()}
+                copyingAll={copyingAll}
                 onExport={() => void exportResults()}
                 onAggregate={() => toggleResultAnalysis('aggregate')}
                 onGroup={() => updateResultView({ grouping: activeResult?.view.grouping.length ? [] : activeResult?.columns[0] ? [activeResult.columns[0].name] : [] })}

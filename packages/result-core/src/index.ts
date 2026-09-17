@@ -52,3 +52,9 @@ export type {
 } from './operations';
 export { applyPortableQueryEvent, emptyPortableQueryResult } from './queryState';
 export type { PortableQueryEvent, PortableQueryExecutionMode, PortableQueryResultState } from './queryState';
+export {
+  collectFullSpoolRows,
+  COPY_SPOOL_BATCH_SIZE,
+  MAX_COPY_SPOOL_ROWS,
+} from './copySpool';
+export type { CollectFullSpoolOptions, CopySpoolPage, CopySpoolProgress } from './copySpool';

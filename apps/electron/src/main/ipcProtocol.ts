@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {
   CapabilityDescriptor,
   ElectronSqlFile,
@@ -31,8 +32,10 @@ export const IPC_METHODS = [
   'connections/test',
   'capabilities/list',
   'filesystem/open-sql',
+  'filesystem/open-sql-path',
   'filesystem/save-sql',
   'filesystem/save-sql-as',
+  'window/new',
 ] as const;
 export type IpcMethod = typeof IPC_METHODS[number];
 
@@ -52,8 +55,10 @@ export interface IpcHandlers {
   readonly testConnectionProfile: (input: UiConnectionProfileInput, requestId?: OpaqueCredentialRequestId) => Promise<void>;
   readonly listCapabilities: () => Promise<UiCapabilitySnapshot> | UiCapabilitySnapshot;
   readonly openSqlFile: () => Promise<ElectronSqlFile | null>;
+  readonly openSqlFilePath: (filePath: string) => Promise<ElectronSqlFile>;
   readonly saveSqlFile: (filePath: string, content: string) => Promise<ElectronSqlSaveResult>;
   readonly saveSqlFileAs: (suggestedName: string | undefined, content: string) => Promise<ElectronSqlSaveResult | null>;
+  readonly requestNewWindow: () => Promise<void>;
 }
 
 interface ProfilePayload {
@@ -119,6 +124,10 @@ function isSqlFilePath(value: unknown): value is string {
     && value.toLowerCase().endsWith('.sql');
 }
 
+function isAbsoluteSqlFilePath(value: unknown): value is string {
+  return isSqlFilePath(value) && path.isAbsolute(value) && path.normalize(value).length <= MAX_SQL_FILE_PATH_LENGTH;
+}
+
 function parseSqlSavePayload(value: unknown): SqlSavePayload | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -139,6 +148,12 @@ function parseSqlSaveAsPayload(value: unknown): SqlSaveAsPayload | undefined {
     ...(candidate.suggestedName === undefined ? {} : { suggestedName: candidate.suggestedName as string }),
     content: candidate.content as string,
   };
+}
+
+function parseSqlOpenPathPayload(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const filePath = (value as { filePath?: unknown }).filePath;
+  return isAbsoluteSqlFilePath(filePath) ? filePath : undefined;
 }
 
 function hasSecretKey(value: unknown): boolean {
@@ -231,6 +246,14 @@ export async function dispatchIpcMessage(message: unknown, handlers: IpcHandlers
           ? { ok: true, file }
           : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid SQL file.' };
       }
+      case 'filesystem/open-sql-path': {
+        const filePath = parseSqlOpenPathPayload(candidate.payload);
+        if (!filePath) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'An absolute .sql file path is required.' };
+        const file = await handlers.openSqlFilePath(filePath);
+        return isElectronSqlFile(file)
+          ? { ok: true, file }
+          : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid SQL file.' };
+      }
       case 'filesystem/save-sql': {
         const payload = parseSqlSavePayload(candidate.payload);
         if (!payload) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'A .sql file path and content are required.' };
@@ -247,6 +270,11 @@ export async function dispatchIpcMessage(message: unknown, handlers: IpcHandlers
         return isElectronSqlSaveResult(saved)
           ? { ok: true, saved }
           : { ok: false, code: 'INVALID_IPC_RESPONSE', message: 'Main returned an invalid save result.' };
+      }
+      case 'window/new': {
+        if (candidate.payload !== undefined) return { ok: false, code: 'INVALID_IPC_PAYLOAD', message: 'window/new does not accept a payload.' };
+        await handlers.requestNewWindow();
+        return { ok: true, operation: 'window-opened' };
       }
     }
   } catch (error: unknown) {

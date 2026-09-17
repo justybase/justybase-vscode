@@ -51,8 +51,10 @@ describe('Electron main/preload secret boundary', () => {
       testConnectionProfile: async () => undefined,
       listCapabilities: () => ({ descriptors: [] }),
       openSqlFile: async () => null,
+      openSqlFilePath: async (filePath: string) => ({ filePath, fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false }),
       saveSqlFile: async (filePath: string) => ({ filePath, fileName: 'report.sql', sizeBytes: 0 }),
       saveSqlFileAs: async () => null,
+      requestNewWindow: async () => undefined,
     };
     await expect(dispatchIpcMessage(null, handlers)).resolves.toEqual(expect.objectContaining({ ok: false, code: 'INVALID_IPC_MESSAGE' }));
     await expect(dispatchIpcMessage({ method: 'main/execute' }, handlers)).resolves.toEqual(expect.objectContaining({ ok: false, code: 'UNKNOWN_IPC_METHOD' }));
@@ -86,8 +88,10 @@ describe('Electron main/preload secret boundary', () => {
       testConnectionProfile: async () => undefined,
       listCapabilities: () => ({ descriptors: [] }),
       openSqlFile: async () => null,
+      openSqlFilePath: async (filePath: string) => ({ filePath, fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false }),
       saveSqlFile: async (filePath: string) => ({ filePath, fileName: 'report.sql', sizeBytes: 0 }),
       saveSqlFileAs: async () => null,
+      requestNewWindow: async () => undefined,
     };
     await expect(dispatchIpcMessage({ method: 'connections/create', payload: {
       profile: { name: 'Netezza', host: 'db', port: 5480, database: 'SYSTEM', user: 'admin', dbType: 'netezza', readOnly: true },
@@ -112,7 +116,7 @@ describe('Electron main/preload secret boundary', () => {
     await expect(bridge.getAuthState()).resolves.toEqual({ status: 'authenticated' });
     await expect(bridge.listConnections()).resolves.toEqual([]);
     await expect(bridge.listCapabilities()).resolves.toEqual({ descriptors: [] });
-    expect(Object.keys(bridge)).toEqual(['getAuthState', 'requestCredential', 'listConnections', 'createConnection', 'updateConnection', 'deleteConnection', 'testConnection', 'testConnectionProfile', 'listCapabilities', 'openSqlFile', 'saveSqlFile', 'saveSqlFileAs']);
+    expect(Object.keys(bridge)).toEqual(['getAuthState', 'requestCredential', 'listConnections', 'createConnection', 'updateConnection', 'deleteConnection', 'testConnection', 'testConnectionProfile', 'listCapabilities', 'openSqlFile', 'openSqlFilePath', 'requestNewWindow', 'saveSqlFile', 'saveSqlFileAs']);
     expect(JSON.stringify(bridge)).toBe('{}');
     expect(calls).toHaveLength(3);
 

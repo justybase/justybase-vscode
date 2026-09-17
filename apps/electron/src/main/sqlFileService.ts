@@ -74,6 +74,12 @@ function validateReadablePath(filePath: string): string {
 /** Main-process SQL file access. Dialog-gated paths are the only writable authorization. */
 export function createSqlFileService(options: SqlFileServiceOptions): {
   readonly openSqlFile: () => Promise<ElectronSqlFile | null>;
+  /**
+   * Opens an explicit path supplied by the OS (file association, protocol
+   * link, second instance). Applies the same .sql/size/grant guardrails as
+   * the dialog flow; OS launch intent is the authorization.
+   */
+  readonly openSqlFilePath: (filePath: string) => Promise<ElectronSqlFile>;
   readonly saveSqlFile: (filePath: string, content: string) => Promise<ElectronSqlSaveResult>;
   readonly saveSqlFileAs: (suggestedName: string | undefined, content: string) => Promise<ElectronSqlSaveResult | null>;
 } {
@@ -142,6 +148,7 @@ export function createSqlFileService(options: SqlFileServiceOptions): {
       if (selection.canceled || selected === undefined) return null;
       return readSqlFile(validateReadablePath(selected));
     },
+    openSqlFilePath: async filePath => readSqlFile(validateReadablePath(filePath)),
     saveSqlFile: async (filePath, content) => {
       if (typeof content !== 'string' || content.length > HARD_SQL_FILE_MAX_BYTES) {
         throw failSafeMessage('SQL document is too large to save. The limit is 25 MB.');

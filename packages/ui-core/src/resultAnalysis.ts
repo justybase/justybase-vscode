@@ -51,10 +51,13 @@ export function createAggregateAnalysisTable(
 /** Maps grouped API output without changing row values or decimal strings. */
 export function createGroupAnalysisTable(response: QueryGroupResponse): UiResultAnalysisTable {
   const rows = response.rows.map(row => row.slice());
+  const truncated = response.totalGroups > rows.length;
   return {
     kind: 'group',
     title: 'Grouped result',
-    summary: `${response.totalGroups.toLocaleString()} groups`,
+    summary: truncated
+      ? `First ${rows.length.toLocaleString()} of ${response.totalGroups.toLocaleString()} groups`
+      : `${response.totalGroups.toLocaleString()} groups`,
     columns: response.columns.map(columnType),
     rows,
     totalRowCount: rows.length,
@@ -73,29 +76,42 @@ export function createPivotAnalysisTable(
   _pivotColumnIndex: number,
   valueColumnIndex: number,
 ): UiResultAnalysisTable {
+  /** Bounds the rendered matrix: pivot cardinality is unbounded server-side. */
+  const MAX_PIVOT_VALUES = 500;
   const pivotValues = [...new Set(response.rows.map(row => String(row[1] ?? 'NULL')))];
   const rowValues = [...new Set(response.rows.map(row => String(row[0] ?? 'NULL')))];
+  const visiblePivotValues = pivotValues.slice(0, MAX_PIVOT_VALUES);
+  const visiblePivotSet = new Set(visiblePivotValues);
   const rowMap = new Map<string, Map<string, unknown>>();
   for (const row of response.rows) {
     const rowKey = String(row[0] ?? 'NULL');
+    const pivotKey = String(row[1] ?? 'NULL');
+    if (!visiblePivotSet.has(pivotKey)) continue;
     const values = rowMap.get(rowKey) ?? new Map<string, unknown>();
-    values.set(String(row[1] ?? 'NULL'), row[2] ?? null);
+    values.set(pivotKey, row[2] ?? null);
     rowMap.set(rowKey, values);
   }
   const valueColumn = columns[valueColumnIndex];
   const pivotColumns: UiResultColumn[] = [
     columnType(columns[rowColumnIndex]),
-    ...pivotValues.map(value => ({
+    ...visiblePivotValues.map(value => ({
       name: value,
       ...(valueColumn?.type === undefined ? {} : { type: valueColumn.type }),
       ...(valueColumn?.scale === undefined ? {} : { scale: valueColumn.scale }),
     })),
   ];
-  const rows = rowValues.map(rowValue => [rowValue, ...pivotValues.map(pivotValue => rowMap.get(rowValue)?.get(pivotValue) ?? null)]);
+  const rows = rowValues.map(rowValue => [rowValue, ...visiblePivotValues.map(pivotValue => rowMap.get(rowValue)?.get(pivotValue) ?? null)]);
+  const truncated = response.totalGroups > response.rows.length;
+  const baseSummary = `${rowValues.length.toLocaleString()} rows · ${visiblePivotValues.length.toLocaleString()} pivot values`;
+  const pivotCapped = pivotValues.length > visiblePivotValues.length
+    ? `${baseSummary} · first ${visiblePivotValues.length.toLocaleString()} of ${pivotValues.length.toLocaleString()} pivot values`
+    : baseSummary;
   return {
     kind: 'pivot',
     title: 'Pivot result',
-    summary: `${rowValues.length.toLocaleString()} rows · ${pivotValues.length.toLocaleString()} pivot values`,
+    summary: truncated
+      ? `${pivotCapped} · first ${response.rows.length.toLocaleString()} of ${response.totalGroups.toLocaleString()} groups`
+      : pivotCapped,
     columns: pivotColumns,
     rows,
     totalRowCount: rows.length,

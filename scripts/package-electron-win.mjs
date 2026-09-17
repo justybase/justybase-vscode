@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { access, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -64,6 +65,18 @@ async function createZip(sourceDirectory, zipPath) {
   await completion;
 }
 
+async function sha256File(filePath) {
+  const hash = createHash('sha256');
+  const { createReadStream } = await import('node:fs');
+  await new Promise((resolve, reject) => {
+    const stream = createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.once('error', reject);
+    stream.once('end', resolve);
+  });
+  return hash.digest('hex');
+}
+
 async function main() {
   const rootPackage = await readJson(path.join(repositoryRoot, 'package.json'));
   const electronManifestPath = await firstExistingPath([
@@ -82,12 +95,13 @@ async function main() {
   await copyWithoutSourceMaps(electronDist, path.join(stagingDirectory, 'dist'));
   await cp(dialectsDirectory, path.join(stagingDirectory, 'dialects'), { recursive: true });
   await cp(path.join(repositoryRoot, 'LICENSE'), path.join(stagingDirectory, 'LICENSE'));
+  await cp(path.join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'), path.join(stagingDirectory, 'THIRD_PARTY_NOTICES.md'));
 
   const packageManifest = {
     name: 'justybase-electron',
     productName: 'JustyBase',
     version: rootPackage.version,
-    description: 'Portable JustyBase SQL workspace.',
+    description: 'JustyBase desktop SQL workspace.',
     main: 'dist/main/main.js',
     license: 'Apache-2.0',
   };
@@ -96,6 +110,15 @@ async function main() {
     `${JSON.stringify(packageManifest, null, 2)}\n`,
     'utf8',
   );
+
+  const windowsSign = process.env.JUSTYBASE_WIN_CERT_FILE
+    ? {
+      certificateFile: process.env.JUSTYBASE_WIN_CERT_FILE,
+      ...(process.env.JUSTYBASE_WIN_CERT_PASSWORD ? { certificatePassword: process.env.JUSTYBASE_WIN_CERT_PASSWORD } : {}),
+    }
+    : undefined;
+  if (windowsSign) console.log('Windows code signing enabled (Authenticode).');
+  else console.log('Windows code signing skipped: set JUSTYBASE_WIN_CERT_FILE to sign the executable.');
 
   const packagedPaths = await packager({
     dir: stagingDirectory,
@@ -110,6 +133,14 @@ async function main() {
     prune: false,
     derefSymlinks: true,
     quiet: false,
+    appVersion: rootPackage.version,
+    buildVersion: rootPackage.version,
+    win32metadata: {
+      CompanyName: 'JustyBase',
+      FileDescription: 'JustyBase desktop SQL workspace',
+      ProductName: 'JustyBase',
+    },
+    ...(windowsSign ? { windowsSign } : {}),
   });
 
   const packagedAppDirectory = packagedPaths[0];
@@ -127,8 +158,13 @@ async function main() {
 
   const zipDetails = await stat(zipPath);
   if (zipDetails.size === 0) throw new Error(`Created ZIP is empty: ${zipPath}`);
+  const checksum = await sha256File(zipPath);
+  const checksumPath = `${zipPath}.sha256`;
+  await writeFile(checksumPath, `${checksum}  ${zipName}\n`, 'utf8');
 
   console.log(`Portable Electron package created: ${path.relative(repositoryRoot, zipPath)}`);
+  console.log(`SHA256: ${checksum}`);
+  console.log(`Checksum file: ${path.relative(repositoryRoot, checksumPath)}`);
   console.log(`Electron runtime: ${electronPackage.version}`);
   console.log(`Packaged app: ${path.relative(repositoryRoot, packagedAppDirectory)}`);
   console.log(`ZIP size: ${zipDetails.size} bytes`);

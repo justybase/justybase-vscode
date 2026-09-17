@@ -98,6 +98,16 @@ export function createPreloadBridge(invoke: IpcInvoker): ElectronRendererApi {
       if (!isElectronSqlFile(response.file)) malformedField('SQL file');
       return response.file;
     },
+    openSqlFilePath: async (filePath: string): Promise<ElectronSqlFile> => {
+      if (typeof filePath !== 'string' || filePath.length === 0 || !filePath.toLowerCase().endsWith('.sql')) malformedField('SQL file path');
+      const response = await invokeResponse(invoke, { method: 'filesystem/open-sql-path', payload: { filePath } });
+      if (!isElectronSqlFile(response.file)) malformedField('SQL file');
+      return response.file;
+    },
+    requestNewWindow: async (): Promise<void> => {
+      const response = await invokeResponse(invoke, { method: 'window/new' });
+      if (response.operation !== 'window-opened') malformedField('new window response');
+    },
     saveSqlFile: async (filePath: string, content: string): Promise<ElectronSqlSaveResult> => {
       if (typeof filePath !== 'string' || filePath.length === 0 || typeof content !== 'string') malformedField('SQL file');
       if (content.length > HARD_SQL_FILE_MAX_BYTES) malformedField('SQL file');
