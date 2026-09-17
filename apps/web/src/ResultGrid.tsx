@@ -3,10 +3,11 @@ import type { ReactElement } from 'react';
 import { getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef, ColumnFiltersState, ColumnPinningState, RowSelectionState, SortingState, VisibilityState } from '@tanstack/react-table';
 import type { QueryAggregateFunction, QueryAggregateResponse, QueryColumnFilterOperator, QueryColumnFilterSpec, QueryDistinctResponse, QueryExportFormat, QuerySortSpec } from '@justybase/contracts';
+import { MAX_QUERY_GROUP_LIMIT } from '@justybase/contracts';
 import type { UiResultViewState } from '@justybase/ui-core';
-import { CellValueViewer, DataGrid, DataGridColumnFilterPanel, DataGridColumnMenu, createDataGridClipboardPayload, formatDataGridCellValue, formatDataGridClipboard, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
+import { CellValueViewer, DataGrid, downloadBlobFile, DataGridColumnFilterPanel, DataGridColumnMenu, createDataGridClipboardPayload, formatDataGridCellValue, formatDataGridClipboard, inferDataGridColumnMetadata, isDataGridNumericColumn, isDataGridTemporalColumn, processDataGridRows } from '@justybase/ui-react';
 import type { DataGridCellContext, DataGridCellMetadata, DataGridClipboardFormat, DataGridColumnFilterRequest, DataGridCopyPayload, GridScrollPosition } from '@justybase/ui-react';
-import { aggregateResultRows, type ResultColumn } from '@justybase/result-core';
+import { aggregateResultRows, collectFullSpoolRows, type ResultColumn } from '@justybase/result-core';
 import { useApiClient } from './api';
 import { readLegacyWorkspaceValue, useWorkspaceStorage, type WorkspaceStorage } from './workspacePersistence';
 import { type ResultState } from './queryState';
@@ -270,6 +271,9 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   const [columnOrder, setColumnOrder] = useState<string[]>(() => result.columns.map((_, i) => String(i)));
   const [detailRowIndex, setDetailRowIndex] = useState<number | null>(null);
   const [cellViewer, setCellViewer] = useState<{ readonly column: ResultGridColumnMetadata; readonly value: unknown; readonly rowNumber: number } | undefined>(undefined);
+  const [copyingAll, setCopyingAll] = useState(false);
+  const [copyProgress, setCopyProgress] = useState('');
+  const copyAbortRef = useRef<AbortController | undefined>(undefined);
   const [showAggregates, setShowAggregates] = useState(false);
   const [aggregates, setAggregates] = useState<QueryAggregateResponse | null>(null);
   const [aggregatesLoading, setAggregatesLoading] = useState(false);
@@ -670,7 +674,15 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     setError('');
     try {
       const groupedRows = result.sessionId
-        ? (await api.group(queryId, { statementIndex, groupByColumnIndices: [config.rowColumnIndex, config.pivotColumnIndex], aggregates: [{ function: 'sum', columnIndex: config.valueColumnIndex }], globalFilter, columnFilters: requestFilters, groupLimit: 2_000 })).rows
+        ? await (async () => {
+          const response = await api.group(queryId, { statementIndex, groupByColumnIndices: [config.rowColumnIndex, config.pivotColumnIndex], aggregates: [{ function: 'sum', columnIndex: config.valueColumnIndex }], globalFilter, columnFilters: requestFilters, groupLimit: MAX_QUERY_GROUP_LIMIT });
+          if (response.totalGroups > response.rows.length) {
+            setNotice(`Pivot truncated to the first ${response.rows.length.toLocaleString()} of ${response.totalGroups.toLocaleString()} groups. Refine filters for a complete pivot.`);
+          } else {
+            setNotice(previous => previous.startsWith('Pivot truncated to the first') ? '' : previous);
+          }
+          return response.rows;
+        })()
         : localPivotGroups(displayRows, config);
       setPivot(buildPivotResult(
         groupedRows,
@@ -940,17 +952,83 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     void copyGridPayload({ columns: gridColumns, rows: selected.map(row => row.original.values) });
   }
 
+  function exportSelection(payload: DataGridCopyPayload, format: 'csv' | 'json'): void {
+    setError('');
+    try {
+      const content = formatDataGridClipboard(payload, format, { includeHeaders: payload.includeHeaders ?? true });
+      const blob = new Blob([content], { type: format === 'json' ? 'application/json; charset=utf-8' : 'text/csv; charset=utf-8' });
+      downloadBlobFile(`justybase-selection.${format}`, blob);
+      setNotice(`Exported ${payload.rows.length.toLocaleString()} selected rows.`);
+    } catch {
+      setError('Could not export the selection.');
+    }
+  }
+
+  function cancelCopyAll(): void {
+    copyAbortRef.current?.abort(new Error('Copy cancelled.'));
+  }
+
+  useEffect(() => () => {
+    copyAbortRef.current?.abort(new Error('Copy cancelled.'));
+  }, []);
+
+  async function copyFullSpool(): Promise<void> {
+    if (copyingAll) {
+      cancelCopyAll();
+      return;
+    }
+    if (!result.sessionId) {
+      copySelection();
+      return;
+    }
+    const controller = new AbortController();
+    copyAbortRef.current = controller;
+    setCopyingAll(true);
+    setCopyProgress('');
+    setError('');
+    try {
+      const allRows = await collectFullSpoolRows(
+        async (offset, limit, signal) => {
+          const page = await api.queryPage(queryId, {
+            statementIndex,
+            offset,
+            limit,
+            sorting: requestSorting,
+            columnFilters: requestFilters,
+            globalFilter,
+          }, signal ? { signal } : undefined);
+          return { rows: page.rows, hasMore: page.hasMore ?? offset + page.rows.length < page.totalRows, totalRows: page.totalRows };
+        },
+        {
+          signal: controller.signal,
+          onProgress: progress => {
+            if (controller.signal.aborted) return;
+            setCopyProgress(`${progress.loadedRows.toLocaleString()} / ${progress.totalRows.toLocaleString()} rows…`);
+          },
+        },
+      );
+      if (controller.signal.aborted) return;
+      await copyGridPayload({ columns: gridColumns, rows: allRows });
+      if (!controller.signal.aborted) setNotice(`Copied ${allRows.length.toLocaleString()} rows (full result).`);
+    } catch (reason: unknown) {
+      if (controller.signal.aborted) {
+        setNotice('Copy cancelled.');
+        return;
+      }
+      setError(reason instanceof Error ? reason.message : 'Could not copy the full result.');
+    } finally {
+      if (copyAbortRef.current === controller) copyAbortRef.current = undefined;
+      setCopyingAll(false);
+      setCopyProgress('');
+    }
+  }
+
   async function exportResult(): Promise<void> {
     setExporting(true);
     setError('');
     try {
       const downloaded = await api.exportQuery(queryId, { statementIndex, format: exportFormat, sorting: requestSorting, columnFilters: requestFilters, globalFilter });
-      const url = URL.createObjectURL(downloaded.blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = downloaded.fileName;
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 100);
+      downloadBlobFile(downloaded.fileName, downloaded.blob);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Could not export query result.');
     } finally {
@@ -961,12 +1039,13 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
   return <section className="advanced-grid">
     <div className="grid-toolbar">
       <input className="grid-global-filter" aria-label="Filter all result values" placeholder="Filter results…" value={globalFilter} onChange={event => setGlobalFilter(event.target.value)} />
-      <div className="grid-tool-group grid-copy-actions"><button className="secondary small copy-btn" aria-label="Copy selected result rows" onClick={copySelection}>Copy</button></div>
+      <div className="grid-tool-group grid-copy-actions"><button className="secondary small copy-btn" aria-label="Copy selected result rows" onClick={copySelection}>Copy</button><button className="secondary small copy-all-btn" aria-label="Copy full result (all rows)" title={result.sessionId ? 'Copy every filtered row from the server spool, not just the loaded page' : 'Copy all loaded rows'} onClick={() => void copyFullSpool()}>{copyingAll ? 'Copying…' : 'Copy all'}</button>{copyingAll && <button className="secondary small" aria-label="Cancel full result copy" onClick={cancelCopyAll}>Cancel</button>}{copyingAll && copyProgress && <span className="running" role="status">{copyProgress}</span>}</div>
       <div className="grid-tool-group grid-analysis-actions"><button className="secondary small" disabled={aggregatesLoading} onClick={() => { const next = !showAggregates; setShowAggregates(next); if (!next) setAggregates(null); }}>{aggregatesLoading ? 'Calculating…' : showAggregates ? 'Hide aggregates' : 'Aggregates'}</button><button className="secondary small" disabled={grouping} aria-expanded={groupPanelOpen} aria-pressed={gridGrouping.length > 0} onClick={() => { if (gridGrouping.length === 0 && gridColumns[0]) { updateSharedGridView({ grouping: [gridColumns[0].name] }); return; } setGroupPanelOpen(previous => !previous); }}>{grouping ? 'Grouping…' : groupPanelOpen ? 'Close group panel' : gridGrouping.length > 0 ? 'Open group panel' : 'Group'}</button><button className="secondary small" disabled={grouping} onClick={openPivotConfiguration}>Pivot</button></div>
       <div className="grid-tool-group grid-export-actions"><label className="grid-export-label">Export<select className="grid-export-format" value={exportFormat} onChange={event => setExportFormat(event.target.value as QueryExportFormat)} aria-label="Export format"><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB (preferred, faster)</option></select></label><button className="secondary small" disabled={exporting} onClick={() => void exportResult()}>{exporting ? 'Exporting…' : 'Export'}</button></div>
       <DataGridColumnMenu columns={gridColumns} view={sharedGridView} onViewChange={updateSharedGridView} />
       {loading && <span className="running">Loading…</span>}{notice && <span className="grid-notice" role="status">{notice}</span>}{error && <span className="grid-error" role="alert">{error}</span>}
     </div>
+    {result.limitReached === true && <div className="grid-limit-banner" role="alert">Row limit reached — showing the first {result.totalRows.toLocaleString()} rows. Refine filters or use Export for the full spool.</div>}
     {pivotConfigOpen && <div className="modal-backdrop pivot-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setPivotConfigOpen(false); }}>
       <section className="modal-card pivot-modal" role="dialog" aria-modal="true" aria-label="Pivot results" onMouseDown={event => event.stopPropagation()}>
         <div className="pivot-modal-header"><div><h2>Pivot results</h2><p>Choose the row, pivot and numeric value columns.</p></div><button type="button" className="secondary small" aria-label="Close Pivot configuration" onClick={() => setPivotConfigOpen(false)}>×</button></div>
@@ -980,7 +1059,7 @@ export function ResultGrid({ queryId, statementIndex = 0, result, onEditRow }: {
     </div>}
     {showAggregates && aggregates && aggregateGrid && <div className="grid-aggregates"><div className="grid-aggregates-title">Aggregates for {aggregates.filteredRowCount.toLocaleString()} {hasGridFilter ? 'filtered rows' : 'rows'}</div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:aggregates`} columns={aggregateGrid.columns} rows={aggregateGrid.rows} totalRowCount={aggregateGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} showGroupingPanel={false} getCellMetadata={aggregateGrid.getCellMetadata} /></div></div>}
     {pivot && pivotGrid && <div className="grid-aggregates grid-grouped"><div className="grid-aggregates-title">Pivot view<button type="button" className="secondary small" onClick={() => setPivot(null)}>Close</button></div><div className="grid-aggregates-scroll"><DataGrid resultSetId={`${resultSetId}:pivot`} columns={pivotGrid.columns} rows={pivotGrid.rows} totalRowCount={pivotGrid.rows.length} view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }} onViewChange={() => undefined} clientProcessing={false} showGroupingPanel={false} /></div></div>}
-    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu showColumnMenu={false} showGroupingPanel={groupPanelOpen} showInlineColumnFilters={false} onOpenColumnFilter={openColumnFilter} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow, ...(scrollRowHeight === undefined ? {} : { rowHeight: scrollRowHeight }) }} onScroll={handleGridScroll} onLoadMore={result.sessionId ? loadMoreRows : undefined} onCopySelection={copyGridSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onViewRow={context => setDetailRowIndex(context.rowIndex)} onViewCell={openCellValue} onEditRow={onEditRow ? context => { const row = gridRows[context.rowIndex]; if (row) onEditRow([...row]); } : undefined} />
+    <DataGrid resultSetId={resultSetId} columns={gridColumns} rows={gridRows} totalRowCount={effectiveTotalRows} view={sharedGridView} clientProcessing={!result.sessionId} showContextMenu showColumnMenu={false} showGroupingPanel={groupPanelOpen} showInlineColumnFilters={false} onOpenColumnFilter={openColumnFilter} onViewChange={updateSharedGridView} selectedRowIndex={selectedRawIndex} scroll={{ resultSetId, top: scrollTop, left: scrollLeft, anchorRow: scrollAnchorRow, ...(scrollRowHeight === undefined ? {} : { rowHeight: scrollRowHeight }) }} onScroll={handleGridScroll} onLoadMore={result.sessionId ? loadMoreRows : undefined} onCopySelection={copyGridSelection} onExportSelection={exportSelection} onSelectionChange={selection => setRowSelection(selection ? { [String(selection.focusRow)]: true } : {})} onRowSelect={rowIndex => { const displayIndex = result.sessionId ? rowIndex : displayRows.findIndex(row => row === result.rows[rowIndex]); if (displayIndex >= 0) setRowSelection({ [String(displayIndex)]: true }); }} onViewRow={context => setDetailRowIndex(context.rowIndex)} onViewCell={openCellValue} onEditRow={onEditRow ? context => { const row = gridRows[context.rowIndex]; if (row) onEditRow([...row]); } : undefined} />
     {filterMenu && <DataGridColumnFilterPanel state={filterMenu} onChange={updateColumnFilterMenu} onApply={applyColumnFilter} onClear={clearColumnFilter} onClose={closeColumnFilter} />}
     {cellViewer && <CellValueViewer column={cellViewer.column} value={cellViewer.value} rowNumber={cellViewer.rowNumber} onClose={() => setCellViewer(undefined)} onCopy={copyCellValue} />}
     {detailRowIndex !== null && gridRows[detailRowIndex] && <aside className="grid-row-details"><div className="grid-row-details-header"><strong>Row details</strong><button type="button" className="secondary small" onClick={() => setDetailRowIndex(null)}>Close</button></div><dl>{gridRows[detailRowIndex].map((value, index) => <div key={index}><dt>{result.columns[index] ?? `Column ${index + 1}`}</dt><dd>{formatCellValue(value, gridColumns[index]).text}</dd></div>)}</dl></aside>}

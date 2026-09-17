@@ -110,7 +110,7 @@ function mapEvent(
       onRows?.(resultSetId, event.rows.map(row => [...row]));
       return { ...base, type: 'rows', rowCount: loadedRowCount, totalRowCount: event.totalRows };
     }
-    case 'complete': return { ...base, type: 'complete', totalRowCount: event.totalRows, message: event.message };
+    case 'complete': return { ...base, type: 'complete', totalRowCount: event.totalRows, message: event.message, ...(event.limitReached === undefined ? {} : { limitReached: event.limitReached }) };
     case 'error': return { ...base, type: 'error', message: event.message };
     case 'cancelled': return { ...base, type: 'cancelled', totalRowCount: event.totalRows };
     case 'session':

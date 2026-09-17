@@ -22,6 +22,7 @@ import {
   WorkspaceTabs,
   calculateDataGridVirtualWindow,
   createDataGridClipboardPayload,
+  downloadBlobFile,
   formatDataGridCellValue,
   formatDataGridClipboard,
   processDataGridRows,
@@ -76,6 +77,107 @@ describe('shared React presentation', () => {
     />);
     expect(screen.getByRole('region', { name: 'SQL Problems' })).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('shows a row-limit banner only when the server stopped at its limit', () => {
+    const { rerender } = render(<ResultPanel
+      results={[result]}
+      activeResult={result}
+      rows={[[1]]}
+      resultState='ready'
+      activeTab='results'
+      problemCount={0}
+      problems={[]}
+      onOutputTabChange={jest.fn()}
+      onResultSelect={jest.fn()}
+      onViewChange={jest.fn()}
+    />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    rerender(<ResultPanel
+      results={[{ ...result, limitReached: true, totalRowCount: 200_000 }]}
+      activeResult={{ ...result, limitReached: true, totalRowCount: 200_000 }}
+      rows={[[1]]}
+      resultState='ready'
+      activeTab='results'
+      problemCount={0}
+      problems={[]}
+      onOutputTabChange={jest.fn()}
+      onResultSelect={jest.fn()}
+      onViewChange={jest.fn()}
+    />);
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent(/Row limit reached/);
+    expect(banner).toHaveTextContent(/200,000/);
+  });
+
+  it('names the shared copy-all control and announces its busy state', () => {
+    const { rerender } = render(<ResultPanel
+      results={[result]}
+      activeResult={result}
+      rows={[[1]]}
+      resultState='ready'
+      activeTab='results'
+      problemCount={0}
+      problems={[]}
+      onOutputTabChange={jest.fn()}
+      onResultSelect={jest.fn()}
+      onViewChange={jest.fn()}
+      onCopyAll={jest.fn()}
+    />);
+    expect(screen.getByRole('button', { name: 'Copy full result (all rows)' })).toHaveTextContent('Copy all');
+
+    rerender(<ResultPanel
+      results={[result]}
+      activeResult={result}
+      rows={[[1]]}
+      resultState='ready'
+      activeTab='results'
+      problemCount={0}
+      problems={[]}
+      onOutputTabChange={jest.fn()}
+      onResultSelect={jest.fn()}
+      onViewChange={jest.fn()}
+      onCopyAll={jest.fn()}
+      copyingAll
+    />);
+    expect(screen.getByRole('button', { name: 'Copy full result (all rows)' })).toHaveTextContent('Copying…');
+  });
+
+  it('exposes selection export actions in the shared context menu', async () => {
+    const user = userEvent.setup();
+    const onExportSelection = jest.fn();
+    render(<DataGrid
+      resultSetId='export-menu-result'
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1], [2]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+      onViewChange={jest.fn()}
+      onExportSelection={onExportSelection}
+    />);
+    fireEvent.contextMenu(screen.getByRole('cell', { name: '1' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Export selection as CSV' }));
+    expect(onExportSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ rows: [[1]] }),
+      'csv',
+    );
+    fireEvent.contextMenu(screen.getByRole('cell', { name: '2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Export selection as JSON' }));
+    expect(onExportSelection).toHaveBeenLastCalledWith(expect.anything(), 'json');
+  });
+
+  it('attaches the download anchor to the document for Firefox compatibility', () => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:selection') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    const seen: Array<{ parent: Node | null }> = [];
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      seen.push({ parent: this.parentNode });
+    });
+    downloadBlobFile('selection.csv', new Blob(['a,b']));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.parent).toBe(document.body);
+    expect(document.body.querySelector('a[download="selection.csv"]')).toBeNull();
+    click.mockRestore();
   });
 
   it('keeps grouping reorder insertion indexes stable in both directions', () => {

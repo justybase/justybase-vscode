@@ -50,6 +50,20 @@ describe('Electron SQL file service', () => {
     expect(saved).toMatchObject({ filePath: path.normalize('/tmp/report.sql'), fileName: 'report.sql' });
   });
 
+  it('opens an explicit OS path with the same guardrails and grants its path', async () => {
+    const { service } = fixtureService();
+    const file = await service.openSqlFilePath(path.normalize('/tmp/report.sql'));
+    expect(file).toMatchObject({ filePath: path.normalize('/tmp/report.sql'), content: 'SELECT 1;' });
+    const saved = await service.saveSqlFile(path.normalize('/tmp/report.sql'), 'SELECT 2;');
+    expect(saved).toMatchObject({ filePath: path.normalize('/tmp/report.sql') });
+
+    await expect(service.openSqlFilePath('relative/report.sql')).rejects.toThrow('absolute');
+    await expect(service.openSqlFilePath(path.normalize('/tmp/notes.txt'))).rejects.toThrow('Only .sql files');
+    await expect(service.openSqlFilePath(path.normalize('/tmp/missing.sql'))).rejects.toThrow('Could not read');
+    await expect(service.openSqlFilePath('/tmp/bad\0.sql')).rejects.toThrow('invalid');
+    await expect(service.openSqlFilePath(`/${'a'.repeat(5000)}.sql`)).rejects.toThrow('unsupported length');
+  });
+
   it('returns null when the open dialog is cancelled', async () => {
     const { service } = fixtureService({ openSelection: { canceled: true, filePaths: [] } });
     await expect(service.openSqlFile()).resolves.toBeNull();

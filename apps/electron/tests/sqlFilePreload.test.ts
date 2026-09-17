@@ -22,6 +22,24 @@ describe('Electron SQL file preload bridge', () => {
     await expect(createPreloadBridge(cancelled).saveSqlFileAs('report.sql', 'SELECT 1;')).resolves.toBeNull();
   });
 
+  it('opens explicit paths and windows through validated methods', async () => {
+    const file = { filePath: '/tmp/report.sql', fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false };
+    const invoke: IpcInvoker = jest.fn(async () => ({ ok: true, file }));
+    await expect(createPreloadBridge(invoke).openSqlFilePath('/tmp/report.sql')).resolves.toEqual(file);
+    expect(invoke).toHaveBeenCalledWith({ method: 'filesystem/open-sql-path', payload: { filePath: '/tmp/report.sql' } });
+
+    const windowInvoke: IpcInvoker = jest.fn(async () => ({ ok: true, operation: 'window-opened' }));
+    await expect(createPreloadBridge(windowInvoke).requestNewWindow()).resolves.toBeUndefined();
+    expect(windowInvoke).toHaveBeenCalledWith({ method: 'window/new' });
+
+    const local: IpcInvoker = jest.fn(async () => ({ ok: true, file }));
+    await expect(createPreloadBridge(local).openSqlFilePath('relative/notes.txt')).rejects.toThrow('Malformed SQL file path');
+    await expect(createPreloadBridge(local).openSqlFilePath('/tmp/report.csv')).rejects.toThrow('Malformed SQL file path');
+    await expect(createPreloadBridge(local).openSqlFilePath('')).rejects.toThrow('Malformed SQL file path');
+    await expect(createPreloadBridge(local).openSqlFilePath(42 as never)).rejects.toThrow('Malformed SQL file path');
+    expect(local).not.toHaveBeenCalled();
+  });
+
   it('rejects malformed main responses', async () => {
     const malformed: IpcInvoker = jest.fn(async () => ({ ok: true, file: { filePath: 42 } }));
     await expect(createPreloadBridge(malformed).openSqlFile()).rejects.toThrow('Malformed SQL file');

@@ -23,8 +23,10 @@ describe('Electron IPC registration lifecycle', () => {
       testConnectionProfile: async () => undefined,
       listCapabilities: () => ({ descriptors: [] }),
       openSqlFile: async () => null,
+      openSqlFilePath: async filePath => ({ filePath, fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false }),
       saveSqlFile: async filePath => ({ filePath, fileName: 'report.sql', sizeBytes: 0 }),
       saveSqlFileAs: async () => null,
+      requestNewWindow: async () => undefined,
     });
     expect(electron.ipcMain.handle).toHaveBeenCalledWith('ui:request', expect.any(Function));
     const listener = electron.ipcMain.handle.mock.calls[0][1] as (_event: unknown, message: unknown) => Promise<unknown>;

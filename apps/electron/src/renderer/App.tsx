@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import type { DatabaseKind, EditorPreferences, HistoryEntry, MetadataColumn, MetadataDatabase, QueryAggregateFunction, QueryColumnFilterSpec, QueryExportFormat, QueryGroupAggregate, QuerySortSpec, RedactedConnectionProfile, SchemaTreeNode } from '@justybase/contracts';
-import { SOFT_SQL_FILE_WARN_BYTES } from '@justybase/contracts';
+import { MAX_QUERY_GROUP_LIMIT, SOFT_SQL_FILE_WARN_BYTES } from '@justybase/contracts';
 import type { ExecutionController, ExecutionHandle, UiResultColumn, UiResultSurfaceState, UiStore, UiSurface } from '@justybase/ui-core';
 import { createAggregateAnalysisTable, createExecutionController, createGroupAnalysisTable, createInitialUiState, createPivotAnalysisTable, createUiStore, hasUiResultQuery, resolveDatabasePicker, resultAsyncState as getResultAsyncState, toUiResultQueryOptions } from '@justybase/ui-core';
 import {
@@ -14,11 +14,13 @@ import {
   SqlDialectSelect,
   ObjectDesigner,
   createDataGridClipboardPayload,
+  downloadBlobFile,
   formatDataGridClipboard,
   processDataGridRows,
   resolveDataGridColumns,
 } from '@justybase/ui-react';
 import { disposeSqlLanguageFeatures } from '@justybase/ui-monaco';
+import { collectFullSpoolRows } from '@justybase/result-core';
 import type { DataGridCellContext, DataGridColumnFilterState, DataGridClipboardFormat, DataGridCopyPayload, DataGridFilterValueOption, GridScrollPosition, HistoryViewEntry, ResultAnalysisKind, ResultOutputTab } from '@justybase/ui-react';
 import type { UiResultAnalysisTable } from '@justybase/ui-core';
 import { createElectronApiClient } from './api';
@@ -216,6 +218,12 @@ export function App(): ReactElement {
   const [resultAnalysisLoading, setResultAnalysisLoading] = useState(false);
   const [resultAnalysisError, setResultAnalysisError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [copyingAll, setCopyingAll] = useState(false);
+  const copyAbortRef = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => () => {
+    copyAbortRef.current?.abort(new Error('Copy cancelled.'));
+  }, []);
   const [exportFormat, setExportFormat] = useState<QueryExportFormat>('csv');
   const [preferences, setPreferences] = useState<EditorPreferences | null>(null);
   const [problems, setProblems] = useState<readonly SqlEditorProblem[]>([]);
@@ -616,20 +624,7 @@ export function App(): ReactElement {
     setDesignerTarget(node);
   }, [selectedConnection]);
 
-  const openSqlFileFromDisk = useCallback(async (): Promise<void> => {
-    const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
-    if (!bridge?.openSqlFile) {
-      setNotice('Opening SQL files is unavailable in this shell.');
-      return;
-    }
-    let file: Awaited<ReturnType<typeof bridge.openSqlFile>>;
-    try {
-      file = await bridge.openSqlFile();
-    } catch (error: unknown) {
-      setNotice(error instanceof Error ? error.message : 'Could not open the SQL file.');
-      return;
-    }
-    if (!file) return;
+  const applyOpenedSqlFile = useCallback((file: { readonly filePath: string; readonly fileName: string; readonly content: string; readonly sizeBytes: number; readonly oversize: boolean }): void => {
     if (file.oversize && !confirmLargeSqlOpen(file.fileName, file.sizeBytes)) return;
     const existing = Object.values(state.workspace.documents).find(document => document.uri === file.filePath);
     if (existing) {
@@ -652,6 +647,36 @@ export function App(): ReactElement {
     openDocument(file.content, file.fileName, { uri: file.filePath });
     setNotice(`Opened ${file.fileName}.`);
   }, [openDocument, state.workspace.documents, store]);
+
+  const openSqlFileFromDisk = useCallback(async (): Promise<void> => {
+    const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
+    if (!bridge?.openSqlFile) {
+      setNotice('Opening SQL files is unavailable in this shell.');
+      return;
+    }
+    let file: Awaited<ReturnType<typeof bridge.openSqlFile>>;
+    try {
+      file = await bridge.openSqlFile();
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not open the SQL file.');
+      return;
+    }
+    if (!file) return;
+    applyOpenedSqlFile(file);
+  }, [applyOpenedSqlFile]);
+
+  const openSqlFileByPath = useCallback(async (filePath: string): Promise<void> => {
+    const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
+    if (!bridge?.openSqlFilePath) {
+      setNotice('Opening SQL files is unavailable in this shell.');
+      return;
+    }
+    try {
+      applyOpenedSqlFile(await bridge.openSqlFilePath(filePath));
+    } catch (error: unknown) {
+      setNotice(error instanceof Error ? error.message : 'Could not open the SQL file.');
+    }
+  }, [applyOpenedSqlFile]);
 
   const saveActiveDocumentAs = useCallback(async (): Promise<boolean> => {
     if (!activeDocument) return false;
@@ -870,7 +895,7 @@ export function App(): ReactElement {
             ...options,
             groupByColumnIndices: [0],
             aggregates,
-            groupLimit: 2_000,
+            groupLimit: MAX_QUERY_GROUP_LIMIT,
           });
           if (generation !== resultAnalysisGenerationRef.current) return;
           setResultAnalysis(createGroupAnalysisTable(response));
@@ -883,7 +908,7 @@ export function App(): ReactElement {
             ...options,
             groupByColumnIndices: [0, 1],
             aggregates: [{ function: 'sum', columnIndex: valueColumnIndex }],
-            groupLimit: 2_000,
+            groupLimit: MAX_QUERY_GROUP_LIMIT,
           });
           if (generation !== resultAnalysisGenerationRef.current) return;
           setResultAnalysis(createPivotAnalysisTable(result.columns, response, 0, 1, valueColumnIndex));
@@ -1094,6 +1119,18 @@ export function App(): ReactElement {
     void copyGridPayload(payload, format);
   }, [copyGridPayload]);
 
+  const exportSelection = useCallback((payload: DataGridCopyPayload, format: 'csv' | 'json'): void => {
+    if (typeof document === 'undefined') return;
+    try {
+      const content = formatDataGridClipboard(payload, format, { includeHeaders: payload.includeHeaders ?? true });
+      const blob = new Blob([content], { type: format === 'json' ? 'application/json; charset=utf-8' : 'text/csv; charset=utf-8' });
+      downloadBlobFile(`justybase-selection.${format}`, blob);
+      setNotice(`Exported ${payload.rows.length.toLocaleString()} selected rows.`);
+    } catch {
+      setNotice('Could not export the selection.');
+    }
+  }, []);
+
   const copyCellValue = useCallback((): void => {
     const item = cellViewer;
     if (!item) return;
@@ -1106,6 +1143,49 @@ export function App(): ReactElement {
     await copyGridPayload({ columns: activeResult.columns, rows: [row] });
   }, [activeResult, copyGridPayload, rows, selectedRow]);
 
+  const copyFullSpool = useCallback(async (): Promise<void> => {
+    if (!activeResult) return;
+    if (copyingAll) {
+      copyAbortRef.current?.abort(new Error('Copy cancelled.'));
+      return;
+    }
+    const controller = new AbortController();
+    copyAbortRef.current = controller;
+    setCopyingAll(true);
+    try {
+      const queryOptions = resultQueryOptions(activeResult, activeResult.view);
+      const allRows = await collectFullSpoolRows(
+        async (offset, limit, signal) => {
+          const page = await clientRef.current!.queryPage(activeResult.executionId, {
+            statementIndex: activeResult.statementIndex,
+            offset,
+            limit,
+            ...queryOptions,
+          }, signal ? { signal } : undefined);
+          return { rows: page.rows, hasMore: page.hasMore ?? offset + page.rows.length < page.totalRows, totalRows: page.totalRows };
+        },
+        {
+          signal: controller.signal,
+          onProgress: progress => {
+            if (!controller.signal.aborted) setNotice(`Copying… ${progress.loadedRows.toLocaleString()} / ${progress.totalRows.toLocaleString()} rows…`);
+          },
+        },
+      );
+      if (controller.signal.aborted) return;
+      await copyGridPayload({ columns: activeResult.columns, rows: allRows });
+      if (!controller.signal.aborted) setNotice(`Copied ${allRows.length.toLocaleString()} rows (full result).`);
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        setNotice('Copy cancelled.');
+        return;
+      }
+      setNotice(error instanceof Error ? error.message : 'Could not copy the full result.');
+    } finally {
+      if (copyAbortRef.current === controller) copyAbortRef.current = undefined;
+      setCopyingAll(false);
+    }
+  }, [activeResult, copyGridPayload, copyingAll]);
+
   const exportActive = useCallback(async (): Promise<void> => {
     if (!activeResult || typeof document === 'undefined') return;
     const queryOptions = resultQueryOptions(activeResult, activeResult.view);
@@ -1115,13 +1195,7 @@ export function App(): ReactElement {
         format: exportFormat,
         ...queryOptions,
       });
-      const url = URL.createObjectURL(downloaded.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = downloaded.fileName;
-      link.click();
-      const revokeObjectUrl = URL.revokeObjectURL;
-      if (typeof revokeObjectUrl === 'function') window.setTimeout(() => revokeObjectUrl(url), 100);
+      downloadBlobFile(downloaded.fileName, downloaded.blob);
       setNotice('Result exported.');
     } catch (error: unknown) {
       setNotice(error instanceof Error ? error.message : 'Could not export results.');
@@ -1181,6 +1255,60 @@ export function App(): ReactElement {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [booting, openSqlFileFromDisk, saveActiveDocument, saveActiveDocumentAs, state.auth.status]);
+
+  const launchHashConsumedRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || booting || state.auth.status !== 'authenticated' || launchHashConsumedRef.current) return;
+    launchHashConsumedRef.current = true;
+    const hash = window.location.hash;
+    if (!hash.startsWith('#open-files=')) return;
+    let filePaths: unknown;
+    try {
+      filePaths = JSON.parse(decodeURIComponent(hash.slice('#open-files='.length)));
+    } catch {
+      return;
+    } finally {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    if (!Array.isArray(filePaths)) return;
+    // Bounded: each entry revalidates through the file IPC, but a hostile
+    // hash must not fan out into unbounded main-process reads.
+    const pending = filePaths.filter((filePath): filePath is string => typeof filePath === 'string').slice(0, 10);
+    void (async () => {
+      for (const filePath of pending) {
+        if (!filePath.toLowerCase().endsWith('.sql')) continue;
+        await openSqlFileByPath(filePath);
+      }
+    })();
+  }, [booting, openSqlFileByPath, state.auth.status]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || booting || state.auth.status !== 'authenticated') return undefined;
+    const menu = window.justybaseMenu;
+    if (!menu?.onMenuAction) return undefined;
+    return menu.onMenuAction(message => {
+      switch (message.action) {
+        case 'new-window': {
+          const bridge = typeof window === 'undefined' ? undefined : window.justybaseElectron;
+          if (bridge?.requestNewWindow) void bridge.requestNewWindow().catch(() => setNotice('Could not open a new window.'));
+          else setNotice('Opening windows is unavailable in this shell.');
+          break;
+        }
+        case 'open-file':
+          void openSqlFileFromDisk();
+          break;
+        case 'save-file':
+          void saveActiveDocument();
+          break;
+        case 'save-file-as':
+          void saveActiveDocumentAs();
+          break;
+        case 'open-file-path':
+          if (message.filePath) void openSqlFileByPath(message.filePath);
+          break;
+      }
+    });
+  }, [booting, openSqlFileByPath, openSqlFileFromDisk, saveActiveDocument, saveActiveDocumentAs, state.auth.status]);
 
   if (booting) return <AsyncStateView state="loading" loadingLabel="Starting authenticated workspace…" /> as ReactElement;
   if (state.auth.status !== 'authenticated') return <AsyncStateView state="error" message={state.auth.message ?? 'Authentication is unavailable.'} /> as ReactElement;
@@ -1251,6 +1379,7 @@ export function App(): ReactElement {
       selectedRowIndex={selectedRow}
       onRowSelect={setSelectedRow}
       onCopySelection={copyGridSelection}
+      onExportSelection={exportSelection}
       onViewCell={openCellValue}
       onEditRow={selectedObject?.kind === 'object' && selectedObject.objectType?.toUpperCase() !== 'VIEW' ? openEditRow : undefined}
       onOpenColumnFilter={openColumnFilter}
@@ -1261,6 +1390,8 @@ export function App(): ReactElement {
       onCloseColumnFilter={closeColumnFilter}
       onRefresh={() => void refresh()}
       onCopy={() => void copyActive()}
+      onCopyAll={() => void copyFullSpool()}
+      copyingAll={copyingAll}
       onExport={() => void exportActive()}
       onAggregate={() => toggleResultAnalysis('aggregate')}
       onGroup={() => updateView({ grouping: activeResult?.view.grouping.length ? [] : activeResult?.columns[0] ? [activeResult.columns[0].name] : [] })}

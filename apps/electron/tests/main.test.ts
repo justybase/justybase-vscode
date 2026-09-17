@@ -5,8 +5,12 @@ jest.mock('electron', () => {
   const app = {
     whenReady: jest.fn(async () => undefined),
     getPath: jest.fn(() => '/tmp/justybase-electron-main-test'),
+    getName: jest.fn(() => 'JustyBase'),
+    getVersion: jest.fn(() => '3.17.14'),
     on: jest.fn((event: string, listener: (...args: unknown[]) => void) => { appEvents.set(event, listener); }),
     quit: jest.fn(),
+    requestSingleInstanceLock: jest.fn(() => true),
+    setAsDefaultProtocolClient: jest.fn(() => true),
     __events: appEvents,
   };
   const windows: MockBrowserWindow[] = [];
@@ -14,8 +18,13 @@ jest.mock('electron', () => {
     public readonly events = new Map<string, (...args: unknown[]) => void>();
     public readonly loadURL = jest.fn(async () => { this.events.get('ready-to-show')?.(); });
     public readonly show = jest.fn();
+    public readonly focus = jest.fn();
+    public readonly isDestroyed = jest.fn(() => false);
+    public readonly webContents = { openDevTools: jest.fn(), send: jest.fn() };
     public constructor() { windows.push(this); }
     public on(event: string, listener: (...args: unknown[]) => void): void { this.events.set(event, listener); }
+    public static getFocusedWindow(): MockBrowserWindow | null { return windows[0] ?? null; }
+    public static getAllWindows(): MockBrowserWindow[] { return [...windows]; }
   }
   return {
     app,
@@ -28,6 +37,10 @@ jest.mock('electron', () => {
       encryptString: jest.fn((value: string) => Buffer.from(value, 'utf8')),
       decryptString: jest.fn((value: Buffer) => value.toString('utf8')),
     },
+    dialog: { showMessageBox: jest.fn(async () => ({ response: 1, checkboxChecked: false })) },
+    crashReporter: { start: jest.fn() },
+    autoUpdater: { on: jest.fn(), setFeedURL: jest.fn(), checkForUpdates: jest.fn(), quitAndInstall: jest.fn() },
+    Menu: { buildFromTemplate: jest.fn((template: unknown) => template), setApplicationMenu: jest.fn() },
   };
 });
 
@@ -62,10 +75,12 @@ describe('Electron main composition root', () => {
       __runtime: { applyAuthenticationCookie: jest.Mock; close: jest.Mock; requestJson: jest.Mock };
     };
     const electron = jest.requireMock('electron') as {
-      app: { __events: Map<string, (...args: unknown[]) => void>; quit: jest.Mock };
-      __windows: Array<{ events: Map<string, (...args: unknown[]) => void>; loadURL: jest.Mock; show: jest.Mock }>;
+      app: { __events: Map<string, (...args: unknown[]) => void>; quit: jest.Mock; requestSingleInstanceLock: jest.Mock; setAsDefaultProtocolClient: jest.Mock };
+      __windows: Array<{ events: Map<string, (...args: unknown[]) => void>; loadURL: jest.Mock; show: jest.Mock; focus: jest.Mock; webContents: { send: jest.Mock } }>;
       ipcMain: { handle: jest.Mock; removeHandler: jest.Mock };
       session: { defaultSession: { cookies: { set: jest.Mock } } };
+      crashReporter: { start: jest.Mock };
+      Menu: { buildFromTemplate: jest.Mock; setApplicationMenu: jest.Mock };
     };
     for (let attempt = 0; attempt < 2_000 && (electron.__windows[0] === undefined || electron.__windows[0].loadURL.mock.calls.length === 0); attempt += 1) {
       await new Promise<void>(resolve => setImmediate(resolve));
@@ -73,6 +88,13 @@ describe('Electron main composition root', () => {
     const windowInstance = electron.__windows[0];
     expect(windowInstance?.loadURL).toHaveBeenCalledWith('http://127.0.0.1:43123/');
     expect(windowInstance?.show).toHaveBeenCalledTimes(1);
+    expect(electron.app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
+    expect(electron.app.setAsDefaultProtocolClient).toHaveBeenCalledWith('justybase');
+    expect(electron.crashReporter.start).toHaveBeenCalledTimes(1);
+    expect(electron.Menu.buildFromTemplate).toHaveBeenCalledTimes(1);
+    expect(electron.Menu.setApplicationMenu).toHaveBeenCalledTimes(1);
+    const menuTemplate = electron.Menu.buildFromTemplate.mock.calls[0]?.[0] as Array<{ label?: string }>;
+    expect(menuTemplate.map(item => item.label)).toEqual(expect.arrayContaining(['File', 'Edit', 'View', 'Window']));
     expect(startup.startElectronSession).toHaveBeenCalledWith(expect.objectContaining({ provisionSqliteFixture: true }));
     expect(startup.__runtime.applyAuthenticationCookie).toHaveBeenCalledTimes(1);
     expect(electron.ipcMain.handle).toHaveBeenCalledWith('ui:request', expect.any(Function));
@@ -100,6 +122,26 @@ describe('Electron main composition root', () => {
       body: JSON.stringify(profile),
     }));
     expect(startup.__runtime.requestJson.mock.calls.some(([, init]) => typeof init?.body === 'string' && init.body.includes('credential-fixture'))).toBe(true);
+
+    await expect(invoke({ method: 'window/new' })).resolves.toEqual({ ok: true, operation: 'window-opened' });
+    expect(electron.__windows).toHaveLength(2);
+    expect(electron.__windows[1]?.loadURL).toHaveBeenCalledWith('http://127.0.0.1:43123/');
+    await expect(invoke({ method: 'window/new', payload: {} })).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+
+    await expect(invoke({ method: 'filesystem/open-sql-path', payload: { filePath: 'relative/query.sql' } }))
+      .resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(invoke({ method: 'filesystem/open-sql-path', payload: { filePath: '/tmp/report.csv' } }))
+      .resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(invoke({ method: 'filesystem/open-sql-path', payload: { filePath: '/tmp/does-not-exist.sql' } }))
+      .resolves.toMatchObject({ ok: false, code: 'IPC_OPERATION_FAILED' });
+
+    const secondInstance = electron.app.__events.get('second-instance');
+    secondInstance?.({}, ['/usr/bin/justybase', '/tmp/second.sql']);
+    expect(windowInstance?.focus).toHaveBeenCalled();
+    expect(windowInstance?.webContents.send).toHaveBeenCalledWith(
+      'justybase:menu-action',
+      { action: 'open-file-path', filePath: '/tmp/second.sql' },
+    );
 
     let resolveClose!: () => void;
     startup.__runtime.close.mockImplementation(() => new Promise<void>(resolve => { resolveClose = resolve; }));

@@ -7,6 +7,8 @@ describe('Electron startup failure boundary', () => {
         getPath: jest.fn(() => '/tmp/justybase-electron-main-failure-test'),
         on: jest.fn(),
         quit: jest.fn(),
+        requestSingleInstanceLock: jest.fn(() => true),
+        setAsDefaultProtocolClient: jest.fn(() => true),
       },
       BrowserWindow: class MockBrowserWindow {},
       ipcMain: { handle: jest.fn(), removeHandler: jest.fn() },

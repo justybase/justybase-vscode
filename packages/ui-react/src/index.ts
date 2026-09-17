@@ -5,6 +5,7 @@ export type { DataGridColumnMenuProps } from './dataGrid';
 export { DataGridColumnFilterPanel } from './dataGridFilter';
 export type { DataGridColumnFilterPanelProps, DataGridColumnFilterState, DataGridFilterValueOption } from './dataGridFilter';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
+export { downloadBlobFile } from './download';
 export { ResultAnalysisPanel } from './resultAnalysis';
 export type { ResultAnalysisKind, ResultAnalysisPanelProps, ResultAnalysisTable } from './resultAnalysis';
 export { ResultPanel } from './resultPanel';

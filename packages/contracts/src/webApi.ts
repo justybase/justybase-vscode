@@ -369,6 +369,9 @@ export interface QueryGroupRequest extends QueryPageRequest {
   groupLimit?: number;
 }
 
+/** Server-side cap for grouped output; the API clamps larger requests. */
+export const MAX_QUERY_GROUP_LIMIT = 10_000 as const;
+
 export interface QueryGroupResponse {
   statementIndex?: number;
   columns: QueryColumn[];

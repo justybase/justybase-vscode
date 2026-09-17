@@ -138,7 +138,7 @@ export interface QueryApi {
   importFilePreview(input: QueryFileImportPreviewRequest): Promise<WriteOperationPreviewResponse>;
   importFile(input: QueryFileImportRequest): Promise<QueryWriteResponse>;
   cancelQuery(queryId: string): Promise<{ ok: true }>;
-  queryPage(queryId: string, input: QueryPageRequest): Promise<QueryPageResponse>;
+  queryPage(queryId: string, input: QueryPageRequest, requestInit?: Pick<RequestInit, 'signal'>): Promise<QueryPageResponse>;
   distinct(queryId: string, input: QueryDistinctRequest): Promise<QueryDistinctResponse>;
   aggregate(queryId: string, input?: QueryAggregateRequest): Promise<QueryAggregateResponse>;
   group(queryId: string, input: QueryGroupRequest): Promise<QueryGroupResponse>;
@@ -510,7 +510,11 @@ export function createApiClient(options: ApiClientOptions = {}): WorkspaceApi {
     importFilePreview: (input: QueryFileImportPreviewRequest) => request<WriteOperationPreviewResponse>('/api/query/import-file/preview', { method: 'POST', body: JSON.stringify(input) }),
     importFile: (input: QueryFileImportRequest) => request<QueryWriteResponse>('/api/query/import-file', { method: 'POST', body: JSON.stringify(input) }),
     cancelQuery: (queryId: string) => request<{ ok: true }>(`/api/query/${encodeURIComponent(queryId)}/cancel`, { method: 'POST' }),
-    queryPage: (queryId: string, input: QueryPageRequest) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, { method: 'POST', body: JSON.stringify(input) }),
+    queryPage: (queryId: string, input: QueryPageRequest, requestInit?: Pick<RequestInit, 'signal'>) => request<QueryPageResponse>(`/api/query/${encodeURIComponent(queryId)}/page`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      ...(requestInit?.signal ? { signal: requestInit.signal } : {}),
+    }),
     distinct: (queryId: string, input: QueryDistinctRequest) => request<QueryDistinctResponse>(`/api/query/${encodeURIComponent(queryId)}/distinct`, { method: 'POST', body: JSON.stringify(input) }),
     aggregate: (queryId: string, input: QueryAggregateRequest = {}) => request<QueryAggregateResponse>(`/api/query/${encodeURIComponent(queryId)}/aggregate`, { method: 'POST', body: JSON.stringify(input) }),
     group: (queryId: string, input: QueryGroupRequest) => request<QueryGroupResponse>(`/api/query/${encodeURIComponent(queryId)}/group`, { method: 'POST', body: JSON.stringify(input) }),

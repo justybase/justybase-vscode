@@ -45,6 +45,7 @@ describe('Electron renderer execution adapter', () => {
     expect(events.map(event => event.sequence)).toEqual([1, 2, 3, 4]);
     expect(events.every(event => event.sourceId === 'electron:scratch' && event.resultSetId === 'query-1:0')).toBe(true);
     expect(events.find(event => event.type === 'rows')).toMatchObject({ rowCount: 1, totalRowCount: 1 });
+    expect(events.find(event => event.type === 'complete')).toMatchObject({ totalRowCount: 1, limitReached: false });
     expect(rows).toEqual([[1]]);
     expect(fixture.subscription.closed).toBe(true);
     await port.dispose();

@@ -183,7 +183,7 @@ export type UiPreloadResponse =
   | { readonly ok: true; readonly requestId: OpaqueCredentialRequestId }
   | { readonly ok: true; readonly profile: RedactedConnectionProfile }
   | { readonly ok: true; readonly profiles: readonly RedactedConnectionProfile[] }
-  | { readonly ok: true; readonly operation: 'deleted' | 'tested' }
+  | { readonly ok: true; readonly operation: 'deleted' | 'tested' | 'window-opened' }
   | { readonly ok: true; readonly capabilities: UiCapabilitySnapshot }
   | { readonly ok: true; readonly file: ElectronSqlFile | null }
   | { readonly ok: true; readonly saved: ElectronSqlSaveResult | null }
@@ -233,6 +233,47 @@ export interface ElectronRendererApi {
   readonly openSqlFile: () => Promise<ElectronSqlFile | null>;
   readonly saveSqlFile: (filePath: string, content: string) => Promise<ElectronSqlSaveResult>;
   readonly saveSqlFileAs: (suggestedName: string | undefined, content: string) => Promise<ElectronSqlSaveResult | null>;
+  /**
+   * Opens an explicit absolute path supplied by the OS (file association,
+   * protocol link, second instance). Main applies the same .sql/size/grant
+   * guardrails as the dialog flow; the renderer must never send user-typed paths.
+   */
+  readonly openSqlFilePath: (filePath: string) => Promise<ElectronSqlFile>;
+  /** Opens an additional product window owned by the same authenticated session. */
+  readonly requestNewWindow: () => Promise<void>;
+}
+
+/**
+ * Actions the main process may push to a renderer (application menu,
+ * protocol links, OS file opens). The renderer validates every action before
+ * dispatching it to its local document handlers.
+ */
+export const ELECTRON_MENU_ACTIONS = [
+  'new-window',
+  'open-file',
+  'save-file',
+  'save-file-as',
+  'open-file-path',
+] as const;
+export type ElectronMenuAction = typeof ELECTRON_MENU_ACTIONS[number];
+
+export interface ElectronMenuMessage {
+  readonly action: ElectronMenuAction;
+  /** Absolute .sql path; only present for `open-file-path`. */
+  readonly filePath?: string;
+}
+
+/** Guard for main-to-renderer menu messages accepted by the preload bridge. */
+export function isElectronMenuMessage(value: unknown): value is ElectronMenuMessage {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.action !== 'string' || !(ELECTRON_MENU_ACTIONS as readonly string[]).includes(candidate.action)) return false;
+  if (candidate.action === 'open-file-path') {
+    if (!isSqlFilePathShape(candidate.filePath)) return false;
+  } else if (candidate.filePath !== undefined) {
+    return false;
+  }
+  return !hasSecretKey(candidate);
 }
 
 function nonEmptyString(value: unknown, maxLength = 512): value is string {
@@ -276,7 +317,7 @@ function isSqlFilePathShape(value: unknown): value is string {
   return value.toLowerCase().endsWith(`.${SQL_FILE_EXTENSION}`);
 }
 
-/** Guard for an absolute renderer-supplied SQL file path (contract-level, platform-agnostic). */
+/** Shape guard for renderer-supplied SQL file paths; absoluteness is enforced by the main-process IPC boundary. */
 export function isElectronSqlFilePath(value: unknown): value is string {
   return isSqlFilePathShape(value);
 }

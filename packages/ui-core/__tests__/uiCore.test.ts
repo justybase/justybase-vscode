@@ -134,6 +134,7 @@ describe('ui-core reducer', () => {
 
     const beforeBatchComplete = state;
     expect(beforeBatchComplete.results.byResultSetId['source-1\u0000batch-1:0']).toMatchObject({ status: 'complete', lastSequence: 2 });
+
     expect(beforeBatchComplete.results.byResultSetId['source-1\u0000batch-1:1']).toMatchObject({ status: 'error', lastSequence: 2 });
     expect(beforeBatchComplete.executions.byExecutionId['batch-1']).toMatchObject({ status: 'running', statementCount: 3, completedStatements: 2 });
     expect(beforeBatchComplete.executions.byExecutionId['batch-1']?.statements[1]).toMatchObject({ status: 'error', sql: 'SELECT missing' });
@@ -151,6 +152,23 @@ describe('ui-core reducer', () => {
     expect(state.executions.byExecutionId['batch-1']?.statements[2]).toMatchObject({ status: 'skipped' });
     expect(state.results.byResultSetId['source-1\u0000batch-1:0']?.batchStatus).toBe('error');
     expect(state.results.byResultSetId['source-1\u0000batch-1:1']?.batchMessage).toBe('Batch stopped after statement 2.');
+  });
+  it('carries the server row-limit flag from complete events to result state', () => {
+    let state = reduceUiState(initial(), {
+      type: 'execution/start',
+      sourceId: 'source-1',
+      executionId: 'exec-limit',
+      resultSetId: 'result-limit',
+      statementIndex: 0,
+      mode: 'single',
+      statementCount: 1,
+      statementSql: 'SELECT 1',
+    });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'complete', sourceId: 'source-1', executionId: 'exec-limit', resultSetId: 'result-limit', statementIndex: 0, sequence: 1, totalRowCount: 200_000, limitReached: true },
+    });
+    expect(state.results.byResultSetId['source-1\u0000result-limit']).toMatchObject({ status: 'complete', limitReached: true, totalRowCount: 200_000 });
   });
 
   it('does not reset a running statement when a result event repeats execution start metadata', () => {

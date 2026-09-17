@@ -143,6 +143,8 @@ export interface UiResultSurfaceState {
   readonly totalRowCount: number;
   readonly loadedRowCount: number;
   readonly message?: string;
+  /** True when the server stopped at its row limit; the spool holds a prefix. */
+  readonly limitReached?: boolean;
   readonly lastSequence: number;
   readonly cancellation: UiCancellationStatus;
   readonly cancelRequestId?: string;
@@ -210,7 +212,7 @@ export type UiResultEvent =
   | (UiResultEventBase & { readonly type: 'session'; readonly storageId: string; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'rows'; readonly rowCount: number; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'progress'; readonly totalRowCount: number })
-  | (UiResultEventBase & { readonly type: 'complete'; readonly totalRowCount: number; readonly message?: string })
+  | (UiResultEventBase & { readonly type: 'complete'; readonly totalRowCount: number; readonly message?: string; readonly limitReached?: boolean })
   | (UiResultEventBase & { readonly type: 'empty'; readonly message?: string })
   | (UiResultEventBase & { readonly type: 'error'; readonly message: string })
   | (UiResultEventBase & { readonly type: 'cancelled'; readonly totalRowCount: number; readonly message?: string });

@@ -15,8 +15,10 @@ function handlers(overrides: Partial<IpcHandlers> = {}): IpcHandlers {
     testConnectionProfile: async () => undefined,
     listCapabilities: () => ({ descriptors: [] }),
     openSqlFile: async () => null,
+    openSqlFilePath: async filePath => ({ filePath, fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false }),
     saveSqlFile: async filePath => ({ filePath, fileName: 'report.sql', sizeBytes: 9 }),
     saveSqlFileAs: async () => null,
+    requestNewWindow: async () => undefined,
     ...overrides,
   };
 }
@@ -26,6 +28,39 @@ describe('Electron SQL file IPC', () => {
     const file = { filePath: '/tmp/report.sql', fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false };
     const response = await dispatchIpcMessage({ method: 'filesystem/open-sql' }, handlers({ openSqlFile: async () => file }));
     expect(response).toEqual({ ok: true, file });
+  });
+
+  it('opens an explicit path and windows through validated handlers', async () => {
+    const file = { filePath: '/tmp/report.sql', fileName: 'report.sql', content: 'SELECT 1;', sizeBytes: 9, oversize: false };
+    const openSqlFilePath = jest.fn(async () => file);
+    const requestNewWindow = jest.fn(async () => undefined);
+    const base = handlers({ openSqlFilePath, requestNewWindow });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: { filePath: '/tmp/report.sql' } }, base)).resolves.toEqual({ ok: true, file });
+    expect(openSqlFilePath).toHaveBeenCalledWith('/tmp/report.sql');
+    await expect(dispatchIpcMessage({ method: 'window/new' }, base)).resolves.toEqual({ ok: true, operation: 'window-opened' });
+    expect(requestNewWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unsafe open-path and window payloads', async () => {
+    const base = handlers({ openSqlFilePath: jest.fn(), requestNewWindow: jest.fn() });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path' }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: null }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: { filePath: 42 } }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: { filePath: { toString: 'x' } } }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: { filePath: '/tmp/notes.txt' } }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: { filePath: '/tmp/report.sql', token: 'abc' } }, base)).resolves.toMatchObject({ ok: false, code: 'SECRET_IN_IPC' });
+    await expect(dispatchIpcMessage({ method: 'window/new', payload: {} }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+    await expect(dispatchIpcMessage({ method: 'window/new', payload: 'x' }, base)).resolves.toMatchObject({ ok: false, code: 'INVALID_IPC_PAYLOAD' });
+  });
+
+  it('rejects non-absolute open paths at the IPC boundary', async () => {
+    const openSqlFilePath = jest.fn();
+    const base = handlers({ openSqlFilePath });
+    await expect(dispatchIpcMessage({ method: 'filesystem/open-sql-path', payload: { filePath: 'relative.sql' } }, base)).resolves.toMatchObject({
+      ok: false,
+      code: 'INVALID_IPC_PAYLOAD',
+    });
+    expect(openSqlFilePath).not.toHaveBeenCalled();
   });
 
   it('rejects payloads on open and validates save payloads', async () => {

@@ -66,6 +66,18 @@ describe('shared workspace API transport', () => {
     expect(fetch).toHaveBeenCalledWith('/api/query', expect.objectContaining({ credentials: 'same-origin' }));
   });
 
+  it('forwards an abort signal to paged result requests', async () => {
+    const fetch = jest.fn(async () => jsonResponse({ sessionId: 'session-1', columns: [], rows: [], offset: 0, limit: 10, totalRows: 0, hasMore: false }));
+    const client = createApiClient({ fetch });
+    const controller = new AbortController();
+
+    await client.queryPage('query-1', { offset: 0, limit: 10 }, { signal: controller.signal });
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/query/query-1/page'), expect.objectContaining({ signal: controller.signal }));
+
+    await client.queryPage('query-1', { offset: 0, limit: 10 });
+    expect(fetch).toHaveBeenLastCalledWith(expect.anything(), expect.not.objectContaining({ signal: expect.anything() }));
+  });
+
   it('preserves typed HTTP failures and response filenames for downloads', async () => {
     const blob = new Blob(['data']);
     const fetch = jest.fn()

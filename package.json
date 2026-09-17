@@ -2,7 +2,7 @@
   "name": "justybaselite-netezza",
   "displayName": "JustyBase SQL Editor (Netezza)",
   "description": "Netezza-first SQL workspace for VS Code: connect without ODBC drivers, write and validate SQL, explore results, browse schemas, and manage warehouse workflows.",
-  "version": "3.17.18",
+  "version": "3.17.19",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -4706,7 +4706,7 @@
     "@justybase/sqlite-runtime": "*",
     "@justybase/duckdb-runtime": "*",
     "@justybase/netezza-runtime": "*",
-    "@justybase/netezza-driver": "^3.2.0",
+    "@justybase/netezza-driver": "^3.2.1",
     "@justybase/spreadsheet-tasks": "^2.1.1",
     "adm-zip": "^0.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",

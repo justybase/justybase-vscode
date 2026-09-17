@@ -78,6 +78,8 @@ export interface DataGridProps {
   readonly onSelectionChange?: (selection: DataGridSelection | undefined) => void;
   readonly onContextMenu?: (context: DataGridCellContext) => void;
   readonly onCopySelection?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void;
+  /** Exports the current selection (or context row) through the host-owned download. */
+  readonly onExportSelection?: (payload: DataGridCopyPayload, format: 'csv' | 'json') => void;
   /** Optional host-owned writer used when no rich copy callback is supplied. */
   readonly clipboardWriter?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void | Promise<void>;
   /** Opens the host-specific large-value viewer for a context-menu cell. */
@@ -705,6 +707,7 @@ export function DataGrid({
   onSelectionChange,
   onContextMenu,
   onCopySelection,
+  onExportSelection,
   clipboardWriter,
   onViewCell,
   onViewRow,
@@ -1362,19 +1365,42 @@ export function DataGrid({
     updateView({ columnOrder: current });
   }
 
-  function copySelection(): void {
+  function selectionPayload(): DataGridCopyPayload {
     const selected = range;
     const minRow = selected?.minRow ?? 0;
     const maxRow = selected?.maxRow ?? Math.max(0, processedRows.length - 1);
     const selectedColumns = visibleColumnIndexes.filter((_columnIndex, position) => columnRange === undefined || (position >= columnRange.minColumn && position <= columnRange.maxColumn));
     const columnIndexes = selectedColumns.length > 0 ? selectedColumns : visibleColumnIndexes;
     const selectedRows = processedRows.slice(minRow, maxRow + 1).map(row => row.values);
-    const payload: DataGridCopyPayload = { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection, includeHeaders: true };
+    return { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection, includeHeaders: true };
+  }
+
+  function copySelection(): void {
+    const payload = selectionPayload();
     if (onCopySelection) {
       onCopySelection(payload);
       return;
     }
     void clipboardWriter?.(payload, 'text');
+  }
+
+  /**
+   * Right-click does not create a cell range, so a context-menu export with
+   * no active range falls back to the right-clicked row instead of silently
+   * exporting every loaded row.
+   */
+  function contextRowPayload(): DataGridCopyPayload | undefined {
+    const context = contextMenu;
+    const row = context ? rows[context.rowIndex] : undefined;
+    if (!context || !row) return undefined;
+    const columnIndexes = visibleColumnIndexes;
+    return { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: [columnIndexes.map(index => row[index])], includeHeaders: true };
+  }
+
+  function exportSelection(format: 'csv' | 'json'): void {
+    if (!onExportSelection) return;
+    onExportSelection(range === undefined ? contextRowPayload() ?? selectionPayload() : selectionPayload(), format);
+    setContextMenu(undefined);
   }
 
   function copyContextPayload(payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): void {
@@ -1627,6 +1653,8 @@ export function DataGrid({
       <button type="button" role="menuitem" onClick={() => copyContextRowAs('markdown')}>Copy row as Markdown</button>
       <button type="button" role="menuitem" onClick={() => copyContextRowAs('json')}>Copy row as JSON</button>
       <button type="button" role="menuitem" onClick={() => copyContextRowAs('sql')}>Copy SQL INSERT</button>
+      {onExportSelection && <button type="button" role="menuitem" onClick={() => exportSelection('csv')}>Export selection as CSV</button>}
+      {onExportSelection && <button type="button" role="menuitem" onClick={() => exportSelection('json')}>Export selection as JSON</button>}
       <hr />
       <button type="button" role="menuitem" onClick={() => filterContextValue(contextMenu, contextRow)}>Filter by this value</button>
       <button type="button" role="menuitem" onClick={() => clearContextFilter(contextMenu.columnIndex)}>Clear Filter</button>
