@@ -974,9 +974,15 @@ jobs:
           printf 'Attaching %s VSIX file(s) to release %s:\n' "${#vsix_files[@]}" "$RELEASE_TAG"
           printf ' - %s\n' "${vsix_files[@]}"
           printf ' - %s (combined archive)\n' "$bundle_path"
-          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" "$bundle_path" marketplace-review/SHA256SUMS marketplace-review/marketplace-review.json \
+          gh release upload "$RELEASE_TAG" "${vsix_files[@]}" marketplace-review/SHA256SUMS marketplace-review/marketplace-review.json \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
+
+          if ! gh release upload "$RELEASE_TAG" "$bundle_path" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber; then
+            echo 'Combined VSIX archive upload failed; individual VSIX assets were uploaded successfully.' >&2
+          fi
 
   publish-marketplace:
     name: Publish selected VSIX files to Marketplace
