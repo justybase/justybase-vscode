@@ -43,7 +43,7 @@ const nodes = {
   // Vite is run once at the end so --test can be applied without rebuilding
   // the dependency graph a second time.
   web: { packageName: '@justybase/web', script: null, dependencies: ['api-client', 'contracts', 'designer-core', 'dialect-utils', 'dockyard-layout', 'result-core', 'ui-core', 'ui-monaco', 'ui-react'] },
-  'electron-bundle': { packageName: '@justybase/electron-shell', script: 'build:bundle', dependencies: ['api-client', 'contracts', 'dockyard-layout', 'ui-core', 'ui-monaco', 'ui-react', 'web-api'] },
+  'electron-bundle': { packageName: '@justybase/electron-shell', script: 'build:bundle', dependencies: ['api-client', 'contracts', 'dockyard-layout', 'result-core', 'ui-core', 'ui-monaco', 'ui-react', 'web-api'] },
 };
 
 const targets = {
