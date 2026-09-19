@@ -1,4 +1,4 @@
-/* Shared Object Designer skin. Keep Web and Electron on the same reviewed surface. */
+/* Shared Object Designer skin. Keep Web and VS Code on the same reviewed surface. */
 .object-designer-backdrop {
   position: fixed;
   z-index: 120;

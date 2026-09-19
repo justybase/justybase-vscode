@@ -105,7 +105,7 @@ export function registerSqlShortcuts(
     if (!edit) return;
     // Let Monaco finish the native insertion before replacing the compact
     // token. This makes the editor selection state deterministic across the
-    // Chromium browser and Electron's WebView.
+    // Chromium browser and VS Code's webview.
     queueMicrotask(() => applyShortcut(lineNumber, change.range.startColumn - 1, edit));
   });
   return {

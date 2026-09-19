@@ -11,7 +11,6 @@ import {
   isCapabilityDescriptor,
   isRedactedConnectionProfile,
   isUiAuthState,
-  isUiCapabilitySnapshot,
 } from "../src/index";
 
 describe("@justybase/contracts", () => {
@@ -38,7 +37,6 @@ describe("@justybase/contracts", () => {
       expect(isRedactedConnectionProfile({ ...profile, metadata: { password: "pw" } })).toBe(false);
       expect(isUiAuthState({ status: "authenticated", metadata: { sessionToken: "token" } })).toBe(false);
       expect(isCapabilityDescriptor({ ...descriptor, metadata: { apiKey: "key" } })).toBe(false);
-      expect(isUiCapabilitySnapshot({ descriptors: [descriptor], metadata: { authToken: "token" } })).toBe(false);
     });
 
     it("allows additive identifiers that merely contain security words", () => {

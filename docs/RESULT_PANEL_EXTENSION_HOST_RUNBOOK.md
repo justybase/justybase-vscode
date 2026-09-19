@@ -22,7 +22,7 @@ temporary directory after a successful run. Set
 successful run. A failed run retains its temporary directory automatically.
 
 On a headless Linux or WSL2 shell, use a virtual display if the installed
-Electron build requires one:
+The Extension Host build requires one:
 
 ```bash
 xvfb-run -a npm run test:extension-host
@@ -196,6 +196,6 @@ Netezza workspace is not a substitute for either deterministic check.
 WSL2 and Remote-WSL are different Extension Host placements. Run the SQLite
 command inside WSL2 as a local host check. When the deployment uses the VS Code
 Remote-WSL extension, repeat it after opening the repository through Remote-WSL
-so the extension, filesystem, and Electron host all run in the intended mode.
+so the extension, filesystem, and VS Code host all run in the intended mode.
 Keep those results separate in diagnostics; a successful WSL2 shell run does
 not prove Remote-WSL behavior.

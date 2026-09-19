@@ -56,7 +56,7 @@ Data Workspace uses a local DuckDB/SQLite-backed profile to query files as table
 ## Import from a file
 
 1. Select a target table in Schema Browser and choose **Import Data** from the
-   main bar (Web and Electron) or **Import Data (Advanced Wizard)** where the
+   main bar in Web or **Import Data (Advanced Wizard)** where the
    desktop wizard is available.
 2. Choose CSV/TXT, XLSX, or XLSB, or use **Smart Paste** for a path or tabular clipboard data.
 3. Confirm delimiter, decimal separator, header handling, encoding, and inferred types.

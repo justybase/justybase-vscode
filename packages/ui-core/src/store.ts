@@ -7,7 +7,7 @@ export interface UiStore extends Disposable {
   dispatch(action: UiAction): UiState;
   subscribe(listener: (state: UiState, action: UiAction) => void): Unsubscribe;
 }
-/** Small host-independent store used by Web, Electron and VS Code adapters. */
+/** Small host-independent store used by Web and VS Code adapters. */
 export function createUiStore(initialState: UiState): UiStore {
   let state = initialState;
   let disposed = false;

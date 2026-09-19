@@ -9,7 +9,7 @@ export interface SqlProblemsPanelProps {
   readonly className?: string;
 }
 
-/** Shared Problems view used by the Web, Electron and future host adapters. */
+/** Shared Problems view used by the Web, VS Code and future host adapters. */
 export function SqlProblemsPanel({ problems, onSelect, className = '' }: SqlProblemsPanelProps): ReactElement {
   const panelClassName = ['ui-sql-problems', className].filter(Boolean).join(' ');
   return <section className={panelClassName} aria-label="SQL Problems">

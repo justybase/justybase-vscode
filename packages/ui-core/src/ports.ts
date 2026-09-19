@@ -15,7 +15,7 @@ export interface Disposable {
 
 export type Unsubscribe = () => void;
 
-/** Minimal cancellation shape shared by browser, host, and Electron adapters. */
+/** Minimal cancellation shape shared by browser, embedded, and VS Code adapters. */
 export interface CancellationSignal {
   readonly aborted: boolean;
   addEventListener(type: 'abort', listener: () => void): void;

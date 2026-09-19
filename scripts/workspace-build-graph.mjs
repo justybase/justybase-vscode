@@ -43,20 +43,18 @@ const nodes = {
   // Vite is run once at the end so --test can be applied without rebuilding
   // the dependency graph a second time.
   web: { packageName: '@justybase/web', script: null, dependencies: ['api-client', 'contracts', 'designer-core', 'dialect-utils', 'dockyard-layout', 'result-core', 'ui-core', 'ui-monaco', 'ui-react'] },
-  'electron-bundle': { packageName: '@justybase/electron-shell', script: 'build:bundle', dependencies: ['api-client', 'contracts', 'dockyard-layout', 'result-core', 'ui-core', 'ui-monaco', 'ui-react', 'web-api'] },
 };
 
 const targets = {
   api: ['web-api'],
   web: ['web'],
-  electron: ['electron-bundle'],
-  all: ['web-api', 'web', 'electron-bundle'],
+  all: ['web-api', 'web'],
   shared: ['api-client', 'database-utils', 'file-runtime', 'dialect-utils', 'tabular-import-runtime', 'vscode-companion-adapter', 'ui-core', 'ui-monaco', 'ui-react'],
   desktop: ['metadata-core', 'result-core', 'designer-core', 'sql-core', 'ui-core', 'ui-react', 'api-client', 'database-utils', 'file-runtime', 'tabular-import-runtime', 'vscode-companion-adapter', 'duckdb-runtime', 'netezza-runtime', 'database-runtime', 'sqlite-runtime'],
 };
 
 function usage() {
-  console.error('Usage: node scripts/workspace-build-graph.mjs <api|web|electron|all|shared|desktop> [--test] [--minify] [--watch]');
+  console.error('Usage: node scripts/workspace-build-graph.mjs <api|web|all|shared|desktop> [--test] [--minify] [--watch]');
   process.exit(2);
 }
 

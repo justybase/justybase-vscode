@@ -71,7 +71,7 @@ export interface ApiClientOptions {
   readonly csrfAdapter?: () => string | undefined | Promise<string | undefined>;
   /** Injectable transport for browser and embedded consumers. */
   readonly fetch?: typeof globalThis.fetch;
-  /** Product-specific cookie policy; browser Web uses `include`, Electron uses `same-origin`. */
+  /** Product-specific cookie policy; browser clients commonly use `include`, while embedded hosts may use `same-origin`. */
   readonly credentials?: RequestCredentials;
   /** Product-specific fallback prefix when an export response has no filename header. */
   readonly exportFilePrefix?: string;

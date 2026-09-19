@@ -23,7 +23,7 @@ The Result Panel is a data exploration workspace, not only a table widget. It vi
 
 ## Column filters and grouped tree rows
 
-Web and Electron use the same compact result grid. Click the funnel icon in a
+The Web editor uses the same compact result grid as the shared UI package. Click the funnel icon in a
 column header to open the Excel-like filter menu. It can search the visible
 values, select or invert distinct values, use text/numeric comparison
 operators, and match blank or non-blank values. Click **Apply** to keep the

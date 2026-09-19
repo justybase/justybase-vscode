@@ -101,7 +101,7 @@ const resultPanelCapabilities: readonly CapabilityDescriptor[] = [
         key: 'result-panel.data-grid',
         status: 'available',
         owner: 'VS Code Result Panel shared adapter',
-        documentation: 'docs/CROSS_PRODUCT_UI_PARITY.md#result-panel',
+        documentation: 'docs/ARCHITECTURE.md#result-panel-state-and-identity',
         removalCondition: 'Remove this descriptor when the shared result adapter is no longer opt-in.',
     },
     {
@@ -109,7 +109,7 @@ const resultPanelCapabilities: readonly CapabilityDescriptor[] = [
         status: 'unavailable',
         owner: 'VS Code metadata host adapter',
         reason: 'Schema navigation remains host-owned while the Result Panel migration is opt-in.',
-        documentation: 'docs/CROSS_PRODUCT_UI_PARITY.md#vscode',
+        documentation: 'docs/ARCHITECTURE.md#runtime-boundaries',
         removalCondition: 'Expose MetadataPort-backed schema nodes from the VS Code host.',
     },
     {
@@ -117,7 +117,7 @@ const resultPanelCapabilities: readonly CapabilityDescriptor[] = [
         status: 'read-only',
         owner: 'VS Code Result Panel host',
         reason: 'The shared Result Panel currently exposes read-only result data.',
-        documentation: 'docs/CROSS_PRODUCT_UI_PARITY.md#capabilities',
+        documentation: 'docs/TESTING_STRATEGY.md#stateful-and-asynchronous-behavior',
         removalCondition: 'Route edit previews and guarded writes through ResultPort.',
     },
 ];

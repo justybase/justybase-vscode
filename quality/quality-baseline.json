@@ -34,7 +34,6 @@
       "src/views/",
       "media/",
       "apps/web/",
-      "apps/electron/",
       "packages/ui-core/",
       "packages/ui-react/"
     ]

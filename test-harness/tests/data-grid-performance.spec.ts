@@ -614,7 +614,7 @@ test.describe('Data Grid performance webview', () => {
             checked(0, sharedFilterMeasurements.last.rowCount),
             shared.bytes,
             undefined,
-            ['Shared React renderer used by Web and Electron; same deterministic rows and filter contract.'],
+            ['Shared React renderer used by Web and VS Code; same deterministic rows and filter contract.'],
         );
         const legacyFilterStats = calculateTimingStats(legacyFilterSamples.samples);
         const sharedFilterStats = calculateTimingStats(sharedFilterMeasurements.samples);

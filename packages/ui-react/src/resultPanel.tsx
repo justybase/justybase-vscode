@@ -92,7 +92,7 @@ export interface ResultPanelProps {
 }
 
 /**
- * Canonical result surface shared by Web and Electron.
+ * Canonical result surface shared by Web and VS Code.
  *
  * Host adapters own query execution, persistence, clipboard and dialogs. This
  * component owns the result-panel DOM so the two products cannot drift in tab

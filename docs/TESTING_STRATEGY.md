@@ -12,7 +12,7 @@ test behavior.
 
 | Layer | Scope | Command |
 | --- | --- | --- |
-| Static | TypeScript, contracts, API, Web, Electron, shared UI | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web`, `npm run check-types:electron`, `npm run check-types:media` |
+| Static | TypeScript, contracts, API, Web, shared UI | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web`, `npm run check-types:media` |
 | Architecture | Dependency directions, pure packages, explicit debt and cycles | `npm run check:architecture`, `npm run test:quality-tools` |
 | Lint | Blocking desktop rules plus ratcheted workspace baseline | `npm run lint`, `npm run lint:extended:check` |
 | Quality tooling | Versioned baseline/report and changed-code gate helpers | `npm run test:quality-tools`, `npm run quality:report` |
@@ -20,7 +20,6 @@ test behavior.
 | Shared SQL core | Pure validation boundary and package-owned contract tests | `npm run test:sql-core`, `npm run check-types:sql-core` |
 | API/web | Fastify routes and React behavior | `npm run test:api`, `npm run test:web` |
 | Shared UI | `ui-core`, `ui-react`, and migrated media composition | `npm run test:ui-core`, `npm run test:ui-react`, `npm run test:coverage:ui` |
-| Electron | Main/preload secret boundary, renderer presentation, lifecycle | `npm run test:electron` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
 | Web/API browser | Deterministic authenticated Dockyard Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-dockyard` |
@@ -33,7 +32,7 @@ or manual because they require credentials and controlled infrastructure.
 the changed high-risk gate against the pull request base commit. Locally, the
 equivalent is `npm run test:coverage:changed` after fetching `origin/master`.
 The changed-code input is the repository-wide diff, and the gate merges LCOV
-from root Jest, `ui-core`, `ui-react`, Web, Electron, and migrated media. A
+from root Jest, `ui-core`, `ui-react`, Web, and migrated media. A
 changed executable file without an LCOV record fails; generated files,
 declarations, tests, and setup files are the only automatic exclusions. The
 high-risk changed-code minimum is 80% lines and 70% branches. A green root-only
@@ -177,7 +176,7 @@ grid selection/copy, high-contrast themes, zoom, and reduced-motion behavior.
 
 ## Dockyard Web and controlled login
 
-The Web and Electron workspaces have separate Dockyard composition roots. Test
+The Web workspace has its Dockyard composition root. Test
 stable document/source/result identities rather than generated DOM ids.
 Stateful tests must cover query-document create/close/reorder, reload, legacy
 persistence migration, corrupt/future snapshot handling, reconnect, and

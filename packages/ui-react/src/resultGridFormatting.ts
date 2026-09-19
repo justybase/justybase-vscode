@@ -3,7 +3,7 @@
  *
  * The VS Code Result Panel remains the behavioural reference. This module is
  * deliberately independent of React, VS Code and host persistence so that a
- * browser, Electron and a webview can render the same raw value identically.
+ * browser, VS Code and a webview can render the same raw value identically.
  */
 
 export type DataGridNumericKind = 'integer' | 'decimal';

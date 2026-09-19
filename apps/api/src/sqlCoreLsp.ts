@@ -426,7 +426,7 @@ export class NetezzaWebLspCore {
 
   /**
    * Builds the same diagnostic-driven quick fixes exposed by the VS Code LSP.
-   * The Web/Electron adapters only translate the resulting workspace edits;
+   * The Web and VS Code adapters only translate the resulting workspace edits;
    * metadata resolution and dialect-sensitive qualification stay in this
    * shared core.
    */
