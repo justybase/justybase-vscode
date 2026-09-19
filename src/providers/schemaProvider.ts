@@ -42,6 +42,7 @@ import { normalizeCompletionDescription } from '../utils/completionDescriptionUt
 import {
     buildSchemaFilterRegex,
     columnVisibleInSchemaFilter,
+    matchesSchemaQuickFilter,
     tableMatchesSchemaFilter,
 } from './schemaFilterUtils';
 import { buildNetezzaSynonymTargetQuery } from '../metadata/synonymColumns';
@@ -121,6 +122,17 @@ export class SchemaProvider
     // Filter state
     private _filterString?: string;
     private _filterRegex?: RegExp;
+    private _quickFilterString?: string;
+    private _useQuickFilterSnapshots = false;
+    /**
+     * Candidate object lists already materialized for expanded type groups.
+     * The quick filter must be able to redraw these lists without rerunning
+     * catalog queries when the user changes the toolbar input.
+     */
+    private _quickFilterChildren: Map<string, {
+        children: SchemaItem[];
+        metadataSource?: readonly unknown[];
+    }> = new Map();
     private _cteRootItem?: SchemaItem;
     private _cteRefreshTimer?: NodeJS.Timeout;
     private _cteDefinitionsSnapshot?: ActiveCteDefinition[];
@@ -532,6 +544,8 @@ export class SchemaProvider
     }
 
     refresh(): void {
+        this._quickFilterChildren.clear();
+        this._useQuickFilterSnapshots = false;
         this._onDidChangeTreeData.fire();
     }
 
@@ -604,6 +618,22 @@ export class SchemaProvider
 
             this.refresh();
         }
+    }
+
+    /**
+     * Set the lightweight name-only filter used by the schema tree toolbar.
+     * This redraws the tree from the lists already loaded for expanded groups;
+     * it intentionally does not invalidate those lists or start a query.
+     */
+    setQuickFilter(filter: string | undefined): void {
+        const normalizedFilter = filter?.trim() || undefined;
+        if (this._quickFilterString === normalizedFilter) {
+            return;
+        }
+
+        this._quickFilterString = normalizedFilter;
+        this._useQuickFilterSnapshots = true;
+        this._onDidChangeTreeData.fire();
     }
 
     private getCachedColumnsForTable(
@@ -694,6 +724,11 @@ export class SchemaProvider
      */
     getFilter(): string | undefined {
         return this._filterString;
+    }
+
+    /** Get the current lightweight tree filter. */
+    getQuickFilter(): string | undefined {
+        return this._quickFilterString;
     }
 
     /**
@@ -1111,6 +1146,92 @@ export class SchemaProvider
             }
             throw e;
         }
+    }
+
+    private getTypeGroupChildrenKey(element: SchemaItem): string {
+        return element.id || [
+            element.connectionName || '',
+            element.dbName || '',
+            element.objType || '',
+        ].join('|');
+    }
+
+    private isMetadataBackedTypeGroup(element: SchemaItem): boolean {
+        return element.objType === 'PROCEDURE' || isTableCacheObjectType(element.objType);
+    }
+
+    private getMetadataSourceForTypeGroup(element: SchemaItem): readonly unknown[] | undefined {
+        if (!element.connectionName || !element.dbName || !element.objType) {
+            return undefined;
+        }
+
+        const databaseKind = this.getConnectionDatabaseKind(element.connectionName);
+        const cacheDbName = databaseKind === 'netezza'
+            ? formatNetezzaCatalogIdentifier(element.dbName)
+            : element.dbName;
+
+        if (element.objType === 'PROCEDURE') {
+            return this.metadataCache.getProceduresForDatabase(
+                element.connectionName,
+                cacheDbName,
+            );
+        }
+
+        if (isTableCacheObjectType(element.objType)) {
+            return this.metadataCache.getObjectsByType(
+                element.connectionName,
+                cacheDbName,
+                element.objType,
+            );
+        }
+
+        return undefined;
+    }
+
+    private getCachedQuickFilterChildren(element: SchemaItem): SchemaItem[] | undefined {
+        if (!this._useQuickFilterSnapshots) {
+            return undefined;
+        }
+
+        const key = this.getTypeGroupChildrenKey(element);
+        const snapshot = this._quickFilterChildren.get(key);
+        if (!snapshot) {
+            return undefined;
+        }
+
+        // Cache-backed groups must re-enter MetadataCache before reusing a
+        // snapshot. This lets TTL eviction and background cache writes replace
+        // the source list instead of leaving the tree on stale SchemaItems.
+        if (this.isMetadataBackedTypeGroup(element)) {
+            const metadataSource = this.getMetadataSourceForTypeGroup(element);
+            if (!metadataSource || metadataSource !== snapshot.metadataSource) {
+                return undefined;
+            }
+        }
+
+        return this.applyQuickFilter(snapshot.children);
+    }
+
+    private cacheTypeGroupChildren(
+        element: SchemaItem,
+        children: SchemaItem[],
+        metadataSource?: readonly unknown[],
+    ): SchemaItem[] {
+        this._quickFilterChildren.set(this.getTypeGroupChildrenKey(element), {
+            children,
+            metadataSource,
+        });
+        return this.applyQuickFilter(children);
+    }
+
+    private applyQuickFilter(children: SchemaItem[]): SchemaItem[] {
+        if (!this._quickFilterString) {
+            return children;
+        }
+
+        return children.filter((child) =>
+            matchesSchemaQuickFilter(this._quickFilterString, child.rawLabel),
+        );
     }
 
     private mapCachedTableObjectsToSchemaItems(
@@ -2031,6 +2152,11 @@ export class SchemaProvider
                 ? formatNetezzaCatalogIdentifier(dbName)
                 : dbName;
 
+            const cachedQuickFilterChildren = this.getCachedQuickFilterChildren(element);
+            if (cachedQuickFilterChildren !== undefined) {
+                return cachedQuickFilterChildren;
+            }
+
             if (connectionName && dbName && objType) {
                 if (objType === 'PROCEDURE') {
                     const cachedProcedures = this.metadataCache.getProceduresForDatabase(
@@ -2038,15 +2164,19 @@ export class SchemaProvider
                         cacheDbName!,
                     );
                     if (cachedProcedures !== undefined) {
-                        return this.mapCachedProceduresToSchemaItems(
+                        return this.cacheTypeGroupChildren(
+                            element,
+                            this.mapCachedProceduresToSchemaItems(
+                                cachedProcedures,
+                                dbName,
+                                connectionName,
+                                databaseKind,
+                            ),
                             cachedProcedures,
-                            dbName,
-                            connectionName,
-                            databaseKind,
                         );
                     }
                     if (this.metadataCache.isProcedureCatalogLoaded(connectionName, cacheDbName!)) {
-                        return [];
+                        return this.cacheTypeGroupChildren(element, []);
                     }
                 } else if (isTableCacheObjectType(objType)) {
                     const cachedObjectsByType = this.metadataCache.getObjectsByType(
@@ -2063,15 +2193,19 @@ export class SchemaProvider
                                     objType,
                                 )
                             ) {
-                                return [];
+                                return this.cacheTypeGroupChildren(element, [], cachedObjectsByType);
                             }
                         } else {
-                            return this.mapCachedTableObjectsToSchemaItems(
+                            return this.cacheTypeGroupChildren(
+                                element,
+                                this.mapCachedTableObjectsToSchemaItems(
+                                    cachedObjectsByType,
+                                    dbName,
+                                    objType,
+                                    connectionName,
+                                    databaseKind,
+                                ),
                                 cachedObjectsByType,
-                                dbName,
-                                objType,
-                                connectionName,
-                                databaseKind,
                             );
                         }
                     }
@@ -2191,7 +2325,7 @@ export class SchemaProvider
                     );
                 }
 
-                return finalObjects.map(
+                const children = finalObjects.map(
                     (obj: {
                         OBJNAME: string;
                         TABLENAME?: string;
@@ -2241,6 +2375,7 @@ export class SchemaProvider
                         );
                     },
                 );
+                return this.cacheTypeGroupChildren(element, children);
             } catch (e: unknown) {
                 const errorMsg = e instanceof Error ? e.message : String(e);
                 if (e instanceof SchemaQueryTimeoutError) {

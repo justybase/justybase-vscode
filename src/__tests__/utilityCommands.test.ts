@@ -80,6 +80,7 @@ describe('commands/schema/utilityCommands', () => {
     let registeredCommands: Map<string, Function>; // eslint-disable-line @typescript-eslint/no-unsafe-function-type
     let mockDeps: SchemaCommandsDependencies;
     let mockHistoryManager: { clearHistory: jest.Mock };
+    let quickFilter: string | undefined;
     let mockFavoritesManager: {
         toggleFavorite: jest.Mock;
         addFolder: jest.Mock;
@@ -115,6 +116,7 @@ describe('commands/schema/utilityCommands', () => {
 
     beforeEach(() => {
         registeredCommands = new Map();
+        quickFilter = undefined;
         mockedRegisterCommand.mockImplementation((command: string, handler: Function) => { // eslint-disable-line @typescript-eslint/no-unsafe-function-type
             registeredCommands.set(command, handler);
             return { dispose: jest.fn() };
@@ -151,6 +153,12 @@ describe('commands/schema/utilityCommands', () => {
             } as any,
             schemaProvider: {
                 refresh: jest.fn(),
+                getFilter: jest.fn(),
+                setFilter: jest.fn(),
+                getQuickFilter: jest.fn(() => quickFilter),
+                setQuickFilter: jest.fn((value: string | undefined) => {
+                    quickFilter = value;
+                }),
             } as any
         };
 
@@ -245,13 +253,15 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.favorites.includeNow', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.refreshSchemaSelection', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealAccessFile', expect.any(Function));
-            expect(disposables).toHaveLength(20);
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.quickFilter', expect.any(Function));
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.clearQuickFilter', expect.any(Function));
+            expect(disposables).toHaveLength(22);
         });
 
         it('should return disposables for cleanup', () => {
             const disposables = registerUtilityCommands(mockDeps);
 
-            expect(disposables).toHaveLength(20);
+            expect(disposables).toHaveLength(22);
             expect(disposables[0].dispose).toBeDefined();
             expect(disposables[1].dispose).toBeDefined();
             expect(disposables[2].dispose).toBeDefined();
@@ -270,6 +280,52 @@ describe('commands/schema/utilityCommands', () => {
             expect(disposables[15].dispose).toBeDefined();
             expect(disposables[16].dispose).toBeDefined();
             expect(disposables[17].dispose).toBeDefined();
+            expect(disposables[18].dispose).toBeDefined();
+            expect(disposables[19].dispose).toBeDefined();
+            expect(disposables[20].dispose).toBeDefined();
+            expect(disposables[21].dispose).toBeDefined();
+        });
+
+        it('registers a local quick filter without invoking schema search', async () => {
+            const handler = getCommandHandler('netezza.schema.quickFilter');
+            mockedShowInputBox.mockResolvedValue('  orders  ');
+
+            await handler();
+
+            expect(mockDeps.schemaProvider.setQuickFilter).toHaveBeenCalledWith('orders');
+            expect(mockDeps.schemaTreeView.description).toBe('(Quick: orders)');
+            expect(mockedExecuteCommand).toHaveBeenCalledWith(
+                'setContext',
+                'justybase.schema.quickFilterActive',
+                true,
+            );
+        });
+
+        it('clears only the local quick filter and preserves the other description', async () => {
+            quickFilter = 'orders';
+            (mockDeps.schemaProvider.getFilter as jest.Mock).mockReturnValue('sales');
+            const handler = getCommandHandler('netezza.schema.clearQuickFilter');
+
+            await handler();
+
+            expect(mockDeps.schemaProvider.setQuickFilter).toHaveBeenCalledWith(undefined);
+            expect(mockDeps.schemaTreeView.description).toBe('(Filter: sales)');
+            expect(mockedExecuteCommand).toHaveBeenCalledWith(
+                'setContext',
+                'justybase.schema.quickFilterActive',
+                false,
+            );
+        });
+
+        it('leaves the quick filter unchanged when the input is cancelled', async () => {
+            quickFilter = 'orders';
+            const handler = getCommandHandler('netezza.schema.quickFilter');
+            mockedShowInputBox.mockResolvedValue(undefined);
+
+            await handler();
+
+            expect(mockDeps.schemaProvider.setQuickFilter).not.toHaveBeenCalled();
+            expect(quickFilter).toBe('orders');
         });
     });
 

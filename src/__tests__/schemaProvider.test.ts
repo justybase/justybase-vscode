@@ -742,6 +742,69 @@ describe('SchemaProvider', () => {
             expect(children[0].contextValue).toBe('netezza:TABLE');
         });
 
+        it('filters already-loaded object groups locally without another catalog query', async () => {
+            mockMetadataCache.getObjectsByType.mockReturnValue([
+                { schema: 'PUBLIC', objId: 1, item: { label: 'USERS', objType: 'TABLE', kind: 7 } },
+                { schema: 'PUBLIC', objId: 2, item: { label: 'ORDERS', objType: 'TABLE', kind: 7 } },
+            ]);
+
+            const initialChildren = await schemaProvider.getChildren(typeGroupItem);
+            expect(initialChildren.map(child => child.label)).toEqual(['USERS', 'ORDERS']);
+
+            schemaProvider.setQuickFilter('orders');
+            const filteredChildren = await schemaProvider.getChildren(typeGroupItem);
+
+            expect(filteredChildren.map(child => child.label)).toEqual(['ORDERS']);
+            expect(mockMetadataCache.getObjectsByType).toHaveBeenCalledTimes(2);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+
+            schemaProvider.setQuickFilter(undefined);
+            const clearedChildren = await schemaProvider.getChildren(typeGroupItem);
+            expect(clearedChildren.map(child => child.label)).toEqual(['USERS', 'ORDERS']);
+            expect(mockMetadataCache.getObjectsByType).toHaveBeenCalledTimes(3);
+        });
+
+        it('revalidates quick-filter snapshots when the metadata cache changes', async () => {
+            let cachedObjects = [
+                { schema: 'PUBLIC', objId: 1, item: { label: 'USERS', objType: 'TABLE', kind: 7 } },
+                { schema: 'PUBLIC', objId: 2, item: { label: 'ORDERS', objType: 'TABLE', kind: 7 } },
+            ];
+            mockMetadataCache.getObjectsByType.mockImplementation(() => cachedObjects);
+
+            await schemaProvider.getChildren(typeGroupItem);
+            schemaProvider.setQuickFilter('sales');
+
+            cachedObjects = [
+                { schema: 'PUBLIC', objId: 3, item: { label: 'SALES', objType: 'TABLE', kind: 7 } },
+            ];
+
+            const refreshedChildren = await schemaProvider.getChildren(typeGroupItem);
+
+            expect(refreshedChildren.map(child => child.label)).toEqual(['SALES']);
+            expect(mockMetadataCache.getObjectsByType).toHaveBeenCalledTimes(3);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+        });
+
+        it('keeps the quick filter active across metadata refreshes', async () => {
+            mockMetadataCache.getObjectsByType
+                .mockReturnValueOnce([
+                    { schema: 'PUBLIC', objId: 1, item: { label: 'USERS', objType: 'TABLE', kind: 7 } },
+                    { schema: 'PUBLIC', objId: 2, item: { label: 'ORDERS', objType: 'TABLE', kind: 7 } },
+                ])
+                .mockReturnValueOnce([
+                    { schema: 'PUBLIC', objId: 3, item: { label: 'SALES', objType: 'TABLE', kind: 7 } },
+                ]);
+
+            await schemaProvider.getChildren(typeGroupItem);
+            schemaProvider.setQuickFilter('sales');
+            schemaProvider.refresh();
+
+            const refreshedChildren = await schemaProvider.getChildren(typeGroupItem);
+            expect(refreshedChildren.map(child => child.label)).toEqual(['SALES']);
+            expect(schemaProvider.getQuickFilter()).toBe('sales');
+            expect(mockMetadataCache.getObjectsByType).toHaveBeenCalledTimes(2);
+        });
+
         it('should query objects when not in cache', async () => {
             (runQueryRaw as jest.Mock).mockResolvedValue({
                 columns: [
