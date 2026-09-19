@@ -89,6 +89,10 @@ env:
   OVSX_VERSION: "1.1.1"
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
+concurrency:
+  group: publish-${{ github.event.release.tag_name || inputs.release_tag }}
+  cancel-in-progress: false
+
 jobs:
   validate-release:
     name: Validate release metadata
@@ -431,6 +435,7 @@ jobs:
         with:
           name: vsix-main
           path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
+          if-no-files-found: error
           # Release jobs can be manually resumed or rerun days after the build.
           # Keep the VSIX artifacts available for those delayed publication jobs.
           retention-days: 3
@@ -605,6 +610,7 @@ jobs:
         with:
           name: vsix-db2-${{ matrix.target }}
           path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          if-no-files-found: error
           retention-days: 3
 
   build-duckdb:
@@ -696,6 +702,7 @@ jobs:
         with:
           name: vsix-duckdb-${{ matrix.target }}
           path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          if-no-files-found: error
           retention-days: 3
 
   build-access:
@@ -787,6 +794,7 @@ jobs:
         with:
           name: vsix-access-${{ matrix.target }}
           path: extensions/access/justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          if-no-files-found: error
           retention-days: 3
 
   build-optional:
@@ -840,6 +848,7 @@ jobs:
         with:
           name: vsix-${{ matrix.id }}
           path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
+          if-no-files-found: error
           retention-days: 3
 
   audit-vsix:
@@ -1053,18 +1062,19 @@ jobs:
           publish_with_retry() {
             local label="$1"
             local attempt=1
+            local max_attempts=5
             while true; do
               if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
 
-              if [ "$attempt" -ge 2 ]; then
+              if [ "$attempt" -ge "$max_attempts" ]; then
                 echo "Publishing ${label} failed after ${attempt} attempts." >&2
                 return 1
               fi
 
-              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              echo "Publishing ${label} failed on attempt ${attempt}/${max_attempts}. Retrying in 15 seconds..." >&2
               attempt=$((attempt + 1))
               sleep 15
             done
@@ -1115,18 +1125,19 @@ jobs:
             local label="$1"
             local package_path="$2"
             local attempt=1
+            local max_attempts=5
             while true; do
               if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
 
-              if [ "$attempt" -ge 2 ]; then
+              if [ "$attempt" -ge "$max_attempts" ]; then
                 echo "Publishing ${label} failed after ${attempt} attempts." >&2
                 return 1
               fi
 
-              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              echo "Publishing ${label} failed on attempt ${attempt}/${max_attempts}. Retrying in 15 seconds..." >&2
               attempt=$((attempt + 1))
               sleep 15
             done
@@ -1147,18 +1158,19 @@ jobs:
             local label="$1"
             local package_path="$2"
             local attempt=1
+            local max_attempts=5
             while true; do
               if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
 
-              if [ "$attempt" -ge 2 ]; then
+              if [ "$attempt" -ge "$max_attempts" ]; then
                 echo "Publishing ${label} failed after ${attempt} attempts." >&2
                 return 1
               fi
 
-              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              echo "Publishing ${label} failed on attempt ${attempt}/${max_attempts}. Retrying in 15 seconds..." >&2
               attempt=$((attempt + 1))
               sleep 15
             done
@@ -1181,18 +1193,19 @@ jobs:
             local label="$1"
             local package_path="$2"
             local attempt=1
+            local max_attempts=5
             while true; do
               if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
 
-              if [ "$attempt" -ge 2 ]; then
+              if [ "$attempt" -ge "$max_attempts" ]; then
                 echo "Publishing ${label} failed after ${attempt} attempts." >&2
                 return 1
               fi
 
-              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              echo "Publishing ${label} failed on attempt ${attempt}/${max_attempts}. Retrying in 15 seconds..." >&2
               attempt=$((attempt + 1))
               sleep 15
             done
