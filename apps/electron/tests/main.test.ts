@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs';
+import path from 'node:path';
 
 jest.mock('electron', () => {
   const appEvents = new Map<string, (...args: unknown[]) => void>();
@@ -140,7 +141,7 @@ describe('Electron main composition root', () => {
     expect(windowInstance?.focus).toHaveBeenCalled();
     expect(windowInstance?.webContents.send).toHaveBeenCalledWith(
       'justybase:menu-action',
-      { action: 'open-file-path', filePath: '/tmp/second.sql' },
+      { action: 'open-file-path', filePath: path.normalize('/tmp/second.sql') },
     );
 
     let resolveClose!: () => void;
