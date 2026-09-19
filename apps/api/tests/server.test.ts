@@ -471,6 +471,65 @@ describe('web API authentication and connection profiles', () => {
     }
   });
 
+  it('keeps SQLSTATE diagnostics separate from the API error code on a failed query', async () => {
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
+    const rawCookie = login.headers['set-cookie'];
+    const cookies = Array.isArray(rawCookie) ? rawCookie.map(value => value.split(';')[0]) : [String(rawCookie).split(';')[0]];
+    const cookie = cookies.join('; ');
+    const csrf = cookies.find(value => value.startsWith('justybase_csrf='))?.split('=')[1] ?? '';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/connections',
+      headers: { cookie, 'x-justybase-csrf': csrf },
+      payload: { name: `Diag ${Date.now()}`, dbType: 'sqlite', database: `diag-${Date.now()}.sqlite`, readOnly: false },
+    });
+    expect(created.statusCode).toBe(201);
+    const connectionId = String(created.json().id);
+
+    // Shaped like the Netezza driver's structured NzDatabaseError: the code is a
+    // SQLSTATE, which must not be confused with the API's own error namespace.
+    const driverError = Object.assign(new Error('relation "MISSING" does not exist'), {
+      name: 'NzDatabaseError',
+      severity: 'ERROR',
+      code: '42P01',
+      dbMessage: 'relation "MISSING" does not exist',
+      detail: 'The referenced relation was not found.',
+      hint: 'Check the table name.',
+      diagnostics: { C: '42P01' },
+      raw: 'SERROR-C42P01-RAW-PAYLOAD',
+    });
+    const executeSpy = jest.spyOn(app.databaseRuntimes, 'execute').mockRejectedValue(driverError);
+    try {
+      const started = await app.inject({
+        method: 'POST',
+        url: '/api/query',
+        headers: { cookie, 'x-justybase-csrf': csrf },
+        payload: { connectionId, database: 'main', sql: 'SELECT * FROM MISSING', mode: 'single' },
+      });
+      expect(started.statusCode).toBe(202);
+      const job = await waitForQueryJob(app, String(started.json().queryId));
+      const errorEvents = job.events.filter(event => event.type === 'error');
+      expect(errorEvents).toHaveLength(1);
+      expect(errorEvents[0]).toMatchObject({
+        type: 'error',
+        message: 'relation "MISSING" does not exist',
+        errorDetails: {
+          code: '42P01',
+          severity: 'ERROR',
+          detail: 'The referenced relation was not found.',
+          hint: 'Check the table name.',
+          diagnostics: { C: '42P01' },
+        },
+      });
+      // The API error namespace stays clean and the raw payload never leaves.
+      expect(errorEvents[0]).not.toHaveProperty('code');
+      expect(JSON.stringify(errorEvents[0])).not.toContain('RAW-PAYLOAD');
+    } finally {
+      executeSpy.mockRestore();
+      await app.inject({ method: 'DELETE', url: `/api/connections/${connectionId}`, headers: { cookie, 'x-justybase-csrf': csrf } });
+    }
+  });
+
   it('supports local SQLite profiles through the same metadata and query session APIs', async () => {
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin-password' } });
     const rawCookie = login.headers['set-cookie'];

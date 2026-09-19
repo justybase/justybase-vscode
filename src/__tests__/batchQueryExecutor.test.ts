@@ -445,6 +445,109 @@ END_PROC;`;
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
         });
 
+        it('preserves SQLSTATE diagnostics through continue-on-error results, callbacks and history', async () => {
+            const driverError = Object.assign(new Error('relation "MISSING" does not exist'), {
+                name: 'NzDatabaseError',
+                severity: 'ERROR',
+                code: '42P01',
+                dbMessage: 'relation "MISSING" does not exist',
+                detail: 'The referenced relation was not found.',
+                hint: 'Check the table name.',
+                raw: 'SERROR-RAW-PAYLOAD',
+            });
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({ results: [], error: driverError, status: 'error' })
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'value' }], rows: [[2]], limitReached: false }],
+                    error: null,
+                });
+
+            const queryStartCallback = jest.fn().mockReturnValue('exec-diag');
+            const queryEndCallback = jest.fn();
+            const onStatementFailed = jest.fn();
+            const onQueryError = jest.fn();
+
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['SELECT * FROM MISSING', 'SELECT 2'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+                undefined,
+                0,
+                undefined,
+                [],
+                { continueOnError: true, onStatementFailed, onQueryError },
+            );
+
+            const expectedDetails = {
+                code: '42P01',
+                severity: 'ERROR',
+                detail: 'The referenced relation was not found.',
+                hint: 'Check the table name.',
+            };
+            expect(results[0]?.isError).toBe(true);
+            expect(results[0]?.message).toBe('relation "MISSING" does not exist');
+            expect(results[0]?.errorDetails).toEqual(expectedDetails);
+            expect(JSON.stringify(results[0]?.errorDetails)).not.toContain('RAW-PAYLOAD');
+            expect(results[1]?.data).toEqual([[2]]);
+
+            expect(onStatementFailed).toHaveBeenCalledWith(expect.objectContaining({
+                errorMessage: 'relation "MISSING" does not exist',
+                errorDetails: expectedDetails,
+            }));
+            expect(onQueryError).toHaveBeenCalledWith(
+                0,
+                'SELECT * FROM MISSING',
+                'relation "MISSING" does not exist',
+                expectedDetails,
+            );
+            const errorCall = queryEndCallback.mock.calls.find(call => call[3] === 'error');
+            expect(errorCall?.[4]).toBe('relation "MISSING" does not exist');
+            expect(errorCall?.[5]).toEqual(expectedDetails);
+        });
+
+        it('omits error details for a database error without structured diagnostics', async () => {
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({ results: [], error: new Error('divide by zero'), status: 'error' })
+                .mockResolvedValueOnce({
+                    results: [{ columns: [{ name: 'value' }], rows: [[2]], limitReached: false }],
+                    error: null,
+                });
+
+            const queryStartCallback = jest.fn().mockReturnValue('exec-plain');
+            const queryEndCallback = jest.fn();
+            const results = await runQueriesSequentially(
+                mockContext,
+                ['SELECT 1/0', 'SELECT 2'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                queryStartCallback,
+                queryEndCallback,
+                undefined,
+                0,
+                undefined,
+                [],
+                { continueOnError: true },
+            );
+
+            expect(results[0]?.errorDetails).toBeUndefined();
+            const errorCall = queryEndCallback.mock.calls.find(call => call[3] === 'error');
+            expect(errorCall?.[4]).toContain('divide by zero');
+            expect(errorCall?.[5]).toBeUndefined();
+        });
+
         it('should stop remaining queries when cancellation is requested between statements', async () => {
             // isAborted is now checked multiple times per iteration:
             // 1. At loop start, 2. After queryStartCallback, 3. After executeAndFetch

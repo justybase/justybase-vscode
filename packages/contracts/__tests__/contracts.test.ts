@@ -9,8 +9,10 @@ import {
   getDatabaseDesignerCapabilities,
   resolveDatabaseDesignerCapabilities,
   isCapabilityDescriptor,
+  isDatabaseErrorDetails,
   isRedactedConnectionProfile,
   isUiAuthState,
+  hasDatabaseErrorDetails,
 } from "../src/index";
 
 describe("@justybase/contracts", () => {
@@ -166,6 +168,39 @@ describe("@justybase/contracts", () => {
       });
       expect(traits.qualification?.supportsThreePartName).toBe(true);
       expect(traits.qualification?.twoPartNameStyle).toBe("schema-object");
+    });
+  });
+
+  describe("backend error diagnostics guard", () => {
+    it("accepts a partial or full diagnostics payload", () => {
+      expect(isDatabaseErrorDetails({})).toBe(true);
+      expect(isDatabaseErrorDetails({ code: "42P01" })).toBe(true);
+      expect(isDatabaseErrorDetails({
+        code: "42P01",
+        severity: "ERROR",
+        detail: "Missing relation.",
+        hint: "Check the name.",
+        diagnostics: { C: "42P01", M: "relation does not exist" },
+      })).toBe(true);
+    });
+
+    it("rejects foreign, malformed and typed payloads", () => {
+      expect(isDatabaseErrorDetails(undefined)).toBe(false);
+      expect(isDatabaseErrorDetails(null)).toBe(false);
+      expect(isDatabaseErrorDetails("42P01")).toBe(false);
+      expect(isDatabaseErrorDetails([])).toBe(false);
+      expect(isDatabaseErrorDetails({ code: 42 })).toBe(false);
+      expect(isDatabaseErrorDetails({ detail: {} })).toBe(false);
+      expect(isDatabaseErrorDetails({ diagnostics: { C: 42 } })).toBe(false);
+      expect(isDatabaseErrorDetails({ diagnostics: [] })).toBe(false);
+    });
+
+    it("detects whether any diagnostic field carries a value", () => {
+      expect(hasDatabaseErrorDetails(undefined)).toBe(false);
+      expect(hasDatabaseErrorDetails({})).toBe(false);
+      expect(hasDatabaseErrorDetails({ diagnostics: {} })).toBe(false);
+      expect(hasDatabaseErrorDetails({ code: "42P01" })).toBe(true);
+      expect(hasDatabaseErrorDetails({ diagnostics: { C: "42P01" } })).toBe(true);
     });
   });
 

@@ -99,6 +99,21 @@ describe('shared workspace API transport', () => {
     expect(parseQueryEvent({ queryId: 'query-1', type: 'rows', rows: [[1]], totalRows: 0 }, 'query-1')).toBeUndefined();
     expect(parseQueryEvent({ queryId: 'query-1', type: 'started', startedAt: 100 }, 'query-1')).toEqual({ queryId: 'query-1', type: 'started', startedAt: 100 });
 
+    const errorEvent = {
+      queryId: 'query-1',
+      type: 'error',
+      message: 'relation "MISSING" does not exist',
+      errorDetails: { code: '42P01', severity: 'ERROR', detail: 'Missing relation.', hint: 'Check the name.' },
+    };
+    expect(parseQueryEvent(errorEvent, 'query-1')).toEqual(errorEvent);
+    expect(parseQueryEvent({ queryId: 'query-1', type: 'error', message: 'plain' }, 'query-1'))
+      .toEqual({ queryId: 'query-1', type: 'error', message: 'plain' });
+    expect(parseQueryEvent({ queryId: 'query-1', type: 'error', message: 'x', errorDetails: 'nope' }, 'query-1')).toBeUndefined();
+    expect(parseQueryEvent({ queryId: 'query-1', type: 'error', message: 'x', errorDetails: { code: 42 } }, 'query-1')).toBeUndefined();
+    expect(parseQueryEvent({ queryId: 'query-1', type: 'error', message: 'x', errorDetails: { diagnostics: { C: 7 } } }, 'query-1')).toBeUndefined();
+    expect(parseQueryEvent({ queryId: 'query-1', type: 'error', message: 'x', errorDetails: { diagnostics: { C: '42P01' } } }, 'query-1'))
+      .toEqual({ queryId: 'query-1', type: 'error', message: 'x', errorDetails: { diagnostics: { C: '42P01' } } });
+
     const client = createApiClient({
       fetch: jest.fn(async () => jsonResponse({ ok: true })),
       webSocketBaseUrl: 'wss://events.example.test/',

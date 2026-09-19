@@ -1,3 +1,19 @@
+/**
+ * Structural mirror of the shared `DatabaseErrorDetails` contract.
+ *
+ * `@justybase/result-core` is dependency-free by architecture policy, so the
+ * shape is declared locally exactly as {@link PortableQueryEvent} already
+ * mirrors the API event union. The wire payload stays structurally identical,
+ * which keeps assignability with the contracts type.
+ */
+export interface PortableDatabaseErrorDetails {
+  code?: string;
+  severity?: string;
+  detail?: string;
+  hint?: string;
+  diagnostics?: Record<string, string>;
+}
+
 export type PortableQueryExecutionMode = 'single' | 'script' | 'explain';
 
 interface PortableQueryEventBase {
@@ -15,7 +31,7 @@ export type PortableQueryEvent =
   | (PortableQueryEventBase & { type: 'progress'; totalRows: number })
   | (PortableQueryEventBase & { type: 'rows'; rows: unknown[][]; totalRows: number })
   | (PortableQueryEventBase & { type: 'complete'; totalRows: number; limitReached: boolean; rowsAffected?: number; message?: string; commandType?: string })
-  | (PortableQueryEventBase & { type: 'error'; message: string })
+  | (PortableQueryEventBase & { type: 'error'; message: string; errorDetails?: PortableDatabaseErrorDetails })
   | (PortableQueryEventBase & { type: 'cancelled'; totalRows: number; scope?: 'statement' | 'batch' })
   | (PortableQueryEventBase & { type: 'batch-complete'; status: 'complete' | 'error' | 'cancelled'; completedStatements: number; message?: string });
 
@@ -38,6 +54,8 @@ export interface PortableQueryResultState {
   storageSessionId?: string;
   cancelScope?: 'statement' | 'batch';
   batchStatus?: 'complete' | 'error' | 'cancelled';
+  /** Backend diagnostics of the failing statement, when the API supplied them. */
+  errorDetails?: PortableDatabaseErrorDetails;
   lastSequence?: number;
   sourceId?: string;
   executionId?: string;
@@ -100,6 +118,6 @@ export function applyPortableQueryEvent(previous: PortableQueryResultState, even
   if (event.type === 'rows') return { ...previous, ...identity, rows: [...previous.rows, ...event.rows.map(row => row.slice())], totalRows: event.totalRows, lastSequence: sequence };
   if (event.type === 'complete') return { ...previous, ...identity, status: event.limitReached ? 'complete · row limit reached' : 'complete', totalRows: event.totalRows, rowsAffected: event.rowsAffected, message: event.message, limitReached: event.limitReached, lastSequence: sequence };
   if (event.type === 'cancelled') return { ...previous, ...identity, status: 'cancelled', totalRows: event.totalRows, message: event.scope === 'statement' ? 'Statement cancelled.' : 'Query batch cancelled.', cancelScope: event.scope, lastSequence: sequence };
-  if (event.type === 'error') return { ...previous, ...identity, status: 'error', message: event.message, lastSequence: sequence };
+  if (event.type === 'error') return { ...previous, ...identity, status: 'error', message: event.message, errorDetails: event.errorDetails, lastSequence: sequence };
   return { ...previous, ...identity, batchStatus: event.status, message: event.message ?? previous.message, lastSequence: sequence };
 }

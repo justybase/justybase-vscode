@@ -5,13 +5,20 @@ import type {
   DatabaseDesignerTarget,
   DatabaseKind,
 } from './database';
+import type { DatabaseErrorDetails } from './databaseErrors';
 
 /** Maximum raw file size accepted by the query import endpoints and clients. */
 export const MAX_QUERY_FILE_IMPORT_BYTES = 25 * 1024 * 1024;
 
 export interface ApiError {
+  /** API error namespace (e.g. `QUERY_FAILED`), never a SQLSTATE. */
   code: string;
   message: string;
+  /**
+   * Optional backend diagnostics. When present, `errorDetails.code` is the
+   * SQLSTATE reported by the database and is unrelated to {@link ApiError.code}.
+   */
+  errorDetails?: DatabaseErrorDetails;
 }
 
 export interface WebUser {
@@ -263,7 +270,16 @@ export interface QueryRowsEvent extends QueryEventBase { type: 'rows'; rows: unk
 export interface QueryCompleteEvent extends QueryEventBase {
   type: 'complete'; totalRows: number; limitReached: boolean; rowsAffected?: number; message?: string; commandType?: string;
 }
-export interface QueryErrorEvent extends QueryEventBase { type: 'error'; message: string; }
+export interface QueryErrorEvent extends QueryEventBase {
+  type: 'error';
+  message: string;
+  /**
+   * Optional backend diagnostics (SQLSTATE, severity, detail, hint). The event
+   * `message` stays the user-facing summary; this carries the database's own
+   * structured fields so clients can show them without parsing the message.
+   */
+  errorDetails?: DatabaseErrorDetails;
+}
 export interface QueryCancelledEvent extends QueryEventBase { type: 'cancelled'; totalRows: number; scope?: 'statement' | 'batch'; }
 export interface QueryBatchCompleteEvent extends QueryEventBase {
   type: 'batch-complete';

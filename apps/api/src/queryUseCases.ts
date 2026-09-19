@@ -345,6 +345,7 @@ async function startQuery(context: QueryUseCaseContext, userId: string, input: Q
           if (!statement) throw new Error(`Failed unknown statement ${statementIndex}.`);
           const cancelled = event.failure.kind === 'cancellation';
           const message = cancelled ? 'Query cancelled.' : event.failure.message;
+          const errorDetails = cancelled ? undefined : event.failure.details;
           const totalRows = state?.totalRows ?? 0;
           if (state) {
             context.querySessions.complete(userId, state.sessionId, { message });
@@ -353,7 +354,16 @@ async function startQuery(context: QueryUseCaseContext, userId: string, input: Q
           if (cancelled) {
             emit(job, { type: 'cancelled', queryId, statementIndex, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
           } else {
-            emit(job, { type: 'error', queryId, statementIndex, statementCount: job.statements.length, message });
+            // The API error namespace stays `QUERY_FAILED` on the surface; the
+            // database's own SQLSTATE/severity/detail/hint travel separately.
+            emit(job, {
+              type: 'error',
+              queryId,
+              statementIndex,
+              statementCount: job.statements.length,
+              message,
+              ...(errorDetails === undefined ? {} : { errorDetails }),
+            });
           }
           const status: QueryAuditStatus = cancelled ? 'cancelled' : 'error';
           context.store.addHistory(userId, input.connectionId, database, statement.sql, status, Date.now() - startedAt, totalRows);
@@ -380,6 +390,7 @@ async function startQuery(context: QueryUseCaseContext, userId: string, input: Q
           if (state?.terminalized && !cleanupFailure) return;
           const cancelled = event.summary.status === 'cancelled';
           const message = cancelled ? 'Query cancelled.' : event.summary.error?.message ?? 'Query failed.';
+          const errorDetails = cancelled ? undefined : event.summary.error?.details;
           const totalRows = state?.totalRows ?? 0;
           if (state && !state.terminalized) {
             context.querySessions.complete(userId, state.sessionId, { message });
@@ -388,7 +399,14 @@ async function startQuery(context: QueryUseCaseContext, userId: string, input: Q
           if (cancelled) {
             emit(job, { type: 'cancelled', queryId, statementIndex, statementCount: job.statements.length, totalRows, scope: job.mode === 'script' ? 'batch' : 'statement' });
           } else {
-            emit(job, { type: 'error', queryId, statementIndex, statementCount: job.statements.length, message });
+            emit(job, {
+              type: 'error',
+              queryId,
+              statementIndex,
+              statementCount: job.statements.length,
+              message,
+              ...(errorDetails === undefined ? {} : { errorDetails }),
+            });
           }
           if (statement) {
             const status: QueryAuditStatus = cancelled ? 'cancelled' : 'error';

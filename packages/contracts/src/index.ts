@@ -13,6 +13,8 @@ export type * from './webviews';
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseTableDdlMetadata, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseSynonymInfo, DatabaseExternalTableDdlMetadata, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabaseRecreateTableResult, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorServices, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic, DatabaseExplainOptions, DatabaseExplainProvider, DatabaseQueryProfileProvider, DatabaseStageLocation, DatabaseInlineFileFormatOptions, DatabaseCopyIntoTableOptions, DatabaseCopyIntoStageOptions, DatabaseStageWorkflowProvider, DatabaseImportWizardInput, DatabaseImportExecutionPlan, DatabaseImportWizardProvider } from './database';
 
 export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
+export type { DatabaseErrorDetails } from './databaseErrors';
+export { hasDatabaseErrorDetails, isDatabaseErrorDetails } from './databaseErrors';
 export {
   UI_CONTRACT_VERSION,
   isCapabilityDescriptor,

@@ -6,6 +6,7 @@ import type {
   DatabaseConnectionConstructor,
   DatabaseConnectionOptions,
   DatabaseDataReader,
+  DatabaseErrorDetails,
   DatabaseKind,
   DatabaseTunnelConfig,
 } from "@justybase/contracts";
@@ -54,6 +55,12 @@ export interface QueryResult {
   isError?: boolean;
   isCancelled?: boolean;
   isTextContent?: boolean;
+  /**
+   * Structured backend diagnostics for a failed statement (`SQLSTATE`,
+   * severity, detail, hint). Preserved separately from {@link QueryResult.message}
+   * so error presentation never has to parse the message back apart.
+   */
+  errorDetails?: DatabaseErrorDetails;
   executionTimestamp?: number;
   name?: string;
   isEditable?: boolean;

@@ -153,6 +153,39 @@ describe('ui-core reducer', () => {
     expect(state.results.byResultSetId['source-1\u0000batch-1:0']?.batchStatus).toBe('error');
     expect(state.results.byResultSetId['source-1\u0000batch-1:1']?.batchMessage).toBe('Batch stopped after statement 2.');
   });
+  it('carries backend diagnostics from an error event to the result and statement state', () => {
+    const errorDetails = { code: '42P01', severity: 'ERROR', detail: 'Missing relation.', hint: 'Check the name.' };
+    let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'exec-diag', resultSetId: 'result-diag', statementIndex: 0 });
+    state = reduceUiState(state, { type: 'execution/event', event: { type: 'started', sourceId: 'source-1', executionId: 'exec-diag', resultSetId: 'result-diag', sequence: 1 } });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: {
+        type: 'error',
+        sourceId: 'source-1',
+        executionId: 'exec-diag',
+        resultSetId: 'result-diag',
+        sequence: 2,
+        message: 'relation "MISSING" does not exist',
+        errorDetails,
+      },
+    });
+
+    expect(state.results.byResultSetId['source-1\u0000result-diag']?.errorDetails).toEqual(errorDetails);
+    expect(state.results.byResultSetId['source-1\u0000result-diag']?.message).toBe('relation "MISSING" does not exist');
+    expect(state.executions.byExecutionId?.['exec-diag']?.statements[0]?.errorDetails).toEqual(errorDetails);
+  });
+
+  it('keeps an error result without diagnostics renderable', () => {
+    let state = reduceUiState(initial(), { type: 'execution/start', sourceId: 'source-1', executionId: 'exec-plain', resultSetId: 'result-plain', statementIndex: 0 });
+    state = reduceUiState(state, { type: 'execution/event', event: { type: 'started', sourceId: 'source-1', executionId: 'exec-plain', resultSetId: 'result-plain', sequence: 1 } });
+    state = reduceUiState(state, {
+      type: 'execution/event',
+      event: { type: 'error', sourceId: 'source-1', executionId: 'exec-plain', resultSetId: 'result-plain', sequence: 2, message: 'divide by zero' },
+    });
+    expect(state.results.byResultSetId['source-1\u0000result-plain']?.status).toBe('error');
+    expect(state.results.byResultSetId['source-1\u0000result-plain']?.errorDetails).toBeUndefined();
+  });
+
   it('carries the server row-limit flag from complete events to result state', () => {
     let state = reduceUiState(initial(), {
       type: 'execution/start',

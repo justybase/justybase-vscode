@@ -26,6 +26,7 @@ import {
 } from "./macroPreprocessor";
 import { createMacroPythonExecutor } from "./macroPythonExecutor";
 import { NzConnection } from "../types";
+import type { DatabaseErrorDetails } from "@justybase/contracts";
 import type { DatabaseConnection } from "../contracts/database";
 import { streamingManager } from "./queryCancellation";
 import {
@@ -81,6 +82,7 @@ export interface BatchExecutionContext {
         durationMs: number,
         status: BatchExecutionStatus,
         error?: string,
+        errorDetails?: DatabaseErrorDetails,
     ) => void;
 }
 
@@ -97,7 +99,12 @@ export interface BatchQueryRunOptions {
     isExecutionCurrent?: ExecutionCurrentCheck;
     /** Confirm the fully expanded SQL immediately before database execution. */
     confirmSafeExecute?: (sql: string, queryIndex: number) => Promise<boolean>;
-    onQueryError?: (queryIndex: number, sql: string, errorMessage: string) => void;
+    onQueryError?: (
+        queryIndex: number,
+        sql: string,
+        errorMessage: string,
+        errorDetails?: DatabaseErrorDetails,
+    ) => void;
     onStatementSucceeded?: (event: {
         sql: string;
         connectionName: string;
@@ -109,6 +116,8 @@ export interface BatchQueryRunOptions {
         connectionName: string;
         documentUri?: string;
         errorMessage: string;
+        /** Backend diagnostics for a database failure; absent for cancellation. */
+        errorDetails?: DatabaseErrorDetails;
     }) => void;
 }
 

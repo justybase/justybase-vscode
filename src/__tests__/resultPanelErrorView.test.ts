@@ -150,4 +150,87 @@ describe('result panel error view', () => {
         openLogsButton?.onclick?.();
         expect(logTab.click).toHaveBeenCalled();
     });
+
+    it('shows SQLSTATE and severity, keeps detail and hint collapsible, and never renders the raw payload', () => {
+        const createdElements: Array<ReturnType<typeof createMockElement>> = [];
+        const logTab = { click: jest.fn() };
+
+        Object.defineProperty(global, 'document', {
+            configurable: true,
+            writable: true,
+            value: {
+                createElement: jest.fn((tag: string) => {
+                    const element = createMockElement(tag);
+                    createdElements.push(element);
+                    return element;
+                }),
+                querySelectorAll: jest.fn((selector: string) => (
+                    selector === '.result-set-tab' ? [{ click: jest.fn() }, logTab] : []
+                )),
+            },
+        });
+
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: { resultSets: [{ isError: true, data: [] }, { isLog: true, data: [] }] },
+        });
+
+        Object.defineProperty(global, 'vscode', {
+            configurable: true,
+            writable: true,
+            value: { postMessage: jest.fn() },
+        });
+
+        const gridModule: {
+            createErrorView: (
+                rs: Record<string, unknown>,
+                rsIndex: number,
+                container: { appendChild: (child: unknown) => void }
+            ) => void;
+        } = require('../../media/resultPanel/grid.js');
+
+        gridModule.createErrorView(
+            {
+                message: 'relation "MISSING" does not exist',
+                sql: 'SELECT * FROM MISSING',
+                isError: true,
+                data: [],
+                errorDetails: {
+                    code: '42P01',
+                    severity: 'ERROR',
+                    detail: 'The referenced relation was not found.',
+                    hint: 'Check the table name.',
+                    raw: 'SERROR-RAW-PAYLOAD',
+                },
+            },
+            0,
+            { appendChild: jest.fn() },
+        );
+
+        const diagnostics = createdElements.find(element => element.className === 'error-diagnostics');
+        expect(diagnostics).toBeDefined();
+
+        const lineTexts = createdElements
+            .filter(element => element.className === 'error-diagnostic-line')
+            .map(element => element.children.map(child => `${child.textContent}`).join(''));
+        expect(lineTexts.some(text => text.includes('42P01'))).toBe(true);
+        expect(lineTexts.some(text => text.includes('ERROR'))).toBe(true);
+        expect(lineTexts.some(text => text.includes('The referenced relation was not found.'))).toBe(true);
+        expect(lineTexts.some(text => text.includes('Check the table name.'))).toBe(true);
+
+        const toggle = createdElements.find(element => element.className === 'error-details-toggle');
+        expect(toggle?.innerHTML).toContain('Show backend diagnostics');
+        const panel = createdElements.find(element => element.className === 'error-details');
+        expect(panel?.className).not.toContain('visible');
+
+        const copyBtn = createdElements.find(element => element.className.includes('error-copy-diagnostics'));
+        expect(copyBtn?.textContent).toBe('Copy diagnostics');
+
+        // The driver payload is never part of the rendered diagnostics.
+        const rendered = createdElements
+            .map(element => `${element.textContent}${element.innerHTML}${element.title}`)
+            .join('\n');
+        expect(rendered).not.toContain('RAW-PAYLOAD');
+    });
 });

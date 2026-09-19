@@ -813,7 +813,13 @@ export function SharedWebWorkspace({ api, user, onLogout }: SharedWebWorkspacePr
       }
       case 'error':
         startResult();
-        mapped = { ...base, sequence: nextSequence(), type: 'error', message: event.message };
+        mapped = {
+          ...base,
+          sequence: nextSequence(),
+          type: 'error',
+          message: event.message,
+          ...(event.errorDetails === undefined ? {} : { errorDetails: event.errorDetails }),
+        };
         break;
       case 'cancelled': {
         const targets = event.scope === 'batch'

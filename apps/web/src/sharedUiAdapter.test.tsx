@@ -44,7 +44,52 @@ class FixtureWebSocket {
   }
 }
 
-function fixtureApi(): ApiClient {
+/** Emits one failed statement carrying Netezza-style backend diagnostics. */
+class ErrorFixtureWebSocket {
+  private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
+
+  public constructor(_url: string) {
+    void _url;
+    queueMicrotask(() => this.emit('open', {}));
+  }
+
+  public addEventListener(type: string, listener: (event: { data?: string }) => void): void {
+    const callbacks = this.listeners.get(type) ?? new Set();
+    callbacks.add(listener);
+    this.listeners.set(type, callbacks);
+  }
+
+  public send(_message: string): void {
+    void _message;
+    const events = [
+      { type: 'started', queryId: 'query-1', sequence: 1 },
+      {
+        type: 'error',
+        queryId: 'query-1',
+        sequence: 2,
+        message: 'relation "MISSING" does not exist',
+        errorDetails: {
+          code: '42P01',
+          severity: 'ERROR',
+          detail: 'Missing relation.',
+          hint: 'Check the table name.',
+          raw: 'SERROR-RAW-PAYLOAD',
+        },
+      },
+    ];
+    for (const event of events) this.emit('message', { data: JSON.stringify(event) });
+  }
+
+  public close(): void {
+    this.emit('close', {});
+  }
+
+  private emit(type: string, event: { data?: string }): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+function fixtureApi(webSocket: new (url: string) => WebSocket = FixtureWebSocket as unknown as new (url: string) => WebSocket): ApiClient {
   const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith('/api/connections')) return jsonResponse([{ id: 'connection-1', name: 'SQLite', host: 'local', port: 0, database: ':memory:', user: 'local', dbType: 'sqlite', readOnly: true }]);
@@ -56,7 +101,7 @@ function fixtureApi(): ApiClient {
     if (url.includes('/cancel')) return jsonResponse({ ok: true });
     return jsonResponse({ ok: true });
   });
-  return createApiClient({ fetch: fetchMock, WebSocket: FixtureWebSocket as unknown as new (url: string) => WebSocket });
+  return createApiClient({ fetch: fetchMock, WebSocket: webSocket });
 }
 
 describe('shared Web UI adapter', () => {
@@ -89,6 +134,21 @@ describe('shared Web UI adapter', () => {
     expect(screen.getByLabelText('SQL editor')).toHaveValue('SELECT 7');
     await user.click(screen.getByRole('button', { name: 'Log out' }));
     expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows backend SQLSTATE diagnostics for a failed query without leaking the raw payload', async () => {
+    const user = userEvent.setup();
+    const api = fixtureApi(ErrorFixtureWebSocket as unknown as new (url: string) => WebSocket);
+    render(<SharedWebWorkspace api={api} user={{ id: 'user-3', username: 'carol', role: 'user' }} onLogout={() => undefined} />);
+
+    await screen.findByRole('button', { name: 'SQLite' });
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+
+    expect(await screen.findByText('42P01')).toBeInTheDocument();
+    expect(screen.getByText('ERROR')).toBeInTheDocument();
+    expect(screen.getByText('Missing relation.')).toBeInTheDocument();
+    expect(screen.getByText('Check the table name.')).toBeInTheDocument();
+    expect(screen.queryByText(/RAW-PAYLOAD/)).toBeNull();
   });
 
   it('keeps designer and unavailable execution states visible', async () => {

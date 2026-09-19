@@ -90,7 +90,7 @@ function executionWith(state: UiState, execution: UiExecutionState): UiState {
 function statementState(
   statementIndex: number,
   status: UiStatementExecutionState['status'],
-  patch: Pick<UiStatementExecutionState, 'resultSetId' | 'sql' | 'message'> = {},
+  patch: Pick<UiStatementExecutionState, 'resultSetId' | 'sql' | 'message' | 'errorDetails'> = {},
 ): UiStatementExecutionState {
   return { statementIndex, status, ...patch };
 }
@@ -150,12 +150,21 @@ function withResult(state: UiState, result: UiResultSurfaceState): UiState {
 function failExecution(state: UiState, action: Extract<UiAction, { type: 'execution/stream-failed' }>): UiState {
   const result = resultFor(state, action.sourceId, action.resultSetId);
   if (!result || result.executionId !== action.executionId || result.status === 'complete' || result.status === 'empty' || result.status === 'error' || result.status === 'cancelled') return state;
-  let next = withResult(state, { ...result, status: 'error', message: action.message });
+  let next = withResult(state, {
+    ...result,
+    status: 'error',
+    message: action.message,
+    ...(action.errorDetails === undefined ? {} : { errorDetails: action.errorDetails }),
+  });
   const execution = executionFor(next, action.sourceId, action.executionId);
   if (!execution) return next;
   const statements = {
     ...execution.statements,
-    [result.statementIndex]: statementState(result.statementIndex, 'error', { resultSetId: result.resultSetId, message: action.message }),
+    [result.statementIndex]: statementState(result.statementIndex, 'error', {
+      resultSetId: result.resultSetId,
+      message: action.message,
+      ...(action.errorDetails === undefined ? {} : { errorDetails: action.errorDetails }),
+    }),
   };
   next = executionWith(next, {
     ...execution,
@@ -252,6 +261,7 @@ function updateExecutionFromResultEvent(state: UiState, event: UiResultEvent, re
       resultSetId: result.resultSetId,
       ...(previousStatement?.sql === undefined ? {} : { sql: previousStatement.sql }),
       message: event.message,
+      ...(event.errorDetails === undefined ? {} : { errorDetails: event.errorDetails }),
     });
     executionMessage = event.message;
     // Script execution may continue after a statement error. The terminal
@@ -352,7 +362,12 @@ function applyResultEvent(state: UiState, event: UiResultEvent): UiState {
       next = { ...base, status: 'empty', message: event.message, totalRowCount: 0 };
       break;
     case 'error':
-      next = { ...base, status: 'error', message: event.message };
+      next = {
+        ...base,
+        status: 'error',
+        message: event.message,
+        ...(event.errorDetails === undefined ? {} : { errorDetails: event.errorDetails }),
+      };
       break;
     case 'cancelled':
       if (!Number.isInteger(event.totalRowCount) || event.totalRowCount < 0 || event.totalRowCount < previous.loadedRowCount) return state;

@@ -1,3 +1,4 @@
+import { isDatabaseErrorDetails } from '@justybase/contracts';
 import type {
   AdminRestoreRequest,
   AdminRestoreResponse,
@@ -227,7 +228,10 @@ export function parseQueryEvent(value: unknown, queryId: string): QueryEvent | u
         ? value as unknown as QueryEvent
         : undefined;
     case 'error':
-      return typeof value.message === 'string' ? value as unknown as QueryEvent : undefined;
+      return typeof value.message === 'string'
+        && (value.errorDetails === undefined || isDatabaseErrorDetails(value.errorDetails))
+        ? value as unknown as QueryEvent
+        : undefined;
     case 'cancelled':
       return isNonNegativeInteger(value.totalRows)
         && (value.scope === undefined || value.scope === 'statement' || value.scope === 'batch')

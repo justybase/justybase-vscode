@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import type { DatabaseKind } from '../../contracts/database';
+import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
 import {
     runQueryRaw,
     runQueriesSequentially,
@@ -277,6 +278,7 @@ export function registerQueryCommands(
                     return;
                 }
 
+                const errorDetails = extractDatabaseErrorDetails(err);
                 resultPanelProvider.updateResults(
                     [
                         {
@@ -284,7 +286,8 @@ export function registerQueryCommands(
                             data: [],
                             message,
                             isError: true,
-                            sql: query
+                            sql: query,
+                            ...(errorDetails === undefined ? {} : { errorDetails }),
                         }
                     ],
                     sourceUri,
@@ -604,6 +607,7 @@ export function registerQueryCommands(
 
                 // Add error result BEFORE finalizing so it gets properly pinned
                 if (executionStarted) {
+                    const errorDetails = extractDatabaseErrorDetails(err);
                     resultPanelProvider.updateResults(
                         [
                             {
@@ -611,7 +615,8 @@ export function registerQueryCommands(
                                 data: [],
                                 message: msg,
                                 isError: true,
-                                sql: text
+                                sql: text,
+                                ...(errorDetails === undefined ? {} : { errorDetails }),
                             }
                         ],
                         sourceUri,

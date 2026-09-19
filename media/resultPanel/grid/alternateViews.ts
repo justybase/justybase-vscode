@@ -311,6 +311,86 @@ export function extractKeyNetezzaErrorInfo(fullMessage: string): string {
     return msg;
 }
 
+/**
+ * Renders backend diagnostics (SQLSTATE, severity, detail, hint) below the
+ * summary. Detail and hint stay collapsed because they are often long, and the
+ * copy action emits the same text without ever including a raw driver payload.
+ */
+function appendErrorDiagnostics(errorDiv: HTMLElement, rs: ResultSetWithExtras): void {
+    const details = rs.errorDetails;
+    if (!details) return;
+
+    const rows: Array<{ label: string; value: string }> = [];
+    if (details.code) rows.push({ label: 'SQLSTATE', value: details.code });
+    if (details.severity) rows.push({ label: 'Severity', value: details.severity });
+    const collapsible: Array<{ label: string; value: string }> = [];
+    if (details.detail) collapsible.push({ label: 'Detail', value: details.detail });
+    if (details.hint) collapsible.push({ label: 'Hint', value: details.hint });
+    for (const [key, value] of Object.entries(details.diagnostics ?? {})) {
+        collapsible.push({ label: key, value });
+    }
+    if (rows.length === 0 && collapsible.length === 0) return;
+
+    const block = document.createElement('div');
+    block.className = 'error-diagnostics';
+
+    for (const row of rows) {
+        const line = document.createElement('div');
+        line.className = 'error-diagnostic-line';
+        const label = document.createElement('span');
+        label.className = 'error-diagnostic-label';
+        label.textContent = `${row.label}: `;
+        const value = document.createElement('span');
+        value.className = 'error-diagnostic-value';
+        value.textContent = row.value;
+        line.append(label, value);
+        block.appendChild(line);
+    }
+
+    if (collapsible.length > 0) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'error-details-toggle';
+        toggle.innerHTML = '<span class="arrow">▶</span> Show backend diagnostics';
+        toggle.setAttribute('aria-expanded', 'false');
+        const panel = document.createElement('div');
+        panel.className = 'error-details';
+        for (const row of collapsible) {
+            const line = document.createElement('div');
+            line.className = 'error-diagnostic-line';
+            const label = document.createElement('span');
+            label.className = 'error-diagnostic-label';
+            label.textContent = `${row.label}: `;
+            const value = document.createElement('span');
+            value.className = 'error-diagnostic-value';
+            value.textContent = row.value;
+            line.append(label, value);
+            panel.appendChild(line);
+        }
+        toggle.onclick = () => {
+            const isVisible = panel.classList.toggle('visible');
+            toggle.innerHTML = isVisible
+                ? '<span class="arrow open">▶</span> Hide backend diagnostics'
+                : '<span class="arrow">▶</span> Show backend diagnostics';
+            toggle.setAttribute('aria-expanded', String(isVisible));
+        };
+        block.append(toggle, panel);
+    }
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'error-secondary-btn error-copy-diagnostics';
+    copyBtn.textContent = 'Copy diagnostics';
+    copyBtn.title = 'Copy SQLSTATE, severity, detail and hint to the clipboard';
+    copyBtn.onclick = () => {
+        const lines = [...rows, ...collapsible].map(row => `${row.label}: ${row.value}`);
+        void navigator.clipboard?.writeText(lines.join('\n')).catch(() => undefined);
+    };
+    block.appendChild(copyBtn);
+
+    errorDiv.appendChild(block);
+}
+
 export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, container: HTMLElement): void {
     const wrapper = document.createElement('div');
     wrapper.className = 'grid-wrapper error-wrapper' + (rsIndex === getActiveGridIndex() ? ' active' : '');
@@ -364,6 +444,8 @@ export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, contai
         details.textContent = fullMessage;
         errorDiv.appendChild(details);
     }
+
+    appendErrorDiagnostics(errorDiv, rs);
 
     const recoveryHint = document.createElement('div');
     recoveryHint.className = 'error-recovery-hint';
