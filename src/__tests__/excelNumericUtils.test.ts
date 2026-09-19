@@ -58,7 +58,7 @@ describe('excelNumericUtils', () => {
   });
 
   describe('convertToExcelNumberIfNumericString', () => {
-    describe('NUMERIC/DECIMAL types (exact precision - not lossy)', () => {
+    describe('NUMERIC/DECIMAL types (rounded to Excel precision)', () => {
       it('should convert padded NUMERIC strings to number', () => {
         expect(convertToExcelNumberIfNumericString('0000000000000002.5000', 'NUMERIC(20,4)')).toBe(2.5);
       });
@@ -87,9 +87,23 @@ describe('excelNumericUtils', () => {
         expect(convertToExcelNumberIfNumericString('-2.5000', 'NUMERIC(20,4)')).toBe(-2.5);
       });
 
-      it('should preserve long NUMERIC strings (>15 chars) as text to avoid precision loss', () => {
+      it('should round long NUMERIC strings to 15 significant digits', () => {
         const longNum = '1234567890123.4567';
-        expect(convertToExcelNumberIfNumericString(longNum, 'NUMERIC(20,4)')).toBe(longNum);
+        expect(convertToExcelNumberIfNumericString(longNum, 'NUMERIC(20,4)')).toBe(1234567890123.46);
+      });
+
+      it('should round high-precision decimal values from Netezza', () => {
+        expect(convertToExcelNumberIfNumericString(
+          '123456789012345.678901234567890123',
+          'NUMERIC(38,18)'
+        )).toBe(123456789012346);
+      });
+
+      it('should round decimal text before binary conversion at a boundary', () => {
+        expect(convertToExcelNumberIfNumericString(
+          '0.9999999999999945',
+          'NUMERIC(38,16)'
+        )).toBe(0.999999999999995);
       });
 
       it('should convert NUMBER type padded string', () => {
@@ -106,9 +120,9 @@ describe('excelNumericUtils', () => {
     });
 
     describe('FLOAT/DOUBLE types (lossy - no length protection)', () => {
-      it('should convert float strings regardless of length', () => {
+      it('should round float strings to Excel precision', () => {
         const longFloat = '12345678901234567.89';
-        expect(convertToExcelNumberIfNumericString(longFloat, 'FLOAT8')).toBe(Number(longFloat));
+        expect(convertToExcelNumberIfNumericString(longFloat, 'FLOAT8')).toBe(12345678901234600);
       });
 
       it('should convert REAL padded string', () => {
@@ -129,9 +143,9 @@ describe('excelNumericUtils', () => {
         expect(convertToExcelNumberIfNumericString('123', 'INT4')).toBe(123);
       });
 
-      it('should not convert long integer strings (>15 chars)', () => {
+      it('should round long integer strings to Excel precision', () => {
         const longInt = '12345678901234567';
-        expect(convertToExcelNumberIfNumericString(longInt, 'BIGINT')).toBe(longInt);
+        expect(convertToExcelNumberIfNumericString(longInt, 'BIGINT')).toBe(12345678901234600);
       });
 
       it('should not convert leading-zero integer strings like "0123"', () => {
@@ -146,19 +160,19 @@ describe('excelNumericUtils', () => {
         expect(convertToExcelNumberIfNumericString(-1, 'INT4')).toBe(-1);
       });
 
-      it('should convert small bigint to number for numeric types', () => {
+      it('should convert bigint to an Excel-precision number for numeric types', () => {
         expect(convertToExcelNumberIfNumericString(BigInt(1), 'BIGINT')).toBe(1);
         expect(convertToExcelNumberIfNumericString(BigInt(0), 'INT4')).toBe(0);
         expect(convertToExcelNumberIfNumericString(BigInt(-1), 'BIGINT')).toBe(-1);
-        expect(convertToExcelNumberIfNumericString(BigInt(9007199254740991), 'BIGINT')).toBe(9007199254740991);
-        expect(convertToExcelNumberIfNumericString(BigInt(-9007199254740991), 'BIGINT')).toBe(-9007199254740991);
+        expect(convertToExcelNumberIfNumericString(BigInt(9007199254740991), 'BIGINT')).toBe(9007199254740990);
+        expect(convertToExcelNumberIfNumericString(BigInt(-9007199254740991), 'BIGINT')).toBe(-9007199254740990);
       });
 
-      it('should keep large bigint as-is for numeric types to preserve precision', () => {
+      it('should round large bigint values for numeric types', () => {
         const large = BigInt('9007199254740992');
-        expect(convertToExcelNumberIfNumericString(large, 'BIGINT')).toBe(large);
+        expect(convertToExcelNumberIfNumericString(large, 'BIGINT')).toBe(9007199254740990);
         const small = BigInt('-9007199254740992');
-        expect(convertToExcelNumberIfNumericString(small, 'BIGINT')).toBe(small);
+        expect(convertToExcelNumberIfNumericString(small, 'BIGINT')).toBe(-9007199254740990);
       });
 
       it('should keep bigint as-is for non-numeric types', () => {
@@ -175,6 +189,7 @@ describe('excelNumericUtils', () => {
       it('should return non-numeric strings as-is', () => {
         expect(convertToExcelNumberIfNumericString('hello', 'VARCHAR')).toBe('hello');
         expect(convertToExcelNumberIfNumericString('N/A', 'VARCHAR')).toBe('N/A');
+        expect(convertToExcelNumberIfNumericString('123.45', 'VARCHAR')).toBe('123.45');
       });
 
       it('should return empty string as-is', () => {
@@ -202,6 +217,10 @@ describe('excelNumericUtils', () => {
 
       it('should return NaN-producing strings as-is', () => {
         expect(convertToExcelNumberIfNumericString('Infinity', 'FLOAT8')).toBe('Infinity');
+      });
+
+      it('should keep non-zero values that underflow to zero as text', () => {
+        expect(convertToExcelNumberIfNumericString('1e-324', 'NUMERIC(38,38)')).toBe('1e-324');
       });
     });
   });

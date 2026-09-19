@@ -21,7 +21,7 @@
     "@justybase/contracts": "*",
     "@justybase/database-utils": "*",
     "@justybase/dialect-utils": "*",
-    "@justybase/spreadsheet-tasks": "^2.1.1"
+    "@justybase/spreadsheet-tasks": "^2.2.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

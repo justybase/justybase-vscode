@@ -90,7 +90,7 @@ describe('xlsxExporter', () => {
       expect(mockWriteRow).toHaveBeenCalledWith([-45.6]);
     });
 
-    it('should NOT convert long numeric strings (precision safety)', async () => {
+    it('should round long numeric strings to Excel precision', async () => {
       const longNum = '12345678901234567'; // 17 digits
       const items = [{
         name: 'Test',
@@ -99,7 +99,7 @@ describe('xlsxExporter', () => {
       }];
       await exportStructuredToXlsx(items, 'path.xlsx');
 
-      expect(mockWriteRow).toHaveBeenCalledWith([longNum]);
+      expect(mockWriteRow).toHaveBeenCalledWith([12345678901234600]);
     });
 
     it('should convert padded NUMERIC strings using Excel number precision', async () => {
@@ -217,6 +217,30 @@ describe('xlsxExporter', () => {
       expect(mockWriteRow).toHaveBeenCalledWith(['Plain Text', 123]);
       expect(mockWriteRow).toHaveBeenCalledWith(['No Convert', 456]);
       expect(mockEndSheet).toHaveBeenCalled();
+    });
+
+    it('should write high-precision numeric values as rounded Excel numbers', async () => {
+      const items = [{
+        name: 'Precision',
+        columns: [
+          { name: 'DECIMAL_VALUE', type: 'NUMERIC(38,18)' },
+          { name: 'BIG_VALUE', type: 'BIGINT' },
+          { name: 'TEXT_VALUE', type: 'VARCHAR' }
+        ],
+        rows: [[
+          '123456789012345.678901234567890123',
+          BigInt('12345678901234567890'),
+          '12345678901234567890'
+        ]]
+      }];
+
+      await exportStructuredToXlsx(items, 'precision.xlsx');
+
+      expect(mockWriteRow).toHaveBeenCalledWith([
+        123456789012346,
+        12345678901234600000,
+        '12345678901234567890'
+      ]);
     });
 
     it('should handle export with no SQL', async () => {

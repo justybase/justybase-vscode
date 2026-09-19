@@ -262,6 +262,30 @@ describe('xlsbExporter', () => {
       expect(mockWriteRow).toHaveBeenCalledWith([123, 'Text']);
     });
 
+    it('should write high-precision numeric values as rounded Excel numbers', async () => {
+      const items = [{
+        name: 'Precision',
+        columns: [
+          { name: 'DECIMAL_VALUE', type: 'NUMERIC(38,18)' },
+          { name: 'BIG_VALUE', type: 'BIGINT' },
+          { name: 'TEXT_VALUE', type: 'VARCHAR' }
+        ],
+        rows: [[
+          '123456789012345.678901234567890123',
+          BigInt('12345678901234567890'),
+          '12345678901234567890'
+        ]]
+      }];
+
+      await exportStructuredToXlsb(items, 'precision.xlsb');
+
+      expect(mockWriteRow).toHaveBeenCalledWith([
+        123456789012346,
+        12345678901234600000,
+        '12345678901234567890'
+      ]);
+    });
+
     it('should skip empty sheets', async () => {
       const items = [{ name: 'Empty', columns: [], rows: [] }];
       await exportStructuredToXlsb(items, 'out.xlsb');
