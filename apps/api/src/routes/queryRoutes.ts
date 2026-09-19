@@ -15,6 +15,7 @@ import { DesignerSnapshotUnavailableError } from '../designerSnapshotService';
 import { StaleDesignerSnapshotError } from '@justybase/database-runtime';
 import { parseQueryStartRequest, RequestValidationError } from '../requestValidation';
 import { createWebSocketOriginGuard } from '../webSocketOrigin';
+import { apiErrorBody } from '../apiErrorDetails';
 
 export interface QueryRouteHooks {
   authenticate: preHandlerHookHandler;
@@ -52,10 +53,11 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
       return reply.code(200).send(await hooks.previewQuery(request.user!.id, parseQueryStartRequest(request.body)));
     } catch (error: unknown) {
       const statusCode = error instanceof StaleDesignerSnapshotError ? 409 : error instanceof DesignerSnapshotUnavailableError ? 501 : 400;
-      return reply.code(statusCode).send({
-        code: error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_PREVIEW_REJECTED',
-        message: error instanceof Error ? error.message : 'Query preview rejected.',
-      });
+      return reply.code(statusCode).send(apiErrorBody(
+        error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_PREVIEW_REJECTED',
+        error instanceof Error ? error.message : 'Query preview rejected.',
+        error,
+      ));
     }
   });
 
@@ -64,10 +66,11 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
       return reply.code(202).send(await hooks.startQuery(request.user!.id, parseQueryStartRequest(request.body)));
     } catch (error: unknown) {
       const statusCode = error instanceof StaleDesignerSnapshotError ? 409 : error instanceof DesignerSnapshotUnavailableError ? 501 : 400;
-      return reply.code(statusCode).send({
-        code: error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_REJECTED',
-        message: error instanceof Error ? error.message : 'Query rejected.',
-      });
+      return reply.code(statusCode).send(apiErrorBody(
+        error instanceof RequestValidationError ? error.code : error instanceof StaleDesignerSnapshotError ? error.code : error instanceof DesignerSnapshotUnavailableError ? error.code : 'QUERY_REJECTED',
+        error instanceof Error ? error.message : 'Query rejected.',
+        error,
+      ));
     }
   });
 
@@ -75,7 +78,7 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
     try {
       return reply.code(200).send(await hooks.editPreview(request.user!.id, request.body as QueryEditPreviewRequest));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'EDIT_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'Edit preview rejected.' });
+      return reply.code(400).send(apiErrorBody('EDIT_PREVIEW_REJECTED', error instanceof Error ? error.message : 'Edit preview rejected.', error));
     }
   });
 
@@ -85,7 +88,7 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
       if (!app.store.getConnection(request.user!.id, connectionIdFromWriteBody(input))) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
       return reply.code(200).send(await hooks.edit(request.user!.id, input));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'EDIT_REJECTED', message: error instanceof Error ? error.message : 'Edit rejected.' });
+      return reply.code(400).send(apiErrorBody('EDIT_REJECTED', error instanceof Error ? error.message : 'Edit rejected.', error));
     }
   });
 
@@ -93,7 +96,7 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
     try {
       return reply.code(200).send(await hooks.importPreview(request.user!.id, request.body as QueryImportPreviewRequest));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'IMPORT_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'Import preview rejected.' });
+      return reply.code(400).send(apiErrorBody('IMPORT_PREVIEW_REJECTED', error instanceof Error ? error.message : 'Import preview rejected.', error));
     }
   });
 
@@ -103,7 +106,7 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
       if (!app.store.getConnection(request.user!.id, connectionIdFromWriteBody(input))) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
       return reply.code(200).send(await hooks.importRows(request.user!.id, input));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'IMPORT_REJECTED', message: error instanceof Error ? error.message : 'Import rejected.' });
+      return reply.code(400).send(apiErrorBody('IMPORT_REJECTED', error instanceof Error ? error.message : 'Import rejected.', error));
     }
   });
 
@@ -111,7 +114,7 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
     try {
       return reply.code(200).send(await hooks.importFilePreview(request.user!.id, request.body as QueryFileImportPreviewRequest));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'FILE_IMPORT_PREVIEW_REJECTED', message: error instanceof Error ? error.message : 'File import preview rejected.' });
+      return reply.code(400).send(apiErrorBody('FILE_IMPORT_PREVIEW_REJECTED', error instanceof Error ? error.message : 'File import preview rejected.', error));
     }
   });
 
@@ -121,7 +124,7 @@ export function registerQueryRoutes(app: FastifyInstance, hooks: QueryRouteHooks
       if (!app.store.getConnection(request.user!.id, connectionIdFromWriteBody(input))) return reply.code(404).send({ code: 'NOT_FOUND', message: 'Connection profile not found.' });
       return reply.code(200).send(await hooks.importFile(request.user!.id, input));
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'FILE_IMPORT_REJECTED', message: error instanceof Error ? error.message : 'File import rejected.' });
+      return reply.code(400).send(apiErrorBody('FILE_IMPORT_REJECTED', error instanceof Error ? error.message : 'File import rejected.', error));
     }
   });
 

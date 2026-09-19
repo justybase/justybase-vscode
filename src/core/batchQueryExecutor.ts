@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { createExecutionId, ExecutionOrchestrator } from '@justybase/database-runtime/execution';
-import type { ExecutionEvent, ExecutionSummary } from '@justybase/contracts';
+import { createExecutionId, ExecutionOrchestrator, extractDatabaseErrorDetails } from '@justybase/database-runtime/execution';
+import type { DatabaseErrorDetails, ExecutionEvent, ExecutionSummary } from '@justybase/contracts';
 import { ConnectionManager } from "./connectionManager";
 import { QueryHistoryManager } from "./queryHistoryManager";
 import { QueryResult } from "../types";
@@ -47,6 +47,7 @@ type QueryEndCallback = (
     durationMs: number,
     status: BatchExecutionStatus,
     error?: string,
+    errorDetails?: DatabaseErrorDetails,
 ) => void;
 
 const TERMINAL_EXECUTION_STATUSES = new Set<BatchExecutionStatus>([
@@ -87,6 +88,7 @@ function emitQueryStatus(
     durationMs: number,
     status: BatchExecutionStatus,
     error?: string,
+    errorDetails?: DatabaseErrorDetails,
 ): void {
     if (!callback || !executionId || terminalExecutionIds.has(executionId)) {
         return;
@@ -99,7 +101,11 @@ function emitQueryStatus(
         callback(executionId, rowCount, durationMs, status);
         return;
     }
-    callback(executionId, rowCount, durationMs, status, error);
+    if (errorDetails === undefined) {
+        callback(executionId, rowCount, durationMs, status, error);
+        return;
+    }
+    callback(executionId, rowCount, durationMs, status, error, errorDetails);
 }
 
 function isRowsAffectedStatement(sql: string): boolean {
@@ -382,6 +388,9 @@ async function runBatchWithSharedOrchestrator(
                     state.terminalized = true;
                     const cancelled = event.summary.status === 'cancelled';
                     const message = cancelled ? 'Query cancelled' : reported.message;
+                    const errorDetails = cancelled
+                        ? undefined
+                        : event.summary.error?.details ?? extractDatabaseErrorDetails(event.summary.error?.cause);
                     emitQueryStatus(
                         params.queryEndCallback,
                         params.terminalExecutionIds,
@@ -390,12 +399,14 @@ async function runBatchWithSharedOrchestrator(
                         Date.now() - state.startedAt,
                         cancelled ? 'cancelled' : 'error',
                         message,
+                        errorDetails,
                     );
                     params.batchOptions.onStatementFailed?.({
                         sql: state.statement.sql,
                         connectionName: resolvedConnectionName,
                         documentUri: params.documentUri,
                         errorMessage: message,
+                        ...(errorDetails === undefined ? {} : { errorDetails }),
                     });
                     return;
                 }
@@ -537,6 +548,9 @@ async function runBatchWithSharedOrchestrator(
                             : reported.message;
                     state.terminalized = true;
                     const durationMs = Date.now() - state.startedAt;
+                    const errorDetails = cancelled
+                        ? undefined
+                        : event.failure.details ?? extractDatabaseErrorDetails(event.failure.cause);
                     emitQueryStatus(
                         params.queryEndCallback,
                         params.terminalExecutionIds,
@@ -545,6 +559,7 @@ async function runBatchWithSharedOrchestrator(
                         durationMs,
                         cancelled ? 'cancelled' : 'error',
                         message,
+                        errorDetails,
                     );
                     logQueryToHistoryAsync(
                         historyManager,
@@ -565,6 +580,7 @@ async function runBatchWithSharedOrchestrator(
                         connectionName: resolvedConnectionName,
                         documentUri: params.documentUri,
                         errorMessage: message,
+                        ...(errorDetails === undefined ? {} : { errorDetails }),
                     });
                     if (params.batchOptions.continueOnError && !cancelled) {
                         const errorResult: QueryResult = {
@@ -573,10 +589,11 @@ async function runBatchWithSharedOrchestrator(
                             message,
                             isError: true,
                             sql: state.statement.sql,
+                            ...(errorDetails === undefined ? {} : { errorDetails }),
                         };
                         allResults.push(errorResult);
                         params.resultCallback?.([errorResult]);
-                        params.batchOptions.onQueryError?.(state.statement.originalIndex, state.statement.sql, message);
+                        params.batchOptions.onQueryError?.(state.statement.originalIndex, state.statement.sql, message, errorDetails);
                     }
                     return;
                 }

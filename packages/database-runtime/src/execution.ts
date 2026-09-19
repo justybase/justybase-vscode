@@ -15,6 +15,15 @@ import type {
   ExecutionTerminalStatus,
 } from '@justybase/contracts';
 
+import { extractDatabaseErrorDetails, isConnectionExceptionSqlState, isDatabaseSqlError } from './errorDetails';
+
+/**
+ * Backend diagnostics extracted from a failure chain, re-exported so product
+ * adapters can populate transport DTOs without their own unwrapping logic.
+ */
+export { extractDatabaseErrorDetails, isDatabaseSqlError } from './errorDetails';
+export { hasSqlStateCode, isConnectionExceptionSqlState } from './errorDetails';
+
 export interface ExecutionBackend<TTarget> {
   execute(
     target: TTarget,
@@ -266,16 +275,31 @@ function defaultIsCancellationError(error: unknown): boolean {
   return /(?:query|statement|command|operation|request|execution)?\s*(?:was\s+)?cancel(?:led|ed)|aborted|aborterror/i.test(errorMessage(error));
 }
 
+/**
+ * Transport-level failure detection used for reconnect/replay decisions.
+ *
+ * A database error is never a transport error: when the backend reported
+ * structured diagnostics (SQLSTATE/severity/detail/hint) the connection is
+ * healthy enough to carry an answer, so replaying the statement would repeat
+ * the same failure. Socket-level codes and messages keep their existing
+ * reconnect behaviour.
+ */
 export function isConnectionBrokenError(error: unknown): boolean {
+  // SQLSTATE class 08 means the link itself is unusable, so it keeps the
+  // existing reconnect/replay behaviour.
+  if (isConnectionExceptionSqlState(error)) return true;
+  if (isDatabaseSqlError(error)) return false;
   return hasErrorCode(error, ['ECONNRESET', 'EPIPE', 'ERR_SOCKET_CLOSED', 'ERR_SOCKET_DESTROYED'])
     || /socket\s+(?:closed|destroyed)|connection\s+(?:reset|closed|is\s+closed)|connection\s+protocol\s+is\s+invalid\s*;\s*reconnect\s+is\s+required|econnreset|epipe|broken\s+pipe/i.test(errorMessage(error));
 }
 
 function failureFrom(error: unknown, kind?: ExecutionFailure['kind']): ExecutionFailure {
+  const details = extractDatabaseErrorDetails(error);
   return {
     message: errorMessage(error),
     cause: error,
     ...(kind === undefined ? {} : { kind }),
+    ...(details === undefined ? {} : { details }),
   };
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseKind } from '@justybase/contracts';
+import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseErrorDetails, type DatabaseKind } from '@justybase/contracts';
 import { SCHEMA_CONTEXT_MENU_LABELS, type MetadataNode } from '@justybase/ui-core';
 import type { UiExecutionState, UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
@@ -28,6 +28,39 @@ export function AsyncStateView({ state, message, loadingLabel = 'Loading…', em
   if (state === 'ready') return <>{children}</>;
   const label = state === 'loading' ? loadingLabel : state === 'empty' ? emptyLabel : state === 'cancelled' ? cancelledLabel : message ?? 'Something went wrong.';
   return <div className={`ui-async-state ui-async-${state}`} role={state === 'error' ? 'alert' : 'status'} aria-live="polite">{label}</div>;
+}
+
+export interface ErrorDiagnosticsProps {
+  readonly details: DatabaseErrorDetails;
+}
+
+/**
+ * Backend diagnostics for a failed statement. SQLSTATE and severity stay
+ * visible; detail and hint are collapsible because they are often long. The
+ * driver's raw payload is never part of the contract.
+ */
+export function ErrorDiagnostics({ details }: ErrorDiagnosticsProps): ReactNode {
+  const [copied, setCopied] = useState(false);
+  const lines: Array<[string, string]> = [];
+  if (details.code) lines.push(['SQLSTATE', details.code]);
+  if (details.severity) lines.push(['Severity', details.severity]);
+  const collapsible: Array<[string, string]> = [];
+  if (details.detail) collapsible.push(['Detail', details.detail]);
+  if (details.hint) collapsible.push(['Hint', details.hint]);
+  for (const [key, value] of Object.entries(details.diagnostics ?? {})) collapsible.push([key, value]);
+  if (lines.length === 0 && collapsible.length === 0) return null;
+  const copy = (): void => {
+    const text = [...lines, ...collapsible].map(([label, value]) => `${label}: ${value}`).join('\n');
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }, () => undefined);
+  };
+  return <section className="ui-error-diagnostics" aria-label="Backend diagnostics">
+    {lines.length > 0 && <dl className="ui-error-diagnostic-summary">{lines.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+    {collapsible.length > 0 && <details className="ui-error-diagnostic-details"><summary>Backend diagnostics detail</summary><dl>{collapsible.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></details>}
+    <button type="button" className="ui-error-diagnostics-copy" onClick={copy}>{copied ? 'Copied' : 'Copy diagnostics'}</button>
+  </section>;
 }
 
 export interface CapabilityGateProps {

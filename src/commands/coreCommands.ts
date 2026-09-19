@@ -38,6 +38,8 @@ import type { QueryFlowNode } from '../sqlParser';
 import type { TableDdlSynchronizer } from '../metadata/tableDdlSynchronizer';
 import type { BatchQueryRunOptions } from '../core/queryRunner';
 import { confirmSafeExecute } from './query/queryCommandSafety';
+import type { DatabaseErrorDetails } from '@justybase/contracts';
+import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
 import {
     extractProcedureBlock,
     extractViewStatement,
@@ -47,6 +49,15 @@ import { createConnectionQuickPickItems } from '../utils/connectionQuickPick';
 import { tryAcquireQueryExecution } from './query/queryExecutionGate';
 import { createQueryExecutionRecovery } from './query/queryExecutionRecovery';
 import { getRequiredDatabaseQueryProfileProvider } from '../core/connectionFactory';
+
+/**
+ * Attaches serialisable backend diagnostics (SQLSTATE, severity, detail, hint)
+ * to a failed result without changing its message.
+ */
+function errorDetailFields(error: unknown): { errorDetails?: DatabaseErrorDetails } {
+    const errorDetails = extractDatabaseErrorDetails(error);
+    return errorDetails === undefined ? {} : { errorDetails };
+}
 
 export interface CoreCommandsContext {
     context: vscode.ExtensionContext;
@@ -997,7 +1008,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                         return;
                     }
                     resultPanelProvider.updateResults(
-                        [{ columns: [], data: [], message: msg, isError: true, sql: statementSql }],
+                        [{ columns: [], data: [], message: msg, isError: true, sql: statementSql, ...errorDetailFields(err) }],
                         sourceUri,
                         true,
                     );
@@ -1135,7 +1146,14 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     }
 
                     resultPanelProvider.updateResults(
-                        [{ columns: [], data: [], message: msg, isError: true, sql }],
+                        [{
+                            columns: [],
+                            data: [],
+                            message: msg,
+                            isError: true,
+                            sql,
+                            ...errorDetailFields(err),
+                        }],
                         sourceUri,
                         true,
                     );

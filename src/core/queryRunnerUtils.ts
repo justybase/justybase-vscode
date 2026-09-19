@@ -6,6 +6,7 @@
 
 import * as vscode from "vscode";
 import { ConnectionManager } from "./connectionManager";
+import { isConnectionExceptionSqlState, isDatabaseSqlError } from '@justybase/database-runtime';
 export { normalizeUriKey } from "./uriUtils";
 
 /**
@@ -102,8 +103,14 @@ function collectConnectionErrorMessages(error: unknown, maxDepth = 5): string {
 /**
  * Check if an error indicates a broken/closed connection that should trigger retry.
  * Detects common network/socket errors that occur when a connection is terminated.
+ *
+ * Classification stays aligned with `@justybase/database-runtime`: a database
+ * error carrying structured diagnostics is never a transport error, except for
+ * SQLSTATE class `08` (connection exception), which keeps reconnect behaviour.
  */
 export function isConnectionBrokenError(error: unknown): boolean {
+  if (isConnectionExceptionSqlState(error)) return true;
+  if (isDatabaseSqlError(error)) return false;
   const msg = collectConnectionErrorMessages(error).toLowerCase();
   return (
     msg.includes("socket closed") ||

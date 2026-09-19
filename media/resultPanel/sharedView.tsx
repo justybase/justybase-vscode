@@ -1,7 +1,8 @@
 import { decode } from '@msgpack/msgpack';
 import { createRoot, type Root } from 'react-dom/client';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { CapabilityDescriptor, UiIdentity } from '@justybase/contracts';
+import { isDatabaseErrorDetails } from '@justybase/contracts';
+import type { CapabilityDescriptor, DatabaseErrorDetails, UiIdentity } from '@justybase/contracts';
 import {
     createInitialUiState,
     createUiStore,
@@ -53,6 +54,7 @@ interface SharedResultSetPayload {
     readonly columns?: unknown;
     readonly data?: unknown;
     readonly message?: unknown;
+    readonly errorDetails?: unknown;
     readonly isLog?: unknown;
     readonly isError?: unknown;
     readonly isCancelled?: unknown;
@@ -66,6 +68,7 @@ interface NormalizedResultSet {
     readonly columns: readonly SharedColumn[];
     readonly rows: readonly unknown[][];
     readonly message?: string;
+    readonly errorDetails?: DatabaseErrorDetails;
     readonly isLog: boolean;
     readonly isError: boolean;
     readonly isCancelled: boolean;
@@ -216,6 +219,7 @@ export function normalizeSharedResultSet(value: unknown): NormalizedResultSet | 
         columns: normalizeSharedColumns(candidate.columns),
         rows,
         message: typeof candidate.message === 'string' ? candidate.message : undefined,
+        errorDetails: isDatabaseErrorDetails(candidate.errorDetails) ? candidate.errorDetails : undefined,
         isLog: candidate.isLog === true,
         isError: candidate.isError === true,
         isCancelled: candidate.isCancelled === true,
@@ -998,7 +1002,15 @@ export class SharedResultPanelController {
             return;
         }
         if (normalized.isError) {
-            this.dispatch({ type: 'execution/event', event: { ...eventBase(ref, sequence++), type: 'error', message: normalized.message ?? 'Result failed.' } });
+            this.dispatch({
+                type: 'execution/event',
+                event: {
+                    ...eventBase(ref, sequence++),
+                    type: 'error',
+                    message: normalized.message ?? 'Result failed.',
+                    ...(normalized.errorDetails === undefined ? {} : { errorDetails: normalized.errorDetails }),
+                },
+            });
         } else if (normalized.isCancelled) {
             this.dispatch({ type: 'execution/event', event: { ...eventBase(ref, sequence++), type: 'cancelled', totalRowCount: normalized.totalRowCount, message: normalized.message } });
         } else if (normalized.totalRowCount === 0) {

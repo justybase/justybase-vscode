@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { tryNormalizeDatabaseKind, type ConnectionProfileInput, type ConnectionProfileUpdate } from '@justybase/contracts';
 import { encryptSecret } from '../security';
+import { apiErrorBody } from '../apiErrorDetails';
 import type { StoredConnection } from '../store';
 
 export interface ConnectionRouteHooks {
@@ -119,7 +120,7 @@ export function registerConnectionRoutes(app: FastifyInstance, hooks: Connection
       await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined });
       return { ok: true };
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' });
+      return reply.code(400).send(apiErrorBody('CONNECTION_FAILED', error instanceof Error ? error.message : 'Connection failed.', error));
     } finally {
       if (testProfile) await app.databaseRuntimes.closeConnection(testProfile.id);
     }
@@ -132,7 +133,7 @@ export function registerConnectionRoutes(app: FastifyInstance, hooks: Connection
       await app.databaseRuntimes.execute(profile, 'SELECT 1', { maxRows: 1, timeoutSeconds: 30, readOnly: true }, { onColumns: () => undefined, onRows: () => undefined, onCommand: () => undefined });
       return { ok: true };
     } catch (error: unknown) {
-      return reply.code(400).send({ code: 'CONNECTION_FAILED', message: error instanceof Error ? error.message : 'Connection failed.' });
+      return reply.code(400).send(apiErrorBody('CONNECTION_FAILED', error instanceof Error ? error.message : 'Connection failed.', error));
     }
   });
 }

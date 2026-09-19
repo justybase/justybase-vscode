@@ -1,6 +1,7 @@
 import { UI_CONTRACT_VERSION } from '@justybase/contracts';
 import type {
   CapabilityDescriptor,
+  DatabaseErrorDetails,
   DatabaseKind,
   PersistenceScope,
   QueryColumnFilterOperator,
@@ -67,6 +68,8 @@ export interface UiStatementExecutionState {
   readonly resultSetId?: string;
   readonly sql?: string;
   readonly message?: string;
+  /** Backend diagnostics of a failed statement, when the producer supplied them. */
+  readonly errorDetails?: DatabaseErrorDetails;
 }
 
 /**
@@ -143,6 +146,8 @@ export interface UiResultSurfaceState {
   readonly totalRowCount: number;
   readonly loadedRowCount: number;
   readonly message?: string;
+  /** Backend diagnostics (SQLSTATE, severity, detail, hint) for an error result. */
+  readonly errorDetails?: DatabaseErrorDetails;
   /** True when the server stopped at its row limit; the spool holds a prefix. */
   readonly limitReached?: boolean;
   readonly lastSequence: number;
@@ -214,7 +219,7 @@ export type UiResultEvent =
   | (UiResultEventBase & { readonly type: 'progress'; readonly totalRowCount: number })
   | (UiResultEventBase & { readonly type: 'complete'; readonly totalRowCount: number; readonly message?: string; readonly limitReached?: boolean })
   | (UiResultEventBase & { readonly type: 'empty'; readonly message?: string })
-  | (UiResultEventBase & { readonly type: 'error'; readonly message: string })
+  | (UiResultEventBase & { readonly type: 'error'; readonly message: string; readonly errorDetails?: DatabaseErrorDetails })
   | (UiResultEventBase & { readonly type: 'cancelled'; readonly totalRowCount: number; readonly message?: string });
 
 export type UiAction =
@@ -235,7 +240,7 @@ export type UiAction =
   | { readonly type: 'execution/event'; readonly event: UiResultEvent }
   | { readonly type: 'execution/statement-status'; readonly sourceId: string; readonly executionId: string; readonly statementIndex: number; readonly status: UiStatementExecutionStatus; readonly resultSetId?: string; readonly sql?: string; readonly message?: string }
   | { readonly type: 'execution/batch-complete'; readonly sourceId: string; readonly executionId: string; readonly status: Exclude<UiExecutionStatus, 'idle' | 'running'>; readonly statementCount?: number; readonly completedStatements: number; readonly message?: string }
-  | { readonly type: 'execution/stream-failed'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly message: string }
+  | { readonly type: 'execution/stream-failed'; readonly sourceId: string; readonly executionId: string; readonly resultSetId: string; readonly message: string; readonly errorDetails?: DatabaseErrorDetails }
   | {
     readonly type: 'results/hydrate';
     readonly sourceId: string;

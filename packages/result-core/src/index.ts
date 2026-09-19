@@ -51,7 +51,12 @@ export type {
   ResultFilterQuery,
 } from './operations';
 export { applyPortableQueryEvent, emptyPortableQueryResult } from './queryState';
-export type { PortableQueryEvent, PortableQueryExecutionMode, PortableQueryResultState } from './queryState';
+export type {
+  PortableDatabaseErrorDetails,
+  PortableQueryEvent,
+  PortableQueryExecutionMode,
+  PortableQueryResultState,
+} from './queryState';
 export {
   collectFullSpoolRows,
   COPY_SPOOL_BATCH_SIZE,

@@ -91,6 +91,31 @@ describe('shared VS Code Result Panel adapter', () => {
             totalRowCount: 0,
         });
 
+        // Backend diagnostics survive normalization, and malformed payloads are
+        // dropped instead of reaching the shared store.
+        expect(normalizeSharedResultSet({
+            data: [],
+            columns: [],
+            isError: true,
+            message: 'relation "MISSING" does not exist',
+            errorDetails: { code: '42P01', severity: 'ERROR', detail: 'Missing relation.', hint: 'Check the name.' },
+        })).toMatchObject({
+            isError: true,
+            errorDetails: { code: '42P01', severity: 'ERROR', detail: 'Missing relation.', hint: 'Check the name.' },
+        });
+        expect(normalizeSharedResultSet({
+            data: [],
+            columns: [],
+            isError: true,
+            errorDetails: { code: 42, detail: null },
+        })?.errorDetails).toBeUndefined();
+        expect(normalizeSharedResultSet({
+            data: [],
+            columns: [],
+            isError: true,
+            errorDetails: 'not-an-object',
+        })?.errorDetails).toBeUndefined();
+
         const columns = [{ name: 'id' }, { name: 'label' }];
         const rows = [[2, 'Beta'], [1, 'Alpha'], [3, 'Beta']];
         expect(displaySharedRows(rows, columns, 'alpha', [])).toEqual([[1, 'Alpha']]);

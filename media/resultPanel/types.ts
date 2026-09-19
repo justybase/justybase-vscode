@@ -3,6 +3,7 @@
  * Consumed by TypeScript modules under media/resultPanel/ during Phase 5 migration.
  */
 
+import type { DatabaseErrorDetails } from '@justybase/contracts';
 import type { SelectionStatsPayload } from './selectionStatsTypes.js';
 
 export type { TanStackCellContext } from '../shared/tanstackShims.js';
@@ -151,6 +152,11 @@ export interface ResultSet {
     columns: ResultSetColumn[];
     data: unknown[][];
     message?: string;
+    /**
+     * Structured backend diagnostics for a failed statement (`SQLSTATE`,
+     * severity, detail, hint) supplied by the host alongside the message.
+     */
+    errorDetails?: DatabaseErrorDetails;
     limitReached?: boolean;
     isLog?: boolean;
     isError?: boolean;

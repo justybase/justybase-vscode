@@ -9,6 +9,14 @@ import type {
 } from '@justybase/contracts';
 
 export {
+  extractDatabaseErrorDetails,
+  hasSqlStateCode,
+  isConnectionExceptionSqlState,
+  isDatabaseSqlError,
+  MAX_ERROR_DETAIL_LENGTH,
+} from './errorDetails';
+
+export {
   assertDesignerOperationSupported,
   assertDesignerPlanCurrent,
   assertDesignerPlanHasChanges,

@@ -1,3 +1,4 @@
+import type { DatabaseErrorDetails } from './databaseErrors';
 import type { QueryColumn } from './webApi';
 
 export type Awaitable<T> = T | PromiseLike<T>;
@@ -78,6 +79,11 @@ export interface ExecutionFailure {
   message: string;
   cause: unknown;
   kind?: 'timeout' | 'cancellation' | 'cleanup' | 'backend' | 'observer';
+  /**
+   * Safe, serialisable backend diagnostics (SQLSTATE, severity, detail, hint).
+   * Present only when the failure chain carries structured database fields.
+   */
+  details?: DatabaseErrorDetails;
 }
 
 export interface ExecutionStatementSummary {

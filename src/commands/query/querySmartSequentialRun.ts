@@ -23,6 +23,8 @@ import {
     formatAccessFailureMessage,
     presentAccessError,
 } from '../../utils/accessErrorHandling';
+import type { DatabaseErrorDetails } from '@justybase/contracts';
+import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
@@ -79,6 +81,7 @@ function buildQueryErrorResult(
     sql: string | undefined,
     message: string,
     databaseKind?: string,
+    errorDetails?: DatabaseErrorDetails,
 ) {
     const userMessage = formatAccessFailureMessage(message, { databaseKind, sql }) ?? message;
     return {
@@ -87,6 +90,7 @@ function buildQueryErrorResult(
         message: userMessage,
         isError: true,
         sql,
+        ...(errorDetails === undefined ? {} : { errorDetails }),
     };
 }
 
@@ -188,14 +192,14 @@ export async function runSmartSequentialQuery(
             ...(continueOnError
             ? {
                 continueOnError: true,
-                onQueryError: (queryIndex, sql, errorMessage) => {
+                onQueryError: (queryIndex, sql, errorMessage, errorDetails) => {
                     void presentAccessError(errorMessage, {
                         databaseKind,
                         sql: queries[queryIndex] ?? sql,
                         operation: 'SQL execution',
                     });
                     resultPanelProvider.updateResults(
-                        [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage, databaseKind)],
+                        [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage, databaseKind, errorDetails)],
                         sourceUri,
                         true,
                     );
@@ -362,6 +366,7 @@ export async function runSmartSequentialQuery(
                     queriesForError.length === 1 ? queriesForError[0] : undefined,
                     msg,
                     databaseKind,
+                    extractDatabaseErrorDetails(err),
                 )],
                 sourceUri,
                 true,

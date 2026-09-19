@@ -9,6 +9,7 @@ import type {
 import {
   AsyncStateView,
   DataGrid,
+  ErrorDiagnostics,
   ResultOutputTabs,
   ResultTabs,
   ResultViewToolbar,
@@ -170,6 +171,7 @@ export function ResultPanel({
       {activeResult && <div className="ui-result-controls"><ResultViewToolbar columns={activeResult.columns} view={activeResult.view} onChange={onViewChange} onAggregate={onAggregate} onGroup={onGroup} onPivot={onPivot} activeAnalysis={activeAnalysis} analysisBusy={analysisBusy} onRefresh={onRefresh} onCopy={onCopy} onCopyAll={onCopyAll} copyingAll={copyingAll} copyAllLabel={copyAllLabel} onExport={onExport} columnMenu={showColumnMenu ? <DataGridColumnMenu columns={activeResult.columns} view={activeResult.view} onViewChange={onViewChange} /> : undefined} />
         {exportFormat !== undefined && onExportFormatChange && <label className="ui-export-format">Format<select aria-label={exportFormatAriaLabel} value={exportFormat} onChange={event => onExportFormatChange(event.target.value)}><option value="csv">CSV</option><option value="csv.gz">CSV gzip</option><option value="csv.zst">CSV zstd</option><option value="json">JSON</option><option value="xml">XML</option><option value="sql">SQL INSERT</option><option value="markdown">Markdown</option><option value="xlsx">XLSX</option><option value="xlsb">XLSB</option></select></label>}
       </div>}
+      {activeResult?.status === 'error' && activeResult.errorDetails && <ErrorDiagnostics details={activeResult.errorDetails} />}
       {activeResult?.limitReached === true && <div className="ui-result-limit-banner" role="alert">Row limit reached — showing the first {activeResult.totalRowCount.toLocaleString()} rows. Refine filters or use Export for the full spool.</div>}
       {activeResult && (resultAnalysis || resultAnalysisLoading || resultAnalysisError) && <ResultAnalysisPanel sourceId={activeResult.sourceId} resultSetId={activeResult.resultSetId} table={resultAnalysis} loading={resultAnalysisLoading} error={resultAnalysisError} onClose={onCloseResultAnalysis ?? (() => undefined)} onCopySelection={onCopyAnalysisSelection ?? onCopySelection} onViewCell={onViewAnalysisCell ?? onViewCell} />}
       <AsyncStateView state={resultState} message={resultMessage} emptyLabel="No rows to display." loadingLabel={loadingLabel}>
