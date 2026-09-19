@@ -36,7 +36,7 @@ describe('Electron product lifecycle', () => {
     expect(deepLinkToSqlPath('justybase://open?path=%2Ftmp%2F..%2Fx.sql')).toBe(path.normalize('/x.sql'));
     expect(deepLinkToSqlPath(`justybase://open?path=%2F${'a'.repeat(5000)}.sql`)).toBeUndefined();
     expect(deepLinkToSqlPath('justybase://open?path=%2Ftmp%2Fbad%00.sql')).toBeUndefined();
-    expect(deepLinkToSqlPath('justybase://open?path=%2Ftmp%2Fx.sql&path=%2Fetc%2Fy.sql')).toBe('/tmp/x.sql');
+    expect(deepLinkToSqlPath('justybase://open?path=%2Ftmp%2Fx.sql&path=%2Fetc%2Fy.sql')).toBe(path.normalize('/tmp/x.sql'));
     expect(deepLinkToSqlPath('JUSTYBASE://open?path=%2Ftmp%2Fupper.sql')).toBe(path.normalize('/tmp/upper.sql'));
   });
 
@@ -67,8 +67,8 @@ describe('Electron product lifecycle', () => {
   it('queues pre-startup file opens without duplicates and drains once', () => {
     const queue = createLaunchPathQueue();
     expect(queue.size).toBe(0);
-    queue.push(['/tmp/a.sql', '/tmp/b.sql']);
-    queue.push(['/tmp/b.sql', 42 as never, null as never]);
+    queue.push([path.normalize('/tmp/a.sql'), path.normalize('/tmp/b.sql')]);
+    queue.push([path.normalize('/tmp/b.sql'), 42 as never, null as never]);
     expect(queue.size).toBe(2);
     expect(queue.drain()).toEqual([path.normalize('/tmp/a.sql'), path.normalize('/tmp/b.sql')]);
     expect(queue.size).toBe(0);
