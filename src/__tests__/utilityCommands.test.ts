@@ -21,6 +21,7 @@ jest.mock('vscode', () => ({
         setStatusBarMessage: jest.fn(() => ({
             dispose: jest.fn()
         })),
+        createInputBox: jest.fn(),
         showWarningMessage: jest.fn(),
         showErrorMessage: jest.fn(),
         showInformationMessage: jest.fn(),
@@ -81,6 +82,22 @@ describe('commands/schema/utilityCommands', () => {
     let mockDeps: SchemaCommandsDependencies;
     let mockHistoryManager: { clearHistory: jest.Mock };
     let quickFilter: string | undefined;
+    let liveFilterInput: {
+        value: string;
+        title?: string;
+        prompt?: string;
+        placeholder?: string;
+        ignoreFocusOut?: boolean;
+        show: jest.Mock;
+        hide: jest.Mock;
+        dispose: jest.Mock;
+        onDidChangeValue: jest.Mock;
+        onDidAccept: jest.Mock;
+        onDidHide: jest.Mock;
+    };
+    let onLiveFilterChanged: ((value: string) => void) | undefined;
+    let onLiveFilterAccepted: (() => void) | undefined;
+    let onLiveFilterHidden: (() => void) | undefined;
     let mockFavoritesManager: {
         toggleFavorite: jest.Mock;
         addFolder: jest.Mock;
@@ -100,6 +117,7 @@ describe('commands/schema/utilityCommands', () => {
     const mockedShowErrorMessage = vscode.window.showErrorMessage as jest.Mock;
     const mockedShowInformationMessage = vscode.window.showInformationMessage as jest.Mock;
     const mockedShowInputBox = vscode.window.showInputBox as jest.Mock;
+    const mockedCreateInputBox = vscode.window.createInputBox as jest.Mock;
     const mockedShowQuickPick = vscode.window.showQuickPick as jest.Mock;
     const mockedShowTextDocument = vscode.window.showTextDocument as jest.Mock;
     const mockedOpenTextDocument = vscode.workspace.openTextDocument as jest.Mock;
@@ -117,6 +135,28 @@ describe('commands/schema/utilityCommands', () => {
     beforeEach(() => {
         registeredCommands = new Map();
         quickFilter = undefined;
+        onLiveFilterChanged = undefined;
+        onLiveFilterAccepted = undefined;
+        onLiveFilterHidden = undefined;
+        liveFilterInput = {
+            value: '',
+            show: jest.fn(),
+            hide: jest.fn(),
+            dispose: jest.fn(),
+            onDidChangeValue: jest.fn((handler: (value: string) => void) => {
+                onLiveFilterChanged = handler;
+                return { dispose: jest.fn() };
+            }),
+            onDidAccept: jest.fn((handler: () => void) => {
+                onLiveFilterAccepted = handler;
+                return { dispose: jest.fn() };
+            }),
+            onDidHide: jest.fn((handler: () => void) => {
+                onLiveFilterHidden = handler;
+                return { dispose: jest.fn() };
+            }),
+        };
+        mockedCreateInputBox.mockReturnValue(liveFilterInput);
         mockedRegisterCommand.mockImplementation((command: string, handler: Function) => { // eslint-disable-line @typescript-eslint/no-unsafe-function-type
             registeredCommands.set(command, handler);
             return { dispose: jest.fn() };
@@ -253,15 +293,15 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.favorites.includeNow', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.refreshSchemaSelection', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealAccessFile', expect.any(Function));
-            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.quickFilter', expect.any(Function));
-            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.clearQuickFilter', expect.any(Function));
-            expect(disposables).toHaveLength(22);
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.filter', expect.any(Function));
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.clearFilter', expect.any(Function));
+            expect(disposables).toHaveLength(20);
         });
 
         it('should return disposables for cleanup', () => {
             const disposables = registerUtilityCommands(mockDeps);
 
-            expect(disposables).toHaveLength(22);
+            expect(disposables).toHaveLength(20);
             expect(disposables[0].dispose).toBeDefined();
             expect(disposables[1].dispose).toBeDefined();
             expect(disposables[2].dispose).toBeDefined();
@@ -282,49 +322,43 @@ describe('commands/schema/utilityCommands', () => {
             expect(disposables[17].dispose).toBeDefined();
             expect(disposables[18].dispose).toBeDefined();
             expect(disposables[19].dispose).toBeDefined();
-            expect(disposables[20].dispose).toBeDefined();
-            expect(disposables[21].dispose).toBeDefined();
         });
 
-        it('registers a local quick filter without invoking schema search', async () => {
-            const handler = getCommandHandler('netezza.schema.quickFilter');
-            mockedShowInputBox.mockResolvedValue('  orders  ');
+        it('registers one local schema filter without invoking schema search', async () => {
+            const handler = getCommandHandler('netezza.schema.filter');
 
             await handler();
 
+            expect(mockedCreateInputBox).toHaveBeenCalledTimes(1);
+            expect(liveFilterInput.prompt).toBe('Filter loaded schema objects by name (local only)');
+            onLiveFilterChanged?.('  orders  ');
+            onLiveFilterAccepted?.();
+            onLiveFilterHidden?.();
+
             expect(mockDeps.schemaProvider.setQuickFilter).toHaveBeenCalledWith('orders');
-            expect(mockDeps.schemaTreeView.description).toBe('(Quick: orders)');
-            expect(mockedExecuteCommand).toHaveBeenCalledWith(
-                'setContext',
-                'justybase.schema.quickFilterActive',
-                true,
-            );
+            expect(liveFilterInput.hide).toHaveBeenCalledTimes(1);
+            expect(mockDeps.schemaTreeView.description).toBe('(Filter: orders)');
         });
 
-        it('clears only the local quick filter and preserves the other description', async () => {
+        it('clears the local schema filter', async () => {
             quickFilter = 'orders';
-            (mockDeps.schemaProvider.getFilter as jest.Mock).mockReturnValue('sales');
-            const handler = getCommandHandler('netezza.schema.clearQuickFilter');
+            const handler = getCommandHandler('netezza.schema.clearFilter');
 
             await handler();
 
             expect(mockDeps.schemaProvider.setQuickFilter).toHaveBeenCalledWith(undefined);
-            expect(mockDeps.schemaTreeView.description).toBe('(Filter: sales)');
-            expect(mockedExecuteCommand).toHaveBeenCalledWith(
-                'setContext',
-                'justybase.schema.quickFilterActive',
-                false,
-            );
+            expect(mockDeps.schemaTreeView.description).toBe('');
         });
 
-        it('leaves the quick filter unchanged when the input is cancelled', async () => {
+        it('leaves the schema filter unchanged when the input is cancelled', async () => {
             quickFilter = 'orders';
-            const handler = getCommandHandler('netezza.schema.quickFilter');
-            mockedShowInputBox.mockResolvedValue(undefined);
+            const handler = getCommandHandler('netezza.schema.filter');
 
             await handler();
+            onLiveFilterChanged?.('sales');
+            onLiveFilterHidden?.();
 
-            expect(mockDeps.schemaProvider.setQuickFilter).not.toHaveBeenCalled();
+            expect(mockDeps.schemaProvider.setQuickFilter).toHaveBeenLastCalledWith('orders');
             expect(quickFilter).toBe('orders');
         });
     });
