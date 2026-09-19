@@ -2,7 +2,7 @@
   "name": "@justybase/api-client",
   "private": true,
   "version": "3.17.14",
-  "description": "Shared HTTP and WebSocket workspace transport for Web and Electron.",
+  "description": "Shared HTTP and WebSocket workspace transport for browser and embedded hosts.",
   "license": "Apache-2.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -262,7 +262,7 @@ jobs:
       - name: Run complete root unit test suite with coverage
         run: npm run test:coverage
 
-      - name: Run UI package, Web, and Electron coverage suites
+      - name: Run UI package and Web coverage suites
         run: npm run test:coverage:ui
 
       - name: Verify semantic token latency without coverage instrumentation
@@ -282,9 +282,6 @@ jobs:
 
       - name: Run web workspace tests
         run: npm run test:web
-
-      - name: Run Electron shell tests
-        run: npm run test:electron
 
   extension-host-result-panel:
     name: Extension Host Result Panel Gate

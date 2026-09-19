@@ -595,7 +595,7 @@ function processIndexedRows(
   return indexed;
 }
 
-/** Shared filtering/sorting semantics used by the Electron shell and tests. */
+/** Shared filtering/sorting semantics used by the Web/VS Code shells and tests. */
 export function processDataGridRows(
   columns: readonly DataGridColumn[],
   rows: readonly (readonly unknown[])[],

@@ -1,7 +1,7 @@
 # Architecture overview
 
-JustyBase is a layered monorepo with VS Code, Web/API, and Electron
-development/test products plus shared contract and presentation surfaces.
+JustyBase is a layered monorepo with VS Code and Web/API products plus shared
+contract and presentation surfaces.
 
 Cross-cutting architecture debt, enforcement work, and measurable exit criteria
 are tracked in the
@@ -10,23 +10,20 @@ describes the intended structure; the automated architecture check determines
 which parts are currently enforced.
 
 The [refactoring plan](REFACTORING_PLAN.md) orders further extraction for
-production VS Code, the existing web/API, and the Electron development/test
-adapter. It does not replace the quality backlog.
+production VS Code and the existing web/API. It does not replace the quality
+backlog.
 
 The current dependency map, contract audit, service proposal and ordered
 migration gates are in [Shared-code migration preparation](SHARED_CODE_MIGRATION.md).
-The Web/Electron Dockyard composition boundary, result-grid decision, and
-manual/browser acceptance checklist are documented in
-[Dockyard Web and Electron workspace](DOCKYARD_WEB_ELECTRON.md).
+The Web Dockyard composition boundary, result-grid decision, and
+manual/browser acceptance checklist are documented in [Web Editor](WEB_EDITOR.md).
 The SQL boundary is now implemented as a platform-neutral Netezza core:
 `@justybase/sql-core` owns the lexer, parser, semantic validator, incremental
 validation primitives, authoring helpers, quality rules and validation model.
 Desktop and API adapters compose metadata, transport, editor lifecycle and
 incremental-cache state around that core while preserving their existing public
 shapes. Public results and wire contracts remain unchanged. The R9 working
-tree now contains non-empty `ui-core`, `ui-react`, and Electron
-development/test packages; the Electron shell is not a production installer
-or release target.
+tree now contains non-empty `ui-core` and `ui-react` packages.
 
 Desktop SQL compatibility facades consume named `sql-core` subpaths for the
 parser base/rules, Netezza parser/lexer/identifier patterns and source scanning.
@@ -45,11 +42,11 @@ Arrows below mean “imports”; product composition roots select and inject
 implementations. A pure engine never imports an adapter or driver.
 
 ```text
-VS Code adapter / API backend / Electron main backend
+VS Code adapter / API backend
     -> Node database-runtime / dialect-<kind>-runtime -> driver or Node database API
     -> pure SQL / metadata / result engines -> contracts
-Desktop webview / Web / Electron React renderer -> `ui-react` -> pure engines and contracts
-Web / Electron SQL editor -> `ui-monaco` -> `sql-core` authoring API
+Desktop webview / Web React renderer -> `ui-react` -> pure engines and contracts
+Web SQL editor -> `ui-monaco` -> `sql-core` authoring API
 React renderer -> `@justybase/api-client` -> API backend
 ```
 
@@ -66,7 +63,7 @@ React renderer -> `@justybase/api-client` -> API backend
 | Secrets, filesystem, transport, editor integration and lifecycle | product adapter |
 | Shared React presentation and tokens | `@justybase/ui-react`; effects enter through product ports |
 | Monaco editor/LSP registration and marker mapping | `@justybase/ui-monaco`; transport and lifecycle remain adapter-owned |
-| Product-specific DOM/webview/window integration | VS Code, Web, or Electron adapter |
+| Product-specific DOM/webview/window integration | VS Code or Web adapter |
 
 These are ownership decisions, not a claim that every future engine already
 exists. `designer-core`, `result-core`, and `metadata-core` already own pure
@@ -104,16 +101,6 @@ desktop dialect and MCP composition roots use the exported factory. The
 compatibility exports in `@justybase/database-runtime` re-export this surface
 without importing the driver themselves.
 
-The Electron main process hosts/manages the embedded backend; its React
-renderer uses the same `@justybase/api-client` transport as Web after
-main-owned authentication. Backend startup, authentication, port selection and
-shutdown belong to the Electron composition root. Electron only supplies its
-transport policy (`same-origin` credentials and renderer-specific error
-wording); it does not fork HTTP, CSRF, download, event validation, or reconnect
-logic. The shared package has no React, Node, VS Code, or Electron dependency,
-and all product-specific composition remains in the Web provider or Electron
-adapter.
-
 ## Shared API transport boundary
 
 `@justybase/api-client` is the single client-side owner for the authenticated
@@ -124,12 +111,9 @@ Its dependency direction is `api-client -> contracts`; browser globals and
 injected `fetch`/`WebSocket` are ports rather than framework dependencies.
 
 `apps/web/src/api.ts` intentionally contains only the React context/provider
-and the compatibility factory export. `apps/electron/src/renderer/api.ts`
-contains only Electron's transport configuration and compatibility types. This
-keeps the two composition roots free to differ in credentials and wording while
-making route additions and protocol fixes one shared change. The package has
-isolated transport tests, while the Web and Electron suites continue to test
-their adapter-specific contracts.
+and the compatibility factory export. Route additions and protocol fixes stay
+in the shared client package, while Web-specific composition remains in the
+Web provider.
 
 ## Runtime boundaries
 
@@ -275,9 +259,6 @@ alias resolution never silently falls back to a less strict configuration.
 | `media` | `media` | `contracts`, `shared`, `desktop`, `media` |
 | `api` | `apps/api/src` | `contracts`, `shared`, `api` |
 | `web` | `apps/web/src` | `contracts`, `shared`, `web` |
-| `electron-main` | `apps/electron/src/main` | `contracts`, `shared`, `api`, `electron-main` |
-| `electron-preload` | `apps/electron/src/preload` | `contracts`, `electron-preload` |
-| `electron-renderer` | `apps/electron/src/renderer` | `contracts`, `shared`, `electron-renderer` |
 | `companions` | `extensions/*/src` | `contracts`, `shared`, `companions` |
 
 The direction table is intentionally stricter than the current runtime graph.
@@ -313,17 +294,17 @@ fail-closed gate.
 Register each future pure dialect package in that list when its first
 implementation is added. Pure packages cannot import a
 shared Node runtime, even through an alias. External imports require an exact
-approved specifier; Node built-ins (bare and `node:`), VS Code, LSP libraries,
-and Electron are rejected. `ui-react` is the deliberate pure presentation
+approved specifier; Node built-ins (bare and `node:`), VS Code, and LSP
+libraries are rejected. `ui-react` is the deliberate pure presentation
 exception: its exact React import is documented in
 `quality/architecture-rules.json`; it still cannot import Node, VS Code,
-Electron, database runtimes, or drivers. `ui-monaco` is a separate pure
+database runtimes, or drivers. `ui-monaco` is a separate pure
 browser package whose only editor dependency is the explicitly approved
-`monaco-editor`; it does not import React, Electron, VS Code, or database
+`monaco-editor`; it does not import React, VS Code, or database
 runtimes. This also rejects existing or new database drivers without relying
 on a driver-name blacklist.
-Shared packages reject `vscode` and `electron`; Node runtimes may use Node and
-drivers. Companions may import their own implementation, shared contracts and
+Shared packages reject `vscode`; Node runtimes may use Node and drivers.
+Companions may import their own implementation, shared contracts and
 shared engines/runtime helpers, but cannot import another companion directly.
 
 `packageDependencies` further restricts cross-package edges inside `shared`.
@@ -334,7 +315,7 @@ subject to cycle checks.
 
 `browserSources` starts a value-import traversal from web and media sources,
 including worker modules. Every reachable external import must appear in the
-exact `browserExternalImports` list; Node built-ins, VS Code and Electron remain
+exact `browserExternalImports` list; Node built-ins and VS Code remain
 forbidden even if listed. Importing a shared Node runtime is also forbidden,
 including through aliases or re-export facades. Explicit type-only references
 are erased for this traversal but remain in the full dependency/cycle graph.

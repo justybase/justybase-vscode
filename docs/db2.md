@@ -104,11 +104,11 @@ npm run db2:drop-live-fixture
 
 Root extension ships editor assets; the Db2 VSIX ships `ibm_db` + providers. Install order: core then Db2 pack (see [INTEGRATION_STEPS.md](./INTEGRATION_STEPS.md)).
 
-## VS Code/Electron compatibility
+## VS Code native-runtime compatibility
 
 The packaged `ibm_db` binding targets **Node-API 8**, so the VSIX is not tied
-to a particular Electron ABI. Release CI loads the native driver from an
-Extension Host on the minimum supported VS Code (`1.103.2`), current Stable,
+to a particular host ABI. Release CI loads the native driver from an Extension
+Host on the minimum supported VS Code (`1.103.2`), current Stable,
 and Insiders. Add `DB2_VSCODE_RUNTIME_LIVE=true` to make the same test perform
 `SELECT 1 FROM SYSIBM.SYSDUMMY1` using `DB2_LIVE_TEST_*`; the compatibility
 gate intentionally validates only native loading.

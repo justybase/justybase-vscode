@@ -25,9 +25,8 @@ The production Web entrypoint always mounts `DockyardWorkspace`; the retired
 `SharedWebWorkspace` composition is not an active Web path and is retained only
 as a component-test fixture for portable reducer and presentation tests. There
 is no `VITE_UI_MODE` runtime switch and no shared-renderer rollback path. Shell
-composition is owned by [Dockyard Web and Electron](DOCKYARD_WEB_ELECTRON.md)
-and the [cross-product UI parity matrix](CROSS_PRODUCT_UI_PARITY.md); this audit
-covers feature parity inside that shell, not shell selection.
+composition is owned by the Web Dockyard implementation; this audit covers
+feature parity inside that shell, not shell selection.
 
 The shipped shell owns durable query documents, per-document execution and
 result identities, multi-statement status/cancellation, typed result export,
@@ -40,7 +39,7 @@ and runtime handles.
 
 Notebook, chart, tuning, and other host-specific database operations remain
 explicit capability gaps rather than implied parity. VS Code keeps its own
-renderer and host lifecycle; Web and Electron share the React renderer.
+renderer and host lifecycle; Web uses the shared React renderer.
 
 ---
 
@@ -151,7 +150,7 @@ still behind its implemented functionality; see the quality roadmap.
 > through JSON-RPC and Monaco markers. Core/API coverage lives in
 > `apps/api/tests/sqlCoreFeatures.test.ts` and the shared browser gate.
 
-> **D1 authoring parity refresh 2026-09-12** — the shared Web/Electron authoring path now
+> **D1 authoring parity refresh 2026-09-12** — the shared Web authoring path now
 > exposes the complete connection-profile dialect catalog, live completion checks for
 > PostgreSQL, Db2, ClickHouse, Oracle and MSSQL, and an Extension Host `Definition Provider`
 > check for CTE navigation. Deterministic shared quick fixes are available through the same
@@ -178,7 +177,7 @@ still behind its implemented functionality; see the quality roadmap.
 
 ---
 
-## D3 – Results Grid (shared Web/Electron renderer + desktop compatibility)
+## D3 – Results Grid (shared Web renderer + desktop compatibility)
 
 | Feature | Desktop | Web | Status | Notes |
 | --- | --- | --- | --- | --- |
@@ -195,17 +194,17 @@ still behind its implemented functionality; see the quality roadmap.
 | Column charts / range | ✅ `rangeChart.ts`, mini-chart cards (`analysis.ts`) | ❌ | L | |
 | Context menu | ✅ deep desktop menu | ✅ value/row formats, filter, sort, detail/edit | 🟡 | Desktop additionally exposes database- and analysis-specific actions. |
 | Row detail / full row viewer | ✅ `rowView.ts` | ✅ | ✅ | Web renders all fields for the loaded row. |
-| Large-data virtualization | ✅ disk-backed 200k+ | ✅ shared virtualized page + server spool | 🟡 | Web and Electron use the same React/TanStack renderer and virtualized page contract; VS Code keeps its disk-backed DOM renderer. |
+| Large-data virtualization | ✅ disk-backed 200k+ | ✅ shared virtualized page + server spool | 🟡 | Web uses the React/TanStack renderer and virtualized page contract; VS Code keeps its disk-backed DOM renderer. |
 | Result tabs / multi-query panel | ✅ tabs + container | ✅ editor and statement result tabs | ✅ | Results and statement status are retained per editor tab. |
-| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ shared Web/Electron | 🟡 | Page size, sort, filters, visibility, pinning, order, and both scroll axes are restored by stable result identity; persisted scroll geometry carries the compact row height and legacy anchors migrate from the old 30px layout. |
+| Grid state persistence (`localStorage`) | ✅ `persistence.ts` | ✅ shared Web | 🟡 | Page size, sort, filters, visibility, pinning, order, and both scroll axes are restored by stable result identity; persisted scroll geometry carries the compact row height and legacy anchors migrate from the old 30px layout. |
 
 ### D3 deep-dive — current web grid and remaining backlog
 
 Key architecture fact: **VS Code desktop is a DOM grid with a Node host**; Web and
-Electron use the same React/TanStack grid over an async REST/WS spool. Full-result
+Web uses the React/TanStack grid over an async REST/WS spool. Full-result
 aggregation and grouping already execute against the API SQLite spool; client features
 operate on the loaded page. Public request/response types remain additive and the
-Web/Electron renderer is shared without forcing the VS Code webview onto React.
+Web renderer is shared without forcing the VS Code webview onto React.
 
 | # | Feature (desktop ref) | Web approach | Effort |
 | --- | --- | --- | --- |
@@ -228,18 +227,18 @@ never re-type existing fields.
 
 ### Architecture decision (updated 2026-09-12)
 
-**One renderer across VS Code + Web + Electron remains out of scope; Web and Electron
-share one renderer.**
+**One renderer across VS Code and Web remains out of scope; the products retain
+their appropriate host boundaries.**
 
 - VS Code grid (`media/resultPanel`) is vanilla-DOM + disk-backed, wired to the VS Code host
-  (`protocol.ts`); Web/Electron use a React/TanStack renderer with an async REST/WS spool.
-- Web and Electron consume the same `@justybase/ui-react` `DataGrid` and shared view,
+  (`protocol.ts`); Web uses a React/TanStack renderer with an async REST/WS spool.
+- Web consumes the shared `@justybase/ui-react` `DataGrid` and shared view,
   clipboard, context-action, and viewport contracts. This gives the two application shells
   identical behavior while preserving the low-risk VS Code renderer boundary.
 - If pure logic sharing is ever wanted, extract it into a framework-agnostic
   `@justybase/grid-core` (formatting, aggregation math, clipboard generators, pivot/group SQL,
   edit-UPDATE builder) — additive, web-first, desktop adopts later. This remains a **follow-up
-  opportunity**, not a prerequisite for Web/Electron parity.
+  opportunity**, not a prerequisite for Web/VS Code parity.
 
 ---
 
@@ -252,7 +251,7 @@ share one renderer.**
 | Insert object/column name into editor | ✅ | ✅ | ✅ | `SchemaTree.insertNode`. |
 | Drag & drop into editor | ✅ | ✅ (basic) | 🟡 | |
 | Inspector (columns, PK/FK, comments) | ✅ | ✅ `InspectorPanel` | ✅ | |
-| Top 1000 / Copy Name / Copy DDL | ✅ | ✅ common context menu | 🟡 | Web and Electron use the same core Schema menu vocabulary; provider-specific desktop generators still have broader DDL coverage. |
+| Top 1000 / Copy Name / Copy DDL | ✅ | ✅ common context menu | 🟡 | Web and VS Code use the same core Schema menu vocabulary; provider-specific desktop generators still have broader DDL coverage. |
 | Favorites / recent objects | ✅ `favoritesManager`, `schemaRecentObjects` | ✅ local favorites | 🟡 | Favorites exist; desktop has deeper recent-object integration. |
 | Refresh/invalidate metadata | ✅ | ✅ | ✅ | Successful guarded schema writes invalidate the scoped API metadata/LSP cache; SchemaTree Refresh clears the loaded tree and reruns an active search. |
 

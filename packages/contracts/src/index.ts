@@ -1,6 +1,5 @@
 export type { DatabaseKind, DatabaseCapabilities, DatabaseDialect, DatabaseKindOption, DatabaseSqlAuthoring, DatabaseSqlFunctionSignature, DatabaseSqlValidationProfile, DatabaseSqlTypeSpec, DatabaseSqlLintIssue, DatabaseSqlQualityRule, DatabaseSqlFormatterProfile, DatabaseSqlParsingProfile, DatabaseSqlStaticAssetProfile } from './database';
 export { DEFAULT_DATABASE_KIND, DATABASE_KIND_DISPLAY_NAMES, DATABASE_KIND_OPTIONS, SUPPORTED_DATABASE_KINDS, createDatabaseCapabilities, createDatabaseDialectTraits, normalizeDatabaseKind, tryNormalizeDatabaseKind } from './database';
-export { CREDENTIAL_PROMPT_CHANNEL, MENU_ACTION_CHANNEL } from './electronProtocol';
 export type { DatabaseConnection, DatabaseCommand, DatabaseDataReader } from './database';
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor } from './database';
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './database';
@@ -16,48 +15,23 @@ export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnIn
 export type { ConnectionDetails, DatabaseTunnelConfig, NamedConnectionDetails } from './connectionDetails';
 export {
   UI_CONTRACT_VERSION,
-  ELECTRON_MENU_ACTIONS,
-  HARD_SQL_FILE_MAX_BYTES,
-  MAX_SQL_FILE_PATH_LENGTH,
-  SOFT_SQL_FILE_WARN_BYTES,
-  SQL_FILE_EXTENSION,
   isCapabilityDescriptor,
-  isElectronMenuMessage,
-  isElectronSqlFile,
-  isElectronSqlFilePath,
-  isElectronSqlSaveResult,
   isUiAuthState,
-  isUiCapabilitySnapshot,
   isRedactedConnectionProfile,
 } from './ui';
 export type {
   CapabilityDescriptor,
   CapabilityStatus,
-  ElectronMenuAction,
-  ElectronMenuMessage,
-  ElectronRendererApi,
-  ElectronSqlFile,
-  ElectronSqlSaveResult,
   OpaqueCredentialRequestId,
-  UiConnectionProfileInput,
   PersistenceEnvelope,
   PersistenceScope,
   RedactedConnectionProfile,
   UiAuthState,
-  UiCapabilitySnapshot,
   UiIdentity,
   UiMode,
   UiOperationState,
   UiOperationStatus,
-  UiPreloadAuthRequest,
-  UiPreloadCapabilitiesRequest,
-  UiPreloadConnectionsRequest,
-  UiPreloadCredentialRequest,
-  UiPreloadRequest,
-  UiPreloadResponse,
-  UiRendererBootstrap,
 } from './ui';
-export { isUiConnectionProfileInput } from './ui';
 export type {
   ConnectionQueryResult,
   ConnectionSummary,

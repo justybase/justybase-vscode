@@ -67,8 +67,7 @@
   },
   "browserSources": [
     "media/**",
-    "apps/web/src/**",
-    "apps/electron/src/renderer/**"
+    "apps/web/src/**"
   ],
   "browserExternalImports": [
     "react",
@@ -122,7 +121,7 @@
     {
       "source": "packages/ui-react/src/dataGrid.tsx",
       "target": "react",
-      "reason": "The shared result grid is a React presentation component consumed by web, Electron and VS Code adapters.",
+      "reason": "The shared result grid is a React presentation component consumed by Web and VS Code adapters.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },
@@ -136,7 +135,7 @@
     {
       "source": "packages/ui-react/src/resultPanel.tsx",
       "target": "react",
-      "reason": "The canonical result panel composition is a React presentation component shared by Web and Electron adapters.",
+      "reason": "The canonical result panel composition is a React presentation component consumed by the Web adapter.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },
@@ -214,21 +213,6 @@
         "apps/web/src"
       ]
     },
-    "electron-main": {
-      "sources": [
-        "apps/electron/src/main"
-      ]
-    },
-    "electron-preload": {
-      "sources": [
-        "apps/electron/src/preload"
-      ]
-    },
-    "electron-renderer": {
-      "sources": [
-        "apps/electron/src/renderer"
-      ]
-    },
     "companions": {
       "sources": [
         "extensions/*/src"
@@ -263,22 +247,6 @@
       "contracts",
       "shared",
       "web"
-    ],
-    "electron-main": [
-      "contracts",
-      "shared",
-      "api",
-      "electron-main"
-    ],
-    "electron-preload": [
-      "contracts",
-      "shared",
-      "electron-preload"
-    ],
-    "electron-renderer": [
-      "contracts",
-      "shared",
-      "electron-renderer"
     ],
     "companions": [
       "contracts",
@@ -332,10 +300,6 @@
     {
       "source": "packages/ui-react/src/**",
       "specifier": "^(?:node:|vscode|electron|@justybase/(?:database-runtime|duckdb-runtime|netezza-runtime|sqlite-runtime|web-api)(?:/|$))"
-    },
-    {
-      "layer": "electron-renderer",
-      "specifier": "^(?:node:|electron|vscode)(?:/|$)"
     }
   ],
   "exceptions": [],

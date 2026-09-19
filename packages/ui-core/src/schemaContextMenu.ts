@@ -3,7 +3,7 @@ import type { MetadataNode } from './ports';
 /**
  * Labels shared by the schema explorers and kept in the same vocabulary as
  * the VS Code Schema view commands. Host-specific components still own the
- * actual action handlers because Web and Electron have different document
+ * actual action handlers because Web and VS Code have different document
  * and clipboard boundaries.
  */
 export const SCHEMA_CONTEXT_MENU_LABELS = {
@@ -47,4 +47,3 @@ export const SCHEMA_OBJECT_CONTEXT_MENU_ORDER: readonly SchemaContextMenuLabel[]
 export function hasSchemaContextName(node: Pick<MetadataNode, 'kind'>): boolean {
   return node.kind === 'connection' || node.kind === 'database' || node.kind === 'schema' || node.kind === 'object' || node.kind === 'column';
 }
-

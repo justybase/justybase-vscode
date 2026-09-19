@@ -19,7 +19,7 @@ function urlHost(host: string): string {
 
 /**
  * Starts the existing Fastify composition once for an embedded product.
- * Electron and tests use this instead of spawning a second API process.
+ * Embedded consumers and tests use this instead of spawning a second API process.
  */
 export function createEmbeddedApiServer(configuration: ApiConfig): EmbeddedApiServer {
   let instance: FastifyInstance | undefined;

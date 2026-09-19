@@ -1,5 +1,5 @@
 /**
- * Full-spool copy helper shared by Web and Electron.
+ * Full-spool copy helper shared by Web and VS Code.
  *
  * The API keeps the complete result on disk (QuerySessionManager) and serves
  * bounded pages (MAX_PAGE_SIZE = 10_000). The grids historically copied only

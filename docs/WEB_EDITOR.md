@@ -52,11 +52,10 @@ the `ws:`/`wss:` origin from the HTTP base URL. If both are omitted, the client
 uses same-origin `/api` and WebSocket URLs. The WebSocket setting is an origin
 and the client appends `/api/ws` and `/api/lsp`.
 
-The authenticated Web workspace uses its own Dockyard composition root, just
-like the Electron renderer uses its own Dockyard composition root. The two
-products share portable state, persistence, API contracts, Monaco/result
-primitives, and the Dockyard model adapter, while each owns its DOM and
-lifecycle. There is no production `VITE_UI_MODE` switch. Web persistence keeps
+The authenticated Web workspace uses its Dockyard composition root. It shares
+portable state, persistence, API contracts, Monaco/result primitives, and the
+Dockyard model adapter with the VS Code integration boundaries, while owning
+its DOM and lifecycle. There is no production `VITE_UI_MODE` switch. Web persistence keeps
 stable, user-scoped query documents and restores their order, active document,
 connection context, and Dockyard layout; credentials, SQL result data, DOM
 nodes, and runtime handles are never written to workspace persistence.

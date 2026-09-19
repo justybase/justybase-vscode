@@ -17,7 +17,7 @@ import { registerSqlShortcuts } from './sqlShortcuts';
  *
  * The presentation package owns provider registration and protocol mapping;
  * the product adapter owns HTTP, WebSocket, authentication and lifecycle.
- * Keeping this interface structural lets Web and Electron use the same
+ * Keeping this interface structural lets Web and VS Code use the same
  * completion, diagnostics, formatting and snippet semantics without making
  * either product dependency visible to the other.
  */
@@ -41,7 +41,7 @@ export interface SqlLanguageFeatureHandle {
   dispose(): void;
 }
 
-/** Defines the standalone Monaco theme used by Web/Electron SQL editors. */
+/** Defines the standalone Monaco theme used by Web and VS Code SQL editors. */
 export function configureSqlMonacoTheme(monaco: typeof Monaco): string {
   const themeName = 'justybase-sql-dark';
   monaco.editor.defineTheme(themeName, {
