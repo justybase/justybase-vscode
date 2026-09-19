@@ -431,7 +431,9 @@ jobs:
         with:
           name: vsix-main
           path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
-          retention-days: 1
+          # Release jobs can be manually resumed or rerun days after the build.
+          # Keep the VSIX artifacts available for those delayed publication jobs.
+          retention-days: 3
 
   verify-db2-vscode-runtime:
     name: Verify DB2 runtime in VS Code ${{ matrix.vscode }}
@@ -603,7 +605,7 @@ jobs:
         with:
           name: vsix-db2-${{ matrix.target }}
           path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
-          retention-days: 1
+          retention-days: 3
 
   build-duckdb:
     name: Build DuckDB VSIX (${{ matrix.target }})
@@ -694,7 +696,7 @@ jobs:
         with:
           name: vsix-duckdb-${{ matrix.target }}
           path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
-          retention-days: 1
+          retention-days: 3
 
   build-access:
     name: Build Access VSIX (${{ matrix.target }})
@@ -785,7 +787,7 @@ jobs:
         with:
           name: vsix-access-${{ matrix.target }}
           path: extensions/access/justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
-          retention-days: 1
+          retention-days: 3
 
   build-optional:
     name: Build ${{ matrix.display_name }} VSIX
@@ -838,7 +840,7 @@ jobs:
         with:
           name: vsix-${{ matrix.id }}
           path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
-          retention-days: 1
+          retention-days: 3
 
   audit-vsix:
     name: Audit release VSIX files
@@ -1033,7 +1035,12 @@ jobs:
 
       - name: Show prepared VSIX files
         shell: bash
-        run: ls -1 artifacts
+        run: |
+          if [ -d artifacts ]; then
+            ls -1 artifacts
+          else
+            echo "The artifact download produced no artifacts directory."
+          fi
 
       - name: Publish main extension
         if: ${{ needs.validate-release.outputs.publish_core == 'true' }}
@@ -1075,18 +1082,19 @@ jobs:
             local label="$1"
             local package_path="$2"
             local attempt=1
+            local max_attempts=5
             while true; do
               if vsce publish --packagePath "$package_path" -p "$VSCE_PAT" --skip-duplicate; then
                 echo "Published ${label}."
                 return 0
               fi
 
-              if [ "$attempt" -ge 2 ]; then
+              if [ "$attempt" -ge "$max_attempts" ]; then
                 echo "Publishing ${label} failed after ${attempt} attempts." >&2
                 return 1
               fi
 
-              echo "Publishing ${label} failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              echo "Publishing ${label} failed on attempt ${attempt}/${max_attempts}. Retrying in 15 seconds..." >&2
               attempt=$((attempt + 1))
               sleep 15
             done
@@ -1249,7 +1257,23 @@ jobs:
 
       - name: Show prepared VSIX files
         shell: bash
-        run: ls -1 artifacts
+        run: |
+          if [ -d artifacts ]; then
+            ls -1 artifacts
+          else
+            echo "The artifact download produced no artifacts directory."
+          fi
+
+      - name: Verify VSIX artifacts are available
+        shell: bash
+        run: |
+          shopt -s nullglob
+          vsix_files=(artifacts/*.vsix)
+          if [ "${#vsix_files[@]}" -eq 0 ]; then
+            echo "No VSIX artifacts were downloaded. The build artifacts may have expired or were not uploaded." >&2
+            exit 1
+          fi
+          printf 'Found %s VSIX artifact(s).\n' "${#vsix_files[@]}"
 
       - name: Publish selected extensions to Open VSX
         shell: bash
@@ -1266,6 +1290,7 @@ jobs:
             local label="$1"
             local package_path="$2"
             local attempt=1
+            local max_attempts=5
 
             if [ ! -f "$package_path" ]; then
               echo "Missing package for ${label}: ${package_path}" >&2
@@ -1278,12 +1303,12 @@ jobs:
                 return 0
               fi
 
-              if [ "$attempt" -ge 2 ]; then
+              if [ "$attempt" -ge "$max_attempts" ]; then
                 echo "Publishing ${label} to Open VSX failed after ${attempt} attempts." >&2
                 return 1
               fi
 
-              echo "Publishing ${label} to Open VSX failed on attempt ${attempt}/2. Retrying in 15 seconds..." >&2
+              echo "Publishing ${label} to Open VSX failed on attempt ${attempt}/${max_attempts}. Retrying in 15 seconds..." >&2
               attempt=$((attempt + 1))
               sleep 15
             done
