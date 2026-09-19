@@ -23,7 +23,7 @@ The Schema view is a lazy tree: connection → database → schema → object gr
 2. Expand a schema and choose Tables, Views, Procedures, External Tables, or another object group.
 3. Expand an object for columns and type/nullability metadata.
 4. Use context actions to copy a qualified name, generate DDL, view/edit data, add a comment, compare schema, or add the object to favorites.
-5. Use **Quick Filter Visible Objects** in the Schema view toolbar to narrow already loaded object lists by name. This is local and does not run Schema Search; use the clear action to restore the full lists.
+5. Use **Filter Visible Objects** in the Schema view toolbar to narrow already loaded object lists by name. This is local and does not run Schema Search; use the clear action to restore the full lists.
 6. Use **Refresh Selected Metadata** after a targeted DDL change. Use **Refresh Schema** after a broad migration or catalog refresh.
 
 ## DDL and navigation
