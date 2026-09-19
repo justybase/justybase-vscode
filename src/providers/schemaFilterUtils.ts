@@ -1,5 +1,22 @@
 import type { ColumnMetadata } from '../metadata/types';
 
+/**
+ * Match the lightweight, name-only filter used by the schema tree toolbar.
+ * Unlike the full schema filter this deliberately has no glob, description,
+ * column, or metadata semantics.
+ */
+export function matchesSchemaQuickFilter(
+    filter: string | undefined,
+    objectName: string,
+): boolean {
+    const normalizedFilter = filter?.trim().toLocaleLowerCase();
+    if (!normalizedFilter) {
+        return true;
+    }
+
+    return objectName.toLocaleLowerCase().includes(normalizedFilter);
+}
+
 export function buildSchemaFilterRegex(filter: string): RegExp | undefined {
     const trimmed = filter.trim();
     if (!trimmed) {

@@ -2,12 +2,25 @@ import {
     buildSchemaFilterRegex,
     columnMatchesSchemaFilter,
     columnVisibleInSchemaFilter,
+    matchesSchemaQuickFilter,
     matchesSchemaFilter,
     tableMatchesSchemaFilter,
 } from '../providers/schemaFilterUtils';
 import type { ColumnMetadata } from '../metadata/types';
 
 describe('schemaFilterUtils', () => {
+    describe('matchesSchemaQuickFilter', () => {
+        it('matches object names case-insensitively by substring', () => {
+            expect(matchesSchemaQuickFilter(' sales ', 'FACT_SALES')).toBe(true);
+            expect(matchesSchemaQuickFilter(' sales ', 'FACT_ORDERS')).toBe(false);
+        });
+
+        it('treats an empty filter as no filter and does not interpret wildcards', () => {
+            expect(matchesSchemaQuickFilter('   ', 'ANY_OBJECT')).toBe(true);
+            expect(matchesSchemaQuickFilter('*sales*', 'FACT_SALES')).toBe(false);
+        });
+    });
+
     describe('buildSchemaFilterRegex', () => {
         it('converts glob wildcards to regex', () => {
             const regex = buildSchemaFilterRegex('*sales*');

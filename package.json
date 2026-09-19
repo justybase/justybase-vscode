@@ -844,8 +844,18 @@
         "icon": "$(filter)"
       },
       {
+        "command": "netezza.schema.quickFilter",
+        "title": "Quick Filter Visible Objects",
+        "icon": "$(filter)"
+      },
+      {
         "command": "netezza.schema.clearFilter",
         "title": "Clear Schema Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "netezza.schema.clearQuickFilter",
+        "title": "Clear Quick Object Filter",
         "icon": "$(clear-all)"
       },
       {
@@ -2187,9 +2197,19 @@
           "group": "navigation@1"
         },
         {
+          "command": "netezza.schema.quickFilter",
+          "when": "view == netezza.schema",
+          "group": "navigation@1.5"
+        },
+        {
           "command": "netezza.schema.clearFilter",
           "when": "view == netezza.schema",
           "group": "navigation@2"
+        },
+        {
+          "command": "netezza.schema.clearQuickFilter",
+          "when": "view == netezza.schema && justybase.schema.quickFilterActive",
+          "group": "navigation@2.5"
         },
         {
           "command": "netezza.openLogin",
