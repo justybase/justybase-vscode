@@ -18,7 +18,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @justybase/netezza-driver | 3.0.0 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
 | @justybase/netezza-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/result-core | 3.17.14 | Apache-2.0 | See npm package metadata |
-| @justybase/spreadsheet-tasks | 2.1.1 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
+| @justybase/spreadsheet-tasks | 2.2.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
 | @justybase/sql-core | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/sqlite-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/ui-core | 3.17.14 | Apache-2.0 | See npm package metadata |
@@ -577,7 +577,7 @@ Copyright (c) 2007-2009, Mathieu Fenniak
    limitations under the License.
 ```
 
-### @justybase/spreadsheet-tasks@2.1.1
+### @justybase/spreadsheet-tasks@2.2.0
 
 ```text
 MIT License

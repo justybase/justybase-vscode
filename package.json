@@ -4707,7 +4707,7 @@
     "@justybase/duckdb-runtime": "*",
     "@justybase/netezza-runtime": "*",
     "@justybase/netezza-driver": "^3.2.1",
-    "@justybase/spreadsheet-tasks": "^2.1.1",
+    "@justybase/spreadsheet-tasks": "^2.2.0",
     "adm-zip": "^0.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@msgpack/msgpack": "^3.1.3",
