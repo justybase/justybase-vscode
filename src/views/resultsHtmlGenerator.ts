@@ -92,23 +92,6 @@ export class ResultsHtmlGenerator {
                 <button type="button" id="executionStatusBannerCancel" class="execution-status-banner__cancel" title="Cancel the current query" style="display: none;">Cancel</button>
             </div>
             <div id="resultLimitBanner" class="result-limit-banner" style="display: none;" role="status" aria-live="polite"></div>
-            
-
-            <div id="loadingOverlay" class="loading-overlay">
-                <div class="loading-card">
-                    <div class="loading-spinner">
-                        <svg class="loading-spinner-circle" viewBox="0 0 50 50">
-                            <circle class="loading-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="4"/>
-                        </svg>
-                    </div>
-                    <div class="loading-text">Generating data…</div>
-                    <div class="loading-subtext" id="loadingSubtext"></div>
-                    <div class="loading-actions">
-                        <button type="button" id="hideLoadingOverlayBtn" class="loading-hide-btn" title="Hide overlay and keep the status bar">Hide</button>
-                        <button type="button" id="cancelQueryBtn" class="loading-cancel-btn" title="Cancel the current query">Cancel</button>
-                    </div>
-                </div>
-            </div>
             <div class="layout-wrapper" id="layoutWrapper">
                     <div class="controls">
                         <div class="layout-switcher" id="layoutSwitcher" role="radiogroup" aria-label="Result layout">
