@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Web only
 last_verified: 2026-08-19
-product_version: 3.17.24
+product_version: 3.17.25
 ---
 
 # Web Editor API reference

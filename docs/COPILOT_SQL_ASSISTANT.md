@@ -2,7 +2,7 @@
 title: Copilot SQL Assistant
 description: Canonical pointer for the current Copilot, guarded procedure repair, Language Model Tool, and read-only MCP workflow.
 last_verified: 2026-08-19
-product_version: 3.17.24
+product_version: 3.17.25
 ---
 
 # Copilot SQL Assistant
