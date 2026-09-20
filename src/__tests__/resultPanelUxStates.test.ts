@@ -134,12 +134,14 @@ describe('result panel UX states', () => {
         expect(appendedChildren[0]?.innerHTML).toContain('rerun a SELECT-style query if you expected rows');
     });
 
-    it('hides the loading overlay when the user dismisses it during execution', () => {
+    it('never shows the blocking loading overlay during execution', () => {
         const overlay = {
             classList: {
                 add: jest.fn(),
                 remove: jest.fn()
-            }
+            },
+            setAttribute: jest.fn(),
+            style: {} as Record<string, string>
         };
 
         Object.defineProperty(global, 'document', {
@@ -167,19 +169,21 @@ describe('result panel UX states', () => {
         } = require('../../media/resultPanel/grid.js');
 
         gridModule.updateLoadingState();
-        expect(overlay.classList.add).toHaveBeenCalledWith('visible');
+        expect(overlay.classList.add).not.toHaveBeenCalledWith('visible');
+        expect(overlay.classList.remove).toHaveBeenCalledWith('visible');
 
         gridModule.dismissLoadingOverlay();
-        expect(gridModule.isLoadingOverlayDismissed()).toBe(true);
-        expect(overlay.classList.remove).toHaveBeenCalledWith('visible');
+        expect(gridModule.isLoadingOverlayDismissed()).toBe(false);
     });
 
-    it('resets the dismissed loading overlay when execution finishes', () => {
+    it('keeps the legacy overlay hidden after execution finishes', () => {
         const overlay = {
             classList: {
                 add: jest.fn(),
                 remove: jest.fn()
-            }
+            },
+            setAttribute: jest.fn(),
+            style: {} as Record<string, string>
         };
 
         Object.defineProperty(global, 'document', {
@@ -189,25 +193,6 @@ describe('result panel UX states', () => {
                 getElementById: jest.fn((id: string) => (id === 'loadingOverlay' ? overlay : null))
             }
         });
-
-        Object.defineProperty(global, 'window', {
-            configurable: true,
-            writable: true,
-            value: {
-                activeSource: 'file:///queries/batch.sql',
-                executingSources: new Set(['file:///queries/batch.sql']),
-                resultSets: [{ isLog: true, data: ['log line'] }]
-            }
-        });
-
-        const gridModule: {
-            dismissLoadingOverlay: () => void;
-            updateLoadingState: () => void;
-            isLoadingOverlayDismissed: () => boolean;
-        } = require('../../media/resultPanel/grid.js');
-
-        gridModule.dismissLoadingOverlay();
-        expect(gridModule.isLoadingOverlayDismissed()).toBe(true);
 
         Object.defineProperty(global, 'window', {
             configurable: true,
@@ -219,18 +204,30 @@ describe('result panel UX states', () => {
             }
         });
 
+        const gridModule: {
+            dismissLoadingOverlay: () => void;
+            updateLoadingState: () => void;
+            isLoadingOverlayDismissed: () => boolean;
+        } = require('../../media/resultPanel/grid.js');
+
+        gridModule.dismissLoadingOverlay();
+        expect(gridModule.isLoadingOverlayDismissed()).toBe(false);
+
         gridModule.updateLoadingState();
 
         expect(gridModule.isLoadingOverlayDismissed()).toBe(false);
+        expect(overlay.classList.add).not.toHaveBeenCalledWith('visible');
         expect(overlay.classList.remove).toHaveBeenCalledWith('visible');
     });
 
-    it('tracks loading overlay dismissal per active source', () => {
+    it('does not track overlay dismissal per active source', () => {
         const overlay = {
             classList: {
                 add: jest.fn(),
                 remove: jest.fn()
-            }
+            },
+            setAttribute: jest.fn(),
+            style: {} as Record<string, string>
         };
 
         Object.defineProperty(global, 'document', {
@@ -261,7 +258,7 @@ describe('result panel UX states', () => {
         } = require('../../media/resultPanel/grid.js');
 
         gridModule.dismissLoadingOverlay();
-        expect(gridModule.isLoadingOverlayDismissed()).toBe(true);
+        expect(gridModule.isLoadingOverlayDismissed()).toBe(false);
 
         Object.defineProperty(global, 'window', {
             configurable: true,
@@ -275,6 +272,6 @@ describe('result panel UX states', () => {
 
         gridModule.updateLoadingState();
         expect(gridModule.isLoadingOverlayDismissed()).toBe(false);
-        expect(overlay.classList.add).toHaveBeenCalledWith('visible');
+        expect(overlay.classList.add).not.toHaveBeenCalledWith('visible');
     });
 });

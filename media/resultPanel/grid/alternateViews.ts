@@ -1,4 +1,4 @@
-import { postHostMessage, getHostState, setHostState } from '../protocol.js';
+import { postHostMessage } from '../protocol.js';
 import { shouldRightAlignCell } from '../utils.js';
 import {
     getActiveGridIndex,
@@ -12,31 +12,6 @@ import type { ResultSetWithExtras, StateCardOptions } from './types.js';
 import { resolveScrollStateForResultSet, applyScrollStateToTarget } from './persistence.js';
 
 const vscode = { postMessage: postHostMessage };
-
-const LOADING_OVERLAY_DISMISSED_STATE_KEY = 'loadingOverlayDismissedSources';
-
-function loadLoadingOverlayDismissedSources(): Set<string> {
-    const state = getHostState();
-    if (state && typeof state === 'object') {
-        const record = state as Record<string, unknown>;
-        const dismissed = record[LOADING_OVERLAY_DISMISSED_STATE_KEY];
-        if (Array.isArray(dismissed)) {
-            return new Set(dismissed.map(String));
-        }
-    }
-    return new Set();
-}
-
-function persistLoadingOverlayDismissedSources(): void {
-    const priorState = getHostState();
-    const state = priorState && typeof priorState === 'object'
-        ? priorState as Record<string, unknown>
-        : {};
-    setHostState({
-        ...state,
-        [LOADING_OVERLAY_DISMISSED_STATE_KEY]: Array.from(loadingOverlayDismissedSources)
-    });
-}
 
 export function renderStateCard(container: HTMLElement, options: StateCardOptions): void {
     const {
@@ -516,8 +491,6 @@ export function hasPreviewableResultData(): boolean {
     );
 }
 
-let loadingOverlayDismissedSources = loadLoadingOverlayDismissedSources();
-
 function ensureLogConsoleRendered(rsIndex: number): boolean {
     const existingWrapper = document.querySelector(`.grid-wrapper[data-index="${rsIndex}"]`);
     if (existingWrapper?.classList.contains('console-wrapper')) {
@@ -538,52 +511,33 @@ function ensureLogConsoleRendered(rsIndex: number): boolean {
     return !!document.querySelector(`.grid-wrapper[data-index="${rsIndex}"].console-wrapper`);
 }
 
-export function dismissLoadingOverlay() {
-    const source = getActiveSourceUri();
-    if (source) {
-        loadingOverlayDismissedSources.add(source);
-        persistLoadingOverlayDismissedSources();
-    }
+/**
+ * @deprecated The blocking "Generating data…" overlay was removed.
+ * Running state is surfaced through the execution banner (with Cancel)
+ * and the Logs tab (spinner + log rows). These helpers remain as no-ops
+ * for backward compatibility and only hide a legacy overlay node if one
+ * exists in an older webview template.
+ */
+export function dismissLoadingOverlay(): void {
     updateLoadingState();
 }
 
-export function resetLoadingOverlayDismissed() {
-    loadingOverlayDismissedSources = new Set();
-    persistLoadingOverlayDismissedSources();
+/** @deprecated See {@link dismissLoadingOverlay}. */
+export function resetLoadingOverlayDismissed(): void {
+    updateLoadingState();
 }
 
-export function isLoadingOverlayDismissed() {
-    const source = getActiveSourceUri();
-    return !!source && loadingOverlayDismissedSources.has(source);
+/** @deprecated The overlay no longer tracks per-source dismissal. */
+export function isLoadingOverlayDismissed(): boolean {
+    return false;
 }
 
-export function updateLoadingState() {
+export function updateLoadingState(): void {
     const overlay = document.getElementById('loadingOverlay');
     if (!overlay) return;
-
-    const source = getActiveSourceUri();
-    const isActiveExecuting =
-        !!source && (getResultPanelWindow().executingSources?.has(source) ?? false);
-    if (!isActiveExecuting) {
-        if (source && loadingOverlayDismissedSources.delete(source)) {
-            persistLoadingOverlayDismissedSources();
-        }
-        overlay.classList.remove('visible');
-        return;
-    }
-
-    // Keep the yellow execution banner while streaming, but reveal the grid
-    // as soon as the first tabular rows are available. Users can also hide the
-    // blocking overlay early to keep reading execution logs.
-    if (
-        hasPreviewableResultData()
-        || (source && loadingOverlayDismissedSources.has(source))
-    ) {
-        overlay.classList.remove('visible');
-        return;
-    }
-
-    overlay.classList.add('visible');
+    overlay.classList.remove('visible');
+    overlay.setAttribute('aria-hidden', 'true');
+    (overlay as HTMLElement).style.display = 'none';
 }
 
 export function updateControlsVisibility(index: number): void {
