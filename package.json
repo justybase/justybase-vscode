@@ -454,6 +454,11 @@
         "icon": "$(debug-stop)"
       },
       {
+        "command": "netezza.cancelActiveQuery",
+        "title": "Cancel Query in Active SQL Editor",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "netezza.openSettings",
         "title": "JustyBase: Open Settings",
         "icon": "$(gear)"
@@ -4284,6 +4289,12 @@
         "mac": "cmd+shift+enter",
         "when": "editorTextFocus && !notebookEditorFocused && resourceLangId == sql",
         "args": []
+      },
+      {
+        "command": "netezza.cancelActiveQuery",
+        "key": "ctrl+alt+q",
+        "mac": "cmd+alt+q",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
       },
       {
         "command": "netezza.navigatePreviousStatement",

@@ -53,7 +53,28 @@ ORDER BY order_date DESC
 LIMIT 1000;
 ```
 
-Use `Ctrl+Enter` or `F5` for the current statement. Use **Run Query Batch** for multiple statements. The result panel streams rows as they arrive, preserves separate result sets, and allows cancellation from the toolbar.
+Use `Ctrl+Enter` or `F5` for the current statement. Press `Ctrl+Alt+Q` (`Cmd+Alt+Q` on macOS) to cancel a query running from the active SQL editor. Use **Run Query Batch** for multiple statements. The result panel streams rows as they arrive, preserves separate result sets, and allows cancellation from the toolbar.
+
+### Quick SQL typing shortcuts
+
+In a SQL or MSSQL editor, type one of these shortcuts followed by a space to expand it:
+
+| Type | Expands to |
+| --- | --- |
+| `SX` | `SELECT` |
+| `FX` | `FROM` |
+| `JX` | `JOIN` |
+| `WX` | `WHERE` |
+| `GX` | `GROUP BY` |
+| `HX` | `HAVING` |
+| `OX` | `ORDER BY` |
+| `LX` | `LIMIT` |
+| `IX` | `INSERT INTO` |
+| `UX` | `UPDATE` |
+| `DX` | `DELETE FROM` |
+| `CX` | `CREATE TABLE` |
+
+Typing `LIKE` followed by a space inserts a pattern with two wildcards (for example, `LIKE '%%'`) and places the cursor between the `%` characters.
 
 ## 5. Inspect before changing data
 

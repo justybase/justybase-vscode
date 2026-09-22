@@ -196,10 +196,10 @@ describe('commands/queryCommands', () => {
 
             const disposables = registerQueryCommands(deps);
 
-            // Should register 10 commands: cancelQuery, viewTableData, runQuery, runQueryContinueOnError,
+            // Should register 11 commands: cancelQuery, cancelActiveQuery, viewTableData, runQuery, runQueryContinueOnError,
             // executeAndLoadToDuckDb, runQueryBatch, explainQuery, explainQueryVerbose, tuningAdvisor, formatSQL
-            expect(disposables).toHaveLength(10);
-            expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(10);
+            expect(disposables).toHaveLength(11);
+            expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(11);
         });
 
         it('should register netezza.cancelQuery command', () => {
@@ -621,6 +621,21 @@ describe('commands/queryCommands', () => {
                 0,
                 undefined,
                 expect.any(Object),
+            );
+        });
+
+        it('should register netezza.cancelActiveQuery command', () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            };
+
+            registerQueryCommands(deps);
+
+            expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+                'netezza.cancelActiveQuery',
+                expect.any(Function)
             );
         });
 
@@ -1636,6 +1651,64 @@ describe('commands/queryCommands', () => {
 
             expect(mockResultPanelProvider.cancelExecution).toHaveBeenCalledWith('file:///running.sql', undefined);
             expect(cancelQueryByUri).toHaveBeenCalledWith('file:///running.sql');
+        });
+    });
+
+    describe('cancelActiveQuery command handler', () => {
+        const getHandler = () => {
+            const call = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                entry => entry[0] === 'netezza.cancelActiveQuery'
+            );
+            return call?.[1] as (() => Promise<void>) | undefined;
+        };
+
+        it('cancels only the active SQL editor query when other tabs are also running', async () => {
+            registerQueryCommands({
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            });
+            const activeSource = 'file:///active.sql';
+            mockResultPanelProvider.getExecutingSources.mockReturnValue([
+                activeSource,
+                'file:///other.sql'
+            ]);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    uri: { toString: () => activeSource },
+                    languageId: 'sql'
+                }
+            };
+
+            await getHandler()?.();
+
+            expect(mockResultPanelProvider.cancelExecution).toHaveBeenCalledTimes(1);
+            expect(mockResultPanelProvider.cancelExecution).toHaveBeenCalledWith(activeSource, undefined);
+            expect(cancelQueryByUri).toHaveBeenCalledTimes(1);
+            expect(cancelQueryByUri).toHaveBeenCalledWith(activeSource);
+        });
+
+        it('does not cancel another tab when the active SQL editor has no running query', async () => {
+            registerQueryCommands({
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    uri: { toString: () => 'file:///idle.sql' },
+                    languageId: 'sql'
+                }
+            };
+            mockResultPanelProvider.getExecutingSources.mockReturnValue(['file:///other.sql']);
+
+            await getHandler()?.();
+
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No active query to cancel.');
+            expect(mockResultPanelProvider.cancelExecution).not.toHaveBeenCalled();
+            expect(cancelQueryByUri).not.toHaveBeenCalled();
         });
     });
 
