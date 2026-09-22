@@ -38,6 +38,7 @@ import {
     tryAcquireQueryExecution,
 } from './queryExecutionGate';
 import { createQueryExecutionRecovery } from './queryExecutionRecovery';
+import { isSqlAuthoringLanguageId } from '../../utils/sqlLanguage';
 
 const VIEW_DATA_ROW_LIMIT = 100;
 
@@ -93,6 +94,22 @@ export function registerQueryCommands(
 ): vscode.Disposable[] {
     const { context, connectionManager, resultPanelProvider } = deps;
 
+    const cancelQueryForSource = async (
+        sourceUri: string,
+        currentRowCounts?: number[],
+        commandId = 'netezza.cancelQuery',
+    ): Promise<void> => {
+        console.log(`[${commandId}] Cancelling: ${sourceUri}`);
+        markQueryExecutionCancelling(sourceUri);
+        resultPanelProvider.cancelExecution(sourceUri, currentRowCounts);
+
+        try {
+            await cancelQueryByUri(sourceUri);
+        } catch (err) {
+            console.error(`[${commandId}] Backend cancel failed:`, err);
+        }
+    };
+
     return [
         vscode.commands.registerCommand(
             'netezza.cancelQuery',
@@ -101,17 +118,7 @@ export function registerQueryCommands(
                     typeof sourceUri === 'string' ? sourceUri : sourceUri?.toString();
 
                 if (uriToCancel) {
-                    console.log(`[netezza.cancelQuery] Cancelling: ${uriToCancel}`);
-                    markQueryExecutionCancelling(uriToCancel);
-                    // 1. Update UI immediately (optimistic)
-                    resultPanelProvider.cancelExecution(uriToCancel, currentRowCounts);
-
-                    // 2. Perform backend cancellation (async)
-                    try {
-                        await cancelQueryByUri(uriToCancel);
-                    } catch (err) {
-                        console.error('[netezza.cancelQuery] Backend cancel failed:', err);
-                    }
+                    await cancelQueryForSource(uriToCancel, currentRowCounts);
                 } else {
                     const executingUris = resultPanelProvider.getExecutingSources();
                     if (executingUris.length > 0) {
@@ -165,6 +172,21 @@ export function registerQueryCommands(
                 }
             }
         ),
+        vscode.commands.registerCommand('netezza.cancelActiveQuery', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !isSqlAuthoringLanguageId(editor.document.languageId)) {
+                vscode.window.showWarningMessage('Open a SQL editor with an active query to cancel it.');
+                return;
+            }
+
+            const sourceUri = editor.document.uri.toString();
+            if (!resultPanelProvider.getExecutingSources().includes(sourceUri)) {
+                vscode.window.showWarningMessage('No active query to cancel.');
+                return;
+            }
+
+            await cancelQueryForSource(sourceUri, undefined, 'netezza.cancelActiveQuery');
+        }),
         vscode.commands.registerCommand('netezza.action.viewTableData', async (args?: ViewTableDataCommandArgs) => {
             const tableName = args?.tableName?.trim();
             if (!tableName) {
