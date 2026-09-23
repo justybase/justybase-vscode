@@ -1,11 +1,15 @@
 import {
   CompletionItem,
+  CompletionItemKind,
   CompletionTriggerKind,
   Position,
 } from "vscode-languageserver/node";
 import { SqlLexer } from "../sqlParser";
 import type { DatabaseKind } from "../contracts/database";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
+import type { MetadataColumnItem } from "../lsp/protocol";
+import { formatIdentifierForSql } from "../utils/identifierUtils";
+import { createNetezzaUserIdentifier, formatNetezzaIdentifier } from "../dialects/netezza/metadata/identifierUtils";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import {
   parseSemanticScopeWithParser,
@@ -35,6 +39,10 @@ import {
   toLocalVariableItems,
   toScopedColumnItems,
 } from "./completionRenderer";
+import {
+  findJoinColumnMatches,
+  normalizeJoinColumnName,
+} from "./completionJoinConditions";
 import { parseQualifierPathToSource } from "./completionQualifierUtils";
 import { CompletionContextExtractor } from "./completionContextExtractor";
 import { CompletionMetadataResolver } from "./completionMetadataResolver";
@@ -44,6 +52,22 @@ import type {
   ScopedColumnCandidate,
   StatementBoundary,
 } from "./completionTypes";
+
+interface DirectJoinSource extends ScopeSource {
+  kind: "from" | "join";
+  qualifierQuoted?: boolean;
+}
+
+function formatDirectJoinQualifier(source: DirectJoinSource, databaseKind?: DatabaseKind): string {
+  if (databaseKind === "netezza") {
+    return formatNetezzaIdentifier(createNetezzaUserIdentifier(source.qualifier, source.qualifierQuoted));
+  }
+  return formatIdentifierForSql(source.qualifier, databaseKind);
+}
+
+function normalizeRelationColumnName(name: string): string {
+  return normalizeJoinColumnName(name);
+}
 
 export interface QualifierCompletionRequest {
   qualifier: string;
@@ -357,6 +381,18 @@ export class CompletionScopeResolver {
     );
 
     const columnItems = toScopedColumnItems(scopedColumns, typedPrefix, position);
+    const joinConditionItems = clause === "on" && typedPrefix === ""
+      ? await this.buildJoinConditionItems(
+          statementPrefix,
+          localDefs,
+          documentUri,
+          effectiveDb,
+          effectiveSchema,
+          databaseKind,
+          netezzaSchemasEnabled,
+          position,
+        )
+      : [];
     const variableItems = toLocalVariableItems(localDefs, typedPrefix, position);
     const functionItems = buildExpressionFunctionItems(
       statementPrefix,
@@ -386,6 +422,7 @@ export class CompletionScopeResolver {
       triggerKind === CompletionTriggerKind.Invoked,
     );
     const items = dedupeCompletionItems([
+      ...joinConditionItems,
       ...columnItems,
       ...variableItems,
       ...functionItems,
@@ -605,7 +642,7 @@ export class CompletionScopeResolver {
   private parseAliasAfterTableRef(
     tokens: import("chevrotain").IToken[],
     startIndex: number,
-  ): { alias?: string; nextIndex: number } {
+  ): { alias?: string; aliasQuoted?: boolean; nextIndex: number } {
     let index = startIndex;
     if (tokens[index]?.tokenType.name === "As") {
       index += 1;
@@ -621,6 +658,7 @@ export class CompletionScopeResolver {
 
     return {
       alias: stripQuotes(aliasToken.image),
+      aliasQuoted: aliasToken.image.startsWith('"') && aliasToken.image.endsWith('"'),
       nextIndex: index + 1,
     };
   }
@@ -709,6 +747,146 @@ export class CompletionScopeResolver {
       });
     });
 
+    return sources;
+  }
+
+  private async buildJoinConditionItems(
+    statementPrefix: string,
+    localDefs: LocalDefinition[],
+    documentUri: string,
+    effectiveDb: string | undefined,
+    effectiveSchema: string | undefined,
+    databaseKind: DatabaseKind | undefined,
+    netezzaSchemasEnabled: boolean | undefined,
+    position: Position,
+  ): Promise<CompletionItem[]> {
+    const sources = this.extractDirectJoinSources(statementPrefix, databaseKind);
+    const joined = sources[sources.length - 1];
+    if (!joined || joined.kind !== "join" || sources.length < 2) {
+      return [];
+    }
+
+    const qualifierCounts = new Map<string, number>();
+    for (const source of sources) {
+      const key = source.qualifier.toUpperCase();
+      qualifierCounts.set(key, (qualifierCounts.get(key) ?? 0) + 1);
+    }
+    const uniqueSources = sources.filter((source) => {
+      if (qualifierCounts.get(source.qualifier.toUpperCase()) !== 1) return false;
+      return !localDefs.some((definition) =>
+        definition.name.replace(/^"|"$/g, "").toUpperCase() === source.table.toUpperCase(),
+      );
+    });
+    const currentJoin = uniqueSources[uniqueSources.length - 1];
+    if (!currentJoin || currentJoin.kind !== "join") return [];
+
+    const columnsForSource = async (source: DirectJoinSource) => this.metadataResolver.getMetadataColumnsForSource(
+      documentUri,
+      source,
+      effectiveDb,
+      effectiveSchema,
+      databaseKind,
+      this.buildMetadataColumnOptions(netezzaSchemasEnabled),
+    );
+
+    const joinedColumns = await columnsForSource(currentJoin);
+    if (joinedColumns.length === 0) return [];
+
+    const matches: Array<{
+      left: MetadataColumnItem;
+      right: MetadataColumnItem;
+      leftSource: DirectJoinSource;
+      rightSource: DirectJoinSource;
+      isKeyMatch: boolean;
+    }> = [];
+    for (const previousSource of uniqueSources.slice(0, -1)) {
+      const previousColumns = await columnsForSource(previousSource);
+      const sourceMatches = findJoinColumnMatches(previousColumns, joinedColumns);
+      const normalizedCounts = new Map<string, number>();
+      for (const column of previousColumns) {
+        const normalized = normalizeRelationColumnName(column.name);
+        normalizedCounts.set(normalized, (normalizedCounts.get(normalized) ?? 0) + 1);
+      }
+      const joinedCounts = new Map<string, number>();
+      for (const column of joinedColumns) {
+        const normalized = normalizeRelationColumnName(column.name);
+        joinedCounts.set(normalized, (joinedCounts.get(normalized) ?? 0) + 1);
+      }
+      for (const match of sourceMatches) {
+        const normalized = normalizeRelationColumnName(match.left.name);
+        if (!match.isKeyMatch && ((normalizedCounts.get(normalized) ?? 0) !== 1
+          || (joinedCounts.get(normalized) ?? 0) !== 1)) {
+          continue;
+        }
+        matches.push({ ...match, leftSource: previousSource, rightSource: currentJoin });
+      }
+    }
+
+    const keyItems: CompletionItem[] = [];
+    const heuristicItems: CompletionItem[] = [];
+    for (const match of matches) {
+      const left = `${formatDirectJoinQualifier(match.leftSource, databaseKind)}.${formatIdentifierForSql(match.left.name, databaseKind)}`;
+      const right = `${formatDirectJoinQualifier(match.rightSource, databaseKind)}.${formatIdentifierForSql(match.right.name, databaseKind)}`;
+      const text = `${left} = ${right}`;
+      const item: CompletionItem = {
+        label: text,
+        kind: CompletionItemKind.Reference,
+        detail: match.isKeyMatch ? "Join condition (key match)" : "Join condition (name match)",
+        insertText: text,
+        sortText: `${match.isKeyMatch ? "0" : "1"}_${text.toUpperCase()}`,
+        textEdit: {
+          range: { start: position, end: position },
+          newText: text,
+        },
+      };
+      (match.isKeyMatch ? keyItems : heuristicItems).push(item);
+    }
+    return [...keyItems, ...heuristicItems];
+  }
+
+  private extractDirectJoinSources(
+    sql: string,
+    databaseKind?: DatabaseKind,
+  ): DirectJoinSource[] {
+    const tokens = SqlLexer.tokenize(sql).tokens;
+    const sources: DirectJoinSource[] = [];
+    let nesting = 0;
+    let foundFrom = false;
+
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (token.image === "(") {
+        nesting += 1;
+        continue;
+      }
+      if (token.image === ")") {
+        nesting = Math.max(0, nesting - 1);
+        continue;
+      }
+      if (nesting !== 0) continue;
+      // Comma joins and mixed comma/JOIN source lists are easy to mis-pair;
+      // leave the normal column completions available without guessing here.
+      if (foundFrom && token.image === ",") return [];
+
+      const isFrom = token.tokenType.name === "From" && !foundFrom;
+      const isJoin = token.tokenType.name === "Join";
+      if (!isFrom && !isJoin) continue;
+      if (isFrom) foundFrom = true;
+
+      const parsed = parseQualifiedTableNameFromTokens(tokens, index + 1, databaseKind);
+      if (!parsed) continue;
+      const alias = this.parseAliasAfterTableRef(tokens, parsed.nextIndex);
+      const qualifier = alias.alias || parsed.tableRef.table;
+      sources.push({
+        kind: isJoin ? "join" : "from",
+        qualifier,
+        qualifierQuoted: alias.alias ? alias.aliasQuoted : parsed.tableRef.tableQuoted,
+        db: parsed.tableRef.database,
+        schema: parsed.tableRef.schema,
+        table: parsed.tableRef.table,
+      });
+      index = Math.max(index, alias.nextIndex - 1);
+    }
     return sources;
   }
 

@@ -1,6 +1,7 @@
 import type { DatabaseKind } from '../contracts/database';
 import type {
     DatabaseMetadata,
+    ColumnMetadata,
     ObjectWithSchema,
     SchemaMetadata,
     TableMetadata,
@@ -24,4 +25,12 @@ export interface ConnectionManagerMetadataCache {
     getSchemas(connectionName: string, dbName: string): SchemaMetadata[] | undefined;
     getTablesAllSchemas(connectionName: string, dbName: string): TableMetadata[] | undefined;
     getObjectsWithSchema(connectionName: string, dbName?: string): ObjectWithSchema[];
+    getColumns?(connectionName: string, key: string): ColumnMetadata[] | undefined;
+    getColumnsAnySchema?(
+        connectionName: string,
+        database: string,
+        tableName: string,
+    ): ColumnMetadata[] | undefined;
+    ensureColumnsLoadedForTableKey?(connectionName: string, layerKey: string): Promise<void>;
+    ensureColumnsLoaded?(connectionName: string, database: string): Promise<void>;
 }

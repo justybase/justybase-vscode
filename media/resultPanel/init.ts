@@ -29,6 +29,13 @@ import {
   getGlobalDragState,
   setGroupingPanelOpen,
   getGroupingPanelOpen,
+  buildFilterHistoryScope,
+  recordFilterHistorySnapshot,
+  getFilterHistoryTarget,
+  moveFilterHistoryCursor,
+  getFilterHistoryAvailability,
+  setFilterHistoryRestoring,
+  type FilterHistorySnapshot,
 } from "./state.js";
 import { debounce, showError } from "./utils.js";
 import {
@@ -487,6 +494,93 @@ export function onGlobalFilterChanged(): void {
   const filterInput = getElementById<HTMLInputElement>("globalFilter");
   const value = filterInput ? filterInput.value : "";
   debouncedSearch(value);
+}
+
+function readFilterHistorySnapshot(resultSetIndex: number): FilterHistorySnapshot | undefined {
+  const resultSet = getResultSetAt(resultSetIndex);
+  const table = getGrid(resultSetIndex)?.tanTable;
+  if (!resultSet || !table) return undefined;
+  const state = table.getState();
+  return {
+    globalFilter: typeof state.globalFilter === 'string' ? state.globalFilter : '',
+    columnFilters: state.columnFilters ?? [],
+    sorting: state.sorting ?? [],
+    filterScope: resultSet.storageMode === 'sqlite'
+      ? 'disk'
+      : resultSet.databaseFilterSpec ? 'database' : 'loaded',
+    databaseFilterSpec: resultSet.databaseFilterSpec,
+  };
+}
+
+function recordFilterHistoryForResult(
+  resultSetIndex: number,
+  databaseFilterSpec?: import('./types.js').DiskQuerySpec,
+  overrideDatabaseSpec = false,
+  filterScope?: FilterHistorySnapshot['filterScope'],
+): string | undefined {
+  const resultSet = getResultSetAt(resultSetIndex);
+  const snapshot = readFilterHistorySnapshot(resultSetIndex);
+  if (!resultSet || !snapshot) return undefined;
+  if (overrideDatabaseSpec) {
+    snapshot.databaseFilterSpec = databaseFilterSpec;
+    snapshot.filterScope = filterScope ?? 'database';
+  }
+  const scope = buildFilterHistoryScope(getActiveSourceUri(), resultSet, resultSetIndex);
+  recordFilterHistorySnapshot(scope, snapshot);
+  updateFilterHistoryButtons();
+  return scope;
+}
+
+function updateFilterHistoryButtons(): void {
+  const resultSetIndex = getActiveGridIndex();
+  const resultSet = getResultSetAt(resultSetIndex);
+  const scope = buildFilterHistoryScope(getActiveSourceUri(), resultSet, resultSetIndex);
+  const availability = getFilterHistoryAvailability(scope);
+  const undoButton = getElementById<HTMLButtonElement>('undoFilterBtn');
+  const redoButton = getElementById<HTMLButtonElement>('redoFilterBtn');
+  if (undoButton) undoButton.disabled = !availability.canUndo;
+  if (redoButton) redoButton.disabled = !availability.canRedo;
+}
+
+async function moveFilterHistory(direction: 'undo' | 'redo'): Promise<void> {
+  const resultSetIndex = getActiveGridIndex();
+  const resultSet = getResultSetAt(resultSetIndex);
+  const sourceUri = getActiveSourceUri();
+  const scope = buildFilterHistoryScope(sourceUri, resultSet, resultSetIndex);
+  const target = getFilterHistoryTarget(scope, direction);
+  if (!target || !resultSet) return;
+
+  setFilterHistoryRestoring(scope, true);
+  try {
+    if ((resultSet.databaseFilterSpec || target.databaseFilterSpec
+      || target.filterScope === 'database') && sourceUri) {
+      await applyDatabaseFilter(sourceUri, resultSetIndex, target.databaseFilterSpec);
+    }
+
+    const table = getGrid(resultSetIndex)?.tanTable;
+    if (!table) return;
+    table.setSorting(target.sorting);
+    table.setColumnFilters(target.columnFilters);
+    table.setGlobalFilter(target.globalFilter);
+    const globalFilter = getElementById<HTMLInputElement>('globalFilter');
+    if (globalFilter) globalFilter.value = target.globalFilter;
+    setGlobalFilterState(
+      resultSetIndex,
+      target.globalFilter,
+      resultSet.executionTimestamp,
+      sourceUri,
+    );
+    if (!moveFilterHistoryCursor(scope, direction)) return;
+    getGrid(resultSetIndex)?.render?.();
+  } catch (error) {
+    vscode.postMessage({
+      command: 'error',
+      text: `Could not ${direction} filters: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  } finally {
+    setFilterHistoryRestoring(scope, false);
+    updateFilterHistoryButtons();
+  }
 }
 
 /**
@@ -2825,6 +2919,7 @@ function updateEditButtonsState(): void {
     clearFiltersBtn.style.display = canRefresh ? 'inline-flex' : 'none';
     clearFiltersBtn.disabled = !canRefresh;
   }
+  updateFilterHistoryButtons();
 
   if (editBtn) {
     editBtn.style.display = isEditable ? 'inline-flex' : 'none';
@@ -3024,13 +3119,39 @@ function setupWindowFunctions(): void {
         || activeResult.databaseFilterSpec.globalSearch?.trim()),
     );
     if (sourceUri && hasDatabaseFilter) {
-      void applyDatabaseFilter(sourceUri, activeIndex, undefined);
+      recordFilterHistoryForResult(activeIndex);
+      void applyDatabaseFilter(sourceUri, activeIndex, undefined).then(() => {
+        recordFilterHistoryForResult(activeIndex, undefined, true, 'database');
+      }).catch((error) => {
+        vscode.postMessage({
+          command: 'error',
+          text: `Could not clear database filters: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      });
       return;
     }
 
     if (activeGrid?.render) {
       activeGrid.render();
     }
+  };
+  panel.undoFilterHistory = () => { void moveFilterHistory('undo'); };
+  panel.redoFilterHistory = () => { void moveFilterHistory('redo'); };
+  panel.updateFilterHistoryButtons = updateFilterHistoryButtons;
+  panel.recordDatabaseFilterHistoryBefore = (resultSetIndex) => {
+    recordFilterHistoryForResult(resultSetIndex);
+  };
+  panel.recordDatabaseFilterHistoryApplied = (resultSetIndex, spec) => {
+    recordFilterHistoryForResult(resultSetIndex, spec, true, 'database');
+  };
+  panel.openRelatedRows = (rowIndex, columnIndex) => {
+    vscode.postMessage({
+      command: 'openRelatedRows',
+      sourceUri: requireActiveSourceUri(),
+      resultSetIndex: getActiveGridIndex(),
+      rowIndex,
+      columnIndex,
+    });
   };
   panel.clearLogs = function () {
     vscode.postMessage({
@@ -3125,6 +3246,22 @@ function setupWindowFunctions(): void {
       vscode.postMessage({ command: 'info', text: 'No pending changes to save.' });
       return;
     }
+    const previewValue = (value: unknown): string => {
+      if (value === null || value === undefined) return 'NULL';
+      if (typeof value === 'string' && value.length === 0) return '"" (empty string)';
+      const text = typeof value === 'string' ? JSON.stringify(value) : String(value);
+      return text.length > 100 ? `${text.slice(0, 97)}...` : text;
+    };
+    const previewLines = edits.slice(0, 12).map((edit) => {
+      const column = rs.columns[edit.columnIndex]?.name ?? `Column ${edit.columnIndex + 1}`;
+      return `${column}: ${previewValue(edit.oldValue)} → ${previewValue(edit.newValue)}`;
+    });
+    if (edits.length > previewLines.length) {
+      previewLines.push(`…and ${edits.length - previewLines.length} more cell change(s)`);
+    }
+    if (deletes.length > 0) previewLines.push(`Delete ${deletes.length} row(s)`);
+    const summary = `Review ${edits.length} cell change(s)${deletes.length ? ` and ${deletes.length} row deletion(s)` : ''}:\n\n${previewLines.join('\n')}\n\nSave these changes?`;
+    if (!window.confirm(summary)) return;
     vscode.postMessage({
       command: 'saveEdits',
       sourceUri: requireActiveSourceUri(),

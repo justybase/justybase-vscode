@@ -373,6 +373,29 @@ test('ignores type members inside executable TypeScript modules', () => {
   assert.equal(result.files[0]?.executableLines, 0);
 });
 
+test('ignores pure identifier interpolation lines inside HTML template strings', () => {
+  const fixturePath = path.resolve(process.cwd(), 'src/__quality_template_fixture__.ts');
+  const fixture = [
+    'export function render(controls: string) {',
+    '  return `<div>',
+    '    ${controls}',
+    '  </div>`;',
+    '}',
+  ].join('\n');
+  fs.writeFileSync(fixturePath, fixture);
+  try {
+    const result = checkChangedCoverage({
+      diff: '+++ b/src/__quality_template_fixture__.ts\n@@ -2 +3 @@\n',
+      lcov: 'SF:src/__quality_template_fixture__.ts\nDA:2,1\nDA:4,1\nend_of_record\n',
+      baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } },
+    });
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.files[0]?.executableLines, 0);
+  } finally {
+    fs.rmSync(fixturePath, { force: true });
+  }
+});
+
 test('does not require an LCOV record for changed declaration-only files', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/media/resultPanel/databaseGrouping.ts\n@@ -30 +31 @@\n',

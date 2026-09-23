@@ -52,6 +52,7 @@ import { affectsExtensionConfiguration } from '../compatibility/configuration';
 import { getConnectionForDocument } from '../core/queryRunnerHelpers';
 import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
 import { runQueryRaw } from '../core/queryRunner';
+import { openRelatedRowsFromCell } from '../results/relatedRowsNavigation';
 import { MigrationWizardView } from './migrationWizardView';
 import {
     ALL_ROWS_AGGREGATIONS_TIMEOUT_SECONDS,
@@ -266,6 +267,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 this._handleDatabaseFilterValues(sourceUri, resultSetIndex, columnIndex, querySpec, timeoutSeconds, isRetry),
             onApplyDatabaseFilter: (sourceUri, resultSetIndex, querySpec, timeoutSeconds, isRetry) =>
                 this._handleApplyDatabaseFilter(sourceUri, resultSetIndex, querySpec, timeoutSeconds, isRetry),
+            onOpenRelatedRows: (sourceUri, resultSetIndex, rowIndex, columnIndex) =>
+                this._handleOpenRelatedRows(sourceUri, resultSetIndex, rowIndex, columnIndex),
             onClearRefreshFailure: (sourceUri, resultSetIndex) => {
                 this._stateManager.clearResultSetRefreshFailure(sourceUri, resultSetIndex);
                 this._updateWebview();
@@ -1573,13 +1576,33 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         });
         const nextResultSet: ResultSet = {
             ...refreshed,
+            resultSetId: resultSet.resultSetId,
+            statementIndex: resultSet.statementIndex,
             sql: sqlToExecute,
             refreshSql: baseRefreshSql,
             databaseFilterSpec: nextFilterSpec,
             name: resultSet.name,
             executionTimestamp: Date.now(),
         };
-        this._stateManager.replaceResultSet(sourceUri, resultSetIndex, nextResultSet);
+        this._stateManager.replaceResultSet(sourceUri, resultSetIndex, nextResultSet, true);
+    }
+
+    private async _handleOpenRelatedRows(
+        sourceUri: string,
+        resultSetIndex: number,
+        rowIndex: number,
+        columnIndex: number,
+    ): Promise<void> {
+        await openRelatedRowsFromCell({
+            connectionManager: this._connectionManager,
+            context: this._context,
+            stateManager: this._stateManager,
+            executionPanel: this,
+            resolveConnectionName: (uri) => this._resolveConnectionForSource(uri),
+            setActiveSource: (uri) => this.setActiveSource(uri),
+            log: (uri, message) => this.log(uri, message),
+            updateWebview: () => this._updateWebview(),
+        }, sourceUri, resultSetIndex, rowIndex, columnIndex);
     }
 
     private async _previewDatabaseGrouping(
@@ -3262,11 +3285,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
         const str = String(value);
         // Check if it's a numeric string
-        if (dataType && (dataType.toLowerCase().includes('int') || dataType.toLowerCase().includes('numeric')
-            || dataType.toLowerCase().includes('decimal') || dataType.toLowerCase().includes('float')
-            || dataType.toLowerCase().includes('double') || dataType.toLowerCase().includes('real'))) {
+        if (dataType && /\b(?:tinyint|smallint|mediumint|bigint|hugeint|integer|int(?:2|4|8|16|32|64)?|u(?:tinyint|smallint|integer|bigint|hugeint|int(?:8|16|32|64)?)|byteint|serial|smallserial|bigserial|numeric|decimal|number|float|double|real|money|smallmoney|decfloat|single)\b/i.test(dataType)) {
             const cleanNum = str.replace(/[\s\u00A0,]/g, '');
-            if (/^[-+]?\d+(?:\.\d+)?$/.test(cleanNum)) return cleanNum;
+            if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(cleanNum)) return cleanNum;
         }
         // Escape single quotes for string values
         return `'${str.replace(/'/g, "''")}'`;

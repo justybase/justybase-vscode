@@ -241,6 +241,13 @@ export type ResultPanelWebviewToHostMessage =
         timeoutSeconds?: number;
         isRetry?: boolean;
       }
+    | {
+        command: 'openRelatedRows';
+        sourceUri: string;
+        resultSetIndex: number;
+        rowIndex: number;
+        columnIndex: number;
+      }
     | { command: 'closeAllResults'; sourceUri: string }
     | { command: 'cancelQuery'; sourceUri: string; currentRowCounts?: number[] }
     | { command: 'copyToClipboard'; text: string }
@@ -566,7 +573,7 @@ export type ResultPanelHostToWebviewMessage =
 export type ResultPanelInboundMessage = ResultPanelWebviewToHostMessage;
 export type ResultPanelOutboundMessage = ResultPanelHostToWebviewMessage;
 
-export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
+export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['openRelatedRows',
   'ready',
   'migrateResult',
   'logRowsApplied',

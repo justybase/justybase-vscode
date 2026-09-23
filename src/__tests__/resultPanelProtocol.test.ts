@@ -50,6 +50,22 @@ describe('result panel protocol', () => {
             sourceUri: 'untitled:demo',
             reason: 'missing-shell',
         });
+        expect(runtime.parseResultPanelWebviewMessage({
+            command: 'openRelatedRows',
+            sourceUri: 'file:///demo.sql',
+            resultSetIndex: 0,
+            rowIndex: 2,
+            columnIndex: 1,
+        })).toEqual({
+            command: 'openRelatedRows',
+            sourceUri: 'file:///demo.sql',
+            resultSetIndex: 0,
+            rowIndex: 2,
+            columnIndex: 1,
+        });
+        expect(runtime.parseResultPanelWebviewMessage({
+            command: 'openRelatedRows', sourceUri: 'file:///demo.sql', resultSetIndex: 0, rowIndex: -1, columnIndex: 1,
+        })).toBeUndefined();
     });
 
     it('accepts empty display text when inserting an empty SQL string literal', () => {
@@ -84,6 +100,7 @@ describe('result panel protocol', () => {
             RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS: readonly string[];
             RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS: readonly string[];
         } = require('../contracts/webviews/resultPanelContracts');
+        expect(contracts.RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS).toContain('openRelatedRows');
 
         const messageFixture = {
             sourceUri: 'untitled:result-panel',
@@ -94,6 +111,7 @@ describe('result panel protocol', () => {
             currentRows: 2,
             offset: 0,
             limit: 100,
+            rowIndex: 0,
             columnIndex: 0,
             rows: [[1]],
             isLastChunk: true,

@@ -2,7 +2,11 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 
 import { normalizeUriKey } from '../../core/queryRunnerUtils';
-import type { ResultPanelView } from '../../views/resultPanelView';
+
+export interface QueryExecutionResultPanel {
+    getActiveSource(): string | undefined;
+    log(sourceUri: string, message: string): void;
+}
 
 export type QueryExecutionPhase = 'preparing' | 'running' | 'cancelling';
 
@@ -269,7 +273,7 @@ export class QueryExecutionCoordinator {
     private async resolveDuplicate(
         entry: ActiveExecution,
         sourceUri: string,
-        resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
+        resultPanelProvider: QueryExecutionResultPanel,
     ): Promise<boolean> {
         const sessionId = entry.recovery?.getSessionId?.();
         const forcedRecoveryAllowed = entry.recovery?.allowForcedRecovery !== false
@@ -364,7 +368,7 @@ export class QueryExecutionCoordinator {
      */
     public async tryAcquire(
         sourceUri: string,
-        resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
+        resultPanelProvider: QueryExecutionResultPanel,
         options: QueryExecutionAcquireOptions = {},
     ): Promise<QueryExecutionLease | undefined> {
         if (this.disposed) {
@@ -486,7 +490,7 @@ export function setDefaultQueryExecutionCoordinator(coordinator: QueryExecutionC
 
 export async function tryAcquireQueryExecution(
     sourceUri: string,
-    resultPanelProvider: Pick<ResultPanelView, 'log' | 'getActiveSource'>,
+    resultPanelProvider: QueryExecutionResultPanel,
     options: QueryExecutionAcquireOptions = {},
 ): Promise<QueryExecutionLease | undefined> {
     return defaultCoordinator.tryAcquire(sourceUri, resultPanelProvider, options);

@@ -25,7 +25,7 @@ import type {
     TanStackRow,
     TanStackTable
 } from './types';
-import { getResultPanelWindow, getActiveSourceUri } from './types.js';
+import { getResultPanelWindow, getActiveSourceUri, callPanelMethod } from './types.js';
 import { queryDiskDistinctValues } from './diskBackedGrid.js';
 import { applyDatabaseFilter, queryDatabaseFilterValues } from './databaseFilters.js';
 import { showInlineErrorWithRetry } from './inlineErrorRetry.js';
@@ -1159,12 +1159,17 @@ export function showColumnFilterDropdown(
             applyBtn.textContent = 'Applying...';
         }
         try {
+            if (!isRetry) {
+                callPanelMethod('recordDatabaseFilterHistoryBefore', rsIndex);
+            }
             await applyDatabaseFilter(
                 sourceUri,
                 rsIndex,
                 spec,
                 isRetry ? { isRetry: true } : undefined,
             );
+            callPanelMethod('recordDatabaseFilterHistoryApplied', rsIndex, spec);
+            callPanelMethod('updateFilterHistoryButtons');
             dropdown.remove();
         } catch (error) {
             showInlineErrorWithRetry(applyErrorBanner, error, () => {

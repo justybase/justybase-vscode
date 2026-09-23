@@ -95,9 +95,9 @@
         <button class="btn" id="columnVisibilityBtn">Columns</button>
         <button class="btn" id="formattingBtn">Formatting</button>
         <div class="toolbar-separator"></div>
-        <button id="editToggleBtn" style="display: none;">Edit</button>
-        <button id="saveEditsBtn" style="display: none;">Save Changes</button>
-        <button id="discardEditsBtn" style="display: none;">Discard</button>
+        <button id="editToggleBtn" onclick="toggleEditMode()" style="display: none;">Edit</button>
+        <button id="saveEditsBtn" onclick="saveEdits()" style="display: none;">Save Changes</button>
+        <button id="discardEditsBtn" onclick="discardEdits()" style="display: none;">Discard</button>
         <div class="toolbar-separator"></div>
         <div class="split-btn" id="exportSplitBtn">
             <button class="btn split-btn__primary" id="exportBtn">Export</button>
@@ -116,6 +116,8 @@
             </div>
         </div>
         <div class="toolbar-separator"></div>
+        <button type="button" class="btn btn-icon" id="undoFilterBtn" onclick="undoFilterHistory()" title="Undo filter or sort" aria-label="Undo filter or sort" disabled>↶</button>
+        <button type="button" class="btn btn-icon" id="redoFilterBtn" onclick="redoFilterHistory()" title="Redo filter or sort" aria-label="Redo filter or sort" disabled>↷</button>
         <button class="btn btn-destructive" id="clearFiltersBtn" onclick="clearAllFilters()">Clear Filters</button>
         <button id="clearLogsBtn" style="display: none;">Clear Logs</button>
         <span id="rowCountInfo" class="row-count-info"></span>

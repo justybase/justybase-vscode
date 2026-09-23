@@ -41,6 +41,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
     let column: TanStackColumn | null = null;
     let cellValue: string | null = null;
     let cellRawValue: unknown = null;
+    let relatedRowIndex: number | null = null;
     if (clickedCell) {
         const td = clickedCell;
         const tr = td.closest('tr');
@@ -54,7 +55,15 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
                 const rowIndex = parseDatasetIndex(tr);
                 const allRows = table.getRowModel().rows;
                 if (rowIndex !== null && allRows[rowIndex]) {
-                    cellRawValue = allRows[rowIndex].getValue(colId);
+                    const row = allRows[rowIndex];
+                    cellRawValue = row.getValue(colId);
+                    const rowDetails = row as typeof row & {
+                        getIsGrouped?: () => boolean;
+                        subRows?: unknown[];
+                    };
+                    if (!rowDetails.getIsGrouped?.() && !rowDetails.subRows?.length) {
+                        relatedRowIndex = row.index ?? rowIndex;
+                    }
                     // Format for display in the menu label
                     const colDef = column.columnDef;
                     cellValue = formatCellValue(cellRawValue, colDef.dataType, colDef.scale, {
@@ -121,6 +130,28 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             triggerRender(deps.wrapper);
         });
         menu.appendChild(clearFilterItem);
+
+        const resultPanel = getResultPanelWindow();
+        const activeResultIndex = resultPanel.getActiveGridIndex?.() ?? 0;
+        const activeResult = resultPanel.resultSets?.[activeResultIndex];
+        const activeSource = resultPanel.activeSource;
+        const canFindRelatedRows = Boolean(
+            activeSource
+            && activeResult?.isEditable
+            && activeResult.storageMode !== 'sqlite'
+            && activeResult.editSource
+            && relatedRowIndex !== null
+            && Number.isInteger(Number(menuColId))
+            && cellRawValue !== null
+            && cellRawValue !== undefined,
+        );
+        if (canFindRelatedRows && relatedRowIndex !== null) {
+            const relatedRowsItem = createContextMenuItem('Find Related Rows', function () {
+                callPanelMethod('openRelatedRows', relatedRowIndex, Number(menuColId));
+                menu.remove();
+            });
+            menu.appendChild(relatedRowsItem);
+        }
 
         // Separator
         const colSep2 = document.createElement('div');

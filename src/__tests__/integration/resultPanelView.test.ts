@@ -5,9 +5,13 @@ import { ResultPanelView } from '../../views/resultPanelView';
 import { clearResultPanelTrace } from '../../views/resultPanelTrace';
 import type { QueryResult, ResultSet } from '../../types';
 import type { runQueryRaw as RunQueryRaw } from '../../core/queryRunner';
+import { openRelatedRowsFromCell } from '../../results/relatedRowsNavigation';
 
 jest.mock('../../core/queryRunner', () => ({
     runQueryRaw: jest.fn(),
+}));
+jest.mock('../../results/relatedRowsNavigation', () => ({
+    openRelatedRowsFromCell: jest.fn(),
 }));
 
 const mockResultsConfigurationValues: Record<string, unknown> = {
@@ -22,6 +26,7 @@ type MockedVsCodeModule = {
     window: {
         createWebviewPanel: jest.Mock;
         showInformationMessage: jest.Mock;
+        showErrorMessage: jest.Mock;
         activeTextEditor: unknown;
     };
     commands: {
@@ -40,6 +45,9 @@ type WebviewMessage = {
     command: string;
     sourceUri?: string;
     reason?: string;
+    resultSetIndex?: number;
+    rowIndex?: number;
+    columnIndex?: number;
 };
 
 type WebviewMessageHandler = (message: WebviewMessage) => void;
@@ -57,6 +65,7 @@ jest.mock('vscode', () => ({
     window: {
         createWebviewPanel: jest.fn(),
         showInformationMessage: jest.fn(),
+        showErrorMessage: jest.fn(),
         activeTextEditor: undefined
     },
     commands: {
@@ -210,6 +219,78 @@ describe('ResultPanelView Integration', () => {
             streamingTransportCount: 0,
             pendingResultSyncCount: 0,
         });
+    });
+
+    test('routes related-row requests through the provider service ports', () => {
+        const openRelatedRows = openRelatedRowsFromCell as jest.MockedFunction<typeof openRelatedRowsFromCell>;
+        openRelatedRows.mockReset().mockImplementation(async (host, sourceUri) => {
+            host.log(sourceUri, 'Related-row test');
+            host.updateWebview();
+        });
+        const messageHandler = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0] as WebviewMessageHandler;
+
+        messageHandler({
+            command: 'openRelatedRows',
+            sourceUri: 'file:///orders.sql',
+            resultSetIndex: 0,
+            rowIndex: 1,
+            columnIndex: 2,
+        });
+
+        expect(openRelatedRows).toHaveBeenCalledWith(expect.objectContaining({
+            log: expect.any(Function),
+            updateWebview: expect.any(Function),
+        }), 'file:///orders.sql', 0, 1, 2);
+    });
+
+    test('keeps result identity when applying a database filter and preserves numeric edit literals', async () => {
+        const queryRunner = jest.requireMock('../../core/queryRunner') as {
+            runQueryRaw: jest.MockedFunction<typeof RunQueryRaw> & { mockResolvedValueOnce: (value: QueryResult) => unknown };
+        };
+        const sourceUri = 'file:///filter-history.sql';
+        const original: ResultSet = {
+            resultSetId: 'stable-result-id',
+            statementIndex: 3,
+            columns: [{ name: 'AMOUNT', type: 'DECIMAL' }],
+            data: [['1.00']],
+            sql: 'SELECT AMOUNT FROM SALES LIMIT 100',
+            refreshSql: 'SELECT AMOUNT FROM SALES LIMIT 100',
+            name: 'Statement 3',
+        };
+        const privateProvider = provider as unknown as {
+            _context: vscode.ExtensionContext;
+            _connectionManager: {
+                getConnectionForExecution: jest.Mock;
+                getActiveConnectionName: jest.Mock;
+            };
+            _stateManager: { resultsMap: Map<string, ResultSet[]> };
+            _handleApplyDatabaseFilter: (uri: string, index: number, spec?: { globalSearch?: string }) => Promise<void>;
+            _formatEditValue: (value: unknown, dataType?: string) => string;
+        };
+        privateProvider._context = {} as vscode.ExtensionContext;
+        privateProvider._connectionManager = {
+            getConnectionForExecution: jest.fn(() => 'connection-1'),
+            getActiveConnectionName: jest.fn(() => undefined),
+        };
+        privateProvider._stateManager.resultsMap.set(sourceUri, [original]);
+        queryRunner.runQueryRaw.mockReset().mockResolvedValueOnce({
+            columns: [{ name: 'AMOUNT', type: 'DECIMAL' }],
+            data: [['10.5']],
+        });
+
+        await privateProvider._handleApplyDatabaseFilter(sourceUri, 0, { globalSearch: '10' });
+
+        const filtered = privateProvider._stateManager.resultsMap.get(sourceUri)?.[0];
+        expect(filtered).toMatchObject({
+            resultSetId: 'stable-result-id',
+            statementIndex: 3,
+            databaseFilterSpec: { globalSearch: '10' },
+            refreshSql: original.refreshSql,
+            name: original.name,
+        });
+        expect(privateProvider._formatEditValue('1e3', 'INTEGER')).toBe('1e3');
+        expect(privateProvider._formatEditValue('.5E-2', 'DECIMAL(12,4)')).toBe('.5E-2');
+        expect(privateProvider._formatEditValue('1e3', 'VARCHAR')).toBe("'1e3'");
     });
 
     test('executes database aggregation SQL with filtered-count and alias fallbacks', async () => {

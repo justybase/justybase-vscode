@@ -132,6 +132,9 @@ export function toScopedColumnItems(
 
   for (const scoped of scopedColumns) {
     const columnUpper = scoped.column.toUpperCase();
+    const sortPrefix = typedPrefix
+      ? `${scoped.column.startsWith(typedPrefix) ? "0" : "1"}_${columnUpper}_`
+      : "";
     const singleSource = scoped.qualifiers.length <= 1;
 
     if (singleSource) {
@@ -143,7 +146,7 @@ export function toScopedColumnItems(
           label: scoped.column,
           kind: CompletionItemKind.Field,
           detail: "Column in scope",
-          sortText: `2_${scoped.column}`,
+          sortText: `2_${sortPrefix}${scoped.column}`,
         },
         scoped.description,
       );
@@ -163,7 +166,7 @@ export function toScopedColumnItems(
           kind: CompletionItemKind.Field,
           detail: "Qualified column (ambiguous name)",
           insertText: label,
-          sortText: `2_${label}`,
+        sortText: `2_${sortPrefix}${label}`,
         },
         scoped.description,
       );

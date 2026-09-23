@@ -21,6 +21,8 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('id="valueViewerOverlay"');
         expect(html).toContain('id="valueViewerBody"');
         expect(html).toContain('Copy Value');
+        expect(html).toContain('id="undoFilterBtn"');
+        expect(html).toContain('id="redoFilterBtn"');
     });
 
     it('does not acquire the VS Code API in the inline bootstrap script', () => {

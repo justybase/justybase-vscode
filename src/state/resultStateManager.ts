@@ -532,6 +532,60 @@ export class ResultStateManager {
         return { clearedUnpinnedResults: resultsToRemove.length > 0 };
     }
 
+    /** Begin a read-only panel operation without clearing the user's existing result tabs. */
+    public startAuxiliaryExecution(sourceUri: string): boolean {
+        if (!this._isValidSourceUri(sourceUri) || this._executingSources.has(sourceUri)) {
+            return false;
+        }
+        this._executingSources.add(sourceUri);
+        this._cancelledSources.delete(sourceUri);
+        this._activeSourceUri = sourceUri;
+        this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
+        this._onDidChangeState.fire();
+        return true;
+    }
+
+    /** Append an auxiliary read-only result while preserving prior tabs and their pins. */
+    public appendAuxiliaryResultSet(sourceUri: string, resultSet: ResultSet): number {
+        if (!this._isValidSourceUri(sourceUri)) {
+            throw new Error('Invalid result source.');
+        }
+        if (!resultSet.executionTimestamp) resultSet.executionTimestamp = Date.now();
+        ensureResultSetId(resultSet);
+        const results = this._resultsMap.get(sourceUri) ?? [];
+        const resultSetIndex = results.length;
+        results.push(resultSet);
+        this._resultsMap.set(sourceUri, results);
+        this._pinnedSources.add(sourceUri);
+        this._activeSourceUri = sourceUri;
+        this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
+
+        const filename = sourceUri.split(/[\\/]/).pop() || sourceUri;
+        const resultId = `result_${++this._resultIdCounter}`;
+        this._pinnedResults.set(resultId, {
+            sourceUri,
+            resultSetIndex,
+            timestamp: Date.now(),
+            label: `${filename} - ${resultSet.name || `Related rows ${resultSetIndex}`}`,
+        });
+        this._autoPinnedResults.add(resultId);
+        this._incrementDataVersion(sourceUri);
+        this._pruneResults(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
+        this._globalStateVersion++;
+        this._onDidChangeState.fire();
+        return resultSetIndex;
+    }
+
+    /** Finish an auxiliary operation without applying normal-query pin cleanup. */
+    public finishAuxiliaryExecution(sourceUri: string): void {
+        if (!this._executingSources.delete(sourceUri)) return;
+        this._incrementDataVersion(sourceUri);
+        this._syncResultCoreAfterMutation(sourceUri);
+        this._onDidChangeState.fire();
+    }
+
     private _updatePinsOnReorder(_sourceUri: string) {
         // This is a naive way to fix pins when we don't know the exact shift.
         // But since we only move Log to 0, or prune, we can handle it better.
@@ -943,7 +997,12 @@ export class ResultStateManager {
         this._onDidChangeState.fire();
     }
 
-    public replaceResultSet(sourceUri: string, resultSetIndex: number, resultSet: ResultSet): void {
+    public replaceResultSet(
+        sourceUri: string,
+        resultSetIndex: number,
+        resultSet: ResultSet,
+        preserveIdentity = false,
+    ): void {
         const results = this._resultsMap.get(sourceUri);
         if (!results || resultSetIndex < 0 || resultSetIndex >= results.length) {
             throw new Error('Result set not found');
@@ -960,9 +1019,9 @@ export class ResultStateManager {
             resultSet.executionTimestamp = Date.now();
         }
 
-        // A refresh is a new result identity even when it replaces the same
-        // tab. This prevents restoring the previous query's scroll position.
-        resultSet.resultSetId = undefined;
+        // A SQL refresh is a new result identity; an in-place database filter
+        // update keeps the same logical result for session-local filter history.
+        resultSet.resultSetId = preserveIdentity ? existing.resultSetId : undefined;
         ensureResultSetId(resultSet);
 
         if (!resultSet.refreshSql && existing.refreshSql) {
