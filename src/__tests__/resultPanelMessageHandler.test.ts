@@ -138,6 +138,41 @@ describe('ResultPanelMessageHandler', () => {
         });
     });
 
+    it('routes related-row requests to the host callback', () => {
+        const openRelatedRows = jest.fn();
+        callbacks.onOpenRelatedRows = openRelatedRows;
+        handler.handleMessage({
+            command: 'openRelatedRows',
+            sourceUri: 'file:///active.sql',
+            resultSetIndex: 2,
+            rowIndex: 11,
+            columnIndex: 3,
+        });
+        expect(openRelatedRows).toHaveBeenCalledWith('file:///active.sql', 2, 11, 3);
+    });
+
+    it('appends auxiliary rows without replacing existing result tabs', () => {
+        const sourceUri = 'file:///related-rows.sql';
+        stateManager.setActiveSource(sourceUri);
+        stateManager.updateResults([{
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            data: [[1]],
+            name: 'Original',
+        } as ResultSet], sourceUri);
+
+        expect(stateManager.startAuxiliaryExecution(sourceUri)).toBe(true);
+        stateManager.appendAuxiliaryResultSet(sourceUri, {
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            data: [[2]],
+            name: 'Related',
+        } as ResultSet);
+        stateManager.finishAuxiliaryExecution(sourceUri);
+
+        expect(stateManager.resultsMap.get(sourceUri)?.map(result => result.name)).toEqual(['Original', 'Related']);
+        expect(stateManager.getActiveResultSetIndex(sourceUri)).toBe(1);
+        expect(stateManager.executingSources.has(sourceUri)).toBe(false);
+    });
+
     describe('reportHydrationMetrics message', () => {
         it('should log first-paint perf events from the webview', () => {
             const hydrationCallback = jest.fn();

@@ -24,6 +24,15 @@ export interface ResultsHtmlOptions {
 const DEFAULT_RESULTS_GRID_FONT_FAMILY =
   "'JetBrains Mono', monospace";
 
+function buildFilterHistoryControlsMarkup(): string {
+  const parts: string[] = [];
+  parts.push('<div class="filter-history-controls" role="group" aria-label="Filter history">');
+  parts.push('<button type="button" class="btn btn-icon" id="undoFilterBtn" onclick="undoFilterHistory()" title="Undo filter or sort" aria-label="Undo filter or sort" disabled>↶</button>');
+  parts.push('<button type="button" class="btn btn-icon" id="redoFilterBtn" onclick="redoFilterHistory()" title="Redo filter or sort" aria-label="Redo filter or sort" disabled>↷</button>');
+  parts.push('</div>');
+  return parts.join('');
+}
+
 export class ResultsHtmlGenerator {
   private _cspSource: string;
 
@@ -41,6 +50,7 @@ export class ResultsHtmlGenerator {
     );
     const resultGridFontSize = options.resultGridFontSize || 12;
     const uiMode = options.sharedUiMode === true ? 'shared' : 'legacy';
+    const filterHistoryControls = buildFilterHistoryControlsMarkup();
     return `<!DOCTYPE html>
         <html lang="en">
         <head>
@@ -101,6 +111,7 @@ export class ResultsHtmlGenerator {
                             <button type="button" class="layout-switcher__btn" data-layout="explore" aria-pressed="false" title="Explore columns, pivot and time composer">Explore</button>
                         </div>
                         <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter rows..." onkeyup="onFilterChanged()" aria-label="Filter rows">
+                        ${filterHistoryControls}
                         <div class="column-search-group">
                             <div class="column-search-wrapper">
                                 <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column..." autocomplete="off" oninput="onColumnSearchChanged()" onkeydown="onColumnSearchKeydown(event)" onblur="onColumnSearchBlur()" onfocus="onColumnSearchFocus()" aria-label="Find column">

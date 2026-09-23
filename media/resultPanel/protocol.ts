@@ -151,6 +151,9 @@ function validateWebviewMessage(message: MessageRecord): boolean {
         case 'applyDatabaseFilter':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.requestId);
+        case 'openRelatedRows':
+            return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
+                && isIndex(message.rowIndex) && isIndex(message.columnIndex);
         case 'cancelQuery':
             return hasString(message, 'sourceUri')
                 && (message.currentRowCounts === undefined || Array.isArray(message.currentRowCounts));

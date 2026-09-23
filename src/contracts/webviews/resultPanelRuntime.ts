@@ -129,6 +129,7 @@ const webviewRules: Record<string, FieldRule> = {
     requestDatabaseAggregations: all(stringSource, resultIndex, requestIndex, arrayField('aggregations')),
     requestDatabaseFilterValues: all(stringSource, resultIndex, indexField('columnIndex'), requestIndex),
     applyDatabaseFilter: all(stringSource, resultIndex, requestIndex),
+    openRelatedRows: all(stringSource, resultIndex, indexField('rowIndex'), indexField('columnIndex')),
     closeAllResults: stringSource,
     cancelQuery: all(stringSource, optional('currentRowCounts', arrayField('currentRowCounts'))),
     copyToClipboard: stringField('text'),

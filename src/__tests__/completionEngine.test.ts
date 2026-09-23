@@ -42,6 +42,7 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
   private readonly viewsByDbSchema = new Map<string, string[]>();
   private readonly proceduresByDbSchema = new Map<string, string[]>();
   private readonly columnsByTable = new Map<string, string[]>();
+  private readonly relationColumnsByTable = new Map<string, MetadataColumnItem[]>();
 
   readonly getContext = jest.fn(async (_documentUri: string) => ({
     effectiveDatabase: this.effectiveDatabase,
@@ -123,13 +124,15 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
     },
   );
 
-  readonly getColumns = jest.fn(
+    readonly getColumns = jest.fn(
     async (
       _documentUri: string,
       database: string,
       table: string,
       schema?: string,
     ): Promise<MetadataColumnItem[]> => {
+      const relationColumns = this.relationColumnsByTable.get(this.columnKey(database, table, schema));
+      if (relationColumns) return relationColumns.map((column) => ({ ...column }));
       const names = this.getColumnsByPath(database, table, schema);
       return names.map((name) => ({ name, type: "VARCHAR" }));
     },
@@ -156,6 +159,15 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
     this.columnsByTable.set(this.columnKey(database, table, schema), [
       ...columns,
     ]);
+  }
+
+  public setRelationColumns(
+    database: string,
+    table: string,
+    columns: MetadataColumnItem[],
+    schema?: string,
+  ): void {
+    this.relationColumnsByTable.set(this.columnKey(database, table, schema), columns.map((column) => ({ ...column })));
   }
 
   public setDefaultSchema(database: string, schema: string): void {
@@ -2827,6 +2839,23 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       expect(labels(items)).toEqual(
         expect.arrayContaining(["EMPLOYEEKEY", "BASERATE"]),
       );
+    });
+
+    it("offers metadata-backed JOIN predicates at an empty ON clause", async () => {
+      metadataProvider.setRelationColumns("BAZA", "USERS", [
+        { name: "PK_USER_ID", type: "INTEGER", isPk: true },
+      ]);
+      metadataProvider.setRelationColumns("BAZA", "ORDERS", [
+        { name: "FK_USER_ID", type: "INTEGER", isFk: true },
+      ]);
+
+      const items = await complete("SELECT * FROM BAZA..USERS U JOIN BAZA..ORDERS O ON |");
+      const joinItem = items.find((item) => item.detail === "Join condition (key match)");
+
+      expect(joinItem).toBeDefined();
+      expect(String(joinItem?.insertText)).toContain("PK_USER_ID");
+      expect(String(joinItem?.insertText)).toContain("FK_USER_ID");
+      expect(String(joinItem?.sortText)).toMatch(/^0_/);
     });
   });
 

@@ -1,4 +1,5 @@
 // State module - Global state management for result panel
+import { editValuesEqual } from './editValue.js';
 import type {
     AggregationSelection,
     ColumnAggregationState,
@@ -7,6 +8,7 @@ import type {
     GridHandle,
     GridScrollState,
     ResultSet,
+    DiskQuerySpec,
 } from './types.js';
 import { getResultPanelWindow } from './types.js';
 
@@ -34,6 +36,104 @@ interface PendingEdit {
 }
 
 type ColumnFilterStateMap = Record<string, ColumnFilterValue>;
+
+export interface FilterHistorySnapshot {
+    globalFilter: string;
+    columnFilters: Array<{ id: string; value: ColumnFilterValue }>;
+    sorting: Array<{ id: string; desc: boolean }>;
+    filterScope: 'loaded' | 'disk' | 'database';
+    databaseFilterSpec?: DiskQuerySpec;
+}
+
+interface FilterHistoryEntry {
+    snapshots: FilterHistorySnapshot[];
+    cursor: number;
+}
+
+const FILTER_HISTORY_LIMIT = 10;
+const FILTER_HISTORY_SCOPE_LIMIT = 50;
+const filterHistoryByScope = new Map<string, FilterHistoryEntry>();
+const restoringFilterHistoryScopes = new Set<string>();
+
+function cloneFilterHistorySnapshot(snapshot: FilterHistorySnapshot): FilterHistorySnapshot {
+    return JSON.parse(JSON.stringify(snapshot)) as FilterHistorySnapshot;
+}
+
+function filterHistorySnapshotKey(snapshot: FilterHistorySnapshot): string {
+    return JSON.stringify(snapshot);
+}
+
+export function buildFilterHistoryScope(
+    sourceUri: string | undefined,
+    resultSet: ResultSet | undefined,
+    resultSetIndex: number,
+): string {
+    let identity = resultSet?.resultSetId;
+    if (!identity) {
+        identity = resultSet?.executionTimestamp
+            ? `ts:${resultSet.executionTimestamp}`
+            : `index:${resultSetIndex}`;
+    }
+    return `${sourceUri || ''}\u001f${identity}`;
+}
+
+export function recordFilterHistorySnapshot(scope: string, snapshot: FilterHistorySnapshot): void {
+    if (!scope || restoringFilterHistoryScopes.has(scope)) return;
+    let entry = filterHistoryByScope.get(scope);
+    if (!entry) {
+        entry = { snapshots: [], cursor: -1 };
+        filterHistoryByScope.set(scope, entry);
+    }
+    const next = cloneFilterHistorySnapshot(snapshot);
+    const current = entry.snapshots[entry.cursor];
+    if (current && filterHistorySnapshotKey(current) === filterHistorySnapshotKey(next)) return;
+    entry.snapshots = entry.snapshots.slice(0, entry.cursor + 1);
+    entry.snapshots.push(next);
+    entry.cursor = entry.snapshots.length - 1;
+    if (entry.snapshots.length > FILTER_HISTORY_LIMIT) {
+        entry.snapshots.shift();
+        entry.cursor -= 1;
+    }
+    while (filterHistoryByScope.size > FILTER_HISTORY_SCOPE_LIMIT) {
+        const oldestScope = filterHistoryByScope.keys().next().value;
+        if (oldestScope === undefined || oldestScope === scope) break;
+        filterHistoryByScope.delete(oldestScope);
+    }
+}
+
+export function getFilterHistoryTarget(
+    scope: string,
+    direction: 'undo' | 'redo',
+): FilterHistorySnapshot | undefined {
+    const entry = filterHistoryByScope.get(scope);
+    if (!entry) return undefined;
+    const index = direction === 'undo' ? entry.cursor - 1 : entry.cursor + 1;
+    return index >= 0 && index < entry.snapshots.length
+        ? cloneFilterHistorySnapshot(entry.snapshots[index])
+        : undefined;
+}
+
+export function moveFilterHistoryCursor(scope: string, direction: 'undo' | 'redo'): boolean {
+    const entry = filterHistoryByScope.get(scope);
+    if (!entry) return false;
+    const next = direction === 'undo' ? entry.cursor - 1 : entry.cursor + 1;
+    if (next < 0 || next >= entry.snapshots.length) return false;
+    entry.cursor = next;
+    return true;
+}
+
+export function getFilterHistoryAvailability(scope: string): { canUndo: boolean; canRedo: boolean } {
+    const entry = filterHistoryByScope.get(scope);
+    return {
+        canUndo: Boolean(entry && entry.cursor > 0),
+        canRedo: Boolean(entry && entry.cursor >= 0 && entry.cursor < entry.snapshots.length - 1),
+    };
+}
+
+export function setFilterHistoryRestoring(scope: string, restoring: boolean): void {
+    if (restoring) restoringFilterHistoryScopes.add(scope);
+    else restoringFilterHistoryScopes.delete(scope);
+}
 
 // Grid state
 export let grids: Array<GridHandle | null> = [];
@@ -145,6 +245,11 @@ export function addPendingEdit(
         }
     }
     const edit = { rowIndex: rowIndex, columnIndex: columnIndex, oldValue: oldValue, newValue: newValue };
+    const valuesEqual = editValuesEqual(oldValue, newValue);
+    if (valuesEqual) {
+        if (existingIndex >= 0) pendingEdits.splice(existingIndex, 1);
+        return;
+    }
     if (existingIndex >= 0) {
         pendingEdits[existingIndex] = edit;
     } else {

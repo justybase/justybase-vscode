@@ -126,6 +126,63 @@ describe('ResultStateManager', () => {
         });
     });
 
+    describe('auxiliary read-only results', () => {
+        it('preserves the current result while appending, pinning and finishing related rows', () => {
+            const sourceUri = 'file:///queries/orders.sql';
+            manager.updateResults([{
+                resultSetId: 'source-result',
+                executionTimestamp: 100,
+                columns: [{ name: 'ORDER_ID', type: 'INTEGER' }],
+                data: [[17]],
+                name: 'Orders',
+            } as ResultSet], sourceUri);
+
+            expect(manager.startAuxiliaryExecution('vscode://invalid.sql')).toBe(false);
+            expect(manager.startAuxiliaryExecution(sourceUri)).toBe(true);
+            expect(manager.startAuxiliaryExecution(sourceUri)).toBe(false);
+            expect(manager.executingSources.has(sourceUri)).toBe(true);
+
+            const relatedIndex = manager.appendAuxiliaryResultSet(sourceUri, {
+                columns: [{ name: 'ORDER_ID', type: 'INTEGER' }],
+                data: [[17], [18]],
+                name: 'Related',
+            } as ResultSet);
+            const related = manager.resultsMap.get(sourceUri)?.[relatedIndex];
+            expect(relatedIndex).toBe(1);
+            expect(related).toMatchObject({ name: 'Related', data: [[17], [18]] });
+            expect(related?.executionTimestamp).toEqual(expect.any(Number));
+            expect(related?.resultSetId).toEqual(expect.any(String));
+            expect(manager.resultsMap.get(sourceUri)?.[0].resultSetId).toBe('source-result');
+            expect(manager.getActiveResultSetIndex(sourceUri)).toBe(relatedIndex);
+            expect(manager.pinnedSources.has(sourceUri)).toBe(true);
+
+            const stableIdentity = manager.resultsMap.get(sourceUri)?.[0].resultSetId;
+            manager.replaceResultSet(sourceUri, 0, {
+                columns: [{ name: 'ORDER_ID', type: 'INTEGER' }],
+                data: [[17], [18]],
+                executionTimestamp: 101,
+            } as ResultSet, true);
+            expect(manager.resultsMap.get(sourceUri)?.[0].resultSetId).toBe(stableIdentity);
+
+            manager.finishAuxiliaryExecution(sourceUri);
+            manager.finishAuxiliaryExecution(sourceUri);
+            expect(manager.executingSources.has(sourceUri)).toBe(false);
+            expect(() => manager.appendAuxiliaryResultSet('vscode://invalid.sql', {
+                columns: [], data: [],
+            } as ResultSet)).toThrow('Invalid result source.');
+        });
+
+        it('uses a fallback pin label and keeps supplied timestamps', () => {
+            const sourceUri = 'file:///queries/related.sql';
+            manager.appendAuxiliaryResultSet(sourceUri, {
+                columns: [], data: [], name: '', executionTimestamp: 123,
+            } as ResultSet);
+
+            expect(manager.resultsMap.get(sourceUri)?.[0].executionTimestamp).toBe(123);
+            expect(Array.from(manager.pinnedResults.values())[0]?.label).toContain('Related rows 0');
+        });
+    });
+
     describe('startExecution', () => {
         it('should create log result set for new execution', () => {
             const sourceUri = 'file:///test.sql';

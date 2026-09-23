@@ -397,6 +397,7 @@ export interface ResultPanelGlobals {
     grids?: GridHandle[];
     selectAll?: () => void;
     getIsEditMode?: () => boolean;
+    getActiveGridIndex?: () => number;
     addPendingEdit?: (
         rowIndex: number,
         columnIndex: number,
@@ -449,6 +450,12 @@ export interface ResultPanelGlobals {
     onFilterChanged?: () => void;
     clearFilter?: () => void;
     clearAllFilters?: () => void;
+    undoFilterHistory?: () => void;
+    redoFilterHistory?: () => void;
+    updateFilterHistoryButtons?: () => void;
+    recordDatabaseFilterHistoryBefore?: (resultSetIndex: number) => void;
+    recordDatabaseFilterHistoryApplied?: (resultSetIndex: number, spec?: DiskQuerySpec) => void;
+    openRelatedRows?: (rowIndex: number, columnIndex: number) => void;
     onDropGroup?: (event: DragEvent) => void;
     onDragOverGroup?: (event: DragEvent) => void;
     onDragLeaveGroup?: (event: DragEvent) => void;

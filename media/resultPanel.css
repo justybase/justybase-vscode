@@ -1010,6 +1010,20 @@ body.vscode-dark {
   -webkit-user-select: text;
 }
 
+.filter-history-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.filter-history-controls .btn-icon {
+  min-width: 24px;
+  width: 24px;
+  padding: 0;
+  font-size: 16px;
+}
+
 .column-search-group {
   display: inline-flex;
   align-items: stretch;
@@ -1720,6 +1734,31 @@ td.cell-modified {
 .edit-cell-input:focus {
     border-color: var(--vscode-focusBorder);
     box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.edit-cell-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 140px;
+}
+
+.edit-cell-null-toggle {
+    align-self: flex-start;
+    padding: 1px 5px;
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 3px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.edit-cell-textarea {
+    min-height: 120px;
+    max-height: 45vh;
+    resize: vertical;
+    white-space: pre;
 }
 
 /* Make table footer sticky to remain visible while scrolling the grid */

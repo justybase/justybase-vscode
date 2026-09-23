@@ -118,6 +118,12 @@ export interface MessageHandlerCallbacks {
         timeoutSeconds?: number,
         isRetry?: boolean,
     ) => Promise<void>;
+    onOpenRelatedRows?: (
+        sourceUri: string,
+        resultSetIndex: number,
+        rowIndex: number,
+        columnIndex: number,
+    ) => Promise<void> | void;
     onClearRefreshFailure?: (sourceUri: string, resultSetIndex: number) => void;
     onRequestDatabaseGrouping?: (
         sourceUri: string,
@@ -618,6 +624,15 @@ export class ResultPanelMessageHandler {
                     message.querySpec,
                     message.timeoutSeconds,
                     message.isRetry,
+                );
+                return;
+
+            case 'openRelatedRows':
+                void this._callbacks.onOpenRelatedRows?.(
+                    message.sourceUri,
+                    message.resultSetIndex,
+                    message.rowIndex,
+                    message.columnIndex,
                 );
                 return;
 

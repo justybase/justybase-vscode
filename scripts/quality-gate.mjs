@@ -183,9 +183,27 @@ function isNonExecutableAstLine(file, lineNumber) {
       file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
     let declarationLine = false;
+    let hasPureTemplateInterpolation = false;
+    let hasExecutableExpressionOnLine = false;
     const visit = node => {
       const startLine = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile)).line + 1;
       const endLine = ts.getLineAndCharacterOfPosition(sourceFile, node.end).line + 1;
+      if (ts.isTemplateExpression(node)) {
+        for (const span of node.templateSpans) {
+          const expressionStartLine = ts.getLineAndCharacterOfPosition(sourceFile, span.expression.getStart(sourceFile)).line + 1;
+          const expressionEndLine = ts.getLineAndCharacterOfPosition(sourceFile, span.expression.end).line + 1;
+          if (lineNumber >= expressionStartLine && lineNumber <= expressionEndLine) {
+            if (ts.isIdentifier(span.expression)) {
+              hasPureTemplateInterpolation = true;
+            } else {
+              hasExecutableExpressionOnLine = true;
+            }
+          }
+        }
+      }
+      if (ts.isCallExpression(node) && lineNumber >= startLine && lineNumber <= endLine) {
+        hasExecutableExpressionOnLine = true;
+      }
       const body = 'body' in node && node.body && typeof node.body.getStart === 'function'
         ? node.body
         : undefined;
@@ -234,7 +252,7 @@ function isNonExecutableAstLine(file, lineNumber) {
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
-    return declarationLine;
+    return declarationLine || (hasPureTemplateInterpolation && !hasExecutableExpressionOnLine);
   } catch {
     return false;
   }

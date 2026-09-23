@@ -10,6 +10,8 @@ import {
     setGlobalFilterState,
     setResultFormattingState,
     saveScrollStateToCache,
+    buildFilterHistoryScope,
+    recordFilterHistorySnapshot,
 } from '../state.js';
 import {
     createFilterValueSearchText,
@@ -20,8 +22,8 @@ import { GLOBAL_FILTER_WORKER_ROW_THRESHOLD } from '../searchWorkerBridge.js';
 import {
     formatCellValue,
     debounce,
-    isBinaryColumnType,
 } from '../utils.js';
+import { setupCellEditing } from './cellEditing.js';
 import { getSavedStateFor, saveAllGridStates, resolveScrollStateForResultSet } from './persistence.js';
 import { createHeaderCellWithFilter, reorderColumnsForPinning, renderRowCountInfo } from '../filter.js';
 import { setupCellSelectionEvents } from '../selection.js';
@@ -46,7 +48,6 @@ import {
     getResultSetAt,
     callPanelMethod,
 } from '../types.js';
-import { asHtml } from '../dom.js';
 import {
     RESULT_GRID_MAX_AUTO_SIZE_ROWS,
     RESULT_GRID_ESTIMATED_ROW_HEIGHT,
@@ -521,6 +522,21 @@ export function createResultSetGrid(
             }
         }
         return requests;
+    };
+
+    const filterHistoryScope = buildFilterHistoryScope(getActiveSourceUri(), rs, rsIndex);
+    const recordCurrentFilterHistory = (): void => {
+        const currentResult = getResultSetAt(rsIndex) ?? rs;
+        recordFilterHistorySnapshot(filterHistoryScope, {
+            globalFilter: tableState.globalFilter ?? '',
+            columnFilters: tableState.columnFilters,
+            sorting: tableState.sorting,
+            filterScope: currentResult.storageMode === 'sqlite'
+                ? 'disk'
+                : currentResult.databaseFilterSpec ? 'database' : 'loaded',
+            databaseFilterSpec: currentResult.databaseFilterSpec,
+        });
+        callPanelMethod('updateFilterHistoryButtons');
     };
 
     if (rs.storageMode === 'sqlite' && tableState.grouping.length > 0) {
@@ -1191,86 +1207,9 @@ export function createResultSetGrid(
     };
 
     const setupEditModeDelegation = () => {
-        if (editModeDblClickBound) {
-            return;
-        }
+        if (editModeDblClickBound) return;
         editModeDblClickBound = true;
-
-        tbody.addEventListener('dblclick', (e) => {
-            let isEdit = false;
-            try { isEdit = typeof getResultPanelWindow().getIsEditMode === 'function' ? getResultPanelWindow().getIsEditMode!() : false; } catch { /* best effort during teardown */ }
-            if (!isEdit) return;
-
-            const cellTd = asHtml(e.target)?.closest('td');
-            if (!cellTd || cellTd.classList.contains('row-number-cell')) return;
-            const editCellTd = cellTd;
-
-            const cellTr = cellTd.closest('tr');
-            if (!cellTr || !cellTr.dataset.index) return;
-
-            e.stopPropagation();
-            const rowIdx = parseInt(cellTr.dataset.index, 10);
-            if (isNaN(rowIdx)) return;
-            const cellIdx2 = Array.from(cellTr.children).indexOf(cellTd) - 1;
-            if (cellIdx2 < 0) return;
-
-            // Binary columns cannot be edited inline (values are base64/placeholders).
-            const cellColumn = columns[cellIdx2];
-            if (isBinaryColumnType(cellColumn?.dataType)) {
-                return;
-            }
-
-            const currentText = editCellTd.textContent;
-            const isNull = currentText === 'NULL';
-
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.value = isNull ? '' : currentText;
-            input.className = 'edit-cell-input';
-            input.style.width = '100%';
-            input.style.boxSizing = 'border-box';
-            input.style.backgroundColor = 'var(--vscode-input-background)';
-            input.style.color = 'var(--vscode-input-foreground)';
-            input.style.border = '1px solid var(--vscode-focusBorder)';
-            input.style.padding = '2px 4px';
-            input.style.fontSize = 'inherit';
-            input.style.fontFamily = 'inherit';
-
-            editCellTd.innerHTML = '';
-            editCellTd.appendChild(input);
-            input.focus();
-            input.select();
-
-            function commitEdit() {
-                const newVal = input.value;
-                const oldVal = isNull ? null : currentText;
-                if (newVal !== (isNull ? '' : currentText)) {
-                    try {
-                        callPanelMethod('addPendingEdit', rowIdx, cellIdx2, oldVal, newVal);
-                    } catch { /* best effort during teardown */ }
-                    editCellTd.classList.add('cell-modified');
-                } else {
-                    editCellTd.classList.remove('cell-modified');
-                }
-                editCellTd.innerHTML = '';
-                const displaySpan = document.createElement('span');
-                displaySpan.textContent = newVal || 'NULL';
-                editCellTd.appendChild(displaySpan);
-                editCellTd.title = newVal || 'NULL';
-            }
-
-            input.onblur = function () { commitEdit(); };
-            input.onkeydown = function (ke) {
-                if (ke.key === 'Enter') { commitEdit(); }
-                if (ke.key === 'Escape') {
-                    editCellTd.innerHTML = '';
-                    const displaySpan2 = document.createElement('span');
-                    displaySpan2.textContent = currentText;
-                    editCellTd.appendChild(displaySpan2);
-                    editCellTd.title = currentText;
-                }
-            };
-        });
+        setupCellEditing(tbody, columns, rs);
     };
 
     createDataRow = function (
@@ -1279,6 +1218,7 @@ export function createResultSetGrid(
         pinnedColumns: string[],
         formatContext: FormatContext,
     ): void {
+        if (row.index !== undefined) tr.dataset.dataRowIndex = String(row.index);
         const rowNumTd = getCellFromPool();
         rowNumTd.className = 'row-number-cell';
         applyRowNumberColumnStyles(rowNumTd, {
@@ -1292,6 +1232,7 @@ export function createResultSetGrid(
 
         row.getVisibleCells().forEach((cell: GridVisibleCell) => {
             const td = getCellFromPool();
+            td.dataset.columnIndex = cell.column.id;
             const value = cell.getValue();
             applyRightAlignmentClass(td, cell.column.columnDef.dataType, cell.column.columnDef.inferredNumericKind, value);
 
@@ -1927,7 +1868,9 @@ export function createResultSetGrid(
             get columnVisibility() { return tableState.columnVisibility; }
         },
         onSortingChange: (updater) => {
+            recordCurrentFilterHistory();
             tableState.sorting = typeof updater === 'function' ? updater(tableState.sorting) : updater;
+            recordCurrentFilterHistory();
             if (getResultSetAt(rsIndex)?.storageMode === 'sqlite') {
                 syncDiskQuerySpecFromGrid(rsIndex);
                 if (tableState.grouping.length > 0) {
@@ -1942,7 +1885,9 @@ export function createResultSetGrid(
             saveAllGridStates();
         },
         onGlobalFilterChange: (updater) => {
+            recordCurrentFilterHistory();
             tableState.globalFilter = typeof updater === 'function' ? updater(tableState.globalFilter) : updater;
+            recordCurrentFilterHistory();
             if (!tableState.globalFilter) {
                 globalFilterSearchCache = new WeakMap<object, FilterValueSearchText[]>();
             }
@@ -1962,7 +1907,9 @@ export function createResultSetGrid(
             debouncedSaveGlobalFilterState();
         },
         onColumnFiltersChange: (updater) => {
+            recordCurrentFilterHistory();
             tableState.columnFilters = typeof updater === 'function' ? updater(tableState.columnFilters) : updater;
+            recordCurrentFilterHistory();
             if (getResultSetAt(rsIndex)?.storageMode === 'sqlite') {
                 syncDiskQuerySpecFromGrid(rsIndex);
                 if (tableState.grouping.length > 0) {

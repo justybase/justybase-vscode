@@ -237,6 +237,66 @@ test.describe('Table rendering', () => {
         await expect.poll(() => page.locator('#rowCountInfo').textContent()).toContain('1,000 rows');
     });
 
+    test('undoes and redoes a global filter for the active result', async ({ page }) => {
+        const filterInput = page.locator('#globalFilter');
+        const undo = page.locator('#undoFilterBtn');
+        const redo = page.locator('#redoFilterBtn');
+
+        await expect(undo).toBeDisabled();
+        await filterInput.fill('Anna');
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/125 rows of 1,000/);
+        await expect(undo).toBeEnabled();
+
+        await undo.click();
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toContain('1,000 rows');
+        await expect(redo).toBeEnabled();
+
+        await redo.click();
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/125 rows of 1,000/);
+        await expect(redo).toBeDisabled();
+    });
+
+    test('stages a typed edit against the original row after filtering', async ({ page }) => {
+        await page.evaluate(() => {
+            const w = window as unknown as {
+                resultSets: Array<Record<string, unknown>>;
+                activeSource?: string;
+                updateEditButtons?: () => void;
+                addPendingEdit?: (...args: unknown[]) => void;
+                __stagedEdit?: unknown[];
+            };
+            w.resultSets[0].isEditable = true;
+            w.resultSets[0].editSource = { db: 'DB', schema: 'PUBLIC', table: 'EMPLOYEE' };
+            w.activeSource = 'test-source-1';
+            w.addPendingEdit = (...args) => { w.__stagedEdit = args; };
+            w.updateEditButtons?.();
+        });
+
+        await page.locator('#globalFilter').fill('Anna');
+        await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/125 rows of 1,000/);
+        await page.locator('#editToggleBtn').click();
+
+        const firstRow = page.locator('#gridContainer tbody tr').filter({ has: page.locator('td.row-number-cell') }).first();
+        await expect(firstRow).toBeVisible();
+        const originalRowIndex = await firstRow.getAttribute('data-data-row-index');
+        expect(originalRowIndex).toBe('7');
+        const originalSalary = await page.evaluate(() => {
+            const w = window as unknown as { resultSets: Array<{ data: unknown[][] }> };
+            return w.resultSets[0].data[7][2];
+        });
+
+        await firstRow.locator('td').nth(3).dblclick();
+        const editor = page.locator('.edit-cell-input');
+        await expect(editor).toBeVisible();
+        await editor.fill('12345678901234567890.123456');
+        await editor.press('Enter');
+
+        await expect.poll(() => page.evaluate(() => {
+            const w = window as unknown as { __stagedEdit?: unknown[] };
+            return w.__stagedEdit ?? null;
+        })).toEqual([7, 2, originalSalary, '12345678901234567890.123456']);
+    });
+
     test('column filter changes the rendered result and can be cleared', async ({ page }) => {
         const departmentHeader = page.locator('#gridContainer table thead th').nth(6);
         await departmentHeader.locator('.header-btn-filter').click();

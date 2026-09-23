@@ -210,6 +210,12 @@ interface ResultPanelWebviewToHostMessageMap {
         timeoutSeconds?: number;
         isRetry?: boolean;
     };
+    openRelatedRows: {
+        sourceUri: string;
+        resultSetIndex: number;
+        rowIndex: number;
+        columnIndex: number;
+    };
     closeAllResults: { sourceUri: string };
     cancelQuery: { sourceUri: string; currentRowCounts?: number[] };
     copyToClipboard: { text: string };
@@ -465,7 +471,7 @@ export type ResultPanelHostToWebviewMessage = MessageFromMap<ResultPanelHostToWe
 export type ResultPanelInboundMessage = ResultPanelWebviewToHostMessage;
 export type ResultPanelOutboundMessage = ResultPanelHostToWebviewMessage;
 
-export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
+export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['openRelatedRows',
     'ready', 'migrateResult', 'logRowsApplied', 'requestLogSync', 'requestResultSync', 'selectAll',
     'reportHydrationMetrics', 'reportResultPanelTrace', 'testBridgeResult', 'reportUxPerf',
     'describeWithCopilot', 'fixSqlError', 'initiateExport', 'initiateExportWithSelection',

@@ -6,6 +6,18 @@ import { extractDatabaseFromLayerKey } from './diskStorage/metadataDiskPaths';
 import { buildNetezzaCacheDatabasePart } from './helpers';
 import { createNetezzaUserIdentifier } from '../dialects/netezza/metadata/identifierUtils';
 
+/** Small structural surface so connection-manager cache ports can use lookup helpers. */
+export interface MetadataColumnCacheReader {
+    getColumns?(connectionName: string, key: string): ColumnMetadata[] | undefined;
+    getColumnsAnySchema?(
+        connectionName: string,
+        database: string,
+        tableName: string,
+    ): ColumnMetadata[] | undefined;
+    ensureColumnsLoadedForTableKey?(connectionName: string, layerKey: string): Promise<void>;
+    ensureColumnsLoaded?(connectionName: string, database: string): Promise<void>;
+}
+
 function buildDirectColumnCacheKey(
     database: string,
     schema: string | undefined,
@@ -31,7 +43,7 @@ function buildDirectColumnCacheKey(
  * Netezza unquoted identifiers are uppercased; non-Netezza dialects may preserve case.
  */
 export function getCachedColumnsFromMetadataCache(
-    metadataCache: MetadataCache,
+    metadataCache: MetadataColumnCacheReader,
     connectionName: string,
     database: string,
     schema: string | undefined,
@@ -40,13 +52,13 @@ export function getCachedColumnsFromMetadataCache(
 ): ColumnMetadata[] | undefined {
     const isNetezza = databaseKind === 'netezza';
     const directKey = buildDirectColumnCacheKey(database, schema, table, databaseKind);
-    const directColumns = metadataCache.getColumns(connectionName, directKey);
+    const directColumns = metadataCache.getColumns?.(connectionName, directKey);
     if (directColumns) {
         return directColumns;
     }
 
     if (!schema) {
-        return metadataCache.getColumnsAnySchema(
+        return metadataCache.getColumnsAnySchema?.(
             connectionName,
             isNetezza
                 ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
@@ -62,7 +74,7 @@ export function getCachedColumnsFromMetadataCache(
  * Async variant — ensures lazy-loaded column files are hydrated before cache read.
  */
 export async function getCachedColumnsFromMetadataCacheAsync(
-    metadataCache: MetadataCache,
+    metadataCache: MetadataColumnCacheReader,
     connectionName: string,
     database: string,
     schema: string | undefined,
@@ -70,9 +82,9 @@ export async function getCachedColumnsFromMetadataCacheAsync(
     databaseKind?: DatabaseKind,
 ): Promise<ColumnMetadata[] | undefined> {
     const directKey = buildDirectColumnCacheKey(database, schema, table, databaseKind);
-    if (typeof metadataCache.ensureColumnsLoadedForTableKey === 'function') {
+    if (metadataCache.ensureColumnsLoadedForTableKey) {
         await metadataCache.ensureColumnsLoadedForTableKey(connectionName, directKey);
-    } else if (typeof metadataCache.ensureColumnsLoaded === 'function') {
+    } else if (metadataCache.ensureColumnsLoaded) {
         await metadataCache.ensureColumnsLoaded(connectionName, database);
     }
     return getCachedColumnsFromMetadataCache(
