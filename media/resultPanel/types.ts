@@ -11,6 +11,7 @@ export type { TanStackCellContext } from '../shared/tanstackShims.js';
 /** Column metadata carried on TanStack column definitions in the result grid. */
 export interface CellSelectionHandlers {
     destroy(): void;
+    clearSelection?: () => void;
     onTableRowsRendered?: () => void;
     copySelection?: (withHeaders?: boolean, plainTextFormat?: string) => void;
     [key: string]: unknown;
@@ -271,6 +272,8 @@ export interface GridHandle {
     refreshAutoSizedLayout?: () => boolean;
     createVirtualizer?: () => void;
     renderTableRows?: () => void;
+    responsiveCollapseEnabled?: boolean;
+    toggleResponsiveCollapse?: () => boolean;
     executionTimestamp?: number;
     TableCore?: unknown;
     [key: string]: unknown;

@@ -33,6 +33,19 @@ function buildFilterHistoryControlsMarkup(): string {
   return parts.join('');
 }
 
+function buildResponsiveCollapseMenuItemMarkup(): string {
+  const attributes = [
+    'class="split-btn__menu-item"',
+    'data-action="responsive-collapse"',
+    'role="menuitemcheckbox"',
+    'aria-checked="false"',
+    'aria-disabled="false"',
+    'tabindex="0"',
+    'title="Move columns that do not fit into expandable row details"',
+  ].join(' ');
+  return `<div ${attributes}>Responsive collapsed columns</div>`;
+}
+
 export class ResultsHtmlGenerator {
   private _cspSource: string;
 
@@ -51,6 +64,7 @@ export class ResultsHtmlGenerator {
     const resultGridFontSize = options.resultGridFontSize || 12;
     const uiMode = options.sharedUiMode === true ? 'shared' : 'legacy';
     const filterHistoryControls = buildFilterHistoryControlsMarkup();
+    const responsiveCollapseMenuItem = buildResponsiveCollapseMenuItemMarkup();
     return `<!DOCTYPE html>
         <html lang="en">
         <head>
@@ -147,6 +161,7 @@ export class ResultsHtmlGenerator {
                             <button class="btn split-btn__primary" onclick="toggleToolbarMoreMenu(event)" title="More actions" aria-label="More actions" aria-haspopup="menu">⋯ More</button>
                             <div class="split-btn__menu toolbar-more-menu" id="toolbarMoreMenu" style="display:none" onclick="handleToolbarMoreMenuClick(event)" role="menu">
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">View mode</div>
+                                ${responsiveCollapseMenuItem}
                                 <div class="split-btn__menu-item" data-action="view-chart">Trend charts</div>
                                 <div class="split-btn__menu-item" data-action="view-diff">Diff</div>
                                 <div class="split-btn__menu-item" data-action="view-explore">Explore</div>

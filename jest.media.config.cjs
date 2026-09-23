@@ -27,6 +27,7 @@ module.exports = {
     'media/resultPanel/hostContracts.ts',
     'media/resultPanel/init.ts',
     'media/resultPanel/selection/menu.ts',
+    'media/resultPanel/grid/responsiveCollapse.ts',
     '!media/**/*.d.ts',
   ],
   coverageDirectory: 'coverage/media',

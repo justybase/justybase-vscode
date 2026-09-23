@@ -2039,6 +2039,26 @@ tfoot {
 .split-btn__menu-item:hover {
     background: var(--vscode-list-hoverBackground);
 }
+.split-btn__menu-item.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.split-btn__menu-item.is-disabled:hover {
+    background: transparent;
+}
+.split-btn__menu-item[data-action="responsive-collapse"]::before {
+    content: '□';
+    width: 14px;
+    flex: 0 0 14px;
+    text-align: center;
+}
+.split-btn__menu-item[data-action="responsive-collapse"][aria-checked="true"]::before {
+    content: '☑';
+}
+.split-btn__menu-item[data-action="responsive-collapse"]:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
 .split-btn__menu-separator {
     height: 1px;
     background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
@@ -3840,6 +3860,72 @@ td.row-number-cell {
     user-select: none;
     cursor: pointer;
     z-index: 60 !important; 
+}
+
+.row-number-value {
+    vertical-align: middle;
+}
+
+.responsive-details-toggle {
+    position: relative;
+    display: inline-block;
+    width: 14px;
+    height: 16px;
+    padding: 0;
+    margin-left: 3px;
+    vertical-align: middle;
+    border: 0;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+}
+
+.responsive-details-toggle::before {
+    content: '▸';
+}
+
+.responsive-details-toggle[aria-expanded="true"]::before {
+    content: '▾';
+}
+
+.responsive-details-toggle:hover,
+.responsive-details-toggle:focus-visible {
+    color: var(--vscode-editor-foreground);
+}
+
+.responsive-details-toggle:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+
+.responsive-details-row td {
+    padding: 7px 12px;
+    white-space: normal;
+    background: color-mix(in srgb, var(--vscode-editor-background), rgba(127, 127, 127, 0.12));
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.responsive-details-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 4px 14px;
+}
+
+.responsive-details-item {
+    display: grid;
+    grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+}
+
+.responsive-details-label {
+    color: var(--vscode-descriptionForeground);
+    font-weight: 600;
+}
+
+.responsive-details-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 td.row-number-cell.selected-cell {

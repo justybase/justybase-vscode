@@ -2813,10 +2813,27 @@ getResultPanelWindow().toggleExportSplitMenu = function (event: Event) {
 
 getResultPanelWindow().toggleExportPrimaryMenu = toggleExportPrimaryMenu;
 
+function updateResponsiveCollapseMenuItem(): void {
+  const item = getElementById("toolbarMoreMenu")?.querySelector<HTMLElement>(
+    '[data-action="responsive-collapse"]',
+  );
+  if (!item) return;
+  const grid = getGrid(getActiveGridIndex());
+  const grouped = (grid?.tanTable?.getState?.().grouping ?? []).length > 0;
+  const unavailable = !grid?.tanTable || grouped;
+  item.setAttribute("aria-checked", String(grid?.responsiveCollapseEnabled === true));
+  item.setAttribute("aria-disabled", String(unavailable));
+  item.classList.toggle("is-disabled", unavailable);
+  item.title = grouped
+    ? "Responsive collapsed columns are unavailable while rows are grouped"
+    : "Move columns that do not fit into expandable row details";
+}
+
 getResultPanelWindow().toggleToolbarMoreMenu = function (event) {
   event.stopPropagation();
   const menu = getElementById("toolbarMoreMenu");
   if (!menu) return;
+  updateResponsiveCollapseMenuItem();
   menu.style.display = menu.style.display === "none" ? "block" : "none";
 };
 
@@ -2828,6 +2845,14 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
   const menu = getElementById("toolbarMoreMenu");
   if (menu) menu.style.display = "none";
   if (!action) return;
+
+  if (action === "responsive-collapse") {
+    const grid = getGrid(getActiveGridIndex());
+    if (!grid?.tanTable || (grid.tanTable.getState().grouping ?? []).length > 0) return;
+    grid.toggleResponsiveCollapse?.();
+    updateResponsiveCollapseMenuItem();
+    return;
+  }
 
   if (action === "view-chart") { setViewMode("chart"); return; }
   if (action === "view-diff") { setViewMode("diff"); return; }

@@ -91,6 +91,114 @@ test.describe('Table rendering', () => {
         }
     });
 
+    test('responsive collapsed columns preserve virtual rows while resizing', async ({ page }) => {
+        await page.setViewportSize({ width: 520, height: 720 });
+        const wrapper = page.locator('#gridContainer .grid-wrapper');
+        await expect(wrapper).toBeVisible();
+
+        const headerCount = () => page.locator('#gridContainer table thead th[data-col-id]').count();
+        const getVisibleAnchor = () => wrapper.evaluate((element) => {
+            const headerHeight = element.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+            const viewport = element.getBoundingClientRect();
+            const bodyTop = viewport.top + headerHeight;
+            for (const row of Array.from(element.querySelectorAll<HTMLTableRowElement>('tbody tr[data-data-row-index]'))) {
+                const rect = row.getBoundingClientRect();
+                if (rect.height > 0 && rect.bottom > bodyTop && rect.top < viewport.bottom) {
+                    return {
+                        index: row.dataset.dataRowIndex ?? '',
+                        offset: rect.top - bodyTop,
+                    };
+                }
+            }
+            return null;
+        });
+        expect(await headerCount()).toBe(8);
+
+        await page.locator('#toolbarMoreToggle').click();
+        const option = page.locator('#toolbarMoreMenu [data-action="responsive-collapse"]');
+        await expect(option).toHaveAttribute('aria-disabled', 'false');
+        await option.click();
+
+        await expect.poll(headerCount).toBeLessThan(8);
+        const narrowColumnCount = await headerCount();
+        expect(narrowColumnCount).toBeGreaterThanOrEqual(1);
+
+        await wrapper.evaluate((element) => {
+            const table = element.querySelector('table');
+            if (table) table.style.minWidth = '1200px';
+            element.scrollTop = 4000;
+            element.scrollLeft = 100;
+        });
+        await expect.poll(async () => wrapper.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        await expect.poll(async () => wrapper.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+        const unalignedAnchor = await getVisibleAnchor();
+        expect(unalignedAnchor).not.toBeNull();
+        if (!unalignedAnchor) throw new Error('No visible virtual row was found before expansion');
+        await wrapper.evaluate((element, offset) => { element.scrollTop += offset; }, unalignedAnchor.offset);
+        await wrapper.evaluate(() => new Promise<void>(resolve => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        const firstVisibleAnchor = await getVisibleAnchor();
+        expect(firstVisibleAnchor).not.toBeNull();
+        if (!firstVisibleAnchor) throw new Error('No visible virtual row was found after anchor alignment');
+        const firstDataRow = page.locator(
+            `#gridContainer tbody tr[data-data-row-index="${firstVisibleAnchor?.index}"]`,
+        );
+        await expect(firstDataRow).toBeVisible();
+        const rowNumberBeforeExpansion = await firstDataRow.locator('.row-number-value').textContent();
+        await firstDataRow.locator('.responsive-details-toggle').evaluate((button: HTMLButtonElement) => button.click());
+        const details = page.locator('#gridContainer tbody tr.responsive-details-row').first();
+        await expect(details).toBeVisible();
+        await expect(details.locator('.responsive-details-item').first()).toBeVisible();
+        const anchorAfterExpansion = await getVisibleAnchor();
+        expect(anchorAfterExpansion?.index).toBe(firstVisibleAnchor?.index);
+        expect(Math.abs((anchorAfterExpansion?.offset ?? 0) - firstVisibleAnchor.offset)).toBeLessThanOrEqual(1);
+        const visibleRowsBeforeResize = await page.locator('#gridContainer tbody td.row-number-cell').count();
+        await wrapper.evaluate(element => { element.scrollLeft = 100; });
+        const horizontalBeforeResize = await wrapper.evaluate(element => element.scrollLeft);
+        expect(horizontalBeforeResize).toBeGreaterThan(0);
+
+        await page.setViewportSize({ width: 760, height: 720 });
+        await expect.poll(headerCount).toBeGreaterThan(narrowColumnCount);
+        await wrapper.evaluate(() => new Promise<void>(resolve => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        await expect.poll(async () => wrapper.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        const horizontalStateAfterResize = await wrapper.evaluate(element => ({
+            left: element.scrollLeft,
+            width: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+            tableWidth: element.querySelector('table')?.getBoundingClientRect().width ?? 0,
+            minWidth: element.querySelector('table')?.style.minWidth ?? '',
+        }));
+        expect(horizontalStateAfterResize.left, JSON.stringify(horizontalStateAfterResize))
+            .toBeGreaterThanOrEqual(Math.min(horizontalBeforeResize, horizontalStateAfterResize.scrollWidth - horizontalStateAfterResize.width));
+        await expect.poll(async () => page.locator('#gridContainer tbody td.row-number-cell').count())
+            .toBeGreaterThan(0);
+        const visibleAnchorAfterResize = await getVisibleAnchor();
+        expect(visibleAnchorAfterResize?.index, JSON.stringify({
+            beforeExpansion: firstVisibleAnchor,
+            afterExpansion: anchorAfterExpansion,
+            afterResize: visibleAnchorAfterResize,
+            scrollTop: await wrapper.evaluate(element => element.scrollTop),
+        })).toBe(anchorAfterExpansion?.index);
+        expect(Math.abs((visibleAnchorAfterResize?.offset ?? 0) - (anchorAfterExpansion?.offset ?? 0)), JSON.stringify({
+            beforeExpansion: firstVisibleAnchor,
+            afterExpansion: anchorAfterExpansion,
+            afterResize: visibleAnchorAfterResize,
+        }))
+            .toBeLessThanOrEqual(5);
+        expect(await page.locator('#gridContainer tbody td.row-number-cell').count())
+            .toBeLessThanOrEqual(visibleRowsBeforeResize + 10);
+
+        await page.locator('#toolbarMoreToggle').click();
+        await expect(option).toHaveAttribute('aria-checked', 'true');
+        await option.click();
+        await expect.poll(headerCount).toBe(8);
+        await expect(page.locator('#gridContainer tbody tr.responsive-details-row')).toHaveCount(0);
+        expect(rowNumberBeforeExpansion).toBeTruthy();
+    });
+
     test('renders row count info', async ({ page }) => {
         const rowCountInfo = page.locator('#rowCountInfo');
         await expect(rowCountInfo).toBeVisible();

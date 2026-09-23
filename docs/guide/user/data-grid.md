@@ -4,7 +4,7 @@ description: Explore streamed, multi-result, memory-backed, and disk-backed resu
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-09-15
+last_verified: 2026-09-23
 product_version: 3.17.25
 ---
 
@@ -49,6 +49,12 @@ viewport to keep extending it while the grid scrolls. Header widths include
 the type badge and the drag, pin, filter, and grouping controls. A manually
 saved width is still respected, but it cannot be reduced below the readable
 header minimum; use horizontal scrolling for a wide result.
+
+In the desktop Result Panel, open **More → Responsive collapsed columns** to
+move columns that do not fit into expandable row details. Use the chevron in a
+row number cell to inspect those values. The option is off by default and is
+remembered for that result set. Grouping temporarily suspends the layout; the
+setting resumes when the grid returns to flat rows.
 
 <figure>
   <img src="screenshots/row-view.png" alt="Row View showing a result row side by side with values">
