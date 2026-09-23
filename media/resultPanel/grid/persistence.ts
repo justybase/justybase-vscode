@@ -38,6 +38,7 @@ export interface SavedGridState {
     pinnedColumns?: string[];
     resultFormatting?: Record<string, unknown>;
     diskGroupingExpandedKeys?: string[];
+    responsiveCollapseEnabled?: boolean;
     [key: string]: unknown;
 }
 
@@ -402,6 +403,7 @@ export function saveAllGridStates(): void {
             pinnedColumns: getPinnedColumnsState(rsIndex, grid.executionTimestamp, activeSource),
             resultFormatting: getResultFormattingState(rsIndex, grid.executionTimestamp, activeSource),
             diskGroupingExpandedKeys: getDiskGroupingExpandedKeys(rsIndex),
+            responsiveCollapseEnabled: grid.responsiveCollapseEnabled === true,
         };
 
         entries[key] = state;

@@ -23,6 +23,8 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('Copy Value');
         expect(html).toContain('id="undoFilterBtn"');
         expect(html).toContain('id="redoFilterBtn"');
+        expect(html).toContain('data-action="responsive-collapse"');
+        expect(html).toContain('role="menuitemcheckbox" aria-checked="false"');
     });
 
     it('does not acquire the VS Code API in the inline bootstrap script', () => {

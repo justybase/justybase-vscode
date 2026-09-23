@@ -137,6 +137,29 @@ active streaming, cancellation with partial data, disk-backed data, empty data,
 and initially zero-sized layouts. Prefer an exact virtualizer-anchor assertion;
 use pixel tolerance only when no stable anchor is available.
 
+### Responsive collapsed result columns
+
+The opt-in desktop layout is owned by the grid for one stable result identity.
+`responsiveCollapseEnabled` is persisted in that result's grid-state entry;
+row expansion is ephemeral and keyed by the memory row ID, or by disk query
+identity plus its absolute row index. A new disk filter/sort query invalidates
+expanded rows. The hidden-column set is derived from the wrapper width, current
+visible columns, saved widths, and pinned columns; it is never persisted.
+Grouping suspends the projection while retaining the preference, and returning
+to flat rows recalculates it. If a resize changes the visible-column
+projection, cell selection is cleared because its visible coordinates changed.
+
+The virtualizer continues to count one item per source row. When a detail row is
+expanded, its measured height is combined with its source row's height. Resize
+observers and the window-resize fallback are enabled only while the option is
+on and are disconnected on toggle-off or grid disposal. Cover default-off,
+preference restore by exact result identity, ephemeral expansion after restore,
+memory and SQLite-backed rows, grouped suspension, wide/narrow resize,
+selection invalidation, vertical anchor and horizontal scroll preservation,
+zero-width initialization, and observer cleanup. The DOM test proves value
+rendering and state transitions; the Playwright test proves toolbar access and
+the real browser layout/virtualizer behavior.
+
 ## Execution and asynchronous ordering
 
 Streaming and asynchronous UI tests must include more than normal ordering:

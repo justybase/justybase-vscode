@@ -75,6 +75,10 @@ import {
     getAggFn,
 } from './aggregation.js';
 import { buildInMemoryAggregationCacheKey } from './aggregationCacheKey.js';
+import {
+    calculateResponsiveVirtualItemSize,
+    getResponsiveHiddenColumnIds,
+} from './responsiveCollapse.js';
 
 function createDatabaseAggRetryButton(
     errorMessage: string,
@@ -254,6 +258,17 @@ export function createResultSetGrid(
     let lastVirtualizerKey = '';
     /** Measured once from first rendered data row; keeps natural row height without per-row measureElement drift. */
     let resolvedRowHeight: number | null = null;
+    let responsiveCollapseEnabled = savedState?.responsiveCollapseEnabled === true;
+    let responsiveHiddenColumnIds: string[] = [];
+    const responsiveExpandedRowKeys = new Set<string>();
+    const responsiveResultIdentity = rs.resultSetId?.trim() || String(rs.executionTimestamp ?? `result-${rsIndex}`);
+    let lastResponsiveDiskQueryKey: string | null = null;
+    let responsiveWidthObserver: ResizeObserver | null = null;
+    let responsiveBodyObserver: ResizeObserver | null = null;
+    let responsiveFallbackResizeListener: EventListener | null = null;
+    let responsiveLayoutFrame: number | null = null;
+    let responsiveMeasureFrame: number | null = null;
+    let responsiveAnchorFrame: number | null = null;
     let renderScheduled = false;
     let renderRowsScheduled = false;  // Throttling dla renderTableRows
 
@@ -287,6 +302,108 @@ export function createResultSetGrid(
     }, 200);
 
     let tanTable: GridTanStackTable;
+
+    const isResponsiveCollapseActive = (): boolean => (
+        responsiveCollapseEnabled && tableState.grouping.length === 0
+    );
+
+    const getResponsiveVisibleColumns = (): TanStackColumn[] => {
+        const visibleColumns = tanTable.getVisibleLeafColumns();
+        if (!isResponsiveCollapseActive() || responsiveHiddenColumnIds.length === 0) {
+            return visibleColumns;
+        }
+        const hiddenIds = new Set(responsiveHiddenColumnIds);
+        return visibleColumns.filter(column => !hiddenIds.has(column.id));
+    };
+
+    const updateResponsiveHiddenColumns = (): boolean => {
+        const nextHiddenIds = isResponsiveCollapseActive()
+            ? getResponsiveHiddenColumnIds({
+                enabled: true,
+                grouped: false,
+                viewportWidth: wrapper.clientWidth,
+                rowNumberWidth: rowNumberColumnWidth,
+                columns: (() => {
+                    const pinnedColumns = new Set(
+                        getPinnedColumnsState(rsIndex, rs.executionTimestamp, getActiveSourceUri()),
+                    );
+                    return tanTable.getVisibleLeafColumns().map(column => ({
+                        id: column.id,
+                        width: columnWidths.get(column.id) ?? 100,
+                        pinned: pinnedColumns.has(column.id),
+                    }));
+                })(),
+            })
+            : [];
+
+        if (nextHiddenIds.length === responsiveHiddenColumnIds.length
+            && nextHiddenIds.every((columnId, index) => columnId === responsiveHiddenColumnIds[index])) {
+            return false;
+        }
+        const visibleColumnProjectionChanged = responsiveHiddenColumnIds.length > 0 || nextHiddenIds.length > 0;
+        responsiveHiddenColumnIds = nextHiddenIds;
+        if (visibleColumnProjectionChanged && typeof selectionHandlers?.clearSelection === 'function') {
+            selectionHandlers.clearSelection();
+        }
+        return true;
+    };
+
+    const scheduleResponsiveLayoutRefresh = (): void => {
+        if (!responsiveCollapseEnabled || disposed || responsiveLayoutFrame !== null) {
+            return;
+        }
+        responsiveLayoutFrame = requestAnimationFrame(() => {
+            responsiveLayoutFrame = null;
+            if (disposed) {
+                return;
+            }
+            chromeDirty = true;
+            scheduleRender({ chrome: true });
+        });
+    };
+
+    const scheduleResponsiveRowMeasure = (): void => {
+        if (!isResponsiveCollapseActive() || responsiveHiddenColumnIds.length === 0
+            || disposed || responsiveMeasureFrame !== null) {
+            return;
+        }
+        responsiveMeasureFrame = requestAnimationFrame(() => {
+            responsiveMeasureFrame = null;
+            if (!isResponsiveCollapseActive() || responsiveHiddenColumnIds.length === 0
+                || !rowVirtualizer || disposed) {
+                return;
+            }
+            tbody.querySelectorAll<HTMLTableRowElement>('tr[data-index]').forEach(row => {
+                if (!row.classList.contains('responsive-details-row')) {
+                    rowVirtualizer?.measureElement(row);
+                }
+            });
+        });
+    };
+
+    const configureResponsiveObservers = (): void => {
+        responsiveWidthObserver?.disconnect();
+        responsiveWidthObserver = null;
+        responsiveBodyObserver?.disconnect();
+        responsiveBodyObserver = null;
+        if (responsiveFallbackResizeListener) {
+            window.removeEventListener('resize', responsiveFallbackResizeListener);
+            responsiveFallbackResizeListener = null;
+        }
+        if (!responsiveCollapseEnabled || disposed) {
+            return;
+        }
+
+        if (typeof ResizeObserver === 'function') {
+            responsiveWidthObserver = new ResizeObserver(scheduleResponsiveLayoutRefresh);
+            responsiveWidthObserver.observe(wrapper);
+            responsiveBodyObserver = new ResizeObserver(scheduleResponsiveRowMeasure);
+            responsiveBodyObserver.observe(tbody);
+        } else {
+            responsiveFallbackResizeListener = scheduleResponsiveLayoutRefresh;
+            window.addEventListener('resize', responsiveFallbackResizeListener);
+        }
+    };
 
     // Declare function variables first (hoisting pattern)
     let scheduleRender: ScheduleRenderFn;
@@ -340,6 +457,49 @@ export function createResultSetGrid(
         footerHeight: tfoot.offsetHeight || 0,
     });
 
+    const getResponsiveScrollAnchor = (): { index: number; offset: number } | undefined => {
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const bodyTop = wrapperRect.top + (thead.getBoundingClientRect().height || thead.offsetHeight);
+        const bodyBottom = wrapperRect.bottom;
+        for (const row of Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr[data-index]'))) {
+            const index = Number.parseInt(row.dataset.index ?? '', 10);
+            if (!Number.isInteger(index)) {
+                continue;
+            }
+            const rect = row.getBoundingClientRect();
+            if (rect.height > 0 && rect.bottom > bodyTop && rect.top < bodyBottom) {
+                return { index, offset: rect.top - bodyTop };
+            }
+        }
+        return undefined;
+    };
+
+    const scheduleResponsiveAnchorRestore = (
+        anchor: { index: number; offset: number },
+        scrollLeft: number,
+    ): void => {
+        if (responsiveAnchorFrame !== null) {
+            cancelAnimationFrame(responsiveAnchorFrame);
+        }
+        responsiveAnchorFrame = requestAnimationFrame(() => {
+            // Let the virtualizer's scheduled row render and ResizeObserver measurements settle first.
+            responsiveAnchorFrame = requestAnimationFrame(() => {
+                responsiveAnchorFrame = null;
+                if (disposed) {
+                    return;
+                }
+                const row = tbody.querySelector<HTMLTableRowElement>(`tr[data-index="${anchor.index}"]`);
+                if (row) {
+                    const wrapperRect = wrapper.getBoundingClientRect();
+                    const bodyTop = wrapperRect.top + (thead.getBoundingClientRect().height || thead.offsetHeight);
+                    const actualOffset = row.getBoundingClientRect().top - bodyTop;
+                    wrapper.scrollTop = Math.max(0, wrapper.scrollTop + actualOffset - anchor.offset);
+                }
+                wrapper.scrollLeft = scrollLeft;
+            });
+        });
+    };
+
     const appendPlaceholderRow = (fragment: DocumentFragment, rowIndex: number): void => {
         const tr = document.createElement('tr');
         tr.className = 'virtual-row-placeholder';
@@ -352,6 +512,103 @@ export function createResultSetGrid(
         td.appendChild(spacer);
         tr.appendChild(td);
         fragment.appendChild(tr);
+    };
+
+    const getResponsiveRowKey = (
+        row: GroupableTanStackRow,
+        virtualIndex: number,
+        isDiskBacked: boolean,
+    ): string => isDiskBacked
+        ? `${responsiveResultIdentity}:disk:${lastResponsiveDiskQueryKey ?? ''}:${virtualIndex}`
+        : `${responsiveResultIdentity}:memory:${row.id ?? row.index ?? virtualIndex}`;
+
+    const createResponsiveDetailsRow = (
+        row: GroupableTanStackRow,
+        rowKey: string,
+        formatContext: FormatContext,
+    ): HTMLTableRowElement | null => {
+        if (!isResponsiveCollapseActive() || row.getIsGrouped?.() || responsiveHiddenColumnIds.length === 0) {
+            return null;
+        }
+        if (!responsiveExpandedRowKeys.has(rowKey)) {
+            return null;
+        }
+
+        const hiddenIds = new Set(responsiveHiddenColumnIds);
+        const hiddenCells = row.getVisibleCells().filter(cell => hiddenIds.has(cell.column.id));
+        if (hiddenCells.length === 0) {
+            return null;
+        }
+
+        const detailsRow = document.createElement('tr');
+        detailsRow.className = 'responsive-details-row';
+        detailsRow.dataset.responsiveFor = rowKey;
+        const detailsCell = document.createElement('td');
+        detailsCell.colSpan = getResponsiveVisibleColumns().length + 1;
+        const list = document.createElement('div');
+        list.className = 'responsive-details-list';
+
+        hiddenCells.forEach(cell => {
+            const value = cell.getValue();
+            const type = cell.column.columnDef.dataType;
+            let formattedValue = value === null || value === undefined
+                ? 'NULL'
+                : formatCellValue(value, type, cell.column.columnDef.scale, {
+                    ...formatContext,
+                    columnId: cell.column.id,
+                    inferredNumericKind: cell.column.columnDef.inferredNumericKind,
+                    inferredDateInteger: cell.column.columnDef.inferredDateInteger,
+                }) ?? String(value);
+            const normalizedType = (type ?? '').toLowerCase();
+            if (value !== null && value !== undefined
+                && (normalizedType === 'bool' || normalizedType === 'boolean')) {
+                const isTrue = value === true || value === 1 || String(value).toLowerCase() === 'true';
+                formattedValue = isTrue ? '✓ true' : '✗ false';
+            }
+
+            const item = document.createElement('div');
+            item.className = 'responsive-details-item';
+            const label = document.createElement('span');
+            label.className = 'responsive-details-label';
+            label.textContent = cell.column.columnDef.header;
+            const displayValue = document.createElement('span');
+            displayValue.className = 'responsive-details-value';
+            displayValue.textContent = formattedValue;
+            displayValue.title = formattedValue;
+            item.append(label, displayValue);
+            list.appendChild(item);
+        });
+
+        detailsCell.appendChild(list);
+        detailsRow.appendChild(detailsCell);
+        return detailsRow;
+    };
+
+    const createResponsiveDisclosureButton = (rowKey: string, rowNumber: number): HTMLButtonElement => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'responsive-details-toggle';
+        button.dataset.responsiveToggleFor = rowKey;
+        button.setAttribute('aria-expanded', String(responsiveExpandedRowKeys.has(rowKey)));
+        button.setAttribute('aria-label', `${responsiveExpandedRowKeys.has(rowKey) ? 'Hide' : 'Show'} collapsed columns for row ${rowNumber}`);
+        button.title = `${responsiveExpandedRowKeys.has(rowKey) ? 'Hide' : 'Show'} collapsed columns`;
+        const stopGridInteraction = (event: Event): void => {
+            event.stopPropagation();
+        };
+        button.addEventListener('pointerdown', stopGridInteraction);
+        button.addEventListener('mousedown', stopGridInteraction);
+        button.addEventListener('contextmenu', stopGridInteraction);
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (responsiveExpandedRowKeys.has(rowKey)) {
+                responsiveExpandedRowKeys.delete(rowKey);
+            } else {
+                responsiveExpandedRowKeys.add(rowKey);
+            }
+            scheduleRender();
+        });
+        return button;
     };
 
     const syncVirtualScrollExtent = (
@@ -393,6 +650,17 @@ export function createResultSetGrid(
         const diskView = resolveDiskGridViewState(rsIndex);
         const { isDiskBacked, isDiskQueryActive } = diskView;
         const isDiskGrouped = isDiskBacked && tableState.grouping.length > 0;
+        if (responsiveCollapseEnabled && isDiskBacked) {
+            const queryKey = JSON.stringify({
+                diskQuerySpec: rsAt.diskQuerySpec ?? null,
+                databaseFilterSpec: rsAt.databaseFilterSpec ?? null,
+            });
+            if (lastResponsiveDiskQueryKey !== null && lastResponsiveDiskQueryKey !== queryKey) {
+                responsiveExpandedRowKeys.clear();
+                rowVirtualizer?.measure();
+            }
+            lastResponsiveDiskQueryKey = queryKey;
+        }
         if (isDiskGrouped) {
             ensureDiskGrouping(rsIndex, tableState.grouping, getDiskGroupAggregationRequests());
         }
@@ -420,6 +688,37 @@ export function createResultSetGrid(
                 scrollToFn: VirtualCore.elementScroll,
                 observeElementRect: VirtualCore.observeElementRect,
                 observeElementOffset: VirtualCore.observeElementOffset,
+                getItemKey: (index: number) => {
+                    if (!responsiveCollapseEnabled) {
+                        return index;
+                    }
+                    const liveResult = getResultSetAt(rsIndex) ?? rs;
+                    const resultIdentity = liveResult.resultSetId?.trim()
+                        || String(liveResult.executionTimestamp ?? `result-${rsIndex}`);
+                    if (isDiskBackedResultSet(liveResult)) {
+                        return `${resultIdentity}:disk:${lastResponsiveDiskQueryKey ?? ''}:${index}`;
+                    }
+                    const row = (tanTable.getRowModel().rows[index] as GroupableTanStackRow | undefined);
+                    return `${resultIdentity}:memory:${row?.id ?? row?.index ?? index}`;
+                },
+                measureElement: (element: Element) => {
+                    const dataRow = element as HTMLTableRowElement;
+                    const dataRect = dataRow.getBoundingClientRect();
+                    if (!isResponsiveCollapseActive() || responsiveHiddenColumnIds.length === 0) {
+                        return dataRect.height;
+                    }
+                    const nextRow = dataRow.nextElementSibling as HTMLTableRowElement | null;
+                    const detailsHeight = nextRow?.classList.contains('responsive-details-row')
+                        ? nextRow.getBoundingClientRect().height
+                        : 0;
+                    return detailsHeight > 0
+                        ? calculateResponsiveVirtualItemSize(
+                            dataRect.height,
+                            detailsHeight,
+                            resolvedRowHeight ?? RESULT_GRID_ESTIMATED_ROW_HEIGHT,
+                        )
+                        : dataRect.height;
+                },
                 onChange: () => {
                     if (disposed) return;
                     const rsLive = getResultSetAt(rsIndex) ?? rsAt;
@@ -575,6 +874,14 @@ export function createResultSetGrid(
             }
             const anchorScrollTop = wrapper.scrollTop;
             const anchorScrollLeft = wrapper.scrollLeft;
+            const responsiveProjectionChanged = updateResponsiveHiddenColumns();
+            const responsiveAnchor = responsiveProjectionChanged
+                ? getResponsiveScrollAnchor()
+                : undefined;
+            if (responsiveProjectionChanged) {
+                chromeDirty = true;
+                rowVirtualizer?.measure();
+            }
             createVirtualizer();
             if (chromeDirty) {
                 renderChrome();
@@ -595,6 +902,16 @@ export function createResultSetGrid(
                 wrapper.scrollTop = anchorScrollTop;
                 wrapper.scrollLeft = anchorScrollLeft;
             }
+            if (responsiveAnchor !== undefined && anchorScrollTop > 0
+                && !shouldRestoreSavedScroll && rowVirtualizer) {
+                rowVirtualizer.scrollToIndex(responsiveAnchor.index, { align: 'start' });
+                wrapper.scrollTop = Math.max(0, wrapper.scrollTop - responsiveAnchor.offset);
+                wrapper.scrollLeft = anchorScrollLeft;
+                scheduleResponsiveAnchorRestore(responsiveAnchor, anchorScrollLeft);
+            }
+            if (responsiveProjectionChanged && anchorScrollLeft > 0) {
+                wrapper.scrollLeft = anchorScrollLeft;
+            }
         } catch (e: unknown) {
             console.error('Render error:', e);
             const message = e instanceof Error ? e.message : String(e);
@@ -607,7 +924,7 @@ export function createResultSetGrid(
         if (existing) existing.remove();
 
         const colGroup = document.createElement('colgroup');
-        const visibleCols = tanTable.getVisibleLeafColumns();
+        const visibleCols = getResponsiveVisibleColumns();
 
         let totalWidth = 0;
 
@@ -660,6 +977,9 @@ export function createResultSetGrid(
             tr.appendChild(rowNumTh);
 
             headerGroup.headers.forEach((header: TanStackHeader) => {
+                if (responsiveHiddenColumnIds.includes(header.column.id)) {
+                    return;
+                }
                 const th = createHeaderCellWithFilter(header, rs, tanTable, rsIndex, scheduleRender);
 
                 // Vertical sticky is handled by thead (position: sticky; top: 0)
@@ -1014,6 +1334,14 @@ export function createResultSetGrid(
 
             fragment.appendChild(tr);
 
+            if (!row.getIsGrouped?.()) {
+                const rowKey = getResponsiveRowKey(row, virtualRow.index, isDiskBacked);
+                const detailsRow = createResponsiveDetailsRow(row, rowKey, formatContext);
+                if (detailsRow) {
+                    fragment.appendChild(detailsRow);
+                }
+            }
+
             if (!row.getIsGrouped?.() && (row.depth ?? 0) > 0) {
                 const nextRow = rows[virtualRow.index + 1];
                 const isLastInGroup = !nextRow || (nextRow.depth ?? 0) < (row.depth ?? 0) || nextRow.getIsGrouped?.();
@@ -1039,6 +1367,12 @@ export function createResultSetGrid(
         recycleTbodyRowsBeforeClear();
         tbody.innerHTML = '';
         tbody.appendChild(fragment);
+
+        if (isResponsiveCollapseActive() && responsiveHiddenColumnIds.length > 0 && rowVirtualizer) {
+            tbody.querySelectorAll<HTMLTableRowElement>('tr[data-index]').forEach(row => {
+                rowVirtualizer?.measureElement(row);
+            });
+        }
 
         if (resolvedRowHeight === null && rowVirtualizer) {
             const sample = tbody.querySelector('tr[data-index]') as HTMLElement | null;
@@ -1226,11 +1560,31 @@ export function createResultSetGrid(
             cursor: 'pointer'
         });
         rowNumTd.dataset.rowNumber = (++dataRowCounter).toString();
-        rowNumTd.textContent = dataRowCounter.toString();
+        const rowNumberLabel = document.createElement('span');
+        rowNumberLabel.className = 'row-number-value';
+        rowNumberLabel.textContent = dataRowCounter.toString();
+        rowNumTd.appendChild(rowNumberLabel);
         tr.dataset.dataRowNumber = dataRowCounter.toString();
+        const virtualIndex = Number.parseInt(tr.dataset.index ?? '', 10);
+        const resultSet = getResultSetAt(rsIndex) ?? rs;
+        const responsiveRowKey = getResponsiveRowKey(
+            row,
+            Number.isInteger(virtualIndex) ? virtualIndex : row.index ?? dataRowCounter - 1,
+            isDiskBackedResultSet(resultSet),
+        );
+        const canExpandResponsiveDetails = isResponsiveCollapseActive() && responsiveHiddenColumnIds.length > 0 && !row.getIsGrouped?.();
+        if (canExpandResponsiveDetails) {
+            rowNumTd.appendChild(createResponsiveDisclosureButton(responsiveRowKey, dataRowCounter));
+        }
         tr.appendChild(rowNumTd);
 
+        const hiddenResponsiveIds = isResponsiveCollapseActive()
+            ? new Set(responsiveHiddenColumnIds)
+            : null;
         row.getVisibleCells().forEach((cell: GridVisibleCell) => {
+            if (hiddenResponsiveIds?.has(cell.column.id)) {
+                return;
+            }
             const td = getCellFromPool();
             td.dataset.columnIndex = cell.column.id;
             const value = cell.getValue();
@@ -1397,7 +1751,7 @@ export function createResultSetGrid(
             tfoot.innerHTML = '';
 
             const rows = (tanTable.getFilteredRowModel().rows || []) as GroupableTanStackRow[];
-            const visibleColumns = tanTable.getVisibleLeafColumns();
+            const visibleColumns = getResponsiveVisibleColumns();
             const currentAggs = getAggregationState(rsIndex, rs.executionTimestamp, getActiveSourceUri()) || {};
             const pinnedColumns = getPinnedColumnsState(rsIndex, rs.executionTimestamp, getActiveSourceUri());
             const directSql = rs.refreshSql || rs.sql || '';
@@ -2031,6 +2385,19 @@ export function createResultSetGrid(
         tanTable,
         rsIndex,
         executionTimestamp: rs.executionTimestamp,
+        responsiveCollapseEnabled,
+        toggleResponsiveCollapse: () => {
+            if (tableState.grouping.length > 0) {
+                return responsiveCollapseEnabled;
+            }
+            responsiveCollapseEnabled = !responsiveCollapseEnabled;
+            gridObj.responsiveCollapseEnabled = responsiveCollapseEnabled;
+            configureResponsiveObservers();
+            chromeDirty = true;
+            render();
+            saveAllGridStates();
+            return responsiveCollapseEnabled;
+        },
         renderGrouping: () => renderGrouping(),
         updateRowCount: () => updateRowCount(),
         render: () => render(),
@@ -2091,6 +2458,19 @@ export function createResultSetGrid(
             if (wrapper._scrollSaveTimeout) {
                 clearTimeout(wrapper._scrollSaveTimeout);
                 wrapper._scrollSaveTimeout = undefined;
+            }
+            configureResponsiveObservers();
+            if (responsiveLayoutFrame !== null) {
+                cancelAnimationFrame(responsiveLayoutFrame);
+                responsiveLayoutFrame = null;
+            }
+            if (responsiveMeasureFrame !== null) {
+                cancelAnimationFrame(responsiveMeasureFrame);
+                responsiveMeasureFrame = null;
+            }
+            if (responsiveAnchorFrame !== null) {
+                cancelAnimationFrame(responsiveAnchorFrame);
+                responsiveAnchorFrame = null;
             }
             selectionHandlers?.destroy();
             selectionHandlers = null;
@@ -2169,6 +2549,7 @@ export function createResultSetGrid(
     };
 
     // Initial render
+    configureResponsiveObservers();
     render();
 
     void scheduleDeferredColumnWidthInit(columns, rs, columnWidths, manualColumnWidths, measureText, () => {

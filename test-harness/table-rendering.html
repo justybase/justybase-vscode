@@ -73,6 +73,12 @@
             <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column...">
             <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
         </div>
+        <div class="split-btn toolbar-more-btn" id="toolbarMoreBtn">
+            <button class="btn split-btn__primary" id="toolbarMoreToggle" onclick="toggleToolbarMoreMenu(event)" aria-haspopup="menu">⋯ More</button>
+            <div class="split-btn__menu toolbar-more-menu" id="toolbarMoreMenu" style="display:none" onclick="handleToolbarMoreMenuClick(event)" role="menu">
+                <div class="split-btn__menu-item" data-action="responsive-collapse" role="menuitemcheckbox" aria-checked="false" aria-disabled="false" tabindex="0">Responsive collapsed columns</div>
+            </div>
+        </div>
         <div class="toolbar-separator"></div>
         <div class="split-btn view-split-btn" id="viewSplitBtn">
             <button class="btn split-btn__primary view-split-btn__label" id="viewModeLabel">Table</button>

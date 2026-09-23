@@ -26,6 +26,8 @@ import { showContextMenu } from '../selection/menu.js';
 import '../init.js';
 import { createTable, getCoreRowModel, getExpandedRowModel, getFilteredRowModel, getGroupedRowModel, getSortedRowModel } from '@tanstack/table-core';
 import type { CreateTableFn, GridColumnDef, ResultSetWithExtras, RowModelFactoryFn } from '../grid/types.js';
+import * as panelProtocol from '../protocol.js';
+import { getSavedStateFor } from '../grid/persistence.js';
 import { addGrid, getGrid, resetGrids, setActiveGridIndex } from '../state.js';
 import type { FilterHistorySnapshot } from '../state.js';
 import type { GridHandle, ResultSet, DiskQuerySpec } from '../types.js';
@@ -53,6 +55,8 @@ type EditingWindow = Window & {
     undoFilterHistory?: () => void;
     redoFilterHistory?: () => void;
     updateFilterHistoryButtons?: () => void;
+    toggleToolbarMoreMenu?: (event: { stopPropagation: () => void }) => void;
+    handleToolbarMoreMenuClick?: (event: MouseEvent) => void;
     recordDatabaseFilterHistoryBefore?: (resultSetIndex: number) => void;
     recordDatabaseFilterHistoryApplied?: (resultSetIndex: number, spec?: ResultSet['databaseFilterSpec']) => void;
     clearAllFilters?: () => void;
@@ -90,6 +94,123 @@ const emptySnapshot: FilterHistorySnapshot = {
     filterScope: 'loaded',
 };
 
+let restoreTestVirtualCore: (() => void) | undefined;
+let restoreTestResizeObserver: (() => void) | undefined;
+let restoreTestAnimationFrames: (() => void) | undefined;
+const testVirtualizers: Array<{ measureElement: (element: Element) => number }> = [];
+
+function installTestAnimationFrames(): { flush: () => void; pendingCount: () => number } {
+    const previousRequest = window.requestAnimationFrame;
+    const previousCancel = window.cancelAnimationFrame;
+    let nextId = 0;
+    const callbacks = new Map<number, FrameRequestCallback>();
+    Object.defineProperty(window, 'requestAnimationFrame', {
+        configurable: true,
+        value: (callback: FrameRequestCallback) => {
+            const id = ++nextId;
+            callbacks.set(id, callback);
+            return id;
+        },
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+        configurable: true,
+        value: (id: number) => { callbacks.delete(id); },
+    });
+    restoreTestAnimationFrames = () => {
+        if (previousRequest === undefined) delete (window as Partial<Window>).requestAnimationFrame;
+        else Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: previousRequest });
+        if (previousCancel === undefined) delete (window as Partial<Window>).cancelAnimationFrame;
+        else Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: previousCancel });
+        restoreTestAnimationFrames = undefined;
+    };
+    return {
+        flush: () => {
+            let frames = 0;
+            while (callbacks.size > 0 && frames < 100) {
+                const current = [...callbacks.entries()];
+                current.forEach(([id, callback]) => {
+                    callbacks.delete(id);
+                    callback(0);
+                });
+                frames += 1;
+            }
+            if (callbacks.size > 0) throw new Error('Test animation frame queue did not settle');
+        },
+        pendingCount: () => callbacks.size,
+    };
+}
+
+function installTestVirtualCore(): void {
+    type VirtualOptions = {
+        count: number;
+        getItemKey?: (index: number) => unknown;
+        measureElement?: (element: Element) => number;
+        [key: string]: unknown;
+    };
+    class TestVirtualizer {
+        public options: VirtualOptions;
+        constructor(options: VirtualOptions) {
+            this.options = options;
+            testVirtualizers.push(this);
+        }
+        _didMount(): () => void { return () => undefined; }
+        _willUpdate(): void { /* deterministic test virtualizer */ }
+        getVirtualItems(): Array<{ index: number; start: number; size: number; end: number }> {
+            const items = Array.from({ length: this.options.count }, (_value, index) => ({
+                index, start: index * 28, size: 28, end: (index + 1) * 28,
+            }));
+            items.forEach(item => this.options.getItemKey?.(item.index));
+            return items;
+        }
+        getTotalSize(): number { return this.options.count * 28; }
+        getMaxScrollOffset(): number { return this.getTotalSize(); }
+        scrollToIndex(): void { /* no scroll needed in JSDOM */ }
+        measure(): void { /* measured layout is covered by the browser suite */ }
+        measureElement(element: Element): number { return this.options.measureElement?.(element) ?? 28; }
+    }
+    const globals = globalThis as typeof globalThis & { VirtualCore?: unknown };
+    const previousVirtualCore = globals.VirtualCore;
+    Object.assign(globals, {
+        VirtualCore: {
+            Virtualizer: TestVirtualizer,
+            elementScroll: jest.fn(),
+            observeElementRect: jest.fn(),
+            observeElementOffset: jest.fn(),
+        },
+    });
+    restoreTestVirtualCore = () => {
+        if (previousVirtualCore === undefined) delete globals.VirtualCore;
+        else Object.assign(globals, { VirtualCore: previousVirtualCore });
+        restoreTestVirtualCore = undefined;
+    };
+}
+
+function installTestResizeObserver(): {
+    instances: Array<{ observed: Element[]; disconnectCount: number; trigger: () => void }>;
+} {
+    type ResizeObserverConstructor = typeof ResizeObserver;
+    const globals = globalThis as unknown as { ResizeObserver?: ResizeObserverConstructor };
+    const previousResizeObserver = globals.ResizeObserver;
+    const instances: Array<{ observed: Element[]; disconnectCount: number; trigger: () => void }> = [];
+    class TestResizeObserver implements ResizeObserver {
+        public observed: Element[] = [];
+        public disconnectCount = 0;
+        constructor(private readonly callback: ResizeObserverCallback) { instances.push(this); }
+        observe(target: Element): void { this.observed.push(target); }
+        unobserve(_target: Element): void { /* no observation registry needed */ }
+        disconnect(): void { this.disconnectCount += 1; }
+        takeRecords(): ResizeObserverEntry[] { return []; }
+        trigger(): void { this.callback([], this); }
+    }
+    Object.assign(globals, { ResizeObserver: TestResizeObserver });
+    restoreTestResizeObserver = () => {
+        if (previousResizeObserver === undefined) delete globals.ResizeObserver;
+        else Object.assign(globals, { ResizeObserver: previousResizeObserver });
+        restoreTestResizeObserver = undefined;
+    };
+    return { instances };
+}
+
 describe('SQL editor result panel quick-win coverage', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
@@ -107,6 +228,10 @@ describe('SQL editor result panel quick-win coverage', () => {
     });
 
     afterEach(() => {
+        restoreTestVirtualCore?.();
+        restoreTestResizeObserver?.();
+        restoreTestAnimationFrames?.();
+        testVirtualizers.length = 0;
         clearPendingEdits();
         clearPendingDeletes();
         resetGrids();
@@ -274,31 +399,7 @@ describe('SQL editor result panel quick-win coverage', () => {
     });
 
     it('records filter transitions and edits the original source row in a rendered grid', () => {
-        type VirtualOptions = { count: number; [key: string]: unknown };
-        class TestVirtualizer {
-            public options: VirtualOptions;
-            constructor(options: VirtualOptions) { this.options = options; }
-            _didMount(): () => void { return () => undefined; }
-            _willUpdate(): void { /* deterministic test virtualizer */ }
-            getVirtualItems(): Array<{ index: number; start: number; size: number; end: number }> {
-                return Array.from({ length: this.options.count }, (_value, index) => ({
-                    index, start: index * 28, size: 28, end: (index + 1) * 28,
-                }));
-            }
-            getTotalSize(): number { return this.options.count * 28; }
-            getMaxScrollOffset(): number { return this.getTotalSize(); }
-            scrollToIndex(): void { /* no scroll needed in JSDOM */ }
-        }
-        const globals = globalThis as typeof globalThis & { VirtualCore?: unknown };
-        const previousVirtualCore = globals.VirtualCore;
-        Object.assign(globals, {
-            VirtualCore: {
-                Virtualizer: TestVirtualizer,
-                elementScroll: jest.fn(),
-                observeElementRect: jest.fn(),
-                observeElementOffset: jest.fn(),
-            },
-        });
+        installTestVirtualCore();
         resetGrids();
         setActiveGridIndex(0);
 
@@ -372,8 +473,6 @@ describe('SQL editor result panel quick-win coverage', () => {
         table.setGlobalFilter(undefined as unknown as string);
 
         grid.dispose?.();
-        if (previousVirtualCore === undefined) delete globals.VirtualCore;
-        else Object.assign(globals, { VirtualCore: previousVirtualCore });
     });
 
     it('offers related-row navigation only for a direct non-null source cell', () => {
@@ -514,6 +613,366 @@ describe('SQL editor result panel quick-win coverage', () => {
         expect(recordBefore).toHaveBeenCalledTimes(1);
         expect(recordApplied).toHaveBeenCalledWith(0, { columnFilters: [{ columnIndex: 0, values: ['A'] }] });
         expect(updateButtons).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps responsive column collapse opt-in, expandable and suspended while grouped', () => {
+        const animationFrames = installTestAnimationFrames();
+        installTestVirtualCore();
+        const resizeObservers = installTestResizeObserver();
+        resetGrids();
+        setActiveGridIndex(0);
+        const resultSet = {
+            resultSetId: 'responsive-grid-result',
+            executionTimestamp: 900,
+            columns: [
+                { name: 'ID', type: 'INTEGER' },
+                { name: 'LABEL', type: 'VARCHAR' },
+                { name: 'NOTES', type: 'VARCHAR' },
+                { name: 'ACTIVE', type: 'BOOLEAN' },
+                { name: 'OPTIONAL', type: 'VARCHAR' },
+            ],
+            data: [[1, 'one', 'first note', true, null], [2, 'two', 'second note', false, 'present']],
+        } as ResultSetWithExtras;
+        Object.assign(window, {
+            activeSource: 'file:///responsive-grid.sql',
+            resultSets: [resultSet],
+        });
+
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        const factories = [
+            getCoreRowModel,
+            getSortedRowModel,
+            getFilteredRowModel,
+            getGroupedRowModel,
+            getExpandedRowModel,
+        ] as unknown as RowModelFactoryFn[];
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = (() => ({
+            measureText: (value: string) => ({ width: value.length * 8 }),
+        } as unknown as CanvasRenderingContext2D)) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+        let width = 210;
+        let grid: GridHandle | undefined;
+        let savedHostState: unknown = {};
+        const getHostStateSpy = jest.spyOn(panelProtocol, 'getHostState')
+            .mockImplementation(() => savedHostState);
+        const setHostStateSpy = jest.spyOn(panelProtocol, 'setHostState')
+            .mockImplementation((nextState) => { savedHostState = nextState; });
+        try {
+            createResultSetGrid(
+                resultSet,
+                0,
+                container,
+                createTable as unknown as CreateTableFn,
+                factories[0],
+                factories[1],
+                factories[2],
+                factories[3],
+                factories[4],
+            );
+            grid = getGrid(0) ?? undefined;
+            const wrapper = container.querySelector<HTMLElement>('.grid-wrapper');
+            expect(wrapper).not.toBeNull();
+            Object.defineProperty(wrapper, 'clientWidth', { configurable: true, get: () => width });
+            grid?.columnWidths?.set('0', 90);
+            grid?.columnWidths?.set('1', 90);
+            grid?.columnWidths?.set('2', 90);
+            grid?.columnWidths?.set('3', 90);
+            grid?.columnWidths?.set('4', 90);
+
+            expect(grid?.responsiveCollapseEnabled).toBe(false);
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(5);
+            expect(container.querySelector('.responsive-details-toggle')).toBeNull();
+
+            expect(grid?.toggleResponsiveCollapse?.()).toBe(true);
+            expect(grid?.responsiveCollapseEnabled).toBe(true);
+            expect(getSavedStateFor(0, 900, 'file:///responsive-grid.sql', 'responsive-grid-result')
+                ?.responsiveCollapseEnabled).toBe(true);
+            expect(getSavedStateFor(0, 900, 'file:///responsive-grid.sql', 'different-result'))
+                .toBeNull();
+            expect(setHostStateSpy).toHaveBeenCalled();
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(1);
+            const disclosure = container.querySelector<HTMLButtonElement>('.responsive-details-toggle');
+            expect(disclosure).not.toBeNull();
+            resizeObservers.instances[0]?.trigger();
+            resizeObservers.instances[0]?.trigger();
+            resizeObservers.instances[1]?.trigger();
+            expect(animationFrames.pendingCount()).toBe(2);
+            animationFrames.flush();
+            expect(container.querySelector('.responsive-details-row')).toBeNull();
+            disclosure?.click();
+            grid?.render?.();
+            animationFrames.flush();
+            const firstDetailsRow = container.querySelector<HTMLTableRowElement>('.responsive-details-row');
+            expect(firstDetailsRow?.textContent).toContain('LABEL');
+            expect(firstDetailsRow?.textContent).toContain('one');
+            expect(firstDetailsRow?.textContent).toContain('NOTES');
+            expect(firstDetailsRow?.textContent).toContain('first note');
+            expect(firstDetailsRow?.textContent).toContain('✓ true');
+            expect(firstDetailsRow?.textContent).toContain('NULL');
+            const firstDataRow = firstDetailsRow?.previousElementSibling as HTMLTableRowElement | undefined;
+            if (!firstDataRow || !firstDetailsRow) throw new Error('Expanded memory row was not rendered');
+            const makeRect = (height: number): DOMRect => ({
+                x: 0, y: 0, width: 180, height, top: 0, left: 0, right: 180, bottom: height,
+                toJSON: () => ({}),
+            });
+            jest.spyOn(firstDataRow, 'getBoundingClientRect').mockReturnValue(makeRect(28));
+            jest.spyOn(firstDetailsRow, 'getBoundingClientRect').mockReturnValue(makeRect(60));
+            expect(testVirtualizers[testVirtualizers.length - 1]?.measureElement(firstDataRow)).toBe(88);
+            const secondDisclosure = Array.from(container.querySelectorAll<HTMLButtonElement>('.responsive-details-toggle'))
+                .find(button => button.closest('tr')?.dataset.dataRowIndex === '1');
+            secondDisclosure?.click();
+            grid?.render?.();
+            animationFrames.flush();
+            expect(Array.from(container.querySelectorAll('.responsive-details-row'))
+                .some(row => row.textContent?.includes('✗ false'))).toBe(true);
+
+            grid?.dispose?.();
+            resetGrids();
+            container.innerHTML = '';
+            createResultSetGrid(
+                resultSet,
+                0,
+                container,
+                createTable as unknown as CreateTableFn,
+                factories[0],
+                factories[1],
+                factories[2],
+                factories[3],
+                factories[4],
+            );
+            grid = getGrid(0) ?? undefined;
+            const revivedWrapper = container.querySelector<HTMLElement>('.grid-wrapper');
+            if (!revivedWrapper) throw new Error('Grid wrapper was not rendered after revival');
+            Object.defineProperty(revivedWrapper, 'clientWidth', { configurable: true, get: () => width });
+            expect(grid?.responsiveCollapseEnabled).toBe(true);
+            grid?.render?.();
+            expect(container.querySelector('.responsive-details-row')).toBeNull();
+            const revivedDisclosure = container.querySelector<HTMLButtonElement>('.responsive-details-toggle');
+            expect(revivedDisclosure).not.toBeNull();
+            revivedDisclosure?.click();
+            grid?.render?.();
+            animationFrames.flush();
+            expect(container.querySelector('.responsive-details-row')?.textContent).toContain('first note');
+
+            grid?.selectColumn?.(0);
+            expect(container.querySelector('.selected-cell')).not.toBeNull();
+            width = 600;
+            grid?.render?.();
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(5);
+            expect(container.querySelector('.responsive-details-row')).toBeNull();
+            resizeObservers.instances[resizeObservers.instances.length - 1]?.trigger();
+            expect(animationFrames.pendingCount()).toBe(0);
+            expect(container.querySelector('.selected-cell')).toBeNull();
+
+            width = 210;
+            grid?.render?.();
+            expect(container.querySelector('.responsive-details-row')?.textContent).toContain('first note');
+
+            grid?.tanTable?.setGrouping(['0']);
+            grid?.render?.();
+            expect(grid?.toggleResponsiveCollapse?.()).toBe(true);
+            expect(container.querySelector('.responsive-details-toggle')).toBeNull();
+            expect(container.querySelector('.responsive-details-row')).toBeNull();
+            const menu = document.createElement('div');
+            menu.id = 'toolbarMoreMenu';
+            menu.style.display = 'none';
+            const menuItem = document.createElement('div');
+            menuItem.className = 'split-btn__menu-item';
+            menuItem.dataset.action = 'responsive-collapse';
+            menu.appendChild(menuItem);
+            document.body.appendChild(menu);
+            const panelWindow = window as EditingWindow;
+            panelWindow.toggleToolbarMoreMenu?.({ stopPropagation: () => undefined });
+            expect(menuItem.getAttribute('aria-disabled')).toBe('true');
+            const groupedClick = new MouseEvent('click', { bubbles: true });
+            menuItem.dispatchEvent(groupedClick);
+            panelWindow.handleToolbarMoreMenuClick?.(groupedClick);
+            expect(grid?.responsiveCollapseEnabled).toBe(true);
+
+            grid?.tanTable?.setGrouping([]);
+            grid?.render?.();
+            panelWindow.toggleToolbarMoreMenu?.({ stopPropagation: () => undefined });
+            expect(menuItem.getAttribute('aria-disabled')).toBe('false');
+            expect(container.querySelector('.responsive-details-row')?.textContent).toContain('first note');
+            resizeObservers.instances[resizeObservers.instances.length - 2]?.trigger();
+            resizeObservers.instances[resizeObservers.instances.length - 2]?.trigger();
+            resizeObservers.instances[resizeObservers.instances.length - 1]?.trigger();
+            expect(animationFrames.pendingCount()).toBe(2);
+            const enabledClick = new MouseEvent('click', { bubbles: true });
+            menuItem.dispatchEvent(enabledClick);
+            panelWindow.handleToolbarMoreMenuClick?.(enabledClick);
+            expect(grid?.responsiveCollapseEnabled).toBe(false);
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(5);
+            expect(container.querySelector('.responsive-details-row')).toBeNull();
+            grid?.dispose?.();
+            grid = undefined;
+            expect(animationFrames.pendingCount()).toBe(0);
+        } finally {
+            grid?.dispose?.();
+            getHostStateSpy.mockRestore();
+            setHostStateSpy.mockRestore();
+            HTMLCanvasElement.prototype.getContext = originalGetContext;
+        }
+        expect(resizeObservers.instances).toHaveLength(4);
+        expect(resizeObservers.instances.every(observer => observer.disconnectCount > 0)).toBe(true);
+    });
+
+    it('renders expandable collapsed fields for an ungrouped SQLite-backed result', () => {
+        installTestVirtualCore();
+        resetGrids();
+        setActiveGridIndex(0);
+        const resultSet = {
+            executionTimestamp: 901,
+            storageMode: 'sqlite',
+            totalRowCount: 2,
+            diskFilteredCount: 2,
+            diskWindowStart: 0,
+            columns: [
+                { name: 'ID', type: 'INTEGER' },
+                { name: 'LABEL', type: 'VARCHAR' },
+                { name: 'NOTES', type: 'VARCHAR' },
+            ],
+            data: [[1, 'disk one', 'disk note'], [2, 'disk two', 'another note']],
+        } as ResultSetWithExtras;
+        Object.assign(window, {
+            activeSource: 'file:///responsive-disk.sql',
+            resultSets: [resultSet],
+        });
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        const factories = [
+            getCoreRowModel,
+            getSortedRowModel,
+            getFilteredRowModel,
+            getGroupedRowModel,
+            getExpandedRowModel,
+        ] as unknown as RowModelFactoryFn[];
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = (() => ({
+            measureText: (value: string) => ({ width: value.length * 8 }),
+        } as unknown as CanvasRenderingContext2D)) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+        let grid: GridHandle | undefined;
+        try {
+            createResultSetGrid(
+                resultSet,
+                0,
+                container,
+                createTable as unknown as CreateTableFn,
+                factories[0],
+                factories[1],
+                factories[2],
+                factories[3],
+                factories[4],
+            );
+            grid = getGrid(0) ?? undefined;
+            const wrapper = container.querySelector<HTMLElement>('.grid-wrapper');
+            if (!wrapper) throw new Error('Grid wrapper was not rendered');
+            let width = 210;
+            Object.defineProperty(wrapper, 'clientWidth', { configurable: true, get: () => width });
+            grid?.columnWidths?.set('0', 90);
+            grid?.columnWidths?.set('1', 90);
+            grid?.columnWidths?.set('2', 90);
+
+            expect(grid?.toggleResponsiveCollapse?.()).toBe(true);
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(1);
+            const disclosure = container.querySelector<HTMLButtonElement>('.responsive-details-toggle');
+            expect(disclosure).not.toBeNull();
+            disclosure?.click();
+            grid?.render?.();
+            expect(container.querySelector('.responsive-details-row')?.textContent).toContain('disk one');
+            expect(container.querySelector('.responsive-details-row')?.textContent).toContain('disk note');
+
+            resultSet.databaseFilterSpec = { columnFilters: [] };
+            grid?.createVirtualizer?.();
+            grid?.render?.();
+            expect(container.querySelector('.responsive-details-row')).toBeNull();
+
+            width = 500;
+            grid?.render?.();
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(3);
+        } finally {
+            grid?.dispose?.();
+            HTMLCanvasElement.prototype.getContext = originalGetContext;
+        }
+    });
+
+    it('uses a window resize fallback when ResizeObserver is unavailable', () => {
+        const animationFrames = installTestAnimationFrames();
+        installTestVirtualCore();
+        resetGrids();
+        setActiveGridIndex(0);
+        const resizeGlobal = globalThis as unknown as { ResizeObserver?: typeof ResizeObserver };
+        const originalResizeObserver = resizeGlobal.ResizeObserver;
+        delete resizeGlobal.ResizeObserver;
+        const resultSet = {
+            executionTimestamp: 902,
+            columns: [
+                { name: 'ID', type: 'INTEGER' },
+                { name: 'LABEL', type: 'VARCHAR' },
+                { name: 'NOTES', type: 'VARCHAR' },
+            ],
+            data: [[1, 'one', 'note']],
+        } as ResultSetWithExtras;
+        Object.assign(window, {
+            activeSource: 'file:///responsive-fallback.sql',
+            resultSets: [resultSet],
+        });
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        const factories = [
+            getCoreRowModel,
+            getSortedRowModel,
+            getFilteredRowModel,
+            getGroupedRowModel,
+            getExpandedRowModel,
+        ] as unknown as RowModelFactoryFn[];
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = (() => ({
+            measureText: (value: string) => ({ width: value.length * 8 }),
+        } as unknown as CanvasRenderingContext2D)) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+        let grid: GridHandle | undefined;
+        try {
+            createResultSetGrid(
+                resultSet,
+                0,
+                container,
+                createTable as unknown as CreateTableFn,
+                factories[0],
+                factories[1],
+                factories[2],
+                factories[3],
+                factories[4],
+            );
+            grid = getGrid(0) ?? undefined;
+            const wrapper = container.querySelector<HTMLElement>('.grid-wrapper');
+            if (!wrapper) throw new Error('Grid wrapper was not rendered');
+            let width = 210;
+            Object.defineProperty(wrapper, 'clientWidth', { configurable: true, get: () => width });
+            grid?.columnWidths?.set('0', 90);
+            grid?.columnWidths?.set('1', 90);
+            grid?.columnWidths?.set('2', 90);
+            expect(grid?.toggleResponsiveCollapse?.()).toBe(true);
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(1);
+
+            width = 500;
+            window.dispatchEvent(new Event('resize'));
+            expect(animationFrames.pendingCount()).toBe(1);
+            animationFrames.flush();
+            expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(3);
+
+            grid?.dispose?.();
+            grid = undefined;
+            width = 210;
+            window.dispatchEvent(new Event('resize'));
+            expect(animationFrames.pendingCount()).toBe(0);
+        } finally {
+            grid?.dispose?.();
+            if (originalResizeObserver === undefined) delete resizeGlobal.ResizeObserver;
+            else Object.assign(resizeGlobal, { ResizeObserver: originalResizeObserver });
+            HTMLCanvasElement.prototype.getContext = originalGetContext;
+        }
     });
 
     it('declares the related-row host command in the webview protocol', () => {
