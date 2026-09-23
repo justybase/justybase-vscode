@@ -12,6 +12,7 @@ export type { TanStackCellContext } from '../shared/tanstackShims.js';
 export interface CellSelectionHandlers {
     destroy(): void;
     clearSelection?: () => void;
+    getSelectedRowIndices?: (limit?: number) => number[];
     onTableRowsRendered?: () => void;
     copySelection?: (withHeaders?: boolean, plainTextFormat?: string) => void;
     [key: string]: unknown;
@@ -81,6 +82,7 @@ export interface TanStackRow {
     index?: number;
     original: unknown;
     getValue: (columnId: string) => unknown;
+    getIsGrouped?: () => boolean;
     getVisibleCells?: () => Array<{ column: TanStackColumn; getValue: () => unknown }>;
 }
 
@@ -262,6 +264,9 @@ export interface GridHandle {
     scrollToIndex?: (rowIndex: number, behavior: ScrollBehavior | string) => void;
     getScrollAnchorIndex?: () => number | undefined;
     hasSelection?: () => boolean;
+    getSelectedRowIndices?: (limit?: number) => number[];
+    resolveRowValues?: (rowIndex: number) => unknown;
+    fetchRowValues?: (rowIndex: number) => Promise<unknown[] | undefined>;
     selectAll?: () => void;
     copySelection?: (withHeaders: boolean, format?: string) => void;
     copySelectionAsHtml?: () => void;

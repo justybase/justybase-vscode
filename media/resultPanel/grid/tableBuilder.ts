@@ -2542,6 +2542,26 @@ export function createResultSetGrid(
     };
 
     selectionHandlers = setupCellSelectionEvents(wrapper, tanTable, columns.length, clipboardResolver);
+    gridObj.getSelectedRowIndices = (limit = Number.POSITIVE_INFINITY) => {
+        // Group rows and leaf rows use different index spaces. Do not expose the
+        // grouped display index as a source-row index to Row View or its exports.
+        if (tableState.grouping.length > 0) {
+            return [];
+        }
+        return selectionHandlers?.getSelectedRowIndices?.(limit) ?? [];
+    };
+    gridObj.resolveRowValues = (virtualRowIndex: number) => {
+        const liveRs = getResultSetAt(rsIndex);
+        const localIndex = liveRs?.storageMode === 'sqlite'
+            ? virtualRowIndex - (liveRs.diskWindowStart ?? 0)
+            : virtualRowIndex;
+        const row = tanTable.getRowModel().rows[localIndex];
+        if (!row || row.getIsGrouped?.()) {
+            return undefined;
+        }
+        return row.original;
+    };
+    gridObj.fetchRowValues = clipboardResolver.fetchRowValues;
     const originalClearPool = gridObj.clearPool;
     gridObj.clearPool = () => {
         selectionHandlers?.destroy();

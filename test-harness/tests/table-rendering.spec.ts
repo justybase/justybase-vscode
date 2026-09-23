@@ -73,6 +73,29 @@ test.describe('Table rendering', () => {
         expect(Number(rowNumText?.trim())).toBe(1);
     });
 
+    test('Row View compares selected rows from the selection model', async ({ page }) => {
+        const firstRowHeader = page.locator('#gridContainer tbody tr[data-index="0"] td.row-number-cell');
+        const secondRowHeader = page.locator('#gridContainer tbody tr[data-index="1"] td.row-number-cell');
+        await firstRowHeader.click();
+        await secondRowHeader.click({ modifiers: ['Control'] });
+
+        // Scroll both selected rows out of the rendered virtual window before opening Row View.
+        await page.locator('#gridContainer .grid-wrapper').evaluate(element => { element.scrollTop = 5000; });
+        await expect.poll(async () => page.locator('#gridContainer tbody tr[data-index="0"]').count()).toBe(0);
+        await page.evaluate(() => {
+            (window as Window & { toggleRowView?: () => void }).toggleRowView?.();
+        });
+
+        const sections = page.locator('#rowViewContent .row-view-section');
+        await expect(sections).toHaveCount(8);
+        await expect(page.locator('#rowViewContent .row-view-val.label')).toHaveCount(16);
+        await expect(page.locator('#rowViewContent .row-view-section.diff').first()).toBeVisible();
+
+        await page.locator('#gridContainer table thead th').nth(1).locator('.header-btn-sort').click();
+        await expect.poll(async () => page.locator('#gridContainer .selected-cell').count()).toBe(0);
+        await expect(page.locator('#rowViewContent .row-view-placeholder')).toContainText('Select 1 to 10 rows');
+    });
+
     test('renders correct number of columns per data row', async ({ page }) => {
         const tbody = page.locator('#gridContainer table tbody');
         // Find first actual data row (has row-number-cell)

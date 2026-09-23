@@ -12,6 +12,7 @@ import {
     type SqlTextRange,
     type TempTableInlineCandidate,
     type TempTableMaterializationKind,
+    parseSqlStatements,
 } from '../sqlParser';
 
 const REFACTOR_KIND: vscode.CodeActionKind =
@@ -23,6 +24,84 @@ const REFACTOR_EXTRACT_KIND: vscode.CodeActionKind =
 const REFACTOR_REWRITE_KIND: vscode.CodeActionKind =
     ((vscode.CodeActionKind as unknown as { RefactorRewrite?: vscode.CodeActionKind }).RefactorRewrite
         ?? REFACTOR_KIND);
+
+export const EXTRACT_SUBQUERY_PREVIEW_COMMAND = 'justybase.sqlRefactor.previewExtractSubqueryAsCte';
+
+function getLineIndentation(text: string, offset: number): string {
+    let lineStart = Math.max(0, offset);
+    while (lineStart > 0 && text[lineStart - 1] !== '\n' && text[lineStart - 1] !== '\r') {
+        lineStart--;
+    }
+    return text.slice(lineStart, offset).match(/^\s*/u)?.[0] ?? '';
+}
+
+function normalizeBlockIndentation(text: string, lineEnding: string): string {
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    while (lines.length > 0 && lines[0].trim().length === 0) lines.shift();
+    while (lines.length > 0 && lines[lines.length - 1].trim().length === 0) lines.pop();
+    const widths = lines.filter(line => line.trim().length > 0)
+        .map(line => line.match(/^\s*/u)?.[0].length ?? 0);
+    const minimumIndentation = widths.length > 0 ? Math.min(...widths) : 0;
+    return lines
+        .map(line => line.trim().length > 0 ? line.slice(minimumIndentation) : '')
+        .join(lineEnding);
+}
+
+function buildCteDefinition(name: string, body: string, indent: string, lineEnding: string): string {
+    const bodyIndent = `${indent}    `;
+    const indentedBody = normalizeBlockIndentation(body, lineEnding)
+        .split(lineEnding)
+        .map(line => line.trim().length > 0 ? `${bodyIndent}${line}` : line)
+        .join(lineEnding);
+    return `${indent}${name} AS (${lineEnding}${indentedBody}${lineEnding}${indent})`;
+}
+
+/** Construct and parser-check the full SQL proposal before exposing a preview action. */
+export function buildExtractSubquerySql(
+    sql: string,
+    candidate: ExtractSubqueryCandidate,
+    databaseKind?: DatabaseKind,
+): string | undefined {
+    if (candidate.isCorrelated) return undefined;
+    const { subqueryRange, subqueryBodyRange, cteInsertionOffset } = candidate;
+    if (
+        subqueryRange.startOffset < 0
+        || subqueryRange.endOffset > sql.length
+        || subqueryRange.startOffset >= subqueryRange.endOffset
+        || subqueryBodyRange.startOffset < subqueryRange.startOffset
+        || subqueryBodyRange.startOffset >= subqueryBodyRange.endOffset
+        || subqueryBodyRange.endOffset > subqueryRange.endOffset
+        || candidate.cteIndentAnchorOffset < 0
+        || candidate.cteIndentAnchorOffset > sql.length
+        || cteInsertionOffset < 0
+        || cteInsertionOffset > subqueryRange.startOffset
+    ) {
+        return undefined;
+    }
+
+    const lineEnding = sql.includes('\r\n') ? '\r\n' : '\n';
+    const cteIndent = getLineIndentation(sql, candidate.cteIndentAnchorOffset);
+    const cteBody = sql.slice(subqueryBodyRange.startOffset, subqueryBodyRange.endOffset);
+    const definition = buildCteDefinition(candidate.suggestedName, cteBody, cteIndent, lineEnding);
+    const insertionText = candidate.hasWithClause
+        ? `,${lineEnding}${definition}${lineEnding}`
+        : `WITH ${definition}${lineEnding}`;
+    const edits = [
+        { start: subqueryRange.startOffset, end: subqueryRange.endOffset, text: candidate.suggestedName },
+        { start: cteInsertionOffset, end: cteInsertionOffset, text: insertionText },
+    ].sort((left, right) => right.start - left.start);
+
+    let proposedSql = sql;
+    for (const edit of edits) {
+        proposedSql = proposedSql.slice(0, edit.start) + edit.text + proposedSql.slice(edit.end);
+    }
+
+    const parsed = parseSqlStatements({ sql: proposedSql, databaseKind });
+    if (parsed.lexResult.errors.length > 0 || parsed.actionableParserErrors.length > 0 || !parsed.cst) {
+        return undefined;
+    }
+    return proposedSql;
+}
 
 export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider {
     public static readonly providedCodeActionKinds = [
@@ -61,11 +140,17 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
         const analysis = analyzeSqlQueryStructures(sql, databaseKind);
         const actions: vscode.CodeAction[] = [];
 
-        const extractCandidate = analysis.extractSubqueryCandidates.find(candidate =>
-            rangeContainsOffsets(candidate.subqueryBodyRange, startOffset, endOffset)
-        );
+        const extractCandidate = analysis.extractSubqueryCandidates
+            .filter(candidate => !candidate.isCorrelated
+                && rangeContainsOffsets(candidate.subqueryBodyRange, startOffset, endOffset))
+            .sort((left, right) =>
+                (left.subqueryRange.endOffset - left.subqueryRange.startOffset)
+                - (right.subqueryRange.endOffset - right.subqueryRange.startOffset))[0];
         if (extractCandidate) {
-            actions.push(this.createExtractSubqueryAction(document, sql, extractCandidate));
+            const proposedSql = buildExtractSubquerySql(sql, extractCandidate, databaseKind);
+            if (proposedSql) {
+                actions.push(this.createExtractSubqueryAction(document, sql, proposedSql));
+            }
         }
 
         const cteCandidate = analysis.cteMaterializationCandidates.find(candidate =>
@@ -108,21 +193,21 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
     private createExtractSubqueryAction(
         document: vscode.TextDocument,
         sql: string,
-        candidate: ExtractSubqueryCandidate
+        proposedSql: string,
     ): vscode.CodeAction {
-        const cteBody = this.readTextRange(sql, candidate.subqueryBodyRange);
-        const cteIndent = this.getLineIndentation(sql, candidate.cteIndentAnchorOffset);
-        const cteDefinition = this.buildCteDefinition(candidate.suggestedName, cteBody, cteIndent);
-        const insertionText = candidate.hasWithClause
-            ? `,\n${cteDefinition}\n`
-            : `WITH ${cteDefinition}\n`;
-
-        const edit = new vscode.WorkspaceEdit();
-        edit.insert(document.uri, document.positionAt(candidate.cteInsertionOffset), insertionText);
-        edit.replace(document.uri, this.toRange(document, candidate.subqueryRange), candidate.suggestedName);
-
-        const action = new vscode.CodeAction('⚡ Refactor: Extract Subquery as CTE', REFACTOR_EXTRACT_KIND);
-        action.edit = edit;
+        const title = '⚡ Refactor: Extract Subquery as CTE';
+        const action = new vscode.CodeAction(title, REFACTOR_EXTRACT_KIND);
+        action.command = {
+            command: EXTRACT_SUBQUERY_PREVIEW_COMMAND,
+            title,
+            arguments: [{
+                sourceUri: document.uri.toString(),
+                expectedVersion: document.version,
+                originalSql: sql,
+                proposedSql,
+                languageId: document.languageId,
+            }],
+        };
         action.isPreferred = true;
         return action;
     }
@@ -184,11 +269,17 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
         candidate: TempTableInlineCandidate
     ): vscode.CodeAction {
         const cteBody = this.readTextRange(sql, candidate.queryBodyRange);
-        const cteIndent = this.getLineIndentation(sql, candidate.cteIndentAnchorOffset);
-        const cteDefinition = this.buildCteDefinition(candidate.tempTableName, cteBody, cteIndent);
+        const cteIndent = getLineIndentation(sql, candidate.cteIndentAnchorOffset);
+        const cteDefinition = buildCteDefinition(
+            candidate.tempTableName,
+            cteBody,
+            cteIndent,
+            sql.includes('\r\n') ? '\r\n' : '\n',
+        );
+        const lineEnding = sql.includes('\r\n') ? '\r\n' : '\n';
         const insertionText = candidate.nextStatementHasWithClause
-            ? `,\n${cteDefinition}\n`
-            : `WITH ${cteDefinition}\n`;
+            ? `,${lineEnding}${cteDefinition}${lineEnding}`
+            : `WITH ${cteDefinition}${lineEnding}`;
 
         const edit = new vscode.WorkspaceEdit();
         edit.delete(document.uri, this.toRange(document, candidate.tempTableDeletionRange));
@@ -197,49 +288,6 @@ export class SqlRefactorCodeActionProvider implements vscode.CodeActionProvider 
         const action = new vscode.CodeAction('⚡ Refactor: Inline Temp Table as CTE', REFACTOR_REWRITE_KIND);
         action.edit = edit;
         return action;
-    }
-
-    private buildCteDefinition(name: string, body: string, indent: string): string {
-        const normalizedBody = this.normalizeBlockIndentation(body);
-        const bodyIndent = `${indent}    `;
-        const indentedBody = normalizedBody
-            .split(/\r?\n/u)
-            .map(line => (line.trim().length > 0 ? `${bodyIndent}${line}` : line))
-            .join('\n');
-
-        return `${indent}${name} AS (\n${indentedBody}\n${indent})`;
-    }
-
-    private normalizeBlockIndentation(text: string): string {
-        const lines = text
-            .replace(/\r\n/g, '\n')
-            .split('\n');
-
-        while (lines.length > 0 && lines[0].trim().length === 0) {
-            lines.shift();
-        }
-        while (lines.length > 0 && lines[lines.length - 1].trim().length === 0) {
-            lines.pop();
-        }
-
-        const indentationWidths = lines
-            .filter(line => line.trim().length > 0)
-            .map(line => line.match(/^\s*/u)?.[0].length ?? 0);
-        const minimumIndentation = indentationWidths.length > 0 ? Math.min(...indentationWidths) : 0;
-
-        return lines
-            .map(line => (line.trim().length > 0 ? line.slice(minimumIndentation) : ''))
-            .join('\n');
-    }
-
-    private getLineIndentation(text: string, offset: number): string {
-        let lineStart = Math.max(0, offset);
-        while (lineStart > 0 && text[lineStart - 1] !== '\n' && text[lineStart - 1] !== '\r') {
-            lineStart--;
-        }
-
-        const lineText = text.slice(lineStart, offset);
-        return lineText.match(/^\s*/u)?.[0] ?? '';
     }
 
     private readTextRange(text: string, range: SqlTextRange): string {

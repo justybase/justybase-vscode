@@ -2,7 +2,17 @@ jest.unmock('chevrotain');
 
 import * as vscode from 'vscode';
 import * as sqlParser from '../sqlParser';
-import { SqlRefactorCodeActionProvider } from '../providers/sqlRefactorCodeActions';
+import {
+    buildExtractSubquerySql,
+    EXTRACT_SUBQUERY_PREVIEW_COMMAND,
+    SqlRefactorCodeActionProvider,
+} from '../providers/sqlRefactorCodeActions';
+import {
+    registerSqlRefactorPreviewCommand,
+    runExtractSubqueryPreview,
+    type SqlRefactorPreviewDependencies,
+    type SqlRefactorPreviewChoice,
+} from '../providers/sqlRefactorPreview';
 
 jest.mock('vscode', () => {
     class Position {
@@ -22,15 +32,24 @@ jest.mock('vscode', () => {
     class CodeAction {
         public edit?: WorkspaceEdit;
         public isPreferred?: boolean;
+        public command?: unknown;
 
         constructor(public title: string, public kind: string) {}
     }
 
+    class Uri {
+        static parse(value: string) {
+            return { toString: () => value };
+        }
+    }
+
     return {
+        commands: { registerCommand: jest.fn(() => ({ dispose: jest.fn() })) },
         Position,
         Range,
         WorkspaceEdit,
         CodeAction,
+        Uri,
         CodeActionKind: {
             QuickFix: 'quickfix',
             Refactor: 'refactor',
@@ -57,6 +76,9 @@ function createMockDocument(text: string): vscode.TextDocument {
     return {
         uri: { toString: () => 'file:///refactor.sql' },
         getText: jest.fn(() => text),
+        version: 4,
+        languageId: 'sql',
+        fileName: '/workspace/refactor.sql',
         offsetAt: jest.fn((position: vscode.Position) => {
             const lineStart = lineStarts[position.line] ?? 0;
             return lineStart + position.character;
@@ -76,10 +98,59 @@ function createMockDocument(text: string): vscode.TextDocument {
     } as unknown as vscode.TextDocument;
 }
 
+function createPreviewDocument(text: string, version: number): vscode.TextDocument {
+    return {
+        uri: { toString: () => 'file:///refactor.sql' },
+        version,
+        languageId: 'sql',
+        fileName: '/workspace/refactor.sql',
+        getText: () => text,
+        positionAt: (offset: number) => new vscode.Position(0, offset),
+    } as unknown as vscode.TextDocument;
+}
+
+function previewArgs(proposedSql: string) {
+    return {
+        sourceUri: 'file:///refactor.sql',
+        expectedVersion: 4,
+        originalSql: 'SELECT 1;',
+        proposedSql,
+        languageId: 'sql',
+    };
+}
+
+function createPreviewDependencies(
+    getSourceDocument: () => vscode.TextDocument,
+    choice: SqlRefactorPreviewChoice,
+): SqlRefactorPreviewDependencies {
+    return {
+        findSourceDocument: jest.fn(() => getSourceDocument()),
+        openSourceDocument: jest.fn(() => Promise.resolve(getSourceDocument())),
+        openPreviewDocument: jest.fn(() => Promise.resolve({
+            uri: { toString: () => 'untitled:proposal.sql' },
+        } as vscode.TextDocument)),
+        openDiff: jest.fn(() => Promise.resolve(undefined)),
+        choose: jest.fn(() => Promise.resolve(choice)),
+        apply: jest.fn(() => Promise.resolve(true)),
+        closeDiff: jest.fn(() => Promise.resolve(undefined)),
+        showStaleMessage: jest.fn(),
+        showApplyFailureMessage: jest.fn(),
+    };
+}
+
 describe('SqlRefactorCodeActionProvider', () => {
     const provider = new SqlRefactorCodeActionProvider();
 
-    it('creates an Extract Subquery as CTE refactor action', () => {
+    it('registers the private preview command with VS Code', () => {
+        const disposable = registerSqlRefactorPreviewCommand();
+        expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+            EXTRACT_SUBQUERY_PREVIEW_COMMAND,
+            expect.any(Function),
+        );
+        disposable.dispose();
+    });
+
+    it('creates an Extract Subquery as CTE preview action without applying an edit', () => {
         const sql = `SELECT *
 FROM (
     SELECT CUSTOMER_ID, COUNT(*) AS ORDER_COUNT
@@ -97,11 +168,126 @@ FROM (
 
         const action = actions.find(item => item.title === '⚡ Refactor: Extract Subquery as CTE');
         expect(action).toBeDefined();
-        const edit = action?.edit as unknown as MockWorkspaceEdit;
-        expect(edit.insert).toHaveBeenCalledTimes(1);
-        expect(edit.insert.mock.calls[0][2]).toContain('WITH new_cte_name AS');
-        expect(edit.replace).toHaveBeenCalledTimes(1);
-        expect(edit.replace.mock.calls[0][2]).toBe('new_cte_name');
+        expect(action?.edit).toBeUndefined();
+        expect(action?.command).toMatchObject({ command: EXTRACT_SUBQUERY_PREVIEW_COMMAND });
+        const command = action?.command as { arguments: Array<{ originalSql: string; proposedSql: string; expectedVersion: number }> };
+        expect(command.arguments[0].originalSql).toBe(sql);
+        expect(command.arguments[0].expectedVersion).toBe(4);
+        expect(command.arguments[0].proposedSql).toContain('WITH new_cte_name AS');
+        expect(command.arguments[0].proposedSql).toContain('FROM new_cte_name ORDER_COUNTS');
+    });
+
+    it('preserves CRLF while generating and parser-checking the extracted CTE', () => {
+        const sql = 'SELECT *\r\nFROM (\r\n    SELECT ID\r\n    FROM ORDERS\r\n) O;';
+        const analysis = sqlParser.analyzeSqlQueryStructures(sql);
+        const proposed = buildExtractSubquerySql(sql, analysis.extractSubqueryCandidates[0]);
+        expect(proposed).toBeDefined();
+        expect(proposed).toContain('WITH new_cte_name AS (\r\n');
+        expect(proposed).not.toContain('WITH new_cte_name AS (\n');
+    });
+
+    it('adds an extracted query to an existing WITH and avoids a CTE name collision', () => {
+        const sql = `WITH NEW_CTE_NAME AS (
+    SELECT 0 AS ID
+)
+SELECT *
+FROM (
+    SELECT ID FROM ORDERS
+) O;`;
+        const analysis = sqlParser.analyzeSqlQueryStructures(sql);
+        const proposed = buildExtractSubquerySql(sql, analysis.extractSubqueryCandidates[0]);
+
+        expect(proposed).toContain('NEW_CTE_NAME AS');
+        expect(proposed).toMatch(/,\r?\n\s*new_cte_name_2 AS/u);
+        expect(proposed).toContain('FROM new_cte_name_2 O');
+    });
+
+    it('chooses the innermost extracted subquery covering the cursor', () => {
+        const sql = `SELECT *
+FROM (
+    SELECT *
+    FROM (
+        SELECT ID FROM ORDERS
+    ) INNER_QUERY
+) OUTER_QUERY;`;
+        const document = createMockDocument(sql);
+        const selection = new vscode.Range(new vscode.Position(4, 18), new vscode.Position(4, 18));
+        const actions = provider.provideCodeActions(
+            document,
+            selection,
+            { diagnostics: [] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken,
+        );
+        const action = actions.find(item => item.title === '⚡ Refactor: Extract Subquery as CTE');
+        const args = (action?.command as { arguments: Array<{ proposedSql: string }> } | undefined)?.arguments[0];
+
+        expect(args?.proposedSql).toContain('FROM new_cte_name_2 INNER_QUERY');
+        expect(args?.proposedSql).toContain(') OUTER_QUERY');
+    });
+
+    it('does not offer extraction for a correlated subquery', () => {
+        const sql = `SELECT C.ID
+FROM CUSTOMERS C
+JOIN (
+    SELECT O.CUSTOMER_ID
+    FROM ORDERS O
+    WHERE O.CUSTOMER_ID = C.ID
+) Q ON Q.CUSTOMER_ID = C.ID;`;
+        const document = createMockDocument(sql);
+        const selection = new vscode.Range(new vscode.Position(5, 30), new vscode.Position(5, 30));
+        const actions = provider.provideCodeActions(
+            document,
+            selection,
+            { diagnostics: [] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken,
+        );
+        expect(actions.find(item => item.title === '⚡ Refactor: Extract Subquery as CTE')).toBeUndefined();
+    });
+
+    it('shows the source against the proposal and applies only after confirmation', async () => {
+        const sourceDocument = createPreviewDocument('SELECT 1;', 4);
+        const liveDocument = sourceDocument;
+        const deps = createPreviewDependencies(() => liveDocument, 'Apply');
+
+        await runExtractSubqueryPreview(previewArgs('SELECT 2;'), deps);
+
+        expect(deps.openDiff).toHaveBeenCalledWith(
+            sourceDocument.uri,
+            expect.objectContaining({ toString: expect.any(Function) }),
+            expect.stringContaining('refactor.sql'),
+        );
+        expect(deps.apply).toHaveBeenCalledWith(sourceDocument, 'SELECT 2;');
+        expect(deps.closeDiff).not.toHaveBeenCalled();
+    });
+
+    it('discards on Escape and refuses to apply if the source changed during review', async () => {
+        const sourceDocument = createPreviewDocument('SELECT 1;', 4);
+        const discardDeps = createPreviewDependencies(() => sourceDocument, undefined);
+        await runExtractSubqueryPreview(previewArgs('SELECT 2;'), discardDeps);
+        expect(discardDeps.apply).not.toHaveBeenCalled();
+        expect(discardDeps.closeDiff).toHaveBeenCalledWith(
+            sourceDocument.uri,
+            expect.objectContaining({ toString: expect.any(Function) }),
+        );
+
+        const liveDocument = { current: createPreviewDocument('SELECT 1;', 4) };
+        const changedDocument = createPreviewDocument('SELECT 3;', 5);
+        const staleDeps = createPreviewDependencies(() => liveDocument.current, 'Apply');
+        staleDeps.choose = jest.fn(() => {
+            liveDocument.current = changedDocument;
+            return Promise.resolve('Apply');
+        });
+        await runExtractSubqueryPreview(previewArgs('SELECT 2;'), staleDeps);
+        expect(staleDeps.apply).not.toHaveBeenCalled();
+        expect(staleDeps.showStaleMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the diff after Apply & Close Diff', async () => {
+        const sourceDocument = createPreviewDocument('SELECT 1;', 4);
+        const deps = createPreviewDependencies(() => sourceDocument, 'Apply & Close Diff');
+        await runExtractSubqueryPreview(previewArgs('SELECT 2;'), deps);
+        expect(deps.apply).toHaveBeenCalledTimes(1);
+        expect(deps.closeDiff).toHaveBeenCalledTimes(1);
     });
 
     it('creates a Materialize CTE to Temporary Table refactor action', () => {

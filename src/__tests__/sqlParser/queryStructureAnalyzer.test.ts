@@ -17,8 +17,45 @@ JOIN SALES..CUSTOMERS C ON C.CUSTOMER_ID = ORDER_COUNTS.CUSTOMER_ID;`;
         const candidate = analysis.extractSubqueryCandidates[0];
         expect(candidate.suggestedName).toBe('new_cte_name');
         expect(candidate.hasWithClause).toBe(false);
+        expect(candidate.isCorrelated).toBe(false);
         expect(candidate.subqueryBodyRange.startLine).toBe(2);
         expect(candidate.subqueryBodyRange.endLine).toBe(3);
+    });
+
+    it('marks a qualified reference to an outer table alias as correlated', () => {
+        const sql = `SELECT C.ID
+FROM CUSTOMERS C
+JOIN (
+    SELECT O.CUSTOMER_ID
+    FROM ORDERS O
+    WHERE O.CUSTOMER_ID = C.ID
+) Q ON Q.CUSTOMER_ID = C.ID;`;
+
+        const analysis = analyzeSqlQueryStructures(sql);
+        expect(analysis.extractSubqueryCandidates).toHaveLength(1);
+        expect(analysis.extractSubqueryCandidates[0].isCorrelated).toBe(true);
+    });
+
+    it('marks qualified references to an unaliased outer table as correlated', () => {
+        const sql = `SELECT CUSTOMERS.ID
+FROM CUSTOMERS
+JOIN (
+    SELECT ORDERS.CUSTOMER_ID
+    FROM ORDERS
+    WHERE ORDERS.CUSTOMER_ID = CUSTOMERS.ID
+) Q ON Q.CUSTOMER_ID = CUSTOMERS.ID;`;
+
+        const analysis = analyzeSqlQueryStructures(sql);
+        expect(analysis.extractSubqueryCandidates).toHaveLength(1);
+        expect(analysis.extractSubqueryCandidates[0].isCorrelated).toBe(true);
+    });
+
+    it('does not treat the derived-table alias as an outer correlation', () => {
+        const analysis = analyzeSqlQueryStructures(
+            'SELECT * FROM (SELECT O.ID FROM ORDERS O) O;',
+        );
+        expect(analysis.extractSubqueryCandidates).toHaveLength(1);
+        expect(analysis.extractSubqueryCandidates[0].isCorrelated).toBe(false);
     });
 
     it('finds CTE materialization and temp-table inline candidates', () => {

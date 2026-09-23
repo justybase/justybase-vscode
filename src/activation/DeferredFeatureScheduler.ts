@@ -87,8 +87,10 @@ export class DeferredFeatureScheduler {
                 import('../providers/linterCodeActions'),
                 import('../providers/sqlRefactorCodeActions'),
             ]);
+        const { registerSqlRefactorPreviewCommand } = await import('../providers/sqlRefactorPreview');
 
         params.context.subscriptions.push(
+            registerSqlRefactorPreviewCommand(),
             vscode.languages.registerCodeActionsProvider(
                 [...SQL_AUTHORING_LANGUAGE_IDS],
                 new NetezzaLinterCodeActionProvider(documentUri =>
