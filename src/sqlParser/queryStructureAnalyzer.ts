@@ -36,6 +36,8 @@ export interface ExtractSubqueryCandidate {
     hasWithClause: boolean;
     existingCteNames: string[];
     suggestedName: string;
+    /** True when references resolve to, or may depend on, an outer query scope. */
+    isCorrelated: boolean;
 }
 
 export interface CteMaterializationCandidate {
@@ -845,6 +847,7 @@ class SqlQueryStructureAnalyzer {
         const withLike = this.getWithLikeRecord(statement.rootNode);
         const existingNames = new Set((withLike?.cteNames ?? []).map(name => name.toUpperCase()));
         const candidates: ExtractSubqueryCandidate[] = [];
+        const parentByNode = this.buildParentMap(statement.rootNode);
 
         this.visitNode(statement.rootNode, node => {
             if (node.name !== 'tableSource') {
@@ -866,6 +869,48 @@ class SqlQueryStructureAnalyzer {
                 return;
             }
 
+            const outerAliases = new Set<string>();
+            const outerScopes = this.getEnclosingSelectScopes(node, parentByNode);
+            outerScopes.forEach(scope => {
+                this.getQueryBlockTableSources(scope, node).forEach(source => {
+                    const qualifier = this.getTableSourceQualifier(source);
+                    if (qualifier) outerAliases.add(qualifier);
+                });
+            });
+
+            let isCorrelated = false;
+            if (nestedQuery) {
+                const allowsOuterReferences = outerAliases.size > 0
+                    && this.isLateralOrApplyTableSource(node, parentByNode);
+                this.visitNode(nestedQuery, referenceNode => {
+                    if (referenceNode.name !== 'columnReference') return;
+                    const referenceTokens = this.getNodeTokens(referenceNode);
+                    const dotIndex = referenceTokens.findIndex(token => token.image === '.');
+                    if (dotIndex < 0) {
+                        // Without schema metadata an unqualified name in a LATERAL/APPLY
+                        // body cannot be proven local; moving it to a CTE could change its
+                        // binding or make it unresolved.
+                        if (allowsOuterReferences) isCorrelated = true;
+                        return;
+                    }
+
+                    const qualifier = this.normalizeIdentifier(referenceTokens[0]).toUpperCase();
+                    const localAliases = new Set<string>();
+                    for (const scope of this.getEnclosingSelectScopes(referenceNode, parentByNode, node)) {
+                        this.getQueryBlockTableSources(scope).forEach(source => {
+                            const localQualifier = this.getTableSourceQualifier(source);
+                            if (localQualifier) localAliases.add(localQualifier);
+                        });
+                    }
+
+                    // A qualifier declared within the extracted body shadows a matching
+                    // qualifier from an enclosing query block.
+                    if (!localAliases.has(qualifier) && outerAliases.has(qualifier)) {
+                        isCorrelated = true;
+                    }
+                });
+            }
+
             const suggestedName = this.createUniqueName('new_cte_name', existingNames);
             existingNames.add(suggestedName.toUpperCase());
 
@@ -881,11 +926,130 @@ class SqlQueryStructureAnalyzer {
                 cteIndentAnchorOffset: withLike ? withLike.cteIndentAnchorOffset : statement.contentRange.startOffset,
                 hasWithClause: !!withLike,
                 existingCteNames: withLike?.cteNames ?? [],
-                suggestedName
+                suggestedName,
+                isCorrelated
             });
         });
 
         return candidates;
+    }
+
+    private buildParentMap(root: CstNode): Map<CstNode, CstNode> {
+        const parents = new Map<CstNode, CstNode>();
+        const visit = (node: CstNode): void => {
+            for (const value of Object.values(node.children ?? {})) {
+                if (!Array.isArray(value)) continue;
+                for (const child of value) {
+                    if (!this.isCstNode(child)) continue;
+                    parents.set(child, node);
+                    visit(child);
+                }
+            }
+        };
+        visit(root);
+        return parents;
+    }
+
+    private getAncestorNodes(node: CstNode, parentByNode: ReadonlyMap<CstNode, CstNode>): CstNode[] {
+        const ancestors: CstNode[] = [];
+        let parent = parentByNode.get(node);
+        while (parent) {
+            ancestors.push(parent);
+            parent = parentByNode.get(parent);
+        }
+        return ancestors;
+    }
+
+    private getEnclosingSelectScopes(
+        node: CstNode,
+        parentByNode: ReadonlyMap<CstNode, CstNode>,
+        stopAtNode?: CstNode,
+    ): CstNode[] {
+        const scopes: CstNode[] = [];
+        let crossedSubquery = false;
+        for (const ancestor of this.getAncestorNodes(node, parentByNode)) {
+            if (ancestor === stopAtNode) break;
+            if (ancestor.name === 'subquery') {
+                crossedSubquery = true;
+                continue;
+            }
+            if (ancestor.name !== 'selectStatement') continue;
+            if (scopes.length === 0 || crossedSubquery) scopes.push(ancestor);
+            crossedSubquery = false;
+        }
+        return scopes;
+    }
+
+    private getQueryBlockTableSources(selectStatement: CstNode, excludedSource?: CstNode): CstNode[] {
+        const sources: CstNode[] = [];
+        const visit = (node: CstNode, isRoot: boolean): void => {
+            if (!isRoot && (node.name === 'selectStatement' || node.name === 'withStatement')) return;
+            if (node.name === 'tableSource') {
+                if (node !== excludedSource) sources.push(node);
+                return;
+            }
+            for (const value of Object.values(node.children ?? {})) {
+                if (!Array.isArray(value)) continue;
+                for (const child of value) {
+                    if (this.isCstNode(child)) visit(child, false);
+                }
+            }
+        };
+        visit(selectStatement, true);
+        return sources;
+    }
+
+    private getTableSourceQualifier(source: CstNode): string | undefined {
+        const alias = this.getAliasToken(this.getChildNodes(source, 'aliasOptional')[0]);
+        if (alias) return this.normalizeIdentifier(alias).toUpperCase();
+
+        const tableName = this.getChildNodes(source, 'tableName')[0];
+        const qualifiedNameNode = tableName
+            ? this.getChildNodes(tableName, 'qualifiedName')[0]
+            : this.getChildNodes(source, 'qualifiedName')[0];
+        return this.parseQualifiedName(qualifiedNameNode)?.shortName.toUpperCase();
+    }
+
+    private isLateralOrApplyTableSource(
+        source: CstNode,
+        parentByNode: ReadonlyMap<CstNode, CstNode>,
+    ): boolean {
+        for (const ancestor of this.getAncestorNodes(source, parentByNode)) {
+            if (ancestor.name === 'mssqlApplyClause') return true;
+            if (ancestor.name === 'selectStatement') break;
+        }
+
+        const hasLateralToken = (node: CstNode, isRoot: boolean): boolean => {
+            if (!isRoot && (
+                node.name === 'subquery'
+                || node.name === 'selectStatement'
+                || node.name === 'withStatement'
+            )) {
+                return false;
+            }
+            for (const value of Object.values(node.children ?? {})) {
+                if (!Array.isArray(value)) continue;
+                for (const child of value) {
+                    if (this.isToken(child)) {
+                        if (child.image.toUpperCase() === 'LATERAL' || child.tokenType.name.toLowerCase().includes('lateral')) {
+                            return true;
+                        }
+                    } else if (this.isCstNode(child) && hasLateralToken(child, false)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        return hasLateralToken(source, true);
+    }
+
+    private getNodeTokens(node: CstNode): IToken[] {
+        const tokens: IToken[] = [];
+        this.collectTokens(node, tokens);
+        tokens.sort((left, right) => (left.startOffset ?? 0) - (right.startOffset ?? 0));
+        return tokens;
     }
 
     private collectCteMaterializationCandidates(statement: StatementRecord): CteMaterializationCandidate[] {

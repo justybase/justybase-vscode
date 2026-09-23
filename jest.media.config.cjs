@@ -23,6 +23,8 @@ module.exports = {
     'media/resultPanel/state.ts',
     'media/resultPanel/grid/cellEditing.ts',
     'media/resultPanel/grid/tableBuilder.ts',
+    'media/resultPanel/selection.ts',
+    'media/resultPanel/rowViewComparison.ts',
     'media/resultPanel/filter.ts',
     'media/resultPanel/hostContracts.ts',
     'media/resultPanel/init.ts',

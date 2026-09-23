@@ -61,6 +61,7 @@ import {
 import { renderRowCountInfo, reorderColumnByDrag, reorderColumnsForPinning } from "./filter.js";
 import { applyDatabaseFilter } from "./databaseFilters.js";
 import { closeRowView, syncRowViewToolbarButton } from "./rowView.js";
+import { renderRowViewComparison } from "./rowViewComparison.js";
 import { refreshDiskQueryWindow } from "./diskBackedGrid.js";
 import {
   getActiveResultViewMode,
@@ -1060,7 +1061,86 @@ export function init(): void {
 }
 
 // Update row view content
+let rowViewRenderRequest = 0;
+
+function setRowViewPlaceholder(content: HTMLElement, text: string): void {
+  content.replaceChildren();
+  const placeholder = document.createElement("div");
+  placeholder.className = "row-view-placeholder";
+  placeholder.textContent = text;
+  content.appendChild(placeholder);
+}
+
+function getRowViewColumns(table: NonNullable<ReturnType<typeof getGrid>>["tanTable"]) {
+  if (!table) return [];
+  return (table.getAllLeafColumns?.() ?? table.getAllColumns())
+    .filter(column => !column.columnDef.isRowNumber);
+}
+
+function getSelectedRowIndices(grid = getGrid(getActiveGridIndex())): number[] {
+  return grid?.getSelectedRowIndices?.(11) ?? [];
+}
+
+function getRowViewScopeKey(table: NonNullable<ReturnType<typeof getGrid>>["tanTable"]): string {
+  if (!table) return "";
+  const state = table.getState();
+  return JSON.stringify({
+    sorting: state.sorting ?? [],
+    columnFilters: state.columnFilters ?? [],
+    globalFilter: state.globalFilter ?? "",
+    grouping: state.grouping ?? [],
+  });
+}
+
+interface RowViewSnapshot {
+  grid: NonNullable<ReturnType<typeof getGrid>>;
+  rowIndices: number[];
+  columns: ReturnType<typeof getRowViewColumns>;
+  values: unknown[][];
+}
+
+async function getRowViewSnapshot(): Promise<RowViewSnapshot | undefined> {
+  const activeIndex = getActiveGridIndex();
+  const sourceUri = getActiveSourceUri();
+  const grid = getGrid(activeIndex);
+  const table = grid?.tanTable;
+  if (!grid || !table || (table.getState().grouping?.length ?? 0) > 0) return undefined;
+  const scopeKey = getRowViewScopeKey(table);
+
+  const rowIndices = getSelectedRowIndices(grid);
+  if (rowIndices.length === 0 || rowIndices.length > 10) return undefined;
+  const columns = getRowViewColumns(table);
+  if (columns.length === 0) return undefined;
+
+  const rawRows = await Promise.all(rowIndices.map(async rowIndex => {
+    const resolved = grid.resolveRowValues?.(rowIndex);
+    if (resolved !== undefined) return resolved;
+    return await grid.fetchRowValues?.(rowIndex);
+  }));
+  if (
+    rawRows.some(row => row === undefined || row === null || (typeof row !== "object" && !Array.isArray(row)))
+    || getActiveGridIndex() !== activeIndex
+    || getGrid(activeIndex) !== grid
+    || getActiveSourceUri() !== sourceUri
+    || getRowViewScopeKey(table) !== scopeKey
+    || getSelectedRowIndices(grid).join(",") !== rowIndices.join(",")
+  ) {
+    return undefined;
+  }
+
+  // Accessors also cover non-array result records; ordinary SQL results use numeric column ids.
+  const values = rawRows.map(raw => columns.map(column => {
+    const accessor = column.columnDef.accessorFn;
+    if (accessor) return accessor(raw);
+    const columnIndex = Number.parseInt(column.id, 10);
+    return Array.isArray(raw) && Number.isInteger(columnIndex) ? raw[columnIndex] : undefined;
+  }));
+
+  return { grid, rowIndices, columns, values };
+}
+
 function updateRowView(): void {
+  const requestId = ++rowViewRenderRequest;
   const grid = getGrid(getActiveGridIndex());
   if (!getRowViewOpen() || !grid?.tanTable) {
     return;
@@ -1071,105 +1151,44 @@ function updateRowView(): void {
     return;
   }
   const table = grid.tanTable;
+  if ((table.getState().grouping?.length ?? 0) > 0) {
+    setRowViewPlaceholder(content, "Row View is unavailable while results are grouped");
+    return;
+  }
 
-  // Get unique selected row indices
-  const selectedRows = new Set<number>();
-  const selectedCells = document.querySelectorAll(".selected-cell");
-
-  selectedCells.forEach((cell) => {
-    const htmlCell = asHtml(cell);
-    const cellId = htmlCell?.dataset.cellId;
-    if (!cellId) return;
-    const [rowIdx] = cellId.split("-").map(Number);
-    selectedRows.add(rowIdx);
-  });
-
-  const rowIndices = Array.from(selectedRows).sort((a, b) => a - b);
-
+  const rowIndices = getSelectedRowIndices(grid);
   if (rowIndices.length === 0) {
-    content.innerHTML =
-      '<div class="row-view-placeholder">Select 1 to 10 rows to view details or compare</div>';
+    setRowViewPlaceholder(content, "Select 1 to 10 rows to view details or compare");
     return;
   }
-
   if (rowIndices.length > 10) {
-    content.innerHTML =
-      '<div class="row-view-placeholder">Select 1 to 10 rows to compare</div>';
+    setRowViewPlaceholder(content, "Select 1 to 10 rows to compare");
     return;
   }
 
-  const rows = table.getRowModel().rows;
-  const columns = table.getAllColumns().filter((col) => col.getIsVisible());
-
-  function fmtType(dt: string | undefined): string {
-    if (!dt) return '';
-    const lower = dt.toLowerCase();
-    if (lower.indexOf('int') >= 0 || lower.indexOf('dec') >= 0 || lower.indexOf('float') >= 0 || lower.indexOf('num') >= 0) return 'num';
-    if (lower.indexOf('char') >= 0 || lower.indexOf('text') >= 0 || lower.indexOf('varchar') >= 0) return 'txt';
-    if (lower.indexOf('date') >= 0 || lower.indexOf('time') >= 0) return 'dt';
-    if (lower.indexOf('bool') >= 0) return 'bool';
-    return 'oth';
+  const columns = getRowViewColumns(table);
+  if (columns.length === 0) {
+    setRowViewPlaceholder(content, "This result has no data columns");
+    return;
   }
-
-  function fmtVal(val: unknown, dt: string | undefined): string {
-    if (val === null || val === undefined) return '<span class="row-view-val null">NULL</span>';
-    const lower = (dt || '').toLowerCase();
-    if (lower.indexOf('bool') >= 0) {
-      return val ? '<span class="row-view-val boolean-t">✓ true</span>' : '<span class="row-view-val boolean-f">✕ false</span>';
+  setRowViewPlaceholder(content, "Loading selected rows…");
+  void getRowViewSnapshot().then(snapshot => {
+    if (
+      requestId !== rowViewRenderRequest
+      || !getRowViewOpen()
+      || getGrid(getActiveGridIndex()) !== grid
+      || !snapshot
+      || snapshot.grid !== grid
+      || snapshot.rowIndices.join(",") !== getSelectedRowIndices(grid).join(",")
+    ) {
+      return;
     }
-    if (lower.indexOf('int') >= 0 || lower.indexOf('dec') >= 0 || lower.indexOf('float') >= 0 || lower.indexOf('num') >= 0) {
-      if (typeof val === 'number') return '<span class="row-view-val number">' + val.toLocaleString() + '</span>';
-      return '<span class="row-view-val number">' + val + '</span>';
+    renderRowViewComparison(content, snapshot.columns, snapshot.values);
+  }).catch(() => {
+    if (requestId === rowViewRenderRequest && getGrid(getActiveGridIndex()) === grid) {
+      setRowViewPlaceholder(content, "Unable to load selected rows. Select them again to retry.");
     }
-    if (lower.indexOf('date') >= 0 || lower.indexOf('time') >= 0) {
-      return '<span class="row-view-val date">' + val + '</span>';
-    }
-    return '<span class="row-view-val">' + String(val).replace(/</g, '&lt;') + '</span>';
-  }
-
-  let html = '<div class="row-view-table">';
-
-  columns.forEach(function (col) {
-    const values = rowIndices.map(function (rowIndex) {
-      return rows[rowIndex].getValue(col.id);
-    });
-
-    let isDiff = false;
-    if (rowIndices.length > 1) {
-      const firstVal = String(values[0] ?? '');
-      isDiff = values.some(function (v) { return String(v ?? '') !== firstVal; });
-    }
-
-    html += '<div class="row-view-section' + (isDiff ? ' diff' : '') + '">';
-    html += '<div class="row-view-key">';
-    html += '<span class="row-view-key-name">' + col.columnDef.header + '</span>';
-    html += '<span class="row-view-key-type">' + fmtType(col.columnDef.dataType) + '</span>';
-    html += '</div>';
-    html += '<div class="row-view-vals">';
-    values.forEach(function (val, vi) {
-      if (rowIndices.length > 1) {
-        html += '<span class="row-view-val label' + (isDiff ? ' diff' : '') + '">Row ' + (vi + 1) + '</span>';
-      }
-      html += fmtVal(val, col.columnDef.dataType);
-    });
-    html += '</div></div>';
   });
-
-  html += '</div>';
-  content.innerHTML = html;
-}
-
-// Row view export functions
-function getSelectedRowIndices() {
-  const selectedRows = new Set<number>();
-  document.querySelectorAll(".selected-cell").forEach(function (cell) {
-    const htmlCell = asHtml(cell);
-    const cellId = htmlCell?.dataset.cellId;
-    if (!cellId) return;
-    const parts = cellId.split("-");
-    selectedRows.add(parseInt(parts[0], 10));
-  });
-  return Array.from(selectedRows).sort(function (a, b) { return a - b; });
 }
 
 function hasRowViewData() {
@@ -1181,24 +1200,16 @@ function hasRowViewData() {
 
 async function copyRowViewAsMarkdown() {
   if (!hasRowViewData()) return;
-  const activeIndex = getActiveGridIndex();
-  const table = getGrid(activeIndex)?.tanTable;
-  if (!table) return;
-
-  const rowIndices = getSelectedRowIndices();
-  if (rowIndices.length === 0 || rowIndices.length > 10) return;
-
-  const columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
-  const rows = table.getRowModel().rows;
+  const snapshot = await getRowViewSnapshot();
+  if (!snapshot || getGrid(getActiveGridIndex()) !== snapshot.grid) return;
+  const { columns, values } = snapshot;
 
   let md = "| " + columns.map(function (col) { return col.columnDef.header; }).join(" | ") + " |\n";
   md += "| " + columns.map(function () { return "---"; }).join(" | ") + " |\n";
 
-  rowIndices.forEach(function (ri) {
-    const row = rows[ri];
-    if (!row) return;
-    md += "| " + columns.map(function (col) {
-      const val = row.getValue(col.id);
+  values.forEach(function (row) {
+    md += "| " + columns.map(function (_col, index) {
+      const val = row[index];
       if (val === null || val === undefined) return "NULL";
       return String(val).replace(/\|/g, "\\|");
     }).join(" | ") + " |\n";
@@ -1214,15 +1225,9 @@ async function copyRowViewAsMarkdown() {
 
 async function copyRowViewAsImage() {
   if (!hasRowViewData()) return;
-  const activeIndex = getActiveGridIndex();
-  const table = getGrid(activeIndex)?.tanTable;
-  if (!table) return;
-
-  const rowIndices = getSelectedRowIndices();
-  if (rowIndices.length === 0 || rowIndices.length > 10) return;
-
-  const columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
-  const rows = table.getRowModel().rows;
+  const snapshot = await getRowViewSnapshot();
+  if (!snapshot || getGrid(getActiveGridIndex()) !== snapshot.grid) return;
+  const { rowIndices, columns, values: rowValues } = snapshot;
 
   // Read theme colors from computed styles
   const bodyStyle = getComputedStyle(document.body);
@@ -1362,9 +1367,7 @@ async function copyRowViewAsImage() {
     }
 
     // Values
-    const values = rowIndices.map(function (ri) {
-      return rows[ri] ? rows[ri].getValue(col.id) : null;
-    });
+    const values = rowValues.map(row => row[i]);
 
     const valueX = pad + keyW + gap;
 
@@ -1652,7 +1655,7 @@ function exportRowViewAsXlsb() {
   const rowIndices = getSelectedRowIndices();
   if (rowIndices.length === 0 || rowIndices.length > 10) return;
 
-  const columns = table.getAllColumns().filter(function (col) { return col.getIsVisible(); });
+  const columns = getRowViewColumns(table);
   const columnIds = columns.map(function (col) { return col.id; });
   const rs = getResultSetAt(activeIndex) ?? null;
 
@@ -3485,6 +3488,14 @@ function setupWindowFunctions(): void {
 // Initialize window functions
 setupWindowFunctions();
 
+// This listener must be installed when the webview script loads: the editor may
+// deliver result data after DOMContentLoaded has already fired.
+window.addEventListener("result-panel-selection-changed", () => {
+  if (getRowViewOpen()) {
+    updateRowView();
+  }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   const overlay = getElementById("valueViewerOverlay");
   if (!overlay) {
@@ -3523,9 +3534,4 @@ document.addEventListener("DOMContentLoaded", () => {
       });
   });
 
-  window.addEventListener("result-panel-selection-changed", () => {
-    if (getRowViewOpen()) {
-      updateRowView();
-    }
-  });
 });

@@ -12,6 +12,8 @@ import {
     clearPendingDeletes,
     getPendingEdits,
     markRowForDelete,
+    setGroupingPanelOpen,
+    setRowViewOpen,
 } from '../state.js';
 import {
     editValuesEqual,
@@ -30,7 +32,7 @@ import * as panelProtocol from '../protocol.js';
 import { getSavedStateFor } from '../grid/persistence.js';
 import { addGrid, getGrid, resetGrids, setActiveGridIndex } from '../state.js';
 import type { FilterHistorySnapshot } from '../state.js';
-import type { GridHandle, ResultSet, DiskQuerySpec } from '../types.js';
+import type { GridHandle, ResultSet, DiskQuerySpec, TanStackColumn } from '../types.js';
 
 jest.mock('../rangeChart.js', () => ({ canCreateRangeChart: jest.fn(() => false) }));
 jest.mock('../databaseFilters.js', () => ({
@@ -62,6 +64,9 @@ type EditingWindow = Window & {
     clearAllFilters?: () => void;
     saveEdits?: () => void;
     markRowForDelete?: (rowIndex: number) => void;
+    toggleRowView?: () => void;
+    refreshRowView?: () => void;
+    copyRowViewAsMarkdown?: () => Promise<void>;
 };
 
 const initialPanelCallbacks: Pick<EditingWindow,
@@ -216,6 +221,8 @@ describe('SQL editor result panel quick-win coverage', () => {
         document.body.innerHTML = '';
         clearPendingEdits();
         clearPendingDeletes();
+        setRowViewOpen(false);
+        setGroupingPanelOpen(false);
         Object.assign(window, {
             activeSource: undefined,
             resultSets: undefined,
@@ -234,8 +241,166 @@ describe('SQL editor result panel quick-win coverage', () => {
         testVirtualizers.length = 0;
         clearPendingEdits();
         clearPendingDeletes();
+        setRowViewOpen(false);
+        setGroupingPanelOpen(false);
         resetGrids();
         document.body.innerHTML = '';
+    });
+
+    it('renders selected raw rows, handles invalid scopes, and copies the compared rows', async () => {
+        const panel = window as EditingWindow;
+        const resultSet = {
+            resultSetId: 'row-view-result',
+            executionTimestamp: 940,
+            columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'LABEL', type: 'VARCHAR' }],
+            data: [[1, 'first'], [2, 'second']],
+        } as ResultSet;
+        const state = {
+            sorting: [] as Array<{ id: string; desc: boolean }>,
+            columnFilters: [] as Array<{ id: string; value: unknown }>,
+            globalFilter: '',
+            grouping: [] as string[],
+        };
+        const columns = [
+            { id: '0', header: 'ID', type: 'INTEGER', accessorFn: (row: unknown) => (row as unknown[])[0] },
+            { id: '1', header: 'LABEL', type: 'VARCHAR' },
+        ].map(column => ({
+            id: column.id,
+            columnDef: { header: column.header, dataType: column.type, accessorFn: column.accessorFn },
+            getFilterValue: () => undefined,
+            setFilterValue: () => undefined,
+            getIsSorted: () => false,
+            getToggleSortingHandler: () => () => undefined,
+            toggleVisibility: () => undefined,
+            getIsVisible: () => true,
+        } as unknown as TanStackColumn));
+        let selectedRows = [0, 1];
+        const rows = [[1, 'first'], [2, 'second']];
+        const table = {
+            getState: () => state,
+            getAllColumns: () => columns,
+            getAllLeafColumns: () => columns,
+        };
+        const grid: GridHandle = {
+            tanTable: table as never,
+            getSelectedRowIndices: () => [...selectedRows],
+            resolveRowValues: rowIndex => rows[rowIndex],
+            fetchRowValues: jest.fn(async (rowIndex: number) => rows[rowIndex]),
+        };
+        resetGrids();
+        setActiveGridIndex(0);
+        addGrid(grid);
+        Object.assign(window, {
+            activeSource: 'file:///row-view.sql',
+            resultSets: [resultSet],
+        });
+        const rowViewPanel = document.createElement('section');
+        rowViewPanel.id = 'rowViewPanel';
+        const content = document.createElement('div');
+        content.id = 'rowViewContent';
+        rowViewPanel.appendChild(content);
+        document.body.appendChild(rowViewPanel);
+
+        expect(panel.toggleRowView).toEqual(expect.any(Function));
+        panel.toggleRowView?.();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(content.querySelectorAll('.row-view-section')).toHaveLength(2);
+        expect(content.querySelectorAll('.row-view-section.diff')).toHaveLength(2);
+        expect(content.textContent).toContain('first');
+        expect(content.textContent).toContain('second');
+
+        const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+        const writeText = jest.fn((text: string): Promise<void> => Promise.resolve(text).then(() => undefined));
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText },
+        });
+        try {
+            await panel.copyRowViewAsMarkdown?.();
+        } finally {
+            if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+            else Reflect.deleteProperty(navigator, 'clipboard');
+        }
+        expect(writeText).toHaveBeenCalledWith(expect.stringContaining('| 2 | second |'));
+
+        state.grouping = ['0'];
+        panel.refreshRowView?.();
+        expect(content.textContent).toContain('unavailable while results are grouped');
+
+        state.grouping = [];
+        selectedRows = [];
+        panel.refreshRowView?.();
+        expect(content.textContent).toContain('Select 1 to 10 rows to view details or compare');
+
+        selectedRows = Array.from({ length: 11 }, (_, index) => index);
+        panel.refreshRowView?.();
+        expect(content.textContent).toContain('Select 1 to 10 rows to compare');
+
+        selectedRows = [0];
+        table.getAllLeafColumns = () => [];
+        panel.refreshRowView?.();
+        expect(content.textContent).toContain('This result has no data columns');
+
+        setRowViewOpen(false);
+        panel.refreshRowView?.();
+        expect(content.textContent).toContain('This result has no data columns');
+    });
+
+    it('rejects stale or failed row snapshots before replacing the Row View', async () => {
+        const panel = window as EditingWindow;
+        const resultSet = {
+            resultSetId: 'row-view-async-result',
+            executionTimestamp: 941,
+            columns: [{ name: 'ID', type: 'INTEGER' }],
+            data: [[1]],
+        } as ResultSet;
+        const state = {
+            sorting: [] as Array<{ id: string; desc: boolean }>,
+            columnFilters: [] as Array<{ id: string; value: unknown }>,
+            globalFilter: '',
+            grouping: [] as string[],
+        };
+        const columns: TanStackColumn[] = [{
+            id: '0',
+            columnDef: { header: 'ID', dataType: 'INTEGER' },
+            getFilterValue: () => undefined,
+            setFilterValue: () => undefined,
+            getIsSorted: () => false,
+            getToggleSortingHandler: () => () => undefined,
+            toggleVisibility: () => undefined,
+            getIsVisible: () => true,
+        }];
+        const table = { getState: () => state, getAllColumns: () => columns, getAllLeafColumns: () => columns };
+        let resolveFetch: ((row: unknown[]) => void) | undefined;
+        const grid: GridHandle = {
+            tanTable: table as never,
+            getSelectedRowIndices: () => [0],
+            resolveRowValues: () => undefined,
+            fetchRowValues: () => new Promise(resolve => { resolveFetch = row => resolve(row); }),
+        };
+        resetGrids();
+        setActiveGridIndex(0);
+        addGrid(grid);
+        Object.assign(window, { activeSource: 'file:///row-view-async.sql', resultSets: [resultSet] });
+        const rowViewPanel = document.createElement('section');
+        rowViewPanel.id = 'rowViewPanel';
+        const content = document.createElement('div');
+        content.id = 'rowViewContent';
+        rowViewPanel.appendChild(content);
+        document.body.appendChild(rowViewPanel);
+
+        panel.toggleRowView?.();
+        expect(content.textContent).toContain('Loading selected rows');
+        state.globalFilter = 'changed while loading';
+        resolveFetch?.([1]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(content.textContent).toContain('Loading selected rows');
+
+        state.globalFilter = '';
+        grid.fetchRowValues = async () => { throw new Error('fixture fetch failed'); };
+        panel.refreshRowView?.();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(content.textContent).toContain('Unable to load selected rows');
     });
 
     it('records bounded, per-result filter history and ignores snapshots during restore', () => {
@@ -729,6 +894,7 @@ describe('SQL editor result panel quick-win coverage', () => {
                 .some(row => row.textContent?.includes('✗ false'))).toBe(true);
 
             grid?.dispose?.();
+            window.dispatchEvent(new Event('result-panel-selection-changed'));
             resetGrids();
             container.innerHTML = '';
             createResultSetGrid(
@@ -758,6 +924,15 @@ describe('SQL editor result panel quick-win coverage', () => {
 
             grid?.selectColumn?.(0);
             expect(container.querySelector('.selected-cell')).not.toBeNull();
+            expect(grid?.hasSelection?.()).toBe(true);
+            expect(grid?.getSelectedRowIndices?.()).toEqual([0, 1]);
+            expect(grid?.getSelectedRowIndices?.(0)).toEqual([]);
+            window.dispatchEvent(new Event('result-panel-selection-changed'));
+            grid?.tanTable?.setSorting([{ id: '0', desc: true }]);
+            (grid as (GridHandle & { onTableRowsRendered?: () => void }) | undefined)?.onTableRowsRendered?.();
+            expect(container.querySelector('.selected-cell')).toBeNull();
+            grid?.tanTable?.setSorting([]);
+            animationFrames.flush();
             width = 600;
             grid?.render?.();
             expect(container.querySelectorAll('th[data-col-id]')).toHaveLength(5);

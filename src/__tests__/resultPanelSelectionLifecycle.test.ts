@@ -198,12 +198,27 @@ describe('result panel selection lifecycle', () => {
         jest.resetModules();
 
         const listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>();
+        const windowListeners = new Map<string, Array<(event: { type: string }) => void>>();
         const wrappers: FakeWrapper[] = [];
 
         const windowMock = {
             focus: jest.fn(),
             getSelection: () => ({ removeAllRanges: jest.fn() }),
-            dispatchEvent: jest.fn()
+            addEventListener: (type: string, listener: (event: { type: string }) => void) => {
+                const entries = windowListeners.get(type) || [];
+                entries.push(listener);
+                windowListeners.set(type, entries);
+            },
+            removeEventListener: (type: string, listener: (event: { type: string }) => void) => {
+                const entries = windowListeners.get(type) || [];
+                windowListeners.set(type, entries.filter(entry => entry !== listener));
+            },
+            dispatchEvent: (event: { type: string }) => {
+                for (const listener of windowListeners.get(event.type) || []) {
+                    listener(event);
+                }
+                return true;
+            }
         };
 
         const documentMock = {
@@ -429,6 +444,42 @@ describe('result panel selection lifecycle', () => {
         expect(initialRow.children[1].classList.contains('selected-cell')).toBe(false);
         expect(virtualizedRow.children[1].classList.contains('selected-cell')).toBe(false);
         expect(handlers.hasSelection()).toBe(true);
+    });
+
+    it('clears row selection when sorting changes the displayed row positions', () => {
+        const { setupCellSelectionEvents } = require('../../media/resultPanel/selection.js');
+        const { wrappers, documentMock } = (global as typeof globalThis & {
+            __selectionTestState: {
+                wrappers: FakeWrapper[];
+                documentMock: { activeWrapper: FakeWrapper | null };
+            };
+        }).__selectionTestState;
+
+        const rowNumberCell = new FakeCell('1', ['row-number-cell']);
+        const dataCell = new FakeCell('value');
+        const row = new FakeRow(0, [rowNumberCell, dataCell]);
+        const wrapper = new FakeWrapper([row]);
+        wrappers.push(wrapper);
+        documentMock.activeWrapper = wrapper;
+
+        let sorting: unknown[] = [];
+        const tableApi = {
+            getState: () => ({ sorting }),
+            getAllColumns: () => [],
+            getRowModel: () => ({ rows: [] }),
+            getFilteredRowModel: () => ({ rows: [] })
+        };
+        const handlers = setupCellSelectionEvents(wrapper, tableApi, 1);
+
+        wrapper.dispatchMouseDown(rowNumberCell);
+        expect(handlers.hasSelection()).toBe(true);
+        expect(dataCell.classList.contains('selected-cell')).toBe(true);
+
+        sorting = [{ id: 'value', desc: true }];
+        handlers.onTableRowsRendered?.();
+
+        expect(handlers.hasSelection()).toBe(false);
+        expect(dataCell.classList.contains('selected-cell')).toBe(false);
     });
 
     it('copies every row for a selected column instead of only rendered virtual rows', async () => {
