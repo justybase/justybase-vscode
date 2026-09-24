@@ -46,6 +46,7 @@ const nodes = {
 };
 
 const targets = {
+  bundle: [],
   api: ['web-api'],
   web: ['web'],
   all: ['web-api', 'web'],
@@ -54,7 +55,7 @@ const targets = {
 };
 
 function usage() {
-  console.error('Usage: node scripts/workspace-build-graph.mjs <api|web|all|shared|desktop> [--test] [--minify] [--watch]');
+  console.error('Usage: node scripts/workspace-build-graph.mjs <api|web|all|shared|desktop|bundle> [--test] [--minify] [--watch]');
   process.exit(2);
 }
 
@@ -183,7 +184,8 @@ async function main() {
     const environment = { ...process.env };
     if (options.test) environment.VITE_ENABLE_TEST_LOGIN = '1';
     const nodeNames = collectNodes(targets[options.target]);
-    console.log(`[workspace-build] ${options.target}: ${nodeNames.join(' -> ')}`);
+    const buildDescription = options.target === 'bundle' ? 'esbuild' : nodeNames.join(' -> ');
+    console.log(`[workspace-build] ${options.target}: ${buildDescription}`);
     for (const nodeName of nodeNames) runWorkspace(nodeName, { environment });
     if (options.target === 'web' || options.target === 'all') {
       const npm = npmInvocation();
@@ -191,7 +193,7 @@ async function main() {
       if (options.test) args.push('--', '--mode', 'test');
       runCommand(npm.command, args, environment);
     }
-    if (options.target === 'desktop') runRootDesktopBundle(options);
+    if (options.target === 'desktop' || options.target === 'bundle') runRootDesktopBundle(options);
   } finally {
     releaseBuildLock(lockToken);
   }
