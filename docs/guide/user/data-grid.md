@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-09-23
-product_version: 3.17.25
+product_version: 3.17.26
 ---
 
 # Data Grid and Result Exploration
