@@ -4451,6 +4451,7 @@
   "scripts": {
     "vscode:prepublish": "node scripts/clean-vsix.js && npm run build && node scripts/generate-third-party-notices.js .",
     "build": "node scripts/workspace-build-graph.mjs desktop",
+    "build:desktop-bundle": "node scripts/workspace-build-graph.mjs bundle",
     "build:minified": "node scripts/workspace-build-graph.mjs desktop --minify",
     "build:contracts": "npm run build --workspace @justybase/contracts",
     "build:api-client": "npm run build:contracts && npm run build --workspace @justybase/api-client",
