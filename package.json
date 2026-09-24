@@ -400,6 +400,11 @@
         "icon": "$(code)"
       },
       {
+        "command": "netezza.createTableAsView",
+        "title": "Create View in Another Database",
+        "icon": "$(references)"
+      },
+      {
         "command": "netezza.jumpToSchema",
         "title": "Jump to Schema Object",
         "icon": "$(search)"
@@ -2457,6 +2462,11 @@
           "command": "netezza.createDDL",
           "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT)/",
           "group": "1_copy"
+        },
+        {
+          "command": "netezza.createTableAsView",
+          "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == netezza",
+          "group": "1_copy@1"
         },
         {
           "command": "netezza.recreateTable",

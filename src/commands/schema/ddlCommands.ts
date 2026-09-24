@@ -34,6 +34,62 @@ export function registerDDLCommands(deps: SchemaCommandsDependencies): vscode.Di
     const { context, connectionManager } = deps;
 
     return [
+        vscode.commands.registerCommand('netezza.createTableAsView', async (item: SchemaItemData) => {
+            try {
+                const objectType = item?.objType?.toUpperCase()
+                    || item?.contextValue?.replace(/^(netezza|favoritesObject):/, '').toUpperCase();
+                if (!item?.label || !item.dbName || !item.schema || objectType !== 'TABLE') {
+                    vscode.window.showErrorMessage('Select a Netezza table to generate a view script.');
+                    return;
+                }
+
+                const tableName = item.rawLabel || item.label;
+                const connectionName = connectionManager.resolveConnectionName(undefined, item.connectionName);
+                const connectionDetails = connectionName
+                    ? await connectionManager.getConnection(connectionName)
+                    : undefined;
+                if (!connectionName || !connectionDetails) {
+                    vscode.window.showErrorMessage('Connection not configured. Please connect via Netezza: Connect...');
+                    return;
+                }
+
+                await executeWithProgress(
+                    `Generating view script for ${item.dbName}.${item.schema}.${tableName}...`,
+                    async () => {
+                        const { generateTableAsViewDDL } = await import('../../dialects/netezza/ddl/tableAsView');
+                        const ddlCode = await generateTableAsViewDDL(
+                            connectionDetails,
+                            item.dbName!,
+                            item.schema!,
+                            tableName,
+                        );
+                        const doc = await vscode.workspace.openTextDocument({ content: ddlCode, language: 'sql' });
+                        const editor = await vscode.window.showTextDocument(doc);
+
+                        connectionManager.setDocumentConnection(doc.uri.toString(), connectionName);
+                        await connectionManager.setDocumentDatabase(doc.uri.toString(), item.dbName!);
+
+                        const token = 'NEW_DATABASE';
+                        const selections: vscode.Selection[] = [];
+                        let offset = ddlCode.indexOf(token);
+                        while (offset >= 0) {
+                            const start = doc.positionAt(offset);
+                            const end = doc.positionAt(offset + token.length);
+                            selections.push(new vscode.Selection(start, end));
+                            offset = ddlCode.indexOf(token, offset + token.length);
+                        }
+                        if (selections.length > 0) {
+                            editor.selections = selections;
+                            editor.revealRange(selections[0]);
+                        }
+                    },
+                );
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Error generating table-as-view script: ${message}`);
+            }
+        }),
+
         // Create DDL
         vscode.commands.registerCommand('netezza.createDDL', async (item: SchemaItemData) => {
             try {
