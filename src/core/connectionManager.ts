@@ -337,6 +337,7 @@ function getLogicalDefaultDatabase(details: SharedConnectionDetails | undefined)
 export class ConnectionManager {
     // Cache of connection details: { [name]: details }
     private _connections: Record<string, ConnectionDetails> = {};
+    private _connectionOrder: string[] = [];
 
     // Active connection name
     private _activeConnectionName: string | null = null;
@@ -424,6 +425,9 @@ export class ConnectionManager {
         );
         if (cached && Object.keys(cached).length > 0) {
             this._connections = normalizeConnectionMap(cached);
+            this._connectionOrder = this.reconcileConnectionOrder(
+                getMementoValue<unknown>(this.context.globalState, compatibilityStateKeys.connectionOrder),
+            );
             this._fastLoaded = true;
             logWithFallback('debug', `[perf] ConnectionManager: fast-loaded ${Object.keys(cached).length} connection(s) from cache`);
         } else {
@@ -569,8 +573,12 @@ export class ConnectionManager {
                 }
             }
         }
+        this._connectionOrder = this.reconcileConnectionOrder(
+            getMementoValue<unknown>(this.context.globalState, compatibilityStateKeys.connectionOrder),
+        );
         // Update globalState cache for next fast-load
         await this._updateConnectionsCache();
+        await updateMementoValue(this.context.globalState, compatibilityStateKeys.connectionOrder, this._connectionOrder);
         this._connectionsFullyLoaded = true;
         this._onDidChangeConnections.fire();
     }
@@ -594,8 +602,10 @@ export class ConnectionManager {
     }
 
     private async saveConnectionsToStorage() {
+        this._connectionOrder = this.reconcileConnectionOrder(this._connectionOrder);
         await storeSecretValue(this.context.secrets, compatibilitySecretKeys.connections, JSON.stringify(this._connections));
         await this._updateConnectionsCache();
+        await updateMementoValue(this.context.globalState, compatibilityStateKeys.connectionOrder, this._connectionOrder);
         await updateMementoValue(
             this.context.globalState,
             compatibilityStateKeys.activeConnection,
@@ -612,6 +622,16 @@ export class ConnectionManager {
             cache[name] = { ...details, password: undefined };
         }
         await updateMementoValue(this.context.globalState, compatibilityStateKeys.connectionsCache, cache);
+    }
+
+    private reconcileConnectionOrder(preferredOrder: unknown): string[] {
+        const names = Object.keys(this._connections);
+        const validNames = new Set(names);
+        const ordered = Array.isArray(preferredOrder)
+            ? preferredOrder.filter((name): name is string => typeof name === 'string' && validNames.has(name))
+            : [];
+        const seen = new Set(ordered);
+        return [...new Set(ordered), ...names.filter(name => !seen.has(name))];
     }
 
     private hasTunnelReference(tunnelId: string): boolean {
@@ -687,9 +707,16 @@ export class ConnectionManager {
             }
         }
 
+        const currentOrder = this.reconcileConnectionOrder(this._connectionOrder);
+        const renamedPosition = renamedDetails && sourceName ? currentOrder.indexOf(sourceName) : -1;
         this._connections[storedDetails.name] = storedDetails;
         if (renamedDetails && sourceName) {
             delete this._connections[sourceName];
+            const nextOrder = currentOrder.filter(name => name !== sourceName && name !== storedName);
+            nextOrder.splice(renamedPosition < 0 ? nextOrder.length : renamedPosition, 0, storedName);
+            this._connectionOrder = nextOrder;
+        } else if (!currentOrder.includes(storedName)) {
+            this._connectionOrder = [...currentOrder, storedName];
         }
 
         if (this.databaseTunnelRuntime) {
@@ -779,6 +806,7 @@ export class ConnectionManager {
 
             const removedDetails = this._connections[name];
             delete this._connections[name];
+            this._connectionOrder = this._connectionOrder.filter(connectionName => connectionName !== name);
 
             if (removedDetails.tunnel && this.databaseTunnelRuntime && !this.hasTunnelReference(removedDetails.tunnel.id)) {
                 await this.databaseTunnelRuntime.stop(removedDetails.tunnel.id);
@@ -787,8 +815,8 @@ export class ConnectionManager {
 
             // If active connection was deleted, reset active
             if (this._activeConnectionName === name) {
-                const names = Object.keys(this._connections);
-                await this.setActiveConnection(names.length > 0 ? names[0] : null);
+                const nextConnection = this.reconcileConnectionOrder(this._connectionOrder)[0] ?? null;
+                await this.setActiveConnection(nextConnection);
             }
 
             await this.saveConnectionsToStorage();
@@ -799,10 +827,37 @@ export class ConnectionManager {
     async getConnections(): Promise<ConnectionDetails[]> {
         // If fast-loaded from globalState cache, return immediately without waiting for Secrets API
         if (this._fastLoaded) {
-            return Object.values(this._connections);
+            return this.getOrderedConnections();
         }
         await this.ensureLoaded();
-        return Object.values(this._connections);
+        return this.getOrderedConnections();
+    }
+
+    private getOrderedConnections(): ConnectionDetails[] {
+        this._connectionOrder = this.reconcileConnectionOrder(this._connectionOrder);
+        return this._connectionOrder
+            .map(name => this._connections[name])
+            .filter((connection): connection is ConnectionDetails => Boolean(connection));
+    }
+
+    /** Move a connection before another connection, or to the end when targetName is omitted. */
+    async moveConnection(sourceName: string, targetName?: string): Promise<void> {
+        await this.ensureLoaded();
+        if (!this._connections[sourceName] || (targetName !== undefined && !this._connections[targetName])) return;
+        if (sourceName === targetName) return;
+
+        const order = this.reconcileConnectionOrder(this._connectionOrder);
+        const sourceIndex = order.indexOf(sourceName);
+        if (sourceIndex < 0) return;
+        order.splice(sourceIndex, 1);
+        const targetIndex = targetName === undefined ? order.length : order.indexOf(targetName);
+        if (targetIndex < 0) return;
+        order.splice(targetIndex, 0, sourceName);
+        if (order.every((name, index) => name === this._connectionOrder[index])) return;
+
+        this._connectionOrder = order;
+        await updateMementoValue(this.context.globalState, compatibilityStateKeys.connectionOrder, order);
+        this._onDidChangeConnections.fire();
     }
 
     async getConnection(name: string): Promise<ConnectionDetails | undefined> {
@@ -832,7 +887,7 @@ export class ConnectionManager {
     }
 
     getConnectionNames(): string[] {
-        return Object.keys(this._connections);
+        return this.reconcileConnectionOrder(this._connectionOrder);
     }
 
     getConnectionDatabaseKind(name?: string): DatabaseKind | undefined {

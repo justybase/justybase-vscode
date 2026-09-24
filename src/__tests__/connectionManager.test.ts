@@ -167,6 +167,57 @@ describe('ConnectionManager', () => {
             expect(connections[0]).toMatchObject(sampleConnection);
         });
 
+        it('persists reordered connections and restores them after restart', async () => {
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection({ ...sampleConnection, name: 'SecondConnection' });
+            await manager.saveConnection({ ...sampleConnection, name: 'ThirdConnection' });
+
+            await manager.moveConnection('ThirdConnection', 'TestConnection');
+
+            expect((await manager.getConnections()).map(connection => connection.name)).toEqual([
+                'ThirdConnection', 'TestConnection', 'SecondConnection',
+            ]);
+            expect(globalState.get('justybase.connectionOrder.v1')).toEqual([
+                'ThirdConnection', 'TestConnection', 'SecondConnection',
+            ]);
+
+            const restored = new ConnectionManager(mockContext);
+            await restored.ensureFullyLoaded();
+            expect((await restored.getConnections()).map(connection => connection.name)).toEqual([
+                'ThirdConnection', 'TestConnection', 'SecondConnection',
+            ]);
+            await restored.dispose();
+        });
+
+        it('moves a connection to the end and ignores unknown or self targets', async () => {
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection({ ...sampleConnection, name: 'SecondConnection' });
+
+            await manager.moveConnection('TestConnection');
+            expect(manager.getConnectionNames()).toEqual(['SecondConnection', 'TestConnection']);
+
+            await manager.moveConnection('TestConnection', 'MissingConnection');
+            await manager.moveConnection('TestConnection', 'TestConnection');
+            expect(manager.getConnectionNames()).toEqual(['SecondConnection', 'TestConnection']);
+        });
+
+        it('keeps a renamed connection in its existing position and removes deleted names', async () => {
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection({ ...sampleConnection, name: 'SecondConnection' });
+            await manager.saveConnection({ ...sampleConnection, name: 'ThirdConnection' });
+
+            await manager.saveConnection(
+                { ...sampleConnection, name: 'RenamedConnection' },
+                undefined,
+                false,
+                'SecondConnection',
+            );
+            expect(manager.getConnectionNames()).toEqual(['TestConnection', 'RenamedConnection', 'ThirdConnection']);
+
+            await manager.deleteConnection('RenamedConnection');
+            expect(manager.getConnectionNames()).toEqual(['TestConnection', 'ThirdConnection']);
+        });
+
         it('should clear tunnel tokens explicitly and when the relay URL changes', async () => {
             const tokens = new Map<string, string>();
             const getToken = jest.fn(async (id: string) => tokens.get(id));

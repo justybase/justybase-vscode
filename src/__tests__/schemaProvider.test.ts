@@ -100,6 +100,7 @@ describe('SchemaProvider', () => {
             }),
             getDocumentDatabase: jest.fn().mockReturnValue(undefined),
             getEffectiveSchemaSync: jest.fn().mockReturnValue('ADMIN'),
+            moveConnection: jest.fn().mockResolvedValue(undefined),
             onDidChangeConnections: jest.fn().mockReturnValue({ dispose: jest.fn() }),
             dispose: jest.fn()
         } as unknown as jest.Mocked<ConnectionManager>;
@@ -1411,6 +1412,28 @@ describe('SchemaProvider', () => {
     });
 
     describe('handleDrag', () => {
+        it('sets a connection-order drag payload for server connections', () => {
+            const item = new SchemaItem(
+                'Connection With Spaces',
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'serverInstance',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'Connection With Spaces',
+            );
+            const dataTransfer = { set: jest.fn() } as unknown as vscode.DataTransfer;
+
+            schemaProvider.handleDrag([item], dataTransfer, { isCancellationRequested: false } as vscode.CancellationToken);
+
+            expect(dataTransfer.set).toHaveBeenCalledWith(
+                'application/vnd.code.tree.netezza',
+                expect.objectContaining({ value: 'netezza-connection-order:///Connection%20With%20Spaces' }),
+            );
+        });
+
         it('should set data transfer for netezza items', () => {
             const item = new SchemaItem(
                 'USERS',
@@ -1522,6 +1545,50 @@ describe('SchemaProvider', () => {
             schemaProvider.handleDrag([], dataTransfer, token);
 
             expect(dataTransfer.set).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('handleDrop - connection ordering', () => {
+        function connectionItem(name: string): SchemaItem {
+            return new SchemaItem(
+                name,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'serverInstance',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                name,
+            );
+        }
+
+        function connectionDrop(name: string): vscode.DataTransfer {
+            return {
+                get: jest.fn((mimeType: string) => mimeType === 'application/vnd.code.tree.netezza'
+                    ? { value: `netezza-connection-order:///${encodeURIComponent(name)}` }
+                    : undefined),
+            } as unknown as vscode.DataTransfer;
+        }
+
+        it('moves the dragged connection before the connection drop target', async () => {
+            await schemaProvider.handleDrop(
+                connectionItem('Target'),
+                connectionDrop('Source'),
+                { isCancellationRequested: false } as vscode.CancellationToken,
+            );
+
+            expect(mockConnectionManager.moveConnection).toHaveBeenCalledWith('Source', 'Target');
+        });
+
+        it('moves the dragged connection to the end when dropped on empty space', async () => {
+            await schemaProvider.handleDrop(
+                undefined,
+                connectionDrop('Source'),
+                { isCancellationRequested: false } as vscode.CancellationToken,
+            );
+
+            expect(mockConnectionManager.moveConnection).toHaveBeenCalledWith('Source');
         });
     });
 });

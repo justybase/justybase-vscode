@@ -785,7 +785,10 @@ export class SchemaProvider
         const item = source[0];
 
         // Enable drag for favorites items
-        if (item.contextValue?.startsWith('favorites') && item.id) {
+        if (item.contextValue === 'serverInstance' && item.connectionName) {
+            const dragUri = vscode.Uri.parse(`netezza-connection-order:///${encodeURIComponent(item.connectionName)}`);
+            dataTransfer.set('application/vnd.code.tree.netezza', new vscode.DataTransferItem(dragUri.toString()));
+        } else if (item.contextValue?.startsWith('favorites') && item.id) {
             const dragUri = vscode.Uri.parse(`netezza-favorite://${item.id}`);
             dataTransfer.set('application/vnd.code.tree.netezza', new vscode.DataTransferItem(dragUri.toString()));
 
@@ -848,7 +851,7 @@ export class SchemaProvider
         sources: vscode.DataTransfer,
         token: vscode.CancellationToken,
     ): Promise<void> {
-        // First check for internal drag (favorites reordering)
+        // First check for internal drag (connection order or favorites reordering)
         const internalDrop = sources.get('application/vnd.code.tree.netezza');
         if (internalDrop) {
             let uriString: string;
@@ -856,7 +859,15 @@ export class SchemaProvider
                 uriString = typeof internalDrop.value === 'string' ? internalDrop.value : await internalDrop.asString();
                 const uri = vscode.Uri.parse(uriString);
 
-                if (uri.scheme === 'netezza-favorite') {
+                if (uri.scheme === 'netezza-connection-order') {
+                    const encodedName = uriString.slice('netezza-connection-order:///'.length);
+                    const sourceName = decodeURIComponent(encodedName);
+                    if (target === undefined) {
+                        await this.connectionManager.moveConnection(sourceName);
+                    } else if (target.contextValue === 'serverInstance' && target.connectionName) {
+                        await this.connectionManager.moveConnection(sourceName, target.connectionName);
+                    }
+                } else if (uri.scheme === 'netezza-favorite') {
                     const sourceId = uri.authority;
                     let targetId: string | undefined = undefined;
 
