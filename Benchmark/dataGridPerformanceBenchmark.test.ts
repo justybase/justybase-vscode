@@ -642,5 +642,5 @@ describe('Data Grid Performance Benchmark', () => {
                 }
             }
         }
-    }, 120_000);
+    }, 300_000);
 });

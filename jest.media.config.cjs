@@ -12,6 +12,8 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@justybase/contracts$': '<rootDir>/packages/contracts/src/index.ts',
+    '^@justybase/result-core$': '<rootDir>/packages/result-core/src/index.ts',
+    '^@justybase/result-core/(.*)$': '<rootDir>/packages/result-core/src/$1',
     '^@justybase/ui-core$': '<rootDir>/packages/ui-core/src/index.ts',
     '^@justybase/ui-core/(.*)$': '<rootDir>/packages/ui-core/src/$1',
     '^@justybase/ui-react$': '<rootDir>/packages/ui-react/src/index.ts',
