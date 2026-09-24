@@ -21,6 +21,10 @@ export const compatibilityStateKeys = {
         current: 'justybase.connectionsCache',
         legacy: ['netezza-connections-cache']
     },
+    connectionOrder: {
+        current: 'justybase.connectionOrder.v1',
+        legacy: []
+    },
     variableValues: {
         current: 'justybase.variableValues',
         legacy: ['netezza.variableValues']
