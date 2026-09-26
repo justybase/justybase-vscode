@@ -3803,6 +3803,78 @@
           "default": false,
           "description": "Show inline SQL type hints for resolved qualified columns (for example: alias.column INT8)."
         },
+        "justybase.sql.joinNameHeuristics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow lower-priority JOIN suggestions based on matching cached key and column names when no declared or configured relationship is available."
+        },
+        "justybase.sql.autoJoinAliases": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate a unique table alias when accepting a JOIN completion."
+        },
+        "justybase.sql.joinAliases": {
+          "type": "array",
+          "default": [],
+          "description": "Workspace table-to-alias overrides used by JOIN completions.",
+          "items": {
+            "type": "object",
+            "required": ["table", "alias"],
+            "properties": {
+              "table": {
+                "type": "object",
+                "required": ["table"],
+                "properties": {
+                  "database": { "type": "string" },
+                  "schema": { "type": "string" },
+                  "table": { "type": "string" }
+                }
+              },
+              "alias": { "type": "string" }
+            }
+          }
+        },
+        "justybase.sql.joinRelations": {
+          "type": "array",
+          "default": [],
+          "description": "Workspace virtual JOIN relationships. Table identities use database/schema/table fields and columns map left to right.",
+          "items": {
+            "type": "object",
+            "required": ["left", "right", "columns"],
+            "properties": {
+              "left": {
+                "type": "object",
+                "required": ["table"],
+                "properties": {
+                  "database": { "type": "string" },
+                  "schema": { "type": "string" },
+                  "table": { "type": "string" }
+                }
+              },
+              "right": {
+                "type": "object",
+                "required": ["table"],
+                "properties": {
+                  "database": { "type": "string" },
+                  "schema": { "type": "string" },
+                  "table": { "type": "string" }
+                }
+              },
+              "columns": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["left", "right"],
+                  "properties": {
+                    "left": { "type": "string" },
+                    "right": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
         "justybase.linter.rules": {
           "type": "object",
           "default": {

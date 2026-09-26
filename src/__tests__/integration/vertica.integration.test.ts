@@ -17,6 +17,10 @@ import {
     expectReaderCloseAndReuse,
 } from './connectionLifecycleHelpers';
 import { registerLiveIntegrationSuite, verticaHarness } from './optionalDialectIntegrationHarness';
+import {
+	expectLiveForeignKeyCompletion,
+	requireForeignKeyRelationshipQuery,
+} from './liveForeignKeyCompletionHelper';
 
 registerLiveIntegrationSuite(verticaHarness);
 
@@ -134,6 +138,49 @@ describeIfConfigured('vertica integration', () => {
 	const sourceMarker = `JBL_VERTICA_SOURCE_${stamp.toUpperCase()}`;
 	const tableComment = `JBL Vertica comment ${stamp}`;
 	let schemaName = 'public';
+
+	 it('completes an exact composite FK JOIN from live Vertica catalog rows', async () => {
+		const suffix = `${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
+		const parentTable = `JBL_JOIN_P_${suffix}`;
+		const childTable = `JBL_JOIN_C_${suffix}`;
+		const parentName = buildQualifiedName(schemaName, parentTable);
+		const childName = buildQualifiedName(schemaName, childTable);
+		try {
+			await connection.createCommand(`
+				CREATE TABLE ${parentName} (
+					TENANT_KEY INTEGER NOT NULL,
+					CUSTOMER_KEY INTEGER NOT NULL,
+					CONSTRAINT ${quoteIdentifier(`JBL_JPK_${suffix}`)} PRIMARY KEY (TENANT_KEY, CUSTOMER_KEY)
+				)
+			`).execute();
+			await connection.createCommand(`
+				CREATE TABLE ${childName} (
+					TENANT_ID INTEGER NOT NULL,
+					CUSTOMER_ID INTEGER NOT NULL,
+					CONSTRAINT ${quoteIdentifier(`JBL_JFK_${suffix}`)} FOREIGN KEY (TENANT_ID, CUSTOMER_ID)
+						REFERENCES ${parentName} (TENANT_KEY, CUSTOMER_KEY)
+				)
+			`).execute();
+			const rows = await readRows(
+				connection,
+					requireForeignKeyRelationshipQuery(verticaMetadataProvider.buildForeignKeyRelationshipsQuery!(config!.database, {
+						schema: schemaName,
+						tableName: childTable,
+					}), 'vertica'),
+			);
+			await expectLiveForeignKeyCompletion({
+				databaseKind: 'vertica',
+				database: config!.database,
+				schema: schemaName,
+				parentTable,
+				childTable,
+				rows,
+			});
+		} finally {
+			await tryExecute(connection, `DROP TABLE IF EXISTS ${childName} CASCADE`);
+			await tryExecute(connection, `DROP TABLE IF EXISTS ${parentName} CASCADE`);
+		}
+	}, 120000);
 
 	beforeAll(async () => {
 		connection = verticaHarness.createConnection(config!) as VerticaConnection;

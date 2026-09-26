@@ -36,6 +36,10 @@ import { InMemorySchemaProvider } from '../../sqlParser/schemaProvider';
 import { SqlValidator } from '../../sqlParser/validator';
 import type { ConnectionDetails } from '../../types';
 import { oracleHarness, registerLiveIntegrationSuite } from './optionalDialectIntegrationHarness';
+import {
+	expectLiveForeignKeyCompletion,
+	requireForeignKeyRelationshipQuery,
+} from './liveForeignKeyCompletionHelper';
 
 registerLiveIntegrationSuite(oracleHarness);
 
@@ -1227,6 +1231,49 @@ describeIfConfigured('oracle integration', () => {
 	});
 
 	describe('Oracle live completion (Netezza-quality E2E)', () => {
+		it('completes an exact composite FK JOIN from live Oracle catalog rows', async () => {
+			const suffix = `${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
+			const parentTable = `JBL_JOIN_P_${suffix}`;
+			const childTable = `JBL_JOIN_C_${suffix}`;
+			const parentName = buildQualifiedName(schemaName, parentTable);
+			const childName = buildQualifiedName(schemaName, childTable);
+			try {
+				await connection.createCommand(`
+					CREATE TABLE ${parentName} (
+						TENANT_KEY NUMBER(10) NOT NULL,
+						CUSTOMER_KEY NUMBER(10) NOT NULL,
+						CONSTRAINT ${quoteIdentifier(`JBL_JPK_${suffix}`)} PRIMARY KEY (TENANT_KEY, CUSTOMER_KEY)
+					)
+				`).execute();
+				await connection.createCommand(`
+					CREATE TABLE ${childName} (
+						TENANT_ID NUMBER(10) NOT NULL,
+						CUSTOMER_ID NUMBER(10) NOT NULL,
+						CONSTRAINT ${quoteIdentifier(`JBL_JFK_${suffix}`)} FOREIGN KEY (TENANT_ID, CUSTOMER_ID)
+							REFERENCES ${parentName} (TENANT_KEY, CUSTOMER_KEY)
+					)
+				`).execute();
+				const rows = await readRows(
+					connection,
+					requireForeignKeyRelationshipQuery(oracleMetadataProvider.buildForeignKeyRelationshipsQuery!(config!.database, {
+						schema: schemaName,
+						tableName: childTable,
+					}), 'oracle'),
+				);
+				await expectLiveForeignKeyCompletion({
+					databaseKind: 'oracle',
+					database: config!.database,
+					schema: schemaName,
+					parentTable,
+					childTable,
+					rows,
+				});
+			} finally {
+				await tryExecute(connection, `DROP TABLE ${childName} PURGE`);
+				await tryExecute(connection, `DROP TABLE ${parentName} PURGE`);
+			}
+		}, 120000);
+
 		it('completes columns for an alias against live ALL_TAB_COLUMNS metadata', async () => {
 			const provider = new LiveOracleCompletionMetadataProvider(
 				connection,

@@ -3,6 +3,7 @@ import {
     groupCanonicalColumnsByTable,
     mapColumnsWithKeysRows,
     mapTableColumnsRows,
+    mergeForeignKeyReferencesIntoColumnRows,
     normalizeBooleanFlag,
     parseColumnsWithKeysResult,
     toCacheColumnMetadata
@@ -90,5 +91,32 @@ describe('columnMetadataService', () => {
         );
 
         expect(copilotColumns.map(c => c.columnName)).toEqual(ddlColumns.map(c => c.columnName));
+    });
+
+    it('attaches exact catalog FK endpoint pairs to source columns', () => {
+        const rows = [
+            { DBNAME: 'DB1', SCHEMA: 'APP', TABLENAME: 'LINE_ITEM', ATTNAME: 'TENANT_ID', FORMAT_TYPE: 'INT' },
+            { DBNAME: 'DB1', SCHEMA: 'APP', TABLENAME: 'LINE_ITEM', ATTNAME: 'CUSTOMER_ID', FORMAT_TYPE: 'INT' },
+        ];
+        mergeForeignKeyReferencesIntoColumnRows(rows, [
+            {
+                FROM_DATABASE: 'DB1', FROM_SCHEMA: 'APP', FROM_TABLE: 'LINE_ITEM', FROM_COLUMN: 'TENANT_ID',
+                TO_DATABASE: 'DB1', TO_SCHEMA: 'APP', TO_TABLE: 'CUSTOMER', TO_COLUMN: 'TENANT_KEY',
+                CONSTRAINT_NAME: 'FK_LINE_CUSTOMER', ORDINAL_POSITION: 1,
+            },
+            {
+                FROM_DATABASE: 'DB1', FROM_SCHEMA: 'APP', FROM_TABLE: 'LINE_ITEM', FROM_COLUMN: 'CUSTOMER_ID',
+                TO_DATABASE: 'DB1', TO_SCHEMA: 'APP', TO_TABLE: 'CUSTOMER', TO_COLUMN: 'CUSTOMER_KEY',
+                CONSTRAINT_NAME: 'FK_LINE_CUSTOMER', ORDINAL_POSITION: 2,
+            },
+        ], 'DB1');
+
+        const parsed = mapColumnsWithKeysRows(rows);
+        expect(parsed[0].joinReferences).toEqual([expect.objectContaining({
+            toTable: 'CUSTOMER', toColumn: 'TENANT_KEY', constraintName: 'FK_LINE_CUSTOMER', ordinalPosition: 1,
+        })]);
+        expect(toCacheColumnMetadata(parsed[1]).joinReferences).toEqual([expect.objectContaining({
+            toColumn: 'CUSTOMER_KEY', ordinalPosition: 2,
+        })]);
     });
 });

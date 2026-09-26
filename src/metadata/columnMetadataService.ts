@@ -26,6 +26,7 @@ export interface CanonicalColumnMetadata {
     isPk: boolean;
     isFk: boolean;
     ordinalPosition?: number;
+    joinReferences?: import('../contracts/database').DatabaseForeignKeyColumnReference[];
 }
 
 export interface RawColumnsWithKeysRow {
@@ -49,7 +50,7 @@ export interface RawColumnsWithKeysRow {
 
 export type ColumnsWithKeysRowReader = (
     sql: string,
-    role: ColumnsWithKeysQueryRole,
+    role: ColumnsWithKeysQueryRole | 'relations',
 ) => Promise<Record<string, unknown>[]>;
 
 function getMetadataProvider(kind?: string | DatabaseKind) {
@@ -122,10 +123,83 @@ export async function loadColumnsWithKeysRows(
 ): Promise<RawColumnsWithKeysRow[]> {
     const provider = metadataProvider ?? getMetadataProvider(kind);
     const querySet = provider.buildColumnsWithKeysQueries?.(database, options);
+    let rows: RawColumnsWithKeysRow[];
     if (querySet) {
-        return loadNetezzaColumnsWithKeysRows(querySet, readRows) as Promise<RawColumnsWithKeysRow[]>;
+        rows = await loadNetezzaColumnsWithKeysRows(querySet, readRows) as RawColumnsWithKeysRow[];
+    } else {
+        rows = await readRows(provider.buildColumnsWithKeysQuery(database, options), 'columns') as RawColumnsWithKeysRow[];
     }
-    return readRows(provider.buildColumnsWithKeysQuery(database, options), 'columns') as Promise<RawColumnsWithKeysRow[]>;
+    const relationQuery = provider.buildForeignKeyRelationshipsQuery?.(database, options);
+    if (!relationQuery) return rows;
+    try {
+        const relationships = await readRows(relationQuery, 'relations');
+        mergeForeignKeyReferencesIntoColumnRows(rows, relationships, database);
+    } catch {
+        // Relationship metadata is an optional completion enhancement. A
+        // catalog permission/version gap must not prevent column-cache refresh.
+    }
+    return rows;
+}
+
+function normalizeRelationPart(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+}
+
+export function mergeForeignKeyReferencesIntoColumnRows(
+    rows: RawColumnsWithKeysRow[],
+    relationshipRows: readonly Record<string, unknown>[],
+    fallbackDatabase: string,
+): void {
+    const byColumn = new Map<string, RawColumnsWithKeysRow[]>();
+    for (const row of rows) {
+        const key = [
+            normalizeRelationPart(row.DBNAME || row.DATABASE || fallbackDatabase),
+            normalizeRelationPart(row.SCHEMA),
+            normalizeRelationPart(row.TABLENAME || row.TABLE_NAME),
+            normalizeRelationPart(row.ATTNAME || row.COLUMN_NAME),
+        ].map(part => part.toUpperCase()).join('|');
+        const matching = byColumn.get(key) ?? [];
+        matching.push(row);
+        byColumn.set(key, matching);
+    }
+
+    for (const relationship of relationshipRows) {
+        const fromSchema = normalizeRelationPart(relationship.FROM_SCHEMA);
+        const fromTable = normalizeRelationPart(relationship.FROM_TABLE);
+        const fromColumn = normalizeRelationPart(relationship.FROM_COLUMN);
+        const toSchema = normalizeRelationPart(relationship.TO_SCHEMA);
+        const toTable = normalizeRelationPart(relationship.TO_TABLE);
+        const toColumn = normalizeRelationPart(relationship.TO_COLUMN);
+        if (!fromSchema || !fromTable || !fromColumn || !toSchema || !toTable || !toColumn) continue;
+        const fromDatabase = normalizeRelationPart(relationship.FROM_DATABASE || fallbackDatabase);
+        const key = [fromDatabase, fromSchema, fromTable, fromColumn]
+            .map(part => part.toUpperCase()).join('|');
+        const sourceRows = byColumn.get(key);
+        if (!sourceRows?.length) continue;
+        const reference: import('../contracts/database').DatabaseForeignKeyColumnReference = {
+            fromDatabase,
+            fromSchema,
+            fromTable,
+            fromColumn,
+            toDatabase: normalizeRelationPart(relationship.TO_DATABASE || fromDatabase),
+            toSchema,
+            toTable,
+            toColumn,
+            constraintName: normalizeRelationPart(relationship.CONSTRAINT_NAME) || undefined,
+            ordinalPosition: Number.isFinite(Number(relationship.ORDINAL_POSITION))
+                ? Number(relationship.ORDINAL_POSITION)
+                : undefined,
+        };
+        for (const row of sourceRows) {
+            const existing = Array.isArray(row.JOIN_REFERENCES)
+                ? row.JOIN_REFERENCES as import('../contracts/database').DatabaseForeignKeyColumnReference[]
+                : [];
+            const identity = `${reference.toDatabase}|${reference.toSchema}|${reference.toTable}|${reference.toColumn}|${reference.constraintName ?? ''}|${reference.ordinalPosition ?? ''}`.toUpperCase();
+            if (!existing.some(item => `${item.toDatabase}|${item.toSchema}|${item.toTable}|${item.toColumn}|${item.constraintName ?? ''}|${item.ordinalPosition ?? ''}`.toUpperCase() === identity)) {
+                row.JOIN_REFERENCES = [...existing, reference];
+            }
+        }
+    }
 }
 
 export function buildTableColumnsQuery(
@@ -159,7 +233,10 @@ export function mapColumnsWithKeysRows(rows: RawColumnsWithKeysRow[], fallbackDa
             isNotNull: false,
             isPk: normalizeBooleanFlag(row.IS_PK),
             isFk: normalizeBooleanFlag(row.IS_FK),
-            ordinalPosition: typeof row.ATTNUM === 'number' ? row.ATTNUM : undefined
+            ordinalPosition: typeof row.ATTNUM === 'number' ? row.ATTNUM : undefined,
+            joinReferences: Array.isArray(row.JOIN_REFERENCES)
+                ? row.JOIN_REFERENCES as import('../contracts/database').DatabaseForeignKeyColumnReference[]
+                : undefined
         });
     }
 
@@ -189,7 +266,10 @@ export function mapTableColumnsRows(rows: RawTableColumnsRow[], location: Column
             isNotNull: normalizeBooleanFlag(row.ATTNOTNULL),
             isPk: normalizeBooleanFlag(row.IS_PK),
             isFk: normalizeBooleanFlag(row.IS_FK),
-            ordinalPosition: typeof row.ATTNUM === 'number' ? row.ATTNUM : undefined
+            ordinalPosition: typeof row.ATTNUM === 'number' ? row.ATTNUM : undefined,
+            joinReferences: Array.isArray(row.JOIN_REFERENCES)
+                ? row.JOIN_REFERENCES as import('../contracts/database').DatabaseForeignKeyColumnReference[]
+                : undefined
         });
     }
 
@@ -237,7 +317,8 @@ export function toCacheColumnMetadata(column: CanonicalColumnMetadata): CacheCol
         kind: 5,
         documentation: column.description || '',
         isPk: column.isPk,
-        isFk: column.isFk
+        isFk: column.isFk,
+        joinReferences: column.joinReferences
     };
 }
 

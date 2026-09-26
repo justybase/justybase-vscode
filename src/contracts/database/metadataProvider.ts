@@ -4,6 +4,20 @@ export interface DatabaseColumnQueryOptions {
     objTypes?: string[];
 }
 
+/** Catalog FK endpoint pair returned by metadata providers. */
+export interface DatabaseForeignKeyColumnReference {
+    fromDatabase?: string;
+    fromSchema: string;
+    fromTable: string;
+    fromColumn: string;
+    toDatabase?: string;
+    toSchema: string;
+    toTable: string;
+    toColumn: string;
+    constraintName?: string;
+    ordinalPosition?: number;
+}
+
 /**
  * Optional split plan for dialects whose column/key metadata is cheaper to
  * fetch as independent catalog scans and combine in the client.
@@ -59,6 +73,17 @@ export interface DatabaseMetadataProvider {
         database: string,
         options?: DatabaseColumnQueryOptions,
     ): DatabaseColumnsWithKeysQuerySet;
+    /**
+     * Optional exact FK endpoint query. It runs during metadata refresh and its
+     * rows are persisted with the source column cache; completion never calls it.
+     * The query must expose FROM_SCHEMA/FROM_TABLE/FROM_COLUMN and
+     * TO_SCHEMA/TO_TABLE/TO_COLUMN aliases (database and ordering aliases are
+     * optional).
+     */
+    buildForeignKeyRelationshipsQuery?(
+        database: string,
+        options?: DatabaseColumnQueryOptions,
+    ): string | undefined;
     /**
      * Builds a companion query for external/foreign-object columns across a
      * database (Netezza). It is executed separately and merged in code.

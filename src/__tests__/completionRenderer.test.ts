@@ -79,6 +79,18 @@ describe("completionRenderer — documentation regression guard", () => {
       expect(items[0].documentation).toBe("FK to product");
       expect(items[1].documentation).toBe("Display name");
     });
+
+    it("matches snake_case and camelCase prefixes and identifier fragments", () => {
+      const scoped: ScopedColumnCandidate[] = [
+        { column: "ACCOUNT_ID", qualifiers: ["A"] },
+        { column: "accountOwnerId", qualifiers: ["A"] },
+        { column: "CUSTOMER_CODE", qualifiers: ["A"] },
+      ];
+      expect(toScopedColumnItems(scoped, "accId", position).map((item) => item.label))
+        .toEqual(["ACCOUNT_ID", "accountOwnerId"]);
+      expect(toScopedColumnItems(scoped, "CODE", position).map((item) => item.label))
+        .toEqual(["CUSTOMER_CODE"]);
+    });
   });
 
   describe("toMetadataColumnItem", () => {
@@ -292,6 +304,34 @@ describe("completionRenderer — documentation regression guard", () => {
       ]));
       expect(items[0].insertText).toBe("ROW_NUMBER() OVER ($1)$0");
       expect(items[0].insertTextFormat).toBe(2);
+    });
+
+    it("keeps text after the cursor and emits one OVER clause", () => {
+      const sql = "SELECT ROW + 1";
+      const cursor = Position.create(0, "SELECT ROW".length);
+      const item = toFunctionItems(
+        "ROW",
+        cursor,
+        ["ROW_NUMBER"],
+        new Map([
+          ["ROW_NUMBER", [{
+            name: "ROW_NUMBER",
+            parameters: ["OVER (ORDER BY ...)"],
+            description: "Row number",
+            window: "required" as const,
+          }]],
+        ]),
+      )[0];
+      const textEdit = item.textEdit;
+      if (!textEdit || !("range" in textEdit) || !("newText" in textEdit)) {
+        throw new Error("Expected a prefix text edit for the function item");
+      }
+      const start = textEdit.range.start.character;
+      const end = textEdit.range.end.character;
+      const acceptedSql = `${sql.slice(0, start)}${textEdit.newText}${sql.slice(end)}`;
+
+      expect(acceptedSql).toBe("SELECT ROW_NUMBER() OVER ($1)$0 + 1");
+      expect(acceptedSql.match(/\bOVER\b/g)).toHaveLength(1);
     });
 
     it("offers a separate window variant for aggregate functions", () => {

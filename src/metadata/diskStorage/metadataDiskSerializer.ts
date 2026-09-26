@@ -46,6 +46,7 @@ const KNOWN_PROCEDURE_KEYS = new Set([
 const KNOWN_COLUMN_KEYS = new Set([
     'ATTNAME', 'FORMAT_TYPE', 'label', 'detail', 'kind', 'documentation',
     'isPk', 'isFk', 'isDistributionKey',
+    'joinReferences',
 ]);
 
 function stripUnknownKeys<T extends Record<string, unknown>>(

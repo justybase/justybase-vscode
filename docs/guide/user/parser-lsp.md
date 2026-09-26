@@ -36,6 +36,8 @@ SELECT r.| FROM recent AS r;
 
 At `r.|`, suggestions are columns visible through `r`, not every function and column in the connection. At `r.order_`, the partial qualifier continues to filter columns. Without a qualifier, the resolver considers aliases and visible CTEs, then uses metadata to rank real columns.
 
+For the full completion inventory, JOIN relationship settings, cache behavior, and a step-by-step verification checklist, see [SQL completion: scope, settings, and verification](../sql-completion-manual-verification/).
+
 ## Diagnostics with examples
 
 <figure class="figure-wide">

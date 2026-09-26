@@ -20,6 +20,9 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 // Import the actual driver, not mocked
 import { NzConnection } from '@justybase/netezza-driver';
 import { ResultFormatter } from '../../core/streaming/ResultFormatter';
+import {
+    expectLiveVirtualJoinCompletion,
+} from './liveForeignKeyCompletionHelper';
 
 // Connection configuration from environment
 const DB_CONFIG = {
@@ -144,6 +147,45 @@ WHERE A.ACCOUNTCODEALTERNATEKEY IN
                 await reader.close();
             }
         });
+    });
+
+    describe('virtual JOIN completion', () => {
+        itIfDb('completes a configured composite JOIN for live Netezza fixture tables', async () => {
+            const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
+            const parentTable = `JBL_JOIN_P_${suffix}`;
+            const childTable = `JBL_JOIN_C_${suffix}`;
+            const parentName = `${SCHEMA}.${parentTable}`;
+            const childName = `${SCHEMA}.${childTable}`;
+            const execute = async (sql: string): Promise<void> => {
+                const reader = await connection.createCommand(sql).executeReader();
+                await reader.close();
+            };
+            try {
+                await execute(`CREATE TABLE ${parentName} (
+                    TENANT_KEY INTEGER NOT NULL,
+                    CUSTOMER_KEY INTEGER NOT NULL,
+                    CONSTRAINT JBL_JPK_${suffix} PRIMARY KEY (TENANT_KEY, CUSTOMER_KEY)
+                )`);
+                await execute(`CREATE TABLE ${childName} (
+                    TENANT_ID INTEGER NOT NULL,
+                    CUSTOMER_ID INTEGER NOT NULL
+                )`);
+                await expectLiveVirtualJoinCompletion({
+                    databaseKind: 'netezza',
+                    database: DB_CONFIG.database,
+                    schema: SCHEMA,
+                    leftTable: parentTable,
+                    rightTable: childTable,
+                    columns: [
+                        { left: 'TENANT_KEY', right: 'TENANT_ID' },
+                        { left: 'CUSTOMER_KEY', right: 'CUSTOMER_ID' },
+                    ],
+                });
+            } finally {
+                try { await execute(`DROP TABLE ${childName}`); } catch { /* fixture may not exist */ }
+                try { await execute(`DROP TABLE ${parentName}`); } catch { /* fixture may not exist */ }
+            }
+        }, 120000);
     });
 
     describe('System Views', () => {

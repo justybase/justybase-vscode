@@ -191,6 +191,7 @@ export class LspCompletionEngine {
         effectiveDb,
         effectiveSchema,
         netezzaSchemasEnabled: requestContext.netezzaSchemasEnabled,
+        joinCompletionSettings: requestContext.joinCompletionSettings,
         databaseKind,
         completionKeywords,
         sqlFunctionNames,

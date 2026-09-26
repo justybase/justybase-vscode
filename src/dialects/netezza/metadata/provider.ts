@@ -222,6 +222,9 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
     buildColumnsWithKeysQueries(database: string, options?: DatabaseColumnQueryOptions) {
         return buildNetezzaColumnsWithKeysQueries(database, options);
     },
+    buildForeignKeyRelationshipsQuery(database: string, options?: DatabaseColumnQueryOptions): string {
+        return NZ_QUERIES.listForeignKeyColumnReferences(database, options);
+    },
     buildExternalColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string {
         return NZ_QUERIES.listExternalColumnsWithKeys(database, options);
     },

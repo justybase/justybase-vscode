@@ -2,6 +2,7 @@ import { createDelegatingMetadataProvider } from '@justybase/database-utils/meta
 import {
     buildColumnMetadataQuery,
     buildColumnsWithKeysQuery,
+    buildForeignKeyRelationshipsQuery,
     buildListDatabasesQuery,
     buildListProceduresQuery,
     buildListSchemasQuery,
@@ -28,6 +29,7 @@ export const mysqlMetadataProvider = createDelegatingMetadataProvider({
     objectType: buildObjectTypeQuery,
     typeGroups: () => buildTypeGroupsQuery(),
     columnsWithKeys: (database, options) => buildColumnsWithKeysQuery(database, options?.schema, options?.tableName, options?.objTypes),
+    foreignKeyRelationships: (database, options) => buildForeignKeyRelationshipsQuery(database, options?.schema, options?.tableName),
     tableColumns: buildTableColumnsQuery,
     columnMetadata: buildColumnMetadataQuery,
     lookupColumns: buildLookupColumnsQuery,

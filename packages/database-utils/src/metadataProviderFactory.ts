@@ -19,6 +19,7 @@ export interface DelegatingMetadataProviderConfig {
     objectType: (database: string, objectType: string) => string;
     typeGroups: (database: string) => string;
     columnsWithKeys: (database: string, options?: DatabaseColumnQueryOptions) => string;
+    foreignKeyRelationships?: (database: string, options?: DatabaseColumnQueryOptions) => string | undefined;
     tableColumns: (database: string, schema: string, tableName: string) => string;
     columnMetadata: (database: string, schema: string, tableName: string) => string;
     lookupColumns: (params: DatabaseColumnLookupParams) => string;
@@ -73,6 +74,13 @@ export function createDelegatingMetadataProvider(
         buildColumnsWithKeysQuery(database: string, options?: DatabaseColumnQueryOptions): string {
             return config.columnsWithKeys(database, options);
         },
+        ...(config.foreignKeyRelationships
+            ? {
+                buildForeignKeyRelationshipsQuery(database: string, options?: DatabaseColumnQueryOptions): string | undefined {
+                    return config.foreignKeyRelationships!(database, options);
+                },
+            }
+            : {}),
         buildTableColumnsQuery(database: string, schema: string, tableName: string): string {
             return config.tableColumns(database, schema, tableName);
         },

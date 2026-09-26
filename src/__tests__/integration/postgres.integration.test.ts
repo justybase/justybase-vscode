@@ -28,6 +28,10 @@ import {
     expectConnectionCloseIsIdempotent,
     expectReaderCloseAndReuse,
 } from './connectionLifecycleHelpers';
+import {
+    expectLiveForeignKeyCompletion,
+    requireForeignKeyRelationshipQuery,
+} from './liveForeignKeyCompletionHelper';
 
 function readEnv(names: string | readonly string[]): string | undefined {
     const candidates = Array.isArray(names) ? names : [names];
@@ -286,6 +290,49 @@ describeIfConfigured('postgres integration', () => {
     afterAll(async () => {
         await connection.close();
     });
+
+    it('completes an exact composite FK JOIN from live PostgreSQL catalog rows', async () => {
+        const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toLowerCase();
+        const parentTable = `jbl_join_parent_${suffix}`;
+        const childTable = `jbl_join_child_${suffix}`;
+        const parentConstraint = `jbl_join_pk_${suffix}`;
+        const childConstraint = `jbl_join_fk_${suffix}`;
+        try {
+            await connection.createCommand(`
+                CREATE TABLE public.${parentTable} (
+                    tenant_key INTEGER NOT NULL,
+                    customer_key INTEGER NOT NULL,
+                    CONSTRAINT ${parentConstraint} PRIMARY KEY (tenant_key, customer_key)
+                )
+            `).execute();
+            await connection.createCommand(`
+                CREATE TABLE public.${childTable} (
+                    tenant_id INTEGER NOT NULL,
+                    customer_id INTEGER NOT NULL,
+                    CONSTRAINT ${childConstraint} FOREIGN KEY (tenant_id, customer_id)
+                        REFERENCES public.${parentTable} (tenant_key, customer_key)
+                )
+            `).execute();
+            const rows = await readRows(
+                connection,
+                requireForeignKeyRelationshipQuery(postgresqlMetadataProvider.buildForeignKeyRelationshipsQuery!(config!.database, {
+                    schema: 'public',
+                    tableName: childTable,
+                }), 'postgresql'),
+            );
+            await expectLiveForeignKeyCompletion({
+                databaseKind: 'postgresql',
+                database: config!.database,
+                schema: 'public',
+                parentTable,
+                childTable,
+                rows,
+            });
+        } finally {
+            await connection.createCommand(`DROP TABLE IF EXISTS public.${childTable} CASCADE`).execute();
+            await connection.createCommand(`DROP TABLE IF EXISTS public.${parentTable} CASCADE`).execute();
+        }
+    }, 120000);
 
     it('closes readers and connections idempotently', async () => {
         await expectReaderCloseAndReuse(

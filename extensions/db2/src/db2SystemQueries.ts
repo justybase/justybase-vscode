@@ -645,6 +645,42 @@ export function buildColumnsWithKeysQuery(
     `;
 }
 
+export function buildForeignKeyRelationshipsQuery(
+    database?: string,
+    schema?: string,
+    tableName?: string,
+): string {
+    const databaseExpression = database?.trim() ? quoteLiteral(database) : 'CURRENT SERVER';
+    return `
+        SELECT
+            ${databaseExpression} AS FROM_DATABASE,
+            RTRIM(FK.TABSCHEMA) AS FROM_SCHEMA,
+            RTRIM(FK.TABNAME) AS FROM_TABLE,
+            RTRIM(FK.COLNAME) AS FROM_COLUMN,
+            ${databaseExpression} AS TO_DATABASE,
+            RTRIM(PK.TABSCHEMA) AS TO_SCHEMA,
+            RTRIM(PK.TABNAME) AS TO_TABLE,
+            RTRIM(PK.COLNAME) AS TO_COLUMN,
+            RTRIM(R.CONSTNAME) AS CONSTRAINT_NAME,
+            FK.COLSEQ AS ORDINAL_POSITION
+        FROM SYSCAT.REFERENCES R
+        INNER JOIN SYSCAT.KEYCOLUSE FK
+            ON FK.TABSCHEMA = R.TABSCHEMA
+           AND FK.TABNAME = R.TABNAME
+           AND FK.CONSTNAME = R.CONSTNAME
+        INNER JOIN SYSCAT.KEYCOLUSE PK
+            ON PK.TABSCHEMA = R.REFTABSCHEMA
+           AND PK.TABNAME = R.REFTABNAME
+           AND PK.CONSTNAME = R.REFKEYNAME
+           AND PK.COLSEQ = FK.COLSEQ
+        WHERE 1 = 1
+        ${buildEqualityFilter('FK.TABSCHEMA', schema)}
+        ${buildEqualityFilter('FK.TABNAME', tableName)}
+        ORDER BY FK.TABSCHEMA, FK.TABNAME, R.CONSTNAME, FK.COLSEQ
+        WITH UR
+    `;
+}
+
 export function buildTableColumnsQuery(schema: string, tableName: string): string {
     return `
         SELECT

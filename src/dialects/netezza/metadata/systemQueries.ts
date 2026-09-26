@@ -1031,6 +1031,37 @@ ${unionSql}
         `.trim();
     },
 
+    /** Exact FK endpoint pairs cached during schema refresh for JOIN completion. */
+    listForeignKeyColumnReferences: (
+        database: string | NetezzaIdentifier,
+        options?: NetezzaColumnQueryOptions,
+    ): string => {
+        const db = database;
+        const schemaFilter = options?.schema
+            ? ` AND ${buildIdentifierCondition('X.SCHEMA', options.schema)}`
+            : '';
+        const tableFilter = options?.tableName
+            ? ` AND ${buildIdentifierCondition('X.RELATION', options.tableName)}`
+            : '';
+        return `
+            SELECT
+                X.DATABASE AS FROM_DATABASE,
+                X.SCHEMA AS FROM_SCHEMA,
+                X.RELATION AS FROM_TABLE,
+                X.ATTNAME AS FROM_COLUMN,
+                X.PKDATABASE AS TO_DATABASE,
+                X.PKSCHEMA AS TO_SCHEMA,
+                X.PKRELATION AS TO_TABLE,
+                X.PKATTNAME AS TO_COLUMN,
+                X.CONSTRAINTNAME AS CONSTRAINT_NAME,
+                X.CONSEQ AS ORDINAL_POSITION
+            FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_KEYDATA)} X
+            WHERE X.CONTYPE = '${NZ_CONSTRAINT_TYPES.FOREIGN_KEY}'
+                AND ${buildIdentifierCondition('X.DATABASE', db)}${schemaFilter}${tableFilter}
+            ORDER BY X.CONSTRAINTNAME, X.CONSEQ
+        `.trim();
+    },
+
     /** Get all distribution-column markers needed for one database column snapshot. */
     listColumnDistributionFlags: (
         database: string | NetezzaIdentifier,

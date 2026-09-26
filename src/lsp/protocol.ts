@@ -59,6 +59,26 @@ export interface MetadataContextResponse {
   effectiveSchema?: string;
   databaseKind?: DatabaseKind;
   netezzaSchemasEnabled?: boolean;
+  joinCompletionSettings?: JoinCompletionSettings;
+}
+
+export interface JoinTableIdentity {
+  database?: string;
+  schema?: string;
+  table: string;
+}
+
+export interface JoinRelationSetting {
+  left: JoinTableIdentity;
+  right: JoinTableIdentity;
+  columns: Array<{ left: string; right: string }>;
+}
+
+export interface JoinCompletionSettings {
+  nameHeuristicsEnabled: boolean;
+  autoAliases: boolean;
+  aliases: readonly { table: JoinTableIdentity; alias: string }[];
+  relations: readonly JoinRelationSetting[];
 }
 
 export interface DocumentContextChangedParams {
@@ -91,6 +111,9 @@ export interface MetadataObjectItem {
     sourceSchema?: string;
     sourceColumn: string;
     targetColumn: string;
+    relationType?: "foreignKey" | "heuristic";
+    constraintName?: string;
+    ordinalPosition?: number;
   }>;
 }
 
@@ -100,6 +123,7 @@ export interface MetadataColumnItem {
   description?: string;
   isPk?: boolean;
   isFk?: boolean;
+  joinReferences?: import("../contracts/database").DatabaseForeignKeyColumnReference[];
 }
 
 export interface MetadataTableInfoResponse {

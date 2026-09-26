@@ -81,6 +81,8 @@ export interface EncodedColumnRecord {
     name: string;
     flags: number;
     doc?: number;
+    /** Exact declared FK endpoints for cache-only JOIN completion. */
+    references?: import('../../contracts/database').DatabaseForeignKeyColumnReference[];
 }
 
 export interface EncodedColumnLayer {

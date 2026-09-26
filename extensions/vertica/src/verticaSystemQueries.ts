@@ -317,6 +317,27 @@ export function buildColumnsWithKeysQuery(schema?: string, tableName?: string, o
     return buildCombinedColumnQuery(selects);
 }
 
+export function buildForeignKeyRelationshipsQuery(schema?: string, tableName?: string): string {
+    return `
+        SELECT
+            CURRENT_DATABASE() AS "FROM_DATABASE",
+            fk.TABLE_SCHEMA AS "FROM_SCHEMA",
+            fk.TABLE_NAME AS "FROM_TABLE",
+            fk.COLUMN_NAME AS "FROM_COLUMN",
+            CURRENT_DATABASE() AS "TO_DATABASE",
+            fk.REFERENCE_TABLE_SCHEMA AS "TO_SCHEMA",
+            fk.REFERENCE_TABLE_NAME AS "TO_TABLE",
+            fk.REFERENCE_COLUMN_NAME AS "TO_COLUMN",
+            fk.CONSTRAINT_NAME AS "CONSTRAINT_NAME",
+            fk.ORDINAL_POSITION AS "ORDINAL_POSITION"
+        FROM V_CATALOG.FOREIGN_KEYS fk
+        WHERE fk.CONSTRAINT_TYPE = 'f'
+          ${buildSchemaPredicate('fk.TABLE_SCHEMA', schema)}
+          ${buildNamePredicate('fk.TABLE_NAME', tableName)}
+        ORDER BY fk.TABLE_SCHEMA, fk.TABLE_NAME, fk.CONSTRAINT_NAME, fk.ORDINAL_POSITION
+    `;
+}
+
 export function buildTableColumnsQuery(schema: string, tableName: string): string {
     return `${buildConstraintFlagsCte()} ${buildTableColumnSelect(schema, tableName)}`;
 }

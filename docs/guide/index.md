@@ -20,6 +20,7 @@ This portal is the canonical documentation for the VS Code extension and its com
 | If you need to… | Start here |
 | --- | --- |
 | Understand why the editor catches a problem before execution | [Parser, LSP and SQL Editor](guide/user/parser-lsp/) |
+| Configure table aliases and virtual JOIN relationships | [SQL completion guide](guide/user/sql-completion-manual-verification/) |
 | Review safety, correctness, performance, and type warnings | [SQL quality and diagnostics](guide/user/sql-quality/) |
 | Explore a large result without losing control of the data boundary | [Data Grid and Result Exploration](guide/user/data-grid/) |
 | Move data between files and databases | [Import and export](guide/user/import-export/) |

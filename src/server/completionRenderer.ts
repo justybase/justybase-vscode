@@ -14,7 +14,7 @@ import {
   formatNetezzaIdentifier,
 } from "../dialects/netezza/metadata/identifierUtils";
 import { isCompletableLocalDefinition } from "./completionLocalDefinitionUtils";
-import { matchesPrefix } from "./completionRanker";
+import { getCompletionMatchRank, matchesPrefix } from "./completionRanker";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { ScopedColumnCandidate } from "./completionTypes";
 import { attachCompletionDescription } from "./completionDescriptionUtils";
@@ -108,9 +108,8 @@ export function toKeywordItems(
   position: Position,
   completionKeywords: readonly string[],
 ): CompletionItem[] {
-  const prefixUpper = prefix.toUpperCase();
   return completionKeywords
-    .filter((keyword) => !prefix || keyword.startsWith(prefixUpper))
+    .filter((keyword) => matchesPrefix(keyword, prefix))
     .map((keyword) => {
       const item: CompletionItem = {
         label: keyword,
@@ -128,18 +127,16 @@ export function toScopedColumnItems(
   typedPrefix: string,
   position: Position,
 ): CompletionItem[] {
-  const typedPrefixUpper = typedPrefix.toUpperCase();
   const items: CompletionItem[] = [];
 
   for (const scoped of scopedColumns) {
     const columnUpper = scoped.column.toUpperCase();
-    const sortPrefix = typedPrefix
-      ? `${scoped.column.startsWith(typedPrefix) ? "0" : "1"}_${columnUpper}_`
-      : "";
+    const matchRank = getCompletionMatchRank(scoped.column, typedPrefix) ?? 9;
+    const sortPrefix = typedPrefix ? `${matchRank}_` : "";
     const singleSource = scoped.qualifiers.length <= 1;
 
     if (singleSource) {
-      if (typedPrefix && !columnUpper.startsWith(typedPrefixUpper)) {
+      if (typedPrefix && !matchesPrefix(scoped.column, typedPrefix)) {
         continue;
       }
       const item = attachCompletionDescription(
@@ -147,7 +144,7 @@ export function toScopedColumnItems(
           label: scoped.column,
           kind: CompletionItemKind.Field,
           detail: "Column in scope",
-          sortText: `2_${sortPrefix}${scoped.column}`,
+          sortText: `2_${sortPrefix}${columnUpper}`,
         },
         scoped.description,
       );
@@ -157,7 +154,7 @@ export function toScopedColumnItems(
     }
 
     for (const qualifier of scoped.qualifiers) {
-      if (typedPrefix && !columnUpper.startsWith(typedPrefixUpper)) {
+      if (typedPrefix && !matchesPrefix(scoped.column, typedPrefix)) {
         continue;
       }
       const label = `${qualifier}.${scoped.column}`;
@@ -167,7 +164,7 @@ export function toScopedColumnItems(
           kind: CompletionItemKind.Field,
           detail: "Qualified column (ambiguous name)",
           insertText: label,
-        sortText: `2_${sortPrefix}${label}`,
+        sortText: `2_${sortPrefix}${label.toUpperCase()}`,
         },
         scoped.description,
       );
@@ -188,9 +185,8 @@ export function toFunctionItems(
     readonly DatabaseSqlFunctionSignature[]
   >,
 ): CompletionItem[] {
-  const typedPrefixUpper = typedPrefix.toUpperCase();
   return sqlFunctionNames
-    .filter((name) => !typedPrefix || name.startsWith(typedPrefixUpper))
+    .filter((name) => matchesPrefix(name, typedPrefix))
     .flatMap((name) => {
       const signatures = sqlFunctionSignatures?.get(name);
       const inlineDescription = buildFunctionInlineDescription(signatures);
@@ -200,7 +196,7 @@ export function toFunctionItems(
         kind: CompletionItemKind.Function,
         detail: buildFunctionCompletionDetail(signatures),
         insertText: `${name}()`,
-        sortText: `4_${name}`,
+        sortText: `4_${getCompletionMatchRank(name, typedPrefix) ?? 9}_${name}`,
         documentation: buildFunctionSignatureDocumentation(signatures),
         labelDetails: inlineDescription
           ? { description: inlineDescription }
@@ -217,7 +213,7 @@ export function toFunctionItems(
         ...item,
         label: `${name}() OVER (…)`,
         detail: `${item.detail ?? name} (window)`,
-        sortText: `4_${name}_window`,
+        sortText: `4_${getCompletionMatchRank(name, typedPrefix) ?? 9}_${name}_window`,
         insertText: buildWindowFunctionSnippet(name, signatures),
         insertTextFormat: InsertTextFormat.Snippet,
         filterText: name,
@@ -244,15 +240,14 @@ export function toSpecialValueItems(
   position: Position,
   specialValues: readonly string[],
 ): CompletionItem[] {
-  const typedPrefixUpper = typedPrefix.toUpperCase();
   return specialValues
-    .filter((name) => !typedPrefix || name.startsWith(typedPrefixUpper))
+    .filter((name) => matchesPrefix(name, typedPrefix))
     .map((name) => {
       const item: CompletionItem = {
         label: name,
         kind: CompletionItemKind.Constant,
         detail: "Session variable",
-        sortText: `3_${name}`,
+        sortText: `3_${getCompletionMatchRank(name, typedPrefix) ?? 9}_${name}`,
       };
       applyPrefixRange(item, position, typedPrefix);
       return item;
@@ -264,13 +259,10 @@ export function filterColumnCompletionItems(
   columnPrefix: string,
   position: Position,
 ): CompletionItem[] {
-  const columnPrefixUpper = columnPrefix.toUpperCase();
   return columns
     .filter((item) => {
       const label = typeof item.label === "string" ? item.label : "";
-      return (
-        !columnPrefix || label.toUpperCase().startsWith(columnPrefixUpper)
-      );
+      return !columnPrefix || matchesPrefix(label, columnPrefix);
     })
     .map((item) => {
       if (!columnPrefix) {
@@ -340,12 +332,16 @@ export function filterMetadataItems(
         options?.ranking?.role === "location" && databaseKind === "db2"
           ? "Db2 location (CURRENT SERVER)"
           : item.detail;
+      const completionRank = getCompletionMatchRank(item.name, prefix);
+      const matchRank = prefix && completionRank !== 0
+        ? `${completionRank ?? 9}_`
+        : "";
       return attachCompletionDescription(
         {
           label: item.name,
           kind: kindOverride || toCompletionKind(item.objectType),
           detail,
-          sortText: `${sortPrefix}${item.name}`,
+          sortText: `${sortPrefix}${matchRank}${item.name}`,
           insertText,
         },
         item.description,
