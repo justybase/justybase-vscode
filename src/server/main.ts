@@ -56,9 +56,8 @@ const inlayHintEngine = new LspInlayHintEngine(
 );
 
 // Re-run completion while an object name is being typed so metadata-backed
-// paths such as `FROM DIM|` can open automatically. Keep whitespace out of
-// this list: the completion engine intentionally requires a non-empty prefix
-// for automatic suggestions after a completed FROM/JOIN target.
+// paths such as `FROM DIM|` can open automatically. Space also triggers
+// related-table suggestions after `JOIN` and predicates after an empty `ON`.
 const completionWordTriggerCharacters = [
   ..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 ];
@@ -74,15 +73,15 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       completionProvider: {
-        // Whitespace intentionally omitted: it never opens the completion
-        // list (see LspCompletionEngine whitespace gate); Ctrl+Space always
-        // works.
+        // Space only opens a targeted list for an empty JOIN ON clause; other
+        // whitespace triggers are ignored by LspCompletionEngine.
         triggerCharacters: [
           ".",
           "*",
           "$",
           "%",
           "&",
+          " ",
           ...completionWordTriggerCharacters,
         ],
       },

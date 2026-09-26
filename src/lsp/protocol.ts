@@ -32,6 +32,7 @@ export type MetadataRequestKind =
   | "procedures"
   | "columns"
   | "cachedTableInfo"
+  | "cachedJoinTargets"
   | "tableInfo"
   | "warmDatabaseColumns"
   | "qualifyTable"
@@ -43,6 +44,8 @@ export interface MetadataRequestParams {
   database?: string;
   schema?: string;
   table?: string;
+  /** Existing FROM/JOIN sources to match against cached PK/FK metadata. */
+  joinSources?: Array<{ schema?: string; table: string }>;
   allowPublicSynonym?: boolean;
   /** Completion list lookups may explicitly forbid a live catalog fallback. */
   cacheOnly?: boolean;
@@ -81,6 +84,14 @@ export interface MetadataObjectItem {
   description?: string;
   /** Parsed from procedure signature when objectType is procedure. */
   argumentNames?: string[];
+  /** Cached PK/FK name matches used to build a complete JOIN suggestion. */
+  joinUsesDefaultSchema?: boolean;
+  joinMatches?: Array<{
+    sourceTable: string;
+    sourceSchema?: string;
+    sourceColumn: string;
+    targetColumn: string;
+  }>;
 }
 
 export interface MetadataColumnItem {

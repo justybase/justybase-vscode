@@ -53,6 +53,21 @@ export class CompletionMetadataResolver {
     private readonly parseSession?: DocumentParseSession,
   ) {}
 
+  public async getCachedJoinTargets(
+    documentUri: string,
+    database: string,
+    sources: Array<{ schema?: string; table: string }>,
+  ): Promise<MetadataObjectItem[]> {
+    if (!this.metadataProvider.getCachedJoinTargets) {
+      return [];
+    }
+    return this.metadataProvider.getCachedJoinTargets(
+      documentUri,
+      database,
+      sources,
+    );
+  }
+
   public async resolveTablePathCompletions(
     context: FromJoinContext,
     localItems: CompletionItem[],

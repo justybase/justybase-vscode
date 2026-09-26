@@ -157,6 +157,12 @@ export interface CompletionMetadataProvider {
     schema?: string,
     options?: MetadataColumnLookupOptions,
   ): Promise<MetadataColumnItem[]>;
+  /** Read only cached tables related to these sources by key/name metadata. */
+  getCachedJoinTargets?(
+    documentUri: string,
+    database: string,
+    sources: Array<{ schema?: string; table: string }>,
+  ): Promise<MetadataObjectItem[]>;
   getNetezzaDefaultSchema?(
     documentUri: string,
     database: string,

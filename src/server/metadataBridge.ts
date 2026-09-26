@@ -241,6 +241,20 @@ export class MetadataBridge {
     return this.asColumnList(response);
   }
 
+  async getCachedJoinTargets(
+    documentUri: string,
+    database: string,
+    sources: Array<{ schema?: string; table: string }>,
+  ): Promise<MetadataObjectItem[]> {
+    const response = await this.request({
+      documentUri,
+      kind: "cachedJoinTargets",
+      database,
+      joinSources: sources,
+    });
+    return this.asObjectList(response);
+  }
+
   async getNetezzaDefaultSchema(
     documentUri: string,
     database: string,
