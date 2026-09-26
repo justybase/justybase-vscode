@@ -13,7 +13,6 @@ import {
   HistoryView,
   ResultTabs,
   ResultAnalysisPanel,
-  ResultPanel,
   ResultViewToolbar,
   RowDetail,
   SchemaTree,
@@ -45,105 +44,6 @@ const result: UiResultSurfaceState = {
 };
 
 describe('shared React presentation', () => {
-  it('keeps Results and Problems as tabs in one shared output panel', () => {
-    const { rerender } = render(<ResultPanel
-      results={[result]}
-      activeResult={result}
-      rows={[[1]]}
-      resultState="ready"
-      activeTab="results"
-      problemCount={1}
-      problems={[{ severity: 'error', message: 'Invalid SQL', startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 7 }]}
-      onOutputTabChange={jest.fn()}
-      onResultSelect={jest.fn()}
-      onViewChange={jest.fn()}
-    />);
-
-    expect(document.querySelectorAll('.ui-result-panel')).toHaveLength(1);
-    expect(screen.getByRole('tab', { name: 'Results' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: /Problems/ })).toHaveTextContent('1');
-
-    rerender(<ResultPanel
-      results={[result]}
-      activeResult={result}
-      rows={[[1]]}
-      resultState="ready"
-      activeTab="problems"
-      problemCount={1}
-      problems={[{ severity: 'error', message: 'Invalid SQL', startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 7 }]}
-      onOutputTabChange={jest.fn()}
-      onResultSelect={jest.fn()}
-      onViewChange={jest.fn()}
-    />);
-    expect(screen.getByRole('region', { name: 'SQL Problems' })).toBeInTheDocument();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
-  });
-
-  it('shows a row-limit banner only when the server stopped at its limit', () => {
-    const { rerender } = render(<ResultPanel
-      results={[result]}
-      activeResult={result}
-      rows={[[1]]}
-      resultState='ready'
-      activeTab='results'
-      problemCount={0}
-      problems={[]}
-      onOutputTabChange={jest.fn()}
-      onResultSelect={jest.fn()}
-      onViewChange={jest.fn()}
-    />);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-
-    rerender(<ResultPanel
-      results={[{ ...result, limitReached: true, totalRowCount: 200_000 }]}
-      activeResult={{ ...result, limitReached: true, totalRowCount: 200_000 }}
-      rows={[[1]]}
-      resultState='ready'
-      activeTab='results'
-      problemCount={0}
-      problems={[]}
-      onOutputTabChange={jest.fn()}
-      onResultSelect={jest.fn()}
-      onViewChange={jest.fn()}
-    />);
-    const banner = screen.getByRole('alert');
-    expect(banner).toHaveTextContent(/Row limit reached/);
-    expect(banner).toHaveTextContent(/200,000/);
-  });
-
-  it('names the shared copy-all control and announces its busy state', () => {
-    const { rerender } = render(<ResultPanel
-      results={[result]}
-      activeResult={result}
-      rows={[[1]]}
-      resultState='ready'
-      activeTab='results'
-      problemCount={0}
-      problems={[]}
-      onOutputTabChange={jest.fn()}
-      onResultSelect={jest.fn()}
-      onViewChange={jest.fn()}
-      onCopyAll={jest.fn()}
-    />);
-    expect(screen.getByRole('button', { name: 'Copy full result (all rows)' })).toHaveTextContent('Copy all');
-
-    rerender(<ResultPanel
-      results={[result]}
-      activeResult={result}
-      rows={[[1]]}
-      resultState='ready'
-      activeTab='results'
-      problemCount={0}
-      problems={[]}
-      onOutputTabChange={jest.fn()}
-      onResultSelect={jest.fn()}
-      onViewChange={jest.fn()}
-      onCopyAll={jest.fn()}
-      copyingAll
-    />);
-    expect(screen.getByRole('button', { name: 'Copy full result (all rows)' })).toHaveTextContent('Copying…');
-  });
-
   it('exposes selection export actions in the shared context menu', async () => {
     const user = userEvent.setup();
     const onExportSelection = jest.fn();

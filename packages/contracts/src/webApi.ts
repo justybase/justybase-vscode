@@ -1,3 +1,8 @@
+/**
+ * Shared query DTOs and contracts retained from the self-hosted Web API.
+ * API-only DTOs stay exported for compatibility; query and metadata shapes
+ * still have desktop and companion consumers.
+ */
 import type {
   DatabaseDdlResult,
   DatabaseDesignerCapabilities,

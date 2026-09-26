@@ -8,8 +8,6 @@ export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataG
 export { downloadBlobFile } from './download';
 export { ResultAnalysisPanel } from './resultAnalysis';
 export type { ResultAnalysisKind, ResultAnalysisPanelProps, ResultAnalysisTable } from './resultAnalysis';
-export { ResultPanel } from './resultPanel';
-export type { ResultPanelProps } from './resultPanel';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,
@@ -28,8 +26,7 @@ export type {
   DataGridNumericKind,
 } from './resultGridFormatting';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
-export { SqlProblemsPanel } from './sqlProblems';
-export type { SqlProblem, SqlProblemSeverity, SqlProblemsPanelProps } from './sqlProblems';
+export type { SqlProblem, SqlProblemSeverity } from '@justybase/ui-core';
 export {
   AsyncStateView,
   CellValueViewer,
@@ -42,7 +39,6 @@ export {
   FocusOnMount,
   HistoryView,
   ResultTabs,
-  ResultOutputTabs,
   ResultGrid,
   ResultViewToolbar,
   RowDetail,
@@ -69,8 +65,6 @@ export type {
   HistoryViewEntry,
   HistoryViewProps,
   ResultTabsProps,
-  ResultOutputTab,
-  ResultOutputTabsProps,
   ResultViewToolbarProps,
   RowDetailProps,
   SchemaTreeProps,
@@ -79,9 +73,3 @@ export type {
   WorkspaceTab,
   WorkspaceTabsProps,
 } from './components';
-export { ObjectDesigner } from './objectDesigner/ObjectDesigner';
-export { CAPABILITY_ROWS, capabilityClass, capabilityLabel, getAvailableDesignerTabs, getDesignerTargetFlags, isMutatingCapability, viewDefinitionFromMetadata } from './objectDesigner/model';
-export { useObjectDesignerController } from './objectDesigner/useObjectDesignerController';
-export type { ObjectDesignerApi, ObjectDesignerQueryEventSubscription } from './objectDesigner/types';
-export type { ObjectDesignerControllerProps } from './objectDesigner/useObjectDesignerController';
-export type { ObjectDesignerProps } from './objectDesigner/ObjectDesigner';

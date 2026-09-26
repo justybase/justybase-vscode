@@ -21,8 +21,6 @@
   },
   "dependencies": {
     "@justybase/contracts": "*",
-    "@justybase/dialect-utils": "*",
-    "@justybase/designer-core": "*",
     "@justybase/ui-core": "*",
     "react": "^19.2.0"
   },
