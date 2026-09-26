@@ -229,7 +229,7 @@ const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
         title: ERROR_CODE_ACTIONS.NZ004.title,
         safety: 'review-required',
         fixAllEligible: false,
-        rationale: 'Requires user-selected join predicate and can change result cardinality.'
+        rationale: 'Makes Cartesian semantics explicit with a tautological predicate; review intent and result cardinality.'
     },
     NZ006: {
         code: 'NZ006',
@@ -1539,8 +1539,8 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         }
 
         const diagnosticOffset = document.offsetAt(diagnostic.range.start) - statementBoundary.startOffset;
-        const joinSpan = this.findCrossJoinSpan(parsed.cst, diagnosticOffset);
-        if (!joinSpan) {
+        const joinRewrite = this.findCrossJoinSpan(parsed.cst, diagnosticOffset);
+        if (!joinRewrite) {
             return undefined;
         }
 
@@ -1551,27 +1551,58 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         action.edit.replace(
             document.uri,
             {
-                start: document.positionAt(statementBoundary.startOffset + joinSpan.startOffset),
-                end: document.positionAt(statementBoundary.startOffset + joinSpan.endOffset),
+                start: document.positionAt(statementBoundary.startOffset + joinRewrite.startOffset),
+                end: document.positionAt(statementBoundary.startOffset + joinRewrite.joinEndOffset),
             } as vscode.Range,
-            'INNER JOIN ON 1=1',
+            'INNER JOIN',
         );
+        if (!joinRewrite.hasCondition) {
+            const conditionPosition = document.positionAt(
+                statementBoundary.startOffset + joinRewrite.tableSourceEndOffset,
+            );
+            action.edit.insert(document.uri, conditionPosition, ' ON 1=1');
+        }
         return action;
     }
 
     private findCrossJoinSpan(
         root: CstNode,
         diagnosticOffset: number,
-    ): { startOffset: number; endOffset: number } | undefined {
-        const visit = (node: CstNode): { startOffset: number; endOffset: number } | undefined => {
+    ): {
+        startOffset: number;
+        joinEndOffset: number;
+        tableSourceEndOffset: number;
+        hasCondition: boolean;
+    } | undefined {
+        const visit = (node: CstNode): {
+            startOffset: number;
+            joinEndOffset: number;
+            tableSourceEndOffset: number;
+            hasCondition: boolean;
+        } | undefined => {
             if (node.name === 'joinClause') {
                 const cross = this.getDirectToken(node, 'Cross');
                 const join = this.getDirectToken(node, 'Join');
                 if (cross && join && cross.startOffset !== undefined && join.endOffset !== undefined) {
                     const startOffset = cross.startOffset;
-                    const endOffset = join.endOffset + 1;
-                    if (diagnosticOffset >= startOffset && diagnosticOffset <= endOffset) {
-                        return { startOffset, endOffset };
+                    const joinEndOffset = join.endOffset + 1;
+                    if (diagnosticOffset >= startOffset && diagnosticOffset <= joinEndOffset) {
+                        const tableSource = node.children?.tableSource?.[0];
+                        if (!tableSource || !this.isCstNode(tableSource)) {
+                            return undefined;
+                        }
+                        const lastTableSourceToken = this.getLastToken(tableSource);
+                        if (lastTableSourceToken?.endOffset === undefined) {
+                            return undefined;
+                        }
+                        return {
+                            startOffset,
+                            joinEndOffset,
+                            tableSourceEndOffset: lastTableSourceToken.endOffset + 1,
+                            hasCondition: Boolean(
+                                this.getDirectToken(node, 'On') || this.getDirectToken(node, 'Using'),
+                            ),
+                        };
                     }
                 }
             }
@@ -1590,6 +1621,24 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         };
 
         return visit(root);
+    }
+
+    private getLastToken(node: CstNode): IToken | undefined {
+        let lastToken: IToken | undefined;
+        for (const children of Object.values(node.children ?? {})) {
+            for (const child of children) {
+                const candidate = this.isCstNode(child)
+                    ? this.getLastToken(child)
+                    : child as IToken;
+                if (
+                    candidate?.endOffset !== undefined &&
+                    (lastToken?.endOffset === undefined || candidate.endOffset > lastToken.endOffset)
+                ) {
+                    lastToken = candidate;
+                }
+            }
+        }
+        return lastToken;
     }
 
     private getDirectToken(node: CstNode, childName: string): IToken | undefined {

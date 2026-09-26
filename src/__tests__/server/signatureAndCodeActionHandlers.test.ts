@@ -136,7 +136,7 @@ describe("signatureAndCodeActionHandlers code actions", () => {
         error: jest.fn(),
       },
     } as unknown as Connection;
-    const sql = "SELECT * FROM T1 CROSS JOIN T2; SELECT FROM;";
+    const sql = "SELECT * FROM T1 CROSS JOIN DB1.PUBLIC.T2 AS T2_ALIAS; SELECT FROM;";
     const document = TextDocument.create("file:///cross-join.sql", "netezza-sql", 1, sql);
     const documents = { get: jest.fn(() => document) };
     registerCodeActionHandler({ connection, documents: documents as never });
@@ -170,6 +170,35 @@ describe("signatureAndCodeActionHandlers code actions", () => {
         title: "Replace CROSS JOIN with explicit INNER JOIN",
       }),
     ]);
+
+    const action = (actions as Array<{
+      edit?: {
+        changes?: Record<string, Array<{
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+          newText: string;
+        }>>;
+      };
+    }>)[0];
+    const edits = action?.edit?.changes?.[document.uri] ?? [];
+    const resultSql = [...edits]
+      .sort(
+        (left, right) =>
+          document.offsetAt(right.range.start) - document.offsetAt(left.range.start),
+      )
+      .reduce((currentSql, edit) => {
+        const start = document.offsetAt(edit.range.start);
+        const end = document.offsetAt(edit.range.end);
+        return currentSql.slice(0, start) + edit.newText + currentSql.slice(end);
+      }, sql);
+    expect(resultSql).toBe(
+      "SELECT * FROM T1 INNER JOIN DB1.PUBLIC.T2 AS T2_ALIAS ON 1=1; SELECT FROM;",
+    );
+    expect(resultSql.indexOf("DB1.PUBLIC.T2 AS T2_ALIAS")).toBeLessThan(
+      resultSql.indexOf("ON 1=1"),
+    );
   });
 
   it("avoids aliases already used by FROM sources", async () => {

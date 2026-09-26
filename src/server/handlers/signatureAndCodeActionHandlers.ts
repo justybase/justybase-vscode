@@ -8,6 +8,7 @@ import {
 } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { TextDocuments } from "vscode-languageserver/node";
+import type { CstNode, IToken } from "chevrotain";
 import { getDatabaseSqlAuthoring } from "../../core/connectionFactory";
 import type { DatabaseKind } from "../../contracts/database";
 import type { MetadataBridge } from "../metadataBridge";
@@ -191,6 +192,25 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
                 databaseKind,
               );
               if (crossJoin) {
+                const edits = [{
+                  range: {
+                    start: document.positionAt(crossJoin.startOffset),
+                    end: document.positionAt(crossJoin.joinEndOffset),
+                  },
+                  newText: "INNER JOIN",
+                }];
+                if (!crossJoin.hasCondition) {
+                  const conditionPosition = document.positionAt(
+                    crossJoin.tableSourceEndOffset,
+                  );
+                  edits.push({
+                    range: {
+                      start: conditionPosition,
+                      end: conditionPosition,
+                    },
+                    newText: " ON 1=1",
+                  });
+                }
                 actions.push({
                   title: "Replace CROSS JOIN with explicit INNER JOIN",
                   kind: CodeActionKind.QuickFix,
@@ -198,13 +218,7 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
                   isPreferred: true,
                   edit: {
                     changes: {
-                      [document.uri]: [{
-                        range: {
-                          start: document.positionAt(crossJoin.startOffset),
-                          end: document.positionAt(crossJoin.endOffset),
-                        },
-                        newText: "INNER JOIN ON 1=1",
-                      }],
+                      [document.uri]: edits,
                     },
                   },
                 } satisfies CodeAction);
@@ -380,7 +394,12 @@ function findCrossJoinReplacement(
   text: string,
   diagnosticOffset: number,
   databaseKind: DatabaseKind,
-): { startOffset: number; endOffset: number } | undefined {
+): {
+  startOffset: number;
+  joinEndOffset: number;
+  tableSourceEndOffset: number;
+  hasCondition: boolean;
+} | undefined {
   const statement = buildStatementIndex(text).statements.find(
     (candidate) => diagnosticOffset >= candidate.startOffset && diagnosticOffset <= candidate.endOffset,
   );
@@ -402,21 +421,91 @@ function findCrossJoinReplacement(
     return undefined;
   }
 
-  const tokens = runtime.SqlLexer.tokenize(statement.sql).tokens;
-  for (let index = 0; index < tokens.length - 1; index++) {
-    if (
-      tokens[index].tokenType.name !== "Cross" ||
-      tokens[index + 1].tokenType.name !== "Join"
-    ) {
-      continue;
+  const crossJoin = findCrossJoinInCst(parsed.cst, diagnosticOffset - statement.startOffset);
+  if (!crossJoin) {
+    return undefined;
+  }
+  return {
+    startOffset: statement.startOffset + crossJoin.startOffset,
+    joinEndOffset: statement.startOffset + crossJoin.joinEndOffset,
+    tableSourceEndOffset: statement.startOffset + crossJoin.tableSourceEndOffset,
+    hasCondition: crossJoin.hasCondition,
+  };
+}
+
+function findCrossJoinInCst(
+  root: CstNode,
+  diagnosticOffset: number,
+): {
+  startOffset: number;
+  joinEndOffset: number;
+  tableSourceEndOffset: number;
+  hasCondition: boolean;
+} | undefined {
+  const visit = (node: CstNode): ReturnType<typeof findCrossJoinInCst> => {
+    if (node.name === "joinClause") {
+      const cross = getDirectToken(node, "Cross");
+      const join = getDirectToken(node, "Join");
+      if (cross?.startOffset !== undefined && join?.endOffset !== undefined) {
+        const joinEndOffset = join.endOffset + 1;
+        if (diagnosticOffset >= cross.startOffset && diagnosticOffset <= joinEndOffset) {
+          const tableSource = node.children?.tableSource?.[0];
+          if (!isCstNode(tableSource)) {
+            return undefined;
+          }
+          const lastTableSourceToken = getLastToken(tableSource);
+          if (lastTableSourceToken?.endOffset === undefined) {
+            return undefined;
+          }
+          return {
+            startOffset: cross.startOffset,
+            joinEndOffset,
+            tableSourceEndOffset: lastTableSourceToken.endOffset + 1,
+            hasCondition: Boolean(getDirectToken(node, "On") || getDirectToken(node, "Using")),
+          };
+        }
+      }
     }
-    const startOffset = statement.startOffset + (tokens[index].startOffset ?? 0);
-    const endOffset = statement.startOffset + (tokens[index + 1].endOffset ?? 0) + 1;
-    if (diagnosticOffset >= startOffset && diagnosticOffset <= endOffset) {
-      return { startOffset, endOffset };
+
+    for (const children of Object.values(node.children ?? {})) {
+      for (const child of children) {
+        if (isCstNode(child)) {
+          const found = visit(child);
+          if (found) {
+            return found;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+
+  return visit(root);
+}
+
+function getDirectToken(node: CstNode, childName: string): IToken | undefined {
+  const child = node.children?.[childName]?.[0];
+  return child && !isCstNode(child) ? child as IToken : undefined;
+}
+
+function getLastToken(node: CstNode): IToken | undefined {
+  let lastToken: IToken | undefined;
+  for (const children of Object.values(node.children ?? {})) {
+    for (const child of children) {
+      const candidate = isCstNode(child) ? getLastToken(child) : child as IToken;
+      if (
+        candidate?.endOffset !== undefined &&
+        (lastToken?.endOffset === undefined || candidate.endOffset > lastToken.endOffset)
+      ) {
+        lastToken = candidate;
+      }
     }
   }
-  return undefined;
+  return lastToken;
+}
+
+function isCstNode(value: unknown): value is CstNode {
+  return typeof value === "object" && value !== null && "name" in value && "children" in value;
 }
 
 interface JoinAliasRewrite {
