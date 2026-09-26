@@ -2,7 +2,7 @@
   "name": "justybaselite-netezza",
   "displayName": "JustyBase SQL Editor (Netezza)",
   "description": "Netezza-first SQL workspace for VS Code: connect without ODBC drivers, write and validate SQL, explore results, browse schemas, and manage warehouse workflows.",
-  "version": "3.17.26",
+  "version": "3.17.27",
   "workspaces": [
     "packages/*"
   ],
@@ -3819,18 +3819,31 @@
           "description": "Workspace table-to-alias overrides used by JOIN completions.",
           "items": {
             "type": "object",
-            "required": ["table", "alias"],
+            "required": [
+              "table",
+              "alias"
+            ],
             "properties": {
               "table": {
                 "type": "object",
-                "required": ["table"],
+                "required": [
+                  "table"
+                ],
                 "properties": {
-                  "database": { "type": "string" },
-                  "schema": { "type": "string" },
-                  "table": { "type": "string" }
+                  "database": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "type": "string"
+                  },
+                  "table": {
+                    "type": "string"
+                  }
                 }
               },
-              "alias": { "type": "string" }
+              "alias": {
+                "type": "string"
+              }
             }
           }
         },
@@ -3840,24 +3853,44 @@
           "description": "Workspace virtual JOIN relationships. Table identities use database/schema/table fields and columns map left to right.",
           "items": {
             "type": "object",
-            "required": ["left", "right", "columns"],
+            "required": [
+              "left",
+              "right",
+              "columns"
+            ],
             "properties": {
               "left": {
                 "type": "object",
-                "required": ["table"],
+                "required": [
+                  "table"
+                ],
                 "properties": {
-                  "database": { "type": "string" },
-                  "schema": { "type": "string" },
-                  "table": { "type": "string" }
+                  "database": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "type": "string"
+                  },
+                  "table": {
+                    "type": "string"
+                  }
                 }
               },
               "right": {
                 "type": "object",
-                "required": ["table"],
+                "required": [
+                  "table"
+                ],
                 "properties": {
-                  "database": { "type": "string" },
-                  "schema": { "type": "string" },
-                  "table": { "type": "string" }
+                  "database": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "type": "string"
+                  },
+                  "table": {
+                    "type": "string"
+                  }
                 }
               },
               "columns": {
@@ -3865,10 +3898,17 @@
                 "minItems": 1,
                 "items": {
                   "type": "object",
-                  "required": ["left", "right"],
+                  "required": [
+                    "left",
+                    "right"
+                  ],
                   "properties": {
-                    "left": { "type": "string" },
-                    "right": { "type": "string" }
+                    "left": {
+                      "type": "string"
+                    },
+                    "right": {
+                      "type": "string"
+                    }
                   }
                 }
               }
