@@ -1,6 +1,6 @@
 /**
  * Schema Commands - DDL Generation and Comparison
- * Commands: createDDL, batchExportDDL, compareSchema
+ * Commands: createDDL, createTableAsView, batchExportDDL, compareSchema
  */
 
 import * as vscode from 'vscode';

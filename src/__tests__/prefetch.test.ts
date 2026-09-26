@@ -557,8 +557,8 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       }
 
       await prefetchPromise;
-      // Three regular scans per database; external remains conditional.
-      expect(mockRunQuery).toHaveBeenCalledTimes(dbCount * 3);
+      // Three column scans plus the FK relationship scan per database; external remains conditional.
+      expect(mockRunQuery).toHaveBeenCalledTimes(dbCount * 4);
       expect(maxInFlight).toBe(1);
       expect(inFlight).toBe(0);
     });
@@ -585,8 +585,8 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery),
       ]);
 
-      // Concurrent calls are deduplicated to one three-query snapshot.
-      expect(mockRunQuery).toHaveBeenCalledTimes(3);
+      // Concurrent calls are deduplicated to one four-query snapshot.
+      expect(mockRunQuery).toHaveBeenCalledTimes(4);
       expect(mockCache.setColumns).toHaveBeenCalledWith(
         connName,
         'DB1.PUBLIC.ORDERS',
@@ -637,7 +637,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         ]),
       );
       expect(synonymColumns).toEqual(targetColumns);
-      expect(mockRunQuery).toHaveBeenCalledTimes(3); // one regular three-query snapshot
+      expect(mockRunQuery).toHaveBeenCalledTimes(4); // column scans plus FK relationship scan
     });
 
     it('skips when database is dead', async () => {
@@ -1445,7 +1445,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
     expect(maxActiveQueries).toBeLessThanOrEqual(3);
     expect(databaseKinds.size).toBe(dbNames.length);
     for (const dbName of dbNames) {
-      expect(databaseKinds.get(dbName)).toEqual(['columns', 'column-keys', 'column-distribution']);
+      expect(databaseKinds.get(dbName)).toEqual(['columns', 'column-keys', 'column-distribution', 'column-relations']);
     }
     expect(secondaryRunners[0]!.ensureConnected).toHaveBeenCalledTimes(1);
     expect(secondaryRunners[1]!.ensureConnected).toHaveBeenCalledTimes(1);
@@ -1471,7 +1471,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
     await prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery);
 
     expect(optional.ensureConnected).not.toHaveBeenCalled();
-    expect(mockRunQuery).toHaveBeenCalledTimes(3);
+    expect(mockRunQuery).toHaveBeenCalledTimes(4);
   });
 
   it('falls back to one primary worker when an optional session cannot connect', async () => {
@@ -1500,7 +1500,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
     expect(result).toBe(true);
     expect(optional.ensureConnected).toHaveBeenCalledTimes(1);
     expect(optional.dispose).toHaveBeenCalledTimes(1);
-    expect(mockRunQuery).toHaveBeenCalledTimes(dbNames.length * 3);
+    expect(mockRunQuery).toHaveBeenCalledTimes(dbNames.length * 4);
     expect(mockCache.markDatabaseDead).not.toHaveBeenCalled();
   });
 
@@ -1534,7 +1534,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
 
     expect(result).toBe(true);
     expect(secondary).toHaveBeenCalledTimes(1);
-    expect(primary).toHaveBeenCalledTimes(9);
+    expect(primary).toHaveBeenCalledTimes(12);
     expect(Logger.getInstance().warn).toHaveBeenCalledWith(
       expect.stringContaining('Retrying column metadata for DB2'),
     );

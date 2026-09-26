@@ -25,7 +25,7 @@ import * as path from 'path';
 
 type SettingType = 'toggle' | 'select' | 'number' | 'text' | 'button' | 'textarea' | 'json';
 
-type SettingValue = boolean | string | number | string[] | Record<string, string>;
+type SettingValue = boolean | string | number | string[] | Record<string, string> | Record<string, unknown>[];
 
 interface SettingItem {
     id: string;
@@ -38,7 +38,7 @@ interface SettingItem {
     action?: string;
     actionLabel?: string;
     icon?: string;
-    jsonKind?: 'array' | 'severityMap';
+    jsonKind?: 'array' | 'objectArray' | 'severityMap';
 }
 
 interface SettingsSection {
@@ -127,11 +127,18 @@ const LINTER_RULE_LEVELS = new Set(['error', 'warning', 'information', 'hint', '
 
 export function validateJsonSettingValue(
     value: unknown,
-    kind: 'array' | 'severityMap'
+    kind: 'array' | 'objectArray' | 'severityMap'
 ): void {
     if (kind === 'array') {
         if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
             throw new Error('Python Arguments must be a JSON array of strings.');
+        }
+        return;
+    }
+
+    if (kind === 'objectArray') {
+        if (!Array.isArray(value) || value.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+            throw new Error('Expected a JSON array of objects.');
         }
         return;
     }
@@ -345,6 +352,40 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'toggle',
                 configKey: 'sql.showInlineTypeHints',
                 defaultValue: false
+            },
+            {
+                id: 'join-name-heuristics',
+                label: 'JOIN Name Heuristics',
+                description: 'Allow lower-priority JOIN suggestions based on matching cached key and column names when no declared or configured relationship is available',
+                type: 'toggle',
+                configKey: 'sql.joinNameHeuristics',
+                defaultValue: true
+            },
+            {
+                id: 'auto-join-aliases',
+                label: 'Generate JOIN Aliases',
+                description: 'Generate a unique table alias when accepting a JOIN completion',
+                type: 'toggle',
+                configKey: 'sql.autoJoinAliases',
+                defaultValue: true
+            },
+            {
+                id: 'join-aliases',
+                label: 'JOIN Table Alias Overrides',
+                description: 'JSON array of table-to-alias overrides used by JOIN completions',
+                type: 'json',
+                configKey: 'sql.joinAliases',
+                defaultValue: [],
+                jsonKind: 'objectArray'
+            },
+            {
+                id: 'join-relations',
+                label: 'Virtual JOIN Relationships',
+                description: 'JSON array of table relationships and column mappings used by JOIN completions',
+                type: 'json',
+                configKey: 'sql.joinRelations',
+                defaultValue: [],
+                jsonKind: 'objectArray'
             },
             {
                 id: 'long-query-threshold',

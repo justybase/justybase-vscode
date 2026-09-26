@@ -85,8 +85,10 @@ describe('SettingsView webview shell', () => {
 
     it('validates JSON-backed setting values before configuration updates', () => {
         expect(() => validateJsonSettingValue(['--flag', 'value'], 'array')).not.toThrow();
+        expect(() => validateJsonSettingValue([{ table: { schema: 'ADMIN', table: 'ORDERS' }, alias: 'O' }], 'objectArray')).not.toThrow();
         expect(() => validateJsonSettingValue({ NZ001: 'warning' }, 'severityMap')).not.toThrow();
         expect(() => validateJsonSettingValue(['--flag', 42], 'array')).toThrow(/array of strings/);
+        expect(() => validateJsonSettingValue([{ table: 'ORDERS' }, null], 'objectArray')).toThrow(/array of objects/);
         expect(() => validateJsonSettingValue({ NZ001: 'verbose' }, 'severityMap')).toThrow(/error, warning/);
         expect(() => validateJsonSettingValue([], 'severityMap')).toThrow(/JSON object/);
     });

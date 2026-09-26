@@ -381,7 +381,7 @@ function renderTextareaControl(setting) {
 }
 
 function renderJsonControl(setting) {
-    const value = settingsValues[setting.id] ?? setting.defaultValue ?? (setting.jsonKind === 'array' ? [] : {});
+    const value = settingsValues[setting.id] ?? setting.defaultValue ?? (setting.jsonKind === 'array' || setting.jsonKind === 'objectArray' ? [] : {});
     const serialized = JSON.stringify(value, null, 2);
     const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + formatSettingValue(setting.defaultValue) : '↺ Reset to default';
     return '<div class="json-control">' +
@@ -603,6 +603,12 @@ function validateJsonValue(value, kind) {
     if (kind === 'array') {
         if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
             throw new Error('Expected a JSON array of strings');
+        }
+        return;
+    }
+    if (kind === 'objectArray') {
+        if (!Array.isArray(value) || value.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+            throw new Error('Expected a JSON array of objects');
         }
         return;
     }
