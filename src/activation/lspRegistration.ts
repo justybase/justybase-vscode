@@ -35,6 +35,10 @@ import {
   type UxPerfNotificationParams,
 } from "../lsp/protocol";
 import { getUxPerfSession } from "../services/perf/uxPerfSession";
+import {
+  getRelatedColumnRole,
+  normalizeRelatedColumnName,
+} from "../utils/relatedColumnNames";
 
 interface LanguageClientLike {
   onRequest(
@@ -58,6 +62,30 @@ interface LanguageClientConstructor {
     clientOptions: unknown,
   ): LanguageClientLike;
 }
+
+interface CachedJoinColumn {
+  name: string;
+  normalizedName: string;
+  isKey: boolean;
+}
+
+interface CachedJoinTable {
+  name: string;
+  schema: string;
+  item: TableMetadata;
+  columns: CachedJoinColumn[];
+}
+
+interface CachedJoinTableIndexEntry {
+  tables: CachedJoinTable[];
+  expiresAt: number;
+}
+
+const CACHED_JOIN_TABLE_INDEX_TTL_MS = 60_000;
+const cachedJoinTableIndexes = new WeakMap<
+  MetadataCache,
+  Map<string, CachedJoinTableIndexEntry>
+>();
 
 interface LanguageClientModule {
   LanguageClient: LanguageClientConstructor;
@@ -213,6 +241,7 @@ export async function startSqlLanguageClient(
         } satisfies DocumentContextChangedParams);
       }),
       metadataCache.onDidInvalidate((connectionName) => {
+        clearCachedJoinTableIndexes(metadataCache, connectionName);
         sendNotificationSafely(
           client,
           NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
@@ -220,6 +249,7 @@ export async function startSqlLanguageClient(
         );
       }),
       metadataCache.onDidExternalRefresh((connectionName) => {
+        clearCachedJoinTableIndexes(metadataCache, connectionName);
         sendNotificationSafely(
           client,
           NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
@@ -397,6 +427,17 @@ export async function handleMetadataRequest(
           effectiveDatabase,
           params.schema,
           params.table,
+          metadataCache,
+          resolvedContext.databaseKind,
+        );
+      case "cachedJoinTargets":
+        if (!connectionName || !effectiveDatabase || !params.joinSources?.length) {
+          return [];
+        }
+        return getCachedJoinTargets(
+          connectionName,
+          effectiveDatabase,
+          params.joinSources,
           metadataCache,
           resolvedContext.databaseKind,
         );
@@ -864,6 +905,217 @@ async function getCachedTableInfo(
     ...(columns !== undefined && databaseKind !== 'file' ? { columnsComplete: true } : {}),
     columns: [],
   };
+}
+
+function getCachedJoinTargets(
+  connectionName: string,
+  database: string,
+  sources: Array<{ schema?: string; table: string }>,
+  metadataCache: MetadataCache,
+  databaseKind?: DatabaseKind,
+): Promise<MetadataObjectItem[]> {
+  return getCachedJoinTargetsAsync(
+    connectionName,
+    database,
+    sources,
+    metadataCache,
+    databaseKind,
+  );
+}
+
+async function getCachedJoinTargetsAsync(
+  connectionName: string,
+  database: string,
+  sources: Array<{ schema?: string; table: string }>,
+  metadataCache: MetadataCache,
+  databaseKind?: DatabaseKind,
+): Promise<MetadataObjectItem[]> {
+  const resolvedSources = sources.map((source) => {
+    const sourceObject = metadataCache.findObjectWithType(
+      connectionName,
+      database,
+      source.schema,
+      source.table,
+    );
+    const schema = source.schema?.trim() || (
+      metadataCache.getDefaultSchema(connectionName, database)
+      ?? sourceObject?.schema
+      ?? ""
+    );
+    return { ...source, schema };
+  });
+  const sourceSchemas = [...new Set(resolvedSources.map((source) => source.schema))];
+  const tableIndex = await getCachedJoinTableIndex(
+    connectionName,
+    database,
+    metadataCache,
+    sourceSchemas,
+    databaseKind,
+  );
+  if (tableIndex.length === 0) {
+    return [];
+  }
+
+  const targets = new Map<string, MetadataObjectItem>();
+  const defaultSchema = metadataCache.getDefaultSchema(connectionName, database);
+  for (const source of resolvedSources) {
+    const sourceSchema = source.schema;
+    const sourceTable = tableIndex.find((entry) =>
+      entry.name.toUpperCase() === source.table.toUpperCase() &&
+      entry.schema.toUpperCase() === sourceSchema.toUpperCase(),
+    );
+    if (!sourceTable?.columns.length) {
+      continue;
+    }
+
+    for (const candidate of tableIndex) {
+      if (
+        candidate.schema.toUpperCase() !== sourceSchema.toUpperCase() ||
+        candidate.name.toUpperCase() === sourceTable.name.toUpperCase()
+      ) {
+        continue;
+      }
+
+      const matches: NonNullable<MetadataObjectItem["joinMatches"]> = [];
+      for (const sourceColumn of sourceTable.columns) {
+        for (const targetColumn of candidate.columns) {
+          if (
+            sourceColumn.normalizedName !== targetColumn.normalizedName ||
+            (!sourceColumn.isKey && !targetColumn.isKey)
+          ) {
+            continue;
+          }
+          matches.push({
+            sourceTable: sourceTable.name,
+            sourceSchema: sourceTable.schema || undefined,
+            sourceColumn: sourceColumn.name,
+            targetColumn: targetColumn.name,
+          });
+        }
+      }
+      if (matches.length === 0) {
+        continue;
+      }
+
+      const item = mapTableMetadata(candidate.item, database);
+      if (item) {
+        const key = `${item.schema ?? ""}.${item.name}`.toUpperCase();
+        const existing = targets.get(key);
+        targets.set(key, {
+          ...(existing ?? item),
+          joinUsesDefaultSchema: Boolean(
+            defaultSchema &&
+            candidate.schema.toUpperCase() === defaultSchema.toUpperCase(),
+          ),
+          joinMatches: [
+            ...(existing?.joinMatches ?? []),
+            ...matches,
+          ],
+        });
+      }
+    }
+  }
+
+  return [...targets.values()];
+}
+
+async function getCachedJoinTableIndex(
+  connectionName: string,
+  database: string,
+  metadataCache: MetadataCache,
+  sourceSchemas: string[],
+  databaseKind?: DatabaseKind,
+): Promise<CachedJoinTable[]> {
+  let cacheForMetadata = cachedJoinTableIndexes.get(metadataCache);
+  if (!cacheForMetadata) {
+    cacheForMetadata = new Map();
+    cachedJoinTableIndexes.set(metadataCache, cacheForMetadata);
+  }
+  const normalizedSchemas = [...new Set(sourceSchemas.map((schema) => schema.toUpperCase()))]
+    .sort();
+  const key = `${connectionName.toUpperCase()}|${database.toUpperCase()}|${normalizedSchemas.join(",")}`;
+  const cached = cacheForMetadata.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.tables;
+  }
+  cacheForMetadata.delete(key);
+
+  const tables = metadataCache.getObjectsByType(
+    connectionName,
+    database,
+    "TABLE",
+  )?.filter((table) => normalizedSchemas.includes(table.schema.toUpperCase())) ?? [];
+  const index: CachedJoinTable[] = [];
+  let nextTableIndex = 0;
+  const loadCachedColumns = async (): Promise<void> => {
+    while (nextTableIndex < tables.length) {
+      const table = tables[nextTableIndex];
+      nextTableIndex += 1;
+      const name = normalizeName(
+        table.item.OBJNAME || table.item.TABLENAME || extractLabel(table.item),
+      );
+      if (!name) continue;
+      let columns: ColumnMetadata[] | undefined;
+      try {
+        columns = await getCachedColumnsFromMetadataCacheAsync(
+          metadataCache,
+          connectionName,
+          database,
+          table.schema || undefined,
+          name,
+          databaseKind,
+        );
+      } catch {
+        continue;
+      }
+      if (!columns?.length) continue;
+      index.push({
+        name,
+        schema: table.schema,
+        item: table.item,
+        columns: columns.flatMap((column) => {
+          const normalizedName = normalizeRelatedColumnName(column.ATTNAME);
+          if (!normalizedName) return [];
+          return [{
+            name: column.ATTNAME,
+            normalizedName,
+            isKey: getRelatedColumnRole({
+              name: column.ATTNAME,
+              isPk: column.isPk,
+              isFk: column.isFk,
+            }) !== "unknown",
+          }];
+        }),
+      });
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(8, tables.length) }, () => loadCachedColumns()),
+  );
+
+  cacheForMetadata.set(key, {
+    tables: index,
+    expiresAt: Date.now() + CACHED_JOIN_TABLE_INDEX_TTL_MS,
+  });
+  return index;
+}
+
+function clearCachedJoinTableIndexes(
+  metadataCache: MetadataCache,
+  connectionName?: string,
+): void {
+  const cacheForMetadata = cachedJoinTableIndexes.get(metadataCache);
+  if (!cacheForMetadata) return;
+  if (!connectionName) {
+    cacheForMetadata.clear();
+    return;
+  }
+  const prefix = `${connectionName.toUpperCase()}|`;
+  for (const key of cacheForMetadata.keys()) {
+    if (key.startsWith(prefix)) {
+      cacheForMetadata.delete(key);
+    }
+  }
 }
 
 function mapTableMetadata(

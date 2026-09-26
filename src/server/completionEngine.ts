@@ -68,16 +68,26 @@ export class LspCompletionEngine {
     position: Position,
     triggerKind: CompletionTriggerKind = CompletionTriggerKind.Invoked,
   ): Promise<CompletionItem[]> {
-    // Whitespace never opens the completion list by itself; the list opens
-    // only on an explicit Ctrl+Space (Invoked) or once a word character / '.'
-    // (or another trigger character) was typed. Matches the Avalonia editor
-    // gate ("Never open autocomplete on whitespace").
+    let autoJoinConditionTrigger = false;
     if (triggerKind === CompletionTriggerKind.TriggerCharacter) {
       const cursorOffset = document.offsetAt(position);
       const previousChar =
         cursorOffset > 0 ? document.getText().charAt(cursorOffset - 1) : "";
       if (/\s/.test(previousChar)) {
-        return [];
+        if (previousChar !== " ") {
+          return [];
+        }
+        const textBeforeSpace = document.getText().substring(
+          Math.max(0, cursorOffset - 17),
+          Math.max(0, cursorOffset - 1),
+        );
+        const lastWord = (
+          textBeforeSpace.match(/[A-Za-z_][A-Za-z0-9_$]*\s*$/)?.[0] ?? ""
+        ).trim().toUpperCase();
+        if (lastWord !== "JOIN" && lastWord !== "ON") {
+          return [];
+        }
+        autoJoinConditionTrigger = true;
       }
     }
 
@@ -85,6 +95,19 @@ export class LspCompletionEngine {
       document,
       position,
     );
+    if (autoJoinConditionTrigger) {
+      const joinTargetItems = await this.scopeResolver.getJoinTargetCompletions(
+        requestContext,
+      );
+      if (joinTargetItems !== undefined) {
+        return finalizeCompletionItems(joinTargetItems, triggerKind);
+      }
+      return finalizeCompletionItems(
+        await this.scopeResolver.getJoinConditionCompletions(requestContext),
+        triggerKind,
+      );
+    }
+
     const macroVariableItems = handleMacroVariableCompletion({
       documentText: requestContext.documentText,
       cursorOffset: requestContext.cursorOffset,

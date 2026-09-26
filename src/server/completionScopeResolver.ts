@@ -9,7 +9,11 @@ import type { DatabaseKind } from "../contracts/database";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { MetadataColumnItem } from "../lsp/protocol";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
-import { createNetezzaUserIdentifier, formatNetezzaIdentifier } from "../dialects/netezza/metadata/identifierUtils";
+import {
+  createNetezzaCatalogIdentifier,
+  createNetezzaUserIdentifier,
+  formatNetezzaIdentifier,
+} from "../dialects/netezza/metadata/identifierUtils";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import {
   parseSemanticScopeWithParser,
@@ -48,6 +52,7 @@ import { CompletionContextExtractor } from "./completionContextExtractor";
 import { CompletionMetadataResolver } from "./completionMetadataResolver";
 import { handleVariableCompletion } from "./completionVariableResolver";
 import type {
+  CompletionRequestContext,
   ScopeSource,
   ScopedColumnCandidate,
   StatementBoundary,
@@ -117,6 +122,154 @@ export class CompletionScopeResolver {
     private readonly metadataResolver: CompletionMetadataResolver,
     private readonly parseSession?: DocumentParseSession,
   ) {}
+
+  /** Return only key/name matched predicates for an automatic space trigger. */
+  public async getJoinConditionCompletions(
+    request: CompletionRequestContext,
+  ): Promise<CompletionItem[]> {
+    const {
+      statementPrefix,
+      linePrefix,
+      position,
+      localDefs,
+      documentUri,
+      effectiveDb,
+      effectiveSchema,
+      databaseKind,
+      netezzaSchemasEnabled,
+    } = request;
+    const tokens = SqlLexer.tokenize(statementPrefix).tokens;
+    const lastToken = tokens[tokens.length - 1];
+    if (
+      resolveExpressionClauseContext(statementPrefix) !== "on" ||
+      this.contextExtractor.extractCurrentIdentifierPrefix(linePrefix) !== "" ||
+      lastToken?.image.toUpperCase() !== "ON"
+    ) {
+      return [];
+    }
+
+    return this.buildJoinConditionItems(
+      statementPrefix,
+      localDefs,
+      documentUri,
+      effectiveDb,
+      effectiveSchema,
+      databaseKind,
+      netezzaSchemasEnabled,
+      position,
+    );
+  }
+
+  /** Suggest only cache-backed related tables after an automatic `JOIN ` trigger. */
+  public async getJoinTargetCompletions(
+    request: CompletionRequestContext,
+  ): Promise<CompletionItem[] | undefined> {
+    const { statementPrefix, documentUri, effectiveDb, databaseKind } = request;
+    const tokens = SqlLexer.tokenize(statementPrefix).tokens;
+    if (tokens[tokens.length - 1]?.tokenType.name !== "Join") {
+      return undefined;
+    }
+    if (databaseKind !== "netezza") {
+      return [];
+    }
+
+    const sources = this.extractDirectJoinSources(statementPrefix, databaseKind);
+    const sourcesByDatabase = new Map<
+      string,
+      { database: string; sources: Array<{ schema?: string; table: string }> }
+    >();
+    for (const source of sources) {
+      const database = source.db ?? effectiveDb;
+      if (!database) continue;
+      const key = database.toUpperCase();
+      const group = sourcesByDatabase.get(key) ?? { database, sources: [] };
+      group.sources.push({ schema: source.schema, table: source.table });
+      sourcesByDatabase.set(key, group);
+    }
+
+    const usedAliases = new Set<string>(
+      request.localDefs.map((definition) =>
+        definition.name.replace(/^"|"$/g, "").toUpperCase(),
+      ),
+    );
+    for (const source of sources) {
+      usedAliases.add(source.qualifier.replace(/^"|"$/g, "").toUpperCase());
+    }
+
+    const relatedItems = new Map<string, CompletionItem>();
+    for (const { database, sources: databaseSources } of sourcesByDatabase.values()) {
+      const relatedTables = await this.metadataResolver.getCachedJoinTargets(
+        documentUri,
+        database,
+        databaseSources,
+      );
+      for (const table of relatedTables) {
+        const targetDatabase = table.database ?? database;
+        const targetTable = formatNetezzaIdentifier(
+          createNetezzaCatalogIdentifier(table.name),
+        );
+        const targetDatabaseIdentifier = formatNetezzaIdentifier(
+          createNetezzaCatalogIdentifier(targetDatabase),
+        );
+        const targetPath = table.joinUsesDefaultSchema === true || !table.schema
+          ? `${targetDatabaseIdentifier}..${targetTable}`
+          : `${targetDatabaseIdentifier}.${formatNetezzaIdentifier(createNetezzaCatalogIdentifier(table.schema))}.${targetTable}`;
+        const matchesBySource = new Map<
+          string,
+          { source: DirectJoinSource; matches: NonNullable<typeof table.joinMatches> }
+        >();
+        for (const match of table.joinMatches ?? []) {
+          const source = sources.find((candidate) =>
+            candidate.table.toUpperCase() === match.sourceTable.toUpperCase() &&
+            (!match.sourceSchema || !candidate.schema ||
+              candidate.schema.toUpperCase() === match.sourceSchema.toUpperCase()),
+          );
+          if (!source) continue;
+          const sourceKey = `${source.db ?? effectiveDb ?? ""}|${source.schema ?? ""}|${source.table}`.toUpperCase();
+          const entry = matchesBySource.get(sourceKey) ?? { source, matches: [] };
+          entry.matches.push(match);
+          matchesBySource.set(sourceKey, entry);
+        }
+
+        for (const { source, matches } of matchesBySource.values()) {
+          const alias = this.createUniqueJoinAlias(table.name, usedAliases);
+          const targetQualifier = formatNetezzaIdentifier(
+            createNetezzaUserIdentifier(alias),
+          );
+          const predicates = matches.map((match) =>
+            `${formatDirectJoinQualifier(source, databaseKind)}.${formatIdentifierForSql(match.sourceColumn, databaseKind)} = ${targetQualifier}.${formatIdentifierForSql(match.targetColumn, databaseKind)}`,
+          );
+          const label = `${targetPath} ${targetQualifier} ON ${predicates.join(" AND ")}`;
+          relatedItems.set(label.toUpperCase(), {
+            label,
+            kind: CompletionItemKind.Class,
+            detail: "JOIN with cached PK/FK match",
+            sortText: `0_${label.toUpperCase()}`,
+            insertText: label,
+          });
+        }
+      }
+    }
+    return [...relatedItems.values()];
+  }
+
+  private createUniqueJoinAlias(tableName: string, usedAliases: Set<string>): string {
+    const words = tableName
+      .replace(/^"|"$/g, "")
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean);
+    const base = (words.length > 1
+      ? words.map((word) => word[0]).join("")
+      : words[0]?.[0] ?? "T").toUpperCase();
+    if (!usedAliases.has(base)) {
+      return base;
+    }
+    let suffix = 2;
+    while (usedAliases.has(`${base}${suffix}`)) {
+      suffix += 1;
+    }
+    return `${base}${suffix}`;
+  }
 
   public async resolveColumnsForQualifier(
     request: QualifierCompletionRequest,
