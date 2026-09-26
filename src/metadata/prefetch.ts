@@ -77,6 +77,7 @@ import {
     buildNetezzaColumnsWithKeysQueries,
     mergeNetezzaColumnsWithKeysRows,
 } from '../dialects/netezza/metadata/columnsWithKeys';
+import { mergeForeignKeyReferencesIntoColumnRows } from './columnMetadataService';
 import { Logger } from '../utils/logger';
 import { createMetadataPrefetchPlan } from '@justybase/metadata-core';
 import type {
@@ -564,6 +565,7 @@ export class CachePrefetcher {
         connectionName: string,
         runQueryFn: QueryRunnerRawFn,
         queries: ReturnType<typeof buildNetezzaColumnsWithKeysQueries>,
+        relationshipQuery: string,
         context: {
             source: MetadataRequestSource;
             database: string;
@@ -609,11 +611,39 @@ export class CachePrefetcher {
             rowsByKind.set(part.kind, queryResultToRows<Record<string, unknown>>(result));
         }
 
-        return mergeNetezzaColumnsWithKeysRows(
+        const rows = mergeNetezzaColumnsWithKeysRows(
             rowsByKind.get('columns') ?? [],
             rowsByKind.get('column-keys') ?? [],
             rowsByKind.get('column-distribution') ?? [],
         ) as RawColumnRowWithKeys[];
+        if (rows.length > 0) {
+            try {
+                const result = await this.runPrefetchQuery(
+                    connectionName,
+                    runQueryFn,
+                    relationshipQuery,
+                    {
+                        source: context.source,
+                        kind: 'column-relations',
+                        database: context.database,
+                        schema: context.schema,
+                        reason: 'foreign-key-prefetch',
+                    },
+                    lifecycle,
+                    limiterKey,
+                );
+                if (result) {
+                    mergeForeignKeyReferencesIntoColumnRows(
+                        rows,
+                        queryResultToRows<Record<string, unknown>>(result),
+                        context.database,
+                    );
+                }
+            } catch {
+                // Relationship metadata is optional for column refresh.
+            }
+        }
+        return rows;
     }
 
     private planConnectionRefreshQueries(connectionName: string, databases: string[]): void {
@@ -646,6 +676,9 @@ export class CachePrefetcher {
             });
             this.planRefreshQuery(connectionName, columnQueries.distribution, {
                 source: 'connection-prefetch', kind: 'column-distribution', database, reason: 'column-distribution-prefetch',
+            });
+            this.planRefreshQuery(connectionName, NZ_QUERIES.listForeignKeyColumnReferences(identifier), {
+                source: 'connection-prefetch', kind: 'column-relations', database, reason: 'foreign-key-prefetch',
             });
             this.planRefreshQuery(connectionName, NZ_QUERIES.listExternalColumnsWithKeys(identifier), {
                 source: 'connection-prefetch', kind: 'external-columns', database, reason: 'external-table-columns',
@@ -929,6 +962,14 @@ export class CachePrefetcher {
                     connectionName,
                     runQueryFn,
                     columnQueries,
+                    NZ_QUERIES.listForeignKeyColumnReferences(
+                        preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
+                        {
+                            schema: preserveCatalogIdentity && schemaName !== undefined
+                                ? createNetezzaUserIdentifier(schemaName)
+                                : schemaName,
+                        },
+                    ),
                     {
                         source: 'schema-prefetch',
                         database: dbName,
@@ -1393,6 +1434,9 @@ export class CachePrefetcher {
                 connectionName,
                 runQueryFn,
                 columnQueries,
+                NZ_QUERIES.listForeignKeyColumnReferences(
+                    preserveCatalogIdentity ? createNetezzaUserIdentifier(dbName) : dbName,
+                ),
                 {
                     source: 'database-prefetch',
                     database: dbName,
@@ -2414,6 +2458,9 @@ export class CachePrefetcher {
                         connectionName,
                         runner,
                         columnQueries,
+                        NZ_QUERIES.listForeignKeyColumnReferences(
+                            preserveCatalogIdentity ? createNetezzaCatalogIdentifier(dbName) : dbName,
+                        ),
                         {
                             source: 'connection-prefetch',
                             database: dbName,

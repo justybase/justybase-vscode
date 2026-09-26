@@ -2,8 +2,9 @@ import type { DatabaseKind } from "../contracts/database";
 import { getDatabaseDialectTraits } from "../core/dialectTraits";
 import type { JoinTableIdentity } from "../lsp/protocol";
 import {
-  createNetezzaCatalogIdentifier,
-  formatNetezzaIdentifier,
+    createNetezzaCatalogIdentifier,
+    formatNetezzaIdentifier,
+    unquoteNetezzaIdentifier,
 } from "../dialects/netezza/metadata/identifierUtils";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
 import { supportsThreePartPath, usesDatabaseObjectTwoPartName } from "./completionPathUtils";
@@ -42,10 +43,14 @@ export function formatJoinTargetPath(
   const database = target.database ?? effectiveDatabase;
   const schema = target.schema;
   if (databaseKind === "netezza") {
+    const tableName = unquoteNetezzaIdentifier(target.table);
+    const normalizedTableName = schema && tableName.toLocaleUpperCase().startsWith(`${schema.toLocaleUpperCase()}.`)
+      ? tableName.slice(schema.length + 1)
+      : tableName;
     const databasePart = database
       ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(database))
       : undefined;
-    const tablePart = formatNetezzaIdentifier(createNetezzaCatalogIdentifier(target.table));
+    const tablePart = formatNetezzaIdentifier(createNetezzaCatalogIdentifier(normalizedTableName));
     if (databasePart && (joinUsesDefaultSchema || !schema)) {
       return `${databasePart}..${tablePart}`;
     }
