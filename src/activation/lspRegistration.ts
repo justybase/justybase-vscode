@@ -1174,8 +1174,8 @@ async function getCachedJoinTableIndex(
         normalizedSchemas.includes(table.schema.toUpperCase()),
       );
       const sourceIndex = await loadTableColumns(sourceTables);
-      // Catalog FK metadata carries exact endpoint identities, so only those
-      // cross-schema target tables need to be added to the per-request index.
+      // Catalog FK metadata carries exact endpoint identities. Outbound
+      // references identify targets; inbound references live on child tables.
       const referencedTargets = new Set<string>();
       for (const table of sourceIndex) {
         for (const column of table.columns) {
@@ -1192,19 +1192,22 @@ async function getCachedJoinTableIndex(
           }
         }
       }
-      const indexedTables = new Set(sourceIndex.map((table) =>
+      const sourceTableKeys = new Set(sourceIndex.map((table) =>
         `${table.schema.toUpperCase()}|${table.name.toUpperCase()}`,
       ));
-      const referencedTables = allTables.filter((table) => {
-        const schema = table.schema.toUpperCase();
-        const name = normalizeName(
-          table.item.OBJNAME || table.item.TABLENAME || extractLabel(table.item),
+      const crossSchemaIndex = await loadTableColumns(allTables.filter((table) =>
+        !normalizedSchemas.includes(table.schema.toUpperCase()),
+      ));
+      const referencedIndex = crossSchemaIndex.filter((table) => {
+        const tableKey = `${table.schema.toUpperCase()}|${table.name.toUpperCase()}`;
+        if (referencedTargets.has(tableKey)) return true;
+        return table.columns.some((column) =>
+          (column.joinReferences ?? []).some((reference) =>
+            (!reference.toDatabase || reference.toDatabase.toUpperCase() === database.toUpperCase()) &&
+            sourceTableKeys.has(`${reference.toSchema.toUpperCase()}|${reference.toTable.toUpperCase()}`),
+          ),
         );
-        if (!name) return false;
-        const key = `${schema}|${name.toUpperCase()}`;
-        return referencedTargets.has(key) && !indexedTables.has(key);
       });
-      const referencedIndex = await loadTableColumns(referencedTables);
       return [...sourceIndex, ...referencedIndex];
     })();
   const pendingEntry: CachedJoinTableIndexEntry = {

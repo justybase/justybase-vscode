@@ -230,7 +230,7 @@ export class CompletionScopeResolver {
         ?? (joinCompletionSettings.autoAliases ? getJoinAliasBase(target.table) : undefined);
       let alias: string | undefined;
       if (preferredAlias) {
-        alias = this.reserveUniqueJoinAlias(preferredAlias, usedAliases);
+        alias = this.getUniqueJoinAlias(preferredAlias, usedAliases);
       }
       const targetPath = formatJoinTargetPath(
         targetIdentity,
@@ -352,19 +352,16 @@ export class CompletionScopeResolver {
     return [...relatedItems.values()];
   }
 
-  private reserveUniqueJoinAlias(preferred: string, usedAliases: Set<string>): string {
+  private getUniqueJoinAlias(preferred: string, usedAliases: Set<string>): string {
     const base = preferred.replace(/[^A-Za-z0-9_$]/g, "").toUpperCase() || "T";
     if (!usedAliases.has(base)) {
-      usedAliases.add(base);
       return base;
     }
     let suffix = 2;
     while (usedAliases.has(`${base}${suffix}`)) {
       suffix += 1;
     }
-    const alias = `${base}${suffix}`;
-    usedAliases.add(alias);
-    return alias;
+    return `${base}${suffix}`;
   }
 
   public async resolveColumnsForQualifier(

@@ -34,6 +34,7 @@ export interface RawColumnsWithKeysRow {
     DBNAME?: string;
     DATABASE?: string;
     SCHEMA?: string;
+    SCHEMA_NAME?: string;
     TABLENAME?: string;
     TABLE_NAME?: string;
     ATTNAME?: string;
@@ -152,6 +153,9 @@ export function mergeForeignKeyReferencesIntoColumnRows(
 ): void {
     const byColumn = new Map<string, RawColumnsWithKeysRow[]>();
     for (const row of rows) {
+        // Companion dialects use SCHEMA_NAME for column rows, while FK rows
+        // expose FROM_SCHEMA. Keep the canonical row shape for later mapping.
+        row.SCHEMA ??= row.SCHEMA_NAME;
         const key = [
             normalizeRelationPart(row.DBNAME || row.DATABASE || fallbackDatabase),
             normalizeRelationPart(row.SCHEMA),

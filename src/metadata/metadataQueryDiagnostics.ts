@@ -22,6 +22,7 @@ export type MetadataQueryKind =
     | 'columns'
     | 'column-keys'
     | 'column-distribution'
+    | 'column-relations'
     | 'external-columns'
     | 'table-columns'
     | 'external-table-columns'
