@@ -307,11 +307,12 @@ describe('services/copilot/CopilotToolsHandler', () => {
 
         const result = await handler.getColumnsForTables(['JUST_DATA_2.ADMIN.ET_SALES']);
 
-        expect(runQueryRaw).toHaveBeenCalledTimes(4);
+        expect(runQueryRaw).toHaveBeenCalledTimes(5);
         expect((runQueryRaw as jest.Mock).mock.calls[0][1]).not.toContain('_V_EXTERNAL');
         expect((runQueryRaw as jest.Mock).mock.calls[1][1]).toContain('_V_RELATION_KEYDATA');
         expect((runQueryRaw as jest.Mock).mock.calls[2][1]).toContain('_V_TABLE_DIST_MAP');
-        expect((runQueryRaw as jest.Mock).mock.calls[3][1]).toContain('_V_EXTERNAL');
+        expect((runQueryRaw as jest.Mock).mock.calls[3][1]).toContain('FROM_DATABASE');
+        expect((runQueryRaw as jest.Mock).mock.calls[4][1]).toContain('_V_EXTERNAL');
         expect(result).toContain('ET_SALES');
         expect(result).toContain('EXT_ID');
     });

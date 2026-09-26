@@ -136,11 +136,12 @@ describe('columnCacheWarmup', () => {
             readRows,
         );
 
-        expect(queries).toHaveLength(4);
+        expect(queries).toHaveLength(5);
         expect(queries[0]).not.toContain('_V_EXTERNAL');
         expect(queries[1]).toContain('_V_RELATION_KEYDATA');
         expect(queries[2]).toContain('_V_TABLE_DIST_MAP');
-        expect(queries[3]).toContain('_V_EXTERNAL');
+        expect(queries[3]).toContain('FROM_DATABASE');
+        expect(queries[4]).toContain('_V_EXTERNAL');
         expect(cache.getColumns('CONN', 'JUST_DATA.ADMIN.ET_ORDERS')).toEqual([
             expect.objectContaining({ ATTNAME: 'EXTERNAL_ID', FORMAT_TYPE: 'VARCHAR(30)' }),
         ]);

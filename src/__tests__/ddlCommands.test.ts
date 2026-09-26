@@ -158,7 +158,8 @@ describe('commands/schema/ddlCommands', () => {
         it('should register all DDL commands', () => {
             const disposables = registerDDLCommands(mockDeps);
 
-            expect(disposables).toHaveLength(3);
+            expect(disposables).toHaveLength(4);
+            expect(registeredCommands.has('netezza.createTableAsView')).toBe(true);
             expect(registeredCommands.has('netezza.createDDL')).toBe(true);
             expect(registeredCommands.has('netezza.compareSchema')).toBe(true);
             expect(registeredCommands.has('netezza.batchExportDDL')).toBe(true);
