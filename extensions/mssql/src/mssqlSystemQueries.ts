@@ -193,6 +193,43 @@ export function buildColumnsWithKeysQuery(
   return query;
 }
 
+export function buildForeignKeyRelationshipsQuery(
+  database: string,
+  schema?: string,
+  tableName?: string,
+): string {
+  const prefix = buildCatalogPrefix(database);
+  const filters = [
+    schema ? ` AND source_schema.name = ${quoteLiteral(schema)}` : "",
+    tableName ? ` AND source_table.name = ${quoteLiteral(tableName)}` : "",
+  ].join("");
+  return `
+    SELECT
+      ${quoteLiteral(database)} AS FROM_DATABASE,
+      source_schema.name AS FROM_SCHEMA,
+      source_table.name AS FROM_TABLE,
+      source_column.name AS FROM_COLUMN,
+      ${quoteLiteral(database)} AS TO_DATABASE,
+      target_schema.name AS TO_SCHEMA,
+      target_table.name AS TO_TABLE,
+      target_column.name AS TO_COLUMN,
+      fk.name AS CONSTRAINT_NAME,
+      fkc.constraint_column_id AS ORDINAL_POSITION
+    FROM ${prefix}sys.foreign_key_columns fkc
+    INNER JOIN ${prefix}sys.foreign_keys fk ON fk.object_id = fkc.constraint_object_id
+    INNER JOIN ${prefix}sys.tables source_table ON source_table.object_id = fkc.parent_object_id
+    INNER JOIN ${prefix}sys.schemas source_schema ON source_schema.schema_id = source_table.schema_id
+    INNER JOIN ${prefix}sys.columns source_column
+      ON source_column.object_id = source_table.object_id AND source_column.column_id = fkc.parent_column_id
+    INNER JOIN ${prefix}sys.tables target_table ON target_table.object_id = fkc.referenced_object_id
+    INNER JOIN ${prefix}sys.schemas target_schema ON target_schema.schema_id = target_table.schema_id
+    INNER JOIN ${prefix}sys.columns target_column
+      ON target_column.object_id = target_table.object_id AND target_column.column_id = fkc.referenced_column_id
+    WHERE 1 = 1${filters}
+    ORDER BY source_schema.name, source_table.name, fk.name, fkc.constraint_column_id
+  `;
+}
+
 export function buildLookupColumnsQuery(
   params: DatabaseColumnLookupParams,
 ): string {

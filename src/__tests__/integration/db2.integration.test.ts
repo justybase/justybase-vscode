@@ -34,6 +34,10 @@ import {
     expectReaderCloseAndReuse,
 } from './connectionLifecycleHelpers';
 import { db2Harness, registerLiveIntegrationSuite } from './optionalDialectIntegrationHarness';
+import {
+	expectLiveForeignKeyCompletion,
+	requireForeignKeyRelationshipQuery,
+} from './liveForeignKeyCompletionHelper';
 
 registerLiveIntegrationSuite(db2Harness);
 
@@ -731,6 +735,49 @@ describeIfConfigured('db2 integration', () => {
 	});
 
 	describe('Db2 live completion (Oracle-parity E2E)', () => {
+		it('completes an exact composite FK JOIN from live Db2 catalog rows', async () => {
+			const suffix = `${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
+			const parentTable = `JBL_JOIN_P_${suffix}`;
+			const childTable = `JBL_JOIN_C_${suffix}`;
+			const parentName = buildQualifiedName(schemaName, parentTable);
+			const childName = buildQualifiedName(schemaName, childTable);
+			try {
+				await connection.createCommand(`
+					CREATE TABLE ${parentName} (
+						TENANT_KEY INTEGER NOT NULL,
+						CUSTOMER_KEY INTEGER NOT NULL,
+						CONSTRAINT ${`JBL_JPK_${suffix}`} PRIMARY KEY (TENANT_KEY, CUSTOMER_KEY)
+					)
+				`).execute();
+				await connection.createCommand(`
+					CREATE TABLE ${childName} (
+						TENANT_ID INTEGER NOT NULL,
+						CUSTOMER_ID INTEGER NOT NULL,
+						CONSTRAINT ${`JBL_JFK_${suffix}`} FOREIGN KEY (TENANT_ID, CUSTOMER_ID)
+							REFERENCES ${parentName} (TENANT_KEY, CUSTOMER_KEY)
+					)
+				`).execute();
+				const rows = await readRows(
+					connection,
+					requireForeignKeyRelationshipQuery(db2MetadataProvider.buildForeignKeyRelationshipsQuery!(config!.database, {
+						schema: schemaName,
+						tableName: childTable,
+					}), 'db2'),
+				);
+				await expectLiveForeignKeyCompletion({
+					databaseKind: 'db2',
+					database: config!.database,
+					schema: schemaName,
+					parentTable,
+					childTable,
+					rows,
+				});
+			} finally {
+				await tryExecute(connection, `DROP TABLE ${childName}`);
+				await tryExecute(connection, `DROP TABLE ${parentName}`);
+			}
+		}, 120000);
+
 		it('completes columns for an alias against live SYSCAT.COLUMNS metadata', async () => {
 			const provider = new LiveDb2CompletionMetadataProvider(
 				connection,

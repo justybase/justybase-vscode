@@ -365,13 +365,13 @@ export const BASE_SQL_SPECIAL_BUILTIN_VALUES = new Set<string>([
 
 export const BASE_SQL_FUNCTION_SIGNATURES: ReadonlyMap<string, readonly DatabaseSqlFunctionSignature[]> = new Map([
     ['COUNT', [
-        { name: 'COUNT', parameters: ['expression'], description: 'Count non-null values' },
-        { name: 'COUNT', parameters: ['*'], description: 'Count all rows' },
-        { name: 'COUNT', parameters: ['DISTINCT expression'], description: 'Count distinct non-null values' }
+        { name: 'COUNT', parameters: ['expression'], description: 'Count non-null values', window: 'supported' },
+        { name: 'COUNT', parameters: ['*'], description: 'Count all rows', window: 'supported' },
+        { name: 'COUNT', parameters: ['DISTINCT expression'], description: 'Count distinct non-null values', window: 'supported' }
     ]],
     ['SUM', [
-        { name: 'SUM', parameters: ['expression'], description: 'Sum of values' },
-        { name: 'SUM', parameters: ['DISTINCT expression'], description: 'Sum of distinct values' }
+        { name: 'SUM', parameters: ['expression'], description: 'Sum of values', window: 'supported' },
+        { name: 'SUM', parameters: ['DISTINCT expression'], description: 'Sum of distinct values', window: 'supported' }
     ]],
     ['AVG', [
         { name: 'AVG', parameters: ['expression'], description: 'Average of values' },
@@ -464,19 +464,19 @@ export const BASE_SQL_FUNCTION_SIGNATURES: ReadonlyMap<string, readonly Database
         { name: 'WIDTH_BUCKET', parameters: ['value', 'min', 'max', 'buckets'], description: 'Assign to bucket' }
     ]],
     ['ROW_NUMBER', [
-        { name: 'ROW_NUMBER', parameters: ['OVER (ORDER BY ...)'], description: 'Row number in partition' }
+        { name: 'ROW_NUMBER', parameters: ['OVER (ORDER BY ...)'], description: 'Row number in partition', window: 'required' }
     ]],
     ['RANK', [
-        { name: 'RANK', parameters: ['OVER (ORDER BY ...)'], description: 'Rank with gaps' }
+        { name: 'RANK', parameters: ['OVER (ORDER BY ...)'], description: 'Rank with gaps', window: 'required' }
     ]],
     ['DENSE_RANK', [
-        { name: 'DENSE_RANK', parameters: ['OVER (ORDER BY ...)'], description: 'Rank without gaps' }
+        { name: 'DENSE_RANK', parameters: ['OVER (ORDER BY ...)'], description: 'Rank without gaps', window: 'required' }
     ]],
     ['LAG', [
-        { name: 'LAG', parameters: ['expression', 'offset', 'default'], description: 'Previous row value' }
+        { name: 'LAG', parameters: ['expression', 'offset', 'default'], description: 'Previous row value', window: 'required' }
     ]],
     ['LEAD', [
-        { name: 'LEAD', parameters: ['expression', 'offset', 'default'], description: 'Next row value' }
+        { name: 'LEAD', parameters: ['expression', 'offset', 'default'], description: 'Next row value', window: 'required' }
     ]],
     ['FIRST_VALUE', [
         { name: 'FIRST_VALUE', parameters: ['expression OVER (ORDER BY ...)'], description: 'First value in window' }

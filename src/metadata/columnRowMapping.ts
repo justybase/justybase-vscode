@@ -16,6 +16,7 @@ export interface RawColumnRowWithKeys {
     IS_PK?: number | string;
     IS_FK?: number | string;
     IS_DISTRIBUTION_KEY?: number | string;
+    JOIN_REFERENCES?: import('../contracts/database').DatabaseForeignKeyColumnReference[];
     [key: string]: unknown;
 }
 
@@ -42,6 +43,7 @@ export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMeta
             row.IS_DISTRIBUTION_KEY !== undefined
                 ? Number(row.IS_DISTRIBUTION_KEY) === 1
                 : false,
+        joinReferences: Array.isArray(row.JOIN_REFERENCES) ? row.JOIN_REFERENCES : undefined,
     };
 }
 

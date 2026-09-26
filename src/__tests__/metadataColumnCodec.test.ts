@@ -36,6 +36,11 @@ describe('metadataColumnCodec', () => {
                     FORMAT_TYPE: 'INTEGER',
                     label: 'CUSTOMER_ID',
                     isPk: true,
+                    joinReferences: [{
+                        fromDatabase: 'DB1', fromSchema: 'SALES', fromTable: 'ORDERS', fromColumn: 'CUSTOMER_ID',
+                        toDatabase: 'DB1', toSchema: 'SALES', toTable: 'CUSTOMER', toColumn: 'ID',
+                        constraintName: 'FK_ORDERS_CUSTOMER', ordinalPosition: 1,
+                    }],
                 },
                 {
                     ATTNAME: 'STATUS',
@@ -86,6 +91,9 @@ describe('metadataColumnCodec', () => {
         const decoded = decodeColumnFile(encoded);
         expect(decoded['DB1.SALES.ORDERS'].data[0].ATTNAME).toBe('CUSTOMER_ID');
         expect(decoded['DB1.SALES.ORDERS'].data[0].isPk).toBe(true);
+        expect(decoded['DB1.SALES.ORDERS'].data[0].joinReferences?.[0]).toEqual(expect.objectContaining({
+            toTable: 'CUSTOMER', toColumn: 'ID', constraintName: 'FK_ORDERS_CUSTOMER', ordinalPosition: 1,
+        }));
         expect(decoded['DB1.SALES.ORDERS'].data[1].documentation).toHaveLength(500);
         expect(decoded['DB1..NICK_TABLE'].data[0].isDistributionKey).toBe(true);
     });

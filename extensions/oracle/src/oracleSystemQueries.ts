@@ -636,6 +636,46 @@ export function buildColumnsWithKeysQuery(
     `;
 }
 
+export function buildForeignKeyRelationshipsQuery(
+    database: string | undefined,
+    schema?: string,
+    tableName?: string,
+): string {
+    const databaseExpression = normalizeOptionalName(database)
+        ? quoteLiteral(database?.toUpperCase())
+        : buildCurrentDatabaseExpression();
+    const ownerPredicate = buildEqualityFilter('source_columns.OWNER', schema);
+    const tablePredicate = buildEqualityFilter('source_columns.TABLE_NAME', tableName);
+    return `
+        SELECT
+            ${databaseExpression} AS "FROM_DATABASE",
+            source_columns.OWNER AS "FROM_SCHEMA",
+            source_columns.TABLE_NAME AS "FROM_TABLE",
+            source_columns.COLUMN_NAME AS "FROM_COLUMN",
+            ${databaseExpression} AS "TO_DATABASE",
+            target_columns.OWNER AS "TO_SCHEMA",
+            target_columns.TABLE_NAME AS "TO_TABLE",
+            target_columns.COLUMN_NAME AS "TO_COLUMN",
+            source_constraints.CONSTRAINT_NAME AS "CONSTRAINT_NAME",
+            source_columns.POSITION AS "ORDINAL_POSITION"
+        FROM ALL_CONSTRAINTS source_constraints
+        INNER JOIN ALL_CONS_COLUMNS source_columns
+            ON source_columns.OWNER = source_constraints.OWNER
+           AND source_columns.CONSTRAINT_NAME = source_constraints.CONSTRAINT_NAME
+        INNER JOIN ALL_CONSTRAINTS target_constraints
+            ON target_constraints.OWNER = source_constraints.R_OWNER
+           AND target_constraints.CONSTRAINT_NAME = source_constraints.R_CONSTRAINT_NAME
+        INNER JOIN ALL_CONS_COLUMNS target_columns
+            ON target_columns.OWNER = target_constraints.OWNER
+           AND target_columns.CONSTRAINT_NAME = target_constraints.CONSTRAINT_NAME
+           AND target_columns.POSITION = source_columns.POSITION
+        WHERE source_constraints.CONSTRAINT_TYPE = 'R'
+          ${ownerPredicate}${tablePredicate}
+        ORDER BY source_columns.OWNER, source_columns.TABLE_NAME,
+                 source_constraints.CONSTRAINT_NAME, source_columns.POSITION
+    `;
+}
+
 export function buildTableColumnsQuery(schema: string, tableName: string): string {
     return buildDetailedColumnQuery(schema, tableName, false);
 }

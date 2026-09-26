@@ -4,6 +4,20 @@ export interface DatabaseColumnQueryOptions {
   objTypes?: string[];
 }
 
+/** Exact source and target column mapping from one declared FK constraint. */
+export interface DatabaseForeignKeyColumnReference {
+  fromDatabase?: string;
+  fromSchema: string;
+  fromTable: string;
+  fromColumn: string;
+  toDatabase?: string;
+  toSchema: string;
+  toTable: string;
+  toColumn: string;
+  constraintName?: string;
+  ordinalPosition?: number;
+}
+
 /**
  * Optional split plan for dialects whose column/key metadata is cheaper to
  * fetch as independent catalog scans and combine in the client.
@@ -50,6 +64,11 @@ export interface DatabaseMetadataProvider {
     database: string,
     options?: DatabaseColumnQueryOptions,
   ): DatabaseColumnsWithKeysQuerySet;
+  /** Exact FK pairs are loaded during schema refresh and then cached. */
+  buildForeignKeyRelationshipsQuery?(
+    database: string,
+    options?: DatabaseColumnQueryOptions,
+  ): string | undefined;
   /**
    * Builds a companion query for external/foreign-object columns across a
    * database (Netezza). It is executed separately and merged in code.

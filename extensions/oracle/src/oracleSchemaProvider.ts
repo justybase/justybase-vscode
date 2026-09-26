@@ -6,6 +6,7 @@ import {
     buildProcedureSourceSearchQuery,
     buildColumnMetadataQuery,
     buildColumnsWithKeysQuery,
+    buildForeignKeyRelationshipsQuery,
     buildListDatabasesQuery,
     buildListProceduresQuery,
     buildListSchemasQuery,
@@ -34,6 +35,7 @@ export const oracleMetadataProvider = createDelegatingMetadataProvider({
     objectType: (database, objectType) => buildObjectTypeQuery(objectType, database),
     typeGroups: () => buildTypeGroupsQuery(),
     columnsWithKeys: (database, options) => buildColumnsWithKeysQuery(database, options?.schema, options?.tableName, options?.objTypes),
+    foreignKeyRelationships: (database, options) => buildForeignKeyRelationshipsQuery(database, options?.schema, options?.tableName),
     tableColumns: (_database, schema, tableName) => buildTableColumnsQuery(schema, tableName),
     columnMetadata: (_database, schema, tableName) => buildColumnMetadataQuery(schema, tableName),
     lookupColumns: params => buildLookupColumnsQuery({

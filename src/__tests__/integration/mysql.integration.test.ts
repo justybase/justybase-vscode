@@ -17,6 +17,10 @@ import {
   expectConnectionCloseIsIdempotent,
   expectReaderCloseAndReuse,
 } from "./connectionLifecycleHelpers";
+import {
+  expectLiveForeignKeyCompletion,
+  requireForeignKeyRelationshipQuery,
+} from "./liveForeignKeyCompletionHelper";
 
 function readEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -123,6 +127,49 @@ describeIfConfigured("mysql integration", () => {
   afterAll(async () => {
     await connection.close();
   });
+
+  it("completes an exact composite FK JOIN from live MySQL catalog rows", async () => {
+    const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const parentTable = `jbl_join_parent_${suffix}`;
+    const childTable = `jbl_join_child_${suffix}`;
+    const qualifiedParent = `${quoteIdentifier(config!.database)}.${quoteIdentifier(parentTable)}`;
+    const qualifiedChild = `${quoteIdentifier(config!.database)}.${quoteIdentifier(childTable)}`;
+    try {
+      await connection.createCommand(`
+        CREATE TABLE ${qualifiedParent} (
+          tenant_key INT NOT NULL,
+          customer_key INT NOT NULL,
+          CONSTRAINT ${quoteIdentifier(`jbl_join_pk_${suffix}`)} PRIMARY KEY (tenant_key, customer_key)
+        ) ENGINE=InnoDB
+      `).execute();
+      await connection.createCommand(`
+        CREATE TABLE ${qualifiedChild} (
+          tenant_id INT NOT NULL,
+          customer_id INT NOT NULL,
+          CONSTRAINT ${quoteIdentifier(`jbl_join_fk_${suffix}`)} FOREIGN KEY (tenant_id, customer_id)
+            REFERENCES ${qualifiedParent} (tenant_key, customer_key)
+        ) ENGINE=InnoDB
+      `).execute();
+      const rows = await readRows(
+        connection,
+        requireForeignKeyRelationshipQuery(mysqlMetadataProvider.buildForeignKeyRelationshipsQuery!(config!.database, {
+          schema: config!.database,
+          tableName: childTable,
+        }), "mysql"),
+      );
+      await expectLiveForeignKeyCompletion({
+        databaseKind: "mysql",
+        database: config!.database,
+        schema: config!.database,
+        parentTable,
+        childTable,
+        rows,
+      });
+    } finally {
+      await connection.createCommand(`DROP TABLE IF EXISTS ${qualifiedChild}`).execute();
+      await connection.createCommand(`DROP TABLE IF EXISTS ${qualifiedParent}`).execute();
+    }
+  }, 120000);
 
   it("closes readers and connections idempotently", async () => {
     await expectReaderCloseAndReuse(

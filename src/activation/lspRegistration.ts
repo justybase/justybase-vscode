@@ -39,6 +39,7 @@ import {
   getRelatedColumnRole,
   normalizeRelatedColumnName,
 } from "../utils/relatedColumnNames";
+import { normalizeJoinCompletionSettings } from "../lsp/joinCompletionSettings";
 
 interface LanguageClientLike {
   onRequest(
@@ -67,6 +68,7 @@ interface CachedJoinColumn {
   name: string;
   normalizedName: string;
   isKey: boolean;
+  joinReferences?: ColumnMetadata["joinReferences"];
 }
 
 interface CachedJoinTable {
@@ -77,11 +79,14 @@ interface CachedJoinTable {
 }
 
 interface CachedJoinTableIndexEntry {
-  tables: CachedJoinTable[];
+  tables?: CachedJoinTable[];
+  promise?: Promise<CachedJoinTable[]>;
   expiresAt: number;
 }
 
 const CACHED_JOIN_TABLE_INDEX_TTL_MS = 60_000;
+// A failed/hung async metadata read must not pin the in-flight cache entry forever.
+const PENDING_JOIN_TABLE_INDEX_TTL_MS = 10_000;
 const cachedJoinTableIndexes = new WeakMap<
   MetadataCache,
   Map<string, CachedJoinTableIndexEntry>
@@ -337,7 +342,10 @@ export async function handleMetadataRequest(
   try {
     switch (params.kind) {
       case "context":
-        return resolvedContext;
+        return {
+          ...resolvedContext,
+          joinCompletionSettings: getWorkspaceJoinCompletionSettings(params.documentUri),
+        };
       case "databases":
         return await getDatabases(
           connectionName,
@@ -504,6 +512,26 @@ export async function handleMetadataRequest(
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
+  }
+}
+
+function getWorkspaceJoinCompletionSettings(documentUri: string) {
+  try {
+    const configuration = vscode.workspace.getConfiguration(
+      "justybase.sql",
+      vscode.Uri.parse(documentUri),
+    );
+    const rawSettings = typeof configuration.toJSON === "function"
+      ? configuration.toJSON()
+      : {
+          joinNameHeuristics: configuration.get("joinNameHeuristics"),
+          autoJoinAliases: configuration.get("autoJoinAliases"),
+          joinAliases: configuration.get("joinAliases"),
+          joinRelations: configuration.get("joinRelations"),
+        };
+    return normalizeJoinCompletionSettings(rawSettings);
+  } catch {
+    return normalizeJoinCompletionSettings(undefined);
   }
 }
 
@@ -969,28 +997,68 @@ async function getCachedJoinTargetsAsync(
     }
 
     for (const candidate of tableIndex) {
-      if (
-        candidate.schema.toUpperCase() !== sourceSchema.toUpperCase() ||
-        candidate.name.toUpperCase() === sourceTable.name.toUpperCase()
-      ) {
+      const isSameSchema = candidate.schema.toUpperCase() === sourceSchema.toUpperCase();
+      if (isSameSchema && candidate.name.toUpperCase() === sourceTable.name.toUpperCase()) {
         continue;
       }
 
       const matches: NonNullable<MetadataObjectItem["joinMatches"]> = [];
+      // Exact catalog FK pairs take precedence over the fallback name/key matcher.
       for (const sourceColumn of sourceTable.columns) {
-        for (const targetColumn of candidate.columns) {
+        for (const reference of sourceColumn.joinReferences ?? []) {
           if (
-            sourceColumn.normalizedName !== targetColumn.normalizedName ||
-            (!sourceColumn.isKey && !targetColumn.isKey)
-          ) {
-            continue;
-          }
+            reference.toTable.toUpperCase() !== candidate.name.toUpperCase() ||
+            reference.toSchema.toUpperCase() !== candidate.schema.toUpperCase() ||
+            (reference.toDatabase && reference.toDatabase.toUpperCase() !== database.toUpperCase())
+          ) continue;
           matches.push({
             sourceTable: sourceTable.name,
             sourceSchema: sourceTable.schema || undefined,
             sourceColumn: sourceColumn.name,
-            targetColumn: targetColumn.name,
+            targetColumn: reference.toColumn,
+            relationType: "foreignKey",
+            constraintName: reference.constraintName,
+            ordinalPosition: reference.ordinalPosition,
           });
+        }
+      }
+      // Keep relationships in both directions. Two tables can have separate
+      // foreign keys pointing at each other; the resolver groups each constraint.
+      for (const targetColumn of candidate.columns) {
+        for (const reference of targetColumn.joinReferences ?? []) {
+          if (
+            reference.toTable.toUpperCase() !== sourceTable.name.toUpperCase() ||
+            reference.toSchema.toUpperCase() !== sourceTable.schema.toUpperCase() ||
+            (reference.toDatabase && reference.toDatabase.toUpperCase() !== database.toUpperCase())
+          ) continue;
+          matches.push({
+            sourceTable: sourceTable.name,
+            sourceSchema: sourceTable.schema || undefined,
+            sourceColumn: reference.toColumn,
+            targetColumn: targetColumn.name,
+            relationType: "foreignKey",
+            constraintName: reference.constraintName,
+            ordinalPosition: reference.ordinalPosition,
+          });
+        }
+      }
+      if (matches.length === 0 && isSameSchema) {
+        for (const sourceColumn of sourceTable.columns) {
+          for (const targetColumn of candidate.columns) {
+            if (
+              sourceColumn.normalizedName !== targetColumn.normalizedName ||
+              (!sourceColumn.isKey && !targetColumn.isKey)
+            ) {
+              continue;
+            }
+            matches.push({
+              sourceTable: sourceTable.name,
+              sourceSchema: sourceTable.schema || undefined,
+              sourceColumn: sourceColumn.name,
+              targetColumn: targetColumn.name,
+              relationType: "heuristic",
+            });
+          }
         }
       }
       if (matches.length === 0) {
@@ -1036,68 +1104,127 @@ async function getCachedJoinTableIndex(
   const key = `${connectionName.toUpperCase()}|${database.toUpperCase()}|${normalizedSchemas.join(",")}`;
   const cached = cacheForMetadata.get(key);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.tables;
+    if (cached.tables) return cached.tables;
+    if (cached.promise) return cached.promise;
   }
   cacheForMetadata.delete(key);
 
-  const tables = metadataCache.getObjectsByType(
-    connectionName,
-    database,
-    "TABLE",
-  )?.filter((table) => normalizedSchemas.includes(table.schema.toUpperCase())) ?? [];
-  const index: CachedJoinTable[] = [];
-  let nextTableIndex = 0;
-  const loadCachedColumns = async (): Promise<void> => {
-    while (nextTableIndex < tables.length) {
-      const table = tables[nextTableIndex];
-      nextTableIndex += 1;
-      const name = normalizeName(
-        table.item.OBJNAME || table.item.TABLENAME || extractLabel(table.item),
-      );
-      if (!name) continue;
-      let columns: ColumnMetadata[] | undefined;
-      try {
-        columns = await getCachedColumnsFromMetadataCacheAsync(
-          metadataCache,
-          connectionName,
-          database,
-          table.schema || undefined,
-          name,
-          databaseKind,
+  const pendingPromise = (async (): Promise<CachedJoinTable[]> => {
+      const allTables = metadataCache.getObjectsByType(
+        connectionName,
+        database,
+        "TABLE",
+      ) ?? [];
+
+      const loadTableColumns = async (
+        tables: typeof allTables,
+      ): Promise<CachedJoinTable[]> => {
+        const index: CachedJoinTable[] = [];
+        let nextTableIndex = 0;
+        const loadCachedColumns = async (): Promise<void> => {
+          while (nextTableIndex < tables.length) {
+            const table = tables[nextTableIndex];
+            nextTableIndex += 1;
+            const name = normalizeName(
+              table.item.OBJNAME || table.item.TABLENAME || extractLabel(table.item),
+            );
+            if (!name) continue;
+            let columns: ColumnMetadata[] | undefined;
+            try {
+              columns = await getCachedColumnsFromMetadataCacheAsync(
+                metadataCache,
+                connectionName,
+                database,
+                table.schema || undefined,
+                name,
+                databaseKind,
+              );
+            } catch {
+              continue;
+            }
+            if (!columns?.length) continue;
+            index.push({
+              name,
+              schema: table.schema,
+              item: table.item,
+              columns: columns.flatMap((column) => {
+                const normalizedName = normalizeRelatedColumnName(column.ATTNAME);
+                if (!normalizedName) return [];
+                return [{
+                  name: column.ATTNAME,
+                  normalizedName,
+                  isKey: getRelatedColumnRole({
+                    name: column.ATTNAME,
+                    isPk: column.isPk,
+                    isFk: column.isFk,
+                  }) !== "unknown",
+                  joinReferences: column.joinReferences,
+                }];
+              }),
+            });
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(8, tables.length) }, () => loadCachedColumns()),
         );
-      } catch {
-        continue;
+        return index;
+      };
+
+      const sourceTables = allTables.filter((table) =>
+        normalizedSchemas.includes(table.schema.toUpperCase()),
+      );
+      const sourceIndex = await loadTableColumns(sourceTables);
+      // Catalog FK metadata carries exact endpoint identities, so only those
+      // cross-schema target tables need to be added to the per-request index.
+      const referencedTargets = new Set<string>();
+      for (const table of sourceIndex) {
+        for (const column of table.columns) {
+          for (const reference of column.joinReferences ?? []) {
+            if (
+              reference.toSchema &&
+              reference.toTable &&
+              (!reference.toDatabase || reference.toDatabase.toUpperCase() === database.toUpperCase())
+            ) {
+              referencedTargets.add(
+                `${reference.toSchema.toUpperCase()}|${reference.toTable.toUpperCase()}`,
+              );
+            }
+          }
+        }
       }
-      if (!columns?.length) continue;
-      index.push({
-        name,
-        schema: table.schema,
-        item: table.item,
-        columns: columns.flatMap((column) => {
-          const normalizedName = normalizeRelatedColumnName(column.ATTNAME);
-          if (!normalizedName) return [];
-          return [{
-            name: column.ATTNAME,
-            normalizedName,
-            isKey: getRelatedColumnRole({
-              name: column.ATTNAME,
-              isPk: column.isPk,
-              isFk: column.isFk,
-            }) !== "unknown",
-          }];
-        }),
+      const indexedTables = new Set(sourceIndex.map((table) =>
+        `${table.schema.toUpperCase()}|${table.name.toUpperCase()}`,
+      ));
+      const referencedTables = allTables.filter((table) => {
+        const schema = table.schema.toUpperCase();
+        const name = normalizeName(
+          table.item.OBJNAME || table.item.TABLENAME || extractLabel(table.item),
+        );
+        if (!name) return false;
+        const key = `${schema}|${name.toUpperCase()}`;
+        return referencedTargets.has(key) && !indexedTables.has(key);
+      });
+      const referencedIndex = await loadTableColumns(referencedTables);
+      return [...sourceIndex, ...referencedIndex];
+    })();
+  const pendingEntry: CachedJoinTableIndexEntry = {
+    expiresAt: Date.now() + PENDING_JOIN_TABLE_INDEX_TTL_MS,
+    promise: pendingPromise,
+  };
+  cacheForMetadata.set(key, pendingEntry);
+  try {
+    const index = await pendingPromise;
+    if (cacheForMetadata.get(key) === pendingEntry) {
+      cacheForMetadata.set(key, {
+        tables: index,
+        expiresAt: Date.now() + CACHED_JOIN_TABLE_INDEX_TTL_MS,
       });
     }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(8, tables.length) }, () => loadCachedColumns()),
-  );
-
-  cacheForMetadata.set(key, {
-    tables: index,
-    expiresAt: Date.now() + CACHED_JOIN_TABLE_INDEX_TTL_MS,
-  });
-  return index;
+    return index;
+  } catch (error: unknown) {
+    if (cacheForMetadata.get(key) === pendingEntry) cacheForMetadata.delete(key);
+    throw error;
+  }
 }
 
 function clearCachedJoinTableIndexes(
@@ -1184,6 +1311,7 @@ function mapColumns(items: ColumnMetadata[]): MetadataColumnItem[] {
       description: normalizeName(rawDescription),
       isPk: item.isPk,
       isFk: item.isFk,
+      joinReferences: item.joinReferences,
     });
   }
   return result;

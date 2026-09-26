@@ -30,6 +30,10 @@ import { SqlQualityEngine } from '../../providers/sqlQualityEngine';
 import { SqlValidator } from '../../sqlParser/validator';
 import { InMemorySchemaProvider } from '../../sqlParser/schemaProvider';
 import { mssqlHarness, registerLiveIntegrationSuite } from './optionalDialectIntegrationHarness';
+import {
+	expectLiveForeignKeyCompletion,
+	requireForeignKeyRelationshipQuery,
+} from './liveForeignKeyCompletionHelper';
 
 registerLiveIntegrationSuite(mssqlHarness);
 
@@ -567,6 +571,49 @@ describeIfConfigured('mssql integration', () => {
 	});
 
 	describe('MSSQL live completion', () => {
+		it('completes an exact composite FK JOIN from live SQL Server catalog rows', async () => {
+			const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+			const parentTable = `jbl_join_parent_${suffix}`;
+			const childTable = `jbl_join_child_${suffix}`;
+			const parentName = buildQualifiedName(schemaName, parentTable);
+			const childName = buildQualifiedName(schemaName, childTable);
+			try {
+				await connection.createCommand(`
+					CREATE TABLE ${parentName} (
+						[tenant_key] INT NOT NULL,
+						[customer_key] INT NOT NULL,
+						CONSTRAINT ${quoteIdentifier(`jbl_join_pk_${suffix}`)} PRIMARY KEY ([tenant_key], [customer_key])
+					)
+				`).execute();
+				await connection.createCommand(`
+					CREATE TABLE ${childName} (
+						[tenant_id] INT NOT NULL,
+						[customer_id] INT NOT NULL,
+						CONSTRAINT ${quoteIdentifier(`jbl_join_fk_${suffix}`)} FOREIGN KEY ([tenant_id], [customer_id])
+							REFERENCES ${parentName} ([tenant_key], [customer_key])
+					)
+				`).execute();
+				const rows = await readRows(
+					connection,
+					requireForeignKeyRelationshipQuery(mssqlMetadataProvider.buildForeignKeyRelationshipsQuery!(config!.database, {
+						schema: schemaName,
+						tableName: childTable,
+					}), 'mssql'),
+				);
+				await expectLiveForeignKeyCompletion({
+					databaseKind: 'mssql',
+					database: config!.database,
+					schema: schemaName,
+					parentTable,
+					childTable,
+					rows,
+				});
+			} finally {
+				await tryExecute(connection, `DROP TABLE ${childName}`);
+				await tryExecute(connection, `DROP TABLE ${parentName}`);
+			}
+		}, 120000);
+
 		it('completes columns for an alias against live catalog metadata', async () => {
 			const provider = new LiveMsSqlCompletionMetadataProvider(
 				connection,

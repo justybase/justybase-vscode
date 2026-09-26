@@ -279,6 +279,21 @@ export function populateLargeCatalogColumnLayers(
     ]);
     cache.setColumns(connectionName, `${LARGE_DB}.${SCHEMA}.T0`, [
         COLUMN_ROW('ID', { isPk: true }),
+        COLUMN_ROW('FK_TARGET_ID', {
+            isFk: true,
+            joinReferences: [{
+                fromDatabase: LARGE_DB,
+                fromSchema: SCHEMA,
+                fromTable: 'T0',
+                fromColumn: 'FK_TARGET_ID',
+                toDatabase: LARGE_DB,
+                toSchema: SCHEMA,
+                toTable: 'TARGET',
+                toColumn: 'TARGET_ID',
+                constraintName: 'FK_T0_TARGET',
+                ordinalPosition: 1,
+            }],
+        }),
     ]);
 }
 

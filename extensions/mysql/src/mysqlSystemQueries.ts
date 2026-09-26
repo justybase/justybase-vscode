@@ -294,6 +294,28 @@ export function buildColumnsWithKeysQuery(database: string, schema?: string, tab
     return buildColumnsWithKeysBaseQuery(database, schema, tableName, objTypes);
 }
 
+export function buildForeignKeyRelationshipsQuery(database: string, schema?: string, tableName?: string): string {
+    const sourceSchema = normalizeOptionalName(schema) ?? normalizeOptionalName(database) ?? '';
+    return `
+        SELECT
+            kcu.TABLE_SCHEMA AS FROM_DATABASE,
+            kcu.TABLE_SCHEMA AS FROM_SCHEMA,
+            kcu.TABLE_NAME AS FROM_TABLE,
+            kcu.COLUMN_NAME AS FROM_COLUMN,
+            kcu.REFERENCED_TABLE_SCHEMA AS TO_DATABASE,
+            kcu.REFERENCED_TABLE_SCHEMA AS TO_SCHEMA,
+            kcu.REFERENCED_TABLE_NAME AS TO_TABLE,
+            kcu.REFERENCED_COLUMN_NAME AS TO_COLUMN,
+            kcu.CONSTRAINT_NAME AS CONSTRAINT_NAME,
+            kcu.ORDINAL_POSITION AS ORDINAL_POSITION
+        FROM information_schema.KEY_COLUMN_USAGE kcu
+        WHERE kcu.REFERENCED_TABLE_NAME IS NOT NULL
+          AND kcu.TABLE_SCHEMA = ${quoteLiteral(sourceSchema)}
+          ${tableName ? `AND kcu.TABLE_NAME = ${quoteLiteral(tableName)}` : ''}
+        ORDER BY kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
+    `;
+}
+
 export function buildTableColumnsQuery(database: string, schema: string, tableName: string): string {
     return buildColumnBaseQuery(database, schema, tableName);
 }

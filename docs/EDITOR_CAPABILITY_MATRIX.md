@@ -54,6 +54,22 @@ This document tracks the SQL editor surface from a user-facing perspective. It c
 | Quoted identifiers                                                                        | First-class with one grammar limit | Quoted schema/table paths, quoted aliases, and quoted projected columns are covered. Quoted CTE names are still grammar-limited and are not part of the supported surface yet. |
 | Procedure target paths                                                                    | First-class                        | `CALL`, `EXECUTE`, and `EXEC` target parsing now has direct helper-level coverage in addition to integration coverage.                                                         |
 
+## SQL Completion Scope
+
+| Completion area | Behavior | Metadata/cache requirement |
+| --- | --- | --- |
+| SQL words, built-ins, types, special values | Active dialect authoring profile; keyword candidates remain broad because they are not grammar-filtered. | None for static candidates. |
+| Object paths | `SELECT`/`INSERT` targets, DML/DDL targets, procedure targets, and dialect-specific database/schema/table paths. | Database/schema/table list in metadata cache. |
+| Tables and relation-like objects | `FROM` and `JOIN` candidates include tables, views, and dialect-defined source objects. | Refreshed object metadata. |
+| Columns | Scoped alias columns, partial qualified names, unqualified columns, wildcard expansion, and metadata-backed types/descriptions. | Cached columns; no catalog query while typing. |
+| Local SQL scope | Visible aliases, CTE outputs, nested scopes, and local/temporary definitions. | Parser-derived; CTE visibility follows the cursor scope. |
+| Name matching | Direct prefix first, then compact spelling, snake/camel word starts, delimited initials, and multi-character fragments. | No database access; fuzzy matches rank below direct matches. |
+| JOIN target items | Qualified target path, unique generated or configured alias, and exact `ON` predicate when an exact relation is known. | Workspace relation, cached declared FK pairs, or optional cached key/name heuristic. |
+| Empty `ON` clause | Composite predicates are inserted as one item; declared/configured pairs rank before heuristics. | Cached source columns and relationship metadata. |
+| Function snippets | Signature details, required `OVER`, and separate aggregate/window variants for functions marked window-capable. | Dialect authoring profile. |
+
+Workspace JOIN settings: `justybase.sql.joinRelations`, `justybase.sql.joinNameHeuristics`, `justybase.sql.autoJoinAliases`, and `justybase.sql.joinAliases`. Exact catalog FK adapters currently cover Netezza, Db2, MSSQL, MySQL, Oracle, PostgreSQL, and Vertica. All dialects can use explicit workspace relationships; heuristic matches are available where cached key/column metadata supports them. The detailed settings schema and manual checks are in [the SQL completion guide](guide/user/sql-completion-manual-verification/).
+
 ## Parser-Aware vs Hybrid vs Fallback Classification
 
 ### Fully Parser-Aware (First-Class)
@@ -104,11 +120,12 @@ Harness: `Benchmark/suggestBenchmark.test.ts`
 
 Scope: parser/context pipeline only. This measurement coverage excludes LSP transport overhead, metadata I/O, and VS Code rendering costs, so it should be treated as an internal regression floor rather than a full end-to-end request benchmark.
 
-The internal parser/context benchmark is within the current working budget. The repo still does not have a dedicated end-to-end LSP completion benchmark, so transport and metadata fetch overhead remain intentionally unreported in this document.
+`Benchmark/lspFeatureBenchmark.test.ts` measures end-to-end LSP engine completion, hover, inlay, and diagnostics. Completion now includes ordinary object completion and `JOIN ` for 200 and 1000 cached tables under cold and warm cache states. The report includes metadata reads per request and maximum read concurrency for those scenarios. Completion keeps the standard median ≤150 ms and p95 ≤300 ms limits.
 
 ## Current Follow-Through
 
 - Keep adding direct helper-level tests when a behavior is only covered through the large `completionEngine` integration suite.
+- Keep catalog relationship metadata in the refresh/cache lifecycle; completion must never run FK catalog queries while typing.
 - Hover routes through the LSP in production, with the local provider retained only for test-mode fallback coverage.
 - Signature help migrated to LSP; extension-host provider retained for test-mode fallback.
 - Code actions split: LSP handles SQL/PAR codes (parser diagnostics), extension host handles NZ/NZP codes (linter rules). Shared `buildSafeFixEdit` helper for deterministic rewrites.

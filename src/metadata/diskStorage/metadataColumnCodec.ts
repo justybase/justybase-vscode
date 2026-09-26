@@ -105,6 +105,9 @@ export function encodeColumnLayers(
             if (typeof col.documentation === 'string' && col.documentation.length > 0) {
                 record.doc = intern(docs, col.documentation);
             }
+            if (Array.isArray(col.joinReferences) && col.joinReferences.length > 0) {
+                record.references = col.joinReferences.map(reference => ({ ...reference }));
+            }
             encodedColumns.push(record);
         }
 
@@ -140,6 +143,9 @@ function decodeLayerColumnsV3(
         };
         if (encoded.doc !== undefined && file.docs[encoded.doc] !== undefined) {
             metadata.documentation = file.docs[encoded.doc];
+        }
+        if (encoded.references?.length) {
+            metadata.joinReferences = encoded.references.map(reference => ({ ...reference }));
         }
 
         return metadata;

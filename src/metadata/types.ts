@@ -103,6 +103,7 @@ export interface ColumnMetadata {
     isPk?: boolean;
     isFk?: boolean;
     isDistributionKey?: boolean;
+    joinReferences?: import('../contracts/database').DatabaseForeignKeyColumnReference[];
     [key: string]: unknown;
 }
 

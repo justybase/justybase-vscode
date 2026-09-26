@@ -1,8 +1,10 @@
 import { handleMetadataRequest } from '../activation/lspRegistration'
 import type { ConnectionManager } from '../core/connectionManager'
-import type { MetadataCache } from '../metadataCache'
+import * as vscode from 'vscode'
+import { MetadataCache } from '../metadataCache'
 import type { TableMetadata } from '../metadata/types'
 import type { MetadataProvider } from '../providers/providers/metadataProvider'
+import { DEFAULT_JOIN_COMPLETION_SETTINGS } from '../lsp/joinCompletionSettings'
 
 jest.mock('../utils/logger', () => ({
     getLogger: () => ({
@@ -95,7 +97,8 @@ describe('handleMetadataRequest view lookups', () => {
                 connectionName: 'CONN_1',
                 effectiveDatabase,
                 effectiveSchema,
-                databaseKind
+                databaseKind,
+                joinCompletionSettings: DEFAULT_JOIN_COMPLETION_SETTINGS,
             })
         }
     )
@@ -178,6 +181,174 @@ describe('handleMetadataRequest view lookups', () => {
             ]))
         }
     )
+})
+
+describe('handleMetadataRequest cache-backed JOIN targets', () => {
+    it('builds exact composite/different-name FK targets once for parallel cold requests', async () => {
+        const metadataCache = new MetadataCache({} as vscode.ExtensionContext)
+        metadataCache.setTables('CONN_1', 'DB1.PUBLIC', [
+            createTableMetadata('CUSTOMER', 'TABLE', 'PUBLIC'),
+            createTableMetadata('ORDERS', 'TABLE', 'PUBLIC'),
+        ], new Map())
+        metadataCache.setColumns('CONN_1', 'DB1.PUBLIC.CUSTOMER', [
+            { ATTNAME: 'TENANT_KEY', FORMAT_TYPE: 'INTEGER', isPk: true },
+            { ATTNAME: 'CUSTOMER_KEY', FORMAT_TYPE: 'INTEGER', isPk: true },
+        ])
+        metadataCache.setColumns('CONN_1', 'DB1.PUBLIC.ORDERS', [
+            {
+                ATTNAME: 'TENANT_ID',
+                FORMAT_TYPE: 'INTEGER',
+                isFk: true,
+                joinReferences: [{
+                    fromDatabase: 'DB1', fromSchema: 'PUBLIC', fromTable: 'ORDERS', fromColumn: 'TENANT_ID',
+                    toDatabase: 'DB1', toSchema: 'PUBLIC', toTable: 'CUSTOMER', toColumn: 'TENANT_KEY',
+                    constraintName: 'FK_ORDERS_CUSTOMER', ordinalPosition: 1,
+                }],
+            },
+            {
+                ATTNAME: 'CUSTOMER_ID',
+                FORMAT_TYPE: 'INTEGER',
+                isFk: true,
+                joinReferences: [{
+                    fromDatabase: 'DB1', fromSchema: 'PUBLIC', fromTable: 'ORDERS', fromColumn: 'CUSTOMER_ID',
+                    toDatabase: 'DB1', toSchema: 'PUBLIC', toTable: 'CUSTOMER', toColumn: 'CUSTOMER_KEY',
+                    constraintName: 'FK_ORDERS_CUSTOMER', ordinalPosition: 2,
+                }],
+            },
+        ])
+        const getObjectsSpy = jest.spyOn(metadataCache, 'getObjectsByType')
+        const getColumnsSpy = jest.spyOn(metadataCache, 'getColumns')
+        const request = () => handleMetadataRequest(
+            {
+                documentUri: 'file:///completion.sql',
+                kind: 'cachedJoinTargets',
+                joinSources: [{ schema: 'PUBLIC', table: 'CUSTOMER' }],
+            },
+            mockExtensionContext,
+            {} as MetadataProvider,
+            metadataCache,
+            createConnectionManager('postgresql', { effectiveDatabase: 'DB1', effectiveSchema: 'PUBLIC' }),
+        )
+
+        const [left, right] = await Promise.all([request(), request()])
+        for (const response of [left, right]) {
+            expect(response).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    name: 'ORDERS',
+                    joinMatches: expect.arrayContaining([
+                        expect.objectContaining({
+                            sourceTable: 'CUSTOMER',
+                            sourceColumn: 'TENANT_KEY',
+                            targetColumn: 'TENANT_ID',
+                            relationType: 'foreignKey',
+                            constraintName: 'FK_ORDERS_CUSTOMER',
+                        }),
+                        expect.objectContaining({
+                            sourceTable: 'CUSTOMER',
+                            sourceColumn: 'CUSTOMER_KEY',
+                            targetColumn: 'CUSTOMER_ID',
+                            relationType: 'foreignKey',
+                            ordinalPosition: 2,
+                        }),
+                    ]),
+                }),
+            ]))
+        }
+        expect(getObjectsSpy).toHaveBeenCalledTimes(1)
+        expect(getColumnsSpy).toHaveBeenCalledTimes(4)
+        await metadataCache.dispose()
+    })
+
+    it('includes exact FK targets in referenced schemas but keeps heuristics same-schema only', async () => {
+        const metadataCache = new MetadataCache({} as vscode.ExtensionContext)
+        metadataCache.setTables('CONN_1', 'DB1.SALES', [
+            createTableMetadata('ORDERS', 'TABLE', 'SALES'),
+        ], new Map())
+        metadataCache.setTables('CONN_1', 'DB1.CRM', [
+            createTableMetadata('CUSTOMER', 'TABLE', 'CRM'),
+            createTableMetadata('CUSTOMER_ARCHIVE', 'TABLE', 'CRM'),
+        ], new Map())
+        metadataCache.setColumns('CONN_1', 'DB1.SALES.ORDERS', [
+            { ATTNAME: 'CUSTOMER_REF', FORMAT_TYPE: 'INTEGER', isFk: true, joinReferences: [{
+                fromDatabase: 'DB1', fromSchema: 'SALES', fromTable: 'ORDERS', fromColumn: 'CUSTOMER_REF',
+                toDatabase: 'DB1', toSchema: 'CRM', toTable: 'CUSTOMER', toColumn: 'ID',
+                constraintName: 'FK_ORDERS_CUSTOMER', ordinalPosition: 1,
+            }] },
+        ])
+        metadataCache.setColumns('CONN_1', 'DB1.CRM.CUSTOMER', [
+            { ATTNAME: 'ID', FORMAT_TYPE: 'INTEGER', isPk: true },
+        ])
+        metadataCache.setColumns('CONN_1', 'DB1.CRM.CUSTOMER_ARCHIVE', [
+            { ATTNAME: 'CUSTOMER_REF', FORMAT_TYPE: 'INTEGER', isPk: true },
+        ])
+
+        const response = await handleMetadataRequest(
+            {
+                documentUri: 'file:///completion.sql',
+                kind: 'cachedJoinTargets',
+                joinSources: [{ schema: 'SALES', table: 'ORDERS' }],
+            },
+            mockExtensionContext,
+            {} as MetadataProvider,
+            metadataCache,
+            createConnectionManager('postgresql', { effectiveDatabase: 'DB1', effectiveSchema: 'SALES' }),
+        )
+
+        expect(response).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                name: 'CUSTOMER',
+                schema: 'CRM',
+                joinMatches: expect.arrayContaining([
+                    expect.objectContaining({
+                        sourceTable: 'ORDERS',
+                        sourceColumn: 'CUSTOMER_REF',
+                        targetColumn: 'ID',
+                        relationType: 'foreignKey',
+                        constraintName: 'FK_ORDERS_CUSTOMER',
+                    }),
+                ]),
+            }),
+        ]))
+        expect(response).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'CUSTOMER_ARCHIVE', schema: 'CRM' }),
+        ]))
+        await metadataCache.dispose()
+    })
+
+    it('reads updated workspace JOIN settings for each context request', async () => {
+        const getConfiguration = vscode.workspace.getConfiguration as jest.Mock
+        getConfiguration.mockReturnValueOnce({
+            toJSON: () => ({
+                joinNameHeuristics: false,
+                autoJoinAliases: false,
+                joinRelations: [{
+                    left: { table: 'CUSTOMER' },
+                    right: { table: 'ORDERS' },
+                    columns: [{ left: 'ID', right: 'CUSTOMER_ID' }],
+                }],
+            }),
+        })
+        const response = await handleMetadataRequest(
+            { documentUri: 'file:///completion.sql', kind: 'context' },
+            mockExtensionContext,
+            {} as MetadataProvider,
+            {} as MetadataCache,
+            createConnectionManager('postgresql', { effectiveDatabase: 'DB1', effectiveSchema: 'PUBLIC' }),
+        )
+
+        expect(response).toEqual(expect.objectContaining({
+            joinCompletionSettings: {
+                nameHeuristicsEnabled: false,
+                autoAliases: false,
+                aliases: [],
+                relations: [{
+                    left: { table: 'CUSTOMER' },
+                    right: { table: 'ORDERS' },
+                    columns: [{ left: 'ID', right: 'CUSTOMER_ID' }],
+                }],
+            },
+        }))
+    })
 })
 
 describe('handleMetadataRequest cachedTableInfo', () => {

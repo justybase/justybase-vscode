@@ -135,7 +135,17 @@ describe('MetadataCache disk restart integration', () => {
             `${LARGE_DB}.${SCHEMA}.T0`,
         );
         expect(restarted.getColumns(RESTART_CONN, `${LARGE_DB}.${SCHEMA}.T0`)).toEqual(
-            expect.arrayContaining([expect.objectContaining({ ATTNAME: 'ID' })]),
+            expect.arrayContaining([
+                expect.objectContaining({ ATTNAME: 'ID' }),
+                expect.objectContaining({
+                    ATTNAME: 'FK_TARGET_ID',
+                    joinReferences: [expect.objectContaining({
+                        toTable: 'TARGET',
+                        toColumn: 'TARGET_ID',
+                        constraintName: 'FK_T0_TARGET',
+                    })],
+                }),
+            ]),
         );
         expect(countColumnLayersInRam(restarted, RESTART_CONN, LARGE_DB)).toBe(2);
         expect(isDatabaseColumnsFullyLoaded(restarted, RESTART_CONN, LARGE_DB)).toBe(false);
@@ -351,7 +361,7 @@ describe('SchemaProvider.getChildren after disk restart', () => {
             createTableSchemaItem('T0', LARGE_DB, SCHEMA, RESTART_CONN, 1),
         );
 
-        expect(t0Children.map((child) => child.label)).toEqual(['ID']);
+        expect(t0Children.map((child) => child.label)).toEqual(['ID', 'FK_TARGET_ID']);
         expect(countColumnLayersInRam(restarted, RESTART_CONN, LARGE_DB)).toBe(2);
         expect(isDatabaseColumnsFullyLoaded(restarted, RESTART_CONN, LARGE_DB)).toBe(false);
         expect(runQueryRawMock).not.toHaveBeenCalled();

@@ -8,7 +8,7 @@ For an editor-facing status board with the current Phase 2 completion baseline, 
 | --- | --- | --- | --- | --- | --- |
 | Diagnostics (SQL/PAR) | LSP | `src/server/main.ts`, `src/sqlParser/validator.ts` | Working | Native | Parser diagnostics publish from the language server only when the client is running. |
 | Diagnostics (NZ/NZP) | Extension host | `src/providers/sqlLinterProvider.ts`, `src/providers/sqlQualityEngine.ts` | Working | Native | Extension linter runs quality rules only when LSP is active; full parser+quality fallback when LSP is off. |
-| Completion | LSP | `src/server/main.ts`, `src/server/completionEngine.ts` | Working | Native + Heuristic | Parser-based scope with explicit `sortText` ranking; context selection still mixes parser-native and best-effort paths. |
+| Completion | LSP | `src/server/main.ts`, `src/server/completionEngine.ts` | Working | Parser + metadata + heuristic | Parser-based scopes, alias/CTE/local definitions, dialect paths and snippets; cache-backed exact/configured JOIN relationships rank before optional key/name heuristics; fuzzy identifier matching. |
 | Hover | LSP | `src/server/main.ts`, `src/providers/parserHoverProvider.ts` | Working | Native | Production hover now routes through the language server; the extension-host provider remains test-only as a local fallback. |
 | Go to Definition | LSP | `src/server/main.ts` | Working | Native | Symbol resolution uses parser-backed rename-symbol logic. |
 | References | LSP | `src/server/main.ts`, `src/sqlParser/symbols.ts` | Working | Native | Parser-backed symbol collection. Extension-host fallback for test mode only. |
@@ -75,10 +75,12 @@ The benchmark includes an XLarge incremental-edit scenario and reports `validate
 
 - NZ/NZP linter code actions remain extension-host only (SQL/PAR fixes are already on LSP).
 - Refactor code actions remain extension-host only.
-- Completion ranking has deterministic `sortText` priorities but still lacks richer metadata relevance scoring.
+- Completion ranking has deterministic context tiers and identifier matching, but does not yet score candidates by usage frequency or recent history.
 - Full-document XLarge diagnostics median (~580 ms) is within budget but tight; incremental validation path is the preferred hot-edit route.
 
 ## Metadata & Completion Ranking Status
+
+JOIN completion uses workspace `justybase.sql.joinRelations`, cached declared FK column mappings, and optional name/key heuristics. Generated aliases can be disabled or overridden with `justybase.sql.autoJoinAliases` and `justybase.sql.joinAliases`. Exact catalog relationship queries run only during metadata refresh for Netezza, Db2, MSSQL, MySQL, Oracle, PostgreSQL, and Vertica. Completion reads the in-memory/disk cache and does not query catalogs while typing. `justybase.sql.joinNameHeuristics` controls only the lower-priority fallback.
 
 | Item type | Current ranking | Sort mechanism | Quality |
 | --- | --- | --- | --- |
@@ -97,6 +99,7 @@ The benchmark includes an XLarge incremental-edit scenario and reports `validate
 
 - Parser/context regression harness: `Benchmark/suggestBenchmark.test.ts`.
 - End-to-end LSP engine latency (completion, hover, inlay, diagnostics validator): `Benchmark/lspFeatureBenchmark.test.ts` (results written locally to `Benchmark/lspFeature.results.md`, gitignored).
+- Completion includes ordinary and JOIN cold/warm cache scenarios at 200 and 1000 tables; rows report metadata reads and maximum parallel read count and use the standard 150 ms median / 300 ms p95 completion budget.
 - CI enforces Medium/Large budgets when `LSP_BENCHMARK_ENFORCE=1`; full-document XLarge diagnostics keep a separate tier, while the incremental XLarge edit scenario uses the standard diagnostics budget.
 - Benchmark harness sources live under `Benchmark/`; generated timing artifacts (`*.results.md`) are never committed.
 

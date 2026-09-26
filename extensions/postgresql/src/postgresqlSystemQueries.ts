@@ -427,6 +427,42 @@ export function buildColumnsWithKeysQuery(
     `;
 }
 
+export function buildForeignKeyRelationshipsQuery(
+    _database: string,
+    schema?: string,
+    tableName?: string,
+): string {
+    return `
+        SELECT
+            current_database() AS "FROM_DATABASE",
+            source_ns.nspname AS "FROM_SCHEMA",
+            source_table.relname AS "FROM_TABLE",
+            source_column.attname AS "FROM_COLUMN",
+            current_database() AS "TO_DATABASE",
+            target_ns.nspname AS "TO_SCHEMA",
+            target_table.relname AS "TO_TABLE",
+            target_column.attname AS "TO_COLUMN",
+            fk.conname AS "CONSTRAINT_NAME",
+            source_key.ordinality AS "ORDINAL_POSITION"
+        FROM pg_catalog.pg_constraint fk
+        INNER JOIN pg_catalog.pg_class source_table ON source_table.oid = fk.conrelid
+        INNER JOIN pg_catalog.pg_namespace source_ns ON source_ns.oid = source_table.relnamespace
+        INNER JOIN pg_catalog.pg_class target_table ON target_table.oid = fk.confrelid
+        INNER JOIN pg_catalog.pg_namespace target_ns ON target_ns.oid = target_table.relnamespace
+        INNER JOIN LATERAL unnest(fk.conkey) WITH ORDINALITY source_key(attnum, ordinality) ON TRUE
+        INNER JOIN LATERAL unnest(fk.confkey) WITH ORDINALITY target_key(attnum, ordinality)
+            ON target_key.ordinality = source_key.ordinality
+        INNER JOIN pg_catalog.pg_attribute source_column
+            ON source_column.attrelid = source_table.oid AND source_column.attnum = source_key.attnum
+        INNER JOIN pg_catalog.pg_attribute target_column
+            ON target_column.attrelid = target_table.oid AND target_column.attnum = target_key.attnum
+        WHERE fk.contype = 'f'
+          ${buildSchemaPredicate('source_ns.nspname', schema)}
+          ${buildNamePredicate('source_table.relname', tableName)}
+        ORDER BY source_ns.nspname, source_table.relname, fk.conname, source_key.ordinality
+    `;
+}
+
 export function buildTableColumnsQuery(_database: string, schema: string, tableName: string): string {
     return `
         SELECT

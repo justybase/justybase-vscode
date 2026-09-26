@@ -2,6 +2,7 @@ import type { Position } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
 import type { DatabaseKind } from "../contracts/database";
+import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
 import { normalizeDialectQuotedIdentifiers } from "./completionDialectAdapter";
 import { CompletionContextExtractor } from "./completionContextExtractor";
 import { mergeLocalDefinitions } from "./completionLocalDefinitionUtils";
@@ -82,6 +83,7 @@ export class CompletionRequestContextBuilder {
       effectiveDb,
       effectiveSchema,
       netezzaSchemasEnabled,
+      joinCompletionSettings: context.joinCompletionSettings ?? DEFAULT_JOIN_COMPLETION_SETTINGS,
       linePrefix,
       prevLine,
       cursorOffset,

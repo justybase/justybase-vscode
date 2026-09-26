@@ -80,9 +80,41 @@ interface BenchmarkResultRow {
   p95Ms: number;
   parseCalls?: number;
   validatedStatements?: number;
+  metadataReads?: number;
+  maxReadConcurrency?: number;
 }
 
 class BenchmarkMetadataProvider implements CompletionMetadataProvider {
+  private tableCount = 200;
+  private tableCache?: MetadataObjectItem[];
+  private joinTargetCache?: MetadataObjectItem[];
+  private activeReads = 0;
+  metadataReads = 0;
+  maxReadConcurrency = 0;
+
+  resetScenario(tableCount = this.tableCount, clearJoinIndex = true): void {
+    this.tableCount = tableCount;
+    this.tableCache = undefined;
+    if (clearJoinIndex) this.joinTargetCache = undefined;
+  }
+
+  resetReadMetrics(): void {
+    this.metadataReads = 0;
+    this.maxReadConcurrency = 0;
+  }
+
+  private async trackedRead<T>(action: () => T): Promise<T> {
+    this.activeReads += 1;
+    this.maxReadConcurrency = Math.max(this.maxReadConcurrency, this.activeReads);
+    this.metadataReads += 1;
+    try {
+      await Promise.resolve();
+      return action();
+    } finally {
+      this.activeReads -= 1;
+    }
+  }
+
   readonly getContext = async () => ({
     effectiveDatabase: "JUST_DATA",
     effectiveSchema: "ADMIN",
@@ -97,11 +129,17 @@ class BenchmarkMetadataProvider implements CompletionMetadataProvider {
     { name: "ADMIN", detail: "Schema" },
   ];
 
-  readonly getTables = async (): Promise<MetadataObjectItem[]> =>
-    Array.from({ length: 200 }, (_, index) => ({
-      name: `TABLE_${index}`,
-      detail: "Table",
-    }));
+  readonly getTables = async (): Promise<MetadataObjectItem[]> => {
+    if (!this.tableCache) {
+      this.tableCache = await this.trackedRead(() =>
+        Array.from({ length: this.tableCount }, (_, index) => ({
+          name: `TABLE_${index}`,
+          detail: "Table",
+        })),
+      );
+    }
+    return this.tableCache;
+  };
 
   readonly getViews = async (): Promise<MetadataObjectItem[]> => [];
 
@@ -116,6 +154,43 @@ class BenchmarkMetadataProvider implements CompletionMetadataProvider {
       name: `COL_${index}`,
       type: "INTEGER",
     }));
+
+  readonly getCachedJoinTargets = async (
+    _documentUri: string,
+    _database: string,
+    sources: Array<{ schema?: string; table: string }>,
+  ): Promise<MetadataObjectItem[]> => {
+    if (!this.joinTargetCache) {
+      const targets: MetadataObjectItem[] = [];
+      let nextTable = 1;
+      const load = async (): Promise<void> => {
+        while (nextTable < this.tableCount) {
+          const index = nextTable;
+          nextTable += 1;
+          const item = await this.trackedRead(() => ({
+            name: `TABLE_${index}`,
+            database: "JUST_DATA",
+            schema: "ADMIN",
+            objectType: "table" as const,
+            joinMatches: [{
+              sourceTable: "TABLE_0",
+              sourceSchema: "ADMIN",
+              sourceColumn: "ID",
+              targetColumn: `TABLE_${index}_ID`,
+              relationType: "heuristic" as const,
+            }],
+          }));
+          targets.push(item);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(8, this.tableCount) }, () => load()));
+      this.joinTargetCache = targets;
+    }
+    const sourceTables = new Set(sources.map((source) => source.table.toUpperCase()));
+    return this.joinTargetCache.filter((target) =>
+      target.joinMatches?.some((match) => sourceTables.has(match.sourceTable.toUpperCase())),
+    );
+  };
 
   readonly getTableInfo = async () => null;
 
@@ -140,6 +215,53 @@ async function benchmarkAsync(
   return {
     medianMs: times[Math.floor(times.length / 2)] ?? 0,
     p95Ms: times[Math.floor(times.length * 0.95)] ?? 0,
+  };
+}
+
+async function benchmarkColdCompletionAsync(
+  metadata: BenchmarkMetadataProvider,
+  reset: () => void,
+  fn: () => Promise<void>,
+): Promise<{ medianMs: number; p95Ms: number; metadataReads: number; maxReadConcurrency: number }> {
+  const times: number[] = [];
+  let totalReads = 0;
+  let maxReadConcurrency = 0;
+  for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
+    reset();
+    metadata.resetReadMetrics();
+    const start = performance.now();
+    await fn();
+    times.push(performance.now() - start);
+    totalReads += metadata.metadataReads;
+    maxReadConcurrency = Math.max(maxReadConcurrency, metadata.maxReadConcurrency);
+  }
+  times.sort((a, b) => a - b);
+  return {
+    medianMs: times[Math.floor(times.length / 2)] ?? 0,
+    p95Ms: times[Math.floor(times.length * 0.95)] ?? 0,
+    metadataReads: totalReads / ITERATIONS,
+    maxReadConcurrency,
+  };
+}
+
+async function benchmarkWarmCompletionAsync(
+  metadata: BenchmarkMetadataProvider,
+  fn: () => Promise<void>,
+): Promise<{ medianMs: number; p95Ms: number; metadataReads: number; maxReadConcurrency: number }> {
+  for (let iteration = 0; iteration < WARMUP; iteration += 1) await fn();
+  metadata.resetReadMetrics();
+  const times: number[] = [];
+  for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
+    const start = performance.now();
+    await fn();
+    times.push(performance.now() - start);
+  }
+  times.sort((a, b) => a - b);
+  return {
+    medianMs: times[Math.floor(times.length / 2)] ?? 0,
+    p95Ms: times[Math.floor(times.length * 0.95)] ?? 0,
+    metadataReads: metadata.metadataReads / ITERATIONS,
+    maxReadConcurrency: metadata.maxReadConcurrency,
   };
 }
 
@@ -456,6 +578,48 @@ describe("LSP Feature Performance Benchmark", () => {
     });
   }
 
+  for (const tableCount of [200, 1000]) {
+    for (const context of ["ordinary", "join"] as const) {
+      const sql = context === "ordinary"
+        ? "SELECT * FROM "
+        : "SELECT * FROM TABLE_0 T JOIN ";
+      const textDocument = TextDocument.create(
+        `benchmark://completion-${context}-${tableCount}.sql`,
+        "sql",
+        1,
+        sql,
+      );
+      const position = Position.create(0, sql.length);
+      const coldLabel = `completion ${context} ${tableCount} tables cold-cache`;
+      const warmLabel = `completion ${context} ${tableCount} tables warm-cache`;
+      const complete = async (): Promise<void> => {
+        await completionEngine.provideCompletionItems(
+          textDocument,
+          position,
+          context === "join"
+            ? CompletionTriggerKind.TriggerCharacter
+            : CompletionTriggerKind.Invoked,
+        );
+      };
+
+      it(coldLabel, async () => {
+        const timing = await benchmarkColdCompletionAsync(
+          metadata,
+          () => metadata.resetScenario(tableCount),
+          complete,
+        );
+        results.push({ stage: "completion", doc: `${context}-${tableCount}-cold`, ...timing });
+        enforceBudget("completion", `${context}-${tableCount}-cold`, timing);
+      });
+
+      it(warmLabel, async () => {
+        const timing = await benchmarkWarmCompletionAsync(metadata, complete);
+        results.push({ stage: "completion", doc: `${context}-${tableCount}-warm`, ...timing });
+        enforceBudget("completion", `${context}-${tableCount}-warm`, timing);
+      });
+    }
+  }
+
   it("incremental diagnostics edit XLarge (3000 lines)", async () => {
     const xlargeDoc = docs.find((doc) => doc.name.includes("3000"));
     if (!xlargeDoc) {
@@ -590,11 +754,11 @@ describe("LSP Feature Performance Benchmark", () => {
       "",
       `Commit: ${commit}`,
       "",
-      "| Stage | Document | Median (ms) | P95 (ms) | Parse calls | Validated statements |",
-      "| --- | --- | ---: | ---: | ---: | ---: |",
+      "| Stage | Document | Median (ms) | P95 (ms) | Parse calls | Validated statements | Metadata reads/request | Max read concurrency |",
+      "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
       ...results.map(
         (row) =>
-          `| ${row.stage} | ${row.doc} | ${row.medianMs.toFixed(2)} | ${row.p95Ms.toFixed(2)} | ${row.parseCalls ?? "—"} | ${row.validatedStatements ?? "—"} |`,
+          `| ${row.stage} | ${row.doc} | ${row.medianMs.toFixed(2)} | ${row.p95Ms.toFixed(2)} | ${row.parseCalls ?? "—"} | ${row.validatedStatements ?? "—"} | ${row.metadataReads === undefined ? "—" : row.metadataReads.toFixed(1)} | ${row.maxReadConcurrency ?? "—"} |`,
       ),
       "",
       "## Baseline",
@@ -611,6 +775,7 @@ describe("LSP Feature Performance Benchmark", () => {
       "## Budgets",
       "",
       `- completion median ≤ ${BUDGETS_MS.completionMedian}ms, p95 ≤ ${BUDGETS_MS.completionP95}ms`,
+      `- ordinary and JOIN completion for 200/1000 tables records cold/warm-cache latency and metadata-read concurrency under the same completion budgets`,
       `- hover median ≤ ${BUDGETS_MS.hoverMedian}ms, p95 ≤ ${BUDGETS_MS.hoverP95}ms`,
       `- definition median ≤ ${BUDGETS_MS.definitionMedian}ms, p95 ≤ ${BUDGETS_MS.definitionP95}ms`,
       `- references median ≤ ${BUDGETS_MS.referencesMedian}ms, p95 ≤ ${BUDGETS_MS.referencesP95}ms`,

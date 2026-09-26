@@ -21,6 +21,8 @@ import { DocumentParseSession } from "../sqlParser/documentParseSession";
 import * as parsingRuntime from "../sqlParser/parsingRuntime";
 import type { DatabaseKind } from "../contracts/database";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
+import type { JoinCompletionSettings } from "../lsp/protocol";
+import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
 import { db2Dialect } from "../../extensions/db2/src/db2Dialect";
 import { mssqlDialect } from "../../extensions/mssql/src/mssqlDialect";
 import { postgresqlDialect } from "../../extensions/postgresql/src/postgresqlDialect";
@@ -35,6 +37,7 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
   public effectiveSchema: string | undefined = undefined;
   public netezzaSchemasEnabled: boolean | undefined = undefined;
   public databaseKind: DatabaseKind = "netezza";
+  public joinCompletionSettings: JoinCompletionSettings = DEFAULT_JOIN_COMPLETION_SETTINGS;
 
   private readonly databases = ["BAZA", "JUST_DATA"];
   private readonly schemasByDb = new Map<string, string[]>();
@@ -43,12 +46,14 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
   private readonly proceduresByDbSchema = new Map<string, string[]>();
   private readonly columnsByTable = new Map<string, string[]>();
   private readonly relationColumnsByTable = new Map<string, MetadataColumnItem[]>();
+  private joinTargets: MetadataObjectItem[] = [];
 
   readonly getContext = jest.fn(async (_documentUri: string) => ({
     effectiveDatabase: this.effectiveDatabase,
     effectiveSchema: this.effectiveSchema,
     databaseKind: this.databaseKind,
     netezzaSchemasEnabled: this.netezzaSchemasEnabled,
+    joinCompletionSettings: this.joinCompletionSettings,
   }));
 
   readonly getDatabases = jest.fn(
@@ -138,6 +143,13 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
     },
   );
 
+  readonly getCachedJoinTargets = jest.fn(async (): Promise<MetadataObjectItem[]> =>
+    this.joinTargets.map((target) => ({
+      ...target,
+      joinMatches: target.joinMatches?.map((match) => ({ ...match })),
+    })),
+  );
+
   readonly getNetezzaDefaultSchema = jest.fn(
     async (_documentUri: string, database: string): Promise<string | undefined> => {
       return this.defaultSchemaByDatabase.get(this.normalize(database));
@@ -168,6 +180,10 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
     schema?: string,
   ): void {
     this.relationColumnsByTable.set(this.columnKey(database, table, schema), columns.map((column) => ({ ...column })));
+  }
+
+  public setCachedJoinTargets(targets: MetadataObjectItem[]): void {
+    this.joinTargets = targets.map((target) => ({ ...target }));
   }
 
   public setDefaultSchema(database: string, schema: string): void {
@@ -2852,10 +2868,216 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       const items = await complete("SELECT * FROM BAZA..USERS U JOIN BAZA..ORDERS O ON |");
       const joinItem = items.find((item) => item.detail === "Join condition (key match)");
 
-      expect(joinItem).toBeDefined();
-      expect(String(joinItem?.insertText)).toContain("PK_USER_ID");
-      expect(String(joinItem?.insertText)).toContain("FK_USER_ID");
-      expect(String(joinItem?.sortText)).toMatch(/^0_/);
+      expect(joinItem).toBeUndefined();
+      const cachedKeyItem = items.find((item) => item.detail === "Join condition (cached key/name match)");
+      expect(cachedKeyItem).toBeDefined();
+      expect(String(cachedKeyItem?.insertText)).toContain("PK_USER_ID");
+      expect(String(cachedKeyItem?.insertText)).toContain("FK_USER_ID");
+      expect(String(cachedKeyItem?.sortText)).toMatch(/^1_/);
+    });
+
+    it("suggests cache-backed related targets in non-Netezza dialects", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [{
+          sourceTable: "users",
+          sourceSchema: "public",
+          sourceColumn: "owner_id",
+          targetColumn: "id",
+        }],
+      }]);
+
+      const items = await complete(
+        "SELECT * FROM users u JOIN |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(metadataProvider.getCachedJoinTargets).toHaveBeenCalled();
+      expect(items.map((item) => item.label)).toContain(
+        "public.orders O ON u.owner_id = O.id",
+      );
+    });
+
+    it("ranks declared FK targets above cached name heuristics", async () => {
+      metadataProvider.setCachedJoinTargets([
+        {
+          name: "orders",
+          database: "BAZA",
+          schema: "public",
+          joinMatches: [{
+            sourceTable: "users", sourceSchema: "public", sourceColumn: "owner_id", targetColumn: "user_key",
+            relationType: "foreignKey", constraintName: "fk_orders_users", ordinalPosition: 1,
+          }],
+        },
+        {
+          name: "usage",
+          database: "BAZA",
+          schema: "public",
+          joinMatches: [{
+            sourceTable: "users", sourceSchema: "public", sourceColumn: "id", targetColumn: "user_id",
+            relationType: "heuristic",
+          }],
+        },
+      ]);
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+
+      const items = await complete("SELECT * FROM users u JOIN |", CompletionTriggerKind.TriggerCharacter);
+      expect(items.find((item) => item.label.startsWith("public.orders"))?.sortText).toMatch(/^0_/);
+      expect(items.find((item) => item.label.startsWith("public.usage"))?.sortText).toMatch(/^2_/);
+      expect(items.find((item) => item.label.startsWith("public.orders"))?.detail).toBe("JOIN with declared foreign key");
+    });
+
+    it("orders composite FK JOIN predicates by constraint ordinal", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [
+          {
+            sourceTable: "users", sourceSchema: "public", sourceColumn: "customer_key", targetColumn: "customer_id",
+            relationType: "foreignKey", constraintName: "fk_orders_users", ordinalPosition: 2,
+          },
+          {
+            sourceTable: "users", sourceSchema: "public", sourceColumn: "tenant_key", targetColumn: "tenant_id",
+            relationType: "foreignKey", constraintName: "fk_orders_users", ordinalPosition: 1,
+          },
+        ],
+      }]);
+
+      const items = await complete(
+        "SELECT * FROM users u JOIN |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(items.find((item) => item.detail === "JOIN with declared foreign key")?.insertText)
+        .toContain("u.tenant_key = O.tenant_id AND u.customer_key = O.customer_id");
+    });
+
+    it("suggests exact composite FK predicates before optional heuristics", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setRelationColumns("BAZA", "ORDERS", [
+        { name: "TENANT_ID", joinReferences: [{ fromDatabase: "BAZA", fromSchema: "public", fromTable: "orders", fromColumn: "TENANT_ID", toDatabase: "BAZA", toSchema: "public", toTable: "customers", toColumn: "TENANT_KEY", constraintName: "fk_order_customer", ordinalPosition: 1 }] },
+        { name: "CUSTOMER_ID", joinReferences: [{ fromDatabase: "BAZA", fromSchema: "public", fromTable: "orders", fromColumn: "CUSTOMER_ID", toDatabase: "BAZA", toSchema: "public", toTable: "customers", toColumn: "CUSTOMER_KEY", constraintName: "fk_order_customer", ordinalPosition: 2 }] },
+      ], "public");
+      metadataProvider.setRelationColumns("BAZA", "CUSTOMERS", [
+        { name: "TENANT_KEY" },
+        { name: "CUSTOMER_KEY" },
+      ], "public");
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        nameHeuristicsEnabled: false,
+      };
+
+      const items = await complete(
+        "SELECT * FROM orders o JOIN customers c ON |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+      expect(items.map((item) => `${item.detail}: ${String(item.insertText)}`)).toContain(
+        'Join condition (declared foreign key): o."TENANT_ID" = c."TENANT_KEY" AND o."CUSTOMER_ID" = c."CUSTOMER_KEY"',
+      );
+    });
+
+    it("suggests configured composite relations with differing column names", async () => {
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        relations: [{
+          left: { database: "BAZA", schema: "ADMIN", table: "USERS" },
+          right: { database: "BAZA", schema: "ADMIN", table: "ORDERS" },
+          columns: [
+            { left: "TENANT_KEY", right: "TENANT_ID" },
+            { left: "USER_KEY", right: "OWNER_ID" },
+          ],
+        }],
+      };
+
+      const items = await complete(
+        "SELECT * FROM BAZA.ADMIN.USERS U JOIN |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      const suggestion = items.find((item) => item.detail === "JOIN with configured relationship");
+      expect(suggestion?.label).toContain("BAZA.ADMIN.ORDERS O ON ");
+      expect(suggestion?.insertText).toContain("U.TENANT_KEY = O.TENANT_ID AND U.USER_KEY = O.OWNER_ID");
+      expect(items[0]?.sortText).toMatch(/^0_/);
+    });
+
+    it("suggests configured composite predicates after an empty ON", async () => {
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        relations: [{
+          left: { database: "BAZA", schema: "ADMIN", table: "USERS" },
+          right: { database: "BAZA", schema: "ADMIN", table: "ORDERS" },
+          columns: [
+            { left: "USER_KEY", right: "OWNER_ID" },
+            { left: "TENANT_KEY", right: "TENANT_ID" },
+          ],
+        }],
+      };
+
+      const items = await complete(
+        "SELECT * FROM BAZA.ADMIN.USERS U JOIN BAZA.ADMIN.ORDERS O ON |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(items.some((item) =>
+        item.detail === "Join condition (configured relationship)"
+        && item.insertText === "U.USER_KEY = O.OWNER_ID AND U.TENANT_KEY = O.TENANT_ID",
+      )).toBe(true);
+    });
+
+    it("uses configured aliases and suffixes collisions", async () => {
+      metadataProvider.setCachedJoinTargets([
+        {
+          name: "ORDERS",
+          database: "BAZA",
+          joinMatches: [{ sourceTable: "USERS", sourceColumn: "ID", targetColumn: "ID" }],
+        },
+        {
+          name: "OUTLETS",
+          database: "BAZA",
+          joinMatches: [{ sourceTable: "USERS", sourceColumn: "ID", targetColumn: "ID" }],
+        },
+      ]);
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        aliases: [{ table: { database: "BAZA", table: "ORDERS" }, alias: "SALE" }],
+      };
+
+      const items = await complete(
+        "SELECT * FROM BAZA..USERS SALE JOIN |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(items.some((item) => item.label.includes("ORDERS SALE2 ON"))).toBe(true);
+      expect(items.some((item) => item.label.includes("OUTLETS O ON"))).toBe(true);
+    });
+
+    it("disables cached name/key heuristics while retaining configured relationships", async () => {
+      metadataProvider.setCachedJoinTargets([{
+        name: "ORDERS",
+        database: "BAZA",
+        joinMatches: [{ sourceTable: "USERS", sourceColumn: "ID", targetColumn: "ID" }],
+      }]);
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        nameHeuristicsEnabled: false,
+      };
+
+      const items = await complete(
+        "SELECT * FROM BAZA..USERS U JOIN |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+
+      expect(items).toEqual([]);
+      expect(metadataProvider.getCachedJoinTargets).toHaveBeenCalled();
     });
   });
 

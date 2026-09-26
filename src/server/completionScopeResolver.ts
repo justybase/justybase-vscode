@@ -10,7 +10,6 @@ import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type { MetadataColumnItem } from "../lsp/protocol";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
 import {
-  createNetezzaCatalogIdentifier,
   createNetezzaUserIdentifier,
   formatNetezzaIdentifier,
 } from "../dialects/netezza/metadata/identifierUtils";
@@ -44,6 +43,11 @@ import {
   toScopedColumnItems,
 } from "./completionRenderer";
 import {
+  formatJoinTargetPath,
+  getJoinAliasBase,
+  matchesJoinTableIdentity,
+} from "./completionJoinRelationUtils";
+import {
   findJoinColumnMatches,
   normalizeJoinColumnName,
 } from "./completionJoinConditions";
@@ -51,6 +55,7 @@ import { parseQualifierPathToSource } from "./completionQualifierUtils";
 import { CompletionContextExtractor } from "./completionContextExtractor";
 import { CompletionMetadataResolver } from "./completionMetadataResolver";
 import { handleVariableCompletion } from "./completionVariableResolver";
+import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
 import type {
   CompletionRequestContext,
   ScopeSource,
@@ -103,6 +108,7 @@ export interface SemanticScopeCompletionRequest {
   effectiveDb?: string;
   effectiveSchema?: string;
   netezzaSchemasEnabled?: boolean;
+  joinCompletionSettings?: CompletionRequestContext["joinCompletionSettings"];
   databaseKind?: DatabaseKind;
   completionKeywords: readonly string[];
   sqlFunctionNames: readonly string[];
@@ -137,6 +143,7 @@ export class CompletionScopeResolver {
       effectiveSchema,
       databaseKind,
       netezzaSchemasEnabled,
+      joinCompletionSettings = DEFAULT_JOIN_COMPLETION_SETTINGS,
     } = request;
     const tokens = SqlLexer.tokenize(statementPrefix).tokens;
     const lastToken = tokens[tokens.length - 1];
@@ -156,6 +163,7 @@ export class CompletionScopeResolver {
       effectiveSchema,
       databaseKind,
       netezzaSchemasEnabled,
+      joinCompletionSettings,
       position,
     );
   }
@@ -164,15 +172,18 @@ export class CompletionScopeResolver {
   public async getJoinTargetCompletions(
     request: CompletionRequestContext,
   ): Promise<CompletionItem[] | undefined> {
-    const { statementPrefix, documentUri, effectiveDb, databaseKind } = request;
+    const {
+      statementPrefix,
+      documentUri,
+      effectiveDb,
+      effectiveSchema,
+      databaseKind,
+      joinCompletionSettings = DEFAULT_JOIN_COMPLETION_SETTINGS,
+    } = request;
     const tokens = SqlLexer.tokenize(statementPrefix).tokens;
     if (tokens[tokens.length - 1]?.tokenType.name !== "Join") {
       return undefined;
     }
-    if (databaseKind !== "netezza") {
-      return [];
-    }
-
     const sources = this.extractDirectJoinSources(statementPrefix, databaseKind);
     const sourcesByDatabase = new Map<
       string,
@@ -197,78 +208,163 @@ export class CompletionScopeResolver {
     }
 
     const relatedItems = new Map<string, CompletionItem>();
-    for (const { database, sources: databaseSources } of sourcesByDatabase.values()) {
-      const relatedTables = await this.metadataResolver.getCachedJoinTargets(
-        documentUri,
-        database,
-        databaseSources,
+    const addJoinCompletion = (
+      target: { database?: string; schema?: string; table: string },
+      source: DirectJoinSource,
+      pairs: Array<{ sourceColumn: string; targetColumn: string }>,
+      detail: string,
+      priority: number,
+      joinUsesDefaultSchema = false,
+    ): void => {
+      if (pairs.length === 0) return;
+      const targetIdentity = {
+        database: target.database ?? effectiveDb,
+        schema: target.schema ?? effectiveSchema,
+        table: target.table,
+      };
+      const configuredAlias = joinCompletionSettings.aliases.find((entry) =>
+        matchesJoinTableIdentity(entry.table, targetIdentity, effectiveDb, effectiveSchema),
+      )?.alias;
+      const isConfiguredAlias = configuredAlias !== undefined;
+      const preferredAlias = configuredAlias
+        ?? (joinCompletionSettings.autoAliases ? getJoinAliasBase(target.table) : undefined);
+      let alias: string | undefined;
+      if (preferredAlias) {
+        alias = this.reserveUniqueJoinAlias(preferredAlias, usedAliases);
+      }
+      const targetPath = formatJoinTargetPath(
+        targetIdentity,
+        databaseKind,
+        effectiveDb,
+        joinUsesDefaultSchema,
       );
-      for (const table of relatedTables) {
-        const targetDatabase = table.database ?? database;
-        const targetTable = formatNetezzaIdentifier(
-          createNetezzaCatalogIdentifier(table.name),
-        );
-        const targetDatabaseIdentifier = formatNetezzaIdentifier(
-          createNetezzaCatalogIdentifier(targetDatabase),
-        );
-        const targetPath = table.joinUsesDefaultSchema === true || !table.schema
-          ? `${targetDatabaseIdentifier}..${targetTable}`
-          : `${targetDatabaseIdentifier}.${formatNetezzaIdentifier(createNetezzaCatalogIdentifier(table.schema))}.${targetTable}`;
-        const matchesBySource = new Map<
-          string,
-          { source: DirectJoinSource; matches: NonNullable<typeof table.joinMatches> }
-        >();
-        for (const match of table.joinMatches ?? []) {
-          const source = sources.find((candidate) =>
-            candidate.table.toUpperCase() === match.sourceTable.toUpperCase() &&
-            (!match.sourceSchema || !candidate.schema ||
-              candidate.schema.toUpperCase() === match.sourceSchema.toUpperCase()),
-          );
-          if (!source) continue;
-          const sourceKey = `${source.db ?? effectiveDb ?? ""}|${source.schema ?? ""}|${source.table}`.toUpperCase();
-          const entry = matchesBySource.get(sourceKey) ?? { source, matches: [] };
-          entry.matches.push(match);
-          matchesBySource.set(sourceKey, entry);
-        }
+      const targetQualifier = alias
+        ? (isConfiguredAlias
+          ? formatDirectJoinQualifier({ qualifier: alias, table: target.table, kind: "join" }, databaseKind)
+          : alias)
+        : formatDirectJoinQualifier({ qualifier: target.table, table: target.table, kind: "join" }, databaseKind);
+      const prefix = alias ? `${targetPath} ${targetQualifier}` : targetPath;
+      const predicates = pairs.map((pair) =>
+        `${formatDirectJoinQualifier(source, databaseKind)}.${formatIdentifierForSql(pair.sourceColumn, databaseKind)} = ${targetQualifier}.${formatIdentifierForSql(pair.targetColumn, databaseKind)}`,
+      );
+      const label = `${prefix} ON ${predicates.join(" AND ")}`;
+      relatedItems.set(label.toUpperCase(), {
+        label,
+        kind: CompletionItemKind.Class,
+        detail,
+        sortText: `${priority}_${label.toUpperCase()}`,
+        insertText: label,
+      });
+    };
 
-        for (const { source, matches } of matchesBySource.values()) {
-          const alias = this.createUniqueJoinAlias(table.name, usedAliases);
-          const targetQualifier = formatNetezzaIdentifier(
-            createNetezzaUserIdentifier(alias),
+    // Workspace relations are authoritative, direction-independent and preserve
+    // explicit column pairs (including composite keys and different names).
+    for (const relation of joinCompletionSettings.relations) {
+      for (const source of sources) {
+        const sourceIdentity = {
+          database: source.db,
+          schema: source.schema,
+          table: source.table,
+        };
+        if (matchesJoinTableIdentity(relation.left, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.right,
+            source,
+            relation.columns.map((pair) => ({ sourceColumn: pair.left, targetColumn: pair.right })),
+            "JOIN with configured relationship",
+            0,
           );
-          const predicates = matches.map((match) =>
-            `${formatDirectJoinQualifier(source, databaseKind)}.${formatIdentifierForSql(match.sourceColumn, databaseKind)} = ${targetQualifier}.${formatIdentifierForSql(match.targetColumn, databaseKind)}`,
+        }
+        if (matchesJoinTableIdentity(relation.right, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.left,
+            source,
+            relation.columns.map((pair) => ({ sourceColumn: pair.right, targetColumn: pair.left })),
+            "JOIN with configured relationship",
+            0,
           );
-          const label = `${targetPath} ${targetQualifier} ON ${predicates.join(" AND ")}`;
-          relatedItems.set(label.toUpperCase(), {
-            label,
-            kind: CompletionItemKind.Class,
-            detail: "JOIN with cached PK/FK match",
-            sortText: `0_${label.toUpperCase()}`,
-            insertText: label,
-          });
+        }
+      }
+    }
+
+    {
+      for (const { database, sources: databaseSources } of sourcesByDatabase.values()) {
+        const relatedTables = await this.metadataResolver.getCachedJoinTargets(
+          documentUri,
+          database,
+          databaseSources,
+        );
+        for (const table of relatedTables) {
+          const groupedMatches = new Map<string, {
+            source: DirectJoinSource;
+            pairs: Array<{
+              sourceColumn: string;
+              targetColumn: string;
+              ordinalPosition?: number;
+            }>;
+            relationType: "foreignKey" | "heuristic";
+            constraintName?: string;
+          }>();
+          for (const match of table.joinMatches ?? []) {
+            const relationType = match.relationType ?? "heuristic";
+            if (!joinCompletionSettings.nameHeuristicsEnabled && relationType !== "foreignKey") continue;
+            const source = sources.find((candidate) =>
+              candidate.table.toUpperCase() === match.sourceTable.toUpperCase() &&
+              (!match.sourceSchema || !candidate.schema ||
+                candidate.schema.toUpperCase() === match.sourceSchema.toUpperCase()),
+            );
+            if (!source) continue;
+            const groupKey = `${source.qualifier.toUpperCase()}|${table.schema?.toUpperCase() ?? ""}|${table.name.toUpperCase()}|${relationType}|${match.constraintName?.toUpperCase() ?? ""}`;
+            const group = groupedMatches.get(groupKey) ?? {
+              source,
+              pairs: [],
+              relationType,
+              constraintName: match.constraintName,
+            };
+            group.pairs.push({
+              sourceColumn: match.sourceColumn,
+              targetColumn: match.targetColumn,
+              ordinalPosition: match.ordinalPosition,
+            });
+            groupedMatches.set(groupKey, group);
+          }
+          for (const { source, pairs, relationType } of groupedMatches.values()) {
+            const orderedPairs = relationType === "foreignKey"
+              ? [...pairs].sort((left, right) =>
+                (left.ordinalPosition ?? Number.MAX_SAFE_INTEGER)
+                - (right.ordinalPosition ?? Number.MAX_SAFE_INTEGER),
+              )
+              : pairs;
+            addJoinCompletion(
+              { database: table.database ?? database, schema: table.schema, table: table.name },
+              source,
+              orderedPairs,
+              relationType === "foreignKey"
+                ? "JOIN with declared foreign key"
+                : "JOIN with cached key/name match",
+              relationType === "foreignKey" ? 0 : 2,
+              table.joinUsesDefaultSchema === true,
+            );
+          }
         }
       }
     }
     return [...relatedItems.values()];
   }
 
-  private createUniqueJoinAlias(tableName: string, usedAliases: Set<string>): string {
-    const words = tableName
-      .replace(/^"|"$/g, "")
-      .split(/[^A-Za-z0-9]+/)
-      .filter(Boolean);
-    const base = (words.length > 1
-      ? words.map((word) => word[0]).join("")
-      : words[0]?.[0] ?? "T").toUpperCase();
+  private reserveUniqueJoinAlias(preferred: string, usedAliases: Set<string>): string {
+    const base = preferred.replace(/[^A-Za-z0-9_$]/g, "").toUpperCase() || "T";
     if (!usedAliases.has(base)) {
+      usedAliases.add(base);
       return base;
     }
     let suffix = 2;
     while (usedAliases.has(`${base}${suffix}`)) {
       suffix += 1;
     }
-    return `${base}${suffix}`;
+    const alias = `${base}${suffix}`;
+    usedAliases.add(alias);
+    return alias;
   }
 
   public async resolveColumnsForQualifier(
@@ -453,6 +549,7 @@ export class CompletionScopeResolver {
       effectiveSchema,
       databaseKind,
       netezzaSchemasEnabled,
+      joinCompletionSettings,
       completionKeywords,
       sqlFunctionNames,
       sqlFunctionSignatures,
@@ -535,7 +632,7 @@ export class CompletionScopeResolver {
 
     const columnItems = toScopedColumnItems(scopedColumns, typedPrefix, position);
     const joinConditionItems = clause === "on" && typedPrefix === ""
-      ? await this.buildJoinConditionItems(
+        ? await this.buildJoinConditionItems(
           statementPrefix,
           localDefs,
           documentUri,
@@ -543,6 +640,7 @@ export class CompletionScopeResolver {
           effectiveSchema,
           databaseKind,
           netezzaSchemasEnabled,
+          joinCompletionSettings ?? DEFAULT_JOIN_COMPLETION_SETTINGS,
           position,
         )
       : [];
@@ -911,6 +1009,7 @@ export class CompletionScopeResolver {
     effectiveSchema: string | undefined,
     databaseKind: DatabaseKind | undefined,
     netezzaSchemasEnabled: boolean | undefined,
+    joinCompletionSettings: NonNullable<CompletionRequestContext["joinCompletionSettings"]>,
     position: Position,
   ): Promise<CompletionItem[]> {
     const sources = this.extractDirectJoinSources(statementPrefix, databaseKind);
@@ -933,6 +1032,46 @@ export class CompletionScopeResolver {
     const currentJoin = uniqueSources[uniqueSources.length - 1];
     if (!currentJoin || currentJoin.kind !== "join") return [];
 
+    const configuredItems: CompletionItem[] = [];
+    for (const previousSource of uniqueSources.slice(0, -1)) {
+      const previousIdentity = {
+        database: previousSource.db,
+        schema: previousSource.schema,
+        table: previousSource.table,
+      };
+      const currentIdentity = {
+        database: currentJoin.db,
+        schema: currentJoin.schema,
+        table: currentJoin.table,
+      };
+      for (const relation of joinCompletionSettings.relations) {
+        let pairs: Array<{ left: string; right: string }> | undefined;
+        if (
+          matchesJoinTableIdentity(relation.left, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.right, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.columns;
+        } else if (
+          matchesJoinTableIdentity(relation.right, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.left, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.columns.map((pair) => ({ left: pair.right, right: pair.left }));
+        }
+        if (!pairs) continue;
+        const predicates = pairs.map((pair) =>
+          `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
+        );
+        const text = predicates.join(" AND ");
+        configuredItems.push({
+          label: text,
+          kind: CompletionItemKind.Reference,
+          detail: "Join condition (configured relationship)",
+          insertText: text,
+          sortText: `0_${text.toUpperCase()}`,
+          textEdit: { range: { start: position, end: position }, newText: text },
+        });
+      }
+    }
     const columnsForSource = async (source: DirectJoinSource) => this.metadataResolver.getMetadataColumnsForSource(
       documentUri,
       source,
@@ -942,8 +1081,28 @@ export class CompletionScopeResolver {
       this.buildMetadataColumnOptions(netezzaSchemasEnabled),
     );
 
-    const joinedColumns = await columnsForSource(currentJoin);
-    if (joinedColumns.length === 0) return [];
+    const previousJoinSources = uniqueSources.slice(0, -1);
+    const joinSources = [currentJoin, ...previousJoinSources];
+    const columnsBySource: MetadataColumnItem[][] = new Array(joinSources.length);
+    let nextSourceIndex = 0;
+    const loadNextSourceColumns = async (): Promise<void> => {
+      while (nextSourceIndex < joinSources.length) {
+        const sourceIndex = nextSourceIndex;
+        nextSourceIndex += 1;
+        columnsBySource[sourceIndex] = await columnsForSource(joinSources[sourceIndex]);
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(8, joinSources.length) },
+        () => loadNextSourceColumns(),
+      ),
+    );
+    const joinedColumns = columnsBySource[0] ?? [];
+    const previousColumnsBySource = columnsBySource.slice(1);
+    if (joinedColumns.length === 0) return configuredItems;
+
+    const declaredItems: CompletionItem[] = [];
 
     const matches: Array<{
       left: MetadataColumnItem;
@@ -952,8 +1111,70 @@ export class CompletionScopeResolver {
       rightSource: DirectJoinSource;
       isKeyMatch: boolean;
     }> = [];
-    for (const previousSource of uniqueSources.slice(0, -1)) {
-      const previousColumns = await columnsForSource(previousSource);
+    for (const [previousIndex, previousSource] of previousJoinSources.entries()) {
+      const previousColumns = previousColumnsBySource[previousIndex] ?? [];
+      const previousIdentity = {
+        database: previousSource.db ?? effectiveDb,
+        schema: previousSource.schema ?? effectiveSchema,
+        table: previousSource.table,
+      };
+      const currentIdentity = {
+        database: currentJoin.db ?? effectiveDb,
+        schema: currentJoin.schema ?? effectiveSchema,
+        table: currentJoin.table,
+      };
+      const declaredGroups = new Map<string, Array<{ left: string; right: string; ordinal: number }>>();
+      const addDeclaredPair = (constraintName: string | undefined, ordinal: number | undefined, left: string, right: string) => {
+        const key = constraintName?.toUpperCase() || `COLUMN:${left.toUpperCase()}:${right.toUpperCase()}`;
+        const pairs = declaredGroups.get(key) ?? [];
+        if (!pairs.some((pair) => pair.left.toUpperCase() === left.toUpperCase() && pair.right.toUpperCase() === right.toUpperCase())) {
+          pairs.push({ left, right, ordinal: ordinal ?? Number.MAX_SAFE_INTEGER });
+          declaredGroups.set(key, pairs);
+        }
+      };
+      for (const column of previousColumns) {
+        for (const reference of column.joinReferences ?? []) {
+          if (
+            matchesJoinTableIdentity(
+              { database: reference.toDatabase, schema: reference.toSchema, table: reference.toTable },
+              currentIdentity,
+              effectiveDb,
+              effectiveSchema,
+            )
+          ) addDeclaredPair(reference.constraintName, reference.ordinalPosition, column.name, reference.toColumn);
+        }
+      }
+      for (const column of joinedColumns) {
+        for (const reference of column.joinReferences ?? []) {
+          if (
+            matchesJoinTableIdentity(
+              { database: reference.toDatabase, schema: reference.toSchema, table: reference.toTable },
+              previousIdentity,
+              effectiveDb,
+              effectiveSchema,
+            )
+          ) addDeclaredPair(reference.constraintName, reference.ordinalPosition, reference.toColumn, column.name);
+        }
+      }
+      if (declaredGroups.size > 0) {
+        for (const pairs of declaredGroups.values()) {
+          pairs.sort((left, right) => left.ordinal - right.ordinal);
+          const predicates = pairs.map((pair) =>
+            `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
+          );
+          const text = predicates.join(" AND ");
+          declaredItems.push({
+            label: text,
+            kind: CompletionItemKind.Reference,
+            detail: "Join condition (declared foreign key)",
+            insertText: text,
+            sortText: `0_${text.toUpperCase()}`,
+            textEdit: { range: { start: position, end: position }, newText: text },
+          });
+        }
+        continue;
+      }
+      if (!joinCompletionSettings.nameHeuristicsEnabled) continue;
       const sourceMatches = findJoinColumnMatches(previousColumns, joinedColumns);
       const normalizedCounts = new Map<string, number>();
       for (const column of previousColumns) {
@@ -984,9 +1205,9 @@ export class CompletionScopeResolver {
       const item: CompletionItem = {
         label: text,
         kind: CompletionItemKind.Reference,
-        detail: match.isKeyMatch ? "Join condition (key match)" : "Join condition (name match)",
+        detail: match.isKeyMatch ? "Join condition (cached key/name match)" : "Join condition (name match)",
         insertText: text,
-        sortText: `${match.isKeyMatch ? "0" : "1"}_${text.toUpperCase()}`,
+        sortText: `${match.isKeyMatch ? "1" : "2"}_${text.toUpperCase()}`,
         textEdit: {
           range: { start: position, end: position },
           newText: text,
@@ -994,7 +1215,7 @@ export class CompletionScopeResolver {
       };
       (match.isKeyMatch ? keyItems : heuristicItems).push(item);
     }
-    return [...keyItems, ...heuristicItems];
+    return [...configuredItems, ...declaredItems, ...keyItems, ...heuristicItems];
   }
 
   private extractDirectJoinSources(

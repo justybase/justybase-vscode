@@ -2,6 +2,7 @@ import { createDelegatingMetadataProvider } from '@justybase/database-utils/meta
 import {
     buildColumnMetadataQuery,
     buildColumnsWithKeysQuery,
+    buildForeignKeyRelationshipsQuery,
     buildListDatabasesQuery,
     buildListProceduresQuery,
     buildListSchemasQuery,
@@ -28,6 +29,7 @@ export const verticaMetadataProvider = createDelegatingMetadataProvider({
     objectType: (_database, objectType) => buildObjectTypeQuery(objectType),
     typeGroups: () => buildTypeGroupsQuery(),
     columnsWithKeys: (_database, options) => buildColumnsWithKeysQuery(options?.schema, options?.tableName, options?.objTypes),
+    foreignKeyRelationships: (_database, options) => buildForeignKeyRelationshipsQuery(options?.schema, options?.tableName),
     tableColumns: (_database, schema, tableName) => buildTableColumnsQuery(schema, tableName),
     columnMetadata: (_database, schema, tableName) => buildColumnMetadataQuery(schema, tableName),
     lookupColumns: buildLookupColumnsQuery,

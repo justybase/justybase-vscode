@@ -2,7 +2,11 @@ import type { CstNode } from "chevrotain";
 import type { Position } from "vscode-languageserver/node";
 import type { DatabaseKind } from "../contracts/database";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
-import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
+import type {
+  JoinCompletionSettings,
+  MetadataColumnItem,
+  MetadataObjectItem,
+} from "../lsp/protocol";
 import type { LocalDefinition } from "../providers/types";
 import type { MetadataColumnLookupOptions } from "../metadata/metadataQueryDiagnostics";
 
@@ -98,6 +102,7 @@ export interface CompletionRequestContext {
   effectiveDb?: string;
   effectiveSchema?: string;
   netezzaSchemasEnabled?: boolean;
+  joinCompletionSettings?: JoinCompletionSettings;
   linePrefix: string;
   prevLine: string;
   cursorOffset: number;
@@ -123,6 +128,7 @@ export interface CompletionMetadataProvider {
     effectiveSchema?: string;
     databaseKind?: DatabaseKind;
     netezzaSchemasEnabled?: boolean;
+    joinCompletionSettings?: JoinCompletionSettings;
   }>;
   getDatabases(documentUri: string): Promise<MetadataObjectItem[]>;
   getSchemas(
