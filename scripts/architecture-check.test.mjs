@@ -552,7 +552,7 @@ test('report CLI emits JSON, preserves the baseline and fails on violations', ()
     assert.equal(passing.status, 0, passing.stderr);
     assert.ok(passing.stdout.trim(), `Report CLI returned no JSON (stderr: ${passing.stderr}, signal: ${passing.signal}).`);
     assert.equal(JSON.parse(passing.stdout).reportVersion, 1);
-    writeFixture(root, 'media/index.ts', "export { value } from '../src';");
+    writeFixture(root, 'packages/shared/src/index.ts', "export { value } from '../../../src';");
     const failing = runReport();
     assert.ifError(failing.error);
     assert.equal(failing.status, 1, failing.stderr);
