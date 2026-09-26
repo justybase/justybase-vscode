@@ -79,6 +79,43 @@ describe('providers/linterCodeActions', () => {
         data
     } as unknown as vscode.Diagnostic);
 
+    const applyMockWorkspaceEdit = (
+        document: vscode.TextDocument,
+        edit: MockWorkspaceEdit,
+    ): string => {
+        const changes: Array<{ start: number; end: number; newText: string }> = [];
+        const replacements = edit.replace.mock.calls as unknown as Array<[
+            vscode.Uri,
+            vscode.Range,
+            string,
+        ]>;
+        const insertions = edit.insert.mock.calls as unknown as Array<[
+            vscode.Uri,
+            vscode.Position,
+            string,
+        ]>;
+
+        for (const [, range, newText] of replacements) {
+            changes.push({
+                start: document.offsetAt(range.start),
+                end: document.offsetAt(range.end),
+                newText,
+            });
+        }
+        for (const [, position, newText] of insertions) {
+            const offset = document.offsetAt(position);
+            changes.push({ start: offset, end: offset, newText });
+        }
+
+        return changes
+            .sort((left, right) => right.start - left.start || right.end - left.end)
+            .reduce((currentText, change) => (
+                currentText.slice(0, change.start)
+                + change.newText
+                + currentText.slice(change.end)
+            ), document.getText());
+    };
+
     beforeEach(() => {
         jest.clearAllMocks();
         resolveDatabaseKind.mockReturnValue('postgresql');
@@ -365,8 +402,22 @@ describe('providers/linterCodeActions', () => {
         );
     });
 
-    it('adds NZ004 quick fix to replace CROSS JOIN with INNER JOIN', () => {
-        const statementSql = 'SELECT * FROM T1 CROSS JOIN T2';
+    it.each([
+        {
+            statementSql: 'SELECT * FROM T1 CROSS JOIN T2',
+            expectedSql: 'SELECT * FROM T1 INNER JOIN T2 ON 1=1',
+            joinedTableText: 'T2',
+        },
+        {
+            statementSql: 'SELECT * FROM T1 CROSS JOIN DB1.PUBLIC.T2 AS T2_ALIAS',
+            expectedSql: 'SELECT * FROM T1 INNER JOIN DB1.PUBLIC.T2 AS T2_ALIAS ON 1=1',
+            joinedTableText: 'DB1.PUBLIC.T2 AS T2_ALIAS',
+        },
+    ])('adds NZ004 quick fix and preserves the joined table: $statementSql', ({
+        statementSql,
+        expectedSql,
+        joinedTableText,
+    }) => {
         const crossOffset = statementSql.indexOf('CROSS JOIN');
         const document = makeDocument(statementSql);
         (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
@@ -390,14 +441,20 @@ describe('providers/linterCodeActions', () => {
 
         const crossJoinFix = actions.find(action => action.title === 'Replace CROSS JOIN with explicit INNER JOIN');
         expect(crossJoinFix).toBeDefined();
-        expect((crossJoinFix?.edit as unknown as MockWorkspaceEdit).replace).toHaveBeenCalledWith(
+        expect(crossJoinFix?.isPreferred).toBe(true);
+        const workspaceEdit = crossJoinFix?.edit as unknown as MockWorkspaceEdit;
+        expect(workspaceEdit.replace).toHaveBeenCalledWith(
             document.uri,
             {
                 start: { line: 0, character: crossOffset },
                 end: { line: 0, character: crossOffset + 'CROSS JOIN'.length },
             },
-            'INNER JOIN ON 1=1'
+            'INNER JOIN'
         );
+
+        const resultSql = applyMockWorkspaceEdit(document, workspaceEdit);
+        expect(resultSql).toBe(expectedSql);
+        expect(resultSql.indexOf(joinedTableText)).toBeLessThan(resultSql.indexOf('ON 1=1'));
     });
 
     it('adds SQL008 qualification quick fixes for ambiguous columns', () => {
