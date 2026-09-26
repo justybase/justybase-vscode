@@ -233,7 +233,7 @@
     },
     {
       "source": "packages/ui-react/src/**",
-      "specifier": "^(?:node:|vscode|electron|@justybase/(?:database-runtime|duckdb-runtime|netezza-runtime|sqlite-runtime|web-api)(?:/|$))"
+      "specifier": "^(?:node:|vscode|electron|@justybase/(?:database-runtime|duckdb-runtime|netezza-runtime|sqlite-runtime)(?:/|$))"
     }
   ],
   "exceptions": [],

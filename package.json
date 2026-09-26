@@ -3725,7 +3725,7 @@
             "shared"
           ],
           "default": "legacy",
-          "description": "Presentation mode for host-owned VS Code UI surfaces. The Web application always uses Shared UI."
+          "description": "Presentation mode for host-owned VS Code UI surfaces. Shared UI is available for supported panels."
         },
         "justybase.highlightActiveStatement": {
           "type": "boolean",
@@ -4685,10 +4685,10 @@
     "check-types:shared": "npm run build:metadata-core && npm run build:designer-core && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run check-types --workspace @justybase/duckdb-runtime && npm run build:duckdb-runtime && npm run check-types --workspace @justybase/netezza-runtime && npm run build:netezza-runtime && npm run build:runtime && npm run build:sqlite-runtime && npm run check-types --workspace @justybase/sqlite-runtime"
   },
   "lint-staged": {
-    "!(media|apps|packages)/**/*.{ts,tsx}": [
+    "!(media|packages)/**/*.{ts,tsx}": [
       "eslint --max-warnings=0 --no-warn-ignored"
     ],
-    "{media,apps,packages}/**/*.{ts,tsx}": [
+    "{media,packages}/**/*.{ts,tsx}": [
       "eslint --no-warn-ignored"
     ]
   },

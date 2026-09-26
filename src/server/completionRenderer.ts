@@ -1,6 +1,7 @@
 import {
   CompletionItem,
   CompletionItemKind,
+  InsertTextFormat,
   Position,
   Range,
 } from "vscode-languageserver/node";
@@ -190,9 +191,10 @@ export function toFunctionItems(
   const typedPrefixUpper = typedPrefix.toUpperCase();
   return sqlFunctionNames
     .filter((name) => !typedPrefix || name.startsWith(typedPrefixUpper))
-    .map((name) => {
+    .flatMap((name) => {
       const signatures = sqlFunctionSignatures?.get(name);
       const inlineDescription = buildFunctionInlineDescription(signatures);
+      const windowMode = signatures?.find((signature) => signature.window)?.window;
       const item: CompletionItem = {
         label: name,
         kind: CompletionItemKind.Function,
@@ -204,9 +206,37 @@ export function toFunctionItems(
           ? { description: inlineDescription }
           : undefined,
       };
+      if (windowMode === "required") {
+        item.insertText = buildWindowFunctionSnippet(name, signatures);
+        item.insertTextFormat = InsertTextFormat.Snippet;
+      }
       applyPrefixRange(item, position, typedPrefix);
-      return item;
+      if (windowMode !== "supported") return [item];
+
+      const windowItem: CompletionItem = {
+        ...item,
+        label: `${name}() OVER (…)`,
+        detail: `${item.detail ?? name} (window)`,
+        sortText: `4_${name}_window`,
+        insertText: buildWindowFunctionSnippet(name, signatures),
+        insertTextFormat: InsertTextFormat.Snippet,
+        filterText: name,
+      };
+      return [item, windowItem];
     });
+}
+
+function buildWindowFunctionSnippet(
+  name: string,
+  signatures: readonly DatabaseSqlFunctionSignature[] | undefined,
+): string {
+  const parameters = signatures?.[0]?.parameters ?? [];
+  const argumentSlots = parameters
+    .filter((parameter) => !/^OVER\b/i.test(parameter))
+    .map((_parameter, index) => "$" + (index + 1));
+  const overSlot = argumentSlots.length + 1;
+  const functionCall = argumentSlots.length ? `${name}(${argumentSlots.join(", ")})` : `${name}()`;
+  return `${functionCall} OVER ($${overSlot})$0`;
 }
 
 export function toSpecialValueItems(

@@ -488,7 +488,7 @@ function createCompilerOptionsResolver(root) {
 
 function discoverWorkspacePackages(root, rules) {
   const packages = new Map();
-  for (const parentName of ['packages', 'apps']) {
+  for (const parentName of ['packages']) {
     const parentDirectory = path.join(root, parentName);
     if (!fs.existsSync(parentDirectory)) continue;
     for (const entry of fs.readdirSync(parentDirectory, { withFileTypes: true })) {
@@ -594,7 +594,7 @@ function resolveKnownSpecifier({ root, importer, specifier, compilerOptions, pro
   } else if (specifier.startsWith('/')) {
     internal = true;
     basePath = path.resolve(root, `.${specifier}`);
-  } else if (/^(?:src|packages|apps|extensions)\//u.test(specifier)) {
+  } else if (/^(?:src|packages|extensions)\//u.test(specifier)) {
     internal = true;
     basePath = path.resolve(root, specifier);
   } else if (isPathAliasSpecifier(specifier, compilerOptions)) {

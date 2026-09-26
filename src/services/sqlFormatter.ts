@@ -69,8 +69,9 @@ export function formatSql(
   sql: string,
   options: SqlFormatterOptions = {},
 ): string {
-  // Netezza formatting is shared by desktop and web/API. Other dialects retain
-  // their registered formatter profiles until their own sql-core migration.
+  // Netezza formatting is backed by the platform-neutral SQL core. Other
+  // dialects retain their registered formatter profiles until their own
+  // sql-core migration.
   if (!options.databaseKind || options.databaseKind === "netezza") {
     return formatNetezzaSql(sql, options);
   }

@@ -57,7 +57,6 @@ const commandStatuses = {
     args: [
       path.join(root, 'node_modules', 'eslint', 'bin', 'eslint.js'),
       'media',
-      'apps',
       'packages',
       'extensions',
       '--ext',

@@ -41,7 +41,7 @@ export default tseslint.config(
         // Webview and workspace packages are being migrated to the same
         // strict baseline incrementally. Keep their current findings visible
         // without weakening the blocking core-extension rules.
-        files: ['media/**/*.{ts,tsx}', 'apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
+        files: ['media/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
         rules: {
             '@typescript-eslint/no-unused-vars': 'warn',
             'prefer-const': 'warn',

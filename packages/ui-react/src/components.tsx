@@ -106,7 +106,7 @@ export interface WorkspaceTabsProps {
   readonly onClose?: (id: string) => void;
 }
 
-/** Dialect picker shared by Web, VS Code and future host adapters. */
+/** Dialect picker shared by host adapters. */
 export interface SqlDialectSelectProps {
   readonly value: DatabaseKind;
   readonly onChange: (databaseKind: DatabaseKind) => void;

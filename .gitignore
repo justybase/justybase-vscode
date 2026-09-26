@@ -9,10 +9,6 @@
 **/[Pp]ackages/*
 !packages/contracts/
 !packages/contracts/**
-!packages/api-client/
-!packages/api-client/**
-!packages/dockyard-layout/
-!packages/dockyard-layout/**
 !packages/database-runtime/
 !packages/database-runtime/**
 !packages/sqlite-runtime/
@@ -33,8 +29,6 @@
 !packages/metadata-core/**
 !packages/ui-core/
 !packages/ui-core/**
-!packages/ui-monaco/
-!packages/ui-monaco/**
 !packages/ui-react/
 !packages/ui-react/**
 !packages/database-utils/
@@ -47,11 +41,6 @@
 !packages/tabular-import-runtime/**
 !packages/vscode-companion-adapter/
 !packages/vscode-companion-adapter/**
-!apps/
-!apps/**
-
-# Web editor runtime state (credentials, query history, and result sessions)
-**/.justybase-web/
 **/.justybase/
 
 # Benchmark timing artifacts (regenerated locally; never published)
@@ -446,4 +435,3 @@ tools/access-java-verify/lib/
 tools/access-java-verify/classes/
 .agents
 .husky/
-apps/api/.justybase-web-manual/query-sessions/

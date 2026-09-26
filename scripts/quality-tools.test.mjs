@@ -9,7 +9,7 @@ import { createChangedDiff } from './quality-changed-diff.mjs';
 import { prepareQualityArtifacts } from './prepare-quality-artifacts.mjs';
 import { buildReport, qualityInputFailures } from './quality-report.mjs';
 
-const lintBaseline = { lint: { total: 3, areas: { media: 2, apps: 1 } } };
+const lintBaseline = { lint: { total: 3, areas: { media: 2, packages: 1 } } };
 
 function runGit(root, args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -134,9 +134,9 @@ test('all first-party workspace packages declare their distribution license', ()
 test('aggregates lint warnings by workspace area and rule', () => {
   const summary = lintSummary([
     { filePath: '/home/dusko/source/justybase-vscode/media/a.ts', warningCount: 2, errorCount: 0, messages: [{ severity: 1, ruleId: 'prefer-const' }, { severity: 1, ruleId: 'no-var' }] },
-    { filePath: '/home/dusko/source/justybase-vscode/apps/a.ts', warningCount: 1, errorCount: 0, messages: [{ severity: 1, ruleId: 'prefer-const' }] },
+    { filePath: '/home/dusko/source/justybase-vscode/packages/a.ts', warningCount: 1, errorCount: 0, messages: [{ severity: 1, ruleId: 'prefer-const' }] },
   ]);
-  assert.deepEqual(summary.byArea, { media: 2, apps: 1 });
+  assert.deepEqual(summary.byArea, { media: 2, packages: 1 });
   assert.deepEqual(summary.byRule, { 'prefer-const': 2, 'no-var': 1 });
   assert.deepEqual(assertLintRatchet(summary, lintBaseline), []);
   assert.match(assertLintRatchet({ ...summary, warnings: 4 }, lintBaseline)[0], /increased/);

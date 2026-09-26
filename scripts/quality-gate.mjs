@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDirectory, '..');
 const baselinePath = path.join(root, 'quality', 'quality-baseline.json');
-const workspaceAreas = new Set(['src', 'media', 'apps', 'packages', 'extensions', 'Benchmark', 'scripts']);
+const workspaceAreas = new Set(['src', 'media', 'packages', 'extensions', 'Benchmark', 'scripts']);
 const coverageFileExtensions = new Set(['.ts', '.tsx', '.mts', '.cts']);
 const ignoredCoverageFilePattern = /(?:\.(?:test|spec)|(?:^|\/)(?:jest\.)?setup)\.[cm]?[jt]sx?$/u;
 

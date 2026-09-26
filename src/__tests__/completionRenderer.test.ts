@@ -285,5 +285,23 @@ describe("completionRenderer — documentation regression guard", () => {
       expect(items[0].detail).toBe("SQL Function");
       expect(items[0].documentation).toBeUndefined();
     });
+
+    it("inserts required OVER clauses after function arguments", () => {
+      const items = toFunctionItems("ROW", position, ["ROW_NUMBER"], new Map([
+        ["ROW_NUMBER", [{ name: "ROW_NUMBER", parameters: ["OVER (ORDER BY ...)"], description: "Row number", window: "required" as const }]],
+      ]));
+      expect(items[0].insertText).toBe("ROW_NUMBER() OVER ($1)$0");
+      expect(items[0].insertTextFormat).toBe(2);
+    });
+
+    it("offers a separate window variant for aggregate functions", () => {
+      const items = toFunctionItems("SUM", position, ["SUM"], new Map([
+        ["SUM", [{ name: "SUM", parameters: ["expression"], description: "Sum", window: "supported" as const }]],
+      ]));
+      expect(items).toHaveLength(2);
+      expect(items[0].insertText).toBe("SUM()");
+      expect(items[1].insertText).toBe("SUM($1) OVER ($2)$0");
+      expect(items[1].filterText).toBe("SUM");
+    });
   });
 });
