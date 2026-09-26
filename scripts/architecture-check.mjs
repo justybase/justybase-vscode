@@ -28,8 +28,6 @@ export const architectureLayerNames = Object.freeze([
   'shared',
   'desktop',
   'media',
-  'api',
-  'web',
   'companions',
 ]);
 

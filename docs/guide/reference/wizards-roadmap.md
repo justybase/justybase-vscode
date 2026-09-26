@@ -1,6 +1,6 @@
 ---
 title: Wizard and designer roadmap
-description: Implementation plan for the next wave of webview wizards and designers — tables, triggers, partitions, indexes, constraints — with the per-dialect construct-support matrix and the test plan for every feature.
+description: Implementation plan for the next wave of VS Code webview wizards and designers — tables, triggers, partitions, indexes, constraints — with the per-dialect construct-support matrix and the test plan for every feature.
 audience: reference
 category: Reference
 status: In progress
@@ -28,30 +28,9 @@ remaining phases:
   delegates to the registered dialect adapter. Existing MySQL, PostgreSQL,
   and Db2 DDL builders are guarded by the same manifest; unsupported DDL now
   fails with a typed `UnsupportedDesignerOperationError`.
-- The self-hosted web editor exposes a schema-tree Object Designer with
-  capability/status states, current-column context, reviewed SQL preview, a
-  server-issued write token, and streamed apply. The initial table surface
-  covers add-column, relational indexes, FK/CHECK creation, Netezza
-  distribution + `ORGANIZE ON`, ClickHouse skipping indexes, Vertica
-  projections, Snowflake clustering keys, a SQLite row-trigger form with
-  `UPDATE OF`, `WHEN`, and `BEGIN`/`END` support, and a view-definition form
-  with dialect-selected replacement semantics for the local web runtimes. A
-  guarded Netezza NZPLSQL routine template is also available for procedure /
-  function targets.
-- The API reports runtime and read-only state separately from the static
-  dialect manifest. At present only the embedded Netezza, SQLite, and DuckDB
-  runtimes are executable through the web API; other profiles remain visible
-  but are explicitly marked runtime-unavailable.
-- SQLite and DuckDB table targets now have provider snapshot paths: columns,
-  primary/unique/foreign/check constraints, indexes, source DDL, and a
-  fingerprint are loaded before the designer form. SQLite additionally reads
-  triggers; DuckDB reports its trigger-free model. The API rechecks the
-  fingerprint at preview and apply time. Local SQLite/DuckDB view targets now
-  load the source query and output columns as well. Other provider-backed
-  snapshots remain on the next adapter slice.
 
-The constraint forms and native physical-design forms are intentionally a
-first slice, not completion of phases 2–7. The remaining work is to add
+The shared capability manifest and SQL builders are foundations, not a claim
+that every dialect has a complete desktop designer. Remaining work is to add
 provider-backed snapshots/change plans, companion desktop adapters, metadata
 pickers, triggers/views/routines/security panels, and the browser/Extension
 Host evidence listed below.
@@ -345,11 +324,11 @@ message routing, refresh invalidates stale context, dispose cleans listeners.
 - New high-risk code targets ≥ 80% line / ≥ 70% branch coverage
   (per `docs/TESTING_STRATEGY.md`); run `npm run test:coverage:changed` on the
   PR branch.
-- The shared `designer-core` boundary must pass its package tests, API/web
-  consumer tests, architecture import guard, and the SQLite Extension Host
-  designer scenario before a desktop or web designer refactor is considered
+- The shared `designer-core` boundary must pass its package tests, desktop and
+  companion consumer checks, architecture import guard, and the SQLite
+  Extension Host designer scenario before a designer refactor is considered
   complete. The verification sequence is:
-  `npm run test:designer-core`, `npm run test:api`, `npm run test:web`,
+  `npm run test:designer-core`,
   `npm run check-types`, `npm run check:architecture`, `npm run build`, and
   `npm run test:extension-host:designer`.
 

@@ -271,8 +271,8 @@ body,
   white-space: nowrap;
 }
 
-/* Web's global form-label rule adds a top margin and a minimum width. Reset
-   it here so every column row keeps one clean baseline in Web and VS Code. */
+/* Reset inherited form-label margins and widths so column rows keep one
+   consistent baseline in every host. */
 .ui-result-toolbar .ui-data-grid-column-menu-item label,
 .grid-toolbar .ui-data-grid-column-menu-item label {
   min-width: 0;
@@ -817,8 +817,8 @@ body,
   opacity: .86;
 }
 
-/* One filter surface for Web and VS Code. Keep it outside the grid's
-   scrolling container so a column menu never moves with virtual rows. */
+/* Keep the filter surface outside the grid's scrolling container so a column
+   menu never moves with virtual rows. */
 .ui-data-grid-filter-menu {
   position: fixed;
   z-index: 1000;
@@ -1172,7 +1172,7 @@ body,
   font-size: 12px;
 }
 
-/* Shared shell chrome used by Web and VS Code hosts. */
+/* Shared shell chrome for host adapters that compose a workspace surface. */
 .ui-shell {
   box-sizing: border-box;
   min-height: 100vh;

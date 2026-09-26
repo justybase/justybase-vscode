@@ -216,19 +216,19 @@ test('merges duplicate LCOV records for the same source file', () => {
 test('merges LCOV reports from separate UI/package collectors', () => {
   const merged = mergeLcovReports([
     'SF:packages/ui-core/src/reducer.ts\nDA:10,1\nend_of_record\n',
-    'SF:apps/web/src/sharedUiAdapter.tsx\nDA:12,1\nend_of_record\n',
+    'SF:media/resultPanel/sharedView.tsx\nDA:12,1\nend_of_record\n',
   ]);
-  assert.deepEqual([...merged.keys()], ['packages/ui-core/src/reducer.ts', 'apps/web/src/sharedUiAdapter.tsx']);
+  assert.deepEqual([...merged.keys()], ['packages/ui-core/src/reducer.ts', 'media/resultPanel/sharedView.tsx']);
   assert.equal(merged.get('packages/ui-core/src/reducer.ts')?.length, 1);
-  assert.equal(merged.get('apps/web/src/sharedUiAdapter.tsx')?.length, 1);
+  assert.equal(merged.get('media/resultPanel/sharedView.tsx')?.length, 1);
 });
 
 test('handles Windows LCOV paths and changed filenames containing spaces', () => {
-  const source = 'apps/web/src/feature with spaces.tsx';
+  const source = 'media/feature with spaces.tsx';
   const result = checkChangedCoverage({
     diff: `+++ b/${source}\n@@ -1 +1 @@\n`,
     lcov: `SF:C:\\runner\\workspace\\${source.replaceAll('/', '\\\\')}\nDA:1,1\nBRDA:1,0,0,1\nend_of_record\n`,
-    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['apps/web/'] } },
+    baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['media/'] } },
   });
   assert.deepEqual(result.failures, []);
   assert.equal(result.files[0].coveredLines, 1);

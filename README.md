@@ -11,7 +11,7 @@ Connect without installing an ODBC driver, write and validate Netezza SQL, explo
 
 [Website](https://justybase.github.io/vscode/) · [Documentation](https://justybase.github.io/justybase-vscode/guide/) · [Marketplace](https://marketplace.visualstudio.com/items?itemName=krzysztof-d.justybaselite-netezza) · [Open VSX](https://open-vsx.org/extension/krzysztof-d/justybaselite-netezza) · [Publisher](https://marketplace.visualstudio.com/publishers/krzysztof-d)
 
-**[Open the complete JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/)** — user workflows, reference tables, Web Editor administration, and developer guidance.
+**[Open the complete JustyBase documentation portal](https://justybase.github.io/justybase-vscode/guide/)** — user workflows, reference tables, and developer guidance.
 
 ## Why JustyBase?
 

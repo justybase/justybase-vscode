@@ -23,8 +23,8 @@ The Result Panel is a data exploration workspace, not only a table widget. It vi
 
 ## Column filters and grouped tree rows
 
-The Web editor uses the same compact result grid as the shared UI package. Click the funnel icon in a
-column header to open the Excel-like filter menu. It can search the visible
+The result grid uses shared UI components. Click the funnel icon in a column
+header to open the Excel-like filter menu. It can search the visible
 values, select or invert distinct values, use text/numeric comparison
 operators, and match blank or non-blank values. Click **Apply** to keep the
 filter; **Clear filter** removes it. The older inline text fields are retained
@@ -38,11 +38,8 @@ collapse chevron, indentation, row count, and preserved row selection/copy
 coordinates. Removing the last grouping returns the flat result grid.
 
 Click **Pivot** to choose a row column, a pivot column, and a numeric value
-column. The Web editor opens this configuration in an in-app dialog, so the
-operation also works in browsers where `window.prompt` is unavailable. The
-result is a separate, closable grid and respects the active filters; for a
-server-backed result the aggregation is performed by the database, while a
-local result is aggregated in the browser.
+column. The operation opens in a dedicated panel and produces a separate,
+closable grid that respects the active filters.
 
 Drag a cell or row selection beyond the top or bottom edge of the result
 viewport to keep extending it while the grid scrolls. Header widths include
@@ -130,7 +127,7 @@ Batch statements appear as separate tabs. Pinning protects a result from normal 
 
 Copy selected cells or rows as TSV, Markdown, CSV, or CSV-semicolon. Export can use raw values or display-formatted values, controlled by `justybase.results.useFormattedValuesForExport`. Formatting controls include integer/decimal grouping, group and decimal separators, scale, trailing zeros, and rounding mode. A display value such as `1 234,50` is not the same as the raw numeric value `1234.5`; choose deliberately before handing data to another system.
 
-The desktop grid can export query results to XLSB, XLSX, CSV, CSV.GZ, CSV.ZST, JSON, XML, SQL INSERT, Markdown, and Parquet. The Web Editor’s session export surface is listed in the [Web API reference](guide/reference/web-api/).
+The grid can export query results to XLSB, XLSX, CSV, CSV.GZ, CSV.ZST, JSON, XML, SQL INSERT, Markdown, and Parquet.
 
 ## Large-data limits
 

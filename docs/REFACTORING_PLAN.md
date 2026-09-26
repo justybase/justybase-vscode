@@ -1,14 +1,19 @@
-# Refactoring Plan: VS Code and Web
+# Historical Refactoring Plan: VS Code and Web
+
+> This plan includes completed work for the self-hosted Web Editor, which was
+> retired on 2026-09-26. Web-specific sections are historical and are not
+> active tasks. The shared package boundaries and desktop/companion work remain
+> relevant; do not merge shared components into product directories merely
+> because VS Code is now their only product consumer.
 
 ## Goal and Principles
 
 Practical modularity means sharing SQL logic, database handling, metadata,
-results, and the presentation of the main user workflows while retaining
-product adapters. Production VS Code extensions preserve behavior, commands,
-settings, and companion compatibility. Existing web/API implementations serve
-to confirm portability. R0–R8 establish the portable backend and ownership
-boundaries; R9 adds near-parity UI for the web and VS Code without
-creating one universal UI for every dialect-specific product feature.
+results, and reusable presentation components while retaining product
+adapters. Production VS Code extensions preserve behavior, commands, settings,
+and companion compatibility. R0–R8 established portable backend and ownership
+boundaries; R9 recorded the former Web/VS Code UI migration and is now
+historical.
 
 This plan specifies the migration sequence; it is not a second quality
 backlog. Statuses and completion evidence remain in the

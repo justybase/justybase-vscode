@@ -26,7 +26,7 @@ Before rerunning a statement:
 3. Add a predicate or `LIMIT` if the original was exploratory.
 4. For writes, use preview/safe execution and confirm the target.
 
-History is a convenience record, not a secret store. Do not put passwords or tokens in SQL literals. The Web Editor stores user history on the server and exposes it through its authenticated API; its retention follows the server data directory/session policy.
+History is a convenience record, not a secret store. Do not put passwords or tokens in SQL literals. Its retention and location follow the VS Code extension's local storage behavior.
 
 ## Favorites
 

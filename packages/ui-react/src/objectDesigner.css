@@ -1,4 +1,4 @@
-/* Shared Object Designer skin. Keep Web and VS Code on the same reviewed surface. */
+/* Shared Object Designer skin; host adapters provide their own lifecycle and transport. */
 .object-designer-backdrop {
   position: fixed;
   z-index: 120;

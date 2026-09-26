@@ -70,7 +70,7 @@ to a single `CALL` statement and a separate modal confirmation is required
 after compilation. Each retry may repeat procedure side effects, so use a
 controlled test connection/database.
 
-The exact names and current count are generated in the [AI and MCP reference](guide/reference/web-api/), so examples do not drift from the registered code.
+The exact names and current count are generated in the [Copilot and MCP reference](guide/reference/ai-mcp/), so examples do not drift from the registered code.
 
 ## MCP: read-only by design
 

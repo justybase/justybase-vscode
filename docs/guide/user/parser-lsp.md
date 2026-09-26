@@ -104,7 +104,7 @@ The CTE definition is visible at the outer query and its output aliases are used
 
 The desktop extension uses an LSP server for language features where the server is available. The extension-host providers and shared `packages/sql-core` surface supply the same parser concepts for startup, web, tests, or platform-specific cases. A fallback is intentionally conservative: if a strict parse fails, semantic coloring and unsafe rewrites are withheld rather than guessed.
 
-The Web Editor uses the shared SQL core over its LSP WebSocket protocol. It does not import `vscode`; this boundary keeps parser and formatter behavior reusable.
+The shared SQL core keeps parser and formatter behavior independent from VS Code APIs. The extension composes it with VS Code document, metadata, and language-server adapters.
 
 ## Dialect depth
 

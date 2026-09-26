@@ -386,7 +386,6 @@ async function main() {
       'coverage/lcov.info',
       'packages/ui-core/coverage/lcov.info',
       'packages/ui-react/coverage/lcov.info',
-      'apps/web/coverage/lcov.info',
       'coverage/media/lcov.info',
     ];
     const lcovFiles = resolveLcovFiles(explicitLcovFiles.length > 0 ? explicitLcovFiles : defaultLcovFiles);

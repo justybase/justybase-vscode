@@ -13,7 +13,7 @@ product_version: 3.17.26
 
 JustyBase is a multi-database SQL workspace for VS Code. It combines a parser-backed editor, schema intelligence, operational tools, and a result explorer so the database context stays close to the work.
 
-This portal is the canonical product documentation. The [reference catalog](guide/reference/commands/) is generated from the current extension manifest and the [database matrix](guide/reference/database-support/) is the place to check dialect boundaries. Pages labelled **Desktop only**, **Web only**, **Read-only**, **Partial**, or **Preview** are deliberate product boundaries, not promises of identical behavior everywhere.
+This portal is the canonical documentation for the VS Code extension and its companion extensions. The [reference catalog](guide/reference/commands/) is generated from the current extension manifests and the [database matrix](guide/reference/database-support/) is the place to check dialect boundaries. Pages labelled **Desktop only**, **Read-only**, **Partial**, or **Preview** describe deliberate product boundaries.
 
 ## Six workflows worth starting with
 
@@ -36,18 +36,14 @@ Read [Getting started](guide/user/getting-started/), save a connection, open the
 
 The [product guides](guide/user/parser-lsp/) cover the workflows that are easy to miss in a feature list: metadata refresh and [Schema Refresh Details](guide/user/schema-browser/#schema-refresh-details), result-set persistence, all-rows filtering, staged imports, query history, DDL, and maintenance.
 
-### Running the Web Editor
-
-Administrators should start with [Web Editor](guide/admin/web-editor/) and [Deployment and security](guide/admin/deployment-security/). The Web Editor shares parser contracts and result-session concepts with the desktop extension, but it is a separate server with its own authentication and session lifecycle.
-
 ### Extending JustyBase
 
-The [developer guide](guide/developer/architecture/) explains the boundaries between contracts, SQL core, runtime, desktop, API, and web. [Testing and documentation](guide/developer/testing-and-docs/) describes the checks expected when a capability changes.
+The [developer guide](guide/developer/architecture/) explains the boundaries between contracts, shared SQL/runtime/UI packages, the VS Code extension, and companion extensions. [Testing and documentation](guide/developer/testing-and-docs/) describes the checks expected when a capability changes.
 
 ## Status vocabulary
 
-**Supported** means the workflow is implemented and covered by the current product surface. **Partial** means the main path exists but the dialect or platform has a stated limitation. **Preview** marks a capability that may change. **Read-only** means the feature intentionally does not write data. **Desktop only** and **Web only** identify platform-specific surfaces. See [Statuses and permissions](guide/reference/statuses-and-permissions/) for the full legend.
+**Supported** means the workflow is implemented and covered by the current product surface. **Partial** means the main path exists but the dialect or platform has a stated limitation. **Preview** marks a capability that may change. **Read-only** means the feature intentionally does not write data. **Desktop only** identifies a VS Code-specific surface. See [Statuses and permissions](guide/reference/statuses-and-permissions/) for the full legend.
 
 ## Version and evidence
 
-This portal was verified against product version **3.17.26** on **2026-08-19**. Generated command, setting, database, AI-tool, MCP, format, and Web API tables are derived from repository sources during the Pages build. The build also publishes machine-readable [build metadata](../build-info.json) with the source commit and generated counts. Narrative pages still require human review when behavior changes.
+This portal was verified against product version **3.17.26** on **2026-09-26**. Generated command, setting, database, AI-tool, and MCP tables are derived from repository sources during the Pages build. The build also publishes machine-readable [build metadata](../build-info.json) with the source commit and generated counts. Narrative pages still require human review when behavior changes.

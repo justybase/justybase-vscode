@@ -1,7 +1,7 @@
 /*
- * Canonical visual contract for the portable Web and VS Code surfaces.
- * VS Code can override the --vscode-* inputs; Web resolves the same fallbacks
- * below, so geometry and contrast do not drift by host.
+ * Canonical visual contract for shared UI components.
+ * VS Code can override the --vscode-* inputs while the defaults keep
+ * components usable in other host adapters.
  */
 :root,
 .justybase-theme {

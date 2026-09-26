@@ -24,10 +24,9 @@ TCP `443`. The relay machine needs TCP access to the private database. The
 desktop never submits a destination host or port: it submits only a named
 target id, and the relay resolves that id from its server-side allowlist.
 
-The browser/web editor cannot use this feature because it cannot open the
-desktop loopback TCP listener. This feature is for the desktop VS Code
-extension (including a Remote-SSH/Remote-WSL extension host, where the
-loopback listener belongs to that host).
+This feature is for the desktop VS Code extension (including a
+Remote-SSH/Remote-WSL extension host, where the loopback listener belongs to
+that host).
 
 ## 1. Start the reference FastAPI relay
 

@@ -12,17 +12,15 @@ test behavior.
 
 | Layer | Scope | Command |
 | --- | --- | --- |
-| Static | TypeScript, contracts, API, Web, shared UI | `npm run check-types`, `npm run check-types:api`, `npm run check-types:web`, `npm run check-types:media` |
+| Static | TypeScript, contracts, shared packages and UI | `npm run check-types`, `npm run check-types:shared`, `npm run check-types:media` |
 | Architecture | Dependency directions, pure packages, explicit debt and cycles | `npm run check:architecture`, `npm run test:quality-tools` |
 | Lint | Blocking desktop rules plus ratcheted workspace baseline | `npm run lint`, `npm run lint:extended:check` |
 | Quality tooling | Versioned baseline/report and changed-code gate helpers | `npm run test:quality-tools`, `npm run quality:report` |
 | Unit | Parsers, state machines, providers, utilities | `npm run test:validate` |
 | Shared SQL core | Pure validation boundary and package-owned contract tests | `npm run test:sql-core`, `npm run check-types:sql-core` |
-| API/web | Fastify routes and React behavior | `npm run test:api`, `npm run test:web` |
 | Shared UI | `ui-core`, `ui-react`, and migrated media composition | `npm run test:ui-core`, `npm run test:ui-react`, `npm run test:coverage:ui` |
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
-| Web/API browser | Deterministic authenticated Dockyard Web workspace against the controlled API/SQLite fixture | `npm run test:playwright:web-dockyard` |
 | Extension Host | Real VS Code activation, commands, webview protocol | `npm run test:extension-host` |
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
@@ -196,26 +194,6 @@ High-traffic surfaces require automated accessibility checks and keyboard-only
 flows. Serious or critical accessibility violations fail the gate. Verify
 accessible names, focus entry/return, modal focus containment, Escape/Enter,
 grid selection/copy, high-contrast themes, zoom, and reduced-motion behavior.
-
-## Dockyard Web and controlled login
-
-The Web workspace has its Dockyard composition root. Test
-stable document/source/result identities rather than generated DOM ids.
-Stateful tests must cover query-document create/close/reorder, reload, legacy
-persistence migration, corrupt/future snapshot handling, reconnect, and
-`dispose()` with no remaining subscriptions, timers, sockets, or late
-callbacks. The browser scenario also runs at a narrow viewport.
-
-The exact `Use test login data` button is a test-harness control. It is rendered
-only by a Vite `test` build with `VITE_ENABLE_TEST_LOGIN=1`, while the API route
-is registered only with `NODE_ENV=test` and `JUSTYBASE_ENABLE_TEST_LOGIN=1`.
-The request is bodyless and obtains the configured test administrator through
-the server; credentials must not be repeated in Playwright specs or enter
-React state, DOM, URL, localStorage, logs, or the frontend bundle. The normal
-username/password login path remains covered independently. Use
-`npm run test:playwright:web-dockyard` for the controlled API/SQLite browser gate
-(`test:playwright:web-shared` is a compatibility alias);
-never enable these flags in a production build or deployment.
 
 ## Live test hygiene
 

@@ -58,7 +58,7 @@ Update lexer, parser, visitor, built-ins, TextMate grammar, and snippets as appr
 
 ## Capability changes
 
-When adding a command, setting, `DatabaseKind`, Copilot/Language Model tool, MCP tool, Web API route, or import/export format:
+When adding a command, setting, `DatabaseKind`, Copilot/Language Model tool, MCP tool, or import/export format:
 
 1. Update its source contract/manifest.
 2. Add or update the user workflow page and relevant status/boundary.

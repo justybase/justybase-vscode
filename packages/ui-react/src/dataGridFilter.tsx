@@ -51,8 +51,7 @@ const FILTER_OPERATORS: readonly { readonly value: QueryColumnFilterOperator; re
 /**
  * Host-neutral Excel-style filter UI. Loading distinct values and translating
  * the selected state into a query remain adapter responsibilities; this
- * component only renders the stable interaction surface shared by Web and
- * VS Code.
+ * component only renders the stable interaction surface shared by hosts.
  */
 export function DataGridColumnFilterPanel({ state, onChange, onApply, onClear, onClose }: DataGridColumnFilterPanelProps): ReactElement {
   const visibleOptions = useMemo(() => {

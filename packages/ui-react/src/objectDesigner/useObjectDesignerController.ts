@@ -359,7 +359,7 @@ export function useObjectDesignerController({
       return;
     }
     if (!context?.runtimeAvailable) {
-      setError('This database runtime is not available in the web API.');
+      setError('This database runtime is not available for the selected connection.');
       return;
     }
     setPreviewing(true);

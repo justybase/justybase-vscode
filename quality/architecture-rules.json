@@ -2,9 +2,6 @@
   "version": 1,
   "packageDependencies": {
     "packages/contracts": [],
-    "packages/api-client": [
-      "packages/contracts"
-    ],
     "packages/sql-core": [
       "packages/contracts"
     ],
@@ -50,14 +47,6 @@
     "packages/ui-core": [
       "packages/contracts"
     ],
-    "packages/dockyard-layout": [
-      "packages/contracts",
-      "packages/ui-core"
-    ],
-    "packages/ui-monaco": [
-      "packages/contracts",
-      "packages/ui-core"
-    ],
     "packages/ui-react": [
       "packages/contracts",
       "packages/dialect-utils",
@@ -66,8 +55,7 @@
     ]
   },
   "browserSources": [
-    "media/**",
-    "apps/web/src/**"
+    "media/**"
   ],
   "browserExternalImports": [
     "react",
@@ -92,13 +80,10 @@
   ],
   "pureSources": [
     "packages/contracts/src/**",
-    "packages/api-client/src/**",
     "packages/database-utils/src/**",
     "packages/dialect-utils/src/**",
     "packages/*-core/src/**",
-    "packages/dockyard-layout/src/**",
-    "packages/ui-react/src/**",
-    "packages/ui-monaco/src/**"
+    "packages/ui-react/src/**"
   ],
   "pureExternalImports": [
     "chevrotain"
@@ -121,7 +106,7 @@
     {
       "source": "packages/ui-react/src/dataGrid.tsx",
       "target": "react",
-      "reason": "The shared result grid is a React presentation component consumed by Web and VS Code adapters.",
+      "reason": "The shared result grid is a React presentation component consumed by the VS Code webview adapter.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },
@@ -135,23 +120,9 @@
     {
       "source": "packages/ui-react/src/resultPanel.tsx",
       "target": "react",
-      "reason": "The canonical result panel composition is a React presentation component consumed by the Web adapter.",
+      "reason": "The shared result panel composition is a React presentation component consumed by the VS Code webview adapter.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
-    },
-    {
-      "source": "packages/ui-monaco/src/sqlLanguage.ts",
-      "target": "monaco-editor",
-      "reason": "The portable Monaco package owns browser editor and LSP registration while product adapters own transport and lifecycle.",
-      "owner": "SQL authoring maintainers",
-      "removeWhen": "Replace Monaco with a different browser editor integration."
-    },
-    {
-      "source": "packages/ui-monaco/src/sqlProblems.ts",
-      "target": "monaco-editor",
-      "reason": "The Monaco boundary translates editor markers into the portable ui-core Problems model.",
-      "owner": "SQL authoring maintainers",
-      "removeWhen": "Replace Monaco with a different browser editor integration."
     },
     {
       "source": "packages/ui-react/src/sqlProblems.tsx",
@@ -159,13 +130,6 @@
       "reason": "The shared Problems view is a React presentation component consumed by product adapters.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
-    },
-    {
-      "source": "packages/ui-monaco/src/sqlShortcuts.ts",
-      "target": "monaco-editor",
-      "reason": "The Monaco boundary owns editor shortcut registration while shortcut semantics remain reusable.",
-      "owner": "SQL authoring maintainers",
-      "removeWhen": "Replace Monaco with a different browser editor integration."
     },
     {
       "source": "packages/ui-react/src/objectDesigner/ObjectDesigner.tsx",
@@ -203,16 +167,6 @@
         "media"
       ]
     },
-    "api": {
-      "sources": [
-        "apps/api/src"
-      ]
-    },
-    "web": {
-      "sources": [
-        "apps/web/src"
-      ]
-    },
     "companions": {
       "sources": [
         "extensions/*/src"
@@ -238,38 +192,22 @@
       "desktop",
       "media"
     ],
-    "api": [
-      "contracts",
-      "shared",
-      "api"
-    ],
-    "web": [
-      "contracts",
-      "shared",
-      "web"
-    ],
     "companions": [
       "contracts",
       "shared",
       "companions"
     ]
   },
-    "workspaceEntryPoints": {
-      "@justybase/api-client": "packages/api-client/src/index.ts",
-      "@justybase/metadata-core": "packages/metadata-core/src/index.ts",
-      "@justybase/result-core": "packages/result-core/src/index.ts",
-      "@justybase/sql-core": "packages/sql-core/src/index.ts",
-      "@justybase/ui-core": "packages/ui-core/src/index.ts",
-      "@justybase/ui-monaco": "packages/ui-monaco/src/index.ts",
-      "@justybase/ui-react": "packages/ui-react/src/index.ts"
+  "workspaceEntryPoints": {
+    "@justybase/metadata-core": "packages/metadata-core/src/index.ts",
+    "@justybase/result-core": "packages/result-core/src/index.ts",
+    "@justybase/sql-core": "packages/sql-core/src/index.ts",
+    "@justybase/ui-core": "packages/ui-core/src/index.ts",
+    "@justybase/ui-react": "packages/ui-react/src/index.ts"
   },
   "forbiddenImports": [
     {
       "layer": "desktop",
-      "specifier": "^@justybase/netezza-driver(?:/|$)"
-    },
-    {
-      "layer": "api",
       "specifier": "^@justybase/netezza-driver(?:/|$)"
     },
     {
@@ -292,10 +230,6 @@
     {
       "source": "packages/ui-core/src/**",
       "specifier": "^(?:react|react-dom|node:|vscode|electron)(?:/|$)"
-    },
-    {
-      "source": "packages/ui-monaco/src/**",
-      "specifier": "^(?:node:|vscode|electron|react|react-dom|@justybase/(?:database-runtime|duckdb-runtime|netezza-runtime|sqlite-runtime|web-api)(?:/|$))"
     },
     {
       "source": "packages/ui-react/src/**",

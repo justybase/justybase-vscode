@@ -2,7 +2,7 @@
   "name": "@justybase/ui-react",
   "private": true,
   "version": "3.17.14",
-  "description": "Shared React presentation for JustyBase Web and VS Code adapters.",
+  "description": "Shared React presentation components for VS Code webviews and compatible host adapters.",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

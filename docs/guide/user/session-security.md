@@ -36,4 +36,4 @@ Security actions are not read-only. The panel previews/constructs SQL and asks f
 5. Confirm target, principal, object, and scope.
 6. Re-query the panel and audit/log source after the change.
 
-The Web Editor adds authenticated admin user management, backup/restore, CSRF protection, and audit routes; see [Web Editor administration](guide/admin/web-editor/).
+Connection credentials are stored through VS Code's SecretStorage. Keep SQL literals and query history free of passwords, tokens, and other credentials.

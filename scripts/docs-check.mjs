@@ -30,11 +30,6 @@ async function exists(file) {
 }
 function unique(values) { return [...new Set(values)]; }
 function regexValues(source, pattern) { return [...source.matchAll(pattern)].map(match => match[1]).filter(Boolean); }
-function extractApiRoutes(source) { return [...source.matchAll(/app\.(?:get|post|put|patch|delete)(?:<[^()]*?>)?\(\s*['"`](\/[^'"`]+)['"`]/g)].map(match => match[1]); }
-function extractTypeUnionValues(source, typeName) {
-  const declaration = source.match(new RegExp(`${typeName}\\s*=\\s*([^;]+)`))?.[1] ?? '';
-  return [...declaration.matchAll(/'([^']+)'/g)].map(match => match[1]);
-}
 function decodeHtmlEntities(value) {
   return value.replace(/&(amp|lt|gt|quot|#39|#x27);/gi, (_match, entity) => ({
     amp: '&',
@@ -127,15 +122,11 @@ async function catalogs() {
   const contractTools = unique(regexValues(contracts, /name:\s*'([^']+)'/g).filter(name => name.startsWith('netezza_')));
   const activeTools = unique(regexValues(registrations, /name:\s*'([^']+)'/g));
   const mcpTools = unique(regexValues(mcp, /name:\s*'([^']+)'/g));
-  const api = await readFile(path.join(root, 'apps/api/src/server.ts'), 'utf8');
-  const routes = unique(extractApiRoutes(api));
   const database = await readFile(path.join(root, 'packages/contracts/src/database/index.ts'), 'utf8');
   const databaseKinds = unique(regexValues(database, /\|\s*'([^']+)'/g)).filter(kind => kind !== 'string');
-  const webApi = await readFile(path.join(root, 'packages/contracts/src/webApi.ts'), 'utf8');
-  const formats = unique([...extractTypeUnionValues(webApi, 'QueryExportFormat'), ...extractTypeUnionValues(webApi, 'QueryFileImportFormat'), 'parquet', 'xpt']);
   const copilotNames = activeTools;
   const mcpNames = mcpTools;
-  return { commands, settings, contractTools, activeTools, mcpTools, copilotNames, mcpNames, routes, databaseKinds, formats };
+  return { commands, settings, contractTools, activeTools, mcpTools, copilotNames, mcpNames, databaseKinds };
 }
 
 function pageFile(url) {
@@ -147,16 +138,13 @@ async function checkCatalogs(catalog) {
     commands: await readFile(pageFile('guide/reference/commands/'), 'utf8'),
     settings: await readFile(pageFile('guide/reference/settings/'), 'utf8'),
     databases: await readFile(pageFile('guide/reference/database-support/'), 'utf8'),
-    api: await readFile(pageFile('guide/reference/web-api/'), 'utf8'),
-    formats: await readFile(pageFile('guide/user/import-export/'), 'utf8'),
+    aiMcp: await readFile(pageFile('guide/reference/ai-mcp/'), 'utf8'),
   };
   assertExactCatalog('command', catalog.commands, tableValues(generated.commands, 'COMMANDS'));
   assertExactCatalog('setting', catalog.settings, tableValues(generated.settings, 'SETTINGS'));
   assertExactCatalog('advertised DatabaseKind', catalog.databaseKinds.filter(value => advertisedDatabaseKinds.has(value)), tableValues(generated.databases, 'DATABASES', value => value.toLowerCase()));
-  assertExactCatalog('Web API route', catalog.routes, tableValues(generated.api, 'ROUTES'));
-  assertExactCatalog('import/export format', catalog.formats, tableValues(generated.formats, 'FORMATS', value => value.toLowerCase()));
-  assertExactCatalog('Copilot tool', catalog.copilotNames, tableValues(generated.api, 'AI_TOOLS'));
-  assertExactCatalog('MCP tool', catalog.mcpNames, tableValues(generated.api, 'MCP_TOOLS'));
+  assertExactCatalog('Copilot tool', catalog.copilotNames, tableValues(generated.aiMcp, 'AI_TOOLS'));
+  assertExactCatalog('MCP tool', catalog.mcpNames, tableValues(generated.aiMcp, 'MCP_TOOLS'));
   for (const tool of catalog.activeTools) if (!catalog.contractTools.includes(tool)) fail(`Active Copilot tool has no contract: ${tool}`);
   for (const tool of catalog.contractTools) if (!catalog.activeTools.includes(tool)) fail(`Contract tool is not registered: ${tool}`);
 }
@@ -262,9 +250,7 @@ async function checkBuildProvenance(catalog) {
     settings: catalog.settings.length,
     copilotTools: catalog.copilotNames.length,
     mcpTools: catalog.mcpNames.length,
-    routes: catalog.routes.length,
     databaseKinds: catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).length,
-    formats: catalog.formats.length,
   };
   for (const [key, expected] of Object.entries(expectedCounts)) {
     if (expected !== undefined && counts[key] !== expected) fail(`Generated build count ${key} is stale: ${counts[key]} != ${expected}`);
@@ -332,7 +318,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  console.log(`docs:check passed (${catalog.commands.length} commands, ${catalog.settings.length} settings, ${catalog.routes.length} Web API routes, ${catalog.mcpTools.length} MCP tools).`);
+  console.log(`docs:check passed (${catalog.commands.length} commands, ${catalog.settings.length} settings, ${catalog.copilotNames.length} Copilot tools, ${catalog.mcpTools.length} MCP tools).`);
 }
 
 await main();

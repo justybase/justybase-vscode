@@ -80,11 +80,8 @@ jobs:
       - name: Check shared package boundaries
         run: npm run check:architecture
 
-      - name: Type check shared packages and API
-        run: npm run check-types:api
-
-      - name: Type check web application
-        run: npm run check-types:web
+      - name: Type check shared packages
+        run: npm run check-types:shared
 
       - name: Type check DB2 extension
         if: hashFiles('extensions/db2/package-lock.json') != ''
@@ -133,9 +130,6 @@ jobs:
 
       - name: Build desktop bundle
         run: npm run build
-
-      - name: Build workspace products
-        run: npm run build:all
 
   typecheck-ts7:
     name: TypeScript 7 Compatibility (informational)
@@ -276,12 +270,6 @@ jobs:
           diff_file="${RUNNER_TEMP}/justybase-changed.diff"
           git diff --unified=0 "${BASE_SHA}...HEAD" -- . > "${diff_file}"
           node scripts/quality-gate.mjs changed-coverage --diff-file="${diff_file}" --base="${BASE_SHA}"
-
-      - name: Run API workspace tests
-        run: npm run test:api
-
-      - name: Run web workspace tests
-        run: npm run test:web
 
   extension-host-result-panel:
     name: Extension Host Result Panel Gate

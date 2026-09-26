@@ -3,8 +3,8 @@ import type { MetadataNode } from './ports';
 /**
  * Labels shared by the schema explorers and kept in the same vocabulary as
  * the VS Code Schema view commands. Host-specific components still own the
- * actual action handlers because Web and VS Code have different document
- * and clipboard boundaries.
+ * actual action handlers because host adapters have different document and
+ * clipboard boundaries.
  */
 export const SCHEMA_CONTEXT_MENU_LABELS = {
   setActiveContext: 'Set as active context',

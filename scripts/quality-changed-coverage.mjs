@@ -22,7 +22,6 @@ function configuredReports() {
     'coverage/lcov.info',
     'packages/ui-core/coverage/lcov.info',
     'packages/ui-react/coverage/lcov.info',
-    'apps/web/coverage/lcov.info',
     'coverage/media/lcov.info',
   ];
   return resolveLcovFiles(explicit.length > 0 ? explicit : defaults);

@@ -297,7 +297,6 @@ Tests simulate: populate cache → `dispose` (disk write) → new `MetadataCache
 Key files:
 
 - `packages/metadata-core/__tests__/rules.test.ts`
-- `apps/api/tests/metadataCache.test.ts`
 
 - `src/__tests__/integration/metadataCacheRestart.integration.test.ts`
 - `src/__tests__/fixtures/metadataCacheRestartFixture.ts`

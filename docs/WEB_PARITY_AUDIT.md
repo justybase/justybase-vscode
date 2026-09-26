@@ -1,4 +1,9 @@
-# Web Editor ↔ VS Code Extension — Parity Audit & Backlog
+# Archived: Web Editor ↔ VS Code Extension Parity Audit
+
+> Historical record only. The self-hosted Web Editor and API were retired on
+> 2026-09-26. Their frontend, server, and product-specific packages are no
+> longer maintained. Shared contracts, SQL/runtime engines, and UI components
+> remain in the repository where VS Code or companion extensions consume them.
 
 Last updated: 2026-09-15
 
@@ -14,7 +19,7 @@ from this repository:
 >
 > Companion implementation references: `docs/LSP_FEATURE_MATRIX.md` (LSP transport),
 > `docs/EDITOR_CAPABILITY_MATRIX.md` (desktop editor capability status),
-> `docs/WEB_EDITOR.md` (how to run the web editor).
+> the former Web Editor deployment guide, retained only in repository history.
 > Cross-cutting readiness and quality gates are owned by
 > `docs/PROJECT_QUALITY_ROADMAP.md`; parity status alone does not make a feature
 > production-ready.
