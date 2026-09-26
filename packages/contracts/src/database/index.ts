@@ -145,6 +145,8 @@ export interface DatabaseSqlFunctionSignature {
   description: string;
   /** Optional example shown by authoring clients. */
   example?: string;
+  /** Window usage supported by this signature. Required functions always insert OVER. */
+  window?: 'required' | 'supported';
 }
 
 export interface DatabaseSqlTypeSpec {

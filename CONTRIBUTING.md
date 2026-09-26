@@ -1,9 +1,10 @@
 # Contributing to JustyBase
 
 JustyBase is a monorepo containing the VS Code extension, companion database
-extensions, shared SQL/runtime packages, and the self-hosted web editor. Small
-changes should stay inside the owning package; cross-cutting changes must keep
-the desktop and web contracts compatible.
+extensions, and shared SQL/runtime packages. Small changes should stay inside
+the owning package; cross-cutting changes must preserve the contracts used by
+the desktop extension and companion extensions. There is no standalone Web
+Editor or web API; “webview” here means a UI panel hosted inside VS Code.
 
 ## Local setup
 
@@ -16,10 +17,10 @@ npm run lint
 npm run test:fast -- --runInBand
 ```
 
-For a pull-request-equivalent check run `npm run verify:pr`. It covers the root
-and workspace type checks, blocking lint, the complete root validation suite,
-API and web tests, and the API/web production build. The deterministic result
-panel gate additionally runs:
+For a pull-request-equivalent check run `npm run verify:pr`. It covers
+architecture boundaries, root and shared-package type checks, blocking and
+extended lint, quality-tool and shared-package tests, coverage gates, and the
+desktop build. The deterministic result-panel gates additionally run:
 
 ```bash
 npm run test:extension-host
@@ -59,8 +60,9 @@ or database fixtures containing customer data.
 
 ## Change boundaries
 
-- `packages/contracts` is the additive public boundary shared by desktop, web,
-  and API. Preserve optional-field and backwards-compatibility semantics.
+- `packages/contracts` is the additive public boundary shared by the desktop
+  extension and companion extensions. Preserve optional-field and
+  backwards-compatibility semantics.
 - `packages/sql-core` must remain independent of `vscode`.
 - `packages/database-runtime` owns reusable execution and safety helpers.
 - `src/` and `media/` are desktop implementation layers; do not add

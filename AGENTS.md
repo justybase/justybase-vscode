@@ -4,7 +4,7 @@ This file provides guidance to agents when working with code in this repository.
 
 ## Project Overview
 
-Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / PureData System for Analytics, optional database companion extensions, and a self-hosted web editor/API. Database support includes Netezza, SQLite, Db2, Oracle, PostgreSQL, Snowflake, MSSQL, MySQL, ClickHouse, DuckDB/File SQL, Microsoft Access, and Vertica.
+Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / PureData System for Analytics and optional database companion extensions. Database support includes Netezza, SQLite, Db2, Oracle, PostgreSQL, Snowflake, MSSQL, MySQL, ClickHouse, DuckDB/File SQL, Microsoft Access, and Vertica.
 
 **External dependencies:**
 
@@ -17,19 +17,17 @@ Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / Pur
 - `media/` — VS Code webviews and React-based panels. These are bundled by the root esbuild configuration.
 - `dialects/` — TextMate grammars and snippets for the supported SQL dialects.
 - `extensions/*/` — optional VS Code companion extensions. Each extension depends on the core extension and is built/package separately.
-- `packages/contracts/` — shared public TypeScript contracts used by desktop, web, API, and companion extensions.
-- `packages/sql-core/` — VS Code-free SQL/LSP surface shared with the web API. Do not introduce a `vscode` import here.
-- `packages/database-runtime/` — shared database execution/runtime helpers used by the web API and other platform-neutral consumers.
+- `packages/contracts/` — shared public TypeScript contracts used by the desktop extension and companion extensions.
+- `packages/sql-core/` — VS Code-free SQL/LSP surface used by desktop and platform-neutral consumers. Do not introduce a `vscode` import here.
+- `packages/database-runtime/` — shared database execution/runtime helpers used by desktop and applicable companion adapters.
 - `packages/sqlite-runtime/` — instance-owned SQLite execution, metadata, cancellation, and cleanup; product adapters authorize paths.
-- `packages/duckdb-runtime/` — structural DuckDB session/runtime used by API and DuckDB/File SQL adapters.
-- `packages/netezza-runtime/` — Netezza driver boundary and instance-scoped runtime used by API, desktop, and MCP.
+- `packages/duckdb-runtime/` — structural DuckDB session/runtime used by DuckDB/File SQL adapters.
+- `packages/netezza-runtime/` — Netezza driver boundary and instance-scoped runtime used by desktop and MCP.
 - `packages/access-file/` — standalone MDB/ACCDB reader and Access file-session package.
-- `apps/api/` — self-hosted Fastify API and WebSocket server.
-- `apps/web/` — React/Vite self-hosted web editor.
 - `Benchmark/` — local performance suites; generated result files are ignored.
-- `test-harness/` — Playwright and browser harnesses for webviews and the web SQL workspace.
+- `test-harness/` — Playwright and browser harnesses for VS Code webviews.
 
-The root `package.json` uses npm workspaces for `packages/*` and `apps/*`. The root API build handles the `contracts -> sql-core -> duckdb-runtime/netezza-runtime -> database-runtime/sqlite-runtime -> api` dependency chain; build `@justybase/access-file` separately when working on that package. Use the root scripts rather than committing generated `dist/` output.
+The root `package.json` uses npm workspaces for `packages/*`. The desktop build graph builds the shared packages needed by the VS Code extension; `@justybase/access-file` has its own build script. Use the root scripts rather than committing generated `dist/` output. The repository has no standalone Web Editor or web API; references to webviews below mean UI panels hosted inside VS Code.
 
 ### Quality and Documentation Sources of Truth
 
@@ -40,10 +38,9 @@ The root `package.json` uses npm workspaces for `packages/*` and `apps/*`. The r
 
 ### Toolchain and Local Setup
 
-- Node.js `>=22.12.0` and npm are required by the root and web/API manifests.
+- Node.js `>=22.12.0` and npm are required by the root and workspace package manifests.
 - The desktop extension targets VS Code `^1.103.2`.
 - Run `npm install` from the repository root so workspace links and shared tooling resolve consistently.
-- Use `apps/api/.env.example` as the starting point for local API configuration. Keep `.env` files, database credentials, and generated runtime data out of commits.
 - Optional extensions may require additional native/runtime dependencies; follow the README and verification script for the extension being changed.
 
 ## Build, Lint, Test Commands
@@ -55,12 +52,9 @@ npm run build              # Desktop extension, webviews, LSP, workers, and MCP 
 npm run build:dev          # Same as build; retained for development workflows
 npm run build:watch        # Watch all root esbuild entry points
 npm run build:minified     # Opt-in minified desktop bundles
-npm run build:api          # contracts -> sql-core -> dialect runtimes -> database-runtime -> web API
 npm run build:sqlite-runtime # contracts -> shared SQLite Node runtime
 npm run build:duckdb-runtime  # contracts -> shared DuckDB Node runtime
 npm run build:netezza-runtime # contracts -> Netezza driver boundary/runtime
-npm run build:web          # Vite build for apps/web
-npm run build:all          # API and web builds
 npm run clean              # Remove root dist/
 ```
 
@@ -70,7 +64,7 @@ The root build emits `dist/extension.js`, `dist/media/*`, `dist/server/main.js`,
 
 ```bash
 npm run lint               # ESLint check
-npm run lint:extended      # Report lint baseline across media/apps/packages/extensions
+npm run lint:extended      # Report lint baseline across media/packages/extensions
 npm run lint:fix           # ESLint with auto-fix
 npm run check-types        # TypeScript type check (no emit)
 npm run check:architecture # Enforce current shared-package import boundaries
@@ -92,11 +86,12 @@ npx jest src/__tests__/sqlParser/sqlParser.test.ts --runInBand  # Direct Jest
 npm run test:watch                                      # Watch mode
 npm run test:completion-parity                          # Completion parity tests
 npm run test:quickfix-regression                        # Quickfix regression tests
-npm run test:api                                        # Build shared packages and test apps/api
 npm run test:sqlite-runtime                             # Shared SQLite runtime unit/lifecycle tests
 npm run test:duckdb-runtime                             # Shared DuckDB runtime unit/lifecycle tests
 npm run test:netezza-runtime                            # Shared Netezza runtime unit/lifecycle tests
-npm run test:web                                        # Test apps/web
+npm run test:coverage:ui                                # Shared UI package and VS Code webview coverage
+npm run test:quality-tools                              # Quality and architecture tool tests
+npm run test:extension-host                             # Production Extension Host result-panel gate
 npm run test:playwright                                 # Browser/webview harness
 ```
 
@@ -175,7 +170,7 @@ npm run verify:pr
 npm run lint:extended && npm run docs:check && npm run version:check
 ```
 
-`verify:pr` covers architecture boundaries, desktop/media/shared/API/web type checks, blocking lint, unit/API/web tests, and desktop/API/web builds. It does not replace scope-specific browser, Extension Host, companion, live-database, packaging, or benchmark gates; run the nearest applicable command for changed high-risk behavior. `check-types` includes webview media TypeScript (`tsconfig.media.json` with `strictNullChecks` and `noImplicitAny`). New code under `media/` must pass `npm run check-types:media` (alias: `check-types:media:strict`).
+`verify:pr` covers architecture boundaries, root and shared-package type checks, blocking and extended lint, quality-tool tests, shared-package tests, coverage gates, and the desktop build. It does not replace scope-specific browser/webview, Extension Host, companion, live-database, packaging, or benchmark gates; run the nearest applicable command for changed high-risk behavior. `check-types` includes VS Code webview media TypeScript (`tsconfig.media.json` with `strictNullChecks` and `noImplicitAny`). New code under `media/` must pass `npm run check-types:media` (alias: `check-types:media:strict`).
 
 ### Result Panel webview layout
 
@@ -225,18 +220,17 @@ Optional extensions expose corresponding `package:<dialect>` and `package:<diale
 
 - Extension uses **esbuild** for bundling (not tsc) - output goes to `dist/`
 - Root bundles include `dist/extension.js`, `dist/media/*`, `dist/server/main.js`, `dist/metadataDiskCompress.worker.js`, and `dist/mcp/mcpServer.js`.
-- `apps/api` and the workspace packages use TypeScript builds into their own `dist/` directories; `apps/web` uses Vite.
+- Workspace packages use TypeScript builds into their own `dist/` directories; the desktop extension and webviews are bundled with esbuild.
 - Root TypeScript `out/` is not used for desktop runtime.
 
 ### Shared Workspace Boundaries
 
-- `@justybase/contracts` is the additive contract boundary. Keep new request/response fields compatible with desktop and web consumers.
-- `@justybase/sql-core` must remain independent of VS Code. It is consumed by `apps/api`; importing `vscode` or desktop-only providers here breaks the web build.
-- `@justybase/database-runtime` owns reusable execution and read-only safety helpers. Keep web/API execution logic here when it is not platform-specific.
+- `@justybase/contracts` is the additive contract boundary. Keep new request/response fields compatible with the desktop extension and companion extensions.
+- `@justybase/sql-core` must remain independent of VS Code. Importing `vscode` or desktop-only providers here breaks platform-neutral consumers.
+- `@justybase/database-runtime` owns reusable execution and read-only safety helpers. Keep execution logic here when it is shared and not platform-specific.
 - `@justybase/sqlite-runtime` owns SQLite sessions and Node I/O. Pass only product-authorized absolute paths or `:memory:`; sandbox and user authorization remain in the product adapter.
 - `@justybase/duckdb-runtime` owns DuckDB sessions, module resolution, catalog serialization, bounded reads, cancellation, and instance ownership. File SQL conversion/view setup stays in the companion adapter.
-- `@justybase/netezza-runtime` is the sole production owner of the Netezza driver import. Product adapters pass resolved credentials/targets; do not import the driver directly from API, desktop dialects, MCP, or compatibility helpers.
-- `apps/api` is a multi-user/self-hosted server. Keep credentials and secrets in its environment/configuration, never in source or fixtures.
+- `@justybase/netezza-runtime` is the sole production owner of the Netezza driver import. Product adapters pass resolved credentials/targets; do not import the driver directly from desktop dialects, MCP, companion extensions, or compatibility helpers.
 - `src/mcp/` contains the bundled read-only Netezza MCP server. Preserve the read-only gate for both stdio and HTTP transports.
 
 ### Critical Patterns
@@ -427,8 +421,7 @@ For ambiguous syntax or implicit-cast behavior, a dev Netezza instance can confi
 
 - Root extension tests: `src/__tests__/**/*.test.ts`
 - Shared contract tests: `packages/contracts/__tests__/**/*.test.ts`
-- API tests: `apps/api/tests/**/*.test.ts`
-- Web tests: `apps/web/src/**/*.test.ts`
+- Shared package tests: `packages/*/__tests__/**/*.test.*` and package-local test directories
 - Browser/webview tests: `test-harness/tests/**/*.spec.ts`
 - VS Code mock: `src/__tests__/__mocks__/vscode.ts`
 - Root Jest uses `maxWorkers: 50%` by default; use `npm run test:serial` or `--runInBand` to reduce memory usage.

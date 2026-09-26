@@ -3,7 +3,7 @@
  *
  * `@justybase/result-core` is dependency-free by architecture policy, so the
  * shape is declared locally exactly as {@link PortableQueryEvent} already
- * mirrors the API event union. The wire payload stays structurally identical,
+ * mirrors the portable query event union. The payload stays structurally identical,
  * which keeps assignability with the contracts type.
  */
 export interface PortableDatabaseErrorDetails {
@@ -43,7 +43,7 @@ export interface PortableQueryResultState {
   status: string;
   message?: string;
   totalRows: number;
-  /** Existing web/API compatibility field; equal to storageSessionId for session events. */
+  /** Legacy session identifier; equal to storageSessionId for session events. */
   sessionId?: string;
   statementIndex?: number;
   statementCount?: number;
@@ -54,7 +54,7 @@ export interface PortableQueryResultState {
   storageSessionId?: string;
   cancelScope?: 'statement' | 'batch';
   batchStatus?: 'complete' | 'error' | 'cancelled';
-  /** Backend diagnostics of the failing statement, when the API supplied them. */
+  /** Backend diagnostics of the failing statement, when supplied. */
   errorDetails?: PortableDatabaseErrorDetails;
   lastSequence?: number;
   sourceId?: string;
