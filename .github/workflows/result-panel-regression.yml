@@ -27,8 +27,6 @@ on:
       - "src/contracts/webviews/**"
       - "media/resultPanel/**"
       - "packages/result-core/**"
-      - "apps/web/src/queryState.ts"
-      - "apps/web/src/ResultGrid.tsx"
       - "test-harness/**"
       - "scripts/extensionHost/resultPanelRegression*"
       - "scripts/extensionHost/**"

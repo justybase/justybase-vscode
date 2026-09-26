@@ -19,8 +19,6 @@ function createFixture() {
     'packages/shared/src',
     'src',
     'media',
-    'apps/api/src',
-    'apps/web/src',
     'extensions/example/src',
   ]) fs.mkdirSync(path.join(root, directory), { recursive: true });
   return root;
@@ -48,8 +46,6 @@ function fixtureRules(overrides = {}) {
       shared: { sources: ['packages/shared/src'] },
       desktop: { sources: ['src'] },
       media: { sources: ['media'] },
-      api: { sources: ['apps/api/src'] },
-      web: { sources: ['apps/web/src'] },
       companions: { sources: ['extensions/*/src'] },
     },
     allowedDependencies: {
@@ -57,8 +53,6 @@ function fixtureRules(overrides = {}) {
       shared: ['contracts', 'shared'],
       desktop: ['contracts', 'shared', 'desktop'],
       media: ['contracts', 'shared', 'desktop', 'media'],
-      api: ['contracts', 'shared', 'api'],
-      web: ['contracts', 'shared', 'web'],
       companions: ['contracts', 'shared', 'companions'],
     },
     workspaceEntryPoints: {},
@@ -108,13 +102,13 @@ test('resolves relative, export, require, dynamic import, import type, aliases, 
       const typeOnly: TypeOnly = true;
       void typeOnly;
     `);
-    writeFixture(root, 'apps/api/src/main.ts', "import { contract } from '@fixture/contracts'; void contract;");
+    writeFixture(root, 'packages/shared/src/consumer.ts', "import { contract } from '@fixture/contracts'; void contract;");
 
     const result = analyzeArchitecture(root, fixtureRules());
     assert.deepEqual(result.diagnostics, []);
     assert.ok(result.edges.some(edge => edge.source === 'src/main.ts' && edge.target === 'src/relative.ts'));
     assert.ok(result.edges.some(edge => edge.source === 'src/main.ts' && edge.target === 'packages/shared/src/alias.ts'));
-    assert.ok(result.edges.some(edge => edge.source === 'apps/api/src/main.ts' && edge.target === 'packages/contracts/src/index.ts'));
+    assert.ok(result.edges.some(edge => edge.source === 'packages/shared/src/consumer.ts' && edge.target === 'packages/contracts/src/index.ts'));
   } finally {
     removeFixture(root);
   }
@@ -143,11 +137,11 @@ test('reports an import outside the configured layer direction as ARCH001', () =
   const root = createFixture();
   try {
     writeFixture(root, 'src/desktop.ts', 'export const desktop = true;');
-    writeFixture(root, 'apps/api/src/main.ts', "import { desktop } from '../../../src/desktop'; void desktop;");
+    writeFixture(root, 'packages/shared/src/main.ts', "import { desktop } from '../../../src/desktop'; void desktop;");
 
     const result = analyzeArchitecture(root, fixtureRules());
     assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.forbiddenDependency));
-    assert.match(result.diagnostics.find(diagnostic => diagnostic.code === ARCHITECTURE_CODES.forbiddenDependency).message, /apps\/api\/src\/main\.ts/);
+    assert.match(result.diagnostics.find(diagnostic => diagnostic.code === ARCHITECTURE_CODES.forbiddenDependency).message, /packages\/shared\/src\/main\.ts/);
   } finally {
     removeFixture(root);
   }
@@ -272,10 +266,10 @@ test('accepts a concrete, reasoned edge exception without accepting a layer-wide
   const root = createFixture();
   try {
     writeFixture(root, 'src/desktop.ts', 'export const desktop = true;');
-    writeFixture(root, 'apps/api/src/main.ts', "import { desktop } from '../../../src/desktop'; void desktop;");
+    writeFixture(root, 'packages/shared/src/main.ts', "import { desktop } from '../../../src/desktop'; void desktop;");
     const result = analyzeArchitecture(root, fixtureRules({
       exceptions: [{
-        source: 'apps/api/src/main.ts',
+        source: 'packages/shared/src/main.ts',
         target: 'src/desktop.ts',
         reason: 'Fixture adapter bridge.',
         owner: 'Fixture owner',
@@ -329,8 +323,8 @@ test('rejects malformed forbidden-import regular expressions as ARCH004', () => 
 test('rejects malformed nested tsconfig diagnostics as ARCH004', () => {
   const root = createFixture();
   try {
-    writeFixture(root, 'apps/api/tsconfig.json', '{ "compilerOptions": { "module": "not-a-module" } }');
-    writeFixture(root, 'apps/api/src/main.ts', 'export const main = true;');
+    writeFixture(root, 'packages/shared/tsconfig.json', '{ "compilerOptions": { "module": "not-a-module" } }');
+    writeFixture(root, 'packages/shared/src/main.ts', 'export const main = true;');
     const result = analyzeArchitecture(root, fixtureRules());
     assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === ARCHITECTURE_CODES.invalidConfiguration));
   } finally {
@@ -384,16 +378,15 @@ test('a pure shared engine cannot import a Node runtime even through a workspace
   }
 });
 
-test('new shared-to-desktop, web-to-desktop and cross-companion bridges fail', () => {
+test('new shared-to-desktop and cross-companion bridges fail', () => {
   const root = createFixture();
   try {
     writeFixture(root, 'src/index.ts', 'export const value = true;');
     writeFixture(root, 'extensions/other/src/index.ts', 'export const other = true;');
     writeFixture(root, 'extensions/example/src/index.ts', "export { other } from '../../other/src';");
     writeFixture(root, 'packages/shared/src/index.ts', "export { value } from '../../../src';");
-    writeFixture(root, 'apps/web/src/index.ts', "export { value } from '../../../src';");
     const result = analyzeArchitecture(root, fixtureRules());
-    assert.equal(result.diagnostics.length, 3);
+    assert.equal(result.diagnostics.length, 2);
     assert.ok(result.diagnostics.every(d => d.code === ARCHITECTURE_CODES.forbiddenDependency));
   } finally {
     removeFixture(root);
@@ -404,8 +397,8 @@ test('exceptions require removal conditions and exact paths', () => {
   const root = createFixture();
   try {
     for (const exception of [
-      { source: 'src/a.ts', target: 'apps/api/src/a.ts', reason: 'Bridge', owner: 'Owner' },
-      { source: 'src/**', target: 'apps/api/src/a.ts', reason: 'Bridge', owner: 'Owner', removeWhen: 'Migration passes' },
+      { source: 'src/a.ts', target: 'packages/shared/src/a.ts', reason: 'Bridge', owner: 'Owner' },
+      { source: 'src/**', target: 'packages/shared/src/a.ts', reason: 'Bridge', owner: 'Owner', removeWhen: 'Migration passes' },
     ]) {
       const result = analyzeArchitecture(root, fixtureRules({ exceptions: [exception] }));
       assert.ok(result.diagnostics.some(d => d.code === ARCHITECTURE_CODES.invalidConfiguration));
@@ -481,10 +474,10 @@ test('browser boundaries follow value imports through facades and reject unappro
   const root = createFixture();
   try {
     writeJsonFixture(root, 'tsconfig.json', { compilerOptions: { paths: { '@runtime': ['./packages/shared/src/index.ts'] } } });
-    writeFixture(root, 'apps/web/src/index.ts', "export { value } from './facade';");
-    writeFixture(root, 'apps/web/src/facade.ts', "export { value } from '@runtime';");
+    writeFixture(root, 'media/index.ts', "export { value } from './facade';");
+    writeFixture(root, 'media/facade.ts', "export { value } from '@runtime';");
     writeFixture(root, 'packages/shared/src/index.ts', "import 'node:fs'; import 'new-database-driver'; export const value = 1;");
-    const result = analyzeArchitecture(root, fixtureRules({ browserSources: ['apps/web/src/**'] }));
+    const result = analyzeArchitecture(root, fixtureRules({ browserSources: ['media/**'] }));
     assert.equal(result.diagnostics.length, 3);
     assert.ok(result.diagnostics.every(d => d.code === ARCHITECTURE_CODES.forbiddenDependency));
     assert.ok(result.diagnostics.some(d => d.target === 'packages/shared/src/index.ts'));
@@ -559,7 +552,7 @@ test('report CLI emits JSON, preserves the baseline and fails on violations', ()
     assert.equal(passing.status, 0, passing.stderr);
     assert.ok(passing.stdout.trim(), `Report CLI returned no JSON (stderr: ${passing.stderr}, signal: ${passing.signal}).`);
     assert.equal(JSON.parse(passing.stdout).reportVersion, 1);
-    writeFixture(root, 'apps/web/src/index.ts', "export { value } from '../../../src';");
+    writeFixture(root, 'media/index.ts', "export { value } from '../src';");
     const failing = runReport();
     assert.ifError(failing.error);
     assert.equal(failing.status, 1, failing.stderr);

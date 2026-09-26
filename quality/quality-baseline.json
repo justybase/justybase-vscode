@@ -8,11 +8,10 @@
     "lines": 72
   },
   "lint": {
-    "total": 70,
+    "total": 52,
     "areas": {
-      "media": 57,
-      "apps": 7,
-      "packages": 6,
+      "media": 52,
+      "packages": 0,
       "extensions": 0
     }
   },
@@ -33,7 +32,6 @@
       "src/state/",
       "src/views/",
       "media/",
-      "apps/web/",
       "packages/ui-core/",
       "packages/ui-react/"
     ]

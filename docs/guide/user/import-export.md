@@ -29,23 +29,19 @@ Always decide which data boundary you mean before choosing a command: the visibl
 
 ## Export formats
 
-| Format | Desktop result grid | Web result session | Notes |
-| --- | --- | --- | --- |
-| XLSB | Supported | Supported | Compact binary Excel; preferred for large workbooks and multi-result sheets. |
-| XLSX | Supported | Supported | Modern Excel workbook; multiple result sets become sheets. |
-| CSV | Supported | Supported | Plain text; use raw values when downstream parsing matters. |
-| CSV.GZ | Supported | Supported | Gzip-compressed CSV stream. |
-| CSV.ZST | Supported | Supported | Zstandard-compressed CSV stream. |
-| JSON | Supported | Supported | Result rows as a JSON array. |
-| XML | Supported | Supported | XML result document. |
-| SQL INSERT | Supported | Supported | Generated `INSERT` statements; review quoting and target schema. |
-| Markdown | Supported | Supported | Table for sharing or documentation; combined Markdown export can include batch sections. |
-| Parquet | Supported | — | Columnar export from the desktop result/file preview workflows. |
-| XPT | Partial | — | SAS-like macro/file workflow; not a general Web import/export option. Verify the target command and dialect first. |
-
-The live contract inventory for result and file formats is generated below.
-
-<!-- GENERATED:FORMATS -->
+| Format | Support | Notes |
+| --- | --- | --- |
+| XLSB | Supported | Compact binary Excel; preferred for large workbooks and multi-result sheets. |
+| XLSX | Supported | Modern Excel workbook; multiple result sets become sheets. |
+| CSV | Supported | Plain text; use raw values when downstream parsing matters. |
+| CSV.GZ | Supported | Gzip-compressed CSV stream. |
+| CSV.ZST | Supported | Zstandard-compressed CSV stream. |
+| JSON | Supported | Result rows as a JSON array. |
+| XML | Supported | XML result document. |
+| SQL INSERT | Supported | Generated `INSERT` statements; review quoting and target schema. |
+| Markdown | Supported | Table for sharing or documentation; combined Markdown export can include batch sections. |
+| Parquet | Supported | Columnar export from the desktop result/file preview workflows. |
+| XPT | Partial | SAS-like macro/file workflow. Verify the target command and dialect first. |
 
 ## File preview and Data Workspace
 
@@ -56,8 +52,8 @@ Data Workspace uses a local DuckDB/SQLite-backed profile to query files as table
 ## Import from a file
 
 1. Select a target table in Schema Browser and choose **Import Data** from the
-   main bar in Web or **Import Data (Advanced Wizard)** where the
-   desktop wizard is available.
+   main bar or **Import Data (Advanced Wizard)** where the desktop wizard is
+   available.
 2. Choose CSV/TXT, XLSX, or XLSB, or use **Smart Paste** for a path or tabular clipboard data.
 3. Confirm delimiter, decimal separator, header handling, encoding, and inferred types.
 4. Map source columns to target columns; choose defaults, nullable behavior, and conversions explicitly.

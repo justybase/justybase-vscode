@@ -12,7 +12,7 @@ const guideRoot = path.join(docsRoot, 'guide');
 const siteRoot = path.join(root, '_site');
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const productVersion = packageJson.version;
-const lastVerified = process.env.DOCS_LAST_VERIFIED ?? '2026-08-19';
+const lastVerified = process.env.DOCS_LAST_VERIFIED ?? '2026-09-26';
 const advertisedDatabaseKinds = new Set([
   'netezza',
   'db2',
@@ -107,13 +107,9 @@ const navGroups = [
       'guide/reference/database-support',
       'guide/reference/settings',
       'guide/reference/commands',
-      'guide/reference/web-api',
+      'guide/reference/ai-mcp',
       'guide/reference/statuses-and-permissions',
     ],
-  },
-  {
-    label: 'Administration',
-    items: ['guide/admin/web-editor', 'guide/admin/deployment-security', 'guide/admin/backup-restore'],
   },
   {
     label: 'Developers',
@@ -424,35 +420,18 @@ function readRegexValues(source, pattern) {
   return [...source.matchAll(pattern)].map(match => match[1]).filter(Boolean);
 }
 
-function extractApiRoutes(source) {
-  return [...source.matchAll(/app\.(?:get|post|put|patch|delete)(?:<[^()]*?>)?\(\s*['"`](\/[^'"`]+)['"`]/g)].map(match => match[1]);
-}
-
-function extractTypeUnionValues(source, typeName) {
-  const declaration = source.match(new RegExp(`${typeName}\\s*=\\s*([^;]+)`))?.[1] ?? '';
-  return [...declaration.matchAll(/'([^']+)'/g)].map(match => match[1]);
-}
-
 async function liveCatalogs() {
   const optional = await optionalPackageJsons();
   const manifests = [packageJson, ...optional];
   const commands = uniqueByName(manifests.flatMap(manifest => manifest.contributes?.commands ?? []), 'command').sort((a, b) => a.command.localeCompare(b.command));
   const settings = uniqueByName(manifests.flatMap(manifest => Object.entries(manifest.contributes?.configuration?.properties ?? {}).map(([key, value]) => ({ key, ...(value ?? {}) }))), 'key').sort((a, b) => a.key.localeCompare(b.key));
-  const contractSource = await readFile(path.join(root, 'src/contracts/copilotTools/contracts.ts'), 'utf8');
   const registrationSource = await readFile(path.join(root, 'src/activation/copilotRegistration.ts'), 'utf8');
   const mcpSource = await readFile(path.join(root, 'src/mcp/mcpToolCatalog.ts'), 'utf8');
   const copilotNames = [...new Set(readRegexValues(registrationSource, /name:\s*'([^']+)'/g))].sort();
   const mcpNames = [...new Set(readRegexValues(mcpSource, /name:\s*'([^']+)'/g))].sort();
-  const contractNames = [...new Set(readRegexValues(contractSource, /name:\s*'([^']+)'/g))].filter(name => name.startsWith('netezza_')).sort();
-  const apiSource = await readFile(path.join(root, 'apps/api/src/server.ts'), 'utf8');
-  const routes = [...new Set(extractApiRoutes(apiSource))].sort();
   const databaseSource = await readFile(path.join(root, 'packages/contracts/src/database/index.ts'), 'utf8');
   const databaseKinds = [...new Set(readRegexValues(databaseSource, /\|\s*'([^']+)'/g))].filter(value => value !== 'string').sort();
-  const exportSource = await readFile(path.join(root, 'packages/contracts/src/webApi.ts'), 'utf8');
-  const exportFormats = extractTypeUnionValues(exportSource, 'QueryExportFormat');
-  const importFormats = extractTypeUnionValues(exportSource, 'QueryFileImportFormat');
-  const formats = [...new Set([...exportFormats, ...importFormats, 'parquet', 'xpt'])].sort();
-  return { commands, settings, copilotNames, mcpNames, contractNames, routes, databaseKinds, exportFormats, importFormats, formats, manifests };
+  return { commands, settings, copilotNames, mcpNames, databaseKinds, manifests };
 }
 
 function catalogMarkdown(catalog) {
@@ -460,17 +439,13 @@ function catalogMarkdown(catalog) {
   const settingRows = catalog.settings.map(setting => `| \`${setting.key}\` | ${displayCatalogValue(setting.default).replaceAll('|', '\\|').replaceAll('\n', ' ')} | ${displayCatalogValue(setting.description ?? '').replaceAll('|', '\\|').replaceAll('\n', ' ')} |`).join('\n');
   const toolRows = catalog.copilotNames.map(name => `| \`${name}\` | Language Model Tool |`).join('\n');
   const mcpRows = catalog.mcpNames.map(name => `| \`${name}\` | Read-only MCP catalog |`).join('\n');
-  const routeRows = catalog.routes.map(route => `| \`${route}\` | Web API route |`).join('\n');
   const dbRows = catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).map(kind => `| \`${kind}\` | ${kind === 'sqlite' || kind === 'duckdb' ? 'Local / file runtime' : 'Database or companion runtime'} |`).join('\n');
-  const formats = catalog.formats;
   return {
     COMMANDS: `<!-- GENERATED_TABLE:COMMANDS -->\n| Command | Title |\n| --- | --- |\n${commandRows}`,
     SETTINGS: `<!-- GENERATED_TABLE:SETTINGS -->\n| Setting | Default | Description |\n| --- | --- | --- |\n${settingRows}`,
     AI_TOOLS: `<!-- GENERATED_TABLE:AI_TOOLS -->\n| Tool | Surface |\n| --- | --- |\n${toolRows}`,
     MCP_TOOLS: `<!-- GENERATED_TABLE:MCP_TOOLS -->\n| Tool | Surface |\n| --- | --- |\n${mcpRows}`,
-    ROUTES: `<!-- GENERATED_TABLE:ROUTES -->\n| Route | Contract surface |\n| --- | --- |\n${routeRows}`,
     DATABASES: `<!-- GENERATED_TABLE:DATABASES -->\n| DatabaseKind | Runtime family |\n| --- | --- |\n${dbRows}`,
-    FORMATS: `<!-- GENERATED_TABLE:FORMATS -->\n| Format | Export | Import |\n| --- | --- | --- |\n${formats.map(format => `| **${format.toUpperCase()}** | ${catalog.exportFormats.includes(format) ? 'Export' : '—'} | ${catalog.importFormats.includes(format) ? 'Web/file import' : '—'} |`).join('\n')}`,
   };
 }
 
@@ -566,9 +541,7 @@ async function build() {
       settings: catalog.settings.length,
       copilotTools: catalog.copilotNames.length,
       mcpTools: catalog.mcpNames.length,
-      routes: catalog.routes.length,
       databaseKinds: catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).length,
-      formats: catalog.formats.length,
     },
   };
 

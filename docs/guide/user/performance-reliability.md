@@ -18,7 +18,7 @@ JustyBase optimizes the path from the first row to a useful decision. It does no
 - **Cancellation:** **Cancel Query** stops new work and asks the driver/server to cancel. A partial result may remain visible and is marked partial/cancelled; it must not be mistaken for a complete dataset.
 - **Retry:** retry after a transient connection error reuses the selected tab connection. It does not duplicate a completed statement silently.
 - **Batch:** batch statements can stop at the first error or continue when **Run Query (Continue on Error)** is selected. Each statement keeps its own result/error state.
-- **Limits:** `justybase.query.rowLimit` defaults to `200000` fetched rows per execution. `justybase.query.executionTimeout` defaults to `3600` seconds in the desktop extension. The Web Editor has its own server defaults and session TTL; see [Web Editor](guide/admin/web-editor/).
+- **Limits:** `justybase.query.rowLimit` defaults to `200000` fetched rows per execution. `justybase.query.executionTimeout` defaults to `3600` seconds in the VS Code extension.
 - **Long-query alert:** `justybase.longQueryAlertThreshold` defaults to 10 minutes; set it to `0` to disable the notification.
 
 ## Result storage layers

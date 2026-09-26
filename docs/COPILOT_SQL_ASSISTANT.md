@@ -22,4 +22,4 @@ It documents the current workflow and boundaries:
 - read-only MCP over stdio or localhost HTTP;
 - the difference between an AI suggestion and a user-approved execution.
 
-The generated [AI and MCP reference](guide/reference/web-api/) is built from `src/contracts/copilotTools/contracts.ts`, `src/activation/copilotRegistration.ts`, and `src/mcp/mcpToolCatalog.ts`. This file remains as a compatibility entry point for links to the former Markdown documentation.
+The generated [Copilot and MCP reference](guide/reference/ai-mcp/) is built from the VS Code extension registrations and `src/mcp/mcpToolCatalog.ts`. This file remains as a compatibility entry point for links to the former Markdown documentation.

@@ -3,9 +3,13 @@
 The preparation stage established the boundaries and the migration now has a
 platform-neutral `@justybase/sql-core` entrypoint. The Netezza lexer, grammar,
 parser runtime, semantic validator, authoring helpers and quality rules are
-owned by sql-core. Desktop and API adapters retain their public facades,
-metadata/transport composition and stateful cache lifecycles while delegating
-Netezza analysis to the same native backend.
+owned by sql-core. The VS Code adapters compose metadata, transport, and
+stateful cache lifecycles around that backend. The Web Editor/API described in
+the historical migration record was retired on 2026-09-26; shared package
+boundaries remain active because VS Code and companion extensions consume
+them and benefit from platform-neutral implementations.
+References below to the former API, browser client, or their test suites record
+the migration context at that time; they are not current products or gates.
 Target ownership is defined in [Architecture](ARCHITECTURE.md); test selection
 and lifecycle requirements remain governed by [Testing strategy](TESTING_STRATEGY.md).
 
@@ -30,8 +34,6 @@ when comparing revisions; do not commit volatile graph/timing reports.
 | `packages/contracts` | its own public types/helpers; existing type cycle is fingerprinted |
 | `packages/sql-core` | Platform-neutral Netezza lexer/parser, semantic validation, authoring and quality rules |
 | Other `packages` | contracts and shared helpers; designer-core is pure, database-runtime owns shared execution plus compatibility exports, and sqlite/duckdb/netezza-runtime/access-file own Node I/O |
-| `apps/api` | contracts, sql-core, database-runtime, sqlite-runtime, duckdb-runtime, netezza-runtime and API modules |
-| `apps/web` | contracts, shared pure logic and web modules; desktop imports forbidden |
 | `extensions` | own modules, contracts/shared helpers and public core activation API |
 
 ## Runtime extraction in R2 (closed 2026-09-08)

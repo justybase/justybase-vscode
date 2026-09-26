@@ -10,7 +10,7 @@ product_version: 3.17.26
 
 # Data Grid performance benchmarks
 
-This suite is a regression instrument for the desktop Result Panel and Import Wizard. It is not a customer-facing SLA and it does not benchmark the Web Editor in the first phase. The result format is versioned as `data-grid.v1` so a future Web Editor adapter can report comparable operation/stage/case identifiers without changing the desktop measurements.
+This suite is a regression instrument for the VS Code Result Panel and Import Wizard. It is not a customer-facing SLA. The result format is versioned as `data-grid.v1` for stable operation, stage, and case identifiers.
 
 ## Scope and matrix
 
@@ -81,6 +81,6 @@ Do not compare a laptop run to a Linux baseline, a different Node major, a diffe
 
 ## What the benchmark does not measure
 
-The first phase does not measure Web Editor rendering, database query planning, network throughput for normal Result Panel queries, VS Code paint scheduling outside Chromium, OS file-picker latency, clipboard transfer, user think time, or production telemetry. It also does not claim that a deterministic synthetic distribution represents every customer dataset.
+The suite does not measure database query planning, network throughput for normal Result Panel queries, VS Code paint scheduling outside Chromium, OS file-picker latency, clipboard transfer, user think time, or production telemetry. It also does not claim that a deterministic synthetic distribution represents every customer dataset.
 
 See [Data Grid and Result Exploration](guide/user/data-grid/), [Import and export](guide/user/import-export/), and [Performance and reliability](guide/user/performance-reliability/) for user-facing boundaries.

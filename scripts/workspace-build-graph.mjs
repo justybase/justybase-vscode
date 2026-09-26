@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Deterministic workspace build entry point.
+ * Deterministic desktop/shared workspace build entry point.
  *
  * npm workspaces do not know that several package builds write into the same
  * repository checkout. This small graph makes the order explicit and uses a
@@ -26,10 +26,7 @@ const nodes = {
   'designer-core': { packageName: '@justybase/designer-core', dependencies: ['contracts', 'dialect-utils'] },
   'metadata-core': { packageName: '@justybase/metadata-core' },
   'result-core': { packageName: '@justybase/result-core' },
-  'api-client': { packageName: '@justybase/api-client', dependencies: ['contracts'] },
-  'dockyard-layout': { packageName: '@justybase/dockyard-layout', dependencies: ['contracts', 'ui-core'] },
   'ui-core': { packageName: '@justybase/ui-core', dependencies: ['contracts'] },
-  'ui-monaco': { packageName: '@justybase/ui-monaco', dependencies: ['contracts', 'ui-core'] },
   'ui-react': { packageName: '@justybase/ui-react', dependencies: ['contracts', 'dialect-utils', 'designer-core', 'ui-core'] },
   'netezza-runtime': { packageName: '@justybase/netezza-runtime', dependencies: ['contracts'] },
   'duckdb-runtime': { packageName: '@justybase/duckdb-runtime', dependencies: ['contracts'] },
@@ -39,23 +36,16 @@ const nodes = {
   'vscode-companion-adapter': { packageName: '@justybase/vscode-companion-adapter', dependencies: ['contracts'] },
   'database-runtime': { packageName: '@justybase/database-runtime', dependencies: ['contracts', 'designer-core', 'netezza-runtime'] },
   'sqlite-runtime': { packageName: '@justybase/sqlite-runtime', dependencies: ['contracts'] },
-  'web-api': { packageName: '@justybase/web-api', dependencies: ['contracts', 'database-runtime', 'dialect-utils', 'designer-core', 'duckdb-runtime', 'metadata-core', 'netezza-runtime', 'sqlite-runtime', 'sql-core'] },
-  // Vite is run once at the end so --test can be applied without rebuilding
-  // the dependency graph a second time.
-  web: { packageName: '@justybase/web', script: null, dependencies: ['api-client', 'contracts', 'designer-core', 'dialect-utils', 'dockyard-layout', 'result-core', 'ui-core', 'ui-monaco', 'ui-react'] },
 };
 
 const targets = {
   bundle: [],
-  api: ['web-api'],
-  web: ['web'],
-  all: ['web-api', 'web'],
-  shared: ['api-client', 'database-utils', 'file-runtime', 'dialect-utils', 'tabular-import-runtime', 'vscode-companion-adapter', 'ui-core', 'ui-monaco', 'ui-react'],
-  desktop: ['metadata-core', 'result-core', 'designer-core', 'sql-core', 'ui-core', 'ui-react', 'api-client', 'database-utils', 'file-runtime', 'tabular-import-runtime', 'vscode-companion-adapter', 'duckdb-runtime', 'netezza-runtime', 'database-runtime', 'sqlite-runtime'],
+  shared: ['database-utils', 'file-runtime', 'dialect-utils', 'tabular-import-runtime', 'vscode-companion-adapter', 'ui-core', 'ui-react'],
+  desktop: ['metadata-core', 'result-core', 'designer-core', 'sql-core', 'ui-core', 'ui-react', 'database-utils', 'file-runtime', 'tabular-import-runtime', 'vscode-companion-adapter', 'duckdb-runtime', 'netezza-runtime', 'database-runtime', 'sqlite-runtime'],
 };
 
 function usage() {
-  console.error('Usage: node scripts/workspace-build-graph.mjs <api|web|all|shared|desktop|bundle> [--test] [--minify] [--watch]');
+  fs.writeSync(2, 'Usage: node scripts/workspace-build-graph.mjs <shared|desktop|bundle> [--minify] [--watch]\n');
   process.exit(2);
 }
 
@@ -64,7 +54,6 @@ function parseArguments() {
   if (!target || !(target in targets)) usage();
   return {
     target,
-    test: flags.includes('--test'),
     minify: flags.includes('--minify'),
     watch: flags.includes('--watch'),
   };
@@ -182,17 +171,10 @@ async function main() {
   const lockToken = await acquireBuildLock();
   try {
     const environment = { ...process.env };
-    if (options.test) environment.VITE_ENABLE_TEST_LOGIN = '1';
     const nodeNames = collectNodes(targets[options.target]);
     const buildDescription = options.target === 'bundle' ? 'esbuild' : nodeNames.join(' -> ');
     console.log(`[workspace-build] ${options.target}: ${buildDescription}`);
     for (const nodeName of nodeNames) runWorkspace(nodeName, { environment });
-    if (options.target === 'web' || options.target === 'all') {
-      const npm = npmInvocation();
-      const args = [...npm.prefix, 'run', 'build', '--workspace', '@justybase/web'];
-      if (options.test) args.push('--', '--mode', 'test');
-      runCommand(npm.command, args, environment);
-    }
     if (options.target === 'desktop' || options.target === 'bundle') runRootDesktopBundle(options);
   } finally {
     releaseBuildLock(lockToken);

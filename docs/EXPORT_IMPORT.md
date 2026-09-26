@@ -79,7 +79,7 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 
 Standard comma-separated format, compatible with any application.
 
-CSV can also be streamed as `CSV.GZ` (gzip) or `CSV.ZST` (Zstandard) from the result panel and Web Editor session export.
+CSV can also be streamed as `CSV.GZ` (gzip) or `CSV.ZST` (Zstandard) from the result panel.
 
 ### JSON
 
@@ -99,7 +99,7 @@ Export results as Markdown table for documentation.
 
 ### XPT
 
-XPT is a **Partial** SAS-like macro/file workflow. It is not a general result-grid or Web Editor import format; verify the selected macro/runtime path before relying on it.
+XPT is a **Partial** SAS-like macro/file workflow, not a general result-grid import format; verify the selected macro/runtime path before relying on it.
 
 ### Markdown File (Combined) — New
 

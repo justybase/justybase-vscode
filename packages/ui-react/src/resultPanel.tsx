@@ -93,10 +93,10 @@ export interface ResultPanelProps {
 }
 
 /**
- * Canonical result surface shared by Web and VS Code.
+ * Canonical result surface shared by host adapters.
  *
  * Host adapters own query execution, persistence, clipboard and dialogs. This
- * component owns the result-panel DOM so the two products cannot drift in tab
+ * component owns the result-panel DOM so adapters cannot drift in tab
  * order, toolbar geometry, filter placement or grid composition.
  */
 export function ResultPanel({

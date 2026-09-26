@@ -20,7 +20,6 @@ product_version: 3.17.26
 | Legacy reference | Technical or compatibility appendix retained for repository history; not a current support promise. |
 | Read-only | Catalog/introspection or result exploration does not write to the database. |
 | Desktop only | Requires VS Code extension-host/webview or native companion runtime. |
-| Web only | Available in the self-hosted Web Editor/API, not necessarily in the desktop extension. |
 
 ## Permission layers
 
@@ -33,6 +32,5 @@ product_version: 3.17.26
 | Session monitor/terminate | Monitor visibility and a terminate privilege; provider-specific. |
 | Security Panel | Grant/revoke/admin catalog rights. |
 | MCP read-only tools | Saved Netezza connection with catalog/EXPLAIN visibility; the selected connection is explicit. |
-| Web Editor admin | Authenticated admin role for users and backup/restore; persistent data directory access for the server process. |
 
 The UI can hide an action based on capability metadata, but database authorization remains the final authority. Never infer permission from a visible button alone.

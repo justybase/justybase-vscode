@@ -4,8 +4,8 @@ import type {
 } from '@justybase/contracts';
 
 /**
- * Netezza table DDL is deliberately kept as a pure formatter.  The desktop,
- * web API, and any future host can load catalog metadata independently and
+ * Netezza table DDL is deliberately kept as a pure formatter. The desktop
+ * and companion adapters can load catalog metadata independently and
  * still produce byte-for-byte compatible DDL.
  */
 export function quoteNetezzaIdentifier(name: string): string {

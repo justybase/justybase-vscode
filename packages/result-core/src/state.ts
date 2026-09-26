@@ -9,7 +9,7 @@
 
 import type { ExecutionId, ResultSetId } from './identity';
 
-/** Column shape shared by desktop and web result adapters. */
+/** Portable result column shape consumed by result adapters. */
 export interface ResultColumn {
   name: string;
   type?: string;
