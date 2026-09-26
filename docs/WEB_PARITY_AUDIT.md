@@ -5,17 +5,17 @@
 > longer maintained. Shared contracts, SQL/runtime engines, and UI components
 > remain in the repository where VS Code or companion extensions consume them.
 
-Last updated: 2026-09-15
+Last updated: 2026-09-26
 
-This document is the **feature-by-feature parity audit** between the two products shipped
-from this repository:
+This document is the **feature-by-feature parity audit** between the two products
+formerly shipped from this repository:
 
 - **Desktop** — the VS Code extension (`src/`, `media/`, `extensions/`, 158 core palette commands).
 - **Web** — `apps/web` (React + Monaco + TanStack) + `apps/api` (Fastify server) running the
   shared SQL core.
 
-> This is a **living backlog**, not a status board frozen in time. When a backlog item is
-> implemented, move it to **Done** and bump the date.
+> This is a frozen historical snapshot, not an active backlog. Its Web statuses
+> describe the product at retirement.
 >
 > Companion implementation references: `docs/LSP_FEATURE_MATRIX.md` (LSP transport),
 > `docs/EDITOR_CAPABILITY_MATRIX.md` (desktop editor capability status),
@@ -24,16 +24,15 @@ from this repository:
 > `docs/PROJECT_QUALITY_ROADMAP.md`; parity status alone does not make a feature
 > production-ready.
 
-## Current Web renderer status
+## Web renderer status at retirement
 
-The production Web entrypoint always mounts `DockyardWorkspace`; the retired
-`SharedWebWorkspace` composition is not an active Web path and is retained only
-as a component-test fixture for portable reducer and presentation tests. There
-is no `VITE_UI_MODE` runtime switch and no shared-renderer rollback path. Shell
-composition is owned by the Web Dockyard implementation; this audit covers
-feature parity inside that shell, not shell selection.
+At retirement, the production Web entrypoint mounted `DockyardWorkspace`;
+`SharedWebWorkspace` remained only as a component-test fixture for portable
+reducer and presentation tests. There was no `VITE_UI_MODE` runtime switch or
+shared-renderer rollback path. The Web Dockyard implementation owned shell
+composition; this audit covered feature parity inside that shell.
 
-The shipped shell owns durable query documents, per-document execution and
+The former shell owned durable query documents, per-document execution and
 result identities, multi-statement status/cancellation, typed result export,
 schema/database context, history, Explain, guarded designer flows, and the
 common React Result Grid through the shared `ui-core`/`ui-react` controllers.
@@ -42,9 +41,10 @@ metadata/content, document order, the active document, connection context, and
 the Dockyard layout snapshot; it excludes credentials, result rows, DOM nodes,
 and runtime handles.
 
-Notebook, chart, tuning, and other host-specific database operations remain
+Notebook, chart, tuning, and other host-specific database operations were
 explicit capability gaps rather than implied parity. VS Code keeps its own
-renderer and host lifecycle; Web uses the shared React renderer.
+renderer and host lifecycle; the former Web product used the shared React
+renderer.
 
 ---
 

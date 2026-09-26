@@ -52,7 +52,7 @@ gates.
   explaining the cause and collecting reliable results before production
   migration.
 
-## Current closure status (2026-09-10)
+## Closure status recorded 2026-09-10
 
 The planned refactoring closure slice is implemented on Linux. CQ02 is closed
 for the host view, API query use-cases, React workspace, schema provider, and
@@ -257,13 +257,16 @@ Presentation state must not persist entire results as UI state.
 Acceptance: two consumers of the shared model, a state and scroll matrix, and
 no cycles in the migrated orchestration.
 
-R3 implementation evidence (2026-09-09, Linux):
+R3 implementation evidence (2026-09-09, Linux; Web details are historical):
 
-- `packages/result-core` now owns stable identity, the pure result-panel state
-  reducer, portable query-event reduction, exact filtering and aggregation.
-  `src/state/resultCoreStateAdapter.ts` bridges the desktop
-  `ResultStateManager`; `apps/web/src/queryState.ts` and `apps/web/src/ResultGrid.tsx`
-  are the second consumer path.
+- At R3 closure, `packages/result-core` owned stable identity, the pure
+  result-panel state reducer, portable query-event reduction, exact filtering
+  and aggregation. The Web-only query-event reducer was removed after product
+  retirement on 2026-09-26; current shared ownership is identity, desktop
+  result-panel state, filtering and aggregation.
+- `src/state/resultCoreStateAdapter.ts` bridges the desktop
+  `ResultStateManager`. The former `apps/web/src/queryState.ts` and
+  `apps/web/src/ResultGrid.tsx` consumer path is historical.
 - Desktop and web persisted grid state use versioned envelopes keyed by
   `resultSetId`, retain the legacy fallback, and do not persist result rows as
   presentation state. Result identity keeps source, execution, result-set and
@@ -430,11 +433,14 @@ Closure evidence (2026-09-09, Linux):
   the companion activation/register smoke pass. The full deterministic root
   suite passes serially: 545 suites, 9,621 tests, one snapshot.
 
-### R7 — Current API and React
+### R7 — Historical API and React product work
 
 Related: CQ02, CQ06.
 
-Status: implementation complete on Linux (2026-09-10). The route groups,
+R7 was marked implementation complete on Linux (2026-09-10). The Web
+Editor/API product was retired on 2026-09-26. This section is historical
+evidence, not a current API implementation or gate.
+The route groups,
 instance-owned API context, shutdown path, user-scoped React workspace, and
 configurable API client are migrated while preserving the existing HTTP,
 WebSocket, cookie-authentication, and CSRF contracts.
@@ -541,15 +547,11 @@ Remote-WSL gates remain explicit follow-up evidence.
 
 ### R9 — Cautious cross-product UI parity rollout
 
-Status: the historical R9 extraction is complete for the production Web
-renderer. The shared `ui-core`/`ui-react` foundation, Dockyard Web composition
-(R10), and VS Code adapter
-boundary are in place. Web has no legacy renderer and no `VITE_UI_MODE` runtime
-switch: the Dockyard shell is the only production composition root, and the
-retired `SharedWebWorkspace` is a component-test fixture; VS Code keeps
-its host-owned renderer. Remaining gaps are explicitly platform-specific
-capabilities rather than a Web renderer rollout blocker. R9 is a
-strangler-style product-surface migration after the
+Status: historical. The self-hosted Web Editor and API were retired on
+2026-09-26. The shared `ui-core`/`ui-react` foundation and VS Code adapter
+boundary remain in the repository; the Web renderer and Dockyard composition
+described here have been retired. This section records the former migration's
+scope and state. R9 was a product-surface migration after the
 R0–R8 refactoring closure. It targets near-parity for the main workflows in
 the Web editor and VS Code webviews. The objective is
 shared behavior, layout, interaction vocabulary, and capability coverage;
@@ -732,32 +734,27 @@ The implementation rule for the entire R9 is: work only in the working tree,
 never run `git commit` or `git push`, and keep generated/test artifacts
 temporary and ignored until the user makes a separate release decision.
 
-### R10 — Dockyard web workspace and test-harness login (current shell)
+### R10 — Historical Dockyard Web workspace and test-harness login
 
-Status: implemented and current. The Dockyard path replaced the Web editor's
-default shell while keeping `ui-core` and `ui-react` platform-neutral. It was
-briefly reverted to the Shared Web composition on 2026-09-13 and restored as the
-production/default Web shell on 2026-09-14 (`fix(workspace): restore Dockyard
-shell lifecycle parity`). `DockyardWorkspace` is mounted unconditionally by the
-Web composition root, and the composition, layout-persistence, and
-initialization-recovery paths are live.
+Status: historical only. The self-hosted Web Editor and API were retired on
+2026-09-26. The Dockyard integration and vendored source were removed with that
+product; this section records the former implementation and is not a current
+requirement or implementation guide.
 
-There is no `VITE_UI_MODE` runtime switch and no shared-renderer rollback path.
-`SharedWebWorkspace` is retained only as a component-test fixture for portable
-reducer and presentation tests. It must not be re-promoted to a production
-shell; a future shell change has to be recorded in
-`docs/WEB_PARITY_AUDIT.md`, which owns the current composition contract.
+At retirement, there was no `VITE_UI_MODE` runtime switch or shared-renderer
+rollback path. `SharedWebWorkspace` was retained only as a component-test
+fixture for portable reducer and presentation tests. The former composition
+contract is preserved in `docs/WEB_PARITY_AUDIT.md` as historical documentation.
 
-The sections below record the extraction itself and remain authoritative for
-the vendored layout boundary, persistence rules, and acceptance gates.
+The sections below are retained as an archive of the former Web implementation.
 
-#### R10.1 — Vendored layout boundary
+#### R10.1 — Formerly vendored layout boundary
 
-1. Vendor upstream Dockyard below `vendor/dockyard`, pinned to commit
-   `921b9a66cac88b07af6edb3ebd5cd47af500c900` (`0.1.0`), with its license,
-   upstream record, checksum manifest, and third-party notice. Verify the
-   upstream `build`, `test`, API-surface, and checksum checks without changing
-   the vendored source.
+1. The former integration vendored upstream Dockyard below `vendor/dockyard`,
+   pinned to commit `921b9a66cac88b07af6edb3ebd5cd47af500c900` (`0.1.0`), with
+   its license, upstream record, checksum manifest, and third-party notice.
+   Its recorded upstream checks covered `build`, `test`, API surface, and
+   checksums without changing the vendored source.
 2. Keep all Dockyard imports in `apps/web/src/dockyard/`. The adapter owns DOM
    content hosts, Dockyard models, browser listeners, subscriptions, and
    serialization; `ui-core` owns portable state/persistence contracts and
@@ -768,7 +765,7 @@ the vendored layout boundary, persistence rules, and acceptance gates.
    controller. `dispose()` must release hosts, listeners, subscriptions, and
    Dockyard resources, including failed initialization paths.
 
-#### R10.2 — Web workspace and persistence
+#### R10.2 — Former Web workspace and persistence
 
 1. Each query is one Dockyard `LayoutDocument` containing its toolbar, Monaco
    editor, result view, statement tabs, Explain state, and empty/error/cancel
@@ -818,16 +815,19 @@ the vendored layout boundary, persistence rules, and acceptance gates.
 | Cross-platform browser | `.github/workflows/web-shared.yml` runs the controlled Chromium/API flow on `ubuntu-latest`, `windows-latest`, and `macos-14`; the gate exercises the Dockyard Web scenario (`npm run test:playwright:web-dockyard`), and `npm run test:playwright:web-shared` is a compatibility alias for that same gate. |
 | Final R10 | `npm run verify:pr`, `npm run docs:check`, `npm run version:check`, `npm audit --omit=dev --audit-level=high`, and the applicable browser/API/package gates. |
 
-R10 is complete only when the Web Dockyard layout survives reload and user
-scope changes without leaking non-layout data, the controlled test login is
-unavailable outside test mode, all first-tier workspace interactions retain
-their existing API/LSP semantics, and the adapter has deterministic teardown.
+At retirement, the intended completion criteria were that the Web Dockyard
+layout survived reload and user scope changes without leaking non-layout data,
+the controlled test login stayed unavailable outside test mode, workspace
+interactions retained their API/LSP semantics, and the adapter had deterministic
+teardown.
 
 ## Compatibility and Verification
 
-Public companion APIs, wire messages, and HTTP preserve their meaning. The
-internal model does not require replacing `data` with `rows` or renumbering
-the transport. New required fields and union variants require a compatibility
+Public companion APIs and desktop webview messages preserve their meaning.
+Former Web HTTP DTOs remain in `@justybase/contracts` for compatibility; the
+retired HTTP transport has no current product implementation. The internal
+model does not require replacing `data` with `rows` or renumbering desktop
+messages. New required fields and union variants require a compatibility
 review. DTOs contain no secrets, driver objects, or VS Code handles. Persistent
 format migration is a separate change.
 
@@ -841,27 +841,26 @@ format migration is a separate change.
 | Values | NULL, decimal, bigint, dates, binaries, aggregation, and export |
 | Isolation | Two users and two backends, foreign results and inaccessible files |
 | Companions | Public activation, missing driver/capability, packaged VSIX |
-| Security | Read-only MCP on both transports, API auth, sandbox, and message validation |
+| Security | Read-only MCP on both transports, file sandbox, and message validation |
 
 Every stage: the nearest tests, types, lint, and architecture checks. Stage
 integration: `npm run verify:pr`, `npm run docs:check`,
 `npm run version:check`. SQL additionally requires sql-core, parity, parser,
 Extension Host authoring, and the LSP benchmark; MSSQL/Oracle construction
-must remain below 2000 ms. Results require Extension Host, Playwright
-table-rendering, the deterministic `npm run test:playwright:web-shared` smoke,
-and web components. Metadata requires disk restart and both
+must remain below 2000 ms. Results require Extension Host and Playwright
+`test-harness/tests/table-rendering.spec.ts` coverage for the VS Code webview.
+Metadata requires disk restart and both
 SchemaProviders. Dialects require verify, integration, companion activation,
 and packaging. Verify VS Code on Linux and Windows; Remote-WSL requires a
 separate environment.
 
-Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8 → R9 → R10. For R0–R8 and
+Order: R0 → R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8 → R9. R10 is a separate
+retired-product archive. For R0–R8 and
 backend/shared-code extractions, every slice follows:
-behavior test → extraction → desktop facade → VS Code gate → API/web → removal
-of the replaced path. R9 UI slices are the qualified exception and use the
-product order in R9.4 (`Web → VS Code`) after the portable
-state/port contract is characterized; this does not change desktop-first
-ownership of execution, runtime, or secrets. Code used only by the API has the
-appropriate API gate. Comparison of old and new is test-only, never by
+behavior test → extraction → desktop facade → desktop gate → removal of the
+replaced path. The Web/API migration order recorded in R9 and API-specific
+gates above are historical. This does not change desktop-first ownership of
+execution, runtime, or secrets. Comparison of old and new is test-only, never by
 executing production SQL twice. A facade enables returning to the previous
 delegation, while data remains readable. Do not mask differences by updating
 expectations, thresholds, or fixed sleeps.

@@ -180,36 +180,6 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
   })}</div>;
 }
 
-export type ResultOutputTab = 'results' | 'problems';
-
-export interface ResultOutputTabsProps {
-  readonly activeTab: ResultOutputTab;
-  readonly problemCount: number;
-  readonly onChange: (tab: ResultOutputTab) => void;
-}
-
-/** Tabs for the single output panel shared by query results and diagnostics. */
-export function ResultOutputTabs({ activeTab, problemCount, onChange }: ResultOutputTabsProps): ReactNode {
-  const tabs: readonly { readonly id: ResultOutputTab; readonly label: string }[] = [
-    { id: 'results', label: 'Results' },
-    { id: 'problems', label: 'Problems' },
-  ];
-  const move = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-    const next = tabs[nextIndex];
-    if (!next) return;
-    onChange(next.id);
-    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
-  };
-  return <div className="ui-result-output-tabs" role="tablist" aria-label="Query output">
-    {tabs.map((tab, index) => <button type="button" role="tab" key={tab.id} aria-selected={tab.id === activeTab} tabIndex={tab.id === activeTab ? 0 : -1} onClick={() => onChange(tab.id)} onKeyDown={event => move(event, index)}>
-      <span>{tab.label}</span>{tab.id === 'problems' && <span className="ui-result-output-count" aria-label={`${problemCount} problems`}>{problemCount}</span>}
-    </button>)}
-  </div>;
-}
-
 export interface ResultViewToolbarProps {
   readonly columns: readonly { readonly name: string }[];
   readonly view: Pick<UiResultViewState, 'globalFilter' | 'sorting' | 'grouping' | 'aggregation' | 'pivotColumn'>;
