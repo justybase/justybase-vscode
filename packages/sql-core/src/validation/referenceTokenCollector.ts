@@ -1,4 +1,5 @@
 import { CstNode, type IToken } from "chevrotain";
+import { hasUnavailableTokenLocation } from "./tokenLocation";
 
 export function isCstNode(value: unknown): value is CstNode {
   return typeof value === "object" && value !== null && "name" in value && "children" in value;
@@ -19,7 +20,9 @@ export function collectOrderedReferenceTokens(
   for (const [key, value] of Object.entries(children)) {
     if (ignoredKeys.has(key) || !Array.isArray(value)) continue;
     for (const child of value) {
-      if (isToken(child)) tokens.push(child);
+      if (isToken(child) && !hasUnavailableTokenLocation(child.startOffset)) {
+        tokens.push(child);
+      }
       else if (isCstNode(child)) collectOrderedReferenceTokens(child, tokens, ignoredKeys);
     }
   }

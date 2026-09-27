@@ -2,6 +2,7 @@ import { CstNode, type IToken } from "chevrotain";
 import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 import { addTableQualificationWarningFromQualifiedName } from "./queryScopeVisitor";
+import { getTokenLocationOr } from "../tokenLocation";
 
 export function visitCommandTail(
   host: SqlVisitorHost,
@@ -281,11 +282,14 @@ export function typeName(
 } {
   const parts = [
     ...(ctx.typeNameWord ?? []).map((node) => ({
-      offset: host.getFirstTokenFromCst(node as CstNode)?.startOffset ?? 0,
+      offset: getTokenLocationOr(
+        host.getFirstTokenFromCst(node as CstNode)?.startOffset,
+        0,
+      ),
       text: host.visitAs<string>(node as CstNode),
     })),
     ...((ctx.With as IToken[] | undefined) ?? []).map((token) => ({
-      offset: token.startOffset ?? 0,
+      offset: getTokenLocationOr(token.startOffset, 0),
       text: host.getTokenText(token),
     })),
   ]

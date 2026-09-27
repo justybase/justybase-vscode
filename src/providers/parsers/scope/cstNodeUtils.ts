@@ -1,5 +1,10 @@
 import { CstNode, type IToken } from "chevrotain";
 import { isCstNode, isToken } from "./referenceTokenCollector";
+import {
+  getAvailableTokenLocation,
+  getTokenLocationOr,
+  hasUnavailableTokenLocation,
+} from "@justybase/sql-core/validation/tokenLocation";
 
 export { isCstNode, isToken };
 
@@ -102,9 +107,10 @@ export function normalizeTokenText(token: IToken): string {
 }
 
 export function getTokenEndOffset(token: IToken): number {
-  const start = token.startOffset ?? 0;
-  if (token.endOffset !== undefined) {
-    return token.endOffset + 1;
+  const start = getTokenLocationOr(token.startOffset, 0);
+  const endOffset = getAvailableTokenLocation(token.endOffset);
+  if (endOffset !== undefined) {
+    return endOffset + 1;
   }
   return start + token.image.length;
 }
@@ -129,8 +135,12 @@ export function getNodeRange(
 
     for (const child of value) {
       if (isToken(child)) {
-        const start = child.startOffset ?? 0;
-        const end = child.endOffset ?? start;
+        if (hasUnavailableTokenLocation(child.startOffset)) {
+          continue;
+        }
+        const start = getTokenLocationOr(child.startOffset, 0);
+        const end =
+          getAvailableTokenLocation(child.endOffset) ?? start;
         minStart = minStart === undefined ? start : Math.min(minStart, start);
         maxEnd = maxEnd === undefined ? end : Math.max(maxEnd, end);
         continue;

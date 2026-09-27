@@ -18,6 +18,10 @@ import type { SchemaProvider } from "./schemaProvider";
 import type { DatabaseSqlValidationProfile } from "../sql/authoring/types";
 import type { CstNode, IRecognitionException, IToken } from "chevrotain";
 import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
+import {
+  getAvailableTokenLocation,
+  getTokenLocationOr,
+} from "@justybase/sql-core/validation/tokenLocation";
 import type {
   DocumentParseRequest,
   DocumentParseSession,
@@ -885,11 +889,13 @@ export class SqlValidator implements SqlValidationService {
       }
       if ("image" in value && "tokenType" in value) {
         const token = value as IToken;
-        if (token.startOffset !== undefined) {
-          startOffset = Math.min(startOffset, token.startOffset);
+        const tokenStartOffset = getAvailableTokenLocation(token.startOffset);
+        const tokenEndOffset = getAvailableTokenLocation(token.endOffset);
+        if (tokenStartOffset !== undefined) {
+          startOffset = Math.min(startOffset, tokenStartOffset);
         }
-        if (token.endOffset !== undefined) {
-          endOffset = Math.max(endOffset, token.endOffset);
+        if (tokenEndOffset !== undefined) {
+          endOffset = Math.max(endOffset, tokenEndOffset);
         }
         return;
       }
@@ -970,30 +976,35 @@ export class SqlValidator implements SqlValidationService {
   }
 
   private positionAfterToken(token: IToken): TokenPosition {
-    const startLine = token.endLine ?? token.startLine ?? 1;
+    const startLine = getTokenLocationOr(
+      token.endLine,
+      getTokenLocationOr(token.startLine, 1),
+    );
     const startColumn =
-      token.endColumn ??
-      (token.startColumn ?? 1) + (token.image?.length ?? 1);
+      getAvailableTokenLocation(token.endColumn) ??
+      getTokenLocationOr(token.startColumn, 1) + (token.image?.length ?? 1);
     return {
       startLine,
       startColumn,
       endLine: startLine,
       endColumn: startColumn + 1,
       offset:
-        token.endOffset ??
-        (token.startOffset ?? 0) + (token.image?.length ?? 0),
+        getAvailableTokenLocation(token.endOffset) ??
+        getTokenLocationOr(token.startOffset, 0) + (token.image?.length ?? 0),
     };
   }
 
   private tokenToPosition(token: IToken): TokenPosition {
+    const startLine = getTokenLocationOr(token.startLine, 1);
+    const startColumn = getTokenLocationOr(token.startColumn, 1);
     return {
-      startLine: token.startLine || 1,
-      startColumn: token.startColumn || 1,
-      endLine: token.endLine || token.startLine || 1,
+      startLine,
+      startColumn,
+      endLine: getTokenLocationOr(token.endLine, startLine),
       endColumn:
-        token.endColumn ||
-        (token.startColumn || 1) + (token.image?.length || 1),
-      offset: token.startOffset || 0,
+        getAvailableTokenLocation(token.endColumn) ??
+        startColumn + (token.image?.length || 1),
+      offset: getTokenLocationOr(token.startOffset, 0),
     };
   }
 

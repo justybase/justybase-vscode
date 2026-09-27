@@ -1,6 +1,7 @@
 import { CstNode, type IToken } from 'chevrotain'
 import { getOrderedCstTokens, isCstNode } from './referenceTokenCollector'
 import { parseNetezzaSqlStatements } from '../parser/runtime'
+import { getAvailableTokenLocation } from './tokenLocation'
 
 export type SqlSemanticIdentifierRole = 'column' | 'table' | 'schema' | 'database' | 'alias'
 
@@ -19,8 +20,10 @@ function identifierTokens(node: CstNode): { identifiers: IToken[]; dots: IToken[
 }
 
 function addRole(roles: SqlSemanticIdentifierOccurrence[], token: IToken, role: SqlSemanticIdentifierRole): void {
-    if (token.startOffset === undefined) return
-    roles.push({ role, startOffset: token.startOffset, endOffset: token.endOffset ?? token.startOffset + token.image.length })
+    const startOffset = getAvailableTokenLocation(token.startOffset)
+    if (startOffset === undefined) return
+    const endOffset = getAvailableTokenLocation(token.endOffset) ?? startOffset + token.image.length
+    roles.push({ role, startOffset, endOffset })
 }
 
 function addQualifiedTableRoles(node: CstNode, roles: SqlSemanticIdentifierOccurrence[]): void {
