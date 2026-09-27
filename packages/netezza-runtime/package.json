@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@justybase/contracts": "*",
-    "@justybase/netezza-driver": "^3.3.0"
+    "@justybase/netezza-driver": "^3.4.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
