@@ -2522,6 +2522,7 @@ interface GroupingTableHeader {
 interface GroupingTanStackTable {
     getHeaderGroups(): Array<{ headers: GroupingTableHeader[] }>;
     getRowModel(): { rows: GroupingTableRow[] };
+    setOptions?: (updater: (previous: Record<string, unknown>) => Record<string, unknown>) => void;
 }
 
 function appendGroupingTableCell(
@@ -2649,38 +2650,36 @@ function renderGroupingTanStackGrid(
             });
         });
     };
-    table = TableCore.createTable({
+    const getGroupingTableState = () => ({
+        sorting,
+        globalFilter: '',
+        grouping: [],
+        expanded: {},
+        columnOrder: [],
+        columnFilters: [],
+        columnPinning: { start: [], end: [] },
+        columnVisibility: {},
+    });
+    table = TableCore.constructTable({
+        features: TableCore.webviewFeatures,
         data: data as unknown as unknown[][],
         columns: result.columns.map((column, index) => ({
             id: String(index),
             header: column.name,
             accessorFn: (row: GroupingGridRow) => row.values[index],
-            sortingFn: (rowA: { getValue(id: string): unknown }, rowB: { getValue(id: string): unknown }, columnId: string) => {
+            sortFn: (rowA: { getValue(id: string): unknown }, rowB: { getValue(id: string): unknown }, columnId: string) => {
                 const a = rowA.getValue(columnId);
                 const b = rowB.getValue(columnId);
                 if (typeof a === 'number' && typeof b === 'number') return a - b;
                 return String(a ?? '').localeCompare(String(b ?? ''), undefined, { numeric: true, sensitivity: 'base' });
             },
         })),
-        state: {
-            get sorting() { return sorting; },
-            globalFilter: '',
-            grouping: [],
-            expanded: {},
-            columnOrder: [],
-            columnFilters: [],
-            columnPinning: { left: [], right: [] },
-            columnVisibility: {},
-        },
+        state: getGroupingTableState(),
         onSortingChange: updater => {
             sorting = typeof updater === 'function' ? updater(sorting) as typeof sorting : updater as typeof sorting;
+            table.setOptions?.(previous => ({ ...previous, state: getGroupingTableState() }));
             renderRows();
         },
-        getCoreRowModel: TableCore.getCoreRowModel(),
-        getSortedRowModel: TableCore.getSortedRowModel(),
-        getFilteredRowModel: TableCore.getFilteredRowModel(),
-        getGroupedRowModel: TableCore.getGroupedRowModel(),
-        getExpandedRowModel: TableCore.getExpandedRowModel(),
     }) as GroupingTanStackTable;
     wrapper.addEventListener('keydown', event => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && selectedRowIds.size > 0) {

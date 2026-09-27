@@ -82,7 +82,7 @@ export function prepareColumns(rs: ResultSet, _rsIndex: number): GridColumnDef[]
                     : undefined,
                 Boolean(inferredDateInteger),
             ),
-            sortingFn: createSortingFn(resolvedType, inferred.numericKind, Boolean(inferredDateInteger))
+            sortFn: createSortingFn(resolvedType, inferred.numericKind, Boolean(inferredDateInteger))
         };
     });
 }

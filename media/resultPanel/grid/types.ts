@@ -19,7 +19,7 @@ export interface GridColumnDef extends ResultColumnDef {
     id: string;
     accessorFn: (row: unknown) => unknown;
     filterFn: (row: TanStackRow, columnId: string, filterValue: ColumnFilterValue) => boolean;
-    sortingFn: SortingFnValue;
+    sortFn: SortingFnValue;
 }
 
 export type SortingFnValue =
@@ -76,8 +76,7 @@ export type ScheduleRenderFn = (options?: { chrome?: boolean }) => void;
 
 export type AggTypeInfo = { isNumeric: boolean; hasDecimal: boolean };
 
-export type CreateTableFn = TableCoreModule['createTable'];
-export type RowModelFactoryFn = TableCoreModule['getCoreRowModel'];
+export type TableCoreModuleLike = TableCoreModule;
 
 export type {
     ColumnFilterValue,

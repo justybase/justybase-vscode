@@ -31,8 +31,8 @@ declare const TableCore: {
             column: Record<string, unknown>,
         ) => unknown;
     };
-    createTable: (options: Record<string, unknown>) => TanStackTableHandle;
-    getCoreRowModel: () => unknown;
+    constructTable: (options: Record<string, unknown>) => TanStackTableHandle;
+    webviewFeatures: unknown;
 };
 
 declare const VirtualCore: {
@@ -43,13 +43,14 @@ declare const VirtualCore: {
 };
 
 interface TanStackTableHandle {
+    setOptions: (updater: (previous: Record<string, unknown>) => Record<string, unknown>) => void;
     options: { data: QueryHistoryEntryDto[] };
     getRowModel: () => {
         rows: Array<{
             index: number;
             original: QueryHistoryEntryDto;
             getValue: (colId: string) => unknown;
-            _getAllCellsByColumnId?: () => Record<string, { getValue: () => unknown }>;
+            getAllCellsByColumnId: () => Record<string, { getValue: () => unknown }>;
         }>;
     };
     getAllLeafColumns: () => Array<{
@@ -205,9 +206,8 @@ function buildColumns(): unknown[] {
 // ── Table initialization ────────────────────────────────────────────
 
 function initTable(): void {
-    const { createTable, getCoreRowModel } = TableCore;
-
-    tanTable = createTable({
+    tanTable = TableCore.constructTable({
+        features: TableCore.webviewFeatures,
         data: allHistory,
         columns: buildColumns(),
         state: {
@@ -215,9 +215,8 @@ function initTable(): void {
             columnSizingInfo: { startOffset: null, startSize: null, deltaOffset: null, deltaPercentage: null, isResizingColumn: false, columnSizingStart: [] },
             columnOrder: [],
             columnVisibility: {},
-            columnPinning: { left: [], right: [] }
+            columnPinning: { start: [], end: [] }
         },
-        getCoreRowModel: getCoreRowModel(),
     });
 
     initVirtualizer();
@@ -367,7 +366,7 @@ function renderTableRows(): void {
 
         // Render cells from column order
         const columns = tanTable.getAllLeafColumns();
-        const allCells = row._getAllCellsByColumnId?.() ?? {};
+        const allCells = row.getAllCellsByColumnId();
         for (let ci = 0; ci < columns.length; ci++) {
             const col = columns[ci];
             const td = document.createElement('td');
@@ -444,7 +443,7 @@ function updateTableData(): void {
     if (!tanTable) {
         initTable();
     } else {
-        tanTable.options.data = allHistory;
+        tanTable.setOptions(previous => ({ ...previous, data: allHistory }));
         initVirtualizer();
         scheduleRenderRows();
     }

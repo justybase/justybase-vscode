@@ -121,12 +121,6 @@ describe('result panel UX states', () => {
             { data: [], rowsAffected: 3, message: 'CREATE TABLE completed' },
             0,
             container,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
         );
 
         expect(appendedChildren[0]?.innerHTML).toContain('Statement Completed');

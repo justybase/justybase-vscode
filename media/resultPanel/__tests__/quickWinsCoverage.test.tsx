@@ -26,13 +26,23 @@ import { createResultSetGrid } from '../grid/tableBuilder.js';
 import { showColumnFilterDropdown } from '../filter.js';
 import { showContextMenu } from '../selection/menu.js';
 import '../init.js';
-import { createTable, getCoreRowModel, getExpandedRowModel, getFilteredRowModel, getGroupedRowModel, getSortedRowModel } from '@tanstack/table-core';
-import type { CreateTableFn, GridColumnDef, ResultSetWithExtras, RowModelFactoryFn } from '../grid/types.js';
+import { constructTable, webviewFeatures } from '../../tanstack-table-core-entry.js';
+import type { GridColumnDef, ResultSetWithExtras, TableCoreModuleLike } from '../grid/types.js';
 import * as panelProtocol from '../protocol.js';
-import { getSavedStateFor } from '../grid/persistence.js';
+import {
+    buildGridStateKey,
+    getSavedStateFor,
+    GRID_STATE_SCHEMA_KIND,
+    GRID_STATE_SCHEMA_VERSION,
+    GRID_STATE_STORAGE_KEY,
+    saveAllGridStates,
+} from '../grid/persistence.js';
+import { initializeTableState } from '../grid/sizing.js';
 import { addGrid, getGrid, resetGrids, setActiveGridIndex } from '../state.js';
 import type { FilterHistorySnapshot } from '../state.js';
 import type { GridHandle, ResultSet, DiskQuerySpec, TanStackColumn } from '../types.js';
+
+const resultPanelTableCore = { constructTable, webviewFeatures } as unknown as TableCoreModuleLike;
 
 jest.mock('../rangeChart.js', () => ({ canCreateRangeChart: jest.fn(() => false) }));
 jest.mock('../databaseFilters.js', () => ({
@@ -586,7 +596,6 @@ describe('SQL editor result panel quick-win coverage', () => {
 
         const container = document.createElement('div');
         document.body.appendChild(container);
-        const factories = [getCoreRowModel, getSortedRowModel, getFilteredRowModel, getGroupedRowModel, getExpandedRowModel] as unknown as RowModelFactoryFn[];
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = (() => ({
             measureText: (value: string) => ({ width: value.length * 8 }),
@@ -596,12 +605,7 @@ describe('SQL editor result panel quick-win coverage', () => {
                 resultSet,
                 0,
                 container,
-                createTable as unknown as CreateTableFn,
-                factories[0],
-                factories[1],
-                factories[2],
-                factories[3],
-                factories[4],
+                resultPanelTableCore,
             );
         } finally {
             HTMLCanvasElement.prototype.getContext = originalGetContext;
@@ -805,13 +809,6 @@ describe('SQL editor result panel quick-win coverage', () => {
 
         const container = document.createElement('div');
         document.body.appendChild(container);
-        const factories = [
-            getCoreRowModel,
-            getSortedRowModel,
-            getFilteredRowModel,
-            getGroupedRowModel,
-            getExpandedRowModel,
-        ] as unknown as RowModelFactoryFn[];
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = (() => ({
             measureText: (value: string) => ({ width: value.length * 8 }),
@@ -829,12 +826,7 @@ describe('SQL editor result panel quick-win coverage', () => {
                 resultSet,
                 0,
                 container,
-                createTable as unknown as CreateTableFn,
-                factories[0],
-                factories[1],
-                factories[2],
-                factories[3],
-                factories[4],
+                resultPanelTableCore,
             );
             grid = getGrid(0) ?? undefined;
             const wrapper = container.querySelector<HTMLElement>('.grid-wrapper');
@@ -901,12 +893,7 @@ describe('SQL editor result panel quick-win coverage', () => {
                 resultSet,
                 0,
                 container,
-                createTable as unknown as CreateTableFn,
-                factories[0],
-                factories[1],
-                factories[2],
-                factories[3],
-                factories[4],
+                resultPanelTableCore,
             );
             grid = getGrid(0) ?? undefined;
             const revivedWrapper = container.querySelector<HTMLElement>('.grid-wrapper');
@@ -1017,13 +1004,6 @@ describe('SQL editor result panel quick-win coverage', () => {
         });
         const container = document.createElement('div');
         document.body.appendChild(container);
-        const factories = [
-            getCoreRowModel,
-            getSortedRowModel,
-            getFilteredRowModel,
-            getGroupedRowModel,
-            getExpandedRowModel,
-        ] as unknown as RowModelFactoryFn[];
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = (() => ({
             measureText: (value: string) => ({ width: value.length * 8 }),
@@ -1034,12 +1014,7 @@ describe('SQL editor result panel quick-win coverage', () => {
                 resultSet,
                 0,
                 container,
-                createTable as unknown as CreateTableFn,
-                factories[0],
-                factories[1],
-                factories[2],
-                factories[3],
-                factories[4],
+                resultPanelTableCore,
             );
             grid = getGrid(0) ?? undefined;
             const wrapper = container.querySelector<HTMLElement>('.grid-wrapper');
@@ -1096,13 +1071,6 @@ describe('SQL editor result panel quick-win coverage', () => {
         });
         const container = document.createElement('div');
         document.body.appendChild(container);
-        const factories = [
-            getCoreRowModel,
-            getSortedRowModel,
-            getFilteredRowModel,
-            getGroupedRowModel,
-            getExpandedRowModel,
-        ] as unknown as RowModelFactoryFn[];
         const originalGetContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = (() => ({
             measureText: (value: string) => ({ width: value.length * 8 }),
@@ -1113,12 +1081,7 @@ describe('SQL editor result panel quick-win coverage', () => {
                 resultSet,
                 0,
                 container,
-                createTable as unknown as CreateTableFn,
-                factories[0],
-                factories[1],
-                factories[2],
-                factories[3],
-                factories[4],
+                resultPanelTableCore,
             );
             grid = getGrid(0) ?? undefined;
             const wrapper = container.querySelector<HTMLElement>('.grid-wrapper');
@@ -1146,6 +1109,62 @@ describe('SQL editor result panel quick-win coverage', () => {
             grid?.dispose?.();
             if (originalResizeObserver === undefined) delete resizeGlobal.ResizeObserver;
             else Object.assign(resizeGlobal, { ResizeObserver: originalResizeObserver });
+            HTMLCanvasElement.prototype.getContext = originalGetContext;
+        }
+    });
+
+    it('round trips legacy left/right column pinning through the v9 table state', () => {
+        const sourceUri = 'file:///pinning-migration.sql';
+        const resultSet = {
+            resultSetId: 'pinning-migration-result',
+            executionTimestamp: 970,
+            columns: [{ name: 'ID', type: 'INTEGER' }, { name: 'LABEL', type: 'VARCHAR' }],
+            data: [[1, 'one'], [2, 'two']],
+        } as ResultSetWithExtras;
+        const key = buildGridStateKey(sourceUri, 0, resultSet.resultSetId, resultSet.executionTimestamp);
+        if (!key) throw new Error('Expected a stable grid state key');
+
+        const legacyPinning = { left: ['1'], right: ['0'] };
+        expect(initializeTableState({ columnPinning: legacyPinning }).columnPinning).toEqual(legacyPinning);
+
+        let savedHostState: unknown = {
+            [GRID_STATE_STORAGE_KEY]: {
+                kind: GRID_STATE_SCHEMA_KIND,
+                schemaVersion: GRID_STATE_SCHEMA_VERSION,
+                entries: { [key]: { columnPinning: legacyPinning } },
+            },
+        };
+        const getHostStateSpy = jest.spyOn(panelProtocol, 'getHostState')
+            .mockImplementation(() => savedHostState);
+        const setHostStateSpy = jest.spyOn(panelProtocol, 'setHostState')
+            .mockImplementation(nextState => { savedHostState = nextState; });
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = (() => ({
+            measureText: (value: string) => ({ width: value.length * 8 }),
+        } as unknown as CanvasRenderingContext2D)) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+        installTestVirtualCore();
+        Object.assign(window, { activeSource: sourceUri, resultSets: [resultSet] });
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+
+        let grid: GridHandle | undefined;
+        try {
+            createResultSetGrid(resultSet, 0, container, resultPanelTableCore);
+            grid = getGrid(0) ?? undefined;
+            const table = grid?.tanTable;
+            expect(table?.getState().columnPinning).toEqual({ start: ['1'], end: ['0'] });
+
+            table?.setColumnPinning?.({ start: ['0'], end: ['1'] });
+            saveAllGridStates();
+            const persistedEnvelope = (savedHostState as Record<string, unknown>)[GRID_STATE_STORAGE_KEY] as {
+                entries: Record<string, { columnPinning?: unknown }>;
+            };
+            expect(persistedEnvelope.entries[key]?.columnPinning).toEqual({ left: ['0'], right: ['1'] });
+            expect(setHostStateSpy).toHaveBeenCalled();
+        } finally {
+            grid?.dispose?.();
+            getHostStateSpy.mockRestore();
+            setHostStateSpy.mockRestore();
             HTMLCanvasElement.prototype.getContext = originalGetContext;
         }
     });
