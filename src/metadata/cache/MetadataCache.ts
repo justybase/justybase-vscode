@@ -79,6 +79,8 @@ import {
 } from './diskLifecycle';
 import * as prefetchDelegation from './prefetchDelegation';
 import { evaluateCompleteness } from '@justybase/metadata-core';
+import type { DatabaseForeignKeyColumnReference } from '../../contracts/database';
+import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
 
 export type { CacheStatsSnapshot, CacheLayer } from '../cacheStats';
 export type { PerKeyEntry, CacheType, DatabaseMetadata } from '../types';
@@ -539,6 +541,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     deletePrefixed(this._store.tableCache);
     deletePrefixed(this._store.procedureCache);
     deletePrefixed(this._store.columnCache);
+    this._store.foreignKeyRelationships.delete(connectionName);
     deletePrefixed(this._store.tableIdMap);
     deletePrefixed(this._store.typeGroupCache);
     deletePrefixed(this._store.objectsByTypeCache);
@@ -652,6 +655,82 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   setDatabases(connectionName: string, data: DatabaseMetadata[]): void {
     this._layers.setDatabases(connectionName, data);
+    if (this.isNetezzaConnection(connectionName)) {
+      const byDatabase = this._store.foreignKeyRelationships.get(connectionName);
+      if (byDatabase) {
+        const activeDatabases = new Set(
+          data
+            .map(database => String(database.DATABASE || database.label || ''))
+            .filter(Boolean)
+            .map(database => this.foreignKeyDatabaseIdentity(connectionName, database)),
+        );
+        for (const databaseKey of byDatabase.keys()) {
+          if (!activeDatabases.has(databaseKey)) {
+            byDatabase.delete(databaseKey);
+          }
+        }
+      }
+    }
+  }
+
+  private foreignKeyDatabaseIdentity(connectionName: string, database: string): string {
+    return this.isNetezzaConnection(connectionName)
+      ? buildNetezzaCacheDatabasePart(database)
+      : database.toUpperCase();
+  }
+
+  getForeignKeyRelationshipsForDatabase(
+    connectionName: string,
+    database: string,
+  ): ForeignKeyRelationshipCacheSlice | undefined {
+    const slice = this._store.foreignKeyRelationships
+      .get(connectionName)
+      ?.get(this.foreignKeyDatabaseIdentity(connectionName, database));
+    return slice ? {
+      database: slice.database,
+      references: slice.references.map(reference => ({ ...reference })),
+      complete: slice.complete,
+    } : undefined;
+  }
+
+  getForeignKeyRelationshipSlices(
+    connectionName: string,
+  ): ForeignKeyRelationshipCacheSlice[] {
+    return [...(this._store.foreignKeyRelationships.get(connectionName)?.values() ?? [])]
+      .map(slice => ({
+        database: slice.database,
+        references: slice.references.map(reference => ({ ...reference })),
+        complete: slice.complete,
+      }));
+  }
+
+  setForeignKeyRelationshipsForDatabase(
+    connectionName: string,
+    database: string,
+    references: DatabaseForeignKeyColumnReference[],
+    complete: boolean,
+  ): void {
+    let byDatabase = this._store.foreignKeyRelationships.get(connectionName);
+    if (!byDatabase) {
+      byDatabase = new Map();
+      this._store.foreignKeyRelationships.set(connectionName, byDatabase);
+    }
+    const databaseIdentity = this.foreignKeyDatabaseIdentity(connectionName, database);
+    const existing = byDatabase.get(databaseIdentity);
+    byDatabase.set(databaseIdentity, {
+      database,
+      // A failed refresh cannot prove that old relationships disappeared.
+      // Keep the last known rows but mark the slice incomplete so consumers
+      // display its partial state instead of treating it as authoritative.
+      references: complete
+        ? references.map(reference => ({ ...reference }))
+        : existing?.references.map(reference => ({ ...reference })) ?? [],
+      complete,
+    });
+  }
+
+  invalidateForeignKeyRelationships(connectionName: string): void {
+    this._store.foreignKeyRelationships.delete(connectionName);
   }
 
   getSchemas(
@@ -941,6 +1020,12 @@ export class MetadataCache implements MetadataPrefetchTarget {
     tableName: string,
   ): void {
     const exactNetezza = this.isNetezzaConnection(connectionName);
+    if (exactNetezza) {
+      // Table DDL can change outgoing constraints and incoming constraints
+      // whose source lives in another database. Invalidate the connection
+      // index so the next ordinary metadata refresh rebuilds all DB slices.
+      this.invalidateForeignKeyRelationships(connectionName);
+    }
     const cacheDatabase = exactNetezza
       ? buildNetezzaCacheDatabasePart(database)
       : database;
@@ -1022,6 +1107,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     schemaName?: string,
   ): void {
     const exactNetezza = this.isNetezzaConnection(connectionName);
+    if (exactNetezza) {
+      this.invalidateForeignKeyRelationships(connectionName);
+    }
     const databaseKey = exactNetezza
       ? buildNetezzaCacheDatabasePart(dbName)
       : dbName;
@@ -1245,14 +1333,14 @@ export class MetadataCache implements MetadataPrefetchTarget {
   getSnapshotCompletenessReport(
     connectionName: string,
   ): MetadataSnapshotCompletenessReport {
-    const missingStages = this.getSnapshotMissingStages(connectionName);
+    const metadataMissingStages = this.getSnapshotMissingStages(connectionName);
     const maxReportedMissingColumnKeys = 100;
     const columnLayers = this.getColumnLayerCompleteness(connectionName);
     const report = evaluateCompleteness({
-      databaseLoaded: !missingStages.includes('databases'),
-      schemaLoaded: !missingStages.includes('schemas'),
-      objectsLoaded: !missingStages.includes('objects'),
-      proceduresLoaded: !missingStages.includes('procedures'),
+      databaseLoaded: !metadataMissingStages.includes('databases'),
+      schemaLoaded: !metadataMissingStages.includes('schemas'),
+      objectsLoaded: !metadataMissingStages.includes('objects'),
+      proceduresLoaded: !metadataMissingStages.includes('procedures'),
       // Type groups are optional for the historical full-snapshot contract.
       typeGroupsLoaded: true,
       expectedColumnKeys: columnLayers.expectedColumnKeys,
@@ -1266,9 +1354,15 @@ export class MetadataCache implements MetadataPrefetchTarget {
     };
     const allMissingColumnKeys = report.missingColumnKeys;
 
+    const missingStages = report.missingStages.map(stage => stageNames[stage] ?? stage);
+    const relationshipsComplete = this.isForeignKeyRelationshipIndexComplete(connectionName);
+    if (!relationshipsComplete) {
+      missingStages.push('foreign-key relationships');
+    }
+
     return {
-      complete: report.complete,
-      missingStages: report.missingStages.map(stage => stageNames[stage] ?? stage),
+      complete: report.complete && relationshipsComplete,
+      missingStages,
       missingColumnKeys: allMissingColumnKeys.slice(0, maxReportedMissingColumnKeys),
       missingColumnCount: allMissingColumnKeys.length,
     };
@@ -1423,6 +1517,21 @@ export class MetadataCache implements MetadataPrefetchTarget {
       );
     }
     return false;
+  }
+
+  private isForeignKeyRelationshipIndexComplete(connectionName: string): boolean {
+    if (!this.isNetezzaConnection(connectionName)) {
+      return true;
+    }
+    const databases = this.getDatabases(connectionName);
+    if (!databases || databases.length === 0) {
+      return false;
+    }
+    return databases.every(database => {
+      const name = String(database.DATABASE || database.label || '');
+      return name.length > 0
+        && this.getForeignKeyRelationshipsForDatabase(connectionName, name)?.complete === true;
+    });
   }
 
   async checkpointSave(connectionName: string, lease?: import('../diskStorage/metadataDiskStorage').PrefetchLease): Promise<void> {

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { gunzipSync, gzipSync } from 'zlib';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import * as vscode from 'vscode';
 import { MetadataCache } from '../metadataCache';
@@ -12,6 +13,7 @@ import type { MetadataQueryContext } from '../metadata/metadataQueryDiagnostics'
 import {
     CACHE_V3_DIR_NAME,
     getV3ColumnFilePath,
+    getV3ConnectionManifestPath,
     getV3ConnectionMetadataPath,
     getV3IndexPath,
 } from '../metadata/diskStorage/metadataDiskPaths';
@@ -86,6 +88,7 @@ describe('MetadataCache disk persistence integration', () => {
         cache.setProcedures(connectionName, 'DB1..', [{ PROCEDURE: 'P1', SCHEMA: 'S1', label: 'P1' }]);
         cache.setColumns(connectionName, `DB1.S1.${tableName}`, [{ ATTNAME: columnName, FORMAT_TYPE: 'INT', label: columnName }]);
         cache.setTypeGroups(connectionName, 'DB1', ['TABLE']);
+        cache.setForeignKeyRelationshipsForDatabase(connectionName, 'DB1', [], true);
     }
 
     function populateFull(connectionName: string): void {
@@ -100,6 +103,18 @@ describe('MetadataCache disk persistence integration', () => {
         } finally {
             await cache.releasePrefetchLock(lease);
         }
+    }
+
+    function removeRelationshipIndexMetadata(filePath: string): void {
+        const value = JSON.parse(gunzipSync(fs.readFileSync(filePath)).toString('utf8')) as {
+            connections?: Record<string, Record<string, unknown>>;
+        };
+        const entry = value.connections?.NZ;
+        if (entry) {
+            delete entry.relationshipDatabases;
+            delete entry.relationshipIndexVersion;
+        }
+        fs.writeFileSync(filePath, gzipSync(JSON.stringify(value)));
     }
 
     it('releases locks and local resources when the final disk save fails', async () => {
@@ -177,6 +192,68 @@ describe('MetadataCache disk persistence integration', () => {
         expect(cache2.getTables('NZ', 'DB1.S1')).toBeUndefined();
         expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
         expect((await cache2['_diskStorage']!.readV3Index())?.connections.NZ).toBeDefined();
+        await cache2.dispose();
+    });
+
+    it('persists and hydrates FK relationship slices without hydrating column layers', async () => {
+        populateFull('NZ');
+        const reference = {
+            fromDatabase: 'DB1',
+            fromSchema: 'S1',
+            fromTable: 'T1',
+            fromColumn: 'C1',
+            toDatabase: 'DB1',
+            toSchema: 'S1',
+            toTable: 'PARENT',
+            toColumn: 'ID',
+            constraintName: 'FK_T1_PARENT',
+            ordinalPosition: 1,
+        };
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [reference], true);
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
+        const index = await cache['_diskStorage']!.readV3Index();
+        expect(index?.connections.NZ).toEqual(expect.objectContaining({
+            relationshipDatabases: ['DB1'],
+            relationshipIndexVersion: 1,
+        }));
+        await cache.dispose();
+
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+
+        expect(cache2.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')).toEqual({
+            database: 'DB1',
+            references: [reference],
+            complete: true,
+        });
+        expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toBeUndefined();
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(true);
+        await cache2.dispose();
+    });
+
+    it('treats a pre-relationship cache as incomplete so standard prefetch can upgrade it', async () => {
+        populateFull('NZ');
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        await persistFull('NZ');
+        await cache.dispose();
+
+        removeRelationshipIndexMetadata(getV3IndexPath(tempDir));
+        removeRelationshipIndexMetadata(getV3ConnectionManifestPath(tempDir, 'NZ'));
+
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await cache2.initialize();
+        await cache2.whenConnectionMetadataHydrated('NZ');
+
+        expect(cache2.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')).toBeUndefined();
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
         await cache2.dispose();
     });
 
@@ -316,6 +393,8 @@ describe('MetadataCache disk persistence integration', () => {
                         return result(['OBJID', 'ATTNAME', 'CONTYPE'], []);
                     case 'column-distribution':
                         return result(['OBJID', 'ATTNAME'], []);
+                    case 'column-relations':
+                        return result([], []);
                     default:
                         throw new Error(`Unexpected metadata query kind: ${String(context?.kind)}`);
                 }
@@ -539,6 +618,33 @@ describe('MetadataCache disk persistence integration', () => {
         expect(cache2['_diskLifecycleState'].deferredIndexConnections.has('NZ')).toBe(false);
     });
 
+    it('removes FK slices omitted by an external snapshot for an existing database', async () => {
+        populateFull('NZ');
+        cache.invalidateForeignKeyRelationships('NZ');
+        await cache.checkpointSave('NZ');
+
+        const cache2 = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        cache2.setDatabases('NZ', [{ DATABASE: 'DB1', label: 'DB1', kind: 9 }]);
+        cache2.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [{
+            fromDatabase: 'DB1', fromSchema: 'S1', fromTable: 'T1', fromColumn: 'C1',
+            toDatabase: 'DB1', toSchema: 'S1', toTable: 'PARENT', toColumn: 'ID',
+        }], true);
+
+        await (
+            cache2 as unknown as {
+                onExternalCacheUpdate: (names: string[]) => Promise<void>;
+            }
+        ).onExternalCacheUpdate(['NZ']);
+
+        expect(cache2.getDatabases('NZ')).toEqual([
+            expect.objectContaining({ DATABASE: 'DB1' }),
+        ]);
+        expect(cache2.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')).toBeUndefined();
+    });
+
     it('should not restore freshness from partial external cache updates', async () => {
         populateFull('NZ');
         await cache.checkpointSave('NZ');
@@ -731,6 +837,7 @@ describe('MetadataCache disk persistence integration', () => {
         expect(cache.verifyCompleteSnapshot('NZ')).toBe(false);
 
         cache.setColumns('NZ', 'DB1.S1.T1', [{ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }]);
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], true);
         expect(cache.verifyCompleteSnapshot('NZ')).toBe(true);
     });
 

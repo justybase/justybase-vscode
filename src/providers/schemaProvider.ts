@@ -24,12 +24,8 @@ import { DatabaseMetadata, TableMetadata, ColumnMetadata, ProcedureMetadata } fr
 import {
     getForeignKeyReferencesForTable,
     getForeignKeyReferencingTable,
-    normalizeForeignKeyRelationshipRows,
 } from '../metadata/foreignKeyRelationships';
-import type {
-    ForeignKeyTableIdentity,
-    RawForeignKeyRelationshipRow,
-} from '../metadata/foreignKeyRelationships';
+import type { ForeignKeyTableIdentity } from '../metadata/foreignKeyRelationships';
 import type { LocalDefinition } from './types';
 import { buildMetadataLookupTargets } from '../server/completionPathUtils';
 import { findLocalDefinition, dedupeColumnNames, normalizeColumnNames, getWildcardResolutionLocalDefinitions } from '../server/completionLocalDefinitionUtils';
@@ -154,10 +150,6 @@ export class SchemaProvider
     private _cteRefreshTimer?: NodeJS.Timeout;
     private _cteDefinitionsSnapshot?: ActiveCteDefinition[];
     private readonly _cteWildcardResolver: CompletionWildcardResolver;
-    private readonly _foreignKeyRelationshipsByScope = new Map<
-        string,
-        Promise<ForeignKeyRelationshipSnapshot>
-    >();
 
     // Drag and Drop support
     readonly dragMimeTypes = ['application/vnd.code.tree.netezza', 'text/plain'];
@@ -567,7 +559,6 @@ export class SchemaProvider
     refresh(): void {
         this._quickFilterChildren.clear();
         this._useQuickFilterSnapshots = false;
-        this._foreignKeyRelationshipsByScope.clear();
         this._onDidChangeTreeData.fire();
     }
 
@@ -1648,124 +1639,48 @@ export class SchemaProvider
         currentDatabase: string,
         direction: ForeignKeyRelationshipDirection,
     ): Promise<ForeignKeyRelationshipSnapshot> {
-        const scopeKey = direction === 'references'
-            ? JSON.stringify([connectionName, direction, currentDatabase])
-            : JSON.stringify([connectionName, direction]);
-        const existing = this._foreignKeyRelationshipsByScope.get(scopeKey);
-        if (existing) {
-            return existing;
-        }
-
-        const loading = this.loadForeignKeyRelationshipSnapshot(connectionName, currentDatabase, direction);
-        this._foreignKeyRelationshipsByScope.set(scopeKey, loading);
-        try {
-            return await loading;
-        } catch (error) {
-            if (this._foreignKeyRelationshipsByScope.get(scopeKey) === loading) {
-                this._foreignKeyRelationshipsByScope.delete(scopeKey);
-            }
-            throw error;
-        }
-    }
-
-    private async loadForeignKeyRelationshipSnapshot(
-        connectionName: string,
-        currentDatabase: string,
-        direction: ForeignKeyRelationshipDirection,
-    ): Promise<ForeignKeyRelationshipSnapshot> {
-        const metadataProvider = this.getMetadataProvider(connectionName);
         const references: DatabaseForeignKeyColumnReference[] = [];
         const errors: string[] = [];
-        let databaseNames: string[];
-
         if (direction === 'references') {
-            // Outgoing constraints originate in the current database, so there
-            // is no need to enumerate or scan unrelated databases.
-            databaseNames = [currentDatabase];
+            const slice = this.metadataCache.getForeignKeyRelationshipsForDatabase?.(
+                connectionName,
+                currentDatabase,
+            );
+            if (slice?.complete) {
+                references.push(...slice.references);
+            } else {
+                errors.push(
+                    `${currentDatabase}: FK relationship metadata is not completely cached. Refresh schema metadata.`,
+                );
+            }
         } else {
             const cachedDatabases = this.metadataCache.getDatabases(connectionName);
-            databaseNames = Array.isArray(cachedDatabases)
-                ? cachedDatabases.map(database => String(database.DATABASE || database.label || '')).filter(Boolean)
-                : [];
-
-            if (!Array.isArray(cachedDatabases)) {
-                try {
-                    const queryResult = await runQueryWithTimeout(
-                        this.context,
-                        metadataProvider.buildListDatabasesQuery(),
-                        this.connectionManager,
-                        connectionName,
-                        SCHEMA_QUERY_TIMEOUT,
-                        {
-                            source: 'schema-tree',
-                            kind: 'databases',
-                            connectionName,
-                            reason: 'foreign-key-relationship-database-list',
-                        },
-                    );
-                    if (!queryResult) {
-                        throw new Error('No database list was returned.');
-                    }
-                    databaseNames = queryResultToRows<{ DATABASE?: unknown }>(queryResult)
-                        .map(row => String(row.DATABASE ?? '').trimEnd())
-                        .filter(Boolean);
-                    this.metadataCache.setDatabases(
-                        connectionName,
-                        databaseNames.map(database => ({ DATABASE: database, label: database, kind: 9, detail: 'Database' })),
-                    );
-                } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    errors.push(`Database list: ${message}`);
-                }
-            }
-
-            if (!databaseNames.some(name => name.trimEnd() === currentDatabase.trimEnd())) {
-                databaseNames.push(currentDatabase);
-            }
-            databaseNames = Array.from(new Map(databaseNames.map(name => [name.trimEnd(), name])).values())
-                .sort((left, right) => left.localeCompare(right));
-        }
-
-        const buildRelationshipsQuery = metadataProvider.buildForeignKeyRelationshipsQuery;
-        if (!buildRelationshipsQuery) {
-            throw new Error('Netezza metadata provider does not support foreign-key relationship queries.');
-        }
-
-        for (const database of databaseNames) {
-            try {
-                const catalogDatabase = formatNetezzaCatalogIdentifier(database);
-                const query = buildRelationshipsQuery.call(metadataProvider, catalogDatabase);
-                if (!query) {
-                    throw new Error('No foreign-key relationship query was provided.');
-                }
-                const queryResult = await runWithMetadataQueryConcurrencyLimit(
-                    connectionName,
-                    queueWaitMs => runQueryWithTimeout(
-                        this.context,
-                        query,
-                        this.connectionManager,
-                        connectionName,
-                        SCHEMA_QUERY_TIMEOUT,
-                        {
-                            source: 'schema-tree',
-                            kind: 'column-relations',
-                            connectionName,
-                            database,
-                            reason: 'schema-relationship-group-expand',
-                            queueWaitMs,
-                        },
-                    ),
-                );
-                if (!queryResult) {
-                    throw new Error('No foreign-key metadata was returned.');
-                }
-                references.push(...normalizeForeignKeyRelationshipRows(
-                    queryResultToRows<RawForeignKeyRelationshipRow>(queryResult),
-                    database,
+            if (!Array.isArray(cachedDatabases) || cachedDatabases.length === 0) {
+                errors.push('Database list: metadata is not cached. Refresh schema metadata.');
+            } else {
+                const databaseNames = Array.from(new Set(
+                    cachedDatabases
+                        .map(database => String(database.DATABASE || database.label || '').trimEnd())
+                        .filter(Boolean),
                 ));
-            } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : String(error);
-                errors.push(`${database}: ${message}`);
+                if (!databaseNames.some(database => database === currentDatabase.trimEnd())) {
+                    databaseNames.push(currentDatabase.trimEnd());
+                }
+                databaseNames.sort((left, right) => left.localeCompare(right));
+
+                for (const database of databaseNames) {
+                    const slice = this.metadataCache.getForeignKeyRelationshipsForDatabase?.(
+                        connectionName,
+                        database,
+                    );
+                    if (slice?.complete) {
+                        references.push(...slice.references);
+                    } else {
+                        errors.push(
+                            `${database}: FK relationship metadata is not completely cached. Refresh schema metadata.`,
+                        );
+                    }
+                }
             }
         }
 
@@ -1902,12 +1817,12 @@ export class SchemaProvider
             if (snapshot.errors.length > 0) {
                 children.push(this.createRelationshipStatusItem(
                     group,
-                    `Some FK metadata could not be read (${snapshot.errors.length} database${snapshot.errors.length === 1 ? '' : 's'})`,
+                    `FK metadata is not completely cached (${snapshot.errors.length} database${snapshot.errors.length === 1 ? '' : 's'})`,
                     'warning',
                     snapshot.errors.join('\n'),
                 ));
             }
-            if (children.length === 0) {
+            if (children.length === 0 && snapshot.errors.length === 0) {
                 return [this.createRelationshipStatusItem(
                     group,
                     group.relationshipDirection === 'references' ? '(No references)' : '(No tables reference this table)',

@@ -223,6 +223,15 @@ async function hydrateConnectionMetadataFromDisk(
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
     }
+    deps.cache.invalidateForeignKeyRelationships(connectionName);
+    for (const slice of loaded.foreignKeyRelationships) {
+      deps.cache.setForeignKeyRelationshipsForDatabase(
+        connectionName,
+        slice.database,
+        slice.references,
+        slice.complete,
+      );
+    }
 
     deps.state.deferredIndexConnections.add(connectionName);
     if (Object.keys(loaded.table).length > 0) {
@@ -322,6 +331,15 @@ export async function onExternalCacheUpdate(
     });
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
+    }
+    deps.cache.invalidateForeignKeyRelationships(connectionName);
+    for (const slice of loaded.foreignKeyRelationships) {
+      deps.cache.setForeignKeyRelationshipsForDatabase(
+        connectionName,
+        slice.database,
+        slice.references,
+        slice.complete,
+      );
     }
     deps.state.deferredIndexConnections.add(connectionName);
 

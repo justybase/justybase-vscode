@@ -144,6 +144,23 @@ describe("MetadataCache", () => {
       expect(netezzaCache.getColumns('conn1', columnLayer)).toBeUndefined();
     });
 
+    it('invalidates the connection FK index after table column DDL invalidation', () => {
+      const netezzaCache = new MetadataCache(mockContext, {
+        getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza'),
+      } as never);
+      const reference = {
+        fromDatabase: 'DB1', fromSchema: 'S1', fromTable: 'CHILD', fromColumn: 'PARENT_ID',
+        toDatabase: 'DB1', toSchema: 'S1', toTable: 'PARENT', toColumn: 'ID',
+      };
+
+      netezzaCache.setForeignKeyRelationshipsForDatabase('conn1', 'DB1', [reference], true);
+      expect(netezzaCache.getForeignKeyRelationshipsForDatabase('conn1', 'DB1')?.complete).toBe(true);
+
+      netezzaCache.invalidateTableColumns('conn1', 'DB1', 'S1', 'CHILD');
+
+      expect(netezzaCache.getForeignKeyRelationshipsForDatabase('conn1', 'DB1')).toBeUndefined();
+    });
+
     it("accepts an exact persisted Netezza column layer during snapshot verification", () => {
       const netezzaCache = new MetadataCache(mockContext, {
         getConnectionDatabaseKind: jest.fn().mockReturnValue("netezza"),
@@ -165,6 +182,7 @@ describe("MetadataCache", () => {
         new Map(),
       );
       netezzaCache.setProcedures('conn1', aggregateLayer, []);
+      netezzaCache.setForeignKeyRelationshipsForDatabase('conn1', database, [], true);
       netezzaCache['_columnLoaderState'].columnLayerKeysOnDisk.set('conn1', new Set([columnLayer]));
 
       expect(netezzaCache.verifyCompleteSnapshot('conn1')).toBe(true);
@@ -194,7 +212,7 @@ describe("MetadataCache", () => {
 
       expect(netezzaCache.getSnapshotCompletenessReport("conn1")).toEqual({
         complete: false,
-        missingStages: [],
+        missingStages: ['foreign-key relationships'],
         missingColumnKeys: [columnLayer],
         missingColumnCount: 1,
       });
@@ -219,6 +237,7 @@ describe("MetadataCache", () => {
       );
       netezzaCache.setProcedures("conn1", aggregateLayer, []);
       netezzaCache.setColumns("conn1", columnLayer, []);
+      netezzaCache.setForeignKeyRelationshipsForDatabase("conn1", "JUST_DATA", [], true);
 
       expect(netezzaCache.verifyCompleteSnapshot("conn1")).toBe(true);
     });
@@ -242,6 +261,7 @@ describe("MetadataCache", () => {
       );
       netezzaCache.setProcedures('conn1', aggregateLayer, []);
       netezzaCache.setColumns('conn1', columnLayer, []);
+      netezzaCache.setForeignKeyRelationshipsForDatabase('conn1', 'BAZA', [], true);
 
       expect(netezzaCache.getColumns('conn1', columnLayer)).toEqual([]);
       expect(netezzaCache.getMissingColumnLayerKeys('conn1')).toEqual([]);

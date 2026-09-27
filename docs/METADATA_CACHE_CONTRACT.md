@@ -30,6 +30,7 @@ cannot observe another instance's metadata cache.
 | `column` | `CONN\|DB.SCHEMA.TABLE` | Prefetch: fill-missing only; explorer refresh: replace |
 | `procedure` | `CONN\|DB.SCHEMA` or `CONN\|DB..` | Replace per key |
 | `typeGroup` | `CONN\|DB` | Merge with dialect defaults |
+| `foreignKeyRelationships` | Netezza `CONN → DB` | Replace a database FK slice; incomplete scans retain old rows but are never authoritative |
 | `objectLookup` / `objectsByType` | derived | Invalidated on `setTables` / `invalidateSchema`; rebuilt lazily |
 
 Connection names are passed through as provided by callers (some lookup methods normalize to uppercase).
@@ -108,6 +109,7 @@ Removes for the target scope:
 - Aggregated `CONN\|DB..` table cache when a specific schema is invalidated
 - Procedure cache (schema + all-schemas aggregate when applicable)
 - Column cache keys for the schema
+- For Netezza, the connection FK relationship index (rebuilt by the next standard metadata prefetch)
 - Lookup indexes via `removeTableCacheEntry`
 
 Fires `onDidInvalidate`.
@@ -148,6 +150,13 @@ Wipes all in-memory layers, bumps `_cacheGeneration` (cancels in-flight disk/col
   or an owner-only `_V_EXTOBJECT` join in Netezza. PROCEDURE uses the separate
   `procedure` layer (stage 4). Type groups are prefetched per DB (stage 2,
   after schemas).
+- **FK relationship index (Netezza)** — the existing FK catalog query in the
+  ordinary per-database column prefetch builds a connection cache slice for
+  each database. `References` reads the current database slice and
+  `Referenced by` searches all cached slices; expanding either tree group runs
+  no catalog SQL. The slices are compressed per-database sidecars in the same
+  generation/fence-protected v3 snapshot. A cache without the FK index version
+  is incomplete and receives the normal connection prefetch upgrade.
 
 ## Host ↔ LSP synchronization
 
@@ -164,9 +173,10 @@ When disk persistence is enabled (`justybase.metadataCache.diskPersistence`, def
 
 - On startup, a small per-connection manifest hydrates the database list immediately; heavy **metadata** layers (schema, table, procedure, typeGroup) hydrate from disk in the background.
 - **Columns** stay in per-database column files (`*.columns.json.gz`) until loaded on demand.
+- **Netezza FK relationships** are loaded from per-database `*.foreign-keys.json.gz` sidecars during the metadata hydrate; this does not hydrate column layers or query the database.
 - Prefetch checkpoints metadata to disk; column files are written at checkpoint/dispose.
 - Checkpoints are marked `isComplete: false`. They may be loaded for recovery, but never restore `isConnectionPrefetchFresh`.
-- Only a verified complete snapshot (`isComplete: true`) restores prefetch freshness. Completion requires database, schema, table, procedure/type catalog stages, plus column cache entries for table/view/external-table objects.
+- Only a verified complete snapshot (`isComplete: true`) restores prefetch freshness. Completion requires database, schema, table, procedure/type catalog stages, column cache entries for table/view/external-table objects, and a complete FK slice for every Netezza database.
 - Another VS Code window writing the v3 index triggers `onExternalCacheUpdate` → re-hydrate metadata → `onDidExternalRefresh`.
 
 Self-writes are skipped when this window holds the prefetch lock.

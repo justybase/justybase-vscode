@@ -92,13 +92,13 @@ describe('ddl/procedureDDL', () => {
         it('should add COMMENT ON PROCEDURE when description is provided', () => {
             const ddl = buildProcedureDDLFromCache('DB', 'S', makeProcInfo({ description: 'My procedure' }));
 
-            expect(ddl).toContain("COMMENT ON PROCEDURE MY_PROC IS 'My procedure';");
+            expect(ddl).toContain("COMMENT ON PROCEDURE DB.S.MY_PROC() IS 'My procedure';");
         });
 
         it('should escape single quotes in description', () => {
             const ddl = buildProcedureDDLFromCache('DB', 'S', makeProcInfo({ description: "O'Brien's procedure" }));
 
-            expect(ddl).toContain("COMMENT ON PROCEDURE MY_PROC IS 'O''Brien''s procedure';");
+            expect(ddl).toContain("COMMENT ON PROCEDURE DB.S.MY_PROC() IS 'O''Brien''s procedure';");
         });
 
         it('should quote identifiers that need quoting', () => {
@@ -123,7 +123,7 @@ describe('ddl/procedureDDL', () => {
             expect(ddl).toContain('LANGUAGE NZPLSQL AS');
             expect(ddl).toContain('BEGIN_PROC');
             expect(ddl).toContain('END_PROC;');
-            expect(ddl).toContain("COMMENT ON PROCEDURE MY_PROC IS 'Full featured procedure';");
+            expect(ddl).toContain("COMMENT ON PROCEDURE PROD.DWH.MY_PROC() IS 'Full featured procedure';");
         });
 
         it('should put BEGIN_PROC and END_PROC on their own lines', () => {
