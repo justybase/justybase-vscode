@@ -49,15 +49,28 @@ jest.mock('../core/queryRunner', () => ({
 
 // Mock SchemaItem
 jest.mock('../providers/schemaProvider', () => ({
-    SchemaItem: jest.fn().mockImplementation(() => ({
-        label: '',
-        collapsibleState: 1,
-        contextValue: '',
-        dbName: '',
-        objType: '',
-        schema: '',
-        objId: 0,
-        connectionName: ''
+    SchemaItem: jest.fn().mockImplementation((
+        label: string,
+        collapsibleState: number,
+        contextValue: string,
+        dbName: string,
+        objType: string,
+        schema: string,
+        objId: number,
+        _description: string,
+        connectionName: string,
+        parentName: string,
+    ) => ({
+        label,
+        collapsibleState,
+        contextValue,
+        dbName,
+        objType,
+        schema,
+        objId,
+        connectionName,
+        parentName,
+        id: `${connectionName}|${contextValue}|${dbName}|${schema}|${objType}|${parentName}|${label}|${objId}`,
     }))
 }));
 
@@ -278,6 +291,7 @@ describe('commands/schema/utilityCommands', () => {
             const disposables = registerUtilityCommands(mockDeps);
 
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealInSchema', expect.any(Function));
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealSchemaColumn', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.showQueryHistory', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.clearQueryHistory', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.toggleSchemaFavorite', expect.any(Function));
@@ -295,13 +309,13 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealAccessFile', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.filter', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.clearFilter', expect.any(Function));
-            expect(disposables).toHaveLength(20);
+            expect(disposables).toHaveLength(21);
         });
 
         it('should return disposables for cleanup', () => {
             const disposables = registerUtilityCommands(mockDeps);
 
-            expect(disposables).toHaveLength(20);
+            expect(disposables).toHaveLength(21);
             expect(disposables[0].dispose).toBeDefined();
             expect(disposables[1].dispose).toBeDefined();
             expect(disposables[2].dispose).toBeDefined();
@@ -322,6 +336,7 @@ describe('commands/schema/utilityCommands', () => {
             expect(disposables[17].dispose).toBeDefined();
             expect(disposables[18].dispose).toBeDefined();
             expect(disposables[19].dispose).toBeDefined();
+            expect(disposables[20].dispose).toBeDefined();
         });
 
         it('registers one local schema filter without invoking schema search', async () => {
@@ -812,6 +827,45 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedShowErrorMessage).toHaveBeenCalledWith(
                 expect.stringContaining('Error revealing item (CQ01-REVEAL-005): Reveal exploded')
             );
+        });
+    });
+
+    describe('netezza.revealSchemaColumn command handler', () => {
+        it('reveals the exact FK-related column beneath its table', async () => {
+            mockedRunQueryRaw.mockResolvedValue({ columns: [], data: [] });
+            mockedQueryResultToRows.mockReturnValue([{
+                OBJNAME: 'CUSTOMERS',
+                OBJTYPE: 'TABLE',
+                SCHEMA: 'PUBLIC',
+                OBJID: 23,
+            }]);
+
+            const handler = getCommandHandler('netezza.revealSchemaColumn');
+            await handler({
+                connectionName: 'test-connection',
+                database: 'CRM',
+                schema: 'PUBLIC',
+                table: 'CUSTOMERS',
+                column: 'ID',
+            });
+
+            expect(mockedSetStatusBarMessage).toHaveBeenCalled();
+            expect(mockedShowWarningMessage).not.toHaveBeenCalled();
+            expect(mockedShowErrorMessage).not.toHaveBeenCalled();
+            expect(mockedRunQueryRaw).toHaveBeenCalledTimes(1);
+            expect(mockedQueryResultToRows).toHaveBeenCalledTimes(1);
+            expect(mockDeps.schemaTreeView.reveal).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    label: 'ID',
+                    contextValue: 'column',
+                    dbName: 'CRM',
+                    schema: 'PUBLIC',
+                    parentName: 'CUSTOMERS',
+                    sourceContext: 'schema',
+                }),
+                { select: true, focus: true },
+            );
+            expect(mockDeps.schemaProvider.refresh).toHaveBeenCalled();
         });
     });
 

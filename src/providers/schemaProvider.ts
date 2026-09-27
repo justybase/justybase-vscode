@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { DatabaseKind } from '../contracts/database';
+import type { DatabaseForeignKeyColumnReference } from '../contracts/database';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
@@ -20,6 +21,15 @@ import {
 import { getTablesForScope, refreshTableLikeTypeForSchema, hasTreeReadyColumnCache, normalizeColumnCacheEntry, isTableCacheObjectType, buildSchemaCacheKey } from '../metadata/cache/schemaTreeDataSource';
 import { buildColumnCacheKey } from '../metadata/columnRowMapping';
 import { DatabaseMetadata, TableMetadata, ColumnMetadata, ProcedureMetadata } from '../metadata/types';
+import {
+    getForeignKeyReferencesForTable,
+    getForeignKeyReferencingTable,
+    normalizeForeignKeyRelationshipRows,
+} from '../metadata/foreignKeyRelationships';
+import type {
+    ForeignKeyTableIdentity,
+    RawForeignKeyRelationshipRow,
+} from '../metadata/foreignKeyRelationships';
 import type { LocalDefinition } from './types';
 import { buildMetadataLookupTargets } from '../server/completionPathUtils';
 import { findLocalDefinition, dedupeColumnNames, normalizeColumnNames, getWildcardResolutionLocalDefinitions } from '../server/completionLocalDefinitionUtils';
@@ -90,6 +100,13 @@ export {
 const SCHEMA_QUERY_TIMEOUT = METADATA_QUERY_TIMEOUT_SECONDS * 1000;
 const CTE_TREE_REFRESH_DEBOUNCE_MS = 400;
 
+type ForeignKeyRelationshipDirection = 'references' | 'referencedBy';
+
+interface ForeignKeyRelationshipSnapshot {
+    references: DatabaseForeignKeyColumnReference[];
+    errors: string[];
+}
+
 interface ActiveCteDefinition {
     name: string;
     type: string;
@@ -137,6 +154,10 @@ export class SchemaProvider
     private _cteRefreshTimer?: NodeJS.Timeout;
     private _cteDefinitionsSnapshot?: ActiveCteDefinition[];
     private readonly _cteWildcardResolver: CompletionWildcardResolver;
+    private readonly _foreignKeyRelationshipsByScope = new Map<
+        string,
+        Promise<ForeignKeyRelationshipSnapshot>
+    >();
 
     // Drag and Drop support
     readonly dragMimeTypes = ['application/vnd.code.tree.netezza', 'text/plain'];
@@ -546,6 +567,7 @@ export class SchemaProvider
     refresh(): void {
         this._quickFilterChildren.clear();
         this._useQuickFilterSnapshots = false;
+        this._foreignKeyRelationshipsByScope.clear();
         this._onDidChangeTreeData.fire();
     }
 
@@ -1506,6 +1528,399 @@ export class SchemaProvider
         return element;
     }
 
+    private createNetezzaTableItem(
+        connectionName: string,
+        database: string,
+        schema: string | undefined,
+        tableName: string,
+        tableType: string,
+        objectId?: number,
+    ): SchemaItem {
+        return new SchemaItem(
+            tableName,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            `netezza:${tableType}`,
+            database,
+            tableType,
+            schema,
+            objectId,
+            undefined,
+            connectionName,
+        );
+    }
+
+    private createRelationshipGroupItem(
+        table: ForeignKeyTableIdentity & {
+            connectionName: string;
+            tableType: string;
+            objectId?: number;
+        },
+        direction: ForeignKeyRelationshipDirection,
+    ): SchemaItem {
+        const label = direction === 'references' ? 'References' : 'Referenced by';
+        const item = new SchemaItem(
+            label,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            'netezzaRelationshipGroup',
+            table.database,
+            table.tableType,
+            table.schema,
+            table.objectId,
+            undefined,
+            table.connectionName,
+            table.table,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            label,
+            undefined,
+            undefined,
+            undefined,
+            direction,
+        );
+        item.iconPath = new vscode.ThemeIcon('references');
+        return item;
+    }
+
+    private createRelationshipGroupItems(tableItem: SchemaItem): SchemaItem[] {
+        const connectionName = tableItem.connectionName;
+        const database = tableItem.dbName;
+        const tableName = tableItem.rawLabel || tableItem.label;
+        const tableType = tableItem.objType?.toUpperCase();
+        if (
+            !connectionName
+            || !database
+            || this.getConnectionDatabaseKind(connectionName) !== 'netezza'
+            || (tableType !== 'TABLE' && tableType !== 'GLOBAL TEMP TABLE')
+        ) {
+            return [];
+        }
+
+        const table = {
+            database,
+            schema: tableItem.schema || '',
+            table: tableName,
+            tableType,
+            objectId: tableItem.objId,
+            connectionName,
+        };
+        return [
+            this.createRelationshipGroupItem(table, 'references'),
+            this.createRelationshipGroupItem(table, 'referencedBy'),
+        ];
+    }
+
+    private createSchemaColumnItems(tableItem: SchemaItem, columns: readonly ColumnMetadata[]): SchemaItem[] {
+        const tableName = tableItem.rawLabel || tableItem.label;
+        return columns.map(column => {
+            const item = new SchemaItem(
+                column.label || column.ATTNAME,
+                vscode.TreeItemCollapsibleState.None,
+                'column',
+                tableItem.dbName,
+                tableItem.objType,
+                tableItem.schema,
+                undefined,
+                column.documentation || '',
+                tableItem.connectionName,
+                tableName,
+                undefined,
+                column.isPk,
+                column.isFk,
+                undefined,
+                undefined,
+                column.detail || column.FORMAT_TYPE,
+                column.isDistributionKey,
+                undefined,
+                undefined,
+                undefined,
+                tableItem.objId,
+            );
+            item.sourceContext = 'schema';
+            item.id = `${item.id}|schema`;
+            return item;
+        });
+    }
+
+    private async getForeignKeyRelationshipSnapshot(
+        connectionName: string,
+        currentDatabase: string,
+        direction: ForeignKeyRelationshipDirection,
+    ): Promise<ForeignKeyRelationshipSnapshot> {
+        const scopeKey = direction === 'references'
+            ? JSON.stringify([connectionName, direction, currentDatabase])
+            : JSON.stringify([connectionName, direction]);
+        const existing = this._foreignKeyRelationshipsByScope.get(scopeKey);
+        if (existing) {
+            return existing;
+        }
+
+        const loading = this.loadForeignKeyRelationshipSnapshot(connectionName, currentDatabase, direction);
+        this._foreignKeyRelationshipsByScope.set(scopeKey, loading);
+        try {
+            return await loading;
+        } catch (error) {
+            if (this._foreignKeyRelationshipsByScope.get(scopeKey) === loading) {
+                this._foreignKeyRelationshipsByScope.delete(scopeKey);
+            }
+            throw error;
+        }
+    }
+
+    private async loadForeignKeyRelationshipSnapshot(
+        connectionName: string,
+        currentDatabase: string,
+        direction: ForeignKeyRelationshipDirection,
+    ): Promise<ForeignKeyRelationshipSnapshot> {
+        const metadataProvider = this.getMetadataProvider(connectionName);
+        const references: DatabaseForeignKeyColumnReference[] = [];
+        const errors: string[] = [];
+        let databaseNames: string[];
+
+        if (direction === 'references') {
+            // Outgoing constraints originate in the current database, so there
+            // is no need to enumerate or scan unrelated databases.
+            databaseNames = [currentDatabase];
+        } else {
+            const cachedDatabases = this.metadataCache.getDatabases(connectionName);
+            databaseNames = Array.isArray(cachedDatabases)
+                ? cachedDatabases.map(database => String(database.DATABASE || database.label || '')).filter(Boolean)
+                : [];
+
+            if (!Array.isArray(cachedDatabases)) {
+                try {
+                    const queryResult = await runQueryWithTimeout(
+                        this.context,
+                        metadataProvider.buildListDatabasesQuery(),
+                        this.connectionManager,
+                        connectionName,
+                        SCHEMA_QUERY_TIMEOUT,
+                        {
+                            source: 'schema-tree',
+                            kind: 'databases',
+                            connectionName,
+                            reason: 'foreign-key-relationship-database-list',
+                        },
+                    );
+                    if (!queryResult) {
+                        throw new Error('No database list was returned.');
+                    }
+                    databaseNames = queryResultToRows<{ DATABASE?: unknown }>(queryResult)
+                        .map(row => String(row.DATABASE ?? '').trimEnd())
+                        .filter(Boolean);
+                    this.metadataCache.setDatabases(
+                        connectionName,
+                        databaseNames.map(database => ({ DATABASE: database, label: database, kind: 9, detail: 'Database' })),
+                    );
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    errors.push(`Database list: ${message}`);
+                }
+            }
+
+            if (!databaseNames.some(name => name.trimEnd() === currentDatabase.trimEnd())) {
+                databaseNames.push(currentDatabase);
+            }
+            databaseNames = Array.from(new Map(databaseNames.map(name => [name.trimEnd(), name])).values())
+                .sort((left, right) => left.localeCompare(right));
+        }
+
+        const buildRelationshipsQuery = metadataProvider.buildForeignKeyRelationshipsQuery;
+        if (!buildRelationshipsQuery) {
+            throw new Error('Netezza metadata provider does not support foreign-key relationship queries.');
+        }
+
+        for (const database of databaseNames) {
+            try {
+                const catalogDatabase = formatNetezzaCatalogIdentifier(database);
+                const query = buildRelationshipsQuery.call(metadataProvider, catalogDatabase);
+                if (!query) {
+                    throw new Error('No foreign-key relationship query was provided.');
+                }
+                const queryResult = await runWithMetadataQueryConcurrencyLimit(
+                    connectionName,
+                    queueWaitMs => runQueryWithTimeout(
+                        this.context,
+                        query,
+                        this.connectionManager,
+                        connectionName,
+                        SCHEMA_QUERY_TIMEOUT,
+                        {
+                            source: 'schema-tree',
+                            kind: 'column-relations',
+                            connectionName,
+                            database,
+                            reason: 'schema-relationship-group-expand',
+                            queueWaitMs,
+                        },
+                    ),
+                );
+                if (!queryResult) {
+                    throw new Error('No foreign-key metadata was returned.');
+                }
+                references.push(...normalizeForeignKeyRelationshipRows(
+                    queryResultToRows<RawForeignKeyRelationshipRow>(queryResult),
+                    database,
+                ));
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                errors.push(`${database}: ${message}`);
+            }
+        }
+
+        return {
+            references,
+            errors,
+        };
+    }
+
+    private createRelationshipStatusItem(
+        group: SchemaItem,
+        label: string,
+        icon: string,
+        tooltip?: string,
+    ): SchemaItem {
+        const item = new SchemaItem(
+            label,
+            vscode.TreeItemCollapsibleState.None,
+            'schemaRelationshipStatus',
+            group.dbName,
+            group.objType,
+            group.schema,
+            group.objId,
+            tooltip,
+            group.connectionName,
+            group.parentName,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            label,
+            undefined,
+            undefined,
+            undefined,
+            group.relationshipDirection,
+        );
+        item.iconPath = new vscode.ThemeIcon(icon);
+        item.id = `${item.id}|${group.relationshipDirection || 'relationship'}|status`;
+        return item;
+    }
+
+    private createForeignKeyRelationshipItem(
+        group: SchemaItem,
+        reference: DatabaseForeignKeyColumnReference,
+    ): SchemaItem {
+        const direction = group.relationshipDirection;
+        const isOutgoing = direction === 'references';
+        const relatedDatabase = isOutgoing
+            ? reference.toDatabase || reference.fromDatabase || group.dbName || ''
+            : reference.fromDatabase || group.dbName || '';
+        const relatedSchema = isOutgoing ? reference.toSchema : reference.fromSchema;
+        const relatedTable = isOutgoing ? reference.toTable : reference.fromTable;
+        const relatedColumn = isOutgoing ? reference.toColumn : reference.fromColumn;
+        const ownerTable = group.parentName || '';
+        const localColumn = isOutgoing ? reference.fromColumn : reference.toColumn;
+        const qualifiedRelatedColumn = `${relatedDatabase}.${relatedSchema}.${relatedTable}.${relatedColumn}`;
+        const label = isOutgoing
+            ? `${localColumn}  →  ${qualifiedRelatedColumn}`
+            : `${qualifiedRelatedColumn}  →  ${localColumn}`;
+        const item = new SchemaItem(
+            label,
+            vscode.TreeItemCollapsibleState.None,
+            'netezzaRelationship',
+            group.dbName,
+            group.objType,
+            group.schema,
+            group.objId,
+            undefined,
+            group.connectionName,
+            ownerTable,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            label,
+            undefined,
+            undefined,
+            undefined,
+            direction,
+            reference,
+        );
+        item.iconPath = new vscode.ThemeIcon(isOutgoing ? 'arrow-right' : 'arrow-left');
+        item.tooltip = [
+            reference.constraintName ? `Foreign key: ${reference.constraintName}` : 'Foreign key',
+            `From: ${reference.fromDatabase}.${reference.fromSchema}.${reference.fromTable}.${reference.fromColumn}`,
+            `To: ${reference.toDatabase || reference.fromDatabase}.${reference.toSchema}.${reference.toTable}.${reference.toColumn}`,
+        ].join('\n');
+        const relationIdentity = [
+            reference.fromDatabase,
+            reference.fromSchema,
+            reference.fromTable,
+            reference.fromColumn,
+            reference.toDatabase || reference.fromDatabase,
+            reference.toSchema,
+            reference.toTable,
+            reference.toColumn,
+            reference.constraintName,
+            reference.ordinalPosition,
+        ].map(part => encodeURIComponent(String(part ?? ''))).join('|');
+        item.id = `${item.id}|fk:${relationIdentity}`;
+        item.command = {
+            command: 'netezza.revealSchemaColumn',
+            title: isOutgoing ? 'Reveal Referenced Column' : 'Reveal Referencing Column',
+            arguments: [{
+                connectionName: group.connectionName,
+                database: relatedDatabase,
+                schema: relatedSchema,
+                table: relatedTable,
+                column: relatedColumn,
+            }],
+        };
+        return item;
+    }
+
+    private async getRelationshipGroupChildren(group: SchemaItem): Promise<SchemaItem[]> {
+        const connectionName = group.connectionName;
+        const database = group.dbName;
+        const tableName = group.parentName;
+        if (!connectionName || !database || !tableName || !group.relationshipDirection) {
+            return [this.createRelationshipStatusItem(group, '(Relationship target unavailable)', 'warning')];
+        }
+
+        try {
+            const snapshot = await this.getForeignKeyRelationshipSnapshot(
+                connectionName,
+                database,
+                group.relationshipDirection,
+            );
+            const table = { database, schema: group.schema || '', table: tableName };
+            const matches = group.relationshipDirection === 'references'
+                ? getForeignKeyReferencesForTable(snapshot.references, table)
+                : getForeignKeyReferencingTable(snapshot.references, table);
+            const children = matches.map(reference => this.createForeignKeyRelationshipItem(group, reference));
+            if (snapshot.errors.length > 0) {
+                children.push(this.createRelationshipStatusItem(
+                    group,
+                    `Some FK metadata could not be read (${snapshot.errors.length} database${snapshot.errors.length === 1 ? '' : 's'})`,
+                    'warning',
+                    snapshot.errors.join('\n'),
+                ));
+            }
+            if (children.length === 0) {
+                return [this.createRelationshipStatusItem(
+                    group,
+                    group.relationshipDirection === 'references' ? '(No references)' : '(No tables reference this table)',
+                    'info',
+                )];
+            }
+            return children;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            return [this.createRelationshipStatusItem(group, 'Could not load FK metadata', 'warning', message)];
+        }
+    }
+
     getParent(element: SchemaItem): SchemaItem | undefined {
         // Return parent based on context value
         if (element.contextValue === 'serverInstance') {
@@ -1536,6 +1951,50 @@ export class SchemaProvider
                 undefined,
                 element.connectionName,
             );
+        } else if (
+            element.contextValue === 'column'
+            && element.sourceContext === 'schema'
+            && element.connectionName
+            && element.dbName
+            && element.parentName
+        ) {
+            return this.createNetezzaTableItem(
+                element.connectionName,
+                element.dbName,
+                element.schema,
+                element.parentName,
+                element.objType || 'TABLE',
+                element.parentObjId,
+            );
+        } else if (
+            element.contextValue === 'netezzaRelationshipGroup'
+            && element.connectionName
+            && element.dbName
+            && element.parentName
+        ) {
+            return this.createNetezzaTableItem(
+                element.connectionName,
+                element.dbName,
+                element.schema,
+                element.parentName,
+                element.objType || 'TABLE',
+                element.objId,
+            );
+        } else if (
+            element.contextValue === 'netezzaRelationship'
+            && element.connectionName
+            && element.dbName
+            && element.parentName
+            && element.relationshipDirection
+        ) {
+            return this.createRelationshipGroupItem({
+                database: element.dbName,
+                schema: element.schema || '',
+                table: element.parentName,
+                tableType: element.objType || 'TABLE',
+                objectId: element.objId,
+                connectionName: element.connectionName,
+            }, element.relationshipDirection);
         } else if (element.contextValue.startsWith('netezza:')) {
             // Parent is typeGroup
             return new SchemaItem(
@@ -2399,6 +2858,8 @@ export class SchemaProvider
                 }
                 return [this.createErrorItem(element.connectionName, errorMsg, 'typeGroup')];
             }
+        } else if (element.contextValue === 'netezzaRelationshipGroup') {
+            return this.getRelationshipGroupChildren(element);
         } else if (element.contextValue.startsWith('netezza:')) {
             // Children: Columns
             const tableName = element.rawLabel || element.label;
@@ -2423,31 +2884,10 @@ export class SchemaProvider
                         element.objectDescription,
                         cachedCols,
                     );
-                    return visibleColumns.map((col: ColumnMetadata) => {
-                        const item = new SchemaItem(
-                            col.label || col.ATTNAME,
-                            vscode.TreeItemCollapsibleState.None,
-                            'column',
-                            element.dbName,
-                            undefined,
-                            undefined,
-                            undefined,
-                            col.documentation || '', // Assuming description stored in documentation or similar
-                            element.connectionName,
-                            tableName, // Parent (Table) Name
-                            undefined,
-                            col.isPk, // Retrieve isPk from cache
-                            col.isFk, // Retrieve isFk from cache
-                            undefined,
-                            undefined,
-                            col.detail || col.FORMAT_TYPE,
-                            col.isDistributionKey,
-                        );
-                        // Mark as schema source to differentiate from favorites columns
-                        item.sourceContext = 'schema';
-                        item.id = `${item.id}|schema`;
-                        return item;
-                    });
+                    return [
+                        ...this.createSchemaColumnItems(element, visibleColumns),
+                        ...this.createRelationshipGroupItems(element),
+                    ];
                 }
                 // If cache is stale (no isPk), fall through to refetch
             }
@@ -2553,14 +2993,14 @@ export class SchemaProvider
                     }),
                 );
 
-                return visibleParsedColumns.map((col) => {
+                return [...visibleParsedColumns.map((col) => {
                     const item = new SchemaItem(
                         col.attname,
                         vscode.TreeItemCollapsibleState.None,
                         'column',
                         element.dbName,
-                        undefined,
-                        undefined,
+                        element.objType,
+                        element.schema,
                         undefined,
                         col.description,
                         element.connectionName,
@@ -2572,12 +3012,16 @@ export class SchemaProvider
                         undefined,
                         col.formatType,
                         col.isDistributionKey,
+                        undefined,
+                        undefined,
+                        undefined,
+                        element.objId,
                     );
                     // Mark as schema source to differentiate from favorites columns
                     item.sourceContext = 'schema';
                     item.id = `${item.id}|schema`;
                     return item;
-                });
+                }), ...this.createRelationshipGroupItems(element)];
             } catch (e: unknown) {
                 const errorMsg = e instanceof Error ? e.message : String(e);
                 if (e instanceof SchemaQueryTimeoutError) {
@@ -2588,7 +3032,10 @@ export class SchemaProvider
                 if (element.connectionName) {
                     this.setConnectionError(element.connectionName, errorMsg);
                 }
-                return [this.createErrorItem(element.connectionName, errorMsg, 'netezza')];
+                return [
+                    this.createErrorItem(element.connectionName, errorMsg, 'netezza'),
+                    ...this.createRelationshipGroupItems(element),
+                ];
             }
         }
 
@@ -2647,6 +3094,9 @@ export class SchemaItem extends vscode.TreeItem {
         public readonly dataType?: string,
         public readonly isDistributionKey?: boolean,
         public cteColumns?: string[],
+        public readonly relationshipDirection?: ForeignKeyRelationshipDirection,
+        public readonly foreignKeyReference?: DatabaseForeignKeyColumnReference,
+        public readonly parentObjId?: number,
     ) {
         super(label, collapsibleState);
         this.rawLabel = rawLabel ?? label;

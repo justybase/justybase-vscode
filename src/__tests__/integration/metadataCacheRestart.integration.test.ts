@@ -309,7 +309,8 @@ describe('SchemaProvider.getChildren after disk restart', () => {
             expect.arrayContaining(['ACCOUNT_ID', 'ACCOUNT_NAME']),
         );
         expect(children.find((child) => child.label === 'ACCOUNT_ID')?.isPk).toBe(true);
-        expect(children.every((child) => child.contextValue === 'column')).toBe(true);
+        expect(children.filter((child) => child.contextValue === 'column').length).toBe(2);
+        expect(children.slice(-2).map((child) => child.label)).toEqual(['References', 'Referenced by']);
         expect(runQueryRawMock).not.toHaveBeenCalled();
     });
 
@@ -330,11 +331,17 @@ describe('SchemaProvider.getChildren after disk restart', () => {
         );
 
         expect(restarted.getColumns(RESTART_CONN, emptyColumnKey)).toBeUndefined();
-        await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+        await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([
+            expect.objectContaining({ label: 'References' }),
+            expect.objectContaining({ label: 'Referenced by' }),
+        ]);
         expect(restarted.getColumns(RESTART_CONN, emptyColumnKey)).toEqual([]);
 
         for (let expand = 0; expand < 20; expand++) {
-            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([
+                expect.objectContaining({ label: 'References' }),
+                expect.objectContaining({ label: 'Referenced by' }),
+            ]);
         }
 
         expect(runQueryRawMock).not.toHaveBeenCalled();
@@ -361,7 +368,12 @@ describe('SchemaProvider.getChildren after disk restart', () => {
             createTableSchemaItem('T0', LARGE_DB, SCHEMA, RESTART_CONN, 1),
         );
 
-        expect(t0Children.map((child) => child.label)).toEqual(['ID', 'FK_TARGET_ID']);
+        expect(t0Children.map((child) => child.label)).toEqual([
+            'ID',
+            'FK_TARGET_ID',
+            'References',
+            'Referenced by',
+        ]);
         expect(countColumnLayersInRam(restarted, RESTART_CONN, LARGE_DB)).toBe(2);
         expect(isDatabaseColumnsFullyLoaded(restarted, RESTART_CONN, LARGE_DB)).toBe(false);
         expect(runQueryRawMock).not.toHaveBeenCalled();
