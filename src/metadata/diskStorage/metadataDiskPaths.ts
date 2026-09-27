@@ -13,6 +13,7 @@ export const V2_INDEX_FILE_NAME = 'index.json.gz';
 export const V2_METADATA_FILE_NAME = 'metadata.json.gz';
 export const V3_MANIFEST_FILE_NAME = 'metadata-manifest.json.gz';
 export const V2_COLUMNS_FILE_SUFFIX = '.columns.json.gz';
+export const V3_FOREIGN_KEY_FILE_SUFFIX = '.foreign-keys.json.gz';
 
 /** @deprecated Legacy lossy sanitizer — used only to load pre-v2 column files. */
 export function sanitizeFileNameSegment(name: string): string {
@@ -85,6 +86,17 @@ export function getColumnFilePath(
 }
 export function getV3ColumnFilePath(storageDir: string, connectionName: string, databaseName: string): string {
     return path.join(getV3ConnectionDir(storageDir, connectionName), `${encodeDatabaseFileSegment(databaseName)}${V2_COLUMNS_FILE_SUFFIX}`);
+}
+
+export function getV3ForeignKeyRelationshipFilePath(
+    storageDir: string,
+    connectionName: string,
+    databaseName: string,
+): string {
+    return path.join(
+        getV3ConnectionDir(storageDir, connectionName),
+        `${encodeDatabaseFileSegment(databaseName)}${V3_FOREIGN_KEY_FILE_SUFFIX}`,
+    );
 }
 
 /** Legacy sanitized path for column files written before base64url encoding. */

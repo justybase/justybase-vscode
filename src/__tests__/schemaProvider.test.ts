@@ -131,7 +131,8 @@ describe('SchemaProvider', () => {
             whenDiskReady: jest.fn().mockResolvedValue(undefined),
             triggerConnectionPrefetch: jest.fn(),
             onDidExternalRefresh: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-            ensureColumnsLoadedForTableKey: jest.fn().mockResolvedValue(undefined)
+            ensureColumnsLoadedForTableKey: jest.fn().mockResolvedValue(undefined),
+            getForeignKeyRelationshipsForDatabase: jest.fn().mockReturnValue(undefined),
         } as unknown as jest.Mocked<MetadataCache>;
 
         schemaProvider = new SchemaProvider(
@@ -1200,39 +1201,32 @@ describe('SchemaProvider', () => {
             expect(children.slice(2).every(item => item.contextValue === 'netezzaRelationshipGroup')).toBe(true);
         });
 
-        it('loads outgoing FKs from the owner database and incoming FKs across connection databases', async () => {
+        it('loads outgoing and incoming FKs from cached database relationship slices', async () => {
             mockMetadataCache.getColumns.mockReturnValue([]);
             mockMetadataCache.getDatabases.mockReturnValue([
                 { DATABASE: 'TESTDB', label: 'TESTDB' },
                 { DATABASE: 'CRM', label: 'CRM' },
             ]);
-            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [], data: [] });
-            (queryResultToRows as jest.Mock)
-                .mockReturnValueOnce([{
-                    FROM_DATABASE: 'TESTDB',
-                    FROM_SCHEMA: 'PUBLIC',
-                    FROM_TABLE: 'USERS',
-                    FROM_COLUMN: 'CRM_ID',
-                    TO_DATABASE: 'CRM',
-                    TO_SCHEMA: 'PUBLIC',
-                    TO_TABLE: 'CUSTOMERS',
-                    TO_COLUMN: 'ID',
-                    CONSTRAINT_NAME: 'FK_USER_CUSTOMER',
-                    ORDINAL_POSITION: 1,
-                }])
-                .mockReturnValueOnce([])
-                .mockReturnValueOnce([{
-                    FROM_DATABASE: 'TESTDB',
-                    FROM_SCHEMA: 'PUBLIC',
-                    FROM_TABLE: 'USERS',
-                    FROM_COLUMN: 'CRM_ID',
-                    TO_DATABASE: 'CRM',
-                    TO_SCHEMA: 'PUBLIC',
-                    TO_TABLE: 'CUSTOMERS',
-                    TO_COLUMN: 'ID',
-                    CONSTRAINT_NAME: 'FK_USER_CUSTOMER',
-                    ORDINAL_POSITION: 1,
-                }]);
+            const reference = {
+                fromDatabase: 'TESTDB',
+                fromSchema: 'PUBLIC',
+                fromTable: 'USERS',
+                fromColumn: 'CRM_ID',
+                toDatabase: 'CRM',
+                toSchema: 'PUBLIC',
+                toTable: 'CUSTOMERS',
+                toColumn: 'ID',
+                constraintName: 'FK_USER_CUSTOMER',
+                ordinalPosition: 1,
+            };
+            mockMetadataCache.getForeignKeyRelationshipsForDatabase.mockImplementation((
+                _connectionName,
+                database,
+            ) => ({
+                database,
+                references: database === 'TESTDB' ? [reference] : [],
+                complete: true,
+            }));
 
             const sourceChildren = await schemaProvider.getChildren(tableItem);
             const sourceGroups = sourceChildren.filter(item => item.contextValue === 'netezzaRelationshipGroup');
@@ -1253,7 +1247,7 @@ describe('SchemaProvider', () => {
                     column: 'ID',
                 })],
             }));
-            expect(runQueryRaw).toHaveBeenCalledTimes(1);
+            expect(runQueryRaw).not.toHaveBeenCalled();
 
             const targetTable = new SchemaItem(
                 'CUSTOMERS',
@@ -1274,7 +1268,33 @@ describe('SchemaProvider', () => {
             expect(incoming[0].label).toBe('TESTDB.PUBLIC.USERS.CRM_ID  →  ID');
             expect((incoming[0].iconPath as vscode.ThemeIcon).id).toBe('arrow-left');
             expect(schemaProvider.getParent(incoming[0])?.id).toBe(incomingGroup.id);
-            expect(runQueryRaw).toHaveBeenCalledTimes(3);
+            expect(mockMetadataCache.getDatabases).toHaveBeenCalledTimes(1);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+        });
+
+        it('reports incomplete FK cache slices without scanning databases on expansion', async () => {
+            mockMetadataCache.getColumns.mockReturnValue([]);
+            mockMetadataCache.getDatabases.mockReturnValue([
+                { DATABASE: 'TESTDB', label: 'TESTDB' },
+                { DATABASE: 'CRM', label: 'CRM' },
+            ]);
+            mockMetadataCache.getForeignKeyRelationshipsForDatabase.mockImplementation((
+                _connectionName,
+                database,
+            ) => ({ database, references: [], complete: false }));
+
+            const tableChildren = await schemaProvider.getChildren(tableItem);
+            const groups = tableChildren.filter(item => item.contextValue === 'netezzaRelationshipGroup');
+            const outgoing = await schemaProvider.getChildren(groups[0]!);
+            const incoming = await schemaProvider.getChildren(groups[1]!);
+
+            expect(outgoing).toHaveLength(1);
+            expect(outgoing[0]?.label).toContain('not completely cached');
+            expect(outgoing[0]?.contextValue).toBe('schemaRelationshipStatus');
+            expect(incoming).toHaveLength(1);
+            expect(incoming[0]?.label).toContain('not completely cached');
+            expect(incoming[0]?.contextValue).toBe('schemaRelationshipStatus');
+            expect(runQueryRaw).not.toHaveBeenCalled();
         });
 
         it('treats an empty negative column layer as a cache hit on repeated expands', async () => {

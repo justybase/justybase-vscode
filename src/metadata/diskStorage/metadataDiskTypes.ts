@@ -9,6 +9,8 @@ import type {
     SchemaMetadata,
     TableMetadata,
 } from '../types';
+import type { DatabaseForeignKeyColumnReference } from '../../contracts/database';
+import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
 
 /** Legacy monolithic cache file schema version */
 export const LEGACY_CACHE_SCHEMA_VERSION = 1;
@@ -20,6 +22,8 @@ export const CACHE_V3_SCHEMA_VERSION = 3;
 export const METADATA_MANIFEST_SCHEMA_VERSION = 3;
 /** Dictionary-encoded column file schema version */
 export const COLUMN_FILE_SCHEMA_VERSION = 3;
+/** FK relationship sidecars are versioned independently of column files. */
+export const FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION = 1;
 
 export const COLUMN_FLAG_PK = 1;
 export const COLUMN_FLAG_FK = 2;
@@ -64,7 +68,17 @@ export interface SerializedConnectionManifest {
     columnDatabases: string[];
     /** Exact column cache layers persisted across the column database files. */
     columnLayerKeys?: string[];
+    /** Database FK relationship slices persisted beside metadata files. */
+    relationshipDatabases?: string[];
+    relationshipIndexVersion?: number;
     isComplete?: boolean;
+}
+
+export interface SerializedForeignKeyRelationshipFile {
+    schemaVersion: 1;
+    database: string;
+    complete: boolean;
+    references: DatabaseForeignKeyColumnReference[];
 }
 
 /** Expanded column layers for one database (legacy v2 {DB}.columns.json.gz payload). */
@@ -116,6 +130,8 @@ export interface V2ConnectionIndexEntry {
     columnDatabases: string[];
     /** Exact column cache layers persisted across the column database files. */
     columnLayerKeys?: string[];
+    relationshipDatabases?: string[];
+    relationshipIndexVersion?: number;
     isComplete?: boolean;
 }
 
@@ -150,6 +166,7 @@ export function isV3DiskIndex(value: unknown): value is V3DiskIndex {
 export interface LoadedConnectionMetadata extends SerializedConnectionMetadata {
     columnDatabases: string[];
     columnLayerKeys: string[];
+    foreignKeyRelationships: ForeignKeyRelationshipCacheSlice[];
 }
 
 /** Manifest loaded from disk without heavy metadata layers. */
@@ -233,4 +250,25 @@ export function isSerializedColumnFile(value: unknown): value is SerializedColum
         return obj.column !== null && typeof obj.column === 'object';
     }
     return false;
+}
+
+export function isSerializedForeignKeyRelationshipFile(
+    value: unknown,
+): value is SerializedForeignKeyRelationshipFile {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    return obj.schemaVersion === FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION
+        && typeof obj.database === 'string'
+        && typeof obj.complete === 'boolean'
+        && Array.isArray(obj.references)
+        && obj.references.every(reference => {
+            if (!reference || typeof reference !== 'object') return false;
+            const row = reference as Record<string, unknown>;
+            return typeof row.fromSchema === 'string'
+                && typeof row.fromTable === 'string'
+                && typeof row.fromColumn === 'string'
+                && typeof row.toSchema === 'string'
+                && typeof row.toTable === 'string'
+                && typeof row.toColumn === 'string';
+        });
 }

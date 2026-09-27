@@ -8,6 +8,7 @@ import { gunzip } from 'zlib';
 import { promisify } from 'util';
 import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
 import type { MetadataCachePort } from '../cache/metadataCachePort';
+import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
 import { Logger } from '../../utils/logger';
 import { compressJsonToGzip } from './metadataDiskCompress';
 import { yieldToEventLoop } from '../hydrateScheduler';
@@ -23,9 +24,12 @@ import {
 import { MetadataDiskLock, type DiskLease } from './metadataDiskLock';
 import {
     databaseFileSegmentFromColumnFileName,
+    encodeDatabaseFileSegment,
+    V3_FOREIGN_KEY_FILE_SUFFIX,
     getCacheV3Dir,
     getV3ColumnFilePath,
     getV3ConnectionDir,
+    getV3ForeignKeyRelationshipFilePath,
     getV3ConnectionManifestPath,
     getV3ConnectionMetadataPath,
     getV3IndexPath,
@@ -38,9 +42,11 @@ import {
     CACHE_SCHEMA_VERSION,
     CACHE_V3_SCHEMA_VERSION,
     COLUMN_FILE_SCHEMA_VERSION,
+    FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION,
     createEmptyV3Index,
     isSerializedCache,
     isSerializedColumnFile,
+    isSerializedForeignKeyRelationshipFile,
     isV3DiskIndex,
     LEGACY_CACHE_SCHEMA_VERSION,
     METADATA_MANIFEST_SCHEMA_VERSION,
@@ -53,6 +59,7 @@ import {
     type SerializedConnectionCache,
     type SerializedConnectionManifest,
     type SerializedConnectionMetadata,
+    type SerializedForeignKeyRelationshipFile,
     type LoadedConnectionManifest,
     type LoadedConnectionMetadata,
     type V3ConnectionIndexEntry,
@@ -330,6 +337,36 @@ export class MetadataDiskStorage {
         return parsed;
     }
 
+    private async loadForeignKeyRelationshipFile(
+        filePath: string,
+    ): Promise<SerializedForeignKeyRelationshipFile | null> {
+        return this.readGzipJson(filePath, isSerializedForeignKeyRelationshipFile);
+    }
+
+    private async loadForeignKeyRelationshipsForConnection(
+        connectionName: string,
+        indexEntry: V3ConnectionIndexEntry,
+    ): Promise<ForeignKeyRelationshipCacheSlice[]> {
+        if (indexEntry.relationshipIndexVersion !== FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION) {
+            return [];
+        }
+
+        const slices: ForeignKeyRelationshipCacheSlice[] = [];
+        for (const database of indexEntry.relationshipDatabases ?? []) {
+            const file = await this.loadForeignKeyRelationshipFile(
+                getV3ForeignKeyRelationshipFilePath(this.storageDir, connectionName, database),
+            );
+            if (file && file.database === database) {
+                slices.push({
+                    database: file.database,
+                    references: file.references,
+                    complete: file.complete,
+                });
+            }
+        }
+        return slices;
+    }
+
     async loadColumnFileForDatabase(
         connectionName: string,
         databaseName: string,
@@ -360,6 +397,10 @@ export class MetadataDiskStorage {
             ...metadata,
             columnDatabases: [...indexEntry.columnDatabases],
             columnLayerKeys: [...(indexEntry.columnLayerKeys ?? [])],
+            foreignKeyRelationships: await this.loadForeignKeyRelationshipsForConnection(
+                connectionName,
+                indexEntry,
+            ),
         };
     }
 
@@ -401,6 +442,11 @@ export class MetadataDiskStorage {
                     columnLayerKeys: [
                         ...(entry.columnLayerKeys ?? manifest.columnLayerKeys ?? []),
                     ],
+                    relationshipDatabases: [
+                        ...(entry.relationshipDatabases ?? manifest.relationshipDatabases ?? []),
+                    ],
+                    relationshipIndexVersion:
+                        entry.relationshipIndexVersion ?? manifest.relationshipIndexVersion,
                     isComplete: entry.isComplete ?? manifest.isComplete ?? true,
                     hasManifestFile: true,
                 });
@@ -419,6 +465,8 @@ export class MetadataDiskStorage {
                 database: { timestamp: entry.prefetchCompletedAt, data: [] },
                 columnDatabases: [...entry.columnDatabases],
                 columnLayerKeys: [...(entry.columnLayerKeys ?? [])],
+                relationshipDatabases: [...(entry.relationshipDatabases ?? [])],
+                relationshipIndexVersion: entry.relationshipIndexVersion,
                 isComplete: entry.isComplete ?? true,
                 hasManifestFile: false,
             });
@@ -908,6 +956,10 @@ export class MetadataDiskStorage {
                     : Object.keys(columnFile.column),
             ),
         )];
+        const foreignKeyRelationships = metadataCache.isNetezzaConnection(connectionName)
+            ? metadataCache.getForeignKeyRelationshipSlices(connectionName)
+            : [];
+        const relationshipDatabases = foreignKeyRelationships.map(slice => slice.database);
 
         await this.writeGzipJson(
             getV3ConnectionMetadataPath(this.storageDir, connectionName),
@@ -925,13 +977,35 @@ export class MetadataDiskStorage {
             );
         }
 
+        for (const slice of foreignKeyRelationships) {
+            const relationshipFile: SerializedForeignKeyRelationshipFile = {
+                schemaVersion: FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION,
+                database: slice.database,
+                complete: slice.complete,
+                references: slice.references,
+            };
+            await this.writeGzipJson(
+                getV3ForeignKeyRelationshipFilePath(
+                    this.storageDir,
+                    connectionName,
+                    slice.database,
+                ),
+                relationshipFile,
+            );
+        }
+
         await this.pruneStaleColumnFiles(connectionName, columnDatabases);
+        await this.pruneStaleForeignKeyRelationshipFiles(connectionName, relationshipDatabases);
         const isComplete = options?.isComplete ?? true;
         await this.writeConnectionManifest(
             connectionName,
             metadata,
             columnDatabases,
             columnLayerKeys,
+            relationshipDatabases,
+            metadataCache.isNetezzaConnection(connectionName)
+                ? FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION
+                : undefined,
             isComplete,
         );
 
@@ -940,6 +1014,10 @@ export class MetadataDiskStorage {
             connectionFingerprint: fingerprint,
             columnDatabases,
             columnLayerKeys,
+            relationshipDatabases,
+            relationshipIndexVersion: metadataCache.isNetezzaConnection(connectionName)
+                ? FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION
+                : undefined,
             isComplete,
             committedFence: lease.fence,
             prefetchStartedAt: current?.prefetchStartedAt,
@@ -955,6 +1033,8 @@ export class MetadataDiskStorage {
         metadata: SerializedConnectionMetadata,
         columnDatabases: string[],
         columnLayerKeys: string[],
+        relationshipDatabases: string[],
+        relationshipIndexVersion: number | undefined,
         isComplete = true,
     ): Promise<void> {
         const manifest: SerializedConnectionManifest = {
@@ -964,6 +1044,8 @@ export class MetadataDiskStorage {
             database: metadata.database,
             columnDatabases,
             columnLayerKeys,
+            relationshipDatabases,
+            relationshipIndexVersion,
             isComplete,
         };
         await this.writeGzipJson(
@@ -990,6 +1072,35 @@ export class MetadataDiskStorage {
         for (const entry of entries) {
             const fileSegment = databaseFileSegmentFromColumnFileName(entry);
             if (!fileSegment || isActiveColumnFileEntry(fileSegment, physicalActiveDatabases)) {
+                continue;
+            }
+            try {
+                await fs.promises.unlink(path.join(connDir, entry));
+            } catch {
+                // Best-effort
+            }
+        }
+    }
+
+    private async pruneStaleForeignKeyRelationshipFiles(
+        connectionName: string,
+        activeDatabases: string[],
+    ): Promise<void> {
+        const connDir = getV3ConnectionDir(this.storageDir, connectionName);
+        let entries: string[];
+        try {
+            entries = await fs.promises.readdir(connDir);
+        } catch {
+            return;
+        }
+
+        const activeSegments = new Set(activeDatabases.map(encodeDatabaseFileSegment));
+        for (const entry of entries) {
+            if (!entry.endsWith(V3_FOREIGN_KEY_FILE_SUFFIX)) {
+                continue;
+            }
+            const segment = entry.slice(0, -V3_FOREIGN_KEY_FILE_SUFFIX.length);
+            if (activeSegments.has(segment)) {
                 continue;
             }
             try {
@@ -1031,7 +1142,14 @@ export class MetadataDiskStorage {
 
         for (const connectionName of connectionNames) {
             const prefetchCompletedAt = prefetchTimestamps.get(connectionName) ?? Date.now();
-            this.scheduleSave(metadataCache, connectionName, prefetchCompletedAt);
+            const isComplete = !metadataCache.isNetezzaConnection(connectionName)
+                || (metadataCache.verifyCompleteSnapshot?.(connectionName, false) ?? true);
+            this.scheduleSave(
+                metadataCache,
+                connectionName,
+                prefetchCompletedAt,
+                { isComplete },
+            );
         }
         await this.flushPendingWrites();
     }

@@ -69,6 +69,7 @@
     "@tanstack/react-table",
     "@tanstack/react-virtual",
     "@tanstack/table-core",
+    "@tanstack/table-core/store-reactivity-bindings",
     "@tanstack/virtual-core",
     "@xyflow/react",
     "@xyflow/react/dist/style.css",

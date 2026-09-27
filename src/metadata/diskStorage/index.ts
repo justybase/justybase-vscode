@@ -1,6 +1,7 @@
 export {
     CACHE_SCHEMA_VERSION,
     COLUMN_FILE_SCHEMA_VERSION,
+    FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION,
     METADATA_MANIFEST_SCHEMA_VERSION,
     LEGACY_CACHE_SCHEMA_VERSION,
     CACHE_FILE_NAME,
@@ -14,6 +15,7 @@ export {
     type LoadedConnectionManifest,
     type LoadedConnectionMetadata,
     type SerializedColumnFile,
+    type SerializedForeignKeyRelationshipFile,
     type V2DiskIndex,
 } from './metadataDiskTypes';
 export {
@@ -22,6 +24,7 @@ export {
     decodeDatabaseFileSegment,
     getCacheV2Dir,
     getV2IndexPath,
+    getV3ForeignKeyRelationshipFilePath,
     getConnectionManifestPath,
     getLegacySanitizedColumnFilePath,
     isActiveColumnFileEntry,

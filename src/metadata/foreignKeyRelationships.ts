@@ -19,6 +19,14 @@ export interface ForeignKeyTableIdentity {
     table: string;
 }
 
+/** One database's FK catalog result stored in the metadata cache. */
+export interface ForeignKeyRelationshipCacheSlice {
+    database: string;
+    references: DatabaseForeignKeyColumnReference[];
+    /** False when the catalog query failed or only a partial scope was scanned. */
+    complete: boolean;
+}
+
 function catalogText(value: unknown): string {
     return String(value ?? '').trimEnd();
 }

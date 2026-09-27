@@ -7,6 +7,8 @@ import type {
   TableMetadata,
 } from '../types';
 import type { MetadataStorageReader } from './MetadataStorageReader';
+import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
+import type { DatabaseForeignKeyColumnReference } from '../../contracts/database';
 
 /**
  * Cache surface shared by orchestration helpers, disk codecs, and the
@@ -19,6 +21,18 @@ export interface MetadataCachePort extends MetadataStorageReader {
   readonly _tableCache: Map<string, PerKeyEntry<TableMetadata[]>>;
   readonly _columnCache: Map<string, PerKeyEntry<ColumnMetadata[]>>;
   readonly _procedureCache: Map<string, PerKeyEntry<ProcedureMetadata[]>>;
+
+  getForeignKeyRelationshipSlices(
+    connectionName: string,
+  ): ForeignKeyRelationshipCacheSlice[];
+  verifyCompleteSnapshot?(connectionName: string, logMissing?: boolean): boolean;
+  setForeignKeyRelationshipsForDatabase(
+    connectionName: string,
+    database: string,
+    references: DatabaseForeignKeyColumnReference[],
+    complete: boolean,
+  ): void;
+  invalidateForeignKeyRelationships(connectionName: string): void;
 
   getRawDatabaseEntry(
     connectionName: string,

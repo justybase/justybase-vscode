@@ -12,6 +12,7 @@ import type {
   SchemaMetadata,
   TableMetadata,
 } from '../types';
+import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
 import {
   computeStaleTtl as computeCoreStaleTtl,
   isServable,
@@ -55,6 +56,11 @@ export class MetadataStore {
   readonly procedureCache = new Map<string, PerKeyEntry<ProcedureMetadata[]>>();
   /** Key: "CONN|DB.SCHEMA.TABLE" */
   readonly columnCache = new Map<string, PerKeyEntry<ColumnMetadata[]>>();
+  /** Connection -> database identity -> cached FK relationship catalog slice. */
+  readonly foreignKeyRelationships = new Map<
+    string,
+    Map<string, ForeignKeyRelationshipCacheSlice>
+  >();
   /** Key: tableCache key -> {tableName -> OBJID} */
   readonly tableIdMap = new Map<string, PerKeyEntry<Map<string, number>>>();
   /** Key: "CONN|DB" -> ['TABLE', 'VIEW', ...] */
@@ -95,6 +101,7 @@ export class MetadataStore {
       this.netezzaSchemasEnabledCache.size +
       this.tableCache.size +
       this.columnCache.size +
+      this.foreignKeyRelationships.size +
       this.procedureCache.size +
       this.tableIdMap.size +
       this.typeGroupCache.size +
@@ -113,6 +120,7 @@ export class MetadataStore {
     this.tableCache.clear();
     this.procedureCache.clear();
     this.columnCache.clear();
+    this.foreignKeyRelationships.clear();
     this.tableIdMap.clear();
     this.typeGroupCache.clear();
     this.objectsByTypeCache.clear();

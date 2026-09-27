@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import type { MetadataStorageReader } from './MetadataStorageReader';
 import type { PrefetchLease } from '../diskStorage/metadataDiskStorage';
+import type { DatabaseForeignKeyColumnReference } from '../../contracts/database';
 
 /**
  * Read-only completeness diagnosis for a persisted/in-memory metadata snapshot.
@@ -38,6 +39,13 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   ): Promise<void>;
   /** Identifier case policy for catalog rows; only Netezza uses exact catalog identity here. */
   isNetezzaConnection?(connectionName: string): boolean;
+  /** Store a full database FK catalog result from the ordinary column prefetch. */
+  setForeignKeyRelationshipsForDatabase?(
+    connectionName: string,
+    database: string,
+    references: DatabaseForeignKeyColumnReference[],
+    complete: boolean,
+  ): void;
   isDatabaseDead(connectionName: string, dbName: string | undefined): boolean;
   markDatabaseDead(connectionName: string, dbName: string): void;
   getTables(connectionName: string, key: string): TableMetadata[] | undefined;

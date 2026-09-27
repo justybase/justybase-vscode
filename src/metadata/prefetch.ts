@@ -78,6 +78,8 @@ import {
     mergeNetezzaColumnsWithKeysRows,
 } from '../dialects/netezza/metadata/columnsWithKeys';
 import { mergeForeignKeyReferencesIntoColumnRows } from './columnMetadataService';
+import { normalizeForeignKeyRelationshipRows } from './foreignKeyRelationships';
+import type { DatabaseForeignKeyColumnReference } from '../contracts/database';
 import { Logger } from '../utils/logger';
 import { createMetadataPrefetchPlan } from '@justybase/metadata-core';
 import type {
@@ -101,6 +103,12 @@ interface ActiveRefreshDetails {
     nextQueryId: number;
     queries: Map<string, MetadataPrefetchQueryActivity>;
     snapshot?: MetadataPrefetchSnapshotStatus;
+}
+
+interface NetezzaColumnsWithRelationships {
+    rows: RawColumnRowWithKeys[];
+    foreignKeyReferences: DatabaseForeignKeyColumnReference[];
+    foreignKeyRelationshipsComplete: boolean;
 }
 
 interface MissingColumnReconciliation {
@@ -574,7 +582,7 @@ export class CachePrefetcher {
         },
         lifecycle?: PrefetchQueryLifecycleReporter,
         limiterKey = connectionName,
-    ): Promise<RawColumnRowWithKeys[] | undefined> {
+    ): Promise<NetezzaColumnsWithRelationships | undefined> {
         if (!queries.keys || !queries.distribution) {
             throw new Error('Netezza columns-with-keys query set is incomplete.');
         }
@@ -616,6 +624,8 @@ export class CachePrefetcher {
             rowsByKind.get('column-keys') ?? [],
             rowsByKind.get('column-distribution') ?? [],
         ) as RawColumnRowWithKeys[];
+        let foreignKeyReferences: DatabaseForeignKeyColumnReference[] = [];
+        let foreignKeyRelationshipsComplete = rows.length === 0;
         if (rows.length > 0) {
             try {
                 const result = await this.runPrefetchQuery(
@@ -633,17 +643,29 @@ export class CachePrefetcher {
                     limiterKey,
                 );
                 if (result) {
-                    mergeForeignKeyReferencesIntoColumnRows(
-                        rows,
-                        queryResultToRows<Record<string, unknown>>(result),
+                    const relationshipRows = queryResultToRows<Record<string, unknown>>(result);
+                    foreignKeyReferences = normalizeForeignKeyRelationshipRows(
+                        relationshipRows,
                         context.database,
                     );
+                    mergeForeignKeyReferencesIntoColumnRows(
+                        rows,
+                        relationshipRows,
+                        context.database,
+                    );
+                    foreignKeyRelationshipsComplete = true;
                 }
             } catch {
-                // Relationship metadata is optional for column refresh.
+                // Keep regular column metadata useful, but report the FK slice
+                // as incomplete so relationship consumers never infer a false
+                // empty result.
             }
         }
-        return rows;
+        return {
+            rows,
+            foreignKeyReferences,
+            foreignKeyRelationshipsComplete,
+        };
     }
 
     private planConnectionRefreshQueries(connectionName: string, databases: string[]): void {
@@ -958,7 +980,7 @@ export class CachePrefetcher {
             let mainCatalogFailure = false;
 
             try {
-                const rows = await this.runColumnsWithKeysQueries(
+                const result = await this.runColumnsWithKeysQueries(
                     connectionName,
                     runQueryFn,
                     columnQueries,
@@ -977,8 +999,8 @@ export class CachePrefetcher {
                         reason: 'schema-column-prefetch',
                     },
                 );
-                if (rows) {
-                    mainRows = rows;
+                if (result) {
+                    mainRows = result.rows;
                 }
             } catch (e: unknown) {
                 logPrefetchError(`[CachePrefetcher] Error fetching columns:`, e);
@@ -1430,7 +1452,7 @@ export class CachePrefetcher {
         let mainCatalogFailure = false;
 
         try {
-            const rows = await this.runColumnsWithKeysQueries(
+            const result = await this.runColumnsWithKeysQueries(
                 connectionName,
                 runQueryFn,
                 columnQueries,
@@ -1443,11 +1465,30 @@ export class CachePrefetcher {
                     reason: 'database-column-prefetch',
                 },
             );
-            if (rows) {
-                mainRows = rows;
+            if (result) {
+                mainRows = result.rows;
+                this.cache.setForeignKeyRelationshipsForDatabase?.(
+                    connectionName,
+                    userDatabase,
+                    result.foreignKeyReferences,
+                    result.foreignKeyRelationshipsComplete,
+                );
+            } else {
+                this.cache.setForeignKeyRelationshipsForDatabase?.(
+                    connectionName,
+                    userDatabase,
+                    [],
+                    false,
+                );
             }
         } catch (e: unknown) {
             logPrefetchError(`[CachePrefetcher] prefetchColumnsForDatabase error for ${dbName}:`, e);
+            this.cache.setForeignKeyRelationshipsForDatabase?.(
+                connectionName,
+                userDatabase,
+                [],
+                false,
+            );
             mainCatalogFailure = isDatabaseLevelCatalogError(e);
             if (mainCatalogFailure) {
                 this.cache.markDatabaseDead(connectionName, cacheDatabase);
@@ -2429,6 +2470,12 @@ export class CachePrefetcher {
                     ? buildNetezzaCacheDatabasePart(dbName)
                     : dbName;
                 if (this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
+                    this.cache.setForeignKeyRelationshipsForDatabase?.(
+                        connectionName,
+                        dbName,
+                        [],
+                        false,
+                    );
                     if (reportProgress) {
                         completedDatabases += 1;
                         onProgress?.({
@@ -2454,7 +2501,7 @@ export class CachePrefetcher {
                     : connectionName;
 
                 try {
-                    const rows = await this.runColumnsWithKeysQueries(
+                    const result = await this.runColumnsWithKeysQueries(
                         connectionName,
                         runner,
                         columnQueries,
@@ -2470,14 +2517,36 @@ export class CachePrefetcher {
                         limiterKey,
                     );
                     queryDuration = Date.now() - queryStartTime;
-                    if (rows) {
-                        mainRows = rows;
+                    if (result) {
+                        mainRows = result.rows;
+                        const foreignKeyRelationshipsComplete = result.foreignKeyRelationshipsComplete;
+                        this.cache.setForeignKeyRelationshipsForDatabase?.(
+                            connectionName,
+                            dbName,
+                            result.foreignKeyReferences,
+                            foreignKeyRelationshipsComplete,
+                        );
+                        if (!foreignKeyRelationshipsComplete) {
+                            databaseComplete = false;
+                        }
                     } else {
                         databaseComplete = false;
+                        this.cache.setForeignKeyRelationshipsForDatabase?.(
+                            connectionName,
+                            dbName,
+                            [],
+                            false,
+                        );
                     }
                 } catch (e: unknown) {
                     queryDuration = Date.now() - queryStartTime;
                     databaseComplete = false;
+                    this.cache.setForeignKeyRelationshipsForDatabase?.(
+                        connectionName,
+                        dbName,
+                        [],
+                        false,
+                    );
                     logPrefetchError(`[CachePrefetcher] Error fetching columns for DB ${dbName}:`, e);
                     mainCatalogFailure = isDatabaseLevelCatalogError(e);
                 }

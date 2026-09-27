@@ -75,6 +75,7 @@ describe('CachePrefetcher', () => {
       setTables: jest.fn(),
       getColumns: jest.fn(),
       setColumns: jest.fn(),
+      setForeignKeyRelationshipsForDatabase: jest.fn(),
       getColumnsAnySchema: jest.fn(),
       ensureColumnsLoaded: jest.fn().mockResolvedValue(undefined),
       getDatabases: jest.fn(),
@@ -565,6 +566,65 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
   });
 
   describe('prefetchColumnsForDatabase', () => {
+    it('stores FK relationships from the existing database column prefetch scan', async () => {
+      const reference = {
+        fromDatabase: 'db1',
+        fromSchema: 'PUBLIC',
+        fromTable: 'ORDERS',
+        fromColumn: 'CUSTOMER_ID',
+        toDatabase: 'db1',
+        toSchema: 'PUBLIC',
+        toTable: 'CUSTOMERS',
+        toColumn: 'ID',
+        constraintName: 'FK_ORDERS_CUSTOMER',
+        ordinalPosition: 1,
+      };
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult();
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        if (context?.kind === 'column-relations') {
+          return {
+            columns: [
+              { name: 'FROM_DATABASE' }, { name: 'FROM_SCHEMA' }, { name: 'FROM_TABLE' },
+              { name: 'FROM_COLUMN' }, { name: 'TO_DATABASE' }, { name: 'TO_SCHEMA' },
+              { name: 'TO_TABLE' }, { name: 'TO_COLUMN' }, { name: 'CONSTRAINT_NAME' },
+              { name: 'ORDINAL_POSITION' },
+            ],
+            data: [['db1', 'PUBLIC', 'ORDERS', 'CUSTOMER_ID', 'db1', 'PUBLIC', 'CUSTOMERS', 'ID', 'FK_ORDERS_CUSTOMER', 1]],
+          };
+        }
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'CUSTOMER_ID', 'INT4', 1, '']]);
+      });
+
+      await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
+
+      expect(mockCache.setForeignKeyRelationshipsForDatabase).toHaveBeenCalledWith(
+        connName,
+        'db1',
+        [reference],
+        true,
+      );
+      expect(mockRunQuery).toHaveBeenCalledTimes(4);
+    });
+
+    it('marks the FK slice incomplete when its catalog scan fails', async () => {
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult();
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        if (context?.kind === 'column-relations') throw new Error('catalog unavailable');
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'CUSTOMER_ID', 'INT4', 1, '']]);
+      });
+
+      await prefetcher.prefetchColumnsForDatabase(connName, 'db1', mockRunQuery);
+
+      expect(mockCache.setForeignKeyRelationshipsForDatabase).toHaveBeenCalledWith(
+        connName,
+        'db1',
+        [],
+        false,
+      );
+    });
+
     it('should deduplicate concurrent database column prefetch', async () => {
       mockRunQuery.mockImplementation(
         (_sql, context) => new Promise((resolve) =>
@@ -1446,6 +1506,12 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
     expect(databaseKinds.size).toBe(dbNames.length);
     for (const dbName of dbNames) {
       expect(databaseKinds.get(dbName)).toEqual(['columns', 'column-keys', 'column-distribution', 'column-relations']);
+      expect(mockCache.setForeignKeyRelationshipsForDatabase).toHaveBeenCalledWith(
+        connName,
+        dbName,
+        [],
+        true,
+      );
     }
     expect(secondaryRunners[0]!.ensureConnected).toHaveBeenCalledTimes(1);
     expect(secondaryRunners[1]!.ensureConnected).toHaveBeenCalledTimes(1);

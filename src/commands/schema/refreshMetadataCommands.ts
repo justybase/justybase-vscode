@@ -72,7 +72,23 @@ export function registerRefreshMetadataCommands(
 									throw new Error('The selected database node has no database name.');
 								}
 								deps.metadataCache.invalidateSchema(connectionName, database);
-								await deps.schemaProvider.reloadTypeGroups(connectionName, database);
+								try {
+									await deps.schemaProvider.reloadTypeGroups(connectionName, database);
+								} finally {
+									if (databaseKind === 'netezza') {
+										deps.metadataCache.triggerConnectionPrefetch(
+											connectionName,
+											createConnectionScopedMetadataQueryRunner({
+												context: deps.context,
+												connectionManager: deps.connectionManager,
+												connectionName,
+												maxRows: 1000000,
+												timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+											}),
+											{ manual: true },
+										);
+									}
+								}
 								return;
 							}
 
