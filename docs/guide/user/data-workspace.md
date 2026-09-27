@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Preview
 last_verified: 2026-08-19
-product_version: 3.17.27
+product_version: 3.18.0
 ---
 
 # Data Workspace, DuckDB, SQLite and Access files
