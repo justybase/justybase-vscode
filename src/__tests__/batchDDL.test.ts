@@ -107,6 +107,35 @@ describe('batchDDL', () => {
         expect(columns.every((c: any) => c.notNull === true)).toBe(true);
     });
 
+    it('keeps metadata for names containing dots attached to the correct objects', async () => {
+        (helpers.executeQueryHelper as jest.Mock).mockImplementation((_conn, sql) => {
+            if (sql.includes('_V_RELATION_COLUMN')) {
+                return [
+                    { SCHEMA: 'A.B', OBJNAME: 'C', OBJTYPE: 'TABLE', ATTNAME: 'FROM_FIRST', FULL_TYPE: 'INT', ATTNOTNULL: 0 },
+                    { SCHEMA: 'A', OBJNAME: 'B.C', OBJTYPE: 'TABLE', ATTNAME: 'FROM_SECOND', FULL_TYPE: 'INT', ATTNOTNULL: 0 }
+                ];
+            }
+            if (sql.includes('_V_OBJECT_DATA') && sql.includes("DESCRIPTION IS NOT NULL")) return [];
+            if (sql.includes('_V_OBJECT_DATA') && sql.includes("OBJTYPE = 'TABLE'")) {
+                return [
+                    { OBJNAME: 'C', SCHEMA: 'A.B' },
+                    { OBJNAME: 'B.C', SCHEMA: 'A' }
+                ];
+            }
+            return [];
+        });
+
+        const result = await generateBatchDDL({ ...mockOptions, objectTypes: ['TABLE'] });
+        const buildTableDDL = require('../ddl/tableDDL').buildTableDDLFromCache;
+        const columnsByObject = new Map(
+            buildTableDDL.mock.calls.map((call: any[]) => [`${call[1]}:${call[2]}`, call[3].map((column: any) => column.name)])
+        );
+
+        expect(result.errors).toEqual([]);
+        expect(columnsByObject.get('A.B:C')).toEqual(['FROM_FIRST']);
+        expect(columnsByObject.get('A:B.C')).toEqual(['FROM_SECOND']);
+    });
+
     it('should handle errors in bulk fetches gracefully', async () => {
         (helpers.executeQueryHelper as jest.Mock).mockImplementation((_conn, sql) => {
             if (sql.includes('_V_RELATION_COLUMN')) throw new Error('Query Timeout');

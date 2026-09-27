@@ -10,6 +10,7 @@ import {
   buildNetezzaProcedureDdl,
   buildNetezzaSynonymDdl,
   fixNetezzaProcedureReturnType,
+  reconstructNetezzaExternalLayout,
 } from '../src';
 
 const columns: DatabaseDdlColumnInfo[] = [
@@ -48,15 +49,34 @@ const external: DatabaseExternalTableInfo = {
   boolStyle: null,
   format: 'TEXT',
   socketBufSize: null,
-  recordDelim: '\\n',
+  recordDelim: '\r\n',
   maxRows: 100,
   requireQuotes: true,
   recordLength: '1024',
   dateTimeDelim: null,
   rejectFile: null,
+  compressionMode: 'zstd',
+  layout: 'BYTES 4',
+  includeZeroSeconds: false,
+  meridianDelim: '.',
 };
 
 describe('shared Netezza advanced DDL formatters', () => {
+  it('reconstructs ordered external layout zones and preserves null rules', () => {
+    expect(reconstructNetezzaExternalLayout(4, [
+      { usetype: 'FILLER', name: 'F1', type: 'CHAR(2)', style: 'INTERNAL', length: 'BYTES 2' },
+      { name: 'SELECT', type: 'INT4', style: 'DECIMAL', length: 'BYTES 4', nullif: "&&2 = ''" },
+      { name: 'DT', type: 'DATE', style: 'YMD', delimiter: '-', length: 'BYTES 10' },
+      { name: ' DATE FIELD ', type: 'DATE', style: 'YMD', delimiter: ' ', length: 'BYTES 10' },
+    ])).toBe("FILLER F1 CHAR(2) INTERNAL BYTES 2, \"SELECT\" INT4 DECIMAL BYTES 4 NULLIF &&2 = '', DT DATE YMD '-' BYTES 10, \" DATE FIELD \" DATE YMD ' ' BYTES 10");
+  });
+
+  it('rejects incomplete external layout catalog metadata', () => {
+    expect(() => reconstructNetezzaExternalLayout(2, [
+      { type: 'INT4', style: 'DECIMAL', length: 'BYTES 4' },
+    ])).toThrow('_V_EXTZONES returned 1');
+  });
+
   it('builds a complete procedure definition and escapes its comment', () => {
     const procedure: DatabaseProcedureInfo = {
       schema: 'ADMIN',
@@ -65,7 +85,7 @@ describe('shared Netezza advanced DDL formatters', () => {
       returns: 'INTEGER',
       executeAsOwner: true,
       description: "Owner's procedure",
-      procedureSignature: 'P_USERS()',
+      procedureSignature: 'P_USERS(INTEGER)',
       procedureName: 'P_USERS',
       arguments: '(p_id INTEGER)',
     };
@@ -79,7 +99,7 @@ BEGIN
   RAISE NOTICE 'ready';
 END;
 END_PROC;
-COMMENT ON PROCEDURE P_USERS IS 'Owner''s procedure';`);
+COMMENT ON PROCEDURE MYDB.ADMIN.P_USERS(INTEGER) IS 'Owner''s procedure';`);
   });
 
   it('builds external options, preserves zero-like values, and quotes strings', () => {
@@ -89,7 +109,11 @@ COMMENT ON PROCEDURE P_USERS IS 'Owner''s procedure';`);
     expect(ddl).toContain("DATAOBJECT('/tmp/user''s.csv')");
     expect(ddl).toContain('SKIPROWS 2');
     expect(ddl).toContain('MAXERRORS 4');
-    expect(ddl).toContain("RECORDDELIM '\\n'");
+    expect(ddl).toContain("RECORDDELIM '\r\n'");
+    expect(ddl).toContain('COMPRESS zstd');
+    expect(ddl).toContain('LAYOUT (BYTES 4)');
+    expect(ddl).toContain('INCLUDEZEROSECONDS false');
+    expect(ddl).toContain("MERIDIANDELIM '.'");
     expect(ddl).toContain('REQUIREQUOTES true');
     expect(ddl).toContain('Display Name');
     expect(ddl.trimEnd().endsWith(');')).toBe(true);
@@ -105,8 +129,52 @@ COMMENT ON PROCEDURE P_USERS IS 'Owner''s procedure';`);
     };
 
     expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_USERS', synonym)).toBe(
-      "CREATE SYNONYM MYDB.ADMIN.S_USERS FOR MYDB.ADMIN.USERS;\nCOMMENT ON SYNONYM S_USERS IS 'Owner''s alias';",
+      "CREATE SYNONYM MYDB.ADMIN.S_USERS FOR MYDB.ADMIN.USERS;\nCOMMENT ON SYNONYM MYDB.ADMIN.S_USERS IS 'Owner''s alias';",
     );
+    expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_DOTTED', {
+      ...synonym,
+      synonymName: 'S_DOTTED',
+      referenceObjectName: '"Target.Name"',
+      referenceDatabase: 'OTHERDB',
+      referenceSchema: 'Schema.Name',
+      description: null,
+    })).toBe('CREATE SYNONYM MYDB.ADMIN.S_DOTTED FOR OTHERDB."Schema.Name"."Target.Name";');
+    expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_DEFAULT_SCHEMA', {
+      ...synonym,
+      synonymName: 'S_DEFAULT_SCHEMA',
+      referenceObjectName: 'TARGET',
+      referenceDatabase: 'OTHERDB',
+      referenceSchema: null,
+      description: null,
+    })).toBe('CREATE SYNONYM MYDB.ADMIN.S_DEFAULT_SCHEMA FOR OTHERDB..TARGET;');
+    expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_SCHEMA_ONLY', {
+      ...synonym,
+      synonymName: 'S_SCHEMA_ONLY',
+      referenceObjectName: 'TARGET',
+      referenceDatabase: null,
+      referenceSchema: 'OTHER_SCHEMA',
+      description: null,
+    })).toBe('CREATE SYNONYM MYDB.ADMIN.S_SCHEMA_ONLY FOR OTHER_SCHEMA.TARGET;');
+    expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_DOUBLE_DOT', {
+      ...synonym,
+      synonymName: 'S_DOUBLE_DOT',
+      referenceObjectName: 'OTHERDB..TARGET',
+      referenceDatabase: null,
+      referenceSchema: null,
+      description: null,
+    })).toBe('CREATE SYNONYM MYDB.ADMIN.S_DOUBLE_DOT FOR OTHERDB..TARGET;');
+    expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_ESCAPED_QUOTE', {
+      ...synonym,
+      synonymName: 'S_ESCAPED_QUOTE',
+      referenceObjectName: '"A""B".TARGET',
+      description: null,
+    })).toBe('CREATE SYNONYM MYDB.ADMIN.S_ESCAPED_QUOTE FOR "A""B".TARGET;');
+    expect(buildNetezzaSynonymDdl('MYDB', 'ADMIN', 'S_SPACED', {
+      ...synonym,
+      synonymName: 'S_SPACED',
+      referenceObjectName: '  " Schema Name " . " Target Name "  ',
+      description: null,
+    })).toBe('CREATE SYNONYM MYDB.ADMIN.S_SPACED FOR " Schema Name "." Target Name ";');
   });
 
   it('normalizes only the catalog return spellings that require ANY length', () => {

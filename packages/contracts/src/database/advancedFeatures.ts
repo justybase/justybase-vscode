@@ -115,6 +115,11 @@ export interface DatabaseExternalTableInfo {
   y2Base: number | null;
   fillRecord: boolean | null;
   compress: boolean | null;
+  /** Catalog compression mode (for example zlib or zstd). */
+  compressionMode?: string | null;
+  layout?: string | null;
+  includeZeroSeconds?: boolean | null;
+  meridianDelim?: string | null;
   includeHeader: boolean | null;
   lfInString: boolean | null;
   dateStyle: string | null;
@@ -140,6 +145,8 @@ export interface DatabaseSynonymInfo {
   schema: string;
   synonymName: string;
   referenceObjectName: string;
+  referenceDatabase?: string | null;
+  referenceSchema?: string | null;
   owner: string;
   description: string | null;
 }

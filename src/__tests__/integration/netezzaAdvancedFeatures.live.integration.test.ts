@@ -23,6 +23,7 @@ import type {
 } from '../../contracts/database';
 import type { ExtensionContext } from 'vscode';
 import { netezzaDialect } from '../../dialects/netezza';
+import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import { netezzaMetadataProvider } from '../../dialects/netezza/metadata/provider';
 import { netezzaSessionMonitorProvider } from '../../dialects/netezza/sessionMonitor';
 import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
@@ -45,6 +46,8 @@ import {
     tryExecuteNetezza,
     uniqueNetezzaName
 } from './netezzaLiveTestHarness';
+
+registerDatabaseDialect(netezzaDialect);
 
 const describeIfFixture = netezzaFixtureEnabled ? describe : describe.skip;
 const netezzaSessionKillEnabled = netezzaFixtureEnabled && process.env.NZ_DEV_ALLOW_SESSION_KILL === '1';
@@ -198,7 +201,7 @@ describeIfFixture('Netezza advanced features live contract', () => {
         await executeNetezza(connection, `CREATE VIEW ${qualified(fixture, fixture.view)} AS SELECT ID, CODE, AMOUNT FROM ${qualified(fixture, fixture.parent)}`);
         fixture.objects.push({ kind: 'VIEW', name: fixture.view });
 
-        await executeNetezza(connection, `CREATE EXTERNAL TABLE ${qualified(fixture, fixture.external)} (VALUE VARCHAR(80)) USING (DATAOBJECT('/tmp/${fixture.external}.csv') DELIMITER '|')`);
+        await executeNetezza(connection, `CREATE EXTERNAL TABLE ${qualified(fixture, fixture.external)} (ID INTEGER, LABEL CHAR(10), EVENT_DATE DATE) USING (DATAOBJECT('/tmp/${fixture.external}.csv') FORMAT 'FIXED' RECORDLENGTH 24 RECORDDELIM '\r\n' LAYOUT (BYTES 4, BYTES 10, DATE YMD ' ' BYTES 10))`);
         fixture.objects.push({ kind: 'EXTERNAL TABLE', name: fixture.external });
 
         await executeNetezza(connection, `CREATE OR REPLACE PROCEDURE ${qualified(fixture, fixture.procedure)}() RETURNS INTEGER LANGUAGE NZPLSQL AS 'BEGIN RETURN 1; END;'`);
@@ -288,6 +291,10 @@ describeIfFixture('Netezza advanced features live contract', () => {
         const externalDdl = await ddl!.generateExternalTableDDL(asDatabaseConnection(connection), fixture.database, fixture.schema, fixture.external);
         expect(externalDdl.toUpperCase()).toContain('CREATE EXTERNAL TABLE');
         expect(externalDdl.toUpperCase()).toContain('DATAOBJECT');
+        expect(externalDdl).toContain("DATE YMD ' ' BYTES 10");
+        expect(externalDdl).toContain(`RECORDDELIM '\r\n'`);
+        await executeNetezza(connection, `DROP TABLE ${qualified(fixture, fixture.external)}`);
+        await executeNetezza(connection, externalDdl);
 
         const synonymDdl = await ddl!.generateSynonymDDL(asDatabaseConnection(connection), fixture.database, fixture.schema, fixture.synonym);
         expect(synonymDdl.toUpperCase()).toContain('CREATE SYNONYM');
@@ -300,7 +307,7 @@ describeIfFixture('Netezza advanced features live contract', () => {
             fixture.parent,
             'TABLE'
         );
-        expect(generated.success).toBe(true);
+        expect(generated).toEqual(expect.objectContaining({ success: true }));
         expect(generated.ddlCode?.toUpperCase()).toContain('CREATE TABLE');
     }, 180000);
 

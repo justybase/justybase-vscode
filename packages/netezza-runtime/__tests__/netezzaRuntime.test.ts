@@ -298,8 +298,8 @@ describe('Netezza runtime boundary', () => {
           };
         }
         return {
-          columns: Array.from({ length: 36 }, (_, index) => `FIELD_${index}`),
-          rows: [['ADMIN', 'EXT_USERS', '/tmp/users.csv', '|', 'INTERNAL', null, 'LOCAL', '0', '0', null, null, null, null, null, 'f', 'f', 'f', 'f', 'f', '1970', 'f', 'f', 'f', 'f', null, null, null, '1_0', 'TEXT', '0', '\n', '0', 'f', '1024', null, null]],
+          columns: Array.from({ length: 39 }, (_, index) => `FIELD_${index}`),
+          rows: [['ADMIN', 'EXT_USERS', '/tmp/users.csv', '|', 'INTERNAL', null, 'LOCAL', '0', '0', null, null, null, null, null, 'f', 'f', 'f', 'f', 'f', '1970', 'f', 'f', 'f', 'f', null, null, null, '1_0', 'TEXT', '0', '\n', '0', 'f', '1024', null, null, 0, 'f', null]],
         };
       })),
     });
@@ -308,24 +308,55 @@ describe('Netezza runtime boundary', () => {
       { connectionId: 'external', details: { host: 'host', port: 5480, database: 'SYSTEM', user: 'user', password: 'secret' } },
       'MYDB', 'ADMIN', 'EXT_USERS',
     )).resolves.toEqual(expect.objectContaining({
-      info: expect.objectContaining({ skipRows: 0, maxErrors: 0, y2Base: 1970, socketBufSize: 0, maxRows: 0, recordDelim: '\\n' }),
+      info: expect.objectContaining({ skipRows: 0, maxErrors: 0, y2Base: 1970, socketBufSize: 0, maxRows: 0, recordDelim: '\n' }),
       columns: [{ name: 'ID', description: null, fullTypeName: 'INTEGER', notNull: true, defaultValue: null }],
       metadataComplete: true,
     }));
     await runtime.closeAll();
   });
 
-  it('resolves an unqualified synonym target in its own database', async () => {
+  it('reconstructs a fixed-format layout from ordered external-zone catalog rows', async () => {
+    const runtime = new NetezzaRuntime({
+      connectionFactory: jest.fn(async () => connectionForMetadata(sql => {
+        if (sql.includes('_V_EXTZONES')) {
+          return {
+            columns: ['USETYPE', 'NAME', 'TYPE', 'STYLE', 'LENGTH', 'DELIMITER', 'AROUND', 'NULLIF', 'ENDIAN', 'ALIGNMENT', 'MODULUS'],
+            rows: [
+              ['', 'ID', 'INT4', 'DECIMAL', 'BYTES 4', '', '', "&&1 = ''", '', null, null],
+              ['', 'TEXT', 'CHAR(10)', 'INTERNAL', 'BYTES 10', '', '', '', '', null, null],
+              ['', ' DATE FIELD ', 'DATE', 'YMD', 'BYTES 10', ' ', '', '', '', null, null],
+            ],
+          };
+        }
+        if (sql.includes('C.ATTNAME')) {
+          return { columns: ['ATTNAME', 'DESCRIPTION', 'FORMAT_TYPE', 'ATTNOTNULL', 'COLDEFAULT'], rows: [['ID', null, 'INTEGER', 'f', null]] };
+        }
+        const row = Array<unknown>(39).fill(null);
+        row[0] = 'ADMIN'; row[1] = 'EXT_USERS'; row[2] = '/tmp/users.csv';
+        row[21] = 'false'; row[28] = 'FIXED'; row[33] = '14'; row[36] = 3; row[37] = 'f';
+        return { columns: Array.from({ length: row.length }, (_, index) => `FIELD_${index}`), rows: [row] };
+      })),
+    });
+
+    await expect(runtime.getExternalTableDdlMetadata(
+      { connectionId: 'layout', details: { host: 'host', port: 5480, database: 'SYSTEM', user: 'user', password: 'secret' } },
+      'MYDB', 'ADMIN', 'EXT_USERS',
+    )).resolves.toEqual(expect.objectContaining({
+        info: expect.objectContaining({ layout: "ID INT4 DECIMAL BYTES 4 NULLIF &&1 = '', TEXT CHAR(10) INTERNAL BYTES 10, \" DATE FIELD \" DATE YMD ' ' BYTES 10" }),
+    }));
+    await runtime.closeAll();
+  });
+
+  it('uses synonym target qualification stored in the catalog', async () => {
     const runtime = new NetezzaRuntime({
       connectionFactory: jest.fn(async () => connectionForMetadata(sql => {
         if (sql.includes('_V_SYNONYM')) {
           return {
-            columns: ['SCHEMA', 'OWNER', 'SYNONYM_NAME', 'REFOBJNAME', 'DESCRIPTION'],
-            rows: [['ADMIN', 'ADMIN', 'S_USERS', 'USERS', null]],
+            columns: ['SCHEMA', 'OWNER', 'SYNONYM_NAME', 'REFOBJNAME', 'DESCRIPTION', 'REFDATABASE', 'REFSCHEMA'],
+            rows: [['ADMIN', 'ADMIN', 'S_USERS', 'USERS', null, 'OTHERDB', 'SALES'] ],
           };
         }
-        expect(sql).toContain('_V_OBJECT_DATA');
-        return { columns: ['DBNAME', 'SCHEMA', 'OBJNAME'], rows: [['MYDB', 'ADMIN', 'USERS']] };
+        throw new Error(`Unexpected query: ${sql}`);
       })),
     });
 
@@ -334,7 +365,7 @@ describe('Netezza runtime boundary', () => {
       'MYDB', 'ADMIN', 'S_USERS',
     )).resolves.toEqual({
       schema: 'ADMIN', owner: 'ADMIN', synonymName: 'S_USERS',
-      referenceObjectName: 'MYDB.ADMIN.USERS', description: null,
+      referenceObjectName: 'USERS', referenceDatabase: 'OTHERDB', referenceSchema: 'SALES', description: null,
     });
     await runtime.closeAll();
   });

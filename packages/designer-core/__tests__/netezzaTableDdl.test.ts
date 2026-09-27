@@ -3,6 +3,12 @@ import { describe, expect, it } from '@jest/globals';
 import { buildNetezzaTableDdl, buildNetezzaViewDdl } from '../src';
 
 describe('shared Netezza DDL formatter', () => {
+  it('quotes reserved words and identifiers that cannot be regular names', () => {
+    expect(buildNetezzaTableDdl('MYDB', 'ADMIN', 'SELECT', [
+      { name: 'FROM', description: null, fullTypeName: 'INTEGER', notNull: false, defaultValue: null },
+    ], [], [], new Map(), null)).toContain('CREATE TABLE MYDB.ADMIN."SELECT"');
+  });
+
   it('preserves the VS Code table DDL output contract', () => {
     const columns: DatabaseDdlColumnInfo[] = [
       { name: 'ID', description: 'Primary key', fullTypeName: 'INTEGER', notNull: true, defaultValue: '0' },

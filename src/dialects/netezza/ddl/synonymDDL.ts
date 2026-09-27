@@ -5,6 +5,11 @@
 import { buildNetezzaSynonymDdl } from '@justybase/designer-core';
 import { executeQueryHelper } from './helpers';
 import { NzConnection } from '../../../types';
+import {
+    buildNetezzaIdentifierEquality,
+    createNetezzaCatalogIdentifier,
+    formatNetezzaIdentifier,
+} from '../metadata/identifierUtils';
 
 /**
  * Build synonym DDL from metadata
@@ -15,12 +20,16 @@ export function buildSynonymDDLFromCache(
     refObjName: string,
     owner: string,
     schema: string,
-    description: string | null
+    description: string | null,
+    referenceDatabase?: string | null,
+    referenceSchema?: string | null
 ): string {
     return buildNetezzaSynonymDdl(database, schema, synonymName, {
         schema,
         synonymName,
         referenceObjectName: refObjName,
+        referenceDatabase,
+        referenceSchema,
         owner,
         description,
     });
@@ -35,17 +44,21 @@ export async function generateSynonymDDL(
     schema: string,
     synonymName: string
 ): Promise<string> {
+    const databaseIdentifier = createNetezzaCatalogIdentifier(database);
+    const qualifiedDatabase = formatNetezzaIdentifier(databaseIdentifier);
     const sql = `
         SELECT
             SCHEMA,
             OWNER,
             SYNONYM_NAME,
             REFOBJNAME,
+            REFDATABASE,
+            REFSCHEMA,
             DESCRIPTION
-        FROM ${database.toUpperCase()}.._V_SYNONYM
-        WHERE DATABASE = '${database.toUpperCase()}'
-            AND SCHEMA = '${schema.toUpperCase()}'
-            AND SYNONYM_NAME = '${synonymName.toUpperCase()}'
+        FROM ${qualifiedDatabase}.._V_SYNONYM
+        WHERE ${buildNetezzaIdentifierEquality('DATABASE', databaseIdentifier)}
+            AND ${buildNetezzaIdentifierEquality('SCHEMA', createNetezzaCatalogIdentifier(schema))}
+            AND ${buildNetezzaIdentifierEquality('SYNONYM_NAME', createNetezzaCatalogIdentifier(synonymName))}
     `;
 
     interface SynonymRow {
@@ -53,6 +66,8 @@ export async function generateSynonymDDL(
         OWNER: string;
         SYNONYM_NAME: string;
         REFOBJNAME: string;
+        REFDATABASE: string | null;
+        REFSCHEMA: string | null;
         DESCRIPTION: string;
     }
     const result = await executeQueryHelper<SynonymRow>(connection, sql);
@@ -63,102 +78,15 @@ export async function generateSynonymDDL(
     }
 
     const row = rows[0];
-    const resolvedRefObjName = await resolveNetezzaSynonymTarget(
-        connection, database, row.REFOBJNAME
-    );
 
     return buildSynonymDDLFromCache(
         database,
         synonymName,
-        resolvedRefObjName,
+        row.REFOBJNAME,
         row.OWNER,
         schema,
-        row.DESCRIPTION
+        row.DESCRIPTION,
+        row.REFDATABASE,
+        row.REFSCHEMA
     );
-}
-
-/**
- * Resolve a synonym reference to a fully qualified name.
- * If REFOBJNAME is already fully qualified (contains dots), returns it as-is.
- * Otherwise, looks up the target object in _V_OBJECT_DATA to find its database and schema.
- */
-async function resolveNetezzaSynonymTarget(
-    connection: NzConnection,
-    synonymDatabase: string,
-    refObjName: string
-): Promise<string> {
-    const trimmedRef = refObjName.trim();
-    if (trimmedRef.includes('.')) {
-        return trimmedRef;
-    }
-
-    const upperRef = trimmedRef.toUpperCase();
-
-    try {
-        const target = await findTargetInDatabase(connection, synonymDatabase, upperRef);
-        if (target) {
-            return `${target.DBNAME}.${target.SCHEMA}.${target.OBJNAME}`;
-        }
-
-        const databases = await findTargetAcrossDatabases(connection, synonymDatabase, upperRef);
-        if (databases.length > 0) {
-            const best = databases[0];
-            return `${best.DBNAME}.${best.SCHEMA}.${best.OBJNAME}`;
-        }
-    } catch {
-        // If lookup fails, fall back to the original REFOBJNAME value
-    }
-
-    return trimmedRef;
-}
-
-interface TargetObject {
-    DBNAME: string;
-    SCHEMA: string;
-    OBJNAME: string;
-}
-
-async function findTargetInDatabase(
-    connection: NzConnection,
-    database: string,
-    objName: string
-): Promise<TargetObject | undefined> {
-    const sql = `
-        SELECT DBNAME, SCHEMA, OBJNAME
-        FROM ${database.toUpperCase()}.._V_OBJECT_DATA
-        WHERE UPPER(OBJNAME) = '${objName}'
-            AND OBJTYPE IN ('TABLE', 'VIEW', 'EXTERNAL TABLE')
-        LIMIT 1
-    `;
-    const results = await executeQueryHelper<TargetObject>(connection, sql);
-    return results.length > 0 ? results[0] : undefined;
-}
-
-async function findTargetAcrossDatabases(
-    connection: NzConnection,
-    synonymDatabase: string,
-    objName: string
-): Promise<TargetObject[]> {
-    const dbListSql = `SELECT DATABASE FROM _V_DATABASE WHERE DATABASE != '${synonymDatabase.toUpperCase()}'`;
-    let dbs: { DATABASE: string }[];
-    try {
-        dbs = await executeQueryHelper<{ DATABASE: string }>(connection, dbListSql);
-    } catch {
-        return [];
-    }
-
-    const results: TargetObject[] = [];
-    for (const db of dbs) {
-        try {
-            const target = await findTargetInDatabase(connection, db.DATABASE, objName);
-            if (target) {
-                results.push(target);
-                break;
-            }
-        } catch {
-                // Skip databases where lookup fails
-            }
-    }
-
-    return results;
 }

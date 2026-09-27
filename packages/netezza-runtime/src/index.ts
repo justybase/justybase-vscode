@@ -18,6 +18,10 @@ import type {
 } from '@justybase/contracts';
 import { createHash } from 'node:crypto';
 import {
+  isExternalLayoutZoneCount,
+  reconstructExternalLayout,
+} from './externalLayout';
+import {
   createConnectedNetezzaConnection,
   getNetezzaConnectionConstructor,
   type NetezzaDriverCommand,
@@ -683,6 +687,11 @@ export class NetezzaRuntime {
       recordLength: string | null;
       dateTimeDelim: string | null;
       rejectFile: string | null;
+      layout: string | null;
+      compressionMode: string | null;
+      includeZeroSeconds: boolean | null;
+      meridianDelim: string | null;
+      catalogLayout: unknown;
     }
     const rows = await this.queryMetadata(target, `
       SELECT
@@ -721,7 +730,10 @@ export class NetezzaRuntime {
         E1.REQUIREQUOTES,
         E1.RECORDLENGTH,
         E1.DATETIMEDELIM,
-        E1.REJECTFILE
+        E1.REJECTFILE,
+        E1.LAYOUT,
+        E1.INCLUDEZEROSECONDS,
+        E1.MERIDIANDELIM
       FROM ${db}.._V_EXTERNAL E1
       INNER JOIN ${db}.._V_EXTOBJECT E2 ON E1.RELID = E2.OBJID
       WHERE ${identifierEquality('E1.DATABASE', database)}
@@ -731,7 +743,9 @@ export class NetezzaRuntime {
       const booleanAt = (index: number): boolean | null => values[index] === null || values[index] === undefined
         ? null
         : booleanValue(values[index]);
-      const stringAt = (index: number): string | null => optionalStringValue(values[index]);
+      const stringAt = (index: number): string | null => values[index] === null || values[index] === undefined
+        ? null
+        : String(values[index]);
       return {
         schema: stringValue(values[0]),
         tableName: stringValue(values[1]),
@@ -763,16 +777,48 @@ export class NetezzaRuntime {
         boolStyle: stringAt(27),
         format: stringAt(28),
         socketBufSize: optionalNumberValue(values[29]),
-        recordDelim: stringAt(30)?.replace(/\r/gu, '\\r').replace(/\n/gu, '\\n') ?? null,
+        recordDelim: stringAt(30),
         maxRows: optionalNumberValue(values[31]),
         requireQuotes: booleanAt(32),
         recordLength: stringAt(33),
         dateTimeDelim: stringAt(34),
         rejectFile: stringAt(35),
+        layout: stringAt(36),
+        compressionMode: values[21] === null || values[21] === undefined
+          || ['true', 'false', 't', 'f', '1', '0', 'yes', 'no', 'on', 'off'].includes(String(values[21]).trim().toLowerCase())
+          ? null
+          : String(values[21]).trim(),
+        includeZeroSeconds: booleanAt(37),
+        meridianDelim: stringAt(38),
+        catalogLayout: values[36],
       } satisfies ExternalRow;
     }, unquoteNetezzaIdentifier(database));
-    const external = rows[0];
-    if (!external) throw new Error(`External table ${database}.${schema}.${table} not found`);
+    const externalRow = rows[0];
+    if (!externalRow) throw new Error(`External table ${database}.${schema}.${table} not found`);
+    const { catalogLayout, ...external } = externalRow;
+
+    if (catalogLayout !== null && catalogLayout !== undefined
+      && /^\d+$/u.test(String(catalogLayout).trim())) {
+      external.layout = null;
+    }
+
+    if (isExternalLayoutZoneCount(catalogLayout)) {
+      const zones = await this.queryMetadata(target, `
+        SELECT Z.USETYPE, Z.NAME, Z.TYPE, Z.STYLE, Z.LENGTH, Z.DELIMITER,
+               Z.AROUND, Z.NULLIF, Z.ENDIAN, Z.ALIGNMENT, Z.MODULUS
+        FROM ${db}.._V_EXTERNAL E
+        INNER JOIN ${db}.._V_EXTZONES Z ON E.RELID = Z.RELID
+        WHERE ${identifierEquality('E.DATABASE', database)}
+          AND ${identifierEquality('E.SCHEMA', schema)}
+          AND ${identifierEquality('E.TABLENAME', table)}
+        ORDER BY Z.ZONEID
+      `.trim(), values => ({
+        usetype: values[0], name: values[1], type: values[2], style: values[3], length: values[4],
+        delimiter: values[5], around: values[6], nullif: values[7], endian: values[8],
+        alignment: values[9], modulus: values[10],
+      }), unquoteNetezzaIdentifier(database));
+      external.layout = reconstructExternalLayout(catalogLayout, zones);
+    }
 
     const columns = await this.queryMetadata(target, `
       SELECT
@@ -799,7 +845,7 @@ export class NetezzaRuntime {
     return { info, columns: columns.filter(column => column.name.length > 0), metadataComplete: true };
   }
 
-  /** Loads and resolves a synonym target so the shared formatter can emit a runnable definition. */
+  /** Loads synonym target qualification directly from the catalog. */
   public async getSynonymDdlMetadata(
     target: NetezzaRuntimeTarget,
     database: string,
@@ -808,7 +854,7 @@ export class NetezzaRuntime {
   ): Promise<DatabaseSynonymInfo> {
     const db = formatNetezzaIdentifier(database);
     const rows = await this.queryMetadata(target, `
-      SELECT SCHEMA, OWNER, SYNONYM_NAME, REFOBJNAME, DESCRIPTION
+      SELECT SCHEMA, OWNER, SYNONYM_NAME, REFOBJNAME, DESCRIPTION, REFDATABASE, REFSCHEMA
       FROM ${db}.._V_SYNONYM
       WHERE ${identifierEquality('DATABASE', database)}
         AND ${identifierEquality('SCHEMA', schema)}
@@ -819,64 +865,15 @@ export class NetezzaRuntime {
       synonymName: stringValue(values[2]),
       referenceObjectName: stringValue(values[3]),
       description: optionalDescription(values[4]),
+      referenceDatabase: optionalStringValue(values[5]),
+      referenceSchema: optionalStringValue(values[6]),
     }), unquoteNetezzaIdentifier(database));
     const row = rows[0];
     if (!row) throw new Error(`Synonym ${database}.${schema}.${synonym} not found`);
     return {
       ...row,
-      referenceObjectName: await this.resolveSynonymTarget(target, database, row.referenceObjectName),
+      referenceObjectName: row.referenceObjectName,
     };
-  }
-
-  private async resolveSynonymTarget(
-    target: NetezzaRuntimeTarget,
-    synonymDatabase: string,
-    referenceObjectName: string,
-  ): Promise<string> {
-    const trimmed = referenceObjectName.trim();
-    if (!trimmed || trimmed.includes('.')) return trimmed;
-
-    const targetInDatabase = async (database: string): Promise<{
-      database: string;
-      schema: string;
-      name: string;
-    } | undefined> => {
-      const db = formatNetezzaIdentifier(database);
-      const rows = await this.queryMetadata(target, `
-        SELECT DBNAME, SCHEMA, OBJNAME
-        FROM ${db}.._V_OBJECT_DATA
-        WHERE UPPER(OBJNAME) = UPPER('${literal(trimmed)}')
-          AND OBJTYPE IN ('TABLE', 'VIEW', 'EXTERNAL TABLE')
-        ORDER BY OBJID
-        LIMIT 1
-      `.trim(), values => ({
-        database: stringValue(values[0]),
-        schema: stringValue(values[1]),
-        name: stringValue(values[2]),
-      }), unquoteNetezzaIdentifier(database));
-      return rows[0];
-    };
-
-    try {
-      const local = await targetInDatabase(synonymDatabase);
-      if (local) return `${local.database}.${local.schema}.${local.name}`;
-
-      const databases = await this.queryMetadata(target, `
-        SELECT DATABASE
-        FROM SYSTEM.._V_DATABASE
-        WHERE DATABASE <> '${literal(unquoteNetezzaIdentifier(synonymDatabase))}'
-        ORDER BY DATABASE
-      `.trim(), values => stringValue(values[0]));
-      for (const database of databases) {
-        const match = await targetInDatabase(database);
-        if (match) return `${match.database}.${match.schema}.${match.name}`;
-      }
-    } catch {
-      // A synonym can still be reconstructed from its catalog reference when
-      // a cross-database lookup is unavailable to the current user.
-    }
-
-    return trimmed;
   }
 
   public async closeConnection(connectionId: string): Promise<void> {
