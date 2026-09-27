@@ -12,6 +12,7 @@ fs.mkdirSync(outputRoot, { recursive: true });
 const entries = [
   ['root', 'index'],
   ['validation', 'validation'],
+  ['tokenLocation', 'validation/tokenLocation'],
   ['quality', 'quality/index'],
   ['authoring', 'authoring/index'],
   ['authoringTypes', 'authoring/types'],

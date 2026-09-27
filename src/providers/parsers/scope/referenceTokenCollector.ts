@@ -1,4 +1,5 @@
 import { CstNode, type IToken } from "chevrotain";
+import { hasUnavailableTokenLocation } from "@justybase/sql-core/validation/tokenLocation";
 
 export function isCstNode(value: unknown): value is CstNode {
   return (
@@ -39,7 +40,9 @@ export function collectOrderedReferenceTokens(
 
     for (const child of value) {
       if (isToken(child)) {
-        tokens.push(child);
+        if (!hasUnavailableTokenLocation(child.startOffset)) {
+          tokens.push(child);
+        }
       } else if (isCstNode(child)) {
         collectOrderedReferenceTokens(child, tokens, ignoredKeys);
       }

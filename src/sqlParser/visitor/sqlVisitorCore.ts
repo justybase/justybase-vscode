@@ -1,4 +1,8 @@
 import { CstNode, type IToken } from "chevrotain";
+import {
+  getAvailableTokenLocation,
+  getTokenLocationOr,
+} from "@justybase/sql-core/validation/tokenLocation";
 import type { SqlParser } from "../parser";
 import { getDatabaseSqlAuthoring } from "../../core/sqlAuthoringRegistry";
 import {
@@ -205,20 +209,22 @@ export class SqlVisitor
     const tokens = getOrderedCstTokens(node);
     const firstToken = tokens[0];
     const lastToken = tokens[tokens.length - 1];
-    if (!firstToken || !lastToken || firstToken.startOffset === undefined) {
+    const startOffset = getAvailableTokenLocation(firstToken?.startOffset);
+    if (!firstToken || !lastToken || startOffset === undefined) {
       return false;
     }
+    const lastStartOffset =
+      getAvailableTokenLocation(lastToken.startOffset) ?? startOffset;
     const endOffset =
-      (lastToken.startOffset ?? firstToken.startOffset) +
-      (lastToken.image?.length ?? 0);
+      lastStartOffset + (lastToken.image?.length ?? 0);
     return this.macroReferenceRanges.some(
       (range) =>
-        range.startOffset < endOffset && range.endOffset > firstToken.startOffset!,
+        range.startOffset < endOffset && range.endOffset > startOffset,
     );
   }
 
   hasMacroReferenceInToken(token: IToken): boolean {
-    const startOffset = token.startOffset;
+    const startOffset = getAvailableTokenLocation(token.startOffset);
     if (startOffset === undefined) return false;
     const endOffset = startOffset + (token.image?.length ?? 0);
     return this.macroReferenceRanges.some(
@@ -422,14 +428,16 @@ export class SqlVisitor
 
   // Helper methods
   private getTokenPosition(token: IToken): TokenPosition {
+    const startLine = getTokenLocationOr(token.startLine, 1);
+    const startColumn = getTokenLocationOr(token.startColumn, 1);
     return {
-      startLine: token.startLine || 1,
-      startColumn: token.startColumn || 1,
-      endLine: token.endLine || token.startLine || 1,
+      startLine,
+      startColumn,
+      endLine: getTokenLocationOr(token.endLine, startLine),
       endColumn:
-        token.endColumn ||
-        (token.startColumn || 1) + (token.image?.length || 0),
-      offset: token.startOffset || 0,
+        getAvailableTokenLocation(token.endColumn) ??
+        startColumn + (token.image?.length || 0),
+      offset: getTokenLocationOr(token.startOffset, 0),
     };
   }
 

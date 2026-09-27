@@ -65,6 +65,16 @@ describe("NetezzaSqlSemanticValidator", () => {
     );
   });
 
+  it("normalizes unavailable EOF token locations", () => {
+    const result = new NetezzaSqlSemanticValidator().validate("SELECT 1 +");
+    const parserError = result.errors.find((error) => error.code === "PAR001");
+
+    expect(parserError).toBeDefined();
+    expect(Object.values(parserError!.position).every((value) =>
+      Number.isFinite(value) && value >= 0,
+    )).toBe(true);
+  });
+
   it("exposes the method-shaped unqualified-table capability", () => {
     const calls: string[] = [];
     const provider: SchemaProvider = {

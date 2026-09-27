@@ -61,6 +61,7 @@ import {
   getCstNodeTokenSpan,
   getTokenSpanPositionFromEndpoints,
 } from "../../../packages/sql-core/src/validation/tokenSpanUtils";
+import { getCstNodeTokenSpan as getDesktopCstNodeTokenSpan } from "../../sqlParser/tokenSpanUtils";
 import type { CstNode, IToken } from "chevrotain";
 
 interface ParityCase {
@@ -777,7 +778,30 @@ SELECT FROM DB.PUBLIC.PARITY_PROC;`;
       endColumn: 1,
       offset: 0,
     });
+    const recoveryToken = {
+      image: "",
+      tokenType: { name: "Identifier" },
+      startOffset: -1,
+      endOffset: -1,
+      startLine: -1,
+      endLine: -1,
+      startColumn: -1,
+      endColumn: -1,
+    } as IToken;
+    const recoveryNode = {
+      name: "statement",
+      children: { Identifier: [recoveryToken] },
+    } as CstNode;
+    expect(getTokenSpanPositionFromEndpoints(recoveryToken, recoveryToken)).toEqual({
+      startLine: 1,
+      startColumn: 1,
+      endLine: 1,
+      endColumn: 1,
+      offset: 0,
+    });
     expect(getCstNodeTokenSpan({ name: "empty", children: {} } as CstNode)).toBeUndefined();
+    expect(getCstNodeTokenSpan(recoveryNode)).toBeUndefined();
+    expect(getDesktopCstNodeTokenSpan(recoveryNode)).toBeUndefined();
     const parsed = parseNetezzaSqlStatements({ sql: "SELECT 1" });
     expect(parsed.cst && getCstNodeTokenSpan(parsed.cst)).toBeDefined();
   });

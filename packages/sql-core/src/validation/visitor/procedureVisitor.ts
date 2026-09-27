@@ -12,6 +12,7 @@ import {
 import { unquoteIdentifier } from "../identifierUtils";
 import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
 import type { ScopeBuilder } from "./scopeBuilder";
+import { getTokenLocationOr } from "../tokenLocation";
 
 export interface ProcedureVisitorHost {
   addError(
@@ -80,7 +81,7 @@ function validateStringProcedureBody(
   stringToken: IToken,
 ): void {
   const decoded = decodeSqlStringLiteral(stringToken.image ?? "");
-  const quoteContentStart = (stringToken.startOffset ?? 0) + 1;
+  const quoteContentStart = getTokenLocationOr(stringToken.startOffset, 0) + 1;
   const offsetShift = getStringBodyOffsetShift(quoteContentStart);
   const { beginProcBody, parserErrors } = parseWrappedProcedureStringBody(decoded);
 

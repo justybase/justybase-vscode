@@ -221,6 +221,17 @@ ORDER BY d.DATEKEY;`);
       expect(parseError?.position).toBeDefined();
     });
 
+    it("should normalize unavailable EOF token locations", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate("SELECT 1 +");
+      const parseError = result.errors.find((error) => error.code === "PAR001");
+
+      expect(parseError).toBeDefined();
+      expect(Object.values(parseError!.position).every((value) =>
+        Number.isFinite(value) && value >= 0,
+      )).toBe(true);
+    });
+
     it("should report an incomplete qualified reference before the next clause", () => {
       const validator = new SqlValidator();
       const result = validator.validate(`SELECT D.
