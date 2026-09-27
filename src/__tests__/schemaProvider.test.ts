@@ -1188,13 +1188,93 @@ describe('SchemaProvider', () => {
 
             const children = await schemaProvider.getChildren(tableItem);
 
-            expect(children).toHaveLength(2);
+            expect(children).toHaveLength(4);
             expect(children[0].label).toBe('ID');
             expect(children[0].description).toBe('123 - Identifier');
             expect(children[0].isPk).toBe(true);
             expect(children[0].contextValue).toBe('column');
             expect(children[0].tooltip).toContain('Type: INTEGER');
             expect(children[1].description).toBe('txt - User name');
+            expect(schemaProvider.getParent(children[0])?.id).toBe(tableItem.id);
+            expect(children.slice(2).map(item => item.label)).toEqual(['References', 'Referenced by']);
+            expect(children.slice(2).every(item => item.contextValue === 'netezzaRelationshipGroup')).toBe(true);
+        });
+
+        it('loads outgoing FKs from the owner database and incoming FKs across connection databases', async () => {
+            mockMetadataCache.getColumns.mockReturnValue([]);
+            mockMetadataCache.getDatabases.mockReturnValue([
+                { DATABASE: 'TESTDB', label: 'TESTDB' },
+                { DATABASE: 'CRM', label: 'CRM' },
+            ]);
+            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [], data: [] });
+            (queryResultToRows as jest.Mock)
+                .mockReturnValueOnce([{
+                    FROM_DATABASE: 'TESTDB',
+                    FROM_SCHEMA: 'PUBLIC',
+                    FROM_TABLE: 'USERS',
+                    FROM_COLUMN: 'CRM_ID',
+                    TO_DATABASE: 'CRM',
+                    TO_SCHEMA: 'PUBLIC',
+                    TO_TABLE: 'CUSTOMERS',
+                    TO_COLUMN: 'ID',
+                    CONSTRAINT_NAME: 'FK_USER_CUSTOMER',
+                    ORDINAL_POSITION: 1,
+                }])
+                .mockReturnValueOnce([])
+                .mockReturnValueOnce([{
+                    FROM_DATABASE: 'TESTDB',
+                    FROM_SCHEMA: 'PUBLIC',
+                    FROM_TABLE: 'USERS',
+                    FROM_COLUMN: 'CRM_ID',
+                    TO_DATABASE: 'CRM',
+                    TO_SCHEMA: 'PUBLIC',
+                    TO_TABLE: 'CUSTOMERS',
+                    TO_COLUMN: 'ID',
+                    CONSTRAINT_NAME: 'FK_USER_CUSTOMER',
+                    ORDINAL_POSITION: 1,
+                }]);
+
+            const sourceChildren = await schemaProvider.getChildren(tableItem);
+            const sourceGroups = sourceChildren.filter(item => item.contextValue === 'netezzaRelationshipGroup');
+            expect(runQueryRaw).not.toHaveBeenCalled();
+
+            const outgoing = await schemaProvider.getChildren(sourceGroups[0]);
+            expect(outgoing).toHaveLength(1);
+            expect(outgoing[0].label).toBe('CRM_ID  →  CRM.PUBLIC.CUSTOMERS.ID');
+            expect((outgoing[0].iconPath as vscode.ThemeIcon).id).toBe('arrow-right');
+            expect(mockMetadataCache.getDatabases).not.toHaveBeenCalled();
+            expect(outgoing[0].command).toEqual(expect.objectContaining({
+                command: 'netezza.revealSchemaColumn',
+                arguments: [expect.objectContaining({
+                    connectionName: 'TestConnection',
+                    database: 'CRM',
+                    schema: 'PUBLIC',
+                    table: 'CUSTOMERS',
+                    column: 'ID',
+                })],
+            }));
+            expect(runQueryRaw).toHaveBeenCalledTimes(1);
+
+            const targetTable = new SchemaItem(
+                'CUSTOMERS',
+                vscode.TreeItemCollapsibleState.Collapsed,
+                'netezza:TABLE',
+                'CRM',
+                'TABLE',
+                'PUBLIC',
+                2,
+                undefined,
+                'TestConnection',
+            );
+            const targetChildren = await schemaProvider.getChildren(targetTable);
+            const incomingGroup = targetChildren.find(item => item.relationshipDirection === 'referencedBy')!;
+            const incoming = await schemaProvider.getChildren(incomingGroup);
+
+            expect(incoming).toHaveLength(1);
+            expect(incoming[0].label).toBe('TESTDB.PUBLIC.USERS.CRM_ID  →  ID');
+            expect((incoming[0].iconPath as vscode.ThemeIcon).id).toBe('arrow-left');
+            expect(schemaProvider.getParent(incoming[0])?.id).toBe(incomingGroup.id);
+            expect(runQueryRaw).toHaveBeenCalledTimes(3);
         });
 
         it('treats an empty negative column layer as a cache hit on repeated expands', async () => {
@@ -1203,8 +1283,11 @@ describe('SchemaProvider', () => {
             };
             mockMetadataCache.getColumns.mockReturnValue([]);
 
-            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
-            await expect(schemaProvider.getChildren(tableItem)).resolves.toEqual([]);
+            const firstExpand = await schemaProvider.getChildren(tableItem);
+            const secondExpand = await schemaProvider.getChildren(tableItem);
+
+            expect(firstExpand.map(item => item.label)).toEqual(['References', 'Referenced by']);
+            expect(secondExpand.map(item => item.label)).toEqual(['References', 'Referenced by']);
 
             expect(mockMetadataCache.ensureColumnsLoadedForTableKey).toHaveBeenCalledTimes(2);
             expect(fetchTableColumnsWithFallback).not.toHaveBeenCalled();
@@ -1271,11 +1354,12 @@ describe('SchemaProvider', () => {
 
             const children = await schemaProvider.getChildren(lowerTableItem);
 
-            expect(children).toHaveLength(1);
+            expect(children).toHaveLength(3);
             expect(mockMetadataCache.getColumns).toHaveBeenCalledWith(
                 'TestConnection',
                 '@NZEX@TESTDB.ADMIN.lower_table',
             );
+            expect(children.slice(1).map(item => item.label)).toEqual(['References', 'Referenced by']);
             expect(runQueryRaw).not.toHaveBeenCalled();
         });
 
@@ -1292,11 +1376,12 @@ describe('SchemaProvider', () => {
 
             const children = await schemaProvider.getChildren(tableItem);
 
-            expect(children).toHaveLength(1);
+            expect(children).toHaveLength(3);
             expect(mockMetadataCache.setColumns).toHaveBeenCalled();
             expect(children[0].label).toBe('ID');
             expect(children[0].description).toBe('123 - Identifier');
             expect(children[0].tooltip).toContain('Type: INTEGER');
+            expect(children.slice(1).map(item => item.label)).toEqual(['References', 'Referenced by']);
         });
 
         it('should reuse cache when isDistributionKey was not stored on first fetch', async () => {
@@ -1315,8 +1400,9 @@ describe('SchemaProvider', () => {
 
             const children = await schemaProvider.getChildren(tableItem);
 
-            expect(children).toHaveLength(1);
+            expect(children).toHaveLength(3);
             expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(children.slice(1).map(item => item.label)).toEqual(['References', 'Referenced by']);
         });
     });
 

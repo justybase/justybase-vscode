@@ -1,6 +1,6 @@
 /**
  * Schema Commands - Reveal Commands
- * Commands: revealInSchema
+ * Commands: revealInSchema, revealSchemaColumn
  */
 
 import * as vscode from 'vscode';
@@ -11,6 +11,7 @@ import { createPerformanceTimer, formatPerformanceEvent } from '../../services/p
 import { SchemaCommandsDependencies } from './types';
 import type { DatabaseKind } from '../../contracts/database';
 import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
+import { formatNetezzaCatalogIdentifier } from '../../providers/schemaProviderSupport';
 import { stripIdentifierQuoting } from '../../utils/identifierUtils';
 import { isTableCacheObjectType } from '../../metadata/cache/schemaTreeDataSource';
 import { toTableMetadata, upsertTableObject } from '../../metadata/cache/tableObjectMutation';
@@ -28,6 +29,14 @@ interface RevealData {
     database?: string;
     schema?: string;
     connectionName?: string;
+}
+
+interface RevealSchemaColumnData {
+    connectionName?: string;
+    database: string;
+    schema: string;
+    table: string;
+    column: string;
 }
 
 interface GenericRevealRow {
@@ -710,6 +719,104 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                 vscode.window.showErrorMessage(
                     `Error revealing item (CQ01-REVEAL-005): ${formatRevealError(message, revealConnectionKind)}`,
                 );
+            }
+        }),
+        vscode.commands.registerCommand('netezza.revealSchemaColumn', async (data: RevealSchemaColumnData) => {
+            const connectionName = data?.connectionName || connectionManager.getActiveConnectionName?.();
+            if (!connectionName) {
+                vscode.window.showWarningMessage('No active connection. Please select a connection first.');
+                return;
+            }
+            if (!data?.database || !data.schema || !data.table || !data.column) {
+                vscode.window.showWarningMessage('The related column location is incomplete.');
+                return;
+            }
+
+            const qualifiedTable = `${data.database}.${data.schema}.${data.table}`;
+            const statusBarDisposable = vscode.window.setStatusBarMessage(
+                `$(loading~spin) Revealing ${qualifiedTable}.${data.column} in schema...`,
+            );
+            try {
+                let table = await findNetezzaObjectForReveal(
+                    deps,
+                    logger,
+                    connectionName,
+                    formatNetezzaCatalogIdentifier(data.database),
+                    formatNetezzaCatalogIdentifier(data.table),
+                    'TABLE',
+                    formatNetezzaCatalogIdentifier(data.schema),
+                );
+                if (!table) {
+                    table = await findNetezzaObjectForReveal(
+                        deps,
+                        logger,
+                        connectionName,
+                        formatNetezzaCatalogIdentifier(data.database),
+                        formatNetezzaCatalogIdentifier(data.table),
+                        'GLOBAL TEMP TABLE',
+                        formatNetezzaCatalogIdentifier(data.schema),
+                    );
+                }
+                if (!table) {
+                    vscode.window.showWarningMessage(`Could not find related table ${qualifiedTable}`);
+                    return;
+                }
+                if (table.OBJTYPE !== 'TABLE' && table.OBJTYPE !== 'GLOBAL TEMP TABLE') {
+                    vscode.window.showWarningMessage(`Related object ${qualifiedTable} is not a table`);
+                    return;
+                }
+
+                const objectId = normalizeObjectId(table.OBJID);
+                warmNetezzaRevealTarget(deps, connectionName, data.database, table, logger);
+                const targetColumn = new SchemaItem(
+                    data.column,
+                    vscode.TreeItemCollapsibleState.None,
+                    'column',
+                    data.database,
+                    table.OBJTYPE,
+                    table.SCHEMA || data.schema,
+                    undefined,
+                    undefined,
+                    connectionName,
+                    table.OBJNAME,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    data.column,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    objectId,
+                );
+                targetColumn.sourceContext = 'schema';
+                targetColumn.id = `${targetColumn.id}|schema`;
+                try {
+                    await revealSchemaItem(targetColumn);
+                } catch (error) {
+                    const hasActiveFilter = Boolean(
+                        deps.schemaProvider.getFilter() || deps.schemaProvider.getQuickFilter(),
+                    );
+                    if (!isTreeResolveFailure(error) || !hasActiveFilter) {
+                        throw error;
+                    }
+                    deps.schemaProvider.setFilter(undefined);
+                    deps.schemaProvider.setQuickFilter(undefined);
+                    deps.schemaTreeView.description = '';
+                    refreshNetezzaRevealTree(deps, logger);
+                    await revealSchemaItem(targetColumn);
+                    vscode.window.showInformationMessage('Schema filters were cleared to reveal the related column.');
+                }
+                statusBarDisposable.dispose();
+                vscode.window.setStatusBarMessage(`$(check) Found ${qualifiedTable}.${data.column}`, 3000);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                logger?.error('[CQ01-REVEAL-COLUMN-001] Error revealing related column', error);
+                vscode.window.showErrorMessage(`Could not reveal ${qualifiedTable}.${data.column}: ${message}`);
+            } finally {
+                statusBarDisposable.dispose();
             }
         })
     ];
