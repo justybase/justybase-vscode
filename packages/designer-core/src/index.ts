@@ -77,6 +77,9 @@ export {
   buildNetezzaProcedureDdl,
   buildNetezzaSynonymDdl,
   fixNetezzaProcedureReturnType,
+  isNetezzaExternalLayoutZoneCount,
+  reconstructNetezzaExternalLayout,
+  type NetezzaExternalLayoutZone,
 } from './netezzaAdvancedDdl';
 
 export {

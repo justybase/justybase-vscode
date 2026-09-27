@@ -15,6 +15,15 @@ import { buildProcedureDDLFromCache } from '../../../ddl/procedureDDL';
 import { buildExternalTableDDLFromCache } from '../../../ddl/externalTableDDL';
 import { buildSynonymDDLFromCache } from '../../../ddl/synonymDDL';
 import { mapTableColumnsRows, RawTableColumnsRow } from '../../../metadata/columnMetadataService';
+import {
+    isExternalLayoutZoneCount,
+    reconstructExternalLayout,
+    type ExternalLayoutZoneRow,
+} from './externalLayout';
+
+function objectKey(schema: string, name: string): string {
+    return `${schema.length}:${schema}${name.length}:${name}`;
+}
 
 /**
  * Generate DDL for multiple objects in a database
@@ -34,8 +43,8 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
         // Connect to the target database to ensure we can read all definition/source columns correctly
         connection = await createConnectionFromDetails(options.connectionDetails, options.database);
 
-        const database = options.database.toUpperCase();
-        const schemaFilter = options.schema ? options.schema.toUpperCase() : null;
+        const database = options.database;
+        const schemaFilter = options.schema ?? null;
 
         // Determine which object types to process
         let typesToProcess = options.objectTypes
@@ -62,7 +71,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
         // =====================================================
 
         // Bulk data maps
-        const allColumns = new Map<string, ColumnInfo[]>(); // key: "SCHEMA.OBJNAME"
+        const allColumns = new Map<string, ColumnInfo[]>(); // key: serialized [schema, name]
         const allDistribution = new Map<string, string[]>();
         const allOrganize = new Map<string, string[]>();
         const allKeys = new Map<string, Map<string, KeyInfo>>();
@@ -102,7 +111,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 const rowsByTable = new Map<string, ColumnRow[]>();
 
                 for (const row of colResults) {
-                    const key = `${row.SCHEMA}.${row.OBJNAME}`;
+                    const key = objectKey(row.SCHEMA, row.OBJNAME);
                     if (!rowsByTable.has(key)) {
                         rowsByTable.set(key, []);
                     }
@@ -147,7 +156,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 interface DistRow { SCHEMA: string; TABLENAME: string; ATTNAME: string; }
                 const distResults = await executeQueryHelper<DistRow>(connection!, distQuery);
                 for (const row of distResults) {
-                    const key = `${row.SCHEMA}.${row.TABLENAME}`;
+                    const key = objectKey(row.SCHEMA, row.TABLENAME);
                     if (!allDistribution.has(key)) {
                         allDistribution.set(key, []);
                     }
@@ -171,7 +180,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 interface OrgRow { SCHEMA: string; TABLENAME: string; ATTNAME: string; }
                 const orgResults = await executeQueryHelper<OrgRow>(connection!, orgQuery);
                 for (const row of orgResults) {
-                    const key = `${row.SCHEMA}.${row.TABLENAME}`;
+                    const key = objectKey(row.SCHEMA, row.TABLENAME);
                     if (!allOrganize.has(key)) {
                         allOrganize.set(key, []);
                     }
@@ -202,7 +211,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 }
                 const keysResults = await executeQueryHelper<KeyRow>(connection!, keysQuery);
                 for (const row of keysResults) {
-                    const tableKey = `${row.SCHEMA}.${row.RELATION}`;
+                    const tableKey = objectKey(row.SCHEMA, row.RELATION);
                     if (!allKeys.has(tableKey)) {
                         allKeys.set(tableKey, new Map<string, KeyInfo>());
                     }
@@ -248,7 +257,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 const commentResults = await executeQueryHelper<CommentRow>(connection!, commentQuery);
                 for (const row of commentResults) {
                     if (row.DESCRIPTION) {
-                        allComments.set(`${row.SCHEMA}.${row.OBJNAME}`, row.DESCRIPTION);
+                        allComments.set(objectKey(row.SCHEMA, row.OBJNAME), row.DESCRIPTION);
                     }
                 }
             } catch {
@@ -258,7 +267,13 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
 
         const allProcedures = new Map<string, ProcedureInfo>();
         const allViews = new Map<string, string>();
-        const allSynonyms = new Map<string, { refObjName: string; owner: string; description: string | null }>();
+        const allSynonyms = new Map<string, {
+            refObjName: string;
+            owner: string;
+            description: string | null;
+            referenceDatabase: string | null;
+            referenceSchema: string | null;
+        }>();
         const allExternalTables = new Map<string, ExternalTableInfo>();
 
         // Bulk fetch procedures
@@ -293,7 +308,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 }
                 const procResults = await executeQueryHelper<ProcRow>(connection!, procQuery);
                 for (const row of procResults) {
-                    const key = `${row.SCHEMA}.${row.PROCEDURESIGNATURE}`;
+                    const key = objectKey(row.SCHEMA, row.PROCEDURESIGNATURE);
                     allProcedures.set(key, {
                         schema: row.SCHEMA,
                         procedureSource: row.PROCEDURESOURCE,
@@ -325,7 +340,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                 interface ViewRow { SCHEMA: string; VIEWNAME: string; DEFINITION: string; }
                 const viewResults = await executeQueryHelper<ViewRow>(connection!, viewQuery);
                 for (const row of viewResults) {
-                    allViews.set(`${row.SCHEMA}.${row.VIEWNAME}`, row.DEFINITION || '');
+                    allViews.set(objectKey(row.SCHEMA, row.VIEWNAME), row.DEFINITION || '');
                 }
             } catch (e: unknown) {
                 const msg = e instanceof Error ? e.message : String(e);
@@ -337,19 +352,24 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
         if (typesToProcess.includes('SYNONYM')) {
             const schemaClause = buildSchemaFilter(schemaFilter, 'SCHEMA');
             const synonymQuery = `
-                SELECT SCHEMA, OWNER, SYNONYM_NAME, REFOBJNAME, DESCRIPTION
+                SELECT SCHEMA, OWNER, SYNONYM_NAME, REFOBJNAME, DESCRIPTION, REFDATABASE, REFSCHEMA
                 FROM ${escapeSqlIdentifier(database)}.._V_SYNONYM
                 WHERE ${buildDatabaseFilter(database, 'DATABASE')}
                     ${schemaClause}
             `;
             try {
-                interface SynonymRow { SCHEMA: string; OWNER: string; SYNONYM_NAME: string; REFOBJNAME: string; DESCRIPTION: string; }
+                interface SynonymRow {
+                    SCHEMA: string; OWNER: string; SYNONYM_NAME: string; REFOBJNAME: string;
+                    DESCRIPTION: string | null; REFDATABASE: string | null; REFSCHEMA: string | null;
+                }
                 const synonymResults = await executeQueryHelper<SynonymRow>(connection!, synonymQuery);
                 for (const row of synonymResults) {
-                    allSynonyms.set(`${row.SCHEMA}.${row.SYNONYM_NAME}`, {
+                    allSynonyms.set(objectKey(row.SCHEMA, row.SYNONYM_NAME), {
                         refObjName: row.REFOBJNAME,
                         owner: row.OWNER,
-                        description: row.DESCRIPTION || null
+                        description: row.DESCRIPTION ?? null,
+                        referenceDatabase: row.REFDATABASE ?? null,
+                        referenceSchema: row.REFSCHEMA ?? null,
                     });
                 }
             } catch (e: unknown) {
@@ -368,7 +388,8 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                     E1.QUOTEDVALUE, E1.NULLVALUE, E1.CRINSTRING, E1.TRUNCSTRING, E1.CTRLCHARS, E1.IGNOREZERO,
                     E1.TIMEEXTRAZEROS, E1.Y2BASE, E1.FILLRECORD, E1.COMPRESS, E1.INCLUDEHEADER, E1.LFINSTRING,
                     E1.DATESTYLE, E1.DATEDELIM, E1.TIMEDELIM, E1.BOOLSTYLE, E1.FORMAT, E1.SOCKETBUFSIZE,
-                    E1.RECORDDELIM, E1.MAXROWS, E1.REQUIREQUOTES, E1.RECORDLENGTH, E1.DATETIMEDELIM, E1.REJECTFILE
+                    E1.RECORDDELIM, E1.MAXROWS, E1.REQUIREQUOTES, E1.RECORDLENGTH, E1.DATETIMEDELIM, E1.REJECTFILE,
+                    E1.LAYOUT, E1.INCLUDEZEROSECONDS, E1.MERIDIANDELIM
                 FROM ${escapeSqlIdentifier(database)}.._V_EXTERNAL E1
                 JOIN ${escapeSqlIdentifier(database)}.._V_EXTOBJECT E2 ON E1.RELID = E2.OBJID
                 WHERE ${buildDatabaseFilter(database, 'E1.DATABASE')}
@@ -384,7 +405,8 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                     COMPRESS: unknown; INCLUDEHEADER: unknown; LFINSTRING: unknown; DATESTYLE: string; DATEDELIM: string;
                     TIMEDELIM: string; BOOLSTYLE: string; FORMAT: string; SOCKETBUFSIZE: number;
                     RECORDDELIM: string; MAXROWS: number; REQUIREQUOTES: unknown; RECORDLENGTH: string;
-                    DATETIMEDELIM: string; REJECTFILE: string;
+                    DATETIMEDELIM: string; REJECTFILE: string; LAYOUT: unknown;
+                    INCLUDEZEROSECONDS: unknown; MERIDIANDELIM: string;
                 }
                 const parseBool = (val: unknown): boolean | null => {
                     if (val === null || val === undefined) return null;
@@ -394,44 +416,77 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                     return s === 't' || s === 'true' || s === '1' || s === 'yes' || s === 'on';
                 };
                 const extResults = await executeQueryHelper<ExtRow>(connection!, extQuery);
+                const zonesByTable = new Map<string, ExternalLayoutZoneRow[]>();
+                if (extResults.some(row => isExternalLayoutZoneCount(row.LAYOUT))) {
+                    const layoutQuery = `
+                        SELECT E1.SCHEMA, E1.TABLENAME, Z.USETYPE, Z.NAME, Z.TYPE, Z.STYLE,
+                               Z.LENGTH, Z.DELIMITER, Z.AROUND, Z.NULLIF, Z.ENDIAN, Z.ALIGNMENT, Z.MODULUS
+                        FROM ${escapeSqlIdentifier(database)}.._V_EXTERNAL E1
+                        JOIN ${escapeSqlIdentifier(database)}.._V_EXTZONES Z ON E1.RELID = Z.RELID
+                        WHERE ${buildDatabaseFilter(database, 'E1.DATABASE')}
+                            ${schemaClause}
+                        ORDER BY E1.SCHEMA, E1.TABLENAME, Z.ZONEID
+                    `;
+                    const layoutRows = await executeQueryHelper<ExternalLayoutZoneRow & { SCHEMA: string; TABLENAME: string }>(
+                        connection!, layoutQuery,
+                    );
+                    for (const zone of layoutRows) {
+                        const key = objectKey(zone.SCHEMA, zone.TABLENAME);
+                        const tableZones = zonesByTable.get(key) ?? [];
+                        tableZones.push(zone);
+                        zonesByTable.set(key, tableZones);
+                    }
+                }
                 for (const row of extResults) {
-                    allExternalTables.set(`${row.SCHEMA}.${row.TABLENAME}`, {
+                    const key = objectKey(row.SCHEMA, row.TABLENAME);
+                    const compression = row.COMPRESS === null || row.COMPRESS === undefined
+                        ? null
+                        : String(row.COMPRESS).trim();
+                    const compressionMode = compression &&
+                        !['true', 'false', 't', 'f', '1', '0', 'yes', 'no', 'on', 'off'].includes(compression.toLowerCase())
+                        ? compression
+                        : null;
+                    allExternalTables.set(objectKey(row.SCHEMA, row.TABLENAME), {
                         schema: row.SCHEMA,
                         tableName: row.TABLENAME,
-                        dataObject: row.EXTOBJNAME || null,
-                        delimiter: row.DELIM || null,
-                        encoding: row.ENCODING || null,
-                        timeStyle: row.TIMESTYLE || null,
-                        remoteSource: row.REMOTESOURCE || null,
-                        skipRows: row.SKIPROWS || null,
-                        maxErrors: row.MAXERRORS || null,
-                        escapeChar: row.ESCAPE || null,
-                        logDir: row.LOGDIR || null,
-                        decimalDelim: row.DECIMALDELIM || null,
-                        quotedValue: row.QUOTEDVALUE || null,
-                        nullValue: row.NULLVALUE || null,
+                        dataObject: row.EXTOBJNAME ?? null,
+                        delimiter: row.DELIM ?? null,
+                        encoding: row.ENCODING ?? null,
+                        timeStyle: row.TIMESTYLE ?? null,
+                        remoteSource: row.REMOTESOURCE ?? null,
+                        skipRows: row.SKIPROWS ?? null,
+                        maxErrors: row.MAXERRORS ?? null,
+                        escapeChar: row.ESCAPE ?? null,
+                        logDir: row.LOGDIR ?? null,
+                        decimalDelim: row.DECIMALDELIM ?? null,
+                        quotedValue: row.QUOTEDVALUE ?? null,
+                        nullValue: row.NULLVALUE ?? null,
                         crInString: parseBool(row.CRINSTRING),
                         truncString: parseBool(row.TRUNCSTRING),
                         ctrlChars: parseBool(row.CTRLCHARS),
                         ignoreZero: parseBool(row.IGNOREZERO),
                         timeExtraZeros: parseBool(row.TIMEEXTRAZEROS),
-                        y2Base: row.Y2BASE || null,
+                        y2Base: row.Y2BASE ?? null,
                         fillRecord: parseBool(row.FILLRECORD),
                         compress: parseBool(row.COMPRESS),
+                        compressionMode,
                         includeHeader: parseBool(row.INCLUDEHEADER),
                         lfInString: parseBool(row.LFINSTRING),
-                        dateStyle: row.DATESTYLE || null,
-                        dateDelim: row.DATEDELIM || null,
-                        timeDelim: row.TIMEDELIM || null,
-                        boolStyle: row.BOOLSTYLE || null,
-                        format: row.FORMAT || null,
-                        socketBufSize: row.SOCKETBUFSIZE || null,
-                        recordDelim: row.RECORDDELIM ? String(row.RECORDDELIM).replace(/\r/g, '\\r').replace(/\n/g, '\\n') : null,
-                        maxRows: row.MAXROWS || null,
+                        dateStyle: row.DATESTYLE ?? null,
+                        dateDelim: row.DATEDELIM ?? null,
+                        timeDelim: row.TIMEDELIM ?? null,
+                        boolStyle: row.BOOLSTYLE ?? null,
+                        format: row.FORMAT ?? null,
+                        socketBufSize: row.SOCKETBUFSIZE ?? null,
+                        recordDelim: row.RECORDDELIM === null || row.RECORDDELIM === undefined ? null : String(row.RECORDDELIM),
+                        layout: reconstructExternalLayout(row.LAYOUT, zonesByTable.get(key) ?? []),
+                        includeZeroSeconds: parseBool(row.INCLUDEZEROSECONDS),
+                        meridianDelim: row.MERIDIANDELIM ?? null,
+                        maxRows: row.MAXROWS ?? null,
                         requireQuotes: parseBool(row.REQUIREQUOTES),
-                        recordLength: row.RECORDLENGTH || null,
-                        dateTimeDelim: row.DATETIMEDELIM || null,
-                        rejectFile: row.REJECTFILE || null
+                        recordLength: row.RECORDLENGTH ?? null,
+                        dateTimeDelim: row.DATETIMEDELIM ?? null,
+                        rejectFile: row.REJECTFILE ?? null
                     });
                 }
             } catch (e: unknown) {
@@ -478,7 +533,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
             for (const obj of objects) {
                 try {
                     let ddlCode: string;
-                    const key = `${obj.schema}.${obj.name}`;
+                    const key = objectKey(obj.schema, obj.name);
 
                     switch (objType) {
                         case 'TABLE':
@@ -506,7 +561,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                             if (procData) {
                                 ddlCode = buildProcedureDDLFromCache(database, obj.schema, procData);
                             } else {
-                                throw new Error(`Metadata for procedure ${key} not found`);
+                                throw new Error(`Metadata for procedure ${obj.schema}.${obj.name} not found`);
                             }
                             break;
                         case 'EXTERNAL TABLE':
@@ -520,7 +575,7 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                                     allColumns.get(key) || []
                                 );
                             } else {
-                                throw new Error(`Metadata for external table ${key} not found`);
+                                throw new Error(`Metadata for external table ${obj.schema}.${obj.name} not found`);
                             }
                             break;
                         case 'SYNONYM':
@@ -532,10 +587,12 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                                     synData.refObjName,
                                     synData.owner,
                                     obj.schema,
-                                    synData.description
+                                    synData.description,
+                                    synData.referenceDatabase,
+                                    synData.referenceSchema
                                 );
                             } else {
-                                throw new Error(`Metadata for synonym ${key} not found`);
+                                throw new Error(`Metadata for synonym ${obj.schema}.${obj.name} not found`);
                             }
                             break;
                         default:
