@@ -40,7 +40,7 @@ async function main() {
   // their published ESM sources instead of shipping upstream production/minified
   // UMD files, so Marketplace artifacts stay readable and source-mapped.
   const tanStackTableCtx = await esbuild.context({
-    entryPoints: ['./node_modules/@tanstack/table-core/build/lib/index.mjs'],
+    entryPoints: ['./media/tanstack-table-core-entry.ts'],
     bundle: true,
     format: 'iife',
     globalName: 'TableCore',

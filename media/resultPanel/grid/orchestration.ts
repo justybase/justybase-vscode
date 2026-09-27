@@ -52,8 +52,6 @@ export function renderGrids() {
     const libs = validateRequiredLibraries();
     if (!libs) return;
 
-    const { createTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel, getGroupedRowModel, getExpandedRowModel } = libs.TableCore;
-
     getResultSets().forEach((rs, index) => {
         if (!rs) {
             addGrid(null);
@@ -67,7 +65,7 @@ export function renderGrids() {
             } else if (rs.isTextContent) {
                 createTextContentView(rs, index, container);
             } else {
-                createResultSetGrid(rs, index, container, createTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel, getGroupedRowModel, getExpandedRowModel);
+                createResultSetGrid(rs, index, container, libs.TableCore);
             }
         } catch (e: unknown) {
             console.error(`Error rendering grid ${index}:`, e);

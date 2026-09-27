@@ -28,6 +28,7 @@ import { updateRowCountInfo, applyRowLimitReachedFlag, renderRowCountInfo } from
 import { syncDiskStreamingRowCount } from './diskQuerySpec.js';
 import { syncAnalysisView } from './analysis.js';
 import { updateResultLimitBanner } from './banners.js';
+import { setTanStackTableData } from '../shared/tanstackShims.js';
 import { handleDatabaseAggregationResult, clearAllDatabaseAggregationPending } from './databaseAggregations.js';
 import { handleDatabaseGroupingResult, handleDatabaseGroupingPreviewResult } from './databaseGrouping.js';
 import { handleExploreHostMessage } from './explore/hostBridge.js';
@@ -1532,10 +1533,7 @@ export function handleAppendRows(message: Record<string, unknown>): void {
         const grid = getGrid(resultSetIndex);
 
         if (grid?.tanTable) {
-            if (!grid.tanTable.options) {
-                grid.tanTable.options = {};
-            }
-            grid.tanTable.options.data = rs.data;
+            setTanStackTableData(grid.tanTable, rs.data);
 
             const didLayoutChange = grid.refreshAutoSizedLayout?.() ?? false;
             if (didLayoutChange && grid.render) {

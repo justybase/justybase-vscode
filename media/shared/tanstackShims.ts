@@ -59,3 +59,22 @@ export interface TanStackTableLike<T = unknown> {
     getHeaderGroups: () => TanStackHeaderGroupLike[];
     getRowModel: () => { rows: TanStackRowLike<T>[] };
 }
+
+interface TanStackDataTableLike {
+    setOptions?: (updater: (previous: Record<string, unknown>) => Record<string, unknown>) => void;
+    options?: Record<string, unknown>;
+}
+
+/** Update v9's readonly data option through its supported options API. */
+export function setTanStackTableData(table: TanStackDataTableLike, data: unknown[]): void {
+    if (table.setOptions) {
+        table.setOptions(previous => ({ ...previous, data }));
+        return;
+    }
+
+    // Keep simple pre-v9 test doubles working; production v9 tables always
+    // take the setOptions branch above.
+    if (table.options) {
+        table.options.data = data;
+    }
+}

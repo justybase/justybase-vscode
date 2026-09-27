@@ -1,10 +1,4 @@
 import {
-    createTable,
-    getCoreRowModel,
-    getSortedRowModel,
-} from '@tanstack/table-core';
-import type { Row, Table } from '@tanstack/table-core';
-import {
     Virtualizer,
     elementScroll,
     observeElementRect,
@@ -35,8 +29,28 @@ interface TrackedChanges {
     inserts: EditDataRow[];
 }
 
+interface EditDataTanStackCell {
+    column: { id: string; columnDef: { cell?: (context: TanStackCellContext<unknown>) => Node | string } };
+    getContext: () => TanStackCellContext<unknown>;
+}
+
+interface EditDataTanStackRow {
+    original: EditDataRow;
+    getVisibleCells: () => EditDataTanStackCell[];
+}
+
+interface EditDataTanStackHeader {
+    column: { id: string; columnDef: { header?: unknown } };
+    getSize: () => number;
+}
+
+interface EditDataTanStackTable {
+    getRowModel: () => { rows: EditDataTanStackRow[] };
+    getHeaderGroups: () => Array<{ headers: EditDataTanStackHeader[] }>;
+}
+
 let nextInsertId = -1;
-let tanTable: Table<EditDataRow> | null = null;
+let tanTable: EditDataTanStackTable | null = null;
 let rowVirtualizer: Virtualizer<HTMLDivElement, Element> | null = null;
 
 const tableData: EditDataTableState = {
@@ -418,7 +432,8 @@ function renderTable(): void {
     ];
 
     try {
-        tanTable = createTable({
+        tanTable = TableCore.constructTable({
+            features: TableCore.webviewFeatures,
             data: tableData.working,
             columns: columnDefs,
             defaultColumn: {
@@ -427,12 +442,10 @@ function renderTable(): void {
                 maxSize: 500
             },
             state: {
-                columnPinning: { left: [], right: [] },
+                columnPinning: { start: [], end: [] },
                 columnSizing: { __actions: 40 },
             },
-            getCoreRowModel: getCoreRowModel(),
-            getSortedRowModel: getSortedRowModel(),
-        } as never);
+        }) as EditDataTanStackTable;
         console.log('[editDataPanel] TanStack Table created successfully');
 
         // Initialize Virtualizer
@@ -522,7 +535,7 @@ function renderTable(): void {
     // });
 }
 
-function renderRows(tbody: HTMLElement, rows: Row<EditDataRow>[]): void {
+function renderRows(tbody: HTMLElement, rows: EditDataTanStackRow[]): void {
     if (!rowVirtualizer) return;
 
     tbody.innerHTML = '';

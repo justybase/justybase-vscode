@@ -390,7 +390,12 @@ export function saveAllGridStates(): void {
             expanded: tableState?.expanded,
             columnOrder: tableState?.columnOrder,
             columnFilters: tableState?.columnFilters,
-            columnPinning: tableState?.columnPinning,
+            // Preserve the existing v1 persistence shape across the v9 API's
+            // logical `start` / `end` pinning names.
+            columnPinning: tableState?.columnPinning ? {
+                left: tableState.columnPinning.start ?? [],
+                right: tableState.columnPinning.end ?? [],
+            } : undefined,
             columnVisibility: tableState?.columnVisibility,
             globalFilter: tableState?.globalFilter,
             customColumnFilters: getColumnFilterState(rsIndex),

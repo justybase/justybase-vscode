@@ -104,8 +104,7 @@ import type {
     ResultSetWithExtras,
     FormatContext,
     ScheduleRenderFn,
-    CreateTableFn,
-    RowModelFactoryFn,
+    TableCoreModuleLike,
 } from './types.js';
 import { fetchRowsFromHost, isDiskBackedResultSet, queryDiskAggregations, refreshDiskQueryWindow, resolveDiskGridViewState, scheduleEnsureDiskWindow } from '../diskBackedGrid.js';
 import { getDiskFilteredCount, syncDiskQuerySpecFromGrid } from '../diskQuerySpec.js';
@@ -123,6 +122,7 @@ import {
 } from '../diskGrouping.js';
 import type { DiskGroupingDisplayRow } from '../diskGrouping.js';
 import type { ClipboardRowResolver } from '../selection/clipboard.js';
+import { setTanStackTableData } from '../../shared/tanstackShims.js';
 
 type GridRowVirtualizer = InstanceType<typeof VirtualCore.Virtualizer>;
 
@@ -130,12 +130,7 @@ export function createResultSetGrid(
     rs: ResultSetWithExtras,
     rsIndex: number,
     container: HTMLElement,
-    createTable: CreateTableFn,
-    getCoreRowModel: RowModelFactoryFn,
-    getSortedRowModel: RowModelFactoryFn,
-    getFilteredRowModel: RowModelFactoryFn,
-    getGroupedRowModel: RowModelFactoryFn,
-    getExpandedRowModel: RowModelFactoryFn,
+    tableCore?: TableCoreModuleLike,
 ): void {
     const wrapper = document.createElement('div');
     wrapper.className = 'grid-wrapper' + (rsIndex === getActiveGridIndex() ? ' active' : '');
@@ -302,6 +297,24 @@ export function createResultSetGrid(
     }, 200);
 
     let tanTable: GridTanStackTable;
+
+    const getV9TableState = () => ({
+        sorting: tableState.sorting,
+        globalFilter: tableState.globalFilter,
+        grouping: tableState.grouping,
+        expanded: tableState.expanded,
+        columnOrder: tableState.columnOrder,
+        columnFilters: tableState.columnFilters,
+        columnPinning: {
+            start: tableState.columnPinning.left,
+            end: tableState.columnPinning.right,
+        },
+        columnVisibility: tableState.columnVisibility,
+    });
+
+    const publishControlledState = (): void => {
+        tanTable.setOptions?.(previous => ({ ...previous, state: getV9TableState() }));
+    };
 
     const isResponsiveCollapseActive = (): boolean => (
         responsiveCollapseEnabled && tableState.grouping.length === 0
@@ -2205,25 +2218,22 @@ export function createResultSetGrid(
         return values;
     };
 
-    tanTable = createTable({
+    if (!tableCore) {
+        throw new Error('TanStack Table v9 runtime is required to render result rows');
+    }
+
+    tanTable = tableCore.constructTable({
+        features: tableCore.webviewFeatures,
         data: rs.data,
         columns,
         // TanStack invokes a global filter once for every globally filterable column.
         // The predicate below scans the complete row, so one invocation per row is enough.
         getColumnCanGlobalFilter: (column: { id: string }) => column.id === globalFilterColumnId,
-        state: {
-            get sorting() { return tableState.sorting; },
-            get globalFilter() { return tableState.globalFilter; },
-            get grouping() { return tableState.grouping; },
-            get expanded() { return tableState.expanded; },
-            get columnOrder() { return tableState.columnOrder; },
-            get columnFilters() { return tableState.columnFilters; },
-            get columnPinning() { return tableState.columnPinning; },
-            get columnVisibility() { return tableState.columnVisibility; }
-        },
+        state: getV9TableState(),
         onSortingChange: (updater) => {
             recordCurrentFilterHistory();
             tableState.sorting = typeof updater === 'function' ? updater(tableState.sorting) : updater;
+            publishControlledState();
             recordCurrentFilterHistory();
             if (getResultSetAt(rsIndex)?.storageMode === 'sqlite') {
                 syncDiskQuerySpecFromGrid(rsIndex);
@@ -2241,6 +2251,7 @@ export function createResultSetGrid(
         onGlobalFilterChange: (updater) => {
             recordCurrentFilterHistory();
             tableState.globalFilter = typeof updater === 'function' ? updater(tableState.globalFilter) : updater;
+            publishControlledState();
             recordCurrentFilterHistory();
             if (!tableState.globalFilter) {
                 globalFilterSearchCache = new WeakMap<object, FilterValueSearchText[]>();
@@ -2263,6 +2274,7 @@ export function createResultSetGrid(
         onColumnFiltersChange: (updater) => {
             recordCurrentFilterHistory();
             tableState.columnFilters = typeof updater === 'function' ? updater(tableState.columnFilters) : updater;
+            publishControlledState();
             recordCurrentFilterHistory();
             if (getResultSetAt(rsIndex)?.storageMode === 'sqlite') {
                 syncDiskQuerySpecFromGrid(rsIndex);
@@ -2279,6 +2291,7 @@ export function createResultSetGrid(
         },
         onGroupingChange: (updater) => {
             tableState.grouping = typeof updater === 'function' ? updater(tableState.grouping) : updater;
+            publishControlledState();
             if (getResultSetAt(rsIndex)?.storageMode === 'sqlite') {
                 syncDiskQuerySpecFromGrid(rsIndex);
                 if (tableState.grouping.length > 0) {
@@ -2296,12 +2309,14 @@ export function createResultSetGrid(
         },
         onExpandedChange: (updater) => {
             tableState.expanded = typeof updater === 'function' ? updater(tableState.expanded) : updater;
+            publishControlledState();
             invalidateRowNumberCache();
             scheduleRender();
             saveAllGridStates();
         },
         onColumnOrderChange: (updater) => {
             tableState.columnOrder = typeof updater === 'function' ? updater(tableState.columnOrder) : updater;
+            publishControlledState();
             scheduleRender({ chrome: true });
             saveAllGridStates();
             if (document.body.classList.contains('sidebar-layout') && rsIndex === getActiveGridIndex()) {
@@ -2309,12 +2324,23 @@ export function createResultSetGrid(
             }
         },
         onColumnPinningChange: (updater) => {
-            tableState.columnPinning = typeof updater === 'function' ? updater(tableState.columnPinning) : updater;
+            const current = {
+                start: tableState.columnPinning.left,
+                end: tableState.columnPinning.right,
+            };
+            const next = typeof updater === 'function' ? updater(current) : updater;
+            const nextPinning = next as { start?: string[]; end?: string[] };
+            tableState.columnPinning = {
+                left: nextPinning.start ?? [],
+                right: nextPinning.end ?? [],
+            };
+            publishControlledState();
             scheduleRender({ chrome: true });
             saveAllGridStates();
         },
         onColumnVisibilityChange: (updater) => {
             tableState.columnVisibility = typeof updater === 'function' ? updater(tableState.columnVisibility) : updater;
+            publishControlledState();
             scheduleRender({ chrome: true });
             saveAllGridStates();
             if (document.body.classList.contains('sidebar-layout') && rsIndex === getActiveGridIndex()) {
@@ -2370,11 +2396,6 @@ export function createResultSetGrid(
             }
             return false;
         },
-        getCoreRowModel: getCoreRowModel(),
-        getSortedRowModel: getSortedRowModel(),
-        getFilteredRowModel: getFilteredRowModel(),
-        getGroupedRowModel: getGroupedRowModel(),
-        getExpandedRowModel: getExpandedRowModel()
     }) as GridTanStackTable;
 
     // Reorder columns to ensure pinned columns are on the left
@@ -2482,7 +2503,7 @@ export function createResultSetGrid(
             lastVirtualizerKey = '';
             resolvedRowHeight = null;
             if (tanTable.options) {
-                tanTable.options.data = [];
+                setTanStackTableData(tanTable, []);
             }
             globalFilterSearchCache = new WeakMap<object, FilterValueSearchText[]>();
             rowPool.length = 0;

@@ -93,12 +93,14 @@ export interface TanStackTableState {
     globalFilter?: string;
     grouping?: string[];
     expanded?: Record<string, boolean>;
-    columnPinning?: { left?: string[]; right?: string[] };
+    columnPinning?: { start?: string[]; end?: string[] };
     columnVisibility?: Record<string, boolean>;
 }
 
 export interface TanStackTable {
     getState: () => TanStackTableState;
+    store?: { state: TanStackTableState };
+    setOptions?: (updater: (previous: Record<string, unknown>) => Record<string, unknown>) => void;
     getColumn: (columnId: string) => TanStackColumn;
     getCoreRowModel: () => { rows: TanStackRow[] };
     getFilteredRowModel: () => { rows: TanStackRow[] };
@@ -107,6 +109,7 @@ export interface TanStackTable {
     getVisibleLeafColumns: () => TanStackColumn[];
     getAllLeafColumns?: () => TanStackColumn[];
     setColumnOrder: (order: string[]) => void;
+    setColumnPinning?: (pinning: { start: string[]; end: string[] }) => void;
     setColumnFilters: (filters: Array<{ id: string; value: ColumnFilterValue }>) => void;
     setSorting: (sorting: Array<{ id: string; desc: boolean }>) => void;
     setGrouping: (grouping: string[]) => void;

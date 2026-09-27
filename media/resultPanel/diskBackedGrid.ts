@@ -4,6 +4,7 @@ import { clearAllSearchWorkerData } from './searchWorkerBridge.js';
 import { updateRowCountInfo } from './rowCount.js';
 import { getGrid, resetEditSession } from './state.js';
 import { getGridWrapperForResultSet, getScrollTarget } from './grid/persistence.js';
+import { setTanStackTableData } from '../shared/tanstackShims.js';
 import {
     diskQueryChangesRowCount,
     getDiskFilteredCount,
@@ -138,7 +139,7 @@ function invalidateDiskWindowBuffer(rs: ResultSet, rsIndex: number): void {
     }
     const grid = getGrid(rsIndex);
     if (grid?.tanTable?.options) {
-        grid.tanTable.options.data = [];
+        setTanStackTableData(grid.tanTable, []);
         grid.render?.();
     }
 }
@@ -461,7 +462,7 @@ function applyWindowResult(
     const preservedScrollTop = scrollTarget?.scrollTop ?? 0;
     const preservedScrollLeft = scrollTarget?.scrollLeft ?? 0;
     if (grid?.tanTable?.options) {
-        grid.tanTable.options.data = resultSet.data;
+        setTanStackTableData(grid.tanTable, resultSet.data);
         grid.render?.();
         if (scrollTarget && preservedScrollTop > 0) {
             scrollTarget.scrollTop = preservedScrollTop;
@@ -699,7 +700,7 @@ export function handleRowCountUpdate(message: Record<string, unknown>): void {
 
     const grid = getGrid(resultSetIndex);
     if (grid?.tanTable?.options && rs.data.length > 0) {
-        grid.tanTable.options.data = rs.data;
+        setTanStackTableData(grid.tanTable, rs.data);
         grid.createVirtualizer?.();
         grid.renderTableRows?.();
     }

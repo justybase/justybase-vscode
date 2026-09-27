@@ -5,21 +5,14 @@ declare const VirtualCore: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const TanStackTableCore: any;
 
-interface TableRowModelGetter {
-    (): { rows: unknown[] };
-}
-
-interface TableRowModelFactory {
-    (): TableRowModelGetter;
-}
-
 interface TableStateUpdater<T> {
     (updater: T | ((prev: T) => T)): void;
 }
 
 interface TableCreateOptions {
-    data: unknown[][];
+    data: unknown[];
     columns: unknown[];
+    features: unknown;
     state: Record<string, unknown>;
     onSortingChange?: TableStateUpdater<unknown>;
     onGlobalFilterChange?: TableStateUpdater<unknown>;
@@ -31,20 +24,15 @@ interface TableCreateOptions {
     onColumnVisibilityChange?: TableStateUpdater<unknown>;
     globalFilterFn?: (row: unknown, columnId: string, filterValue: string) => boolean;
     getColumnCanGlobalFilter?: (column: { id: string }) => boolean;
-    getCoreRowModel: TableRowModelGetter;
-    getSortedRowModel: TableRowModelGetter;
-    getFilteredRowModel: TableRowModelGetter;
-    getGroupedRowModel: TableRowModelGetter;
-    getExpandedRowModel: TableRowModelGetter;
+    [option: string]: unknown;
 }
 
 interface TableCoreModule {
-    createTable: (options: TableCreateOptions) => unknown;
-    getCoreRowModel: TableRowModelFactory;
-    getSortedRowModel: TableRowModelFactory;
-    getFilteredRowModel: TableRowModelFactory;
-    getGroupedRowModel: TableRowModelFactory;
-    getExpandedRowModel: TableRowModelFactory;
+    constructTable: (options: TableCreateOptions) => unknown;
+    createColumnHelper: () => {
+        accessor: <TData>(accessor: (row: TData) => unknown, column: Record<string, unknown>) => unknown;
+    };
+    webviewFeatures: unknown;
 }
 
 declare const TableCore: TableCoreModule;

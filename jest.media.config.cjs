@@ -8,8 +8,10 @@ module.exports = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   resolver: '<rootDir>/scripts/jest-media-resolver.cjs',
   transform: {
+    '^.+/node_modules/@tanstack/(?:table-core|store)/.+\\.js$': 'babel-jest',
     '^.+\\.[cm]?[jt]sx?$': ['ts-jest', { tsconfig: 'tsconfig.media.json' }],
   },
+  transformIgnorePatterns: ['/node_modules/(?!@tanstack/(?:table-core|store)/)'],
   moduleNameMapper: {
     '^@justybase/contracts$': '<rootDir>/packages/contracts/src/index.ts',
     '^@justybase/result-core$': '<rootDir>/packages/result-core/src/index.ts',

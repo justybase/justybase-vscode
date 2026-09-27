@@ -244,6 +244,9 @@ export async function scheduleDeferredColumnWidthInit(
 }
 
 export function initializeTableState(savedState: SavedGridState | null | undefined): GridTableState {
+    const savedPinning = savedState?.columnPinning && typeof savedState.columnPinning === 'object'
+        ? savedState.columnPinning as Record<string, unknown>
+        : undefined;
     return {
         sorting: Array.isArray(savedState?.sorting) ? savedState.sorting as GridTableState['sorting'] : [],
         globalFilter: typeof savedState?.globalFilter === 'string' ? savedState.globalFilter : '',
@@ -255,9 +258,14 @@ export function initializeTableState(savedState: SavedGridState | null | undefin
         columnFilters: Array.isArray(savedState?.columnFilters)
             ? savedState.columnFilters as GridTableState['columnFilters']
             : [],
-        columnPinning: savedState?.columnPinning && typeof savedState.columnPinning === 'object'
-            ? savedState.columnPinning as GridTableState['columnPinning']
-            : { left: [], right: [] },
+        columnPinning: {
+            left: Array.isArray(savedPinning?.left)
+                ? savedPinning.left as string[]
+                : Array.isArray(savedPinning?.start) ? savedPinning.start as string[] : [],
+            right: Array.isArray(savedPinning?.right)
+                ? savedPinning.right as string[]
+                : Array.isArray(savedPinning?.end) ? savedPinning.end as string[] : [],
+        },
         columnVisibility: savedState?.columnVisibility && typeof savedState.columnVisibility === 'object'
             ? savedState.columnVisibility as Record<string, boolean>
             : {},
