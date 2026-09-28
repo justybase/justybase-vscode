@@ -244,13 +244,13 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
             }
         }
 
-        // Bulk fetch table comments
-        if (processTables) {
+        // Bulk fetch table and view comments
+        if (processTables || processViews) {
             const schemaClause = buildSchemaFilter(schemaFilter, 'SCHEMA');
             const commentQuery = `
                 SELECT SCHEMA, OBJNAME, DESCRIPTION
                 FROM ${escapeSqlIdentifier(database)}.._V_OBJECT_DATA
-                WHERE ${buildDatabaseFilter(database)} AND OBJTYPE = 'TABLE' AND DESCRIPTION IS NOT NULL ${schemaClause}
+                WHERE ${buildDatabaseFilter(database)} AND OBJTYPE IN ('TABLE', 'VIEW') AND DESCRIPTION IS NOT NULL ${schemaClause}
             `;
             try {
                 interface CommentRow { SCHEMA: string; OBJNAME: string; DESCRIPTION: string; }
@@ -553,7 +553,9 @@ export async function generateBatchDDL(options: BatchDDLOptions): Promise<BatchD
                                 database,
                                 obj.schema,
                                 obj.name,
-                                allViews.get(key) || ''
+                                allViews.get(key) || '',
+                                allComments.get(key) || null,
+                                allColumns.get(key) || [],
                             );
                             break;
                         case 'PROCEDURE':

@@ -84,4 +84,24 @@ COMMENT ON COLUMN MYDB.ADMIN.USERS."Display Name" IS 'Owner''s display name';`);
     expect(buildNetezzaViewDdl('MYDB', 'ADMIN', 'V_USERS', 'SELECT ID FROM MYDB.ADMIN.USERS;'))
       .toBe('CREATE OR REPLACE VIEW MYDB.ADMIN.V_USERS AS\nSELECT ID FROM MYDB.ADMIN.USERS;');
   });
+
+  it('adds view and non-empty column comments with escaped literals and quoted identifiers', () => {
+    expect(buildNetezzaViewDdl(
+      'MYDB',
+      'ADMIN',
+      'View Name',
+      'SELECT ID, "Display Name" FROM MYDB.ADMIN.USERS;',
+      "Owner's view",
+      [
+        { name: 'ID', description: 'Owner\'s identifier', fullTypeName: 'INTEGER', notNull: false, defaultValue: null },
+        { name: 'Display Name', description: 'Visible name', fullTypeName: 'VARCHAR(80)', notNull: false, defaultValue: null },
+        { name: 'EMPTY', description: '   ', fullTypeName: 'VARCHAR(1)', notNull: false, defaultValue: null },
+      ],
+    )).toBe(`CREATE OR REPLACE VIEW MYDB.ADMIN."View Name" AS
+SELECT ID, "Display Name" FROM MYDB.ADMIN.USERS;
+
+COMMENT ON VIEW MYDB.ADMIN."View Name" IS 'Owner''s view';
+COMMENT ON COLUMN MYDB.ADMIN."View Name".ID IS 'Owner''s identifier';
+COMMENT ON COLUMN MYDB.ADMIN."View Name"."Display Name" IS 'Visible name';`);
+  });
 });

@@ -16,6 +16,7 @@ export {
     getOrganizeInfo,
     getKeysInfo,
     getTableComment,
+    getViewComment,
     getTableOwner
 } from './metadata';
 

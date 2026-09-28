@@ -125,9 +125,26 @@ export function buildNetezzaViewDdl(
   schema: string,
   viewName: string,
   definition: string,
+  viewComment: string | null = null,
+  columns: readonly DatabaseDdlColumnInfo[] = [],
 ): string {
-  return [
-    `CREATE OR REPLACE VIEW ${quoteNetezzaIdentifier(database)}.${quoteNetezzaIdentifier(schema)}.${quoteNetezzaIdentifier(viewName)} AS`,
+  const qualifiedView = [database, schema, viewName].map(quoteNetezzaIdentifier).join('.');
+  const ddlLines = [
+    `CREATE OR REPLACE VIEW ${qualifiedView} AS`,
     definition || '',
-  ].join('\n');
+  ];
+
+  if (viewComment?.trim()) {
+    ddlLines.push('', `COMMENT ON VIEW ${qualifiedView} IS '${quoteSqlString(viewComment.trim())}';`);
+  }
+
+  for (const column of columns) {
+    if (!column.description?.trim()) continue;
+    ddlLines.push(
+      `COMMENT ON COLUMN ${qualifiedView}.${quoteNetezzaIdentifier(column.name)} `
+      + `IS '${quoteSqlString(column.description.trim())}';`,
+    );
+  }
+
+  return ddlLines.join('\n');
 }

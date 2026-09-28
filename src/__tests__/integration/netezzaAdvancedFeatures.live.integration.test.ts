@@ -200,6 +200,8 @@ describeIfFixture('Netezza advanced features live contract', () => {
 
         await executeNetezza(connection, `CREATE VIEW ${qualified(fixture, fixture.view)} AS SELECT ID, CODE, AMOUNT FROM ${qualified(fixture, fixture.parent)}`);
         fixture.objects.push({ kind: 'VIEW', name: fixture.view });
+        await executeNetezza(connection, `COMMENT ON VIEW ${qualified(fixture, fixture.view)} IS 'JBL live view comment'`);
+        await executeNetezza(connection, `COMMENT ON COLUMN ${qualified(fixture, fixture.view)}.ID IS 'JBL live view column comment'`);
 
         await executeNetezza(connection, `CREATE EXTERNAL TABLE ${qualified(fixture, fixture.external)} (ID INTEGER, LABEL CHAR(10), EVENT_DATE DATE) USING (DATAOBJECT('/tmp/${fixture.external}.csv') FORMAT 'FIXED' RECORDLENGTH 24 RECORDDELIM '\r\n' LAYOUT (BYTES 4, BYTES 10, DATE YMD ' ' BYTES 10))`);
         fixture.objects.push({ kind: 'EXTERNAL TABLE', name: fixture.external });
@@ -277,6 +279,10 @@ describeIfFixture('Netezza advanced features live contract', () => {
         expect(viewDdl.toUpperCase()).toContain('VIEW');
         expect(viewDdl.toUpperCase()).toContain(fixture.view);
         expect(viewDdl.toUpperCase()).toContain(fixture.parent);
+        expect(viewDdl).toContain("COMMENT ON VIEW");
+        expect(viewDdl).toContain('JBL live view comment');
+        expect(viewDdl).toContain("COMMENT ON COLUMN");
+        expect(viewDdl).toContain('JBL live view column comment');
 
         const procedureDdl = await ddl!.generateProcedureDDL(
             asDatabaseConnection(connection),
@@ -347,6 +353,8 @@ describeIfFixture('Netezza advanced features live contract', () => {
         expect(batch.success).toBe(true);
         expect(batch.objectCount).toBeGreaterThanOrEqual(5);
         expect(batch.ddlCode?.toUpperCase()).toContain(fixture.parent);
+        expect(batch.ddlCode).toContain('JBL live view comment');
+        expect(batch.ddlCode).toContain('JBL live view column comment');
     }, 180000);
 
     it('executes live EXPLAIN output through the Netezza tuning advisor', async () => {

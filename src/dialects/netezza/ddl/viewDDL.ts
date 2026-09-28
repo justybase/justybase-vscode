@@ -6,6 +6,8 @@ import { executeQueryHelper } from './helpers';
 import { buildNetezzaViewDdl } from '@justybase/designer-core';
 import type { NzConnection } from '../../../types';
 import { NZ_SYSTEM_VIEWS } from '../metadata/systemQueries';
+import { getColumns, getViewComment } from './metadata';
+import type { ColumnInfo } from './types';
 
 /**
  * Build view DDL from definition string
@@ -14,9 +16,11 @@ export function buildViewDDLFromCache(
     database: string,
     schema: string,
     viewName: string,
-    definition: string
+    definition: string,
+    viewComment: string | null = null,
+    columns: readonly ColumnInfo[] = [],
 ): string {
-    return buildNetezzaViewDdl(database, schema, viewName, definition);
+    return buildNetezzaViewDdl(database, schema, viewName, definition, viewComment, columns);
 }
 
 /**
@@ -54,5 +58,7 @@ export async function generateViewDDL(
     }
 
     const row = rows[0];
-    return buildViewDDLFromCache(database, schema, viewName, row.DEFINITION);
+    const columns = await getColumns(connection, database, schema, viewName);
+    const viewComment = await getViewComment(connection, database, schema, viewName);
+    return buildViewDDLFromCache(database, schema, viewName, row.DEFINITION, viewComment, columns);
 }

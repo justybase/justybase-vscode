@@ -85,6 +85,42 @@ describe('batchDDL', () => {
         expect(result.ddlCode).toContain('-- SYNONYM DDL');
     });
 
+    it('passes view and column comments into the batch view formatter', async () => {
+        (helpers.executeQueryHelper as jest.Mock).mockImplementation((_conn, sql) => {
+            if (sql.includes('_V_RELATION_COLUMN')) {
+                return [{
+                    SCHEMA: 'S1', OBJNAME: 'V1', OBJTYPE: 'VIEW', ATTNAME: 'C1',
+                    DESCRIPTION: 'Column comment', FULL_TYPE: 'INTEGER', ATTNOTNULL: 0,
+                }];
+            }
+            if (sql.includes('DESCRIPTION IS NOT NULL')) {
+                expect(sql).toContain("OBJTYPE IN ('TABLE', 'VIEW')");
+                return [{ SCHEMA: 'S1', OBJNAME: 'V1', DESCRIPTION: 'View comment' }];
+            }
+            if (sql.includes('_V_VIEW')) {
+                return [{ SCHEMA: 'S1', VIEWNAME: 'V1', DEFINITION: 'SELECT C1 FROM T1' }];
+            }
+            if (sql.includes("OBJTYPE = 'VIEW'")) return [{ OBJNAME: 'V1', SCHEMA: 'S1' }];
+            return [];
+        });
+
+        const result = await generateBatchDDL({ ...mockOptions, objectTypes: ['VIEW'] });
+        const buildViewDDL = require('../ddl/viewDDL').buildViewDDLFromCache;
+
+        expect(result.errors).toEqual([]);
+        expect(buildViewDDL).toHaveBeenCalledWith(
+            'TESTDB',
+            'S1',
+            'V1',
+            'SELECT C1 FROM T1',
+            'View comment',
+            expect.arrayContaining([expect.objectContaining({
+                name: 'C1',
+                description: 'Column comment',
+            })]),
+        );
+    });
+
     it('should handle different column NOT NULL representations', async () => {
         (helpers.executeQueryHelper as jest.Mock).mockImplementation((_conn, sql) => {
             if (sql.includes('_V_RELATION_COLUMN')) {
