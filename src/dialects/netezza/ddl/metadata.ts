@@ -198,27 +198,44 @@ export async function getTableComment(
     schema: string,
     tableName: string
 ): Promise<string | null> {
+    return getObjectComment(connection, database, schema, tableName, 'TABLE');
+}
+
+/** Get a view comment, falling back to an untyped object lookup for catalog variants. */
+export async function getViewComment(
+    connection: NzConnection,
+    database: string,
+    schema: string,
+    viewName: string
+): Promise<string | null> {
+    return getObjectComment(connection, database, schema, viewName, 'VIEW');
+}
+
+async function getObjectComment(
+    connection: NzConnection,
+    database: string,
+    schema: string,
+    objectName: string,
+    objectType: string
+): Promise<string | null> {
     try {
-        // Use centralized query builder for object comment
-        const sql = NZ_QUERIES.getObjectComment(database, schema, tableName, 'TABLE');
+        const sql = NZ_QUERIES.getObjectComment(database, schema, objectName, objectType);
         const result = await executeQueryHelper<{ DESCRIPTION: string }>(connection, sql);
-        if (result.length > 0 && result[0].DESCRIPTION) {
+        if (result.length > 0 && result[0].DESCRIPTION?.trim()) {
             return result[0].DESCRIPTION;
         }
     } catch {
-        // Try without OBJTYPE filter
-        try {
-            const sql = NZ_QUERIES.getObjectComment(database, schema, tableName);
-            const result = await executeQueryHelper<{ DESCRIPTION: string }>(connection, sql);
-            if (result.length > 0 && result[0].DESCRIPTION) {
-                return result[0].DESCRIPTION;
-            }
-        } catch {
-            // Silently ignore - comments are optional
-        }
+        // Some catalog versions need the untyped lookup below.
     }
 
-    return null;
+    try {
+        const sql = NZ_QUERIES.getObjectComment(database, schema, objectName);
+        const result = await executeQueryHelper<{ DESCRIPTION: string }>(connection, sql);
+        return result[0]?.DESCRIPTION?.trim() ? result[0].DESCRIPTION : null;
+    } catch {
+        // Comments are optional and unavailable in some catalog versions.
+        return null;
+    }
 }
 
 /**
