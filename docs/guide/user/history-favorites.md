@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.18.0
+product_version: 3.18.1
 ---
 
 # Query History and Favorites
