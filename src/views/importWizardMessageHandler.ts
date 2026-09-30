@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
+import * as path from "node:path";
 import type {
   ImportWizardInboundMessage,
   ImportWizardOutboundMessage,
   ImportWizardPreviewKind,
 } from "../contracts/webviews";
 import type { ConnectionManager } from "../core/connectionManager";
+import { createClipboardImportSource, removeClipboardImportSource } from "../import/clipboardImportSource";
 import { getOutputChannel } from "../core/queryRunnerUtils";
 import type { ImportResult } from "../import/dataImporter";
 import { ImportWizardService } from "../import/wizard/ImportWizardService";
@@ -18,6 +20,7 @@ import type {
 import { presentAccessError } from "../utils/accessErrorHandling";
 
 interface ImportWizardMessageHandlerDependencies {
+  context: vscode.ExtensionContext;
   service: ImportWizardService;
   connectionManager: ConnectionManager;
   catalogService: ImportTargetCatalogService;
@@ -25,6 +28,7 @@ interface ImportWizardMessageHandlerDependencies {
     message: ImportWizardOutboundMessage,
   ) => Thenable<boolean> | Promise<boolean>;
   onTargetTableChanged?: (targetTable: string) => void;
+  onClose?: () => void;
 }
 
 function renderExecutionPlanDocument(state: ImportWizardState): string {
@@ -90,15 +94,50 @@ export class ImportWizardMessageHandler {
   private sessionId?: string;
   private webviewReady = false;
   private connectionName?: string;
+  private currentOptions?: ImportWizardSessionOptions;
+  private clipboardSourceDirectory?: string;
+  private isExecuting = false;
+  private isTransitioning = false;
 
   public constructor(
     private readonly deps: ImportWizardMessageHandlerDependencies,
   ) {}
 
-  public async initialize(options: ImportWizardSessionOptions): Promise<void> {
+  public async initialize(
+    options: ImportWizardSessionOptions,
+    fromSessionTransition = false,
+  ): Promise<void> {
+    if (this.isExecuting || (this.isTransitioning && !fromSessionTransition)) {
+      if (options.clipboardSourceDirectory !== this.clipboardSourceDirectory) {
+        await removeClipboardImportSource(options.clipboardSourceDirectory);
+      }
+      throw new Error("An import or source change is already in progress.");
+    }
+
+    const previousPath = this.currentOptions?.filePath;
     if (this.sessionId) {
       this.deps.service.disposeSession(this.sessionId);
     }
+
+    if (previousPath && previousPath !== options.filePath && this.clipboardSourceDirectory) {
+      await removeClipboardImportSource(this.clipboardSourceDirectory);
+      this.clipboardSourceDirectory = undefined;
+    }
+
+    this.currentOptions = { ...options };
+    this.clipboardSourceDirectory = options.clipboardSourceDirectory;
+
+    const availableConnections = await Promise.all(
+      this.deps.connectionManager.getConnectionNames().map(async (name) => {
+        const details = await this.deps.connectionManager.getConnection(name);
+        return details ? {
+          name,
+          label: details.name || name,
+          database: details.database,
+          databaseKind: details.dbType,
+        } : undefined;
+      }),
+    );
 
     const catalog = await this.deps.catalogService.loadCatalog(
       options.connectionName,
@@ -106,6 +145,7 @@ export class ImportWizardMessageHandler {
     );
     const state = await this.deps.service.createSession({
       ...options,
+      availableConnections: availableConnections.filter((item) => item !== undefined),
       availableDatabases: catalog.availableDatabases,
       availableSchemas: [],
     });
@@ -134,6 +174,9 @@ export class ImportWizardMessageHandler {
   public async handleMessage(
     message: ImportWizardInboundMessage,
   ): Promise<void> {
+    if (this.isExecuting || this.isTransitioning) {
+      return;
+    }
     switch (message.type) {
       case "ready":
         this.webviewReady = true;
@@ -195,6 +238,35 @@ export class ImportWizardMessageHandler {
           DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE,
         );
         return;
+      case "setHasHeaders":
+        await this.deps.service.setHasHeaders(
+          this.requireSessionId(),
+          Boolean(message.hasHeaders),
+        );
+        await this.postState();
+        this.startBackgroundValidation(DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE);
+        return;
+      case "setCreateTable":
+        await this.deps.service.setCreateTable(
+          this.requireSessionId(),
+          Boolean(message.createTable),
+        );
+        await this.postState();
+        return;
+      case "setConnection":
+        await this.runSessionTransition(() =>
+          this.switchConnection(message.connectionName),
+        );
+        return;
+      case "requestClipboardSource":
+        await this.runSessionTransition(() => this.loadClipboardSource());
+        return;
+      case "requestFileSource":
+        await this.runSessionTransition(() => this.loadFileSource());
+        return;
+      case "closeWizard":
+        this.deps.onClose?.();
+        return;
       case "setTargetDatabase":
         await this.deps.service.setTargetDatabase(
           this.requireSessionId(),
@@ -249,6 +321,102 @@ export class ImportWizardMessageHandler {
       this.deps.service.disposeSession(this.sessionId);
     }
     this.sessionId = undefined;
+    void removeClipboardImportSource(this.clipboardSourceDirectory);
+    this.clipboardSourceDirectory = undefined;
+    this.currentOptions = undefined;
+  }
+
+  private async switchConnection(connectionName: string): Promise<void> {
+    const currentOptions = this.currentOptions;
+    if (!currentOptions || !connectionName || connectionName === this.connectionName) {
+      return;
+    }
+    const connectionDetails = await this.deps.connectionManager.getConnectionDetailsForImport(
+      undefined,
+      connectionName,
+    );
+    if (!connectionDetails) {
+      throw new Error(`Connection "${connectionName}" is unavailable.`);
+    }
+    const currentState = this.getState();
+    await this.initialize({
+      ...currentOptions,
+      connectionName,
+      connectionDetails,
+      targetTable: currentState.targetLocation.tableName,
+      hasHeaders: currentState.hasHeaders,
+      createTable: currentState.createTable,
+    }, true);
+  }
+
+  private async runSessionTransition(action: () => Promise<void>): Promise<void> {
+    if (this.isExecuting || this.isTransitioning) {
+      return;
+    }
+    this.isTransitioning = true;
+    try {
+      await this.deps.postMessage({ type: "sessionTransitionStarted" });
+      await action();
+    } finally {
+      this.isTransitioning = false;
+      await this.deps.postMessage({ type: "sessionTransitionFinished" });
+    }
+  }
+
+  private async loadClipboardSource(): Promise<void> {
+    const currentOptions = this.currentOptions;
+    if (!currentOptions) {
+      return;
+    }
+    let sourceDirectory: string | undefined;
+    try {
+      const text = await vscode.env.clipboard.readText();
+      const source = await createClipboardImportSource(
+        this.deps.context.globalStorageUri.fsPath,
+        text,
+      );
+      sourceDirectory = source.directoryPath;
+      const currentState = this.getState();
+      await this.initialize({
+        ...currentOptions,
+        filePath: source.filePath,
+        sourceKind: "clipboard",
+        sourceName: "Clipboard",
+        clipboardSourceDirectory: source.directoryPath,
+        targetTable: currentState.targetTable,
+        hasHeaders: true,
+      }, true);
+    } catch (error) {
+      await removeClipboardImportSource(sourceDirectory);
+      vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async loadFileSource(): Promise<void> {
+    const currentOptions = this.currentOptions;
+    if (!currentOptions) {
+      return;
+    }
+    const [uri] = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: { "Tabular data": ["csv", "txt", "xlsx", "xlsb"] },
+      title: "Choose import source",
+    }) || [];
+    if (!uri) {
+      return;
+    }
+    const currentTable = this.getState().targetTable;
+    await this.initialize({
+      ...currentOptions,
+      filePath: uri.fsPath,
+      sourceKind: "file",
+      sourceName: path.basename(uri.fsPath),
+      clipboardSourceDirectory: undefined,
+      targetTable: currentTable,
+      hasHeaders: undefined,
+    }, true);
   }
 
   private startBackgroundValidation(sampleSize: number): void {
@@ -420,11 +588,15 @@ export class ImportWizardMessageHandler {
   }
 
   private async executeImport(): Promise<void> {
+    if (this.isExecuting || this.isTransitioning) {
+      return;
+    }
     const sessionId = this.requireSessionId();
     const state = this.getState();
-    await this.deps.postMessage({ type: "executionStarted" });
+    this.isExecuting = true;
 
     try {
+      await this.deps.postMessage({ type: "executionStarted" });
       const result = await vscode.window.withProgress<ImportResult>(
         {
           location: vscode.ProgressLocation.Window,
@@ -463,6 +635,8 @@ export class ImportWizardMessageHandler {
       const message = error instanceof Error ? error.message : String(error);
       vscode.window.showErrorMessage(`Advanced import failed: ${message}`);
       await this.deps.postMessage({ type: "executionFailed", message });
+    } finally {
+      this.isExecuting = false;
     }
   }
 }

@@ -315,7 +315,7 @@ export async function importDataToDb2(
         }
 
         progressCallback?.('Analyzing source file...');
-        const importer = createTabularDataImporter(filePath, targetTable, { kind: 'db2' });
+        const importer = createTabularDataImporter(filePath, targetTable, { kind: 'db2', hasHeaders: columnOptions?.hasHeaders });
         await importer.analyzeDataTypes(progressCallback);
         importer.applyColumnOptions(columnOptions);
 
@@ -336,9 +336,11 @@ export async function importDataToDb2(
             dbType: 'db2'
         });
 
-        const createTableSql = buildCreateTableSql(target, columns);
-        progressCallback?.(`Creating target table ${target.displayName}...`);
-        await executeStatement(connection, createTableSql, 3600);
+        if (!columnOptions?.appendToExistingTable) {
+            const createTableSql = buildCreateTableSql(target, columns);
+            progressCallback?.(`Creating target table ${target.displayName}...`);
+            await executeStatement(connection, createTableSql, 3600);
+        }
 
         const insertedRows = await insertRows(
             connection,

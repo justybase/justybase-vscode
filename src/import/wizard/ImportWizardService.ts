@@ -60,6 +60,20 @@ export class ImportWizardService {
     return this.requireSession(sessionId).setPreviewRowCount(previewRowCount);
   }
 
+  public async setHasHeaders(
+    sessionId: string,
+    hasHeaders: boolean,
+  ): Promise<ImportWizardState> {
+    return this.requireSession(sessionId).setHasHeaders(hasHeaders);
+  }
+
+  public async setCreateTable(
+    sessionId: string,
+    createTable: boolean,
+  ): Promise<ImportWizardState> {
+    return this.requireSession(sessionId).setCreateTable(createTable);
+  }
+
   public async setSheet(
     sessionId: string,
     sheetName?: string,

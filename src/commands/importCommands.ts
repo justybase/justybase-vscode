@@ -11,12 +11,12 @@ import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import type { ImportColumnOptions } from '../import/dataImporter';
 import {
     getImportDialectLabel,
-    importClipboardDataForConnection,
     importDataForConnection,
     resolveImportDialect,
     type SupportedImportDialect,
 } from '../import/importDispatcher';
 import { ImportWizardService } from '../import/wizard/ImportWizardService';
+import { createClipboardImportSource, removeClipboardImportSource } from '../import/clipboardImportSource';
 import type { MetadataCache } from '../metadataCache';
 import { getCachedColumnsFromMetadataCacheAsync } from '../metadata/columnCacheLookup';
 import { formatInListPaste } from './inListPasteFormatter';
@@ -240,6 +240,24 @@ interface ImportCommandContext {
     connectionDetails: ManagedConnectionDetails;
     sourceFile: string;
     targetTable: string;
+    sourceKind?: 'file' | 'clipboard';
+    sourceName?: string;
+    clipboardSourceDirectory?: string;
+}
+
+function suggestWizardTargetTable(dbType: string | undefined, sourceName: string): string {
+    const sourceStem = sourceName === 'Clipboard'
+        ? 'CLIPBOARD_IMPORT'
+        : sourceName.replace(/\.[^.]+$/, '');
+    const normalizedStem = sourceStem
+        .replace(/[^A-Za-z0-9_]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase()
+        .slice(0, 40) || 'IMPORTED_DATA';
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const suffix = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    return applyGeneratedIdentifierCase(`${normalizedStem}_${date}_${suffix}`, dbType);
 }
 
 interface ImportWizardConfiguration {
@@ -624,49 +642,6 @@ async function resolveSourceFile(filePath?: string | vscode.Uri): Promise<string
     return fileUris[0].fsPath;
 }
 
-async function resolveAdvancedTargetTable(
-    context: vscode.ExtensionContext,
-    connectionName: string | undefined,
-    connectionManager: ConnectionManager,
-    connectionDetails: ManagedConnectionDetails,
-    documentUri?: string,
-): Promise<string | undefined> {
-    const targetTableName = await vscode.window.showInputBox({
-        prompt: 'Enter target table name (database and schema can be selected in the wizard)',
-        placeHolder: 'TABLE_NAME',
-        validateInput: (value) => {
-            if (!value || value.trim().length === 0) {
-                return null;
-            }
-            if (value.includes('.')) {
-                return 'Enter only the table name. Choose database and schema in the Advanced Import Wizard.';
-            }
-            return null;
-        },
-    });
-
-    if (targetTableName === undefined) {
-        return undefined;
-    }
-
-    if (!targetTableName || targetTableName.trim().length === 0) {
-        const autoName = await generateAutoTableName(
-            context,
-            connectionName,
-            connectionManager,
-            connectionDetails.dbType,
-            documentUri,
-        );
-        if (!autoName) {
-            return undefined;
-        }
-        vscode.window.showInformationMessage(`Auto-generated table name: ${autoName}`);
-        return autoName;
-    }
-
-    return targetTableName.trim();
-}
-
 async function resolveTargetTable(
     context: vscode.ExtensionContext,
     connectionName: string | undefined,
@@ -736,7 +711,6 @@ async function resolveImportCommandContext(
 }
 
 async function resolveAdvancedImportCommandContext(
-    context: vscode.ExtensionContext,
     connectionManager: ConnectionManager,
     filePath?: string | vscode.Uri,
 ): Promise<ImportCommandContext | undefined> {
@@ -753,22 +727,16 @@ async function resolveAdvancedImportCommandContext(
         return undefined;
     }
 
-    const targetTable = await resolveAdvancedTargetTable(
-        context,
-        connectionName,
-        connectionManager,
-        connectionDetails,
-        documentUri,
-    );
-    if (!targetTable) {
-        return undefined;
-    }
+    const sourceName = sourceFile.split(/[\\/]/).pop() || 'data file';
+    const targetTable = suggestWizardTargetTable(connectionDetails.dbType, sourceName);
 
     return {
         connectionName,
         connectionDetails,
         sourceFile,
         targetTable,
+        sourceKind: 'file',
+        sourceName,
     };
 }
 
@@ -817,6 +785,9 @@ async function openAdvancedImportWizard(
     const wizardConfig = getImportWizardConfiguration();
     await ImportWizardView.createOrShow(context, context.extensionUri, connectionManager, metadataCache, importWizardService, {
         filePath: resolvedContext.sourceFile,
+        sourceKind: resolvedContext.sourceKind || 'file',
+        sourceName: resolvedContext.sourceName,
+        clipboardSourceDirectory: resolvedContext.clipboardSourceDirectory,
         targetTable: resolvedContext.targetTable,
         connectionDetails: resolvedContext.connectionDetails,
         connectionName: resolvedContext.connectionName,
@@ -833,8 +804,9 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
     const importWizardService = new ImportWizardService();
 
     return [
-        // Import Data from Clipboard
+        // Import Data from Clipboard opens the shared import wizard.
         vscode.commands.registerCommand('netezza.importClipboard', async () => {
+            let clipboardSourceDirectory: string | undefined;
             try {
                 const editor = vscode.window.activeTextEditor;
                 const documentUri = editor?.document?.uri?.toString();
@@ -847,128 +819,43 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                     throw new Error('Connection not configured. Please connect first.');
                 }
 
-                const targetTable = await vscode.window.showInputBox({
-                    ...buildTargetTableInputOptions(connectionDetails),
-                });
-
-                if (targetTable === undefined) return;
-
-                let finalTableName: string;
-                if (!targetTable || targetTable.trim().length === 0) {
-                    const autoName = await generateAutoTableName(
-                        context,
+                const source = await createClipboardImportSource(
+                    context.globalStorageUri.fsPath,
+                    await vscode.env.clipboard.readText(),
+                );
+                clipboardSourceDirectory = source.directoryPath;
+                await openAdvancedImportWizard(
+                    context,
+                    connectionManager,
+                    metadataCache,
+                    importWizardService,
+                    {
                         connectionName,
-                        connectionManager,
-                        connectionDetails.dbType,
-                        documentUri,
-                    );
-                    if (!autoName) return;
-                    finalTableName = autoName;
-                    vscode.window.showInformationMessage(`Auto-generated table name: ${finalTableName}`);
-                } else {
-                    finalTableName = targetTable.trim();
-                }
-
-                const formatOptions = await vscode.window.showQuickPick(
-                    [
-                        {
-                            label: 'Auto-detect',
-                            description: 'Automatically detect clipboard format',
-                            value: null,
-                        },
-                        {
-                            label: 'Plain Text',
-                            description: 'Force plain text processing with delimiter detection',
-                            value: 'TEXT',
-                        },
-                    ],
-                    {
-                        placeHolder: 'Select clipboard data format',
+                        connectionDetails,
+                        sourceFile: source.filePath,
+                        targetTable: suggestWizardTargetTable(connectionDetails.dbType, 'Clipboard'),
+                        sourceKind: 'clipboard',
+                        sourceName: 'Clipboard',
+                        clipboardSourceDirectory: source.directoryPath,
                     },
                 );
-
-                if (!formatOptions) return;
-
-                const startTime = Date.now();
-
-                await vscode.window.withProgress(
-                    {
-                        location: vscode.ProgressLocation.Window,
-                        title: 'Importing clipboard data...',
-                        cancellable: true,
-                    },
-                    async (progress, token) => {
-                        let lastLoggedMessage = '';
-                        const reportProgress = (message: string, increment?: number, logToOutput: boolean = true) => {
-                            if (token.isCancellationRequested) return;
-                            progress.report({ message, increment });
-                            if (logToOutput && message !== lastLoggedMessage) {
-                                outputChannel.appendLine(`[Clipboard Import] ${message}`);
-                                lastLoggedMessage = message;
-                            }
-                        };
-
-                        if (token.isCancellationRequested) return;
-
-                        const result: {
-                            success: boolean;
-                            message: string;
-                            details?: {
-                                rowsProcessed?: number;
-                                columns?: number;
-                                format?: string;
-                            };
-                        } = await importClipboardDataForConnection(
-                            finalTableName,
-                            connectionDetails,
-                            formatOptions.value,
-                            {},
-                            reportProgress,
-                        );
-
-                        if (!result.success) {
-                            throw new Error(result.message);
-                        }
-
-                        if (result.details) {
-                            outputChannel.appendLine(
-                                `[Clipboard Import] Rows processed: ${result.details.rowsProcessed}`,
-                            );
-                            outputChannel.appendLine(`[Clipboard Import] Columns: ${result.details.columns}`);
-                            outputChannel.appendLine(`[Clipboard Import] Format: ${result.details.format}`);
-                        }
-                    },
-                );
-
-                logExecutionTime(outputChannel, 'Import Clipboard Data', startTime);
-                vscode.window
-                    .showInformationMessage(
-                        `Clipboard data imported successfully to table: ${finalTableName}`,
-                        'Copy Table Name',
-                    )
-                    .then((action) => {
-                        if (action === 'Copy Table Name') {
-                            vscode.env.clipboard.writeText(finalTableName);
-                            vscode.window.showInformationMessage('Table name copied to clipboard');
-                        }
-                    });
-                void vscode.commands.executeCommand('netezza.refreshSchema');
             } catch (err: unknown) {
+                await removeClipboardImportSource(clipboardSourceDirectory);
                 if (await presentAccessError(err, {
                     outputChannel,
-                    operation: 'Clipboard import',
+                    operation: 'Clipboard import wizard',
                 })) {
                     return;
                 }
                 vscode.window.showErrorMessage(
-                    `Error importing clipboard data: ${err instanceof Error ? err.message : String(err)}`,
+                    `Error opening clipboard import wizard: ${err instanceof Error ? err.message : String(err)}`,
                 );
             }
         }),
 
         vscode.commands.registerCommand('netezza.importDataAdvanced', async (filePath?: string | vscode.Uri) => {
             try {
-                const resolvedContext = await resolveAdvancedImportCommandContext(context, connectionManager, filePath);
+                const resolvedContext = await resolveAdvancedImportCommandContext(connectionManager, filePath);
                 if (!resolvedContext) {
                     return;
                 }
@@ -997,22 +884,26 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                 } else {
                     filePath = fileArg as string | vscode.Uri | undefined;
                 }
-                const resolvedContext = await resolveImportCommandContext(context, connectionManager, filePath);
-                if (!resolvedContext) {
-                    return;
-                }
-
                 const importMode = forcedMode || await resolveImportMode();
                 if (!importMode) {
                     return;
                 }
 
-                let formImportOptions: ImportColumnOptions | undefined;
                 if (importMode === 'advanced') {
+                    const resolvedContext = await resolveAdvancedImportCommandContext(connectionManager, filePath);
+                    if (!resolvedContext) {
+                        return;
+                    }
                     await openAdvancedImportWizard(context, connectionManager, metadataCache, importWizardService, resolvedContext);
                     return;
                 }
 
+                const resolvedContext = await resolveImportCommandContext(context, connectionManager, filePath);
+                if (!resolvedContext) {
+                    return;
+                }
+
+                let formImportOptions: ImportColumnOptions | undefined;
                 if (importMode === 'form') {
                     formImportOptions = await buildFormImportOptions(
                         resolvedContext.sourceFile,

@@ -71,6 +71,10 @@ export interface ImportOptions {
   maxErrors?: number;
 }
 
+export interface NetezzaImporterOptions extends ColumnTypeChooserOptions {
+  hasHeaders?: boolean;
+}
+
 export type {
   ImportColumnDescriptor,
   ImportColumnOptions,
@@ -196,6 +200,7 @@ export class NetezzaImporter {
 
   private isExcelFile: boolean = false;
   private excelHasHeaderRow: boolean = true;
+  private hasHeadersOverride?: boolean;
   private availableSheetNames: string[] = [];
   private selectedSheetName?: string;
 
@@ -215,12 +220,13 @@ export class NetezzaImporter {
     filePath: string,
     targetTable: string,
     logDir?: string,
-    typeChooserOptions?: ColumnTypeChooserOptions,
+    typeChooserOptions?: NetezzaImporterOptions,
   ) {
     this.filePath = filePath;
     this.targetTable = targetTable;
     this.logDir = logDir || path.join(path.dirname(filePath), "netezza_logs");
     this.typeChooserOptions = typeChooserOptions ?? {};
+    this.hasHeadersOverride = typeChooserOptions?.hasHeaders;
 
     // Check if this is an Excel file
     const fileExt = path.extname(filePath).toLowerCase();
@@ -254,6 +260,17 @@ export class NetezzaImporter {
     this.targetTable = targetTable;
   }
 
+  public setHasHeaders(hasHeaders: boolean): void {
+    this.hasHeadersOverride = hasHeaders;
+    this.resetAnalyzedState();
+  }
+
+  public getHasHeaders(): boolean {
+    return this.isExcelFile
+      ? this.excelHasHeaderRow
+      : (this.hasHeadersOverride ?? true);
+  }
+
   getDelimiter(): string {
     return this.delimiter;
   }
@@ -279,7 +296,7 @@ export class NetezzaImporter {
     this.dataTypes = [];
     this.rowsCount = 0;
     this.streamedRowsCount = 0;
-    this.excelHasHeaderRow = true;
+    this.excelHasHeaderRow = this.hasHeadersOverride ?? true;
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
     this.columnNameOverrides.clear();
@@ -861,15 +878,21 @@ export class NetezzaImporter {
           const row = this.parseCsvLine(line);
 
           if (!headerProcessed) {
-            // First non-empty line is header
-            this.setHeaders(row);
+            // The header toggle controls whether the first non-empty line is
+            // metadata or the first row of imported data.
+            if (this.hasHeadersOverride ?? true) {
+              this.setHeaders(row);
+            } else {
+              this.setGeneratedHeaders(row.length);
+            }
             headers = [...this.sqlHeaders];
             columnCount = headers.length;
 
-            // We'll detect decimal delimiter from first data row
             headerProcessed = true;
             progressCallback?.(`Headers: ${columnCount} columns`);
-            return;
+            if (this.hasHeadersOverride ?? true) {
+              return;
+            }
           }
 
           pendingRows.push(row);
@@ -896,7 +919,7 @@ export class NetezzaImporter {
           pendingRows.length = 0;
 
           // Progress reporting
-          const rowsAnalyzed = lineNumber - 2; // Exclude header and current row
+          const rowsAnalyzed = lineNumber - (this.hasHeadersOverride ?? true ? 2 : 1);
           if (rowsAnalyzed % 10000 === 0) {
             progressCallback?.(
               `Analyzed ${rowsAnalyzed.toLocaleString()} rows...`,
@@ -974,8 +997,12 @@ export class NetezzaImporter {
 
     const dataTypes: ColumnTypeChooser[] = [];
 
-    // Process headers (first row)
-    this.setHeaders(rows[0]);
+    const hasHeaders = this.hasHeadersOverride ?? true;
+    if (hasHeaders) {
+      this.setHeaders(rows[0]);
+    } else {
+      this.setGeneratedHeaders(rows[0].length);
+    }
     dataTypes.push(
       ...this.createColumnTypeChoosers(
         this.sourceHeaders,
@@ -983,8 +1010,8 @@ export class NetezzaImporter {
       ),
     );
 
-    // Process data rows
-    for (let i = 1; i < rows.length; i++) {
+    // Process data rows, including the first row when no header is selected.
+    for (let i = hasHeaders ? 1 : 0; i < rows.length; i++) {
       const row = rows[i];
       for (let j = 0; j < row.length; j++) {
         if (j < dataTypes.length && row[j] && row[j].trim()) {
@@ -1002,7 +1029,7 @@ export class NetezzaImporter {
       }
     }
 
-    this.rowsCount = rows.length - 1; // Exclude header
+    this.rowsCount = Math.max(0, rows.length - (hasHeaders ? 1 : 0));
     progressCallback?.(
       `Analysis complete: ${this.rowsCount.toLocaleString()} rows`,
     );
@@ -1101,7 +1128,7 @@ export class NetezzaImporter {
         }
 
         if (!firstRowHandled) {
-          this.excelHasHeaderRow = this.detectExcelHeaderRow(firstRawRow);
+          this.excelHasHeaderRow = this.hasHeadersOverride ?? this.detectExcelHeaderRow(firstRawRow);
           if (this.excelHasHeaderRow) {
             this.setHeaders(firstRow ?? []);
           } else {
@@ -1115,7 +1142,7 @@ export class NetezzaImporter {
       }
 
       if (firstRow && !firstRowHandled) {
-        this.excelHasHeaderRow = this.detectExcelHeaderRow(firstRawRow ?? []);
+        this.excelHasHeaderRow = this.hasHeadersOverride ?? this.detectExcelHeaderRow(firstRawRow ?? []);
         if (this.excelHasHeaderRow) {
           this.setHeaders(firstRow);
         } else {
@@ -1419,23 +1446,32 @@ ${this.getExternalUsingClause()}
 
       let headerSkipped = false;
       let totalRowsPushed = 0;
+      let firstLineSeen = false;
       let lastReportTime = 0;
       self.streamedRowsCount = 0;
 
       try {
         for await (const line of rl) {
+          let sourceLine = line;
+          if (!firstLineSeen) {
+            firstLineSeen = true;
+            if (sourceLine.startsWith("\ufeff")) {
+              sourceLine = sourceLine.slice(1);
+            }
+          }
           // Skip header row (first non-empty line)
           // (BOM was already stripped during analyzeDataTypes())
-          if (!headerSkipped) {
+          if (self.hasHeadersOverride !== false && !headerSkipped) {
             headerSkipped = true;
             continue;
           }
+          headerSkipped = true;
 
-          if (!line || !line.trim()) {
+          if (!sourceLine || !sourceLine.trim()) {
             continue;
           }
 
-          const row = self.parseCsvLine(line);
+          const row = self.parseCsvLine(sourceLine);
           const formattedRow = self.formatImportRow(row);
           const lineStr =
             formattedRow.join(self.getExternalDelimiter()) +
@@ -1695,18 +1731,27 @@ ${this.getExternalUsingClause()}
       });
       const rows: string[][] = [];
       let headerSkipped = false;
+      let firstLineSeen = false;
 
       rl.on("line", (line: string) => {
-        if (!headerSkipped) {
+        let sourceLine = line;
+        if (!firstLineSeen) {
+          firstLineSeen = true;
+          if (sourceLine.startsWith("\ufeff")) {
+            sourceLine = sourceLine.slice(1);
+          }
+        }
+        if (this.hasHeadersOverride !== false && !headerSkipped) {
           headerSkipped = true;
           return;
         }
+        headerSkipped = true;
 
-        if (!line.trim()) {
+        if (!sourceLine.trim()) {
           return;
         }
 
-        rows.push(this.parseCsvLine(line));
+        rows.push(this.parseCsvLine(sourceLine));
         if (rows.length >= sampleLimit) {
           rl.close();
         }
@@ -1732,7 +1777,7 @@ ${this.getExternalUsingClause()}
 
     const lines = content.split(/\r?\n/);
     const rows: string[][] = [];
-    let skipHeader = true;
+    let skipHeader = this.hasHeadersOverride !== false;
 
     for (const line of lines) {
       if (!line.trim()) {
@@ -1817,7 +1862,9 @@ export async function importDataToNetezza(
     progressCallback?.(`  File format: ${fileExt}`);
 
     // Create importer instance (logDir defaults to netezza_logs alongside source file)
-    const importer = new NetezzaImporter(filePath, targetTable);
+    const importer = new NetezzaImporter(filePath, targetTable, undefined, {
+      hasHeaders: columnOptions?.hasHeaders,
+    });
 
     // Analyze data types
     await importer.analyzeDataTypes(progressCallback);
@@ -1963,7 +2010,9 @@ export async function importDataToNetezzaAdvanced(
     progressCallback?.(`  File size: ${fileSize.toLocaleString()} bytes`);
     progressCallback?.(`  File format: ${fileExt}`);
 
-    const importer = new NetezzaImporter(filePath, targetTable);
+    const importer = new NetezzaImporter(filePath, targetTable, undefined, {
+      hasHeaders: columnOptions?.hasHeaders,
+    });
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
@@ -1998,10 +2047,12 @@ export async function importDataToNetezzaAdvanced(
         );
       });
 
-      progressCallback?.("Creating target table...");
-      const createCommand = connection.createCommand(createSql);
-      createCommand.commandTimeout = timeout || 3600;
-      await createCommand.execute();
+      if (!columnOptions?.appendToExistingTable) {
+        progressCallback?.("Creating target table...");
+        const createCommand = connection.createCommand(createSql);
+        createCommand.commandTimeout = timeout || 3600;
+        await createCommand.execute();
+      }
 
       progressCallback?.("Loading rows from external stream...");
       const loadCommand = connection.createCommand(loadSql);

@@ -18,6 +18,7 @@ const app = getElementById('app');
 interface ImportWizardViewState {
     session: ImportWizardState | null;
     isExecuting: boolean;
+    isTransitioning: boolean;
     status: { kind: string; message: string } | null;
     backgroundValidation: BackgroundValidationProgress | null;
 }
@@ -25,9 +26,14 @@ interface ImportWizardViewState {
 const state: ImportWizardViewState = {
     session: null,
     isExecuting: false,
+    isTransitioning: false,
     status: null,
     backgroundValidation: null,
 };
+
+function isWizardBusy(): boolean {
+    return state.isExecuting || state.isTransitioning;
+}
 
 function buildIssueMap(session: ImportWizardState): Map<string, ImportWizardState['issues'][number]> {
     const issueMap = new Map<string, ImportWizardState['issues'][number]>();
@@ -61,14 +67,6 @@ function moveColumn(sourceIndex: number, direction: number): void {
         type: 'reorderColumns',
         orderedSourceIndexes: ordered.map(item => item.sourceIndex),
     });
-}
-
-function renderStatus(): string {
-    if (!state.status) {
-        return '';
-    }
-
-    return `<div class="status-banner status-${escapeHtml(state.status.kind)}">${escapeHtml(state.status.message)}</div>`;
 }
 
 function renderBackgroundValidationProgress(): string {
@@ -126,7 +124,7 @@ function renderTargetLocation(session: ImportWizardState): string {
         ? `
 					<label>
 						Database
-						<select id="target-database" ${caps.enforceActiveDatabase ? 'disabled' : ''}>
+						<select id="target-database" ${caps.enforceActiveDatabase || isWizardBusy() ? 'disabled' : ''}>
 							${databaseOptions || '<option value="">No databases available</option>'}
 						</select>
 					</label>`
@@ -135,68 +133,68 @@ function renderTargetLocation(session: ImportWizardState): string {
         ? `
 					<label>
 						Schema
-						<select id="target-schema">
+						<select id="target-schema" ${isWizardBusy() ? 'disabled' : ''}>
 							${schemaOptions || '<option value="">No schemas available</option>'}
 						</select>
 					</label>`
         : '';
+    const connectionOptions = session.availableConnections
+        .map(connection => `<option value="${escapeHtml(connection.name)}"${connection.name === session.connectionName ? ' selected' : ''}>${escapeHtml(connection.label)}</option>`)
+        .join('');
 
     return `
-			<section class="card target-location-panel">
-				<h2>Target location</h2>
-				<div class="target-location-fields">
+			<section class="card target-location-panel import-destination-card">
+				<div class="import-section-heading compact"><div><span class="import-section-number">02</span><div><h3>Destination</h3><p>Choose where the rows will be written.</p></div></div></div>
+				<div class="target-location-fields import-destination-fields">
+				<label>Connection<select id="target-connection" ${isWizardBusy() ? 'disabled' : ''}>${connectionOptions || '<option value="">No saved connections</option>'}</select></label>
 					${databaseField}
 					${schemaField}
 					<label>
 						Table
-						<input id="target-table-name" type="text" value="${escapeHtml(session.targetLocation.tableName)}" />
+						<input id="target-table-name" type="text" value="${escapeHtml(session.targetLocation.tableName)}" ${isWizardBusy() ? 'disabled' : ''} />
 					</label>
 				</div>
-				<p class="muted target-qualified-name">Qualified target: <code>${escapeHtml(session.targetTable)}</code></p>
+				<label class="import-create-toggle"><input id="create-table" type="checkbox" ${session.createTable ? 'checked' : ''} ${session.canAppendToExistingTable && !isWizardBusy() ? '' : 'disabled'} /><span class="import-checkmark" aria-hidden="true">✓</span><span><strong>Create new table</strong><small>${session.createTable ? 'A table will be created from this mapping.' : 'Rows will be added to the existing table.'}</small></span></label>
+				${session.canAppendToExistingTable ? '' : '<p class="muted">Appending is unavailable for this database import workflow.</p>'}
+				<div class="import-destination-summary"><span class="import-destination-dot" aria-hidden="true"></span><small>Import target</small><strong>${escapeHtml(session.targetTable || 'Complete destination details')}</strong></div>
 			</section>`;
 }
 
-function renderHeader(session: ImportWizardState): string {
-    const previewOptions = [5, 10, 20]
-        .map(
-            value =>
-                `<option value="${value}"${session.previewRowCount === value ? ' selected' : ''}>${value}</option>`,
-        )
-        .join('');
-    const sheetOptions = session.availableSheets
-        .map(
-            sheetName =>
-                `<option value="${escapeHtml(sheetName)}"${session.sheetName === sheetName ? ' selected' : ''}>${escapeHtml(sheetName)}</option>`,
-        )
-        .join('');
+function renderHeader(): string {
+	return `
+			<header class="import-workflow-header">
+				<div class="import-heading-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" /></svg></div>
+				<div class="import-heading-copy"><h1>Import data</h1><p>Preview a file, map its columns, and write rows into the selected database.</p></div>
+				<button id="close-import-top" class="import-close" aria-label="Close import dialog" ${isWizardBusy() ? 'disabled' : ''}>✕</button>
+				<ol class="import-steps" aria-label="Import workflow">
+					<li class="complete"><span class="import-step-number">1</span><span class="import-step-label">Source</span><span class="import-step-connector" aria-hidden="true"></span></li>
+					<li class="complete"><span class="import-step-number">2</span><span class="import-step-label">Destination</span><span class="import-step-connector" aria-hidden="true"></span></li>
+					<li class="current"><span class="import-step-number">3</span><span class="import-step-label">Review</span></li>
+				</ol>
+			</header>`;
+}
 
-    const bg = state.backgroundValidation;
-    const isValidationInProgress =
-        bg && bg.phase !== 'complete' && bg.phase !== 'cancelled';
-    const validationWarningIcon = isValidationInProgress
-        ? '<span class="validation-in-progress-icon" title="Background validation in progress. Issues may be found.">&#9888;</span>'
-        : '';
-
-    return `
-			<section class="wizard-header card">
-				<div>
-					<h1>Advanced Import Wizard</h1>
-					<p>${escapeHtml(session.fileName)}</p>
+function renderHeaderSource(session: ImportWizardState): string {
+	const previewOptions = [5, 10, 20]
+		.map(value => `<option value="${value}"${session.previewRowCount === value ? ' selected' : ''}>${value}</option>`)
+		.join('');
+	const sheetOptions = session.availableSheets
+		.map(sheetName => `<option value="${escapeHtml(sheetName)}"${session.sheetName === sheetName ? ' selected' : ''}>${escapeHtml(sheetName)}</option>`)
+		.join('');
+	return `
+			<section class="import-source-panel" aria-labelledby="import-source-title">
+				<div class="import-section-heading"><div><span class="import-section-number">01</span><div><h3 id="import-source-title">Source file</h3><p>Select a spreadsheet, delimited text file, or clipboard data.</p></div></div>
+					<span class="import-ready-badge"><span></span>Ready to preview</span>
 				</div>
-				<div class="header-metadata">
-					<label>
-						Preview rows
-						<select id="preview-row-count">${previewOptions}</select>
-					</label>
-					<label>
-						Sheet
-						<select id="sheet-name" ${session.canChangeSheet ? '' : 'disabled'}>
-							${sheetOptions || '<option value="">N/A</option>'}
-						</select>
-					</label>
-					<button id="execute-import" class="primary" ${state.isExecuting || session.hasValidationErrors ? 'disabled' : ''}>
-						${state.isExecuting ? 'Executing...' : 'Execute Import'}${validationWarningIcon}
-					</button>
+				<div class="import-source-content">
+					<div class="import-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3.75h8l4 4V20a.75.75 0 0 1-.75.75h-10.5A.75.75 0 0 1 6 20V3.75Z" /><path d="M14 3.75v4.5h4M8.5 12h7m-7 3h7" /></svg></div>
+					<div class="import-file-details"><div class="import-file-title">${escapeHtml(session.sourceName || session.fileName)}</div><div class="import-file-path">${session.sourceKind === 'clipboard' ? 'Clipboard snapshot' : escapeHtml(session.filePath)}</div></div>
+					<span class="import-file-type">${escapeHtml(session.fileFormat.toUpperCase())}</span>
+					<div class="import-source-actions"><button class="import-choose-button" data-source-kind="clipboard" ${isWizardBusy() ? 'disabled' : ''}>Paste clipboard</button><button class="import-choose-button" data-source-kind="file" ${isWizardBusy() ? 'disabled' : ''}>${session.sourceKind === 'file' ? 'Change file' : 'Choose file'} <span aria-hidden="true">↗</span></button></div>
+				</div>
+				<div class="import-source-options">
+					<label>Preview rows<select id="preview-row-count" ${isWizardBusy() ? 'disabled' : ''}>${previewOptions}</select></label>
+					${session.availableSheets.length ? `<label class="import-sheet-control"><span>Worksheet</span><select id="sheet-name" ${session.canChangeSheet && !isWizardBusy() ? '' : 'disabled'}>${sheetOptions}</select></label>` : ''}
 				</div>
 			</section>`;
 }
@@ -217,8 +215,8 @@ function renderInspector(session: ImportWizardState): string {
               : '';
 
     return `
-			<section class="card inspector-panel">
-				<h2>Source details</h2>
+			<div class="inspector-panel">
+				<h3>Source details</h3>
 				<dl class="metadata-grid">
 					<div><dt>Dialect</dt><dd>${escapeHtml(session.databaseKind)}</dd></div>
 					<div><dt>Format</dt><dd>${escapeHtml(session.fileFormat)}</dd></div>
@@ -230,56 +228,28 @@ function renderInspector(session: ImportWizardState): string {
 				</dl>
 				<h3>Warnings</h3>
 				${warningItems ? `<ul class="warning-list">${warningItems}</ul>` : '<p class="muted">No warnings.</p>'}
-			</section>`;
+			</div>`;
 }
 
 function renderColumnEditor(session: ImportWizardState): string {
-    const rows = session.columns
-        .map((column, index) => {
-            const typeOptions = session.typeOptions
-                .map(
-                    typeName =>
-                        `<option value="${escapeHtml(typeName)}"${column.selectedType === typeName ? ' selected' : ''}>${escapeHtml(typeName)}</option>`,
-                )
-                .join('');
-            return `
-					<tr class="${column.included ? '' : 'is-excluded'}">
-						<td><input type="checkbox" class="include-toggle" data-source-index="${column.sourceIndex}" ${column.included ? 'checked' : ''} /></td>
-						<td class="move-buttons">
-							<button class="move-up" data-source-index="${column.sourceIndex}" ${index === 0 ? 'disabled' : ''}>&#8593;</button>
-							<button class="move-down" data-source-index="${column.sourceIndex}" ${index === session.columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
-						</td>
-						<td><span class="source-name">${escapeHtml(column.sourceName)}</span></td>
-						<td><input class="target-name" data-source-index="${column.sourceIndex}" value="${escapeHtml(column.targetName)}" /></td>
-						<td><span class="type-badge ${column.overrideMode === 'user' ? 'badge-user' : 'badge-inferred'}">${escapeHtml(column.inferredType)}</span></td>
-						<td>
-							<select class="type-select" data-source-index="${column.sourceIndex}">
-								${typeOptions}
-							</select>
-						</td>
-					</tr>`;
-        })
-        .join('');
-
     return `
-			<section class="card columns-panel">
-				<div class="panel-heading">
-					<h2>Column mapping</h2>
-					<button id="refresh-sql">Refresh SQL Preview</button>
+			<section class="card columns-panel import-card import-mapping">
+				<div class="import-section-heading compact">
+					<div><span class="import-section-number">03</span><div><h3>Column mapping</h3><p>Choose destination names and data types.</p></div></div>
+					<span class="import-mapping-count">${session.columns.filter(column => column.included).length} of ${session.columns.length} columns</span>
 				</div>
-				<table class="columns-table">
-					<thead>
-						<tr>
-							<th>Use</th>
-							<th>Order</th>
-							<th>Source</th>
-							<th>Target</th>
-							<th>Inferred</th>
-							<th>Selected</th>
-						</tr>
-					</thead>
-					<tbody>${rows}</tbody>
-				</table>
+				<div class="import-mapping-head"><span>Use</span><span>Order</span><span>Source column</span><span aria-hidden="true"></span><span>Destination column</span><span>Inferred type</span><span>Data type</span></div>
+				<div class="import-mapping-list">${session.columns.map((column, index) => {
+					const typeOptions = session.typeOptions.map(typeName => `<option value="${escapeHtml(typeName)}"${column.selectedType === typeName ? ' selected' : ''}>${escapeHtml(typeName)}</option>`).join('');
+					return `<div class="import-map-row ${column.included ? '' : 'is-excluded'}">
+						<input aria-label="Include ${escapeHtml(column.sourceName)}" type="checkbox" class="include-toggle" data-source-index="${column.sourceIndex}" ${column.included ? 'checked' : ''} ${isWizardBusy() ? 'disabled' : ''} />
+						<span class="move-buttons"><button class="move-up" data-source-index="${column.sourceIndex}" ${index === 0 || isWizardBusy() ? 'disabled' : ''} aria-label="Move ${escapeHtml(column.sourceName)} up">↑</button><button class="move-down" data-source-index="${column.sourceIndex}" ${index === session.columns.length - 1 || isWizardBusy() ? 'disabled' : ''} aria-label="Move ${escapeHtml(column.sourceName)} down">↓</button></span>
+						<span class="import-source-column" title="${escapeHtml(column.sourceName)}">${escapeHtml(column.sourceName)}</span><span class="import-map-arrow" aria-hidden="true">→</span>
+						<input class="target-name" aria-label="Destination for ${escapeHtml(column.sourceName)}" data-source-index="${column.sourceIndex}" value="${escapeHtml(column.targetName)}" ${isWizardBusy() ? 'disabled' : ''} />
+						<span class="type-badge ${column.overrideMode === 'user' ? 'badge-user' : 'badge-inferred'}">${escapeHtml(column.inferredType)}</span>
+						<select class="type-select" aria-label="Type for ${escapeHtml(column.sourceName)}" data-source-index="${column.sourceIndex}" ${isWizardBusy() ? 'disabled' : ''}>${typeOptions}</select>
+					</div>`;
+				}).join('') || '<div class="import-no-columns">All source columns are excluded. Re-enable at least one column to continue.</div>'}</div>
 			</section>`;
 }
 
@@ -288,7 +258,7 @@ function renderPreviewGrid(session: ImportWizardState): string {
     const headerCells = session.columns
         .map(
             column =>
-                `<th class="${column.included ? '' : 'is-excluded'}">${escapeHtml(column.targetName)}</th>`,
+                `<th class="${column.included ? '' : 'is-excluded'}">${escapeHtml(column.sourceName)}</th>`,
         )
         .join('');
     const bodyRows = session.previewRows
@@ -312,19 +282,24 @@ function renderPreviewGrid(session: ImportWizardState): string {
         .join('');
 
     return `
-			<section class="card preview-panel">
-				<h2>Preview</h2>
-				<div class="preview-table-wrap">
+			<section class="card preview-panel import-card import-preview-card">
+				<div class="import-section-heading compact"><div><span class="import-section-number">02</span><div><h3>Data preview</h3><p>Check the incoming values before importing.</p></div></div><span class="import-preview-count">${session.columns.length} columns <i></i> ${session.previewRows.length} sample rows</span></div>
+				<label class="import-headers-toggle"><input id="has-headers" type="checkbox" ${session.hasHeaders ? 'checked' : ''} ${isWizardBusy() ? 'disabled' : ''} /><span>First row contains column names</span></label>
+				<div class="preview-table-wrap import-preview">
 					<table class="preview-table">
 						<thead><tr>${headerCells}</tr></thead>
 						<tbody>${bodyRows || '<tr><td colspan="999">No preview rows available.</td></tr>'}</tbody>
 					</table>
 				</div>
+				<div class="import-preview-footnote">Showing up to ${session.previewRowCount} rows from the selected source.</div>
 			</section>`;
 }
 
 function renderSqlPreview(session: ImportWizardState): string {
     const createSql = escapeHtml(session.executionPlan.createTableSql || '');
+    const createPreview = session.createTable
+        ? `<div class="sql-card"><div class="sql-card-header"><h3>Create table</h3><div class="sql-actions"><button data-open-kind="create">Open</button><button data-copy-kind="create">Copy</button></div></div><pre>${createSql}</pre></div>`
+        : '<p class="muted">The selected target table will be used as-is. This import will not execute CREATE TABLE.</p>';
     const loadSql = session.executionPlan.loadSql
         ? `<div class="sql-card"><div class="sql-card-header"><h3>Load SQL</h3><div class="sql-actions"><button data-open-kind="load">Open</button><button data-copy-kind="load">Copy</button></div></div><pre>${escapeHtml(session.executionPlan.loadSql)}</pre></div>`
         : '<div class="sql-card"><div class="sql-card-header"><h3>Load SQL</h3><div class="sql-actions"><button data-open-kind="plan">Open Plan</button><button data-copy-kind="plan">Copy Plan</button></div></div><pre>No direct load SQL preview is available for this execution mode.</pre></div>';
@@ -333,21 +308,25 @@ function renderSqlPreview(session: ImportWizardState): string {
         .join('');
 
     return `
-			<section class="card sql-panel">
-				<div class="panel-heading">
-					<h2>SQL Preview</h2>
-					<div class="sql-actions">
-						<button data-open-kind="create">Open CREATE</button>
-						<button data-copy-kind="create">Copy CREATE</button>
-					</div>
+			<section class="sql-panel">
+				<div class="import-section-heading compact">
+					<div><h3>Import plan</h3></div>
+					<button id="refresh-sql">Refresh SQL Preview</button>
 				</div>
-				<div class="sql-card"><pre>${createSql}</pre></div>
+				${createPreview}
 				${loadSql}
 				${nextSteps ? `<div class="sql-next-steps"><h3>Next steps</h3><ol>${nextSteps}</ol></div>` : ''}
 			</section>`;
 }
 
 function attachListeners(): void {
+    document.querySelectorAll('[data-source-kind]').forEach(button => {
+        button.addEventListener('click', () => {
+            const kind = (button as HTMLElement).dataset.sourceKind;
+            postToHost({ type: kind === 'clipboard' ? 'requestClipboardSource' : 'requestFileSource' });
+        });
+    });
+
     const previewSelect = getElementById<HTMLSelectElement>('preview-row-count');
     previewSelect?.addEventListener('change', event => {
         const target = eventTargetAsSelect(event);
@@ -361,6 +340,24 @@ function attachListeners(): void {
     sheetSelect?.addEventListener('change', event => {
         const target = eventTargetAsSelect(event);
         postToHost({ type: 'setSheet', sheetName: target?.value });
+    });
+
+    const hasHeaders = getElementById<HTMLInputElement>('has-headers');
+    hasHeaders?.addEventListener('change', event => {
+        const target = eventTargetAsInput(event);
+        postToHost({ type: 'setHasHeaders', hasHeaders: Boolean(target?.checked) });
+    });
+
+    const createTable = getElementById<HTMLInputElement>('create-table');
+    createTable?.addEventListener('change', event => {
+        const target = eventTargetAsInput(event);
+        postToHost({ type: 'setCreateTable', createTable: Boolean(target?.checked) });
+    });
+
+    const connection = getElementById<HTMLSelectElement>('target-connection');
+    connection?.addEventListener('change', event => {
+        const target = eventTargetAsSelect(event);
+        postToHost({ type: 'setConnection', connectionName: target?.value ?? '' });
     });
 
     document.querySelectorAll('.target-name').forEach(input => {
@@ -459,6 +456,11 @@ function attachListeners(): void {
             tableName: target?.value ?? '',
         });
     });
+
+    const close = getElementById('close-import');
+    close?.addEventListener('click', () => postToHost({ type: 'closeWizard' }));
+    const closeTop = getElementById('close-import-top');
+    closeTop?.addEventListener('click', () => postToHost({ type: 'closeWizard' }));
 }
 
 function render(): void {
@@ -471,21 +473,38 @@ function render(): void {
     }
 
     const session = state.session;
+    const selectedColumnCount = session.columns.filter(column => column.included).length;
+    const canExecute = !isWizardBusy()
+        && !session.hasValidationErrors
+        && selectedColumnCount > 0
+        && Boolean(session.targetLocation.tableName.trim());
     app.innerHTML = `
-			${renderStatus()}
-			${renderBackgroundValidationProgress()}
-			${renderHeader(session)}
-			${renderTargetLocation(session)}
-			<div class="wizard-layout">
-				<div class="wizard-main">
-					${renderColumnEditor(session)}
+			${renderHeader()}
+			<div class="import-workflow-body">
+				${renderBackgroundValidationProgress()}
+				${renderHeaderSource(session)}
+				<div class="import-workflow-grid">
+				<div class="import-main-column">
 					${renderPreviewGrid(session)}
+					${renderColumnEditor(session)}
 				</div>
-				<div class="wizard-side">
-					${renderInspector(session)}
-					${renderSqlPreview(session)}
-				</div>
-			</div>`;
+				<aside class="import-side-column">
+					${renderTargetLocation(session)}
+					<details class="card import-review-details" open>
+						<summary><span>Review details</span><span class="review-chevron" aria-hidden="true">⌄</span></summary>
+						<div class="import-review-content">
+						${renderInspector(session)}
+						${renderSqlPreview(session)}
+						</div>
+					</details>
+				</aside>
+			</div>
+			</div>
+			<footer class="import-workflow-footer">
+				<span class="import-status ${escapeHtml(state.status?.kind || 'neutral')}" role="status" aria-live="polite"><i></i>${escapeHtml(state.status?.message || 'Review the preview and mapping before importing.')}</span>
+				<button id="close-import" class="import-cancel-button" ${isWizardBusy() ? 'disabled' : ''}>Close</button>
+				<button id="execute-import" class="primary import-submit-button" ${canExecute ? '' : 'disabled'}>${state.isExecuting ? '<span class="import-button-spinner"></span>Importing…' : state.isTransitioning ? 'Updating…' : 'Import data'} <span aria-hidden="true">→</span></button>
+			</footer>`;
 
     attachListeners();
 }
@@ -494,6 +513,11 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
     const message = asHostMessage(event.data || {});
     switch (message.type) {
         case 'sessionInitialized':
+            state.status = null;
+            state.backgroundValidation = null;
+            state.session = message.state;
+            render();
+            return;
         case 'previewUpdated':
             state.session = message.state;
             render();
@@ -542,6 +566,14 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
                 kind: 'error',
                 message: message.message || 'Import failed.',
             };
+            render();
+            return;
+        case 'sessionTransitionStarted':
+            state.isTransitioning = true;
+            render();
+            return;
+        case 'sessionTransitionFinished':
+            state.isTransitioning = false;
             render();
             return;
     }

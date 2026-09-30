@@ -4,6 +4,7 @@ export interface ImportColumnOptions {
   forcedColumnTypes?: Record<number, string>;
   columnNameOverrides?: Record<number, string>;
   appendToExistingTable?: boolean;
+  hasHeaders?: boolean;
 }
 
 /** A normalized source column descriptor shared by import planners. */

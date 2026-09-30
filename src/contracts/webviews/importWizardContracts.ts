@@ -17,6 +17,12 @@ export type ImportWizardWebviewToHostMessage =
     | { type: 'toggleColumn'; sourceIndex: number; included?: boolean }
     | { type: 'reorderColumns'; orderedSourceIndexes: number[] }
     | { type: 'setColumnType'; sourceIndex: number; selectedType: string }
+    | { type: 'setHasHeaders'; hasHeaders: boolean }
+    | { type: 'setCreateTable'; createTable: boolean }
+    | { type: 'setConnection'; connectionName: string }
+    | { type: 'requestClipboardSource' }
+    | { type: 'requestFileSource' }
+    | { type: 'closeWizard' }
     | { type: 'setTargetDatabase'; database?: string }
     | { type: 'setTargetSchema'; schema?: string }
     | { type: 'setTargetTableName'; tableName: string }
@@ -44,7 +50,9 @@ export type ImportWizardHostToWebviewMessage =
     }
     | { type: 'executionStarted' }
     | { type: 'executionFinished'; result: ImportResult }
-    | { type: 'executionFailed'; message: string };
+    | { type: 'executionFailed'; message: string }
+    | { type: 'sessionTransitionStarted' }
+    | { type: 'sessionTransitionFinished' };
 
 export type ImportWizardInboundMessage = ImportWizardWebviewToHostMessage;
 export type ImportWizardOutboundMessage = ImportWizardHostToWebviewMessage;
@@ -57,6 +65,12 @@ export const IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES = [
     'toggleColumn',
     'reorderColumns',
     'setColumnType',
+    'setHasHeaders',
+    'setCreateTable',
+    'setConnection',
+    'requestClipboardSource',
+    'requestFileSource',
+    'closeWizard',
     'setTargetDatabase',
     'setTargetSchema',
     'setTargetTableName',
@@ -76,7 +90,9 @@ export const IMPORT_WIZARD_HOST_TO_WEBVIEW_TYPES = [
     'backgroundValidationProgress',
     'executionStarted',
     'executionFinished',
-    'executionFailed'
+    'executionFailed',
+    'sessionTransitionStarted',
+    'sessionTransitionFinished'
 ] as const satisfies readonly ImportWizardHostToWebviewMessage['type'][];
 
 export const IMPORT_WIZARD_INBOUND_TYPES = IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES;

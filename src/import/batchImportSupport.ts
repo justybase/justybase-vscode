@@ -654,6 +654,7 @@ export async function importDataWithBatching(
     const importer = createTabularDataImporter(filePath, targetTable, {
         kind: config.kind,
         inferBoolean: config.inferBoolean,
+        hasHeaders: columnOptions?.hasHeaders,
     });
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);

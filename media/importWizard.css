@@ -403,3 +403,569 @@ button:disabled {
 .validation-complete {
   color: var(--vscode-testing-iconPassed, #4caf50);
 }
+
+/* Match the ImportDialog workflow while using the active VS Code theme. */
+html,
+body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  height: 100vh;
+  padding: 0;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+}
+
+.import-wizard-root {
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  max-width: none;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground, var(--vscode-editor-foreground));
+}
+
+.import-workflow-header {
+  flex: none;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 34px;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 13px;
+  row-gap: 16px;
+  padding: 22px 25px 0;
+  border: 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  border-radius: 0;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.import-heading-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 12%, var(--vscode-editorWidget-background, var(--vscode-sideBar-background)));
+  color: var(--vscode-textLink-foreground);
+}
+
+.import-heading-icon svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.import-heading-copy { min-width: 0; }
+
+.import-heading-copy h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.import-heading-copy p {
+  margin: 5px 0 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.import-close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 15px;
+}
+
+.import-close:hover:not(:disabled) {
+  border-color: var(--vscode-panel-border);
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  color: var(--vscode-foreground);
+}
+
+.import-steps {
+  width: 100%;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 15px;
+  border-bottom: 0;
+}
+
+.import-steps li {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 9px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.import-steps li:last-child { flex: 0 0 auto; }
+
+.import-step-number {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  flex: 0 0 24px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 50%;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.import-step-label {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.import-step-connector {
+  min-width: 12px;
+  height: 1px;
+  flex: 1;
+  margin-left: 7px;
+  background: var(--vscode-panel-border);
+}
+
+.import-steps li.current { color: var(--vscode-foreground); }
+
+.import-steps li.current .import-step-number {
+  border-color: var(--vscode-textLink-foreground);
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 16%, var(--vscode-sideBar-background));
+  color: var(--vscode-textLink-foreground);
+}
+
+.import-steps li.complete .import-step-number {
+  border-color: var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 14%, var(--vscode-sideBar-background));
+  color: var(--vscode-testing-iconPassed);
+}
+
+.import-workflow-body {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 18px 25px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-sideBar-background));
+}
+
+.import-source-panel,
+.import-card {
+  min-width: 0;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 9px;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--vscode-editor-background) 10%, transparent);
+}
+
+.import-source-panel { padding: 14px 16px; }
+.import-card { padding: 14px; }
+
+.import-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.import-section-heading > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.import-section-number {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 7px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  color: var(--vscode-textLink-foreground);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.import-section-heading h3 {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.import-section-heading p {
+  margin: 4px 0 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.import-section-heading.compact { margin-bottom: 12px; }
+.import-section-heading.compact .import-section-number { width: 27px; height: 27px; }
+
+.import-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--vscode-testing-iconPassed) 48%, var(--vscode-panel-border));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 12%, var(--vscode-sideBar-background));
+  color: var(--vscode-testing-iconPassed);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.import-ready-badge > span,
+.import-destination-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-testing-iconPassed);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-testing-iconPassed) 13%, transparent);
+}
+
+.import-source-content {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 13px;
+  padding: 11px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 7px;
+  background: var(--vscode-editor-background);
+}
+
+.import-file-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 25%, var(--vscode-panel-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 10%, var(--vscode-sideBar-background));
+  color: var(--vscode-textLink-foreground);
+}
+
+.import-file-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
+.import-file-details { min-width: 0; flex: 1; }
+.import-file-title { overflow: hidden; color: var(--vscode-foreground); font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.import-file-path { overflow: hidden; margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.import-file-type { flex: none; padding: 4px 6px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--vscode-descriptionForeground); font-size: 8px; font-weight: 800; letter-spacing: 0.06em; }
+.import-source-actions { display: flex; align-items: center; gap: 8px; }
+
+.import-choose-button,
+.import-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 33px;
+  padding: 0 11px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+.import-choose-button:hover:not(:disabled) { border-color: var(--vscode-focusBorder); background: var(--vscode-toolbar-hoverBackground); }
+.import-choose-button > span { color: var(--vscode-textLink-foreground); font-size: 13px; }
+
+.import-source-options {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  margin-top: 11px;
+}
+
+.import-source-options > label,
+.import-sheet-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+.import-source-options select,
+.import-sheet-control select { min-height: 28px; height: 28px; padding: 0 8px; font-size: 10px; }
+
+.import-workflow-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.32fr) minmax(285px, 0.78fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.import-main-column,
+.import-side-column { min-width: 0; display: grid; align-content: start; gap: 14px; }
+.import-preview-card,
+.import-mapping { overflow: hidden; }
+
+.import-preview-count,
+.import-mapping-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.import-preview-count i { width: 3px; height: 3px; border-radius: 50%; background: var(--vscode-textLink-foreground); }
+
+.import-headers-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.import-headers-toggle input,
+.import-map-row > input[type="checkbox"] { accent-color: var(--vscode-textLink-foreground); }
+
+.import-preview {
+  max-height: 248px;
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+}
+
+.import-preview .preview-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 10px;
+}
+
+.import-preview .preview-table th,
+.import-preview .preview-table td {
+  max-width: 250px;
+  overflow: hidden;
+  padding: 7px 10px;
+  border: 0;
+  border-right: 1px solid var(--vscode-panel-border);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-preview .preview-table th { position: sticky; top: 0; z-index: 1; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); color: var(--vscode-descriptionForeground); font-size: 9px; font-weight: 700; }
+.import-preview .preview-table th:last-child,
+.import-preview .preview-table td:last-child { border-right: 0; }
+.import-preview .preview-table tr:last-child td { border-bottom: 0; }
+.import-preview .preview-table td.has-issue { background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground)); }
+.import-preview-footnote { margin-top: 8px; color: var(--vscode-descriptionForeground); font-size: 9px; }
+
+.import-mapping-head,
+.import-map-row {
+  display: grid;
+  grid-template-columns: 24px 42px minmax(90px, 0.82fr) 14px minmax(110px, 1fr) minmax(80px, 0.7fr) minmax(120px, 0.9fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.import-mapping-head {
+  padding: 0 7px 7px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.import-mapping-list { display: grid; gap: 5px; }
+
+.import-map-row {
+  min-width: 0;
+  margin: 0;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+}
+
+.import-map-row:hover { border-color: var(--vscode-panel-border); }
+.import-map-row .import-source-column { min-width: 0; overflow: hidden; color: var(--vscode-foreground); font-size: 10px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.import-map-arrow { color: var(--vscode-descriptionForeground); font-size: 11px; text-align: center; }
+.import-map-row input.target-name,
+.import-map-row select.type-select { width: 100%; min-width: 0; height: 29px; min-height: 29px; padding: 0 7px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 9px; }
+.import-map-row input:focus,
+.import-map-row select:focus,
+.target-location-fields input:focus,
+.target-location-fields select:focus { border-color: var(--vscode-focusBorder); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
+.import-map-row .type-badge { min-width: 0; overflow: hidden; padding: 3px 6px; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.import-map-row.is-excluded { opacity: 0.5; }
+.import-map-row .move-buttons { display: flex; gap: 3px; }
+.import-map-row .move-buttons button { width: 19px; min-width: 19px; height: 22px; min-height: 22px; padding: 0; border: 1px solid var(--vscode-panel-border); border-radius: 4px; font-size: 10px; }
+.import-no-columns { padding: 14px; border: 1px dashed var(--vscode-panel-border); border-radius: 6px; color: var(--vscode-descriptionForeground); font-size: 10px; line-height: 1.5; text-align: center; }
+
+.import-destination-card { display: flex; flex-direction: column; gap: 13px; }
+.import-destination-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 11px; }
+.import-destination-fields label { min-width: 0; display: grid; gap: 6px; color: var(--vscode-descriptionForeground); font-size: 9px; font-weight: 650; }
+.import-destination-fields input,
+.import-destination-fields select { width: 100%; min-width: 0; height: 33px; box-sizing: border-box; padding: 0 9px; font-size: 10px; }
+.import-create-toggle { position: relative; display: flex; align-items: flex-start; gap: 9px; margin-top: 1px; padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editor-background); cursor: pointer; }
+.import-create-toggle input { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }
+.import-checkmark { width: 15px; height: 15px; display: grid; place-items: center; flex: none; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: transparent; font-size: 10px; line-height: 1; }
+.import-create-toggle input:checked + .import-checkmark { border-color: var(--vscode-textLink-foreground); background: var(--vscode-textLink-foreground); color: var(--vscode-editor-background); }
+.import-create-toggle input:focus-visible + .import-checkmark { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.import-create-toggle strong,
+.import-create-toggle small { display: block; }
+.import-create-toggle strong { color: var(--vscode-foreground); font-size: 10px; font-weight: 650; }
+.import-create-toggle small { margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.4; }
+.import-destination-summary { display: grid; grid-template-columns: 6px max-content minmax(0, 1fr); align-items: start; column-gap: 8px; margin-top: 0; padding: 10px; border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 24%, var(--vscode-panel-border)); border-radius: 6px; background: color-mix(in srgb, var(--vscode-textLink-foreground) 6%, var(--vscode-editor-background)); }
+.import-destination-summary .import-destination-dot { grid-column: 1; margin-top: 4px; background: var(--vscode-textLink-foreground); box-shadow: none; }
+.import-destination-summary small { grid-column: 2; color: var(--vscode-descriptionForeground); font-size: 8px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.import-destination-summary strong { grid-column: 3; min-width: 0; overflow-wrap: anywhere; color: var(--vscode-foreground); font-size: 10px; font-weight: 600; line-height: 1.4; }
+
+.import-review-details { padding: 0; overflow: hidden; }
+.import-review-details > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border: 0; background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 11px; font-weight: 650; list-style: none; }
+.import-review-details > summary::-webkit-details-marker { display: none; }
+.import-review-details[open] > summary { border-bottom: 1px solid var(--vscode-panel-border); }
+.review-chevron { color: var(--vscode-descriptionForeground); font-size: 16px; transition: transform 0.15s ease; }
+.import-review-details:not([open]) .review-chevron { transform: rotate(-90deg); }
+.import-review-content { padding: 13px 14px 14px; }
+.inspector-panel h3,
+.sql-panel h3 { margin: 0; color: var(--vscode-foreground); font-size: 11px; font-weight: 650; }
+.metadata-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; margin: 11px 0 14px; }
+.metadata-grid div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.metadata-grid dt { color: var(--vscode-descriptionForeground); font-size: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.metadata-grid dd { margin: 0; overflow-wrap: anywhere; font-size: 10px; }
+.inspector-panel > h3:not(:first-child) { padding-top: 11px; border-top: 1px solid var(--vscode-panel-border); }
+.warning-list { margin: 7px 0 12px 17px; padding: 0; font-size: 10px; }
+.warning-list li + li { margin-top: 4px; }
+.sql-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--vscode-panel-border); }
+.sql-panel > .import-section-heading { margin-bottom: 8px; }
+.sql-panel > .import-section-heading > div { gap: 0; }
+.sql-panel > .import-section-heading button { min-height: 27px; padding: 0 8px; font-size: 9px; }
+.sql-card { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.sql-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sql-card-header h3 { font-size: 10px; }
+.sql-actions { display: flex; gap: 5px; }
+.sql-actions button { min-height: 24px; padding: 0 7px; font-size: 9px; }
+.sql-card pre { max-height: 150px; overflow: auto; margin: 0; padding: 9px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-size: 9px; white-space: pre-wrap; }
+.sql-next-steps { margin-top: 10px; font-size: 10px; }
+.sql-next-steps ol { margin: 6px 0 0 17px; padding: 0; }
+
+.import-workflow-footer {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  padding: 11px 25px;
+  border: 0;
+  border-top: 1px solid var(--vscode-panel-border);
+  border-radius: 0;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  box-shadow: none;
+}
+
+.import-status { min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; margin-right: auto; color: var(--vscode-descriptionForeground); font-size: 10px; line-height: 1.4; text-overflow: ellipsis; }
+.import-status > i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--vscode-descriptionForeground); }
+.import-status.success { color: var(--vscode-testing-iconPassed); }
+.import-status.success > i { background: var(--vscode-testing-iconPassed); }
+.import-status.error { color: var(--vscode-errorForeground); }
+.import-status.error > i { background: var(--vscode-errorForeground); }
+.import-cancel-button { min-height: 33px; padding: 0 12px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: transparent; color: var(--vscode-descriptionForeground); font-size: 10px; font-weight: 600; }
+.import-cancel-button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.import-submit-button { min-width: 115px; border-color: var(--vscode-button-background); background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.import-submit-button:hover:not(:disabled) { border-color: var(--vscode-button-hoverBackground); background: var(--vscode-button-hoverBackground); transform: translateY(-1px); }
+.import-submit-button:disabled { opacity: 0.45; cursor: default; }
+.import-workflow-footer .import-submit-button > span { flex: none; font-size: 14px; }
+.import-button-spinner { width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, var(--vscode-button-foreground) 35%, transparent); border-top-color: var(--vscode-button-foreground); border-radius: 50%; animation: import-spin 0.7s linear infinite; }
+@keyframes import-spin { to { transform: rotate(360deg); } }
+
+.status-banner { flex: none; padding: 9px 12px; border-radius: 6px; font-size: 11px; }
+.background-validation-progress { flex: none; margin: 0; padding: 10px 12px; border-radius: 7px; }
+.progress-label { font-size: 11px; }
+
+@media (max-width: 900px) {
+  .import-workflow-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 700px) {
+  .import-workflow-header { grid-template-columns: 36px minmax(0, 1fr) 30px; column-gap: 9px; padding: 15px 14px 0; }
+  .import-heading-icon { width: 34px; height: 34px; }
+  .import-heading-copy h1 { font-size: 16px; }
+  .import-heading-copy p { font-size: 9px; }
+  .import-steps { gap: 7px; }
+  .import-steps li { gap: 6px; font-size: 9px; }
+  .import-step-number { width: 21px; height: 21px; flex-basis: 21px; }
+  .import-step-connector { min-width: 8px; margin-left: 1px; }
+  .import-workflow-body { padding: 12px; }
+  .import-source-panel,
+  .import-card { padding: 11px; }
+  .import-source-content { gap: 8px; padding: 8px; flex-wrap: wrap; }
+  .import-file-icon { width: 30px; height: 30px; }
+  .import-file-type { display: none; }
+  .import-source-actions { width: 100%; justify-content: flex-end; }
+  .import-choose-button { min-height: 30px; padding: 0 8px; font-size: 9px; }
+  .import-source-options { justify-content: flex-start; flex-wrap: wrap; }
+  .import-preview-count { display: none; }
+  .import-mapping-head { display: none; }
+  .import-map-row { grid-template-columns: 22px minmax(30px, 42px) minmax(0, 0.8fr) 12px minmax(0, 1fr); gap: 5px; }
+  .import-map-row .type-badge { display: none; }
+  .import-map-row select.type-select { grid-column: 5; grid-row: 2; }
+  .import-map-row input.target-name { grid-column: 5; grid-row: 1; }
+  .import-map-row .move-buttons { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; }
+  .import-map-row > input[type="checkbox"] { grid-column: 1; grid-row: 1 / span 2; }
+  .import-map-row .import-source-column { grid-column: 3; grid-row: 1 / span 2; }
+  .import-map-arrow { grid-column: 4; grid-row: 1 / span 2; }
+  .import-status { max-width: 48%; font-size: 9px; }
+  .import-workflow-footer { padding: 9px 12px; }
+}

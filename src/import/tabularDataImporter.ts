@@ -14,6 +14,7 @@ export interface TabularDataImporterOptions {
     kind?: string | DatabaseKind;
     logDir?: string;
     inferBoolean?: boolean;
+    hasHeaders?: boolean;
 }
 
 function normalizeKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
@@ -80,6 +81,7 @@ export class TabularDataImporter {
         this.targetTable = targetTable;
         this.importer = new NetezzaImporter(filePath, targetTable, resolvedOptions?.logDir, {
             inferBoolean: resolvedOptions?.inferBoolean === true,
+            hasHeaders: resolvedOptions?.hasHeaders,
         });
     }
 
@@ -234,6 +236,19 @@ export class TabularDataImporter {
 
     public getSelectedSheet(): string | undefined {
         return this.importer.getSelectedSheet();
+    }
+
+    public setHasHeaders(hasHeaders: boolean): void {
+        this.importer.setHasHeaders(hasHeaders);
+        this.normalizedHeaders = [];
+        this.inferredTypes = [];
+        this.selectedColumnIndexes = [];
+        this.forcedColumnTypes.clear();
+        this.columnNameOverrides.clear();
+    }
+
+    public getHasHeaders(): boolean {
+        return this.importer.getHasHeaders();
     }
 
     public getDecimalDelimiter(): string {

@@ -15,6 +15,7 @@ describe('ImportWizardService', () => {
     const executeMock = jest.fn<Promise<ImportResult>, [unknown]>();
     const fakeAdapter = {
         kind: 'postgresql' as const,
+        supportsAppendToExistingTable: true,
         normalizeTargetColumnName: jest.fn((name: string) => name.trim().toLowerCase()),
         getSupportedTypeOptions: jest.fn(() => ['BIGINT', 'VARCHAR(255)', 'DATE']),
         mapInferredType: jest.fn((typeName: string) => typeName.toUpperCase()),
@@ -67,6 +68,8 @@ describe('ImportWizardService', () => {
         getCsvDelimiter: jest.fn(() => ','),
         getDecimalDelimiter: jest.fn(() => '.'),
         updateTargetTable: jest.fn(),
+        setHasHeaders: jest.fn(),
+        getHasHeaders: jest.fn(() => true),
         getDelegate: jest.fn(() => ({})),
     };
 
@@ -74,6 +77,7 @@ describe('ImportWizardService', () => {
         jest.clearAllMocks();
         importerState.selectedSheet = 'Sheet1';
         importerState.appliedOptions = undefined;
+        fakeAdapter.supportsAppendToExistingTable = true;
         executeMock.mockResolvedValue({ success: true, message: 'Import finished.' });
         (createTabularDataImporter as jest.Mock).mockReturnValue(fakeImporter);
         (getImportWizardAdapter as jest.Mock).mockReturnValue(fakeAdapter);
@@ -180,7 +184,36 @@ describe('ImportWizardService', () => {
                     selectedColumnIndexes: [1],
                     forcedColumnTypes: undefined,
                     columnNameOverrides: { 1: 'customer_name' },
+                    appendToExistingTable: false,
+                    hasHeaders: true,
                 },
+            }),
+        );
+    });
+
+    it('forces create-table mode for adapters that do not support appending', async () => {
+        fakeAdapter.supportsAppendToExistingTable = false;
+        const service = new ImportWizardService();
+        const state = await service.createSession({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'public.orders',
+            createTable: false,
+            connectionDetails: {
+                dbType: 'snowflake',
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'snowflake',
+            } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        });
+
+        expect(state.canAppendToExistingTable).toBe(false);
+        expect(state.createTable).toBe(true);
+        await service.executeImport(state.id);
+        expect(executeMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                columnOptions: expect.objectContaining({ appendToExistingTable: false }),
             }),
         );
     });
