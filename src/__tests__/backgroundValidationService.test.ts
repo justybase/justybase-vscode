@@ -54,6 +54,7 @@ function createColumn(overrides: Partial<ImportWizardColumn> = {}): ImportWizard
 function createAdapter(typeIssueMessages: string[] = []): jest.Mocked<DatabaseImportWizardAdapter> {
     return {
         kind: 'netezza',
+        supportsAppendToExistingTable: true,
         normalizeTargetColumnName: jest.fn(name => name.trim()),
         getSupportedTypeOptions: jest.fn(() => ['INTEGER', 'NUMERIC(18,2)', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'VARCHAR(255)']),
         mapInferredType: jest.fn(typeName => typeName),

@@ -337,7 +337,7 @@ export async function importDataToMsSql(
         }
 
         progressCallback?.('Analyzing source file...');
-        const importer = createTabularDataImporter(filePath, targetTable, { kind: 'mssql' });
+        const importer = createTabularDataImporter(filePath, targetTable, { kind: 'mssql', hasHeaders: columnOptions?.hasHeaders });
         await importer.analyzeDataTypes(progressCallback);
         importer.applyColumnOptions(columnOptions);
 
@@ -358,9 +358,11 @@ export async function importDataToMsSql(
             dbType: 'mssql'
         });
 
-        const createTableSql = buildCreateTableSql(target, columns);
-        progressCallback?.(`Creating target table ${target.displayName}...`);
-        await executeStatement(connection, createTableSql, 3600);
+        if (!columnOptions?.appendToExistingTable) {
+            const createTableSql = buildCreateTableSql(target, columns);
+            progressCallback?.(`Creating target table ${target.displayName}...`);
+            await executeStatement(connection, createTableSql, 3600);
+        }
 
         const insertedRows = await insertRows(
             connection,

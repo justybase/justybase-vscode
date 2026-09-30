@@ -12,6 +12,7 @@ import {
 
 export class SnowflakeImportWizardAdapter extends BaseImportWizardAdapter {
     public readonly kind = 'snowflake' as const;
+    public supportsAppendToExistingTable = false;
 
     public constructor() {
         super('workflow');

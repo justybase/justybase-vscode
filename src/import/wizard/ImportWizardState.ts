@@ -56,13 +56,19 @@ export interface ImportTargetLocationCapabilitiesState {
 export interface ImportWizardState {
   id: string;
   filePath: string;
+  sourceKind: "file" | "clipboard";
+  sourceName: string;
   fileName: string;
   fileFormat: ImportWizardFileFormat;
   sheetName?: string;
   availableSheets: string[];
   canChangeSheet: boolean;
   connectionName?: string;
+  availableConnections: ImportWizardConnection[];
   databaseKind: DatabaseKind;
+  hasHeaders: boolean;
+  createTable: boolean;
+  canAppendToExistingTable: boolean;
   targetTable: string;
   targetLocation: ImportTargetLocationState;
   targetLocationCapabilities: ImportTargetLocationCapabilitiesState;
@@ -83,6 +89,13 @@ export interface ImportWizardState {
   backgroundValidation?: BackgroundValidationStatus;
 }
 
+export interface ImportWizardConnection {
+  name: string;
+  label: string;
+  database?: string;
+  databaseKind?: DatabaseKind;
+}
+
 export interface BackgroundValidationProgress {
   phase: "starting" | "reading" | "validating" | "complete" | "cancelled";
   rowsProcessed: number;
@@ -98,11 +111,17 @@ export interface BackgroundValidationStatus {
 
 export interface ImportWizardSessionOptions {
   filePath: string;
+  sourceKind?: "file" | "clipboard";
+  sourceName?: string;
+  clipboardSourceDirectory?: string;
   targetTable: string;
+  hasHeaders?: boolean;
+  createTable?: boolean;
   connectionDetails: ConnectionDetails;
   previewRowCount: number;
   validationSampleSize: number;
   connectionName?: string;
+  availableConnections?: ImportWizardConnection[];
   availableDatabases?: string[];
   availableSchemas?: string[];
 }

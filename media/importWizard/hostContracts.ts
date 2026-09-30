@@ -66,13 +66,19 @@ export interface ImportTargetLocationCapabilitiesState {
 export interface ImportWizardState {
     id: string;
     filePath: string;
+    sourceKind: 'file' | 'clipboard';
+    sourceName: string;
     fileName: string;
     fileFormat: ImportWizardFileFormat;
     sheetName?: string;
     availableSheets: string[];
     canChangeSheet: boolean;
     connectionName?: string;
+    availableConnections: { name: string; label: string; database?: string; databaseKind?: string }[];
     databaseKind: string;
+    hasHeaders: boolean;
+    createTable: boolean;
+    canAppendToExistingTable: boolean;
     targetTable: string;
     targetLocation: ImportTargetLocationState;
     targetLocationCapabilities: ImportTargetLocationCapabilitiesState;
@@ -106,6 +112,12 @@ export type ImportWizardWebviewToHostMessage =
     | { type: 'toggleColumn'; sourceIndex: number; included?: boolean }
     | { type: 'reorderColumns'; orderedSourceIndexes: number[] }
     | { type: 'setColumnType'; sourceIndex: number; selectedType: string }
+    | { type: 'setHasHeaders'; hasHeaders: boolean }
+    | { type: 'setCreateTable'; createTable: boolean }
+    | { type: 'setConnection'; connectionName: string }
+    | { type: 'requestClipboardSource' }
+    | { type: 'requestFileSource' }
+    | { type: 'closeWizard' }
     | { type: 'setTargetDatabase'; database?: string }
     | { type: 'setTargetSchema'; schema?: string }
     | { type: 'setTargetTableName'; tableName: string }
@@ -133,4 +145,6 @@ export type ImportWizardHostToWebviewMessage =
       }
     | { type: 'executionStarted' }
     | { type: 'executionFinished'; result: ImportResult }
-    | { type: 'executionFailed'; message: string };
+    | { type: 'executionFailed'; message: string }
+    | { type: 'sessionTransitionStarted' }
+    | { type: 'sessionTransitionFinished' };

@@ -69,13 +69,21 @@ export class ImportWizardSession {
     this.state = {
       id: this.id,
       filePath: this.options.filePath,
+      sourceKind: this.options.sourceKind || "file",
+      sourceName: this.options.sourceName || path.basename(this.options.filePath),
       fileName: path.basename(this.options.filePath),
       fileFormat: preview.fileFormat,
       sheetName: preview.sheetName,
       availableSheets: preview.availableSheets,
       canChangeSheet: preview.availableSheets.length > 1,
       connectionName: this.options.connectionName,
+      availableConnections: [...(this.options.availableConnections || [])],
       databaseKind: this.adapter.kind,
+      hasHeaders: this.requireImporter().getHasHeaders(),
+      createTable: this.adapter.supportsAppendToExistingTable
+        ? (this.options.createTable ?? true)
+        : true,
+      canAppendToExistingTable: this.adapter.supportsAppendToExistingTable,
       targetTable: this.options.targetTable,
       targetLocation,
       targetLocationCapabilities,
@@ -124,6 +132,7 @@ export class ImportWizardSession {
       targetLocation: { ...state.targetLocation },
       availableDatabases: [...state.availableDatabases],
       availableSchemas: [...state.availableSchemas],
+      availableConnections: state.availableConnections.map((connection) => ({ ...connection })),
     };
   }
 
@@ -227,6 +236,36 @@ export class ImportWizardSession {
       1,
       Math.min(Math.trunc(previewRowCount), 100),
     );
+    await this.refreshDerivedState();
+    return this.getState();
+  }
+
+  public async setHasHeaders(hasHeaders: boolean): Promise<ImportWizardState> {
+    const state = this.requireState();
+    const importer = this.requireImporter();
+    importer.setHasHeaders(hasHeaders);
+    const preview = await this.previewService.refresh(
+      importer,
+      this.adapter,
+      state.previewRowCount,
+      this.options.filePath,
+    );
+    state.hasHeaders = importer.getHasHeaders();
+    state.sourceHeaders = preview.sourceHeaders;
+    state.columns = preview.columns;
+    state.previewRows = [];
+    state.issues = [];
+    state.warnings = [];
+    state.hasValidationErrors = false;
+    state.detectedDelimiter = preview.detectedDelimiter;
+    state.decimalDelimiter = preview.decimalDelimiter;
+    await this.refreshDerivedState(preview.rawPreviewRows);
+    return this.getState();
+  }
+
+  public async setCreateTable(createTable: boolean): Promise<ImportWizardState> {
+    const state = this.requireState();
+    state.createTable = state.canAppendToExistingTable ? createTable : true;
     await this.refreshDerivedState();
     return this.getState();
   }
@@ -462,6 +501,8 @@ export class ImportWizardSession {
         Object.keys(columnNameOverrides).length > 0
           ? columnNameOverrides
           : undefined,
+      appendToExistingTable: !state.createTable,
+      hasHeaders: state.hasHeaders,
     };
   }
 

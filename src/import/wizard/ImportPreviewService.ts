@@ -53,6 +53,7 @@ export class ImportPreviewService {
     ): Promise<ImportPreviewSnapshot> {
         const importer = createTabularDataImporter(options.filePath, options.targetTable, {
             kind: options.connectionDetails.dbType,
+            hasHeaders: options.hasHeaders,
         });
 
         const availableSheets = await importer.getAvailableSheetNames();

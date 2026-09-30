@@ -52,6 +52,7 @@ interface PostgreSqlImportExecutionOptions {
     fileSize?: number;
     format: string;
     detectedDelimiter?: string;
+    appendToExistingTable?: boolean;
 }
 
 function normalizeImportType(typeName: string): string {
@@ -430,8 +431,10 @@ async function executePostgreSqlCopyImport(options: PostgreSqlImportExecutionOpt
         });
 
         const timeoutSeconds = options.timeoutSeconds || POSTGRESQL_DEFAULT_TIMEOUT_SECONDS;
-        options.progressCallback?.(`Creating target table ${target.displayName}...`);
-        await executeStatement(connection, buildCreateTableSql(target, options.columns), timeoutSeconds);
+        if (!options.appendToExistingTable) {
+            options.progressCallback?.(`Creating target table ${target.displayName}...`);
+            await executeStatement(connection, buildCreateTableSql(target, options.columns), timeoutSeconds);
+        }
 
         options.progressCallback?.(`Loading ${options.totalRows.toLocaleString()} rows with PostgreSQL COPY...`);
         await executeStatement(
@@ -509,7 +512,7 @@ export async function importDataToPostgreSql(
     }
 
     progressCallback?.('Analyzing source file...');
-    const importer = createTabularDataImporter(filePath, targetTable, { kind: 'postgresql' });
+    const importer = createTabularDataImporter(filePath, targetTable, { kind: 'postgresql', hasHeaders: columnOptions?.hasHeaders });
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
@@ -530,7 +533,8 @@ export async function importDataToPostgreSql(
         sourceFile: filePath,
         fileSize: fs.statSync(filePath).size,
         format: path.extname(filePath).replace('.', '').toUpperCase() || 'UNKNOWN',
-        detectedDelimiter: importer.getCsvDelimiter()
+        detectedDelimiter: importer.getCsvDelimiter(),
+        appendToExistingTable: columnOptions?.appendToExistingTable,
     });
 }
 

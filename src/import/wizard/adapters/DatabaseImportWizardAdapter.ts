@@ -64,6 +64,7 @@ export interface ImportExecutionInput {
 
 export interface DatabaseImportWizardAdapter {
     readonly kind: DatabaseKind;
+    supportsAppendToExistingTable: boolean;
     normalizeTargetColumnName(name: string): string;
     getSupportedTypeOptions(): string[];
     mapInferredType(typeName: string): string;
@@ -112,6 +113,7 @@ export function formatQualifiedImportTarget(targetTable: string, kind: DatabaseK
 
 export abstract class BaseImportWizardAdapter implements DatabaseImportWizardAdapter {
     public abstract readonly kind: DatabaseKind;
+    public supportsAppendToExistingTable = true;
 
     protected constructor(private readonly executionMode: ImportWizardExecutionMode = 'direct') {}
 

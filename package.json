@@ -4386,6 +4386,12 @@
     },
     "keybindings": [
       {
+        "command": "netezza.importClipboard",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+      },
+      {
         "command": "netezza.newSqlTabWithContext",
         "key": "ctrl+n",
         "mac": "cmd+n",

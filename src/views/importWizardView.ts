@@ -33,6 +33,7 @@ export class ImportWizardView {
     ) {
         this.panel = panel;
         this.messageHandler = new ImportWizardMessageHandler({
+            context,
             service,
             connectionManager,
             catalogService: new ImportTargetCatalogService(
@@ -41,9 +42,10 @@ export class ImportWizardView {
                 metadataCache,
             ),
             postMessage: (message: ImportWizardOutboundMessage) => this.panel.webview.postMessage(message),
-            onTargetTableChanged: (targetTable) => {
-                this.panel.title = `Advanced Import: ${targetTable}`;
+            onTargetTableChanged: (_targetTable) => {
+                this.panel.title = 'Import data';
             },
+            onClose: () => this.panel.dispose(),
         });
 
         this.panel.webview.options = {
@@ -81,7 +83,7 @@ export class ImportWizardView {
 
         const panel = vscode.window.createWebviewPanel(
             ImportWizardView.viewType,
-            'Advanced Import Wizard',
+            'Import data',
             column,
             {
                 enableScripts: true,
@@ -107,7 +109,7 @@ export class ImportWizardView {
     }
 
     public async loadSession(options: ImportWizardSessionOptions): Promise<void> {
-        this.panel.title = `Advanced Import: ${options.targetTable}`;
+        this.panel.title = 'Import data';
         await this.messageHandler.initialize(options);
     }
 
@@ -138,7 +140,7 @@ export class ImportWizardView {
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="${styleUri}" rel="stylesheet" />
-    <title>Advanced Import Wizard</title>
+    <title>Import data</title>
 </head>
 <body>
     <div id="app" class="import-wizard-root"></div>
