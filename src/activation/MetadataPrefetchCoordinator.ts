@@ -137,22 +137,25 @@ export class MetadataPrefetchCoordinator {
                 || !supportsLegacyMetadataPrefetch(
                     this.services.connectionManager.getConnectionDatabaseKind(connectionName),
                 )
-                || this.services.metadataCache.isConnectionPrefetchFresh(connectionName)
             ) {
                 return;
             }
 
-            this.services.metadataCache.triggerConnectionPrefetch(
+            const runner = createConnectionScopedMetadataQueryRunner({
+                context: this.context,
+                connectionManager: this.services.connectionManager,
                 connectionName,
-                createConnectionScopedMetadataQueryRunner({
-                    context: this.context,
-                    connectionManager: this.services.connectionManager,
-                    connectionName,
-                    maxRows: 1000000,
-                    timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
-                    queryExecutor: this.services.queryExecutor,
-                }),
-            );
+                maxRows: 1000000,
+                timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                queryExecutor: this.services.queryExecutor,
+            });
+            if (this.services.metadataCache.isConnectionPrefetchFresh(connectionName)) {
+                void this.services.metadataCache.refreshIncompleteForeignKeyRelationships(connectionName, runner)
+                    .catch(error => this.logger.warn('FK metadata recovery failed', error));
+            } else {
+                this.logger.debug(`[MetadataCache] Core snapshot expired, absent or incomplete: ${connectionName}`);
+                this.services.metadataCache.triggerConnectionPrefetch(connectionName, runner);
+            }
         });
     }
 

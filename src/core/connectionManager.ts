@@ -1527,6 +1527,9 @@ export class ConnectionManager {
 
     setDocumentConnection(documentUri: string, connectionName: string): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
+        if (this.getConnectionForExecution(documentUri) !== connectionName) {
+            this._documentDatabaseOverride.delete(normalizedUri);
+        }
         this._documentConnections.set(normalizedUri, connectionName);
         this._missingDocumentConnectionWarnings.delete(normalizedUri);
         this.bumpDocumentConnectionGeneration(normalizedUri);

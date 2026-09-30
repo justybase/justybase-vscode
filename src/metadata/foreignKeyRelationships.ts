@@ -19,12 +19,16 @@ export interface ForeignKeyTableIdentity {
     table: string;
 }
 
+export type ForeignKeyRelationshipStatus = 'complete' | 'unavailable' | 'failed';
+
 /** One database's FK catalog result stored in the metadata cache. */
 export interface ForeignKeyRelationshipCacheSlice {
     database: string;
     references: DatabaseForeignKeyColumnReference[];
     /** False when the catalog query failed or only a partial scope was scanned. */
     complete: boolean;
+    /** Optional for compatibility with snapshots written before status tracking. */
+    status?: ForeignKeyRelationshipStatus;
 }
 
 function catalogText(value: unknown): string {
@@ -129,4 +133,12 @@ export function getForeignKeyReferencingTable(
         schema: reference.toSchema,
         table: reference.toTable,
     }, table));
+}
+
+/** Expected catalogue visibility failures; malformed SQL and timeouts remain failures. */
+export function isForeignKeyCatalogUnavailable(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const message = error.message.toLowerCase();
+    return /permission denied|access denied|not authorized|insufficient privilege|resolvecatalog|error retrieving database/.test(message)
+        || /(?:database|relation|table|object).*(?:does not exist|not found)/.test(message);
 }

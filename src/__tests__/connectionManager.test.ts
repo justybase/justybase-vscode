@@ -1099,6 +1099,21 @@ describe('ConnectionManager', () => {
             expect(manager.getDocumentDatabase(docUri)).toBeUndefined();
         });
 
+        it('resets the database override only when switching profiles A to B to A', async () => {
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection({ ...sampleConnection, name: 'Second', database: 'second_db' });
+            const uri = 'file:///switch.sql';
+            await manager.setDocumentConnection(uri, sampleConnection.name);
+            await manager.setDocumentDatabase(uri, 'override_db');
+            await manager.setDocumentConnection(uri, sampleConnection.name);
+            expect(await manager.getEffectiveDatabase(uri)).toBe('override_db');
+            await manager.setDocumentConnection(uri, 'Second');
+            expect(await manager.getEffectiveDatabase(uri)).toBe('second_db');
+            expect(manager.getDocumentDatabase(uri)).toBeUndefined();
+            await manager.setDocumentConnection(uri, sampleConnection.name);
+            expect(await manager.getEffectiveDatabase(uri)).toBe('testdb');
+        });
+
         it('should get effective database with override', async () => {
             await manager.saveConnection(sampleConnection);
 

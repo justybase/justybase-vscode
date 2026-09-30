@@ -1,10 +1,20 @@
 import {
+    isForeignKeyCatalogUnavailable,
     getForeignKeyReferencesForTable,
     getForeignKeyReferencingTable,
     normalizeForeignKeyRelationshipRows,
 } from '../metadata/foreignKeyRelationships';
 
 describe('foreignKeyRelationships', () => {
+    it.each(['Permission denied', 'DATABASE X does not exist', 'Relation X not found', 'ResolveCatalog failed'])(
+        'classifies expected catalogue visibility failures: %s', message => {
+        expect(isForeignKeyCatalogUnavailable(new Error(message))).toBe(true);
+    });
+    it.each(['query timeout', 'syntax error', 'Column PKATTNAME does not exist', 'connection reset'])(
+        'preserves genuine failures: %s', message => {
+        expect(isForeignKeyCatalogUnavailable(new Error(message))).toBe(false);
+    });
+
     const rows = [
         {
             FROM_DATABASE: 'SALES',

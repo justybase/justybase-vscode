@@ -230,6 +230,7 @@ async function hydrateConnectionMetadataFromDisk(
         slice.database,
         slice.references,
         slice.complete,
+        slice.status,
       );
     }
 
@@ -339,6 +340,7 @@ export async function onExternalCacheUpdate(
         slice.database,
         slice.references,
         slice.complete,
+        slice.status,
       );
     }
     deps.state.deferredIndexConnections.add(connectionName);

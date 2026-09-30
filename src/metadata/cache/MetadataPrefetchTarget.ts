@@ -39,12 +39,14 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   ): Promise<void>;
   /** Identifier case policy for catalog rows; only Netezza uses exact catalog identity here. */
   isNetezzaConnection?(connectionName: string): boolean;
+  getForeignKeyRelationshipSlices?(connectionName: string): import('../foreignKeyRelationships').ForeignKeyRelationshipCacheSlice[];
   /** Store a full database FK catalog result from the ordinary column prefetch. */
   setForeignKeyRelationshipsForDatabase?(
     connectionName: string,
     database: string,
     references: DatabaseForeignKeyColumnReference[],
     complete: boolean,
+    status?: import('../foreignKeyRelationships').ForeignKeyRelationshipStatus,
   ): void;
   isDatabaseDead(connectionName: string, dbName: string | undefined): boolean;
   markDatabaseDead(connectionName: string, dbName: string): void;

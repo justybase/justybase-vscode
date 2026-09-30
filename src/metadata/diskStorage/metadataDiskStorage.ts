@@ -361,6 +361,7 @@ export class MetadataDiskStorage {
                     database: file.database,
                     references: file.references,
                     complete: file.complete,
+                    status: file.status ?? (file.complete ? 'complete' : 'failed'),
                 });
             }
         }
@@ -982,6 +983,7 @@ export class MetadataDiskStorage {
                 schemaVersion: FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION,
                 database: slice.database,
                 complete: slice.complete,
+                status: slice.status,
                 references: slice.references,
             };
             await this.writeGzipJson(

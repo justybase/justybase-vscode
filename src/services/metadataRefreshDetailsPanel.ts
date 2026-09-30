@@ -178,15 +178,21 @@ export function getMetadataRefreshDetailsHtml(): string {
   };
   const renderSnapshot = (snapshot) => {
     if (!snapshot) return '';
+    const fkStatus = (snapshot.unavailableRelationshipCount || snapshot.failedRelationshipCount)
+      ? '<div class="snapshot degraded">Foreign-key metadata: unavailable in '
+        + escapeHtml(String(snapshot.unavailableRelationshipCount || 0)) + ' databases; failed reads in '
+        + escapeHtml(String(snapshot.failedRelationshipCount || 0)) + ' databases.'
+        + (snapshot.complete ? ' Tables and columns remain cached.' : '') + '</div>'
+      : '';
     if (snapshot.complete && snapshot.degraded) {
       const unavailableCount = snapshot.unavailableColumnCount || 0;
       const removedCount = snapshot.removedStaleObjectCount || 0;
       const examples = (snapshot.unavailableColumnKeys || []).map(key => '<li>' + escapeHtml(key) + '</li>').join('');
-      return '<div class="snapshot degraded">Snapshot complete with warnings — explicit empty column layers: '
+      return fkStatus + '<div class="snapshot degraded">Snapshot complete with warnings — explicit empty column layers: '
         + escapeHtml(String(unavailableCount)) + '; stale objects removed: ' + escapeHtml(String(removedCount)) + '</div>'
         + (examples ? '<ul class="missing">' + examples + '</ul>' : '');
     }
-    if (snapshot.complete) return '<div class="snapshot ok">Snapshot complete: all prefetched object layers have columns.</div>';
+    if (snapshot.complete) return fkStatus + '<div class="snapshot ok">Snapshot complete: all prefetched object layers have columns.</div>';
     const parts = [];
     if (snapshot.missingStages && snapshot.missingStages.length) {
       const stageText = snapshot.missingStages.map(stage => stage === 'objects'
@@ -196,7 +202,7 @@ export function getMetadataRefreshDetailsHtml(): string {
     }
     if (snapshot.missingColumnCount) parts.push('missing column layers: ' + snapshot.missingColumnCount);
     const examples = (snapshot.missingColumnKeys || []).map(key => '<li>' + escapeHtml(key) + '</li>').join('');
-    return '<div class="snapshot incomplete">Snapshot incomplete' + (parts.length ? ' — ' + escapeHtml(parts.join('; ')) : '') + '</div>'
+    return fkStatus + '<div class="snapshot incomplete">Snapshot incomplete' + (parts.length ? ' — ' + escapeHtml(parts.join('; ')) : '') + '</div>'
       + (examples ? '<ul class="missing">' + examples + '</ul>' : '');
   };
   const renderStats = (refresh, queries) => {

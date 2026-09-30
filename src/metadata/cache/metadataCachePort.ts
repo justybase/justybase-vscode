@@ -31,6 +31,7 @@ export interface MetadataCachePort extends MetadataStorageReader {
     database: string,
     references: DatabaseForeignKeyColumnReference[],
     complete: boolean,
+    status?: import('../foreignKeyRelationships').ForeignKeyRelationshipStatus,
   ): void;
   invalidateForeignKeyRelationships(connectionName: string): void;
 

@@ -4,7 +4,12 @@
  */
 
 import * as vscode from 'vscode';
-import { CachePrefetcher, DisposableQueryRunnerRawFn, QueryRunnerRawFn } from '../prefetch';
+import { NZ_QUERIES } from '../systemQueries';
+import { queryResultToRows } from '../prefetchMapping';
+import { normalizeForeignKeyRelationshipRows, isForeignKeyCatalogUnavailable } from '../foreignKeyRelationships';
+import { createNetezzaCatalogIdentifier } from '../../dialects/netezza/metadata/identifierUtils';
+import { runWithMetadataQueryConcurrencyLimit } from '../metadataQueryLimiter';
+import { CachePrefetcher, DisposableQueryRunnerRawFn, QueryRunnerRawFn, PREFETCH_RETRY_BACKOFF_MS } from '../prefetch';
 import type {
   MetadataPrefetchProgress,
   MetadataPrefetchRefreshDetails,
@@ -114,6 +119,8 @@ export class MetadataCache implements MetadataPrefetchTarget {
   private readonly _objectsCatalogLoaded = new Set<string>();
   private readonly _invalidatedColumnLayerKeys = new Set<string>();
   private prefetcher: CachePrefetcher;
+  private readonly relationshipRetries = new Map<string, { attempts: number; at: number }>();
+  private readonly relationshipRefreshes = new Set<string>();
   private readonly _diskPersistenceEnabled: boolean;
   private readonly _crossWindowSyncEnabled: boolean;
   private _diskStorage: MetadataDiskStorage | undefined;
@@ -471,6 +478,8 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   async dispose(): Promise<void> {
+    this._diskLifecycleState.cacheGeneration++;
+    this.relationshipRetries.clear();
     try {
       this._diskWatcher?.stop();
 
@@ -542,6 +551,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     deletePrefixed(this._store.procedureCache);
     deletePrefixed(this._store.columnCache);
     this._store.foreignKeyRelationships.delete(connectionName);
+    for (const key of this.relationshipRetries.keys()) {
+      if ((JSON.parse(key) as string[])[0] === connectionName) this.relationshipRetries.delete(key);
+    }
     deletePrefixed(this._store.tableIdMap);
     deletePrefixed(this._store.typeGroupCache);
     deletePrefixed(this._store.objectsByTypeCache);
@@ -631,6 +643,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   private clearLocalMetadataState(): void {
+    this.relationshipRetries.clear();
     this._store.clearLayerMaps();
     this._columnLoaderState.columnsOnDisk.clear();
     this._columnLoaderState.columnLayerKeysOnDisk.clear();
@@ -690,6 +703,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
       database: slice.database,
       references: slice.references.map(reference => ({ ...reference })),
       complete: slice.complete,
+      status: slice.status ?? (slice.complete ? 'complete' : 'failed'),
     } : undefined;
   }
 
@@ -701,6 +715,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
         database: slice.database,
         references: slice.references.map(reference => ({ ...reference })),
         complete: slice.complete,
+        status: slice.status ?? (slice.complete ? 'complete' : 'failed'),
       }));
   }
 
@@ -709,6 +724,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
     database: string,
     references: DatabaseForeignKeyColumnReference[],
     complete: boolean,
+    status?: import('../foreignKeyRelationships').ForeignKeyRelationshipStatus,
   ): void {
     let byDatabase = this._store.foreignKeyRelationships.get(connectionName);
     if (!byDatabase) {
@@ -724,13 +740,17 @@ export class MetadataCache implements MetadataPrefetchTarget {
       // display its partial state instead of treating it as authoritative.
       references: complete
         ? references.map(reference => ({ ...reference }))
-        : existing?.references.map(reference => ({ ...reference })) ?? [],
+        : (existing?.references ?? references).map(reference => ({ ...reference })),
       complete,
+      status: complete ? 'complete' : status ?? 'failed',
     });
   }
 
   invalidateForeignKeyRelationships(connectionName: string): void {
     this._store.foreignKeyRelationships.delete(connectionName);
+    for (const key of this.relationshipRetries.keys()) {
+      if ((JSON.parse(key) as string[])[0] === connectionName) this.relationshipRetries.delete(key);
+    }
   }
 
   getSchemas(
@@ -1249,7 +1269,14 @@ export class MetadataCache implements MetadataPrefetchTarget {
     if (freshByTimestamp && this.isConnectionMetadataHydrating(connectionName)) {
       return true;
     }
-    return freshByTimestamp && this.verifyCompleteSnapshot(connectionName, false);
+    const complete = this.verifyCompleteSnapshot(connectionName, false);
+    const fresh = freshByTimestamp && complete;
+    if (!fresh) {
+      Logger.getInstance().debug(
+        `[MetadataCache] Freshness: connection=${connectionName} timestamp=${this.prefetcher.getConnectionPrefetchTimestamp(connectionName) ?? 'absent'} ttlMs=${this._store.cacheTtl} coreComplete=${complete} timestampFresh=${freshByTimestamp}`,
+      );
+    }
+    return fresh;
   }
 
   getLastPrefetchAttemptTime(connectionName: string): number | undefined {
@@ -1355,13 +1382,9 @@ export class MetadataCache implements MetadataPrefetchTarget {
     const allMissingColumnKeys = report.missingColumnKeys;
 
     const missingStages = report.missingStages.map(stage => stageNames[stage] ?? stage);
-    const relationshipsComplete = this.isForeignKeyRelationshipIndexComplete(connectionName);
-    if (!relationshipsComplete) {
-      missingStages.push('foreign-key relationships');
-    }
 
     return {
-      complete: report.complete && relationshipsComplete,
+      complete: report.complete,
       missingStages,
       missingColumnKeys: allMissingColumnKeys.slice(0, maxReportedMissingColumnKeys),
       missingColumnCount: allMissingColumnKeys.length,
@@ -1519,21 +1542,6 @@ export class MetadataCache implements MetadataPrefetchTarget {
     return false;
   }
 
-  private isForeignKeyRelationshipIndexComplete(connectionName: string): boolean {
-    if (!this.isNetezzaConnection(connectionName)) {
-      return true;
-    }
-    const databases = this.getDatabases(connectionName);
-    if (!databases || databases.length === 0) {
-      return false;
-    }
-    return databases.every(database => {
-      const name = String(database.DATABASE || database.label || '');
-      return name.length > 0
-        && this.getForeignKeyRelationshipsForDatabase(connectionName, name)?.complete === true;
-    });
-  }
-
   async checkpointSave(connectionName: string, lease?: import('../diskStorage/metadataDiskStorage').PrefetchLease): Promise<void> {
     if (
       !this.isDiskPersistenceEnabled()
@@ -1584,6 +1592,93 @@ export class MetadataCache implements MetadataPrefetchTarget {
       prefetchCompletedAt,
       { isComplete: true, lease },
     );
+  }
+
+  /** Retry only optional FK reads; preserve the original core snapshot timestamp. */
+  async refreshIncompleteForeignKeyRelationships(
+    connectionName: string,
+    runner: DisposableQueryRunnerRawFn,
+  ): Promise<void> {
+    let lease: import('../diskStorage/metadataDiskStorage').PrefetchLease | undefined;
+    const generation = this._diskLifecycleState.cacheGeneration;
+    let ownsRefresh = false;
+    try {
+      await this.whenConnectionMetadataHydrated(connectionName);
+      if (!this.isNetezzaConnection(connectionName)
+        || !this.isConnectionPrefetchFresh(connectionName)
+        || this.relationshipRefreshes.has(connectionName)) return;
+      const needsRecovery = (this.getDatabases(connectionName) ?? []).some(database => {
+        const name = String(database.DATABASE || database.label || '');
+        const slice = this.getForeignKeyRelationshipsForDatabase(connectionName, name);
+        const retry = this.relationshipRetries.get(JSON.stringify([connectionName, name]));
+        return !slice?.complete && slice?.status !== 'unavailable'
+          && (!retry || (retry.attempts < 2 && Date.now() - retry.at >= PREFETCH_RETRY_BACKOFF_MS));
+      });
+      if (!needsRecovery) return;
+      this.relationshipRefreshes.add(connectionName);
+      ownsRefresh = true;
+      lease = await this.tryAcquirePrefetchLock(connectionName);
+      if (!lease || !this.isCacheGenerationCurrent(generation) || !this.isConnectionPrefetchFresh(connectionName)) return;
+      const timestamp = this.prefetcher.getConnectionPrefetchTimestamp(connectionName);
+      let changed = false;
+      for (const database of this.getDatabases(connectionName) ?? []) {
+        const name = String(database.DATABASE || database.label || '');
+        const previous = this.getForeignKeyRelationshipsForDatabase(connectionName, name);
+        if (previous?.complete || previous?.status === 'unavailable') continue;
+        const key = JSON.stringify([connectionName, name]);
+        const retry = this.relationshipRetries.get(key);
+        if (retry && (retry.attempts >= 2 || Date.now() - retry.at < PREFETCH_RETRY_BACKOFF_MS)) continue;
+        this.relationshipRetries.set(key, { attempts: (retry?.attempts ?? 0) + 1, at: Date.now() });
+        try {
+          const result = await runWithMetadataQueryConcurrencyLimit(connectionName, () => runner(
+            NZ_QUERIES.listForeignKeyColumnReferences(createNetezzaCatalogIdentifier(name)),
+            { source: 'connection-prefetch', kind: 'column-relations', database: name, reason: 'foreign-key-recovery' },
+          ));
+          if (!this.isCacheGenerationCurrent(generation) || !this.isConnectionPrefetchFresh(connectionName)
+            || this.prefetcher.getConnectionPrefetchTimestamp(connectionName) !== timestamp) return;
+          if (!result) throw new Error('FK catalog returned no result');
+          const references = normalizeForeignKeyRelationshipRows(queryResultToRows(result), name);
+          const databaseKey = buildNetezzaCacheDatabasePart(name);
+          await this.ensureColumnsLoaded(connectionName, databaseKey);
+          if (!this.isConnectionPrefetchFresh(connectionName) || !this.isCacheGenerationCurrent(generation)
+            || this.prefetcher.getConnectionPrefetchTimestamp(connectionName) !== timestamp) return;
+          this.setForeignKeyRelationshipsForDatabase(connectionName, name, references, true);
+          const referencesByColumn = new Map<string, import('../../contracts/database').DatabaseForeignKeyColumnReference[]>();
+          for (const reference of references) {
+            const columnKey = buildColumnCacheKey(databaseKey, reference.fromSchema, reference.fromTable, { preserveCase: true });
+            const key = JSON.stringify([`${connectionName}|${columnKey}`, reference.fromColumn]);
+            const matching = referencesByColumn.get(key) ?? [];
+            matching.push(reference);
+            referencesByColumn.set(key, matching);
+          }
+          for (const [columnKey, entry] of this._store.columnCache) {
+            if (!columnKey.startsWith(`${connectionName}|${databaseKey}.`)) continue;
+            for (const column of entry.data) {
+              column.joinReferences = referencesByColumn.get(JSON.stringify([columnKey, column.ATTNAME])) ?? [];
+            }
+          }
+          changed = true;
+        } catch (error: unknown) {
+          if (!this.isCacheGenerationCurrent(generation) || !this.isConnectionPrefetchFresh(connectionName)
+            || this.prefetcher.getConnectionPrefetchTimestamp(connectionName) !== timestamp) return;
+          this.setForeignKeyRelationshipsForDatabase(connectionName, name, [], false,
+            isForeignKeyCatalogUnavailable(error) ? 'unavailable' : 'failed');
+          Logger.getInstance().warn('[MetadataCache] FK recovery failed', error);
+          changed = true;
+        }
+      }
+      if (changed && this.isCacheGenerationCurrent(generation)) {
+        await this.saveConnectionToDiskAfterPrefetch(connectionName, false, lease);
+        this._onDidExternalRefresh.fire(connectionName);
+      }
+    } finally {
+      if (ownsRefresh) this.relationshipRefreshes.delete(connectionName);
+      try {
+        if (lease) await this.releasePrefetchLock(lease);
+      } finally {
+        await runner.dispose?.();
+      }
+    }
   }
 
   triggerConnectionPrefetch(
