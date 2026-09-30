@@ -212,7 +212,7 @@ describe("MetadataCache", () => {
 
       expect(netezzaCache.getSnapshotCompletenessReport("conn1")).toEqual({
         complete: false,
-        missingStages: ['foreign-key relationships'],
+        missingStages: [],
         missingColumnKeys: [columnLayer],
         missingColumnCount: 1,
       });

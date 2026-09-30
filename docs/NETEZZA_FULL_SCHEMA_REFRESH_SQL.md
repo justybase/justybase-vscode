@@ -267,11 +267,12 @@ join to `_V_OBJECT_DATA`, `UNION ALL`, or `NOT EXISTS` here.
 ## Expected Number of Queries
 
 If `N` is the number of live databases returned by `_V_DATABASE`, and `E` is
-the number of those databases in which an external table was detected, then
+the number of those databases in which an external table was detected, and `F`
+is the number with regular columns (and therefore an FK scan), then
 the number of actual catalog queries for a complete, error-free refresh is:
 
 ```text
-1 + 8N + E
+1 + 8N + F + E (1 + 9N + E when F = N)
 ```
 
 Breakdown:
@@ -281,10 +282,11 @@ Breakdown:
 - `2N` — regular and external objects;
 - `N` — procedures;
 - `3N` — regular columns, key flags, and distribution flags;
+- `F` — FK relationship scans (only when regular columns are present);
 - `E` — external-table columns, only where detected.
 
 The technical `SELECT CURRENT_SID` from section 0 is added once, for a total
-of `2 + 8N + E` generated SQL statements. Catalog or cache errors, or skipping
+of `2 + 8N + F + E` generated SQL statements. Catalog or cache errors, or skipping
 a dead database, may reduce the number of executions.
 
 ## Refresh Observability and Snapshot Verification

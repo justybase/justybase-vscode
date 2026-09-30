@@ -1646,11 +1646,10 @@ export class SchemaProvider
                 connectionName,
                 currentDatabase,
             );
-            if (slice?.complete) {
-                references.push(...slice.references);
-            } else {
+            if (slice) references.push(...slice.references);
+            if (!slice?.complete) {
                 errors.push(
-                    `${currentDatabase}: FK relationship metadata is not completely cached. Refresh schema metadata.`,
+                    `${currentDatabase}: ${slice?.status === 'unavailable' ? 'FK metadata unavailable (catalogue access or missing database).' : 'FK metadata read failed or is not cached. Refresh schema metadata.'}`,
                 );
             }
         } else {
@@ -1673,11 +1672,10 @@ export class SchemaProvider
                         connectionName,
                         database,
                     );
-                    if (slice?.complete) {
-                        references.push(...slice.references);
-                    } else {
+                    if (slice) references.push(...slice.references);
+                    if (!slice?.complete) {
                         errors.push(
-                            `${database}: FK relationship metadata is not completely cached. Refresh schema metadata.`,
+                            `${database}: ${slice?.status === 'unavailable' ? 'FK metadata unavailable (catalogue access or missing database).' : 'FK metadata read failed or is not cached. Refresh schema metadata.'}`,
                         );
                     }
                 }
@@ -1792,6 +1790,23 @@ export class SchemaProvider
                 column: relatedColumn,
             }],
         };
+        const targetSlice = this.metadataCache.getForeignKeyRelationshipsForDatabase?.(group.connectionName || '', relatedDatabase);
+        const targetKey = buildNetezzaDbSchemaCacheKey(formatNetezzaCatalogIdentifier(relatedDatabase), formatNetezzaCatalogIdentifier(relatedSchema));
+        const catalogLoaded = this.metadataCache.isObjectsCatalogLoaded?.(group.connectionName || '', targetKey, 'TABLE') === true;
+        const tables = catalogLoaded ? this.metadataCache.getTables(group.connectionName || '', targetKey) : undefined;
+        const targetDatabaseMissing = !targetSlice
+            && this.metadataCache.isConnectionPrefetchFresh?.(group.connectionName || '') === true
+            && this.metadataCache.getDatabases(group.connectionName || '')?.some(database =>
+                String(database.DATABASE || database.label || '').trimEnd() === relatedDatabase) === false;
+        const targetMissing = targetDatabaseMissing || targetSlice?.status === 'unavailable'
+            || (catalogLoaded && tables !== undefined
+                && !tables.some(table => extractLabel(table) === relatedTable && table.SCHEMA === relatedSchema));
+        if (targetMissing) {
+            item.description = 'Target unavailable';
+            item.tooltip += '\nTarget not visible in the cached catalogue (missing object or insufficient access).';
+            item.iconPath = new vscode.ThemeIcon('warning');
+            item.command = undefined;
+        }
         return item;
     }
 

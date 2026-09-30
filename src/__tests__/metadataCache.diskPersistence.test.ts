@@ -34,7 +34,7 @@ describe('MetadataCache disk persistence integration', () => {
             user: 'admin',
             dbType: 'netezza' as const,
         }),
-        getConnectionNames: () => ['NZ'],
+        getConnectionNames: () => ['NZ', 'OTHER'],
         getConnectionDatabaseKind: () => 'netezza' as const,
         ensureFullyLoaded: jest.fn(async () => undefined),
     };
@@ -230,13 +230,125 @@ describe('MetadataCache disk persistence integration', () => {
             database: 'DB1',
             references: [reference],
             complete: true,
+            status: 'complete',
         });
         expect(cache2.getColumns('NZ', 'DB1.S1.T1')).toBeUndefined();
         expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(true);
         await cache2.dispose();
     });
 
-    it('treats a pre-relationship cache as incomplete so standard prefetch can upgrade it', async () => {
+    it.each(['unavailable', 'failed'] as const)('persists optional FK status %s without expiring core metadata', async (status) => {
+        populateFull('NZ');
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], false, status);
+        const timestamp = Date.now() - 60_000;
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', timestamp]]));
+        expect(cache.isConnectionPrefetchFresh('NZ')).toBe(true);
+        await persistFull('NZ');
+        await cache.dispose();
+        const restored = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await restored.initialize();
+        await restored.whenConnectionMetadataHydrated('NZ');
+        expect(restored.isConnectionPrefetchFresh('NZ')).toBe(true);
+        expect(restored.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')?.status).toBe(status);
+        expect(restored['prefetcher'].getConnectionPrefetchTimestamp('NZ')).toBe(timestamp);
+        await restored.dispose();
+    });
+
+    it('recovers only FK metadata and keeps core TTL and other profiles unchanged', async () => {
+        populateFull('NZ');
+        populateFull('OTHER');
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], false, 'failed');
+        const timestamp = Date.now() - 60_000;
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', timestamp], ['OTHER', timestamp]]));
+        const runner = Object.assign(jest.fn(async (_sql: string) => ({ columns: [], data: [] }) as unknown as QueryResult),
+            { dispose: jest.fn(async () => undefined) });
+        await cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+        expect(runner).toHaveBeenCalledTimes(1);
+        expect(runner.mock.calls[0]?.[0]).toContain('_V_RELATION_KEYDATA');
+        expect(runner.dispose).toHaveBeenCalledTimes(1);
+        expect(cache.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')?.complete).toBe(true);
+        expect(cache.isConnectionPrefetchFresh('OTHER')).toBe(true);
+        expect(cache['prefetcher'].getConnectionPrefetchTimestamp('NZ')).toBe(timestamp);
+        await cache.dispose();
+    });
+
+    it('bounds FK-only retries and skips unavailable catalogues', async () => {
+        populateFull('NZ');
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], false, 'failed');
+        const runner = Object.assign(jest.fn(async () => { throw new Error('query timed out'); }),
+            { dispose: jest.fn(async () => undefined) });
+        await cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+        await cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+        expect(runner).toHaveBeenCalledTimes(1);
+        expect(cache.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')?.status).toBe('failed');
+        const now = Date.now();
+        const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 5 * 60_000 + 1);
+        try {
+            await cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+            expect(runner).toHaveBeenCalledTimes(2);
+            clock.mockReturnValue(now + 10 * 60_000 + 2);
+            await cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+            expect(runner).toHaveBeenCalledTimes(2);
+        } finally {
+            clock.mockRestore();
+        }
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], false, 'unavailable');
+        await cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+        expect(runner).toHaveBeenCalledTimes(2);
+        expect(runner.dispose).toHaveBeenCalledTimes(5);
+        expect(cache.isConnectionPrefetchFresh('NZ')).toBe(true);
+        await cache.dispose();
+    });
+
+    it('rejects a late FK response after cache invalidation and still disposes the runner', async () => {
+        populateFull('NZ');
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], false, 'failed');
+        let release!: (result: QueryResult) => void;
+        let started!: () => void;
+        const ready = new Promise<void>(resolve => { started = resolve; });
+        const runner = Object.assign(jest.fn(async (_sql: string) => {
+            started();
+            return new Promise<QueryResult>(resolve => { release = resolve; });
+        }), { dispose: jest.fn(async () => undefined) });
+        const recovery = cache.refreshIncompleteForeignKeyRelationships('NZ', runner);
+        await ready;
+        await cache.clearCache();
+        release({ columns: [], data: [] } as unknown as QueryResult);
+        await recovery;
+        expect(cache.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')).toBeUndefined();
+        expect(runner.dispose).toHaveBeenCalledTimes(1);
+        await cache.dispose();
+    });
+
+    it('restores independent fresh core snapshots for two profiles with different FK states', async () => {
+        populateSnapshot('NZ', 'FIRST', 'A');
+        populateSnapshot('OTHER', 'SECOND', 'B');
+        cache.setForeignKeyRelationshipsForDatabase('NZ', 'DB1', [], false, 'unavailable');
+        const timestamp = Date.now() - 60_000;
+        cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', timestamp], ['OTHER', timestamp]]));
+        await persistFull('NZ');
+        await persistFull('OTHER');
+        await cache.dispose();
+        const restored = new MetadataCache(
+            { globalStorageUri: vscode.Uri.file(tempDir) } as vscode.ExtensionContext,
+            mockConnectionManager as never,
+        );
+        await restored.initialize();
+        for (const profile of ['NZ', 'OTHER', 'NZ']) {
+            await restored.whenConnectionMetadataHydrated(profile);
+            expect(restored.isConnectionPrefetchFresh(profile)).toBe(true);
+            const expected = profile === 'NZ' ? 'FIRST' : 'SECOND';
+            expect(restored.getTables(profile, 'DB1.S1')?.[0]?.OBJNAME).toBe(expected);
+        }
+        await restored.dispose();
+    });
+
+    it('keeps core metadata fresh when an older snapshot has no FK index', async () => {
         populateFull('NZ');
         cache['prefetcher'].restorePrefetchTimestamps(new Map([['NZ', Date.now()]]));
         await persistFull('NZ');
@@ -253,7 +365,7 @@ describe('MetadataCache disk persistence integration', () => {
         await cache2.whenConnectionMetadataHydrated('NZ');
 
         expect(cache2.getForeignKeyRelationshipsForDatabase('NZ', 'DB1')).toBeUndefined();
-        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(false);
+        expect(cache2.isConnectionPrefetchFresh('NZ')).toBe(true);
         await cache2.dispose();
     });
 

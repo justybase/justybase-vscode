@@ -1272,6 +1272,26 @@ describe('SchemaProvider', () => {
             expect(runQueryRaw).not.toHaveBeenCalled();
         });
 
+        it('keeps a known FK visible when its target catalogue is unavailable', async () => {
+            mockMetadataCache.getColumns.mockReturnValue([]);
+            mockMetadataCache.getForeignKeyRelationshipsForDatabase.mockImplementation((_connection, database) => ({
+                database,
+                complete: database === 'TESTDB',
+                status: database === 'TESTDB' ? 'complete' : 'unavailable',
+                references: database === 'TESTDB' ? [{
+                    fromDatabase: 'TESTDB', fromSchema: 'PUBLIC', fromTable: 'USERS', fromColumn: 'ID',
+                    toDatabase: 'CRM', toSchema: 'PUBLIC', toTable: 'CUSTOMERS', toColumn: 'ID',
+                }] : [],
+            }));
+            const children = await schemaProvider.getChildren(tableItem);
+            const group = children.find(item => item.relationshipDirection === 'references')!;
+            const relations = await schemaProvider.getChildren(group);
+            expect(relations[0].label).toContain('CRM.PUBLIC.CUSTOMERS.ID');
+            expect(relations[0].description).toBe('Target unavailable');
+            expect(relations[0].command).toBeUndefined();
+            expect(runQueryRaw).not.toHaveBeenCalled();
+        });
+
         it('reports incomplete FK cache slices without scanning databases on expansion', async () => {
             mockMetadataCache.getColumns.mockReturnValue([]);
             mockMetadataCache.getDatabases.mockReturnValue([

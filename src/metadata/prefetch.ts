@@ -25,7 +25,8 @@ export function isExpectedCatalogError(e: unknown): boolean {
         return false;
     }
     const msg = e.message;
-    return isDatabaseLevelCatalogError(e)
+    return isForeignKeyCatalogUnavailable(e)
+        || isDatabaseLevelCatalogError(e)
         || msg.includes('does not exist')
         || msg.includes('relation does not exist')
         || msg.includes('object not found');
@@ -78,7 +79,7 @@ import {
     mergeNetezzaColumnsWithKeysRows,
 } from '../dialects/netezza/metadata/columnsWithKeys';
 import { mergeForeignKeyReferencesIntoColumnRows } from './columnMetadataService';
-import { normalizeForeignKeyRelationshipRows } from './foreignKeyRelationships';
+import { isForeignKeyCatalogUnavailable, normalizeForeignKeyRelationshipRows } from './foreignKeyRelationships';
 import type { DatabaseForeignKeyColumnReference } from '../contracts/database';
 import { Logger } from '../utils/logger';
 import { createMetadataPrefetchPlan } from '@justybase/metadata-core';
@@ -109,6 +110,7 @@ interface NetezzaColumnsWithRelationships {
     rows: RawColumnRowWithKeys[];
     foreignKeyReferences: DatabaseForeignKeyColumnReference[];
     foreignKeyRelationshipsComplete: boolean;
+    foreignKeyRelationshipStatus: import('./foreignKeyRelationships').ForeignKeyRelationshipStatus;
 }
 
 interface MissingColumnReconciliation {
@@ -270,6 +272,8 @@ export interface MetadataPrefetchSnapshotStatus {
     missingStages: readonly string[];
     missingColumnKeys: readonly string[];
     missingColumnCount: number;
+    unavailableRelationshipCount?: number;
+    failedRelationshipCount?: number;
     /** Successful snapshot containing explicit empty column layers. */
     degraded?: boolean;
     unavailableColumnKeys?: readonly string[];
@@ -626,6 +630,7 @@ export class CachePrefetcher {
         ) as RawColumnRowWithKeys[];
         let foreignKeyReferences: DatabaseForeignKeyColumnReference[] = [];
         let foreignKeyRelationshipsComplete = rows.length === 0;
+        let foreignKeyRelationshipStatus: import('./foreignKeyRelationships').ForeignKeyRelationshipStatus = foreignKeyRelationshipsComplete ? 'complete' : 'failed';
         if (rows.length > 0) {
             try {
                 const result = await this.runPrefetchQuery(
@@ -654,8 +659,11 @@ export class CachePrefetcher {
                         context.database,
                     );
                     foreignKeyRelationshipsComplete = true;
+                    foreignKeyRelationshipStatus = 'complete';
                 }
-            } catch {
+            } catch (error: unknown) {
+                foreignKeyRelationshipStatus = isForeignKeyCatalogUnavailable(error) ? 'unavailable' : 'failed';
+                logPrefetchError(`[CachePrefetcher] FK catalog ${foreignKeyRelationshipStatus} for ${context.database}:`, error);
                 // Keep regular column metadata useful, but report the FK slice
                 // as incomplete so relationship consumers never infer a false
                 // empty result.
@@ -665,6 +673,7 @@ export class CachePrefetcher {
             rows,
             foreignKeyReferences,
             foreignKeyRelationshipsComplete,
+            foreignKeyRelationshipStatus,
         };
     }
 
@@ -734,7 +743,10 @@ export class CachePrefetcher {
         if (!details || !report) {
             return;
         }
+        const relationships = this.cache.getForeignKeyRelationshipSlices?.(connectionName) ?? [];
         details.snapshot = {
+            unavailableRelationshipCount: relationships.filter(slice => slice.status === 'unavailable').length,
+            failedRelationshipCount: relationships.filter(slice => !slice.complete && slice.status !== 'unavailable').length,
             complete: report.complete,
             missingStages: [...report.missingStages],
             missingColumnKeys: [...report.missingColumnKeys],
@@ -1472,6 +1484,7 @@ export class CachePrefetcher {
                     userDatabase,
                     result.foreignKeyReferences,
                     result.foreignKeyRelationshipsComplete,
+                    result.foreignKeyRelationshipStatus,
                 );
             } else {
                 this.cache.setForeignKeyRelationshipsForDatabase?.(
@@ -2475,6 +2488,7 @@ export class CachePrefetcher {
                         dbName,
                         [],
                         false,
+                        'unavailable',
                     );
                     if (reportProgress) {
                         completedDatabases += 1;
@@ -2525,10 +2539,8 @@ export class CachePrefetcher {
                             dbName,
                             result.foreignKeyReferences,
                             foreignKeyRelationshipsComplete,
+                            result.foreignKeyRelationshipStatus,
                         );
-                        if (!foreignKeyRelationshipsComplete) {
-                            databaseComplete = false;
-                        }
                     } else {
                         databaseComplete = false;
                         this.cache.setForeignKeyRelationshipsForDatabase?.(

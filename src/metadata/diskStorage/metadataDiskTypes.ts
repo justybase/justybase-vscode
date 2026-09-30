@@ -78,6 +78,7 @@ export interface SerializedForeignKeyRelationshipFile {
     schemaVersion: 1;
     database: string;
     complete: boolean;
+    status?: import('../foreignKeyRelationships').ForeignKeyRelationshipStatus;
     references: DatabaseForeignKeyColumnReference[];
 }
 
@@ -260,6 +261,9 @@ export function isSerializedForeignKeyRelationshipFile(
     return obj.schemaVersion === FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION
         && typeof obj.database === 'string'
         && typeof obj.complete === 'boolean'
+        && (obj.status === undefined
+            || (['complete', 'unavailable', 'failed'].includes(String(obj.status))
+                && obj.complete === (obj.status === 'complete')))
         && Array.isArray(obj.references)
         && obj.references.every(reference => {
             if (!reference || typeof reference !== 'object') return false;

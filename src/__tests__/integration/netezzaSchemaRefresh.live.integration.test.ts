@@ -603,7 +603,7 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 assertTargetRefreshDetails(details, targetDatabase, snapshot.externalObjects.length > 0);
                 assertCatalogRowsCached(cache, targetDatabase, snapshot);
                 expect(cache.isConnectionPrefetchFresh(CONNECTION_NAME)).toBe(true);
-                expect(trace.catalogCalls).toHaveLength(8 + (snapshot.externalObjects.length > 0 ? 1 : 0));
+                expect(trace.catalogCalls).toHaveLength(8 + (snapshot.columns.length > 0 ? 1 : 0) + (snapshot.externalObjects.length > 0 ? 1 : 0));
                 expect(trace.maxActiveQueries).toBe(1);
                 expect(trace.connectionRefs.size).toBe(1);
                 expect(trace.metadataSessions.size).toBe(1);
@@ -752,7 +752,10 @@ describeIfLive('Netezza schema refresh - live read-only integration', () => {
                 expect(details.queries.filter(query =>
                     query.context.kind === 'databases' && query.state === 'completed',
                 )).toHaveLength(1);
-                expect(trace.catalogCalls).toHaveLength(1 + (8 * databaseCount) + externalDatabaseCount);
+                const foreignKeyScanCount = details.queries.filter(query =>
+                    query.context.kind === 'column-relations' && query.state === 'completed',
+                ).length;
+                expect(trace.catalogCalls).toHaveLength(1 + (8 * databaseCount) + foreignKeyScanCount + externalDatabaseCount);
                 expect(trace.maxActiveQueries).toBe(1);
                 expect(trace.connectionRefs.size).toBe(1);
                 expect(trace.metadataSessions.size).toBe(1);

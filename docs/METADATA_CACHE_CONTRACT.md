@@ -99,6 +99,24 @@ Skipping step 2 removes all TABLE entries for that schema key.
   refresh stages remain on the primary session. A session-open failure falls
   back to the primary session and never starts an unbounded retry loop.
 
+### Optional foreign-key metadata
+
+Core snapshot completeness and TTL depend on database, schema, object, procedure
+and column layers. FK relationship reads do not invalidate these layers. Each
+connection/database FK slice records `complete`, `unavailable` (expected access
+or missing catalogue), or `failed` (including timeout and SQL errors). Status is
+persisted in v3 sidecars; older sidecars derive it from `complete`.
+
+Selecting a profile with fresh core metadata retries only missing/failed FK
+slices, at most twice per scope per session with five minutes between attempts. Unavailable
+slices wait for explicit refresh or core expiry. Recovery preserves the original
+core timestamp, disposes its runner and uses the connection disk lease. Known
+relationships survive failed reads; targets absent from a loaded catalogue stay
+visible in Schema View with an unavailable marker.
+
+Changing a SQL document's connection profile clears its database override.
+Reselecting the same effective profile preserves the override.
+
 ## Invalidation
 
 ### `invalidateSchema(connection, db, schema?)`
@@ -156,7 +174,7 @@ Wipes all in-memory layers, bumps `_cacheGeneration` (cancels in-flight disk/col
   `Referenced by` searches all cached slices; expanding either tree group runs
   no catalog SQL. The slices are compressed per-database sidecars in the same
   generation/fence-protected v3 snapshot. A cache without the FK index version
-  is incomplete and receives the normal connection prefetch upgrade.
+  keeps its core freshness and receives an FK-only recovery read.
 
 ## Host ↔ LSP synchronization
 

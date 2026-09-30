@@ -603,6 +603,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         'db1',
         [reference],
         true,
+        'complete',
       );
       expect(mockRunQuery).toHaveBeenCalledTimes(4);
     });
@@ -622,7 +623,24 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         'db1',
         [],
         false,
+        'failed',
       );
+    });
+
+    it.each([
+      ['permission denied', 'unavailable'],
+      ['query timed out', 'failed'],
+    ])('keeps the core column stage complete after FK error: %s', async (message, status) => {
+      mockCache.getDatabases.mockReturnValue([{ DATABASE: 'db1', label: 'db1' }]);
+      mockRunQuery.mockImplementation(async (_sql, context) => {
+        if (context?.kind === 'column-keys') return keyFlagResult();
+        if (context?.kind === 'column-distribution') return distributionFlagResult();
+        if (context?.kind === 'column-relations') throw new Error(message);
+        return baseColumnResult([[1, 'ORDERS', 'db1', 'PUBLIC', 'CUSTOMER_ID', 'INT4', 1, '']]);
+      });
+      await expect(prefetcher['prefetchAllColumnsForConnection'](connName, mockRunQuery)).resolves.toBe(true);
+      expect(mockCache.setForeignKeyRelationshipsForDatabase).toHaveBeenCalledWith(connName, 'db1', [], false, status);
+      expect(mockCache.setColumns).toHaveBeenCalled();
     });
 
     it('should deduplicate concurrent database column prefetch', async () => {
@@ -1511,6 +1529,7 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
         dbName,
         [],
         true,
+        'complete',
       );
     }
     expect(secondaryRunners[0]!.ensureConnected).toHaveBeenCalledTimes(1);
