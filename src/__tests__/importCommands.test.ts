@@ -4,6 +4,9 @@
  */
 
 import * as vscode from 'vscode';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
     registerImportCommands,
     ImportCommandsDependencies,
@@ -12,10 +15,9 @@ import {
     generateAutoTableName,
 } from '../commands/importCommands';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
-import { importClipboardDataToNetezza } from '../import/clipboardImporter';
 import { importDataToNetezza } from '../import/dataImporter';
-import { importClipboardDataToDb2, importDataToDb2 } from '../import/db2Importer';
-import { importClipboardDataToPostgreSql, importDataToPostgreSql } from '../import/postgresqlImporter';
+import { importDataToDb2 } from '../import/db2Importer';
+import { importDataToPostgreSql } from '../import/postgresqlImporter';
 import { ImportWizardView } from '../views/importWizardView';
 import { getDatabaseStageWorkflowProvider } from '../core/connectionFactory';
 
@@ -84,15 +86,6 @@ jest.mock('../core/queryRunner', () => ({
     queryResultToRows: jest.fn(),
 }));
 
-// Mock clipboard importer
-jest.mock('../import/clipboardImporter', () => ({
-    importClipboardDataToNetezza: jest.fn().mockResolvedValue({
-        success: true,
-        message: 'OK',
-        details: { rowsProcessed: 10, columns: 5, format: 'CSV' },
-    }),
-}));
-
 // Mock data importer
 jest.mock('../import/dataImporter', () => ({
     NetezzaImporter: jest.fn().mockImplementation(() => ({
@@ -122,11 +115,6 @@ jest.mock('../import/dataImporter', () => ({
 
 // Mock DB2 importer
 jest.mock('../import/db2Importer', () => ({
-    importClipboardDataToDb2: jest.fn().mockResolvedValue({
-        success: true,
-        message: 'OK',
-        details: { rowsProcessed: 10, columns: 5, format: 'CLIPBOARD' },
-    }),
     importDataToDb2: jest.fn().mockResolvedValue({
         success: true,
         message: 'OK',
@@ -135,11 +123,6 @@ jest.mock('../import/db2Importer', () => ({
 }));
 
 jest.mock('../import/postgresqlImporter', () => ({
-    importClipboardDataToPostgreSql: jest.fn().mockResolvedValue({
-        success: true,
-        message: 'OK',
-        details: { rowsProcessed: 10, columns: 5, format: 'CLIPBOARD' },
-    }),
     importDataToPostgreSql: jest.fn().mockResolvedValue({
         success: true,
         message: 'OK',
@@ -170,6 +153,7 @@ function createImportConnectionManager(
 
 describe('commands/importCommands', () => {
     let mockContext: vscode.ExtensionContext;
+    let importStorageDirectory: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let mockConnectionManager: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -177,21 +161,29 @@ describe('commands/importCommands', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let mockMetadataCache: any;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         jest.clearAllMocks();
         (getDatabaseStageWorkflowProvider as jest.Mock).mockReturnValue(undefined);
-        (vscode.window.withProgress as jest.Mock).mockImplementation(async (_options, callback) => {
-            return callback({ report: jest.fn() }, { isCancellationRequested: false });
-        });
-        (vscode.window.showInputBox as jest.Mock).mockResolvedValue('admin.target_table');
-        (vscode.window.showQuickPick as jest.Mock).mockResolvedValue({
+        (vscode.window.showInputBox as jest.Mock).mockReset().mockResolvedValue('admin.target_table');
+        (vscode.window.showQuickPick as jest.Mock).mockReset().mockResolvedValue({
             label: 'Simple Import',
             value: 'default',
         });
-        (vscode.window.showOpenDialog as jest.Mock).mockResolvedValue([{ fsPath: 'D:\\data\\input.csv' }]);
-        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('');
+        (vscode.window.showInformationMessage as jest.Mock).mockReset().mockResolvedValue(undefined);
+        (vscode.window.showOpenDialog as jest.Mock).mockReset().mockResolvedValue([{ fsPath: 'D:\\data\\input.csv' }]);
+        (vscode.window.withProgress as jest.Mock).mockReset().mockImplementation(async (_options, callback) => {
+            return callback({ report: jest.fn() }, { isCancellationRequested: false });
+        });
+        (vscode.env.clipboard.readText as jest.Mock).mockReset().mockResolvedValue('');
+        (vscode.env.clipboard.writeText as jest.Mock).mockReset();
+        (vscode.window.activeTextEditor as unknown) = undefined;
 
-        mockContext = { extensionUri: { fsPath: '/test/extension' } } as vscode.ExtensionContext;
+        importStorageDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-import-command-test-'));
+
+        mockContext = {
+            extensionUri: { fsPath: '/test/extension' },
+            globalStorageUri: { fsPath: importStorageDirectory },
+        } as vscode.ExtensionContext;
         mockConnectionManager = {
             getConnectionForExecution: jest.fn().mockReturnValue('test-connection'),
             getConnection: jest.fn().mockResolvedValue({
@@ -229,6 +221,10 @@ describe('commands/importCommands', () => {
         mockMetadataCache = {};
     });
 
+    afterEach(async () => {
+        await fs.rm(importStorageDirectory, { recursive: true, force: true });
+    });
+
     describe('detectFilePath', () => {
         it('should return false for empty string', () => {
             expect(detectFilePath('')).toBe(false);
@@ -248,6 +244,10 @@ describe('commands/importCommands', () => {
 
         it('should detect Windows CSV file path', () => {
             expect(detectFilePath('C:\\path\\to\\file.csv')).toBe(true);
+        });
+
+        it('should detect TSV file paths', () => {
+            expect(detectFilePath('C:\\path\\to\\file.tsv')).toBe(true);
         });
 
         it('should detect Windows XLSX file path', () => {
@@ -541,8 +541,9 @@ describe('commands/importCommands', () => {
             );
         });
 
-        it('should import clipboard data and allow copying table name', async () => {
-            (vscode.window.showInformationMessage as jest.Mock).mockResolvedValue('Copy Table Name');
+        it('should open the import wizard with a clipboard snapshot', async () => {
+            const clipboardText = 'id\tname\n1\tAda';
+            (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(clipboardText);
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
                 connectionManager: mockConnectionManager,
@@ -555,18 +556,31 @@ describe('commands/importCommands', () => {
             )?.[1];
 
             await handler();
-            expect(importClipboardDataToNetezza).toHaveBeenCalledWith(
-                'admin.target_table',
+            expect(ImportWizardView.createOrShow).toHaveBeenCalledWith(
+                mockContext,
+                mockContext.extensionUri,
+                mockConnectionManager,
+                mockMetadataCache,
                 expect.any(Object),
-                expect.anything(),
-                {},
-                expect.any(Function),
+                expect.objectContaining({
+                    sourceKind: 'clipboard',
+                    sourceName: 'Clipboard',
+                    connectionName: 'test-connection',
+                    targetTable: expect.stringMatching(/^CLIPBOARD_IMPORT_\d{8}_\d{4}$/),
+                    filePath: expect.stringMatching(/clipboard-imports[\\/][^\\/]+[\\/]clipboard\.txt$/),
+                    clipboardSourceDirectory: expect.stringContaining('clipboard-imports'),
+                }),
             );
-            expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('admin.target_table');
-            expect(vscode.commands.executeCommand).toHaveBeenCalledWith('netezza.refreshSchema');
+            const wizardOptions = (ImportWizardView.createOrShow as jest.Mock).mock.calls[0]?.[5] as {
+                filePath: string;
+            };
+            await expect(fs.readFile(wizardOptions.filePath, 'utf8')).resolves.toBe(clipboardText);
+            expect(vscode.env.clipboard.writeText).not.toHaveBeenCalled();
+            expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('netezza.refreshSchema');
         });
 
-        it('should route clipboard import to DB2 importer for db2 connections', async () => {
+        it('should open the clipboard import wizard for Db2 connections', async () => {
+            (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('id\tname\n1\tAda');
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
                 connectionManager: createImportConnectionManager({
@@ -586,17 +600,22 @@ describe('commands/importCommands', () => {
             )?.[1];
 
             await handler();
-            expect(importClipboardDataToDb2).toHaveBeenCalledWith(
-                'admin.target_table',
-                expect.objectContaining({ dbType: 'db2' }),
-                expect.anything(),
-                {},
-                expect.any(Function),
+            expect(ImportWizardView.createOrShow).toHaveBeenCalledWith(
+                mockContext,
+                mockContext.extensionUri,
+                deps.connectionManager,
+                mockMetadataCache,
+                expect.any(Object),
+                expect.objectContaining({
+                    sourceKind: 'clipboard',
+                    connectionDetails: expect.objectContaining({ dbType: 'db2' }),
+                }),
             );
-            expect(importClipboardDataToNetezza).not.toHaveBeenCalled();
+            expect(importDataToDb2).not.toHaveBeenCalled();
         });
 
-        it('should route clipboard import to PostgreSQL importer for postgresql connections', async () => {
+        it('should open the clipboard import wizard for PostgreSQL connections', async () => {
+            (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('id\tname\n1\tAda');
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
                 connectionManager: createImportConnectionManager({
@@ -616,21 +635,22 @@ describe('commands/importCommands', () => {
             )?.[1];
 
             await handler();
-            expect(importClipboardDataToPostgreSql).toHaveBeenCalledWith(
-                'admin.target_table',
-                expect.objectContaining({ dbType: 'postgresql' }),
-                expect.anything(),
-                {},
-                expect.any(Function),
+            expect(ImportWizardView.createOrShow).toHaveBeenCalledWith(
+                mockContext,
+                mockContext.extensionUri,
+                deps.connectionManager,
+                mockMetadataCache,
+                expect.any(Object),
+                expect.objectContaining({
+                    sourceKind: 'clipboard',
+                    connectionDetails: expect.objectContaining({ dbType: 'postgresql' }),
+                }),
             );
-            expect(importClipboardDataToDb2).not.toHaveBeenCalled();
-            expect(importClipboardDataToNetezza).not.toHaveBeenCalled();
+            expect(importDataToPostgreSql).not.toHaveBeenCalled();
         });
 
-        it('should auto-generate table name when input is empty', async () => {
-            (vscode.window.showInputBox as jest.Mock).mockResolvedValue('');
-            (runQueryRaw as jest.Mock).mockResolvedValue({ data: [{}] });
-            (queryResultToRows as jest.Mock).mockReturnValue([{ CURRENT_CATALOG: 'SYSTEM', CURRENT_SCHEMA: 'ADMIN' }]);
+        it('should suggest a clipboard target table without prompting', async () => {
+            (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('id\tname\n1\tAda');
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
                 connectionManager: mockConnectionManager,
@@ -643,57 +663,21 @@ describe('commands/importCommands', () => {
             )?.[1];
 
             await handler();
-            expect(importClipboardDataToNetezza).toHaveBeenCalled();
-            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-                expect.stringContaining('Auto-generated'),
+            expect(ImportWizardView.createOrShow).toHaveBeenCalledWith(
+                mockContext,
+                mockContext.extensionUri,
+                mockConnectionManager,
+                mockMetadataCache,
+                expect.any(Object),
+                expect.objectContaining({
+                    targetTable: expect.stringMatching(/^CLIPBOARD_IMPORT_\d{8}_\d{4}$/),
+                }),
             );
+            expect(vscode.window.showInputBox).not.toHaveBeenCalled();
+            expect(runQueryRaw).not.toHaveBeenCalled();
         });
 
-        it('should validate table name input', async () => {
-            const deps: ImportCommandsDependencies = {
-                context: mockContext,
-                connectionManager: mockConnectionManager,
-                metadataCache: mockMetadataCache,
-                outputChannel: mockOutputChannel,
-            };
-            registerImportCommands(deps);
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                (call) => call[0] === 'netezza.importClipboard',
-            )?.[1];
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            let validateInput: any;
-            (vscode.window.showInputBox as jest.Mock).mockImplementationOnce((options) => {
-                validateInput = options.validateInput;
-                return Promise.resolve(undefined); // Abort command
-            });
-            await handler();
-
-            expect(validateInput).toBeDefined();
-            expect(validateInput(undefined)).toBeNull();
-            expect(validateInput('   ')).toBeNull();
-            expect(validateInput('valid_table')).toBeNull();
-            expect(validateInput('db.schema.table')).toBeNull();
-            expect(validateInput('db..table')).toBe(
-                'Invalid target table format. Use TABLE, SCHEMA.TABLE, or DATABASE.SCHEMA.TABLE.',
-            );
-        });
-
-        it('should log progress and handle import failure', async () => {
-            (vscode.window.showInputBox as jest.Mock).mockResolvedValue('target_table');
-            (vscode.window.showQuickPick as jest.Mock).mockResolvedValue({
-                value: 'TEXT',
-            });
-
-            (importClipboardDataToNetezza as jest.Mock).mockImplementationOnce(
-                async (_table, _conn, _fmt, _opts, progressCb) => {
-                    progressCb('Step 1', 10, true);
-                    progressCb('Step 1', 10, true); // Same message shouldn't log twice
-                    progressCb('Step 2', 40, false); // logToOutput false
-                    return { success: false, message: 'Import failed horribly' };
-                },
-            );
-
+        it('should report an error when the clipboard is empty', async () => {
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
                 connectionManager: mockConnectionManager,
@@ -707,11 +691,10 @@ describe('commands/importCommands', () => {
 
             await handler();
 
-            expect(mockOutputChannel.appendLine).toHaveBeenCalledWith('[Clipboard Import] Step 1');
-            expect(mockOutputChannel.appendLine).not.toHaveBeenCalledWith('[Clipboard Import] Step 2'); // false
             expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-                expect.stringContaining('Import failed horribly'),
+                expect.stringContaining('The clipboard is empty'),
             );
+            expect(ImportWizardView.createOrShow).not.toHaveBeenCalled();
         });
     });
 
@@ -742,7 +725,6 @@ describe('commands/importCommands', () => {
         });
 
         it('should open the advanced import wizard command directly', async () => {
-            (vscode.window.showInputBox as jest.Mock).mockResolvedValue('target_table');
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
                 connectionManager: mockConnectionManager,
@@ -765,10 +747,11 @@ describe('commands/importCommands', () => {
                 expect.any(Object),
                 expect.objectContaining({
                     filePath: 'D:\\direct\\file.csv',
-                    targetTable: 'target_table',
+                    targetTable: expect.stringMatching(/^FILE_\d{8}_\d{4}$/),
                     connectionName: 'test-connection',
                 }),
             );
+            expect(vscode.window.showInputBox).not.toHaveBeenCalled();
             expect(importDataToNetezza).not.toHaveBeenCalled();
         });
 
@@ -800,9 +783,10 @@ describe('commands/importCommands', () => {
                 expect.any(Object),
                 expect.objectContaining({
                     filePath: 'D:\\direct\\file.csv',
-                    targetTable: 'admin.target_table',
+                    targetTable: expect.stringMatching(/^FILE_\d{8}_\d{4}$/),
                 }),
             );
+            expect(vscode.window.showInputBox).not.toHaveBeenCalled();
             expect(importDataToNetezza).not.toHaveBeenCalled();
         });
 

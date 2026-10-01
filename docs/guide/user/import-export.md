@@ -65,7 +65,7 @@ The simple importer is useful for a known, clean file. The advanced wizard is sa
 
 For ClickHouse, the companion uses the HTTP runtime and generates a `MergeTree` target with `ORDER BY tuple()` by default. Inferred numeric, date/time, boolean, UUID, decimal, and text columns are mapped to ClickHouse types; use the generated preview to change the target mapping or provide a qualified `database.table` target. Inserts are sent in batches and are intentionally not wrapped in a relational transaction because ClickHouse mutations and MergeTree ingestion have different consistency semantics.
 
-For Netezza, CSV/TXT, XLSX, and XLSB imports use the driver's virtual external-table stream. The source rows are registered under a transient name and consumed with `FROM EXTERNAL`; they are not first copied to a local data file. This keeps the client-side stream and the driver's external-load protocol ordered and avoids failures caused by a prematurely closed or partially materialized temporary file. The Netezza driver must be version 2.4.4 or newer.
+For Netezza, CSV/TSV/TXT, XLSX, and XLSB imports use the driver's virtual external-table stream. The source rows are registered under a transient name and consumed with `FROM EXTERNAL`; they are not first copied to a local data file. This keeps the client-side stream and the driver's external-load protocol ordered and avoids failures caused by a prematurely closed or partially materialized temporary file. The Netezza driver must be version 2.4.4 or newer.
 
 Excel header handling is defensive: a row containing numeric values is treated as data rather than a header, missing headers receive `COL_1`, `COL_2`, and repeated names receive suffixes such as `COL_1`. Consequently, a workbook with a first row `1, a` retains that row in the target table.
 
@@ -76,6 +76,8 @@ Parquet is supported by the DuckDB/File SQL connection, not by the direct Netezz
 **Import Clipboard Data to Table** reads tabular clipboard content. **Smart Paste** detects file paths and tabular text, then opens the matching path or import flow. Clipboard parsing is bounded by the host and OS clipboard limits; for large data, save a file so the wizard can validate and retry deterministically.
 
 Netezza clipboard imports use the same transient virtual external-table stream as file imports. Duplicate or empty column names are normalized before the target DDL is generated, and the stream is unregistered and destroyed after success or failure.
+
+Quoted CSV/TSV cells are parsed as logical records, so delimiters, doubled quotes, and LF characters inside a cell are preserved through import. CR characters in cell values are removed when the Netezza stream is encoded. Line breaks inside column headers are normalized to safe identifier characters.
 
 ## Reliability controls
 

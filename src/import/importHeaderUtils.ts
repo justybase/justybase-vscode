@@ -14,12 +14,17 @@ function normalizeImportKind(kind?: string | DatabaseKind): DatabaseKind | undef
     return normalizedKind;
 }
 
-function sanitizeHeaderToken(value: string): string {
-    return value
-        .trim()
+function sanitizeHeaderToken(value: string, preserveTrailingLineBreak: boolean): string {
+    const hasTrailingLineBreak = /(?:\r\n|\r|\n)+[\t ]*$/.test(value);
+    const sanitized = value
+        .replace(/^[\t ]+|[\t ]+$/g, '')
+        .replace(/\r\n|\r|\n/g, '_')
         .replace(/[^0-9A-Za-z_$]+/g, '_')
         .replace(/_+/g, '_')
-        .replace(/^_+|_+$/g, '');
+        .replace(/^_+/g, '');
+    return preserveTrailingLineBreak && hasTrailingLineBreak
+        ? sanitized
+        : sanitized.replace(/_+$/g, '');
 }
 
 function applyImportHeaderCase(value: string, kind?: DatabaseKind): string {
@@ -40,7 +45,10 @@ function applyImportHeaderCase(value: string, kind?: DatabaseKind): string {
 
 export function normalizeImportedHeader(header: string, kind?: string | DatabaseKind): string {
     const normalizedKind = normalizeImportKind(kind);
-    let cleaned = sanitizeHeaderToken(String(header || ''));
+    let cleaned = sanitizeHeaderToken(
+        String(header || ''),
+        normalizedKind === 'netezza',
+    );
 
     if (!cleaned) {
         return applyImportHeaderCase('COL_EMPTY', normalizedKind);

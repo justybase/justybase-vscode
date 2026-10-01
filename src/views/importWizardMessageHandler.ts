@@ -401,7 +401,7 @@ export class ImportWizardMessageHandler {
       canSelectFiles: true,
       canSelectFolders: false,
       canSelectMany: false,
-      filters: { "Tabular data": ["csv", "txt", "xlsx", "xlsb"] },
+      filters: { "Tabular data": ["csv", "txt", "tsv", "xlsx", "xlsb"] },
       title: "Choose import source",
     }) || [];
     if (!uri) {
@@ -604,8 +604,8 @@ export class ImportWizardMessageHandler {
           cancellable: false,
         },
         async (progress) =>
-          this.deps.service.executeImport(sessionId, (message) =>
-            progress.report({ message }),
+          this.deps.service.executeImport(sessionId, (message, increment) =>
+            progress.report({ message, increment }),
           ),
       );
 
