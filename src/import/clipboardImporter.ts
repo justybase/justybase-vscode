@@ -9,7 +9,13 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Readable } from 'stream';
-import { ColumnTypeChooser, ProgressCallback, ImportResult } from './dataImporter';
+import {
+    ColumnTypeChooser,
+    detectDelimitedTextDelimiter,
+    iterateDelimitedRecords,
+    ProgressCallback,
+    ImportResult,
+} from './dataImporter';
 import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { headerForcesTextImportType } from './importTypeInferenceUtils';
@@ -27,7 +33,7 @@ const delay = () => new Promise(resolve => setTimeout(resolve, 0));
  * Analyzes data types without storing all rows in memory
  */
 class TextDataAnalyzer {
-    private lines: string[];
+    private readonly textData: string;
     private delimiter: string;
     private headers: string[] = [];
     private dataTypes: ColumnTypeChooser[] = [];
@@ -37,59 +43,15 @@ class TextDataAnalyzer {
 
     constructor(textData: string, options?: { inferBoolean?: boolean }) {
         this.inferBoolean = options?.inferBoolean === true;
-        this.lines = textData.split('\n');
-
-        // Strip UTF-8 BOM from first line (can appear when copied from Notepad, Excel, etc.)
-        if (this.lines.length > 0 && this.lines[0].startsWith('\ufeff')) {
-            this.lines[0] = this.lines[0].slice(1);
-        }
-
-        // Remove empty lines at the end
-        while (this.lines.length && !this.lines[this.lines.length - 1].trim()) {
-            this.lines.pop();
-        }
-
-        this.delimiter = this.detectDelimiter();
+        this.textData = textData;
+        this.delimiter = this.detectDelimiter(textData);
     }
 
     /**
      * Auto-detect delimiter
      */
-    private detectDelimiter(): string {
-        const delimiters = ['\t', ',', ';', '|'];
-        const delimiterScores: { [key: string]: { avg: number, variance: number } } = {};
-
-        const sampleLines = this.lines.slice(0, Math.min(10, this.lines.length)).filter(l => l.trim());
-        if (sampleLines.length === 0) return '\t';
-
-        for (const delimiter of delimiters) {
-            const scores = sampleLines.map(line => line.split(delimiter).length);
-            const avgCols = scores.reduce((a, b) => a + b, 0) / scores.length;
-            const variance = scores.reduce((sum, s) => sum + Math.pow(s - avgCols, 2), 0) / scores.length;
-            delimiterScores[delimiter] = { avg: avgCols, variance };
-        }
-
-        // Default to tab, especially if tab has consistent columns > 1
-        if (delimiterScores['\t'].avg > 1 && delimiterScores['\t'].variance === 0) {
-            return '\t';
-        }
-
-        let bestDelimiter = '\t';
-        let maxConsistentCols = 1;
-
-        // Order of preference for fallbacks
-        for (const delimiter of ['\t', ';', '|', ',']) {
-            const stats = delimiterScores[delimiter];
-            // Only consider delimiters that are perfectly consistent across all sample rows
-            if (stats.variance === 0 && stats.avg > maxConsistentCols) {
-                maxConsistentCols = stats.avg;
-                bestDelimiter = delimiter;
-            }
-        }
-
-        // If no perfectly consistent delimiter is found, stick to tab
-        // (which implicitly means 1 column if variance was 0, or we just fallback)
-        return bestDelimiter;
+    private detectDelimiter(textData: string): string {
+        return detectDelimitedTextDelimiter(textData, ['\t', ';', '|', ','], '\t');
     }
 
     /**
@@ -99,14 +61,19 @@ class TextDataAnalyzer {
     private detectDecimalDelimiter(): string {
         let dotCount = 0;
         let commaCount = 0;
-        const sampleLimit = Math.min(100, this.lines.length - 1); // Skip header
+        let dataRowsSampled = 0;
+        let isHeader = true;
 
-        for (let i = 1; i <= sampleLimit; i++) {
-            const line = this.lines[i];
-            if (!line?.trim()) continue;
-
-            const cells = line.split(this.delimiter);
-            for (const cell of cells) {
+        for (const row of iterateDelimitedRecords(this.textData, this.delimiter)) {
+            if (isHeader) {
+                isHeader = false;
+                continue;
+            }
+            if (dataRowsSampled >= 100) {
+                break;
+            }
+            dataRowsSampled++;
+            for (const cell of row) {
                 if (!cell?.trim()) continue;
                 // Ignore spaces (like thousand separators) when guessing if it's a number
                 const val = cell.trim().replace(/\s/g, '');
@@ -134,19 +101,21 @@ class TextDataAnalyzer {
     }
 
     async analyze(progressCallback?: ProgressCallback): Promise<void> {
-        if (this.lines.length === 0) {
+        const records = iterateDelimitedRecords(this.textData, this.delimiter);
+        const headerRecord = records.next();
+        if (headerRecord.done) {
             throw new Error('No data to analyze');
         }
 
         progressCallback?.(`Auto-detected delimiter: '${this.delimiter === '\t' ? '\\t' : this.delimiter}'`);
 
         // First line is headers
-        const headerLine = this.lines[0];
-        if (!headerLine.trim()) {
+        const headerRow = headerRecord.value;
+        if (headerRow.every(cell => !cell.trim())) {
             throw new Error('First line (headers) is empty');
         }
 
-        this.headers = headerLine.split(this.delimiter).map(cell => cell.trim());
+        this.headers = headerRow.map(cell => cell.replace(/^[\t ]+|[\t ]+$/g, ''));
         const columnCount = this.headers.length;
 
         progressCallback?.(`Headers: ${columnCount} columns`);
@@ -157,13 +126,14 @@ class TextDataAnalyzer {
 
         // PASS 2: Initialize type choosers with correct delimiter and analyze all rows
         this.dataTypes = this.createColumnTypeChoosers();
-        progressCallback?.(`Analyzing data types for ${(this.lines.length - 1).toLocaleString()} rows...`);
+        progressCallback?.('Analyzing data types...');
 
-        for (let i = 1; i < this.lines.length; i++) {
-            const line = this.lines[i];
-            if (!line.trim()) continue;
-
-            const cells = line.split(this.delimiter);
+        let isHeader = true;
+        for (const cells of iterateDelimitedRecords(this.textData, this.delimiter)) {
+            if (isHeader) {
+                isHeader = false;
+                continue;
+            }
 
             for (let j = 0; j < Math.min(cells.length, columnCount); j++) {
                 const value = cells[j]?.trim();
@@ -209,18 +179,20 @@ class TextDataAnalyzer {
     *dataRowIterator(): Generator<string[], void, unknown> {
         const columnCount = this.headers.length;
 
-        for (let i = 1; i < this.lines.length; i++) {
-            const line = this.lines[i];
-            if (!line.trim()) continue;
-
-            const cells = line.split(this.delimiter).map(cell => cell.trim());
+        let isHeader = true;
+        for (const parsedCells of iterateDelimitedRecords(this.textData, this.delimiter)) {
+            if (isHeader) {
+                isHeader = false;
+                continue;
+            }
+            const cells = parsedCells.slice(0, columnCount);
 
             // Normalize to column count
             while (cells.length < columnCount) {
                 cells.push('');
             }
 
-            yield cells.slice(0, columnCount);
+            yield cells;
         }
     }
 }
@@ -265,13 +237,17 @@ export class ClipboardDataProcessor {
  * Clean column name for SQL compatibility
  */
 function cleanColumnName(colName: string): string {
-    let cleanName = String(colName).trim();
+    const hasTrailingLineBreak = /(?:\r\n|\r|\n)+\s*$/.test(colName);
+    let cleanName = String(colName).replace(/\r\n|\r|\n/g, '_').trim();
 
     if (!cleanName) {
         return 'COL_EMPTY';
     }
 
     cleanName = cleanName.replace(/[^0-9a-zA-Z]+/g, '_').toUpperCase();
+    if (!hasTrailingLineBreak) {
+        cleanName = cleanName.replace(/_+$/g, '');
+    }
 
     if (!cleanName || /^\d/.test(cleanName) || cleanName.startsWith('_')) {
         cleanName = 'COL' + (cleanName.startsWith('_') ? '' : '_') + cleanName;
@@ -306,7 +282,7 @@ function deduplicateColumnNames(names: string[]): string[] {
  * Escape special characters for Netezza import
  */
 function escapeValue(val: string, escapechar: string, valuesToEscape: string[]): string {
-    let result = String(val).trim();
+    let result = String(val).replace(/\r/g, '');
     for (const char of valuesToEscape) {
         result = result.split(char).join(`${escapechar}${char}`);
     }
@@ -345,14 +321,19 @@ function formatValue(
     valuesToEscape: string[],
     decimalDelimiter: string
 ): string {
-    let result = escapeValue(val, escapechar, valuesToEscape);
-
     if (colIndex >= dataTypes.length) {
-        return result;
+        return escapeValue(val, escapechar, valuesToEscape);
     }
 
     const typeChooser = dataTypes[colIndex];
     const dbType = typeChooser.currentType.dbType;
+    const isTextType = /^(N?CHAR|N?VARCHAR|TEXT|CLOB)/.test(dbType);
+    let result = escapeValue(isTextType ? val : val.trim(), escapechar, valuesToEscape);
+
+    if (dbType === 'BOOLEAN') {
+        if (/^true$/i.test(result)) result = '1';
+        else if (/^false$/i.test(result)) result = '0';
+    }
 
     // Handle DATETIME
     if (dbType === 'DATETIME') {
@@ -407,6 +388,7 @@ class StreamingClipboardDataStream extends Readable {
     private currentIndex: number = 0;
     private totalRows: number;
     private lastReportTime: number = 0;
+    private lastReportedPercent: number = 0;
     public byteLength: number = 0;
 
     constructor(
@@ -489,8 +471,10 @@ class StreamingClipboardDataStream extends Readable {
             const now = Date.now();
             if (now - this.lastReportTime >= 1000) {
                 const percent = Math.floor((this.currentIndex / this.totalRows) * 100);
+                const increment = Math.max(0, percent - this.lastReportedPercent);
+                this.lastReportedPercent = Math.max(this.lastReportedPercent, percent);
                 const message = `Streaming data: ${percent}% (${this.currentIndex.toLocaleString()}/${this.totalRows.toLocaleString()})`;
-                this.progressCallback?.(message, undefined, false);
+                this.progressCallback?.(message, increment, false);
                 this.lastReportTime = now;
             }
 

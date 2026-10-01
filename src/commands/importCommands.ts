@@ -121,8 +121,8 @@ export function detectFilePath(content: string): boolean {
         trimmed = trimmed.slice(1, -1);
     }
 
-    // Only support csv, xlsx, xlsb file extensions
-    const fileExtensions = ['.csv', '.xlsx', '.xlsb'];
+    // Only support tabular data file extensions
+    const fileExtensions = ['.csv', '.tsv', '.xlsx', '.xlsb'];
 
     const hasFileExtension = fileExtensions.some((ext) => trimmed.toLowerCase().endsWith(ext));
 
@@ -627,8 +627,8 @@ async function resolveSourceFile(filePath?: string | vscode.Uri): Promise<string
         canSelectFolders: false,
         canSelectMany: false,
         filters: {
-            'Data Files': ['csv', 'txt', 'xlsx', 'xlsb'],
-            'Delimited Files': ['csv', 'txt'],
+            'Data Files': ['csv', 'txt', 'tsv', 'xlsx', 'xlsb'],
+            'Delimited Files': ['csv', 'txt', 'tsv'],
             'Excel Files': ['xlsx', 'xlsb'],
             'All Files': ['*'],
         },
@@ -922,20 +922,16 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                     {
                         location: vscode.ProgressLocation.Window,
                         title: 'Importing data...',
-                        cancellable: true,
                     },
-                    async (progress, token) => {
+                    async (progress) => {
                         let lastLoggedMessage = '';
                         const reportProgress = (message: string, increment?: number, logToOutput: boolean = true) => {
-                            if (token.isCancellationRequested) return;
                             progress.report({ message, increment });
                             if (logToOutput && message !== lastLoggedMessage) {
                                 outputChannel.appendLine(`[Import] ${message}`);
                                 lastLoggedMessage = message;
                             }
                         };
-
-                        if (token.isCancellationRequested) return;
 
                         const result: {
                             success: boolean;

@@ -50,6 +50,63 @@ describe('import/clipboardImporter real module', () => {
         expect(analyzer.getRowCount()).toBe(2);
     });
 
+    it('uses consistent tab-separated records when a header contains extra commas', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'id\tCity, Region, Country, Postal, Code\tamount\n' +
+            '1\tWarsaw\t12\n' +
+            '2\tKrakow\t34',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDelimiter()).toBe('\t');
+        expect(analyzer.getHeaders()).toEqual(['id', 'City, Region, Country, Postal, Code', 'amount']);
+        expect([...analyzer.dataRowIterator()]).toEqual([
+            ['1', 'Warsaw', '12'],
+            ['2', 'Krakow', '34'],
+        ]);
+    });
+
+    it('should parse the multiline quoted header example from Excel', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'COL1\t"COL2\n""dasdasdasd"""\tCOL3\n1\t2\t3\n1\t2\t3',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDelimiter()).toBe('\t');
+        expect(analyzer.getHeaders()).toEqual(['COL1', 'COL2\n"dasdasdasd"', 'COL3']);
+        expect(analyzer.getRowCount()).toBe(2);
+        expect([...analyzer.dataRowIterator()]).toEqual([
+            ['1', '2', '3'],
+            ['1', '2', '3'],
+        ]);
+    });
+
+    it('should preserve quoted line endings, escaped quotes, and tabs in clipboard cells', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'COL1\t"COL2\n"\tCOL3\n1\t"first\n""quoted""\r\nlast"\t3\n2\t"has\ttab and ; delimiter\n"\t4',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getHeaders()).toEqual(['COL1', 'COL2\n', 'COL3']);
+        expect(analyzer.getRowCount()).toBe(2);
+        expect([...analyzer.dataRowIterator()]).toEqual([
+            ['1', 'first\n"quoted"\r\nlast', '3'],
+            ['2', 'has\ttab and ; delimiter\n', '4'],
+        ]);
+    });
+
+    it('should reject clipboard data with an unterminated quoted field', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('A\tB\n1\t"unfinished');
+        const processor = new ClipboardDataProcessor();
+
+        await expect(processor.analyzeClipboardData()).rejects.toThrow(
+            'Unterminated quoted field',
+        );
+    });
+
     it('should keep leading-zero clipboard columns as text', async () => {
         (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('code\tname\n0123\tAlice\n1234\tBob');
         const processor = new ClipboardDataProcessor();

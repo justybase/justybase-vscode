@@ -30,6 +30,270 @@ import type {
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+class DelimitedRecordParser {
+  private field = "";
+  private row: string[] = [];
+  private recordHasMeaningfulInput = false;
+  private inQuotes = false;
+  private pendingQuote = false;
+  private skipLfAfterCr = false;
+  private recordNumber = 0;
+
+  constructor(private readonly delimiter: string) {
+    if (delimiter.length !== 1) {
+      throw new Error("Delimited import requires a single-character delimiter");
+    }
+  }
+
+  *push(chunk: string, final = false): Generator<string[], void, unknown> {
+    const emitRecord = (): string[] | undefined => {
+      this.row.push(this.field);
+      const record = this.recordHasMeaningfulInput ? this.row : undefined;
+      this.field = "";
+      this.row = [];
+      this.recordHasMeaningfulInput = false;
+      this.recordNumber++;
+      return record;
+    };
+
+    for (let index = 0; index < chunk.length; index++) {
+      const char = chunk[index];
+
+      if (this.skipLfAfterCr) {
+        this.skipLfAfterCr = false;
+        if (char === "\n") {
+          continue;
+        }
+      }
+
+      if (this.pendingQuote) {
+        this.pendingQuote = false;
+        if (char === '"') {
+          this.field += '"';
+          continue;
+        }
+        this.inQuotes = false;
+      }
+
+      if (this.inQuotes) {
+        if (char === '"') {
+          this.pendingQuote = true;
+        } else {
+          this.field += char;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        this.recordHasMeaningfulInput = true;
+        if (this.field.length === 0) {
+          this.inQuotes = true;
+        } else {
+          this.field += char;
+        }
+      } else if (char === this.delimiter) {
+        if (!/\s/.test(char)) {
+          this.recordHasMeaningfulInput = true;
+        }
+        this.row.push(this.field);
+        this.field = "";
+      } else if (char === "\r" || char === "\n") {
+        const record = emitRecord();
+        if (record) {
+          yield record;
+        }
+        this.skipLfAfterCr = char === "\r";
+      } else {
+        if (!/\s/.test(char)) {
+          this.recordHasMeaningfulInput = true;
+        }
+        this.field += char;
+      }
+    }
+
+    if (final) {
+      if (this.pendingQuote) {
+        this.pendingQuote = false;
+        this.inQuotes = false;
+      }
+      if (this.inQuotes) {
+        throw new Error(`Unterminated quoted field in record ${this.recordNumber + 1}`);
+      }
+      if (this.recordHasMeaningfulInput) {
+        const record = emitRecord();
+        if (record) {
+          yield record;
+        }
+      }
+    }
+  }
+}
+
+export function parseDelimitedRecords(text: string, delimiter: string): string[][] {
+  const parser = new DelimitedRecordParser(delimiter);
+  return Array.from(parser.push(text.startsWith("\ufeff") ? text.slice(1) : text, true));
+}
+
+export function* iterateDelimitedRecords(
+  text: string,
+  delimiter: string,
+  chunkSize = 64 * 1024,
+): Generator<string[], void, unknown> {
+  if (chunkSize < 1) {
+    throw new Error("Delimited import chunk size must be positive");
+  }
+
+  const parser = new DelimitedRecordParser(delimiter);
+  const source = text.startsWith("\ufeff") ? text.slice(1) : text;
+  for (let offset = 0; offset < source.length; offset += chunkSize) {
+    yield* parser.push(source.slice(offset, offset + chunkSize));
+  }
+  yield* parser.push("", true);
+}
+
+export function readDelimitedTextPrefix(
+  filePath: string,
+  maxBytes = 64 * 1024,
+): string {
+  const descriptor = fs.openSync(filePath, "r");
+  const buffer = Buffer.alloc(maxBytes);
+  try {
+    const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+    return buffer.toString("utf-8", 0, bytesRead);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+export async function* readDelimitedRecords(
+  filePath: string,
+  delimiter: string,
+  onReadProgress?: (bytesRead: number, totalBytes: number) => void,
+): AsyncGenerator<string[]> {
+  const parser = new DelimitedRecordParser(delimiter);
+  const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+  const totalBytes = fs.statSync(filePath).size;
+  let firstChunk = true;
+
+  try {
+    for await (const rawChunk of stream) {
+      onReadProgress?.(stream.bytesRead, totalBytes);
+      let chunk = String(rawChunk);
+      if (firstChunk) {
+        firstChunk = false;
+        if (chunk.startsWith("\ufeff")) {
+          chunk = chunk.slice(1);
+        }
+      }
+      for (const record of parser.push(chunk)) {
+        yield record;
+      }
+    }
+
+    for (const record of parser.push("", true)) {
+      yield record;
+    }
+  } finally {
+    stream.destroy();
+  }
+}
+
+export function detectDelimitedTextDelimiter(
+  text: string,
+  delimiters: readonly string[],
+  fallback: string,
+): string {
+  const countsByRecord = new Map(delimiters.map((delimiter) => [delimiter, [] as number[]]));
+  const delimiterSet = new Set(delimiters);
+  let inQuotes = false;
+  let atFieldStart = true;
+  let recordHasContent = false;
+  let recordCounts = new Map(delimiters.map((delimiter) => [delimiter, 0]));
+  let sampledRecords = 0;
+  const source = text.startsWith("\ufeff") ? text.slice(1) : text;
+  const sampleRecordLimit = 10;
+
+  const finishRecord = () => {
+    if (recordHasContent) {
+      for (const delimiter of delimiters) {
+        countsByRecord.get(delimiter)?.push(recordCounts.get(delimiter) ?? 0);
+      }
+      sampledRecords++;
+    }
+    recordHasContent = false;
+    atFieldStart = true;
+    recordCounts = new Map(delimiters.map((delimiter) => [delimiter, 0]));
+  };
+
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (inQuotes) {
+      if (char === '"' && source[index + 1] === '"') {
+        index++;
+      } else if (char === '"') {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === '"' && atFieldStart) {
+      inQuotes = true;
+      atFieldStart = false;
+    } else {
+      if (char === "\r" || char === "\n") {
+        finishRecord();
+        if (sampledRecords >= sampleRecordLimit) {
+          break;
+        }
+      } else if (delimiterSet.has(char)) {
+        recordCounts.set(char, (recordCounts.get(char) ?? 0) + 1);
+        recordHasContent = true;
+        atFieldStart = true;
+      } else {
+        if (!/\s/.test(char)) {
+          recordHasContent = true;
+        }
+        atFieldStart = false;
+      }
+    }
+  }
+
+  if (sampledRecords < sampleRecordLimit) {
+    finishRecord();
+  }
+
+  let detected = fallback;
+  let maxConsistentCount = 0;
+  let hasConsistentDelimiter = false;
+  const fallbackCounts = countsByRecord.get(fallback) ?? [];
+  const fallbackCount = fallbackCounts[0] ?? 0;
+  const hasConsistentFallback = fallbackCount > 0
+    && fallbackCounts.every((recordCount) => recordCount === fallbackCount);
+
+  if (hasConsistentFallback) {
+    return fallback;
+  }
+
+  for (const delimiter of delimiters) {
+    if (delimiter === fallback) {
+      continue;
+    }
+    const counts = countsByRecord.get(delimiter) ?? [];
+    const count = counts[0] ?? 0;
+    const isConsistent = count > 0 && counts.every((recordCount) => recordCount === count);
+    if (
+      isConsistent
+      && (
+        !hasConsistentDelimiter
+        || count > maxConsistentCount
+        || (count === maxConsistentCount && delimiter === fallback)
+      )
+    ) {
+      detected = delimiter;
+      maxConsistentCount = count;
+      hasConsistentDelimiter = true;
+    }
+  }
+  return detected;
+}
+
 // XLSX import for Excel file support
 // Custom Excel Reader from ExcelHelpersTs
 interface IExcelReader {
@@ -210,6 +474,7 @@ export class NetezzaImporter {
   private dataTypes: ColumnTypeChooser[] = [];
   private rowsCount: number = 0;
   private streamedRowsCount: number = 0;
+  private analysisProgressOffset = 0;
   private valuesToEscape: string[] = [];
   private selectedColumnIndexes: number[] = [];
   private forcedColumnTypes: Map<number, string> = new Map();
@@ -296,6 +561,7 @@ export class NetezzaImporter {
     this.dataTypes = [];
     this.rowsCount = 0;
     this.streamedRowsCount = 0;
+    this.analysisProgressOffset = 0;
     this.excelHasHeaderRow = this.hasHeadersOverride ?? true;
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
@@ -340,7 +606,9 @@ export class NetezzaImporter {
 
   private setHeaders(headers: readonly string[]): void {
     this.sourceHeaders = headers.map(
-      (header, index) => header.trim() || `COLUMN_${index + 1}`,
+      (header, index) =>
+        header.replace(/^[\t ]+|[\t ]+$/g, "") ||
+        `COLUMN_${index + 1}`,
     );
     this.sqlHeaders = this.normalizeSqlHeaders(this.sourceHeaders);
   }
@@ -547,37 +815,29 @@ export class NetezzaImporter {
    * Auto-detect CSV delimiter
    */
   private detectCsvDelimiter(): void {
-    const content = fs.readFileSync(this.filePath, "utf-8");
-    let firstLine = content.split("\n")[0] || "";
-
-    // Handle UTF-8 BOM
-    if (firstLine.startsWith("\ufeff")) {
-      firstLine = firstLine.slice(1);
-    }
-
-    // Count delimiters and choose the most frequent
-    const delimiters = [";", "\t", "|", ","];
-    const counts: { [key: string]: number } = {};
-
-    for (const delim of delimiters) {
-      counts[delim] = (
-        firstLine.match(new RegExp(delim === "|" ? "\\|" : delim, "g")) || []
-      ).length;
-    }
-
-    const maxCount = Math.max(...Object.values(counts));
-    if (maxCount > 0) {
-      this.csvDelimiter =
-        Object.keys(counts).find((k) => counts[k] === maxCount) || ",";
-    }
+    const content = readDelimitedTextPrefix(this.filePath);
+    const fallback = path.extname(this.filePath).toLowerCase() === ".tsv"
+      ? "\t"
+      : ",";
+    this.csvDelimiter = detectDelimitedTextDelimiter(
+      content,
+      [";", "\t", "|", ","],
+      fallback,
+    );
   }
 
   /**
    * Clean column name for SQL compatibility
    */
   private cleanColumnName(colName: string): string {
-    let cleanName = String(colName).trim();
-    cleanName = cleanName.replace(/[^0-9a-zA-Z]+/g, "_").toUpperCase();
+    const hasTrailingLineBreak = /(?:\r\n|\r|\n)+\s*$/.test(colName);
+    let cleanName = String(colName).replace(/\r\n|\r|\n/g, "_").trim();
+    cleanName = cleanName
+      .replace(/[^0-9a-zA-Z]+/g, "_")
+      .toUpperCase();
+    if (!hasTrailingLineBreak) {
+      cleanName = cleanName.replace(/_+$/g, "");
+    }
     if (!cleanName || /^\d/.test(cleanName) || cleanName.startsWith("_")) {
       cleanName = "COL" + (cleanName.startsWith("_") ? "" : "_") + cleanName;
     }
@@ -602,36 +862,6 @@ export class NetezzaImporter {
   private quoteIdentifier(name: string): string {
     if (!name) return '""';
     return quoteIdentifier(name);
-  }
-
-  /**
-   * Parse a CSV line handling quoted fields
-   */
-  private parseCsvLine(line: string): string[] {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-
-      if (char === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === this.csvDelimiter && !inQuotes) {
-        result.push(current);
-        current = "";
-      } else {
-        current += char;
-      }
-    }
-    result.push(current);
-
-    return result;
   }
 
   /**
@@ -776,6 +1006,7 @@ export class NetezzaImporter {
     progressCallback?: ProgressCallback,
   ): Promise<ColumnTypeChooser[]> {
     progressCallback?.("Analyzing data types...");
+    this.analysisProgressOffset = 0;
 
     if (this.isExcelFile) {
       return this.analyzeExcelTypes(progressCallback);
@@ -787,6 +1018,7 @@ export class NetezzaImporter {
 
     if (isLargeFile) {
       progressCallback?.("Using streaming analysis for large file...");
+      this.analysisProgressOffset = 40;
       return this.analyzeDataTypesStreaming(progressCallback);
     } else {
       // Small files: use existing approach for simplicity
@@ -801,164 +1033,113 @@ export class NetezzaImporter {
   private async analyzeDataTypesStreaming(
     progressCallback?: ProgressCallback,
   ): Promise<ColumnTypeChooser[]> {
-    return new Promise((resolve, reject) => {
-      const readline = require("readline");
-      const stream = fs.createReadStream(this.filePath, { encoding: "utf-8" });
-      const rl = readline.createInterface({
-        input: stream,
-        crlfDelay: Infinity,
-      });
+    const pendingRows: string[][] = [];
+    const decimalSamples = { dot: 0, comma: 0 };
+    const maxDecimalSamples = 1000;
+    let headers: string[] = [];
+    let dataTypes: ColumnTypeChooser[] = [];
+    let decimalDelimiter = ".";
+    let headerProcessed = false;
+    let sampleCount = 0;
+    let rowCount = 0;
+    let lastReportedAnalysisPercent = 0;
 
-      let lineNumber = 0;
-      let headers: string[] = [];
-      let dataTypes: ColumnTypeChooser[] = [];
-      let decimalDelimiter = "."; // Default
-      let columnCount = 0;
-      let headerProcessed = false;
-      let decimalSampleCount = 0;
-      const maxDecimalSamples = 1000;
-      const pendingRows: string[][] = [];
-
-      // Temporary storage for decimal detection
-      const decimalSamples: { dot: number; comma: number } = {
-        dot: 0,
-        comma: 0,
-      };
-
-      const applyRowToTypeInference = (row: string[]) => {
-        for (let j = 0; j < Math.min(row.length, columnCount); j++) {
-          const value = row[j]?.trim();
-          if (value) {
-            dataTypes[j].refreshCurrentType(value);
-          }
+    const applyRow = (row: string[]) => {
+      for (let index = 0; index < Math.min(row.length, headers.length); index++) {
+        const value = row[index]?.trim();
+        if (value) {
+          dataTypes[index].refreshCurrentType(value);
         }
-      };
+      }
+    };
 
-      const initializeTypeChoosers = () => {
-        if (dataTypes.length > 0 || headers.length === 0) {
+    const initializeTypes = () => {
+      if (dataTypes.length > 0 || headers.length === 0) {
+        return;
+      }
+      decimalDelimiter =
+        decimalSamples.comma > decimalSamples.dot && decimalSamples.comma > 0
+          ? ","
+          : ".";
+      this.decimalDelimiter = decimalDelimiter;
+      this.sqlHeaders = headers;
+      dataTypes = this.createColumnTypeChoosers(
+        this.sourceHeaders,
+        decimalDelimiter,
+      );
+      progressCallback?.(`Detected decimal separator: '${decimalDelimiter}'`);
+      for (const row of pendingRows) {
+        applyRow(row);
+      }
+      pendingRows.length = 0;
+    };
+
+    for await (const row of readDelimitedRecords(
+      this.filePath,
+      this.csvDelimiter,
+      (bytesRead, totalBytes) => {
+        const readPercent = totalBytes > 0
+          ? Math.min(100, Math.floor((bytesRead / totalBytes) * 100))
+          : 100;
+        const overallPercent = Math.floor(readPercent * 0.4);
+        if (overallPercent <= lastReportedAnalysisPercent) {
           return;
         }
-
-        decimalDelimiter =
-          decimalSamples.comma > decimalSamples.dot &&
-          decimalSamples.comma > 0
-            ? ","
-            : ".";
+        const increment = Math.max(0, overallPercent - lastReportedAnalysisPercent);
+        lastReportedAnalysisPercent = Math.max(lastReportedAnalysisPercent, overallPercent);
         progressCallback?.(
-          `Detected decimal separator: '${decimalDelimiter}'`,
+          `Analyzing source: ${readPercent}% (${rowCount.toLocaleString()} rows)`,
+          increment,
+          false,
         );
-
-        dataTypes = this.createColumnTypeChoosers(
-          this.sourceHeaders,
-          decimalDelimiter,
-        );
-        this.sqlHeaders = headers;
-        this.decimalDelimiter = decimalDelimiter;
-
-        for (const pendingRow of pendingRows) {
-          applyRowToTypeInference(pendingRow);
+      },
+    )) {
+      if (!headerProcessed) {
+        if (this.hasHeadersOverride ?? true) {
+          this.setHeaders(row);
+        } else {
+          this.setGeneratedHeaders(row.length);
         }
+        headers = [...this.sqlHeaders];
+        headerProcessed = true;
+        progressCallback?.(`Headers: ${headers.length} columns`);
+        if (this.hasHeadersOverride ?? true) {
+          continue;
+        }
+      }
+
+      rowCount++;
+      pendingRows.push(row);
+      if (sampleCount < maxDecimalSamples) {
+        sampleCount++;
+        for (const cell of row) {
+          const value = cell?.trim() ?? "";
+          if (/^\d+\.\d+$/.test(value)) decimalSamples.dot++;
+          if (/^\d+,\d+$/.test(value)) decimalSamples.comma++;
+        }
+      }
+
+      if (dataTypes.length > 0) {
+        applyRow(row);
         pendingRows.length = 0;
-      };
+      } else if (sampleCount === maxDecimalSamples || rowCount >= 100) {
+        initializeTypes();
+      }
 
-      const processLine = async (line: string) => {
-        try {
-          lineNumber++;
+      if (rowCount % 10000 === 0) {
+        progressCallback?.(`Analyzed ${rowCount.toLocaleString()} rows...`, undefined, false);
+        await delay();
+      }
+    }
 
-          // Skip empty lines
-          if (!line || !line.trim()) {
-            return;
-          }
-
-          // Handle UTF-8 BOM on first line
-          if (lineNumber === 1 && line.startsWith("\ufeff")) {
-            line = line.slice(1);
-          }
-
-          const row = this.parseCsvLine(line);
-
-          if (!headerProcessed) {
-            // The header toggle controls whether the first non-empty line is
-            // metadata or the first row of imported data.
-            if (this.hasHeadersOverride ?? true) {
-              this.setHeaders(row);
-            } else {
-              this.setGeneratedHeaders(row.length);
-            }
-            headers = [...this.sqlHeaders];
-            columnCount = headers.length;
-
-            headerProcessed = true;
-            progressCallback?.(`Headers: ${columnCount} columns`);
-            if (this.hasHeadersOverride ?? true) {
-              return;
-            }
-          }
-
-          pendingRows.push(row);
-
-          // First data rows: detect decimal delimiter
-          if (decimalSampleCount < maxDecimalSamples) {
-            decimalSampleCount++;
-            for (const cell of row) {
-              const val = cell?.trim() || "";
-              if (/^\d+\.\d+$/.test(val)) decimalSamples.dot++;
-              if (/^\d+,\d+$/.test(val)) decimalSamples.comma++;
-            }
-          }
-
-          if (decimalSampleCount === maxDecimalSamples || lineNumber > 100) {
-            initializeTypeChoosers();
-          }
-
-          if (dataTypes.length === 0) {
-            return;
-          }
-
-          applyRowToTypeInference(row);
-          pendingRows.length = 0;
-
-          // Progress reporting
-          const rowsAnalyzed = lineNumber - (this.hasHeadersOverride ?? true ? 2 : 1);
-          if (rowsAnalyzed % 10000 === 0) {
-            progressCallback?.(
-              `Analyzed ${rowsAnalyzed.toLocaleString()} rows...`,
-              undefined,
-              false,
-            );
-            await delay(); // Unblock event loop
-          }
-        } catch (e) {
-          console.error("Error processing line:", e);
-        }
-      };
-
-      rl.on("line", (line: string) => {
-        // Queue processing
-        processLine(line).catch(reject);
-      });
-
-      rl.on("close", async () => {
-        try {
-          // Ensure type choosers are initialized (for small files where we didn't hit threshold)
-          if (dataTypes.length === 0 && headers.length > 0) {
-            initializeTypeChoosers();
-          }
-
-          this.rowsCount = Math.max(0, lineNumber - 2);
-          this.dataTypes = dataTypes;
-
-          progressCallback?.(
-            `Analysis complete: ${this.rowsCount.toLocaleString()} rows`,
-          );
-          resolve(dataTypes);
-        } catch (e) {
-          reject(e);
-        }
-      });
-
-      rl.on("error", reject);
-    });
+    if (!headerProcessed) {
+      throw new Error("No data found in file");
+    }
+    initializeTypes();
+    this.rowsCount = rowCount;
+    this.dataTypes = dataTypes;
+    progressCallback?.(`Analysis complete: ${rowCount.toLocaleString()} rows`);
+    return dataTypes;
   }
 
   /**
@@ -969,21 +1150,8 @@ export class NetezzaImporter {
   ): Promise<ColumnTypeChooser[]> {
     this.detectCsvDelimiter();
 
-    let content = fs.readFileSync(this.filePath, "utf-8");
-
-    // Handle UTF-8 BOM
-    if (content.startsWith("\ufeff")) {
-      content = content.slice(1);
-    }
-
-    const lines = content.split(/\r?\n/);
-    const rows: string[][] = [];
-
-    for (const line of lines) {
-      if (line.trim()) {
-        rows.push(this.parseCsvLine(line));
-      }
-    }
+    const content = fs.readFileSync(this.filePath, "utf-8");
+    const rows = parseDelimitedRecords(content, this.csvDelimiter);
 
     if (!rows || rows.length === 0) {
       throw new Error("No data found in file");
@@ -1183,7 +1351,7 @@ export class NetezzaImporter {
    * Escape special characters for Netezza import
    */
   private escapeValue(val: string): string {
-    let result = String(val).trim();
+    let result = String(val).replace(/\r/g, "");
     for (const char of this.valuesToEscape) {
       result = result.split(char).join(`${this.escapechar}${char}`);
     }
@@ -1216,14 +1384,19 @@ export class NetezzaImporter {
    * Format value according to column type
    */
   formatValue(val: string, colIndex: number): string {
-    let result = this.escapeValue(val);
-
     if (colIndex < 0 || colIndex >= this.sqlHeaders.length) {
-      return result;
+      return this.escapeValue(val);
     }
 
     const effectiveType = this.getEffectiveDataType(colIndex);
     const baseType = getBaseDataType(effectiveType);
+    const isTextType = /^(N?CHAR|N?VARCHAR|TEXT|CLOB)/.test(baseType);
+    let result = this.escapeValue(isTextType ? val : val.trim());
+
+    if (baseType === "BOOLEAN") {
+      if (/^true$/i.test(result)) result = "1";
+      else if (/^false$/i.test(result)) result = "0";
+    }
 
     // Handle DATETIME
     if (baseType === "DATETIME" || baseType === "TIMESTAMP") {
@@ -1422,56 +1595,33 @@ ${this.getExternalUsingClause()}
 
   /**
    * Streaming CSV data source — reads and processes rows lazily
-   * via fs.createReadStream + readline. Row data is never materialized
-   * in a full array; each row is parsed, formatted, and pushed directly
-   * into the Readable stream as a formatted delimited line.
+  * via an incremental quote-aware record parser. Row data is never
+  * materialized in a full array; each row is formatted and pushed directly
+  * into the Readable stream as a delimited record.
    */
   private async createCsvDataStream(
     progressCallback?: ProgressCallback,
   ): Promise<Readable> {
-    const fileStats = fs.statSync(this.filePath);
-    const totalBytes = fileStats.size;
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
-    const readline = require("readline");
 
     async function* generateRows(): AsyncGenerator<string> {
-      const fileStream = fs.createReadStream(self.filePath, {
-        encoding: "utf-8",
-      });
-      const rl = readline.createInterface({
-        input: fileStream,
-        crlfDelay: Infinity,
-      });
-
       let headerSkipped = false;
       let totalRowsPushed = 0;
-      let firstLineSeen = false;
       let lastReportTime = 0;
+      const progressOffset = self.analysisProgressOffset;
+      const streamProgressWeight = 100 - progressOffset;
+      let lastReportedPercent = progressOffset;
       self.streamedRowsCount = 0;
 
       try {
-        for await (const line of rl) {
-          let sourceLine = line;
-          if (!firstLineSeen) {
-            firstLineSeen = true;
-            if (sourceLine.startsWith("\ufeff")) {
-              sourceLine = sourceLine.slice(1);
-            }
-          }
-          // Skip header row (first non-empty line)
-          // (BOM was already stripped during analyzeDataTypes())
+        for await (const row of readDelimitedRecords(self.filePath, self.csvDelimiter)) {
           if (self.hasHeadersOverride !== false && !headerSkipped) {
             headerSkipped = true;
             continue;
           }
           headerSkipped = true;
 
-          if (!sourceLine || !sourceLine.trim()) {
-            continue;
-          }
-
-          const row = self.parseCsvLine(sourceLine);
           const formattedRow = self.formatImportRow(row);
           const lineStr =
             formattedRow.join(self.getExternalDelimiter()) +
@@ -1480,17 +1630,17 @@ ${this.getExternalUsingClause()}
           totalRowsPushed++;
           self.streamedRowsCount = totalRowsPushed;
 
-          // Progress reporting based on bytes read from file
           const now = Date.now();
           if (progressCallback && now - lastReportTime >= 1000) {
-            const bytesRead = fileStream.bytesRead || 0;
             const percent =
-              totalBytes > 0
-                ? Math.floor((bytesRead / totalBytes) * 100)
-                : 0;
+              self.rowsCount > 0
+                ? progressOffset + Math.floor((totalRowsPushed / self.rowsCount) * streamProgressWeight)
+                : 100;
+            const increment = Math.max(0, percent - lastReportedPercent);
+            lastReportedPercent = Math.max(lastReportedPercent, percent);
             progressCallback(
               `Importing: ${percent}% complete (${totalRowsPushed.toLocaleString()} rows)`,
-              undefined,
+              increment,
               false,
             );
             lastReportTime = now;
@@ -1500,8 +1650,6 @@ ${this.getExternalUsingClause()}
         }
       } finally {
         self.rowsCount = totalRowsPushed;
-        rl.close();
-        fileStream.destroy();
       }
     }
 
@@ -1552,6 +1700,7 @@ ${this.getExternalUsingClause()}
 
         let headerSkipped = !self.excelHasHeaderRow;
         let lastReportTime = 0;
+        let lastReportedPercent = 0;
 
         while (readerOpened && (await reader.read())) {
           if (!headerSkipped) {
@@ -1582,9 +1731,11 @@ ${this.getExternalUsingClause()}
               totalRows > 0
                 ? Math.floor((rowsPushed / totalRows) * 100)
                 : 0;
+            const increment = Math.max(0, percent - lastReportedPercent);
+            lastReportedPercent = Math.max(lastReportedPercent, percent);
             progressCallback(
               `Importing: ${percent}% complete (${rowsPushed.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
-              undefined,
+              increment,
               false,
             );
             lastReportTime = now;
@@ -1722,44 +1873,20 @@ ${this.getExternalUsingClause()}
       return this.readExcelSampleRows(sampleLimit);
     }
 
-    return new Promise((resolve, reject) => {
-      const readline = require("readline");
-      const stream = fs.createReadStream(this.filePath, { encoding: "utf-8" });
-      const rl = readline.createInterface({
-        input: stream,
-        crlfDelay: Infinity,
-      });
-      const rows: string[][] = [];
-      let headerSkipped = false;
-      let firstLineSeen = false;
-
-      rl.on("line", (line: string) => {
-        let sourceLine = line;
-        if (!firstLineSeen) {
-          firstLineSeen = true;
-          if (sourceLine.startsWith("\ufeff")) {
-            sourceLine = sourceLine.slice(1);
-          }
-        }
-        if (this.hasHeadersOverride !== false && !headerSkipped) {
-          headerSkipped = true;
-          return;
-        }
+    const rows: string[][] = [];
+    let headerSkipped = false;
+    for await (const row of readDelimitedRecords(this.filePath, this.csvDelimiter)) {
+      if (this.hasHeadersOverride !== false && !headerSkipped) {
         headerSkipped = true;
-
-        if (!sourceLine.trim()) {
-          return;
-        }
-
-        rows.push(this.parseCsvLine(sourceLine));
-        if (rows.length >= sampleLimit) {
-          rl.close();
-        }
-      });
-
-      rl.on("close", () => resolve(rows));
-      rl.on("error", (err: Error) => reject(err));
-    });
+        continue;
+      }
+      headerSkipped = true;
+      rows.push(row);
+      if (rows.length >= sampleLimit) {
+        break;
+      }
+    }
+    return rows;
   }
 
   async getAllRows(): Promise<string[][]> {
@@ -1770,24 +1897,14 @@ ${this.getExternalUsingClause()}
       return rows;
     }
 
-    let content = fs.readFileSync(this.filePath, "utf-8");
-    if (content.startsWith("\ufeff")) {
-      content = content.slice(1);
-    }
-
-    const lines = content.split(/\r?\n/);
     const rows: string[][] = [];
     let skipHeader = this.hasHeadersOverride !== false;
-
-    for (const line of lines) {
-      if (!line.trim()) {
-        continue;
-      }
+    for await (const row of readDelimitedRecords(this.filePath, this.csvDelimiter)) {
       if (skipHeader) {
         skipHeader = false;
         continue;
       }
-      rows.push(this.parseCsvLine(line));
+      rows.push(row);
     }
 
     this.rowsCount = rows.length;
@@ -1847,7 +1964,7 @@ export async function importDataToNetezza(
     const fileExt = path.extname(filePath).toLowerCase();
 
     // Check supported formats
-    const supportedFormats = [".csv", ".txt", ".xlsx", ".xlsb"];
+    const supportedFormats = [".csv", ".txt", ".tsv", ".xlsx", ".xlsb"];
     if (!supportedFormats.includes(fileExt)) {
       return {
         success: false,
@@ -1996,7 +2113,7 @@ export async function importDataToNetezzaAdvanced(
     const fileStats = fs.statSync(filePath);
     const fileSize = fileStats.size;
     const fileExt = path.extname(filePath).toLowerCase();
-    const supportedFormats = [".csv", ".txt", ".xlsx", ".xlsb"];
+    const supportedFormats = [".csv", ".txt", ".tsv", ".xlsx", ".xlsb"];
     if (!supportedFormats.includes(fileExt)) {
       return {
         success: false,

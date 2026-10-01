@@ -12,8 +12,10 @@ import {
     ColumnTypeChooser,
     NetezzaImporter,
     importDataToNetezza,
+    readDelimitedTextPrefix,
     resolveNetezzaImportProgress
 } from '../import/dataImporter';
+import { normalizeImportedHeader } from '../import/importHeaderUtils';
 
 interface TestXlsxWriter {
     startSheet(sheetName: string, columnCount: number, headers?: string[]): void;
@@ -289,6 +291,20 @@ describe('import/dataImporter', () => {
             expect(fs.existsSync(logDir)).toBe(true);
         });
 
+        it('defaults TSV files to a tab delimiter', () => {
+            const tsvPath = writeTempFile('empty-prefix.tsv', '');
+            const importer = new NetezzaImporter(tsvPath, 'TEST_TABLE');
+
+            expect(importer.getCsvDelimiter()).toBe('\t');
+            expect(importer.getExternalDelimiter()).toBe('\t');
+        });
+
+        it('reads only the configured prefix for delimiter detection', () => {
+            const csvPath = writeTempFile('bounded-detection.csv', `A;B\n1;2\n${'x'.repeat(2048)}`);
+
+            expect(readDelimitedTextPrefix(csvPath, 32)).toHaveLength(32);
+        });
+
         it('analyzes types, normalizes headers and tracks rows count', async () => {
             const csvPath = writeTempFile('headers.csv', '1col,Name With Space,_private\n123,John,abc\n456,Jane,def\n');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
@@ -297,6 +313,180 @@ describe('import/dataImporter', () => {
             expect(types).toHaveLength(3);
             expect(importer.getSqlHeaders()).toEqual(['COL_1COL', 'NAME_WITH_SPACE', 'COL_PRIVATE']);
             expect(importer.getRowsCount()).toBe(2);
+        });
+
+        it('preserves quoted multiline headers and values in analysis, preview, and stream', async () => {
+            const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+            const source = [
+                ['COL1', quote('COL2\n'), 'COL3'].join('\t'),
+                ['1', quote('first\n"quoted"\r\nlast\n'), '3'].join('\t'),
+                ['2', quote('contains\ttab and ; delimiter'), '4'].join('\t'),
+            ].join('\r\n');
+            const csvPath = writeTempFile('multiline.tsv', source);
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getSqlHeaders()).toEqual(['COL1', 'COL2_', 'COL3']);
+            expect(importer.getRowsCount()).toBe(2);
+            await expect(importer.getSampleRows()).resolves.toEqual([
+                ['1', 'first\n"quoted"\r\nlast\n', '3'],
+                ['2', 'contains\ttab and ; delimiter', '4'],
+            ]);
+            await expect(importer.getAllRows()).resolves.toEqual([
+                ['1', 'first\n"quoted"\r\nlast\n', '3'],
+                ['2', 'contains\ttab and ; delimiter', '4'],
+            ]);
+
+            const stream = await importer.createDataStream();
+            let output = '';
+            stream.on('data', (chunk) => {
+                output += String(chunk);
+            });
+            await once(stream, 'end');
+
+            expect(output).toBe('1\tfirst\\\n"quoted"\\\nlast\\\n\t3\n2\tcontains\\\ttab and ; delimiter\t4\n');
+        });
+
+        it('preserves quotes inside an unquoted field', async () => {
+            const csvPath = writeTempFile('literal-quote.csv', 'A,B\n1,He said "OK"\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            await expect(importer.getSampleRows()).resolves.toEqual([
+                ['1', 'He said "OK"'],
+            ]);
+        });
+
+        it('preserves bare CR records and explicit empty quoted fields', async () => {
+            const csvPath = writeTempFile('bare-cr.csv', 'A,B\r1,"inside\rvalue"\r2,""\r');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getRowsCount()).toBe(2);
+            await expect(importer.getSampleRows()).resolves.toEqual([
+                ['1', 'inside\rvalue'],
+                ['2', ''],
+            ]);
+        });
+
+        it('replaces line breaks inside headers with underscores', async () => {
+            const csvPath = writeTempFile('multiline-header.csv', '"FIRST\nNAME",VALUE\nalice,1\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getSqlHeaders()).toEqual(['FIRST_NAME', 'VALUE']);
+        });
+
+        it('replaces a trailing line break in a header with an underscore', async () => {
+            const csvPath = writeTempFile('trailing-newline-header.csv', 'A,"COL2\n"\n1,value\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getSqlHeaders()).toEqual(['A', 'COL2_']);
+            expect(normalizeImportedHeader('COL2\n', 'netezza')).toBe('COL2_');
+        });
+
+        it('normalizes the quoted multiline header from Excel into a safe identifier', async () => {
+            const csvPath = writeTempFile(
+                'quoted-multiline-header.csv',
+                'COL1\t"COL2\n""dasdasdasd"""\tCOL3\n1\t2\t3\n1\t2\t3\n',
+            );
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getSqlHeaders()).toEqual(['COL1', 'COL2_DASDASDASD', 'COL3']);
+        });
+
+        it('formats inferred numeric, datetime, boolean, and multiline text cells', async () => {
+            const csvPath = writeTempFile(
+                'typed-multiline.csv',
+                'ID;CODE;AMOUNT;EVENT_TIME;ACTIVE;NOTE\n' +
+                    '1;00123;1234,50;07.06.2024 14:30;true;"first\n""quoted"""\n' +
+                    '2;00007;0,25;08.06.2024 05:06;false;tail\n',
+            );
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, {
+                inferBoolean: true,
+            });
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getColumnMappings().map(column => column.dataType)).toEqual([
+                'BIGINT',
+                'NVARCHAR(20)',
+                'NUMERIC(16,2)',
+                'DATETIME',
+                'BOOLEAN',
+                'NVARCHAR(20)',
+            ]);
+            expect(importer.formatImportRow([
+                '2',
+                '00042',
+                '1234,50',
+                '07.06.2024 14:30',
+                'TRUE',
+                'first\n"quoted"',
+            ])).toEqual([
+                '2',
+                '00042',
+                '1234.50',
+                '2024-06-07 14:30:00',
+                '1',
+                'first\\\n"quoted"',
+            ]);
+        });
+
+        it('uses logical records for files above the streaming-analysis threshold', async () => {
+            const longValue = `${'x'.repeat(10 * 1024 * 1024)}\ncontinued`;
+            const csvPath = writeTempFile(
+                'large-multiline.csv',
+                `A,B\n1,"${longValue}"\n2,tail\n`,
+            );
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            const reportProgress = jest.fn();
+
+            await importer.analyzeDataTypes(reportProgress);
+
+            expect(importer.getRowsCount()).toBe(2);
+            await expect(importer.getSampleRows()).resolves.toEqual([
+                ['1', longValue],
+                ['2', 'tail'],
+            ]);
+            expect(reportProgress.mock.calls.reduce(
+                (total, [, increment]) => total + (increment || 0),
+                0,
+            )).toBe(40);
+
+            const streamProgress = jest.fn();
+            const dateNow = jest.spyOn(Date, 'now')
+                .mockReturnValueOnce(1000)
+                .mockReturnValueOnce(2000);
+            try {
+                const stream = await importer.createDataStream(streamProgress);
+                stream.resume();
+                await once(stream, 'end');
+            } finally {
+                dateNow.mockRestore();
+            }
+            expect(streamProgress.mock.calls.filter(([message]) => String(message).startsWith('Importing: ')))
+                .toEqual([
+                    ['Importing: 70% complete (1 rows)', 30, false],
+                    ['Importing: 100% complete (2 rows)', 30, false],
+                ]);
+        });
+
+        it('rejects an unterminated quoted field', async () => {
+            const csvPath = writeTempFile('unclosed.csv', 'A,B\n1,"unterminated\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await expect(importer.analyzeDataTypes()).rejects.toThrow(
+                'Unterminated quoted field',
+            );
         });
 
         it('formats DATETIME and NUMERIC values according to detected column types', async () => {
@@ -355,6 +545,30 @@ describe('import/dataImporter', () => {
             expect(rows[1]).toContain('3,4');
             expect(importer.getRowsCount()).toBe(2);
             expect(importer.getStreamedRowsCount()).toBe(2);
+        });
+
+        it('reports incremental percentage progress while streaming rows', async () => {
+            const csvPath = writeTempFile('progress.csv', 'A,B\n1,2\n3,4\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            const dateNow = jest.spyOn(Date, 'now')
+                .mockReturnValueOnce(1000)
+                .mockReturnValueOnce(2000);
+            const reportProgress = jest.fn();
+            try {
+                const stream = await importer.createDataStream(reportProgress);
+                stream.resume();
+                await once(stream, 'end');
+            } finally {
+                dateNow.mockRestore();
+            }
+
+            expect(reportProgress.mock.calls.filter(([message]) => String(message).startsWith('Importing: ')))
+                .toEqual([
+                    ['Importing: 50% complete (1 rows)', 50, false],
+                    ['Importing: 100% complete (2 rows)', 50, false],
+                ]);
         });
 
         it('applies selected columns and forced types when generating SQL', async () => {

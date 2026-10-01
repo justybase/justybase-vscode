@@ -304,13 +304,101 @@ describeIfNetezza('Live Netezza virtual import and migration coverage', () => {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-live-'));
         const csvPath = path.join(tempDir, 'semicolon.csv');
         const txtPath = path.join(tempDir, 'tabbed.txt');
+        const tsvPath = path.join(tempDir, 'tabbed.tsv');
         fs.writeFileSync(csvPath, 'id;label\n1;alpha\n2;beta\n');
         fs.writeFileSync(txtPath, 'id\tlabel\n3\tgamma\n4\tdelta\n');
+        fs.writeFileSync(tsvPath, 'id\tlabel\n5\tepsilon\n6\tzeta\n');
 
         try {
             await verifyImportedFile(csvPath, ['ID', 'LABEL'], 2, 'semicolon.csv');
             await verifyImportedFile(txtPath, ['ID', 'LABEL'], 2, 'tabbed.txt');
+            await verifyImportedFile(tsvPath, ['ID', 'LABEL'], 2, 'tabbed.tsv');
         } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }, 180000);
+
+    it('round-trips multiline quoted file values through the live Netezza stream', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-multiline-live-'));
+        const filePath = path.join(tempDir, 'multiline.txt');
+        const table = uniqueTable('JBL_MULTILINE_FILE');
+        const target = tableReference(sourceSchema, table);
+        fs.writeFileSync(
+            filePath,
+            'COL1\t"COL2\n"\tCOL3\r\n' +
+                '1\t"first\n""quoted""\r\nlast\n"\t3\r\n' +
+                '2\t"CR only\rinside"\t4\r\n' +
+                '3\t"tail\n"\t5\r\n',
+        );
+
+        try {
+            const result = await importDataToNetezza(filePath, target, buildNetezzaDetails());
+            expect(result.success).toBe(true);
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+
+            const imported = await readNetezzaRows(
+                `SELECT "COL1", "COL2_", "COL3" FROM ${target} ORDER BY "COL1"`,
+            );
+            expect(imported.names.map(name => name.toUpperCase())).toEqual(['COL1', 'COL2_', 'COL3']);
+            expect(imported.rows.map(row => row.map(String))).toEqual([
+                ['1', 'first\n"quoted"\nlast\n', '3'],
+                ['2', 'CR onlyinside', '4'],
+                ['3', 'tail\n', '5'],
+            ]);
+        } finally {
+            await dropNetezzaTable(target);
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }, 180000);
+
+    it('round-trips mixed typed values through Netezza SQL', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-types-live-'));
+        const filePath = path.join(tempDir, 'typed.csv');
+        const table = uniqueTable('JBL_TYPED_IMPORT');
+        const target = tableReference(sourceSchema, table);
+        fs.writeFileSync(
+            filePath,
+            'ID;CODE;AMOUNT;EVENT_DATE;EVENT_TIME;ACTIVE;NOTE\n' +
+                '1;00123;1234,50;2024-06-07;07.06.2024 14:30;true;"first\n""quoted"""\n' +
+                '2;00007;0,25;2024-06-08;08.06.2024 05:06;false;tail\n',
+        );
+
+        try {
+            const result = await importDataToNetezza(
+                filePath,
+                target,
+                buildNetezzaDetails(),
+                undefined,
+                undefined,
+                { forcedColumnTypes: { 5: 'BOOLEAN' } },
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+
+            const imported = await readNetezzaRows(
+                `SELECT CAST("ID" AS VARCHAR(20)), "CODE", ` +
+                    `CAST("AMOUNT" AS VARCHAR(40)), CAST("EVENT_DATE" AS VARCHAR(10)), ` +
+                    `CAST("EVENT_TIME" AS VARCHAR(32)), "ACTIVE", "NOTE" ` +
+                    `FROM ${target} ORDER BY "ID"`,
+            );
+            expect(imported.rows.map(row => [
+                String(row[0]),
+                String(row[1]),
+                String(row[2]),
+                String(row[3]),
+                String(row[4]),
+                String(row[5]).toLowerCase(),
+                String(row[6]),
+            ])).toEqual([
+                ['1', '00123', '1234.50', '2024-06-07', '2024-06-07 14:30:00', 'true', 'first\n"quoted"'],
+                ['2', '00007', '0.25', '2024-06-08', '2024-06-08 05:06:00', 'false', 'tail'],
+            ]);
+        } finally {
+            await dropNetezzaTable(target);
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
     }, 180000);
@@ -356,6 +444,45 @@ describeIfNetezza('Live Netezza virtual import and migration coverage', () => {
             const imported = await readNetezzaRows(`SELECT * FROM ${target} ORDER BY 1`);
             expect(imported.names.map(name => name.toUpperCase())).toEqual(['COL', 'COL_1']);
             expect(imported.rows).toHaveLength(2);
+        } finally {
+            await dropNetezzaTable(target);
+            if (previousReadText) {
+                clipboard.readText = previousReadText;
+            } else {
+                delete clipboard.readText;
+            }
+        }
+    }, 180000);
+
+    it('round-trips multiline quoted clipboard values through the live Netezza stream', async () => {
+        const clipboard = vscode.env.clipboard as unknown as {
+            readText?: () => Promise<string>;
+        };
+        const previousReadText = clipboard.readText;
+        clipboard.readText = async () =>
+            'COL1\t"COL2\n""dasdasdasd"""\tCOL3\r\n' +
+            '1\t"first\n""quoted""\r\nlast\n"\t3\r\n' +
+            '2\t"CR only\rinside"\t4\r\n' +
+            '3\t"tail\n"\t5\r\n';
+
+        const table = uniqueTable('JBL_MULTILINE_CLIP');
+        const target = tableReference(sourceSchema, table);
+        try {
+            const result = await importClipboardDataToNetezza(target, buildNetezzaDetails());
+            expect(result.success).toBe(true);
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+
+            const imported = await readNetezzaRows(
+                `SELECT COL1, COL2_DASDASDASD, COL3 FROM ${target} ORDER BY COL1`,
+            );
+            expect(imported.names.map(name => name.toUpperCase())).toEqual(['COL1', 'COL2_DASDASDASD', 'COL3']);
+            expect(imported.rows.map(row => row.map(String))).toEqual([
+                ['1', 'first\n"quoted"\nlast\n', '3'],
+                ['2', 'CR onlyinside', '4'],
+                ['3', 'tail\n', '5'],
+            ]);
         } finally {
             await dropNetezzaTable(target);
             if (previousReadText) {
