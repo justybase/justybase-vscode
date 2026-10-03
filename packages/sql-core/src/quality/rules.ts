@@ -982,17 +982,9 @@ const ruleNZP023 = procedureRule(
 const ruleNZP024 = procedureRule(
   "NZP024",
   "Missing RETURN Statement",
-  "Procedure with RETURNS type must have RETURN statement",
+  "Retired: Netezza allows RETURNS without RETURN (live-verified CALL returns NULL)",
   0,
-  (sql) => {
-    if (!shouldUseProcedureRegexFallback(sql, "NZP024")) return [];
-    const procedure = procedureBodyOrEmpty(sql);
-    const returnsMatch = /\bRETURNS\s+(\w+)/i.exec(maskSql(sql));
-    if (!procedure || !returnsMatch) return [];
-    return /\bRETURN\b/i.test(maskSql(procedure.body))
-      ? []
-      : [procedureIssue("NZP024", "Procedure declares RETURNS " + returnsMatch[1] + " but has no RETURN statement", 0, procedure.startOffset, procedure.startOffset + 20)];
-  },
+  () => [],
 );
 
 const ruleNZP025 = procedureRule(

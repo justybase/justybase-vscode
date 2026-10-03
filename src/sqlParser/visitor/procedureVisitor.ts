@@ -132,6 +132,14 @@ export function createProcedureStatement(
   host.getScopeBuilder().enterScope();
   const scope = new ProcedureScopeBuilder();
   host.setProcedureScope(scope);
+  // Live-verified on Netezza 11.2.2.1: RETURNS without RETURN is legal
+  // (CREATE ok, CALL ok, result NULL). The Netezza validation profile
+  // carries no databaseKind, so both undefined and 'netezza' opt out here;
+  // Oracle ('oracle') keeps the SQL038 check.
+  const databaseKind = host.getValidationProfile().databaseKind;
+  if (databaseKind === undefined || databaseKind === "netezza") {
+    scope.setMissingReturnCheckEnabled(false);
+  }
 
   if (ctx.qualifiedName) {
     const nameInfo = host.visitAs<{

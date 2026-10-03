@@ -367,14 +367,12 @@ RETURN 1;`);
         });
     });
 
-    describe('NZP024 - Missing RETURN', () => {
-        it('flags procedure with RETURNS but no RETURN when parse fails', () => {
+    describe('NZP024 - Missing RETURN (retired for Netezza)', () => {
+        it('does not flag procedure with RETURNS but no RETURN (live-verified legal)', () => {
             const sql = `${buildProcedure('SELECT 1;')}
 -- force parse failure for regex fallback
 @@@`;
-            const issues = ruleNZP024.check(sql);
-            expect(issues).toHaveLength(1);
-            expect(issues[0].ruleId).toBe('NZP024');
+            expect(ruleNZP024.check(sql)).toHaveLength(0);
         });
 
         it('does not flag procedure without RETURNS clause', () => {

@@ -62,6 +62,13 @@ describe("ProcedureScopeBuilder", () => {
       builder.setHasReturn();
       expect(builder.finalize()).toHaveLength(0);
     });
+
+    it("does not report when the check is disabled (Netezza: RETURNS without RETURN is legal)", () => {
+      builder.setMissingReturnCheckEnabled(false);
+      builder.setHasReturns(mockToken("RETURNS"));
+
+      expect(builder.finalize()).toHaveLength(0);
+    });
   });
 
   describe("SQL039", () => {
