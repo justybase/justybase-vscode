@@ -78,6 +78,7 @@ export interface MigrationWizardState {
     progress?: MigrationWizardProgressState;
     executing: boolean;
     counting: boolean;
+    analyzing: boolean;
     error?: string;
 }
 

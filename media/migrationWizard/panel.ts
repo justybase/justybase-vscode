@@ -98,7 +98,7 @@ function renderAnalysis(analysis: MigrationWizardAnalysisState | undefined, stat
         ? `<ul class="warnings">${analysis.warnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('')}</ul>`
         : '<p class="muted success-note">&#10003; No type translation warnings.</p>';
 
-    const countButtonDisabled = state.executing || state.counting ? ' disabled' : '';
+    const countButtonDisabled = state.executing || state.counting || state.analyzing ? ' disabled' : '';
     const rowCountLabel = analysis.totalRows === undefined ? 'count not requested' : `${analysis.totalRows.toLocaleString()} rows`;
     return `<section class="card plan-card">
         <div class="section-heading"><h2><span class="step-badge">3</span>Plan</h2><div><span class="row-count">${rowCountLabel}</span><button id="count-rows"${countButtonDisabled}>Count rows</button></div></div>
@@ -142,15 +142,16 @@ function updateProgressDom(progress: MigrationWizardProgressState): boolean {
 function render(): void {
     if (!app || !currentState) return;
     const state = currentState;
-    const disabled = state.executing || state.counting ? ' disabled' : '';
+    const busy = state.executing || state.counting || state.analyzing;
+    const disabled = busy ? ' disabled' : '';
     const openSqlButton = lastExecutionSucceeded ? '<button id="open-sql">Open in SQL window</button>' : '';
     app.innerHTML = `<main class="migration-root">
         <header class="wizard-header"><div><h1>Migration Studio</h1><p>Stream a table or SQL result into another database without materializing the full result set.</p></div>
-            <button id="analyze" class="primary"${disabled}>${state.executing || state.counting ? 'Running...' : 'Analyze source'}</button></header>
+            <button id="analyze" class="primary"${disabled}>${state.analyzing ? 'Analyzing...' : state.executing || state.counting ? 'Running...' : 'Analyze source'}</button></header>
         ${statusMessage ? `<div class="status ${statusKind}">${escapeHtml(statusMessage)}</div>` : ''}
         <div class="workspace">${renderSource(state.source, state)}<div class="flow-arrow">&rarr;</div>${renderTarget(state.target, state)}${renderAnalysis(state.analysis, state)}</div>
         ${renderProgress(state)}
-        <footer>${openSqlButton || ''}<button id="execute" class="primary"${!state.analysis || state.executing || state.counting ? ' disabled' : ''}>${state.executing ? 'Migrating...' : 'Start migration'}</button></footer>
+        <footer>${openSqlButton || ''}<button id="execute" class="primary"${!state.analysis || busy ? ' disabled' : ''}>${state.executing ? 'Migrating...' : 'Start migration'}</button></footer>
     </main>`;
     syncTableDatalist();
 }
@@ -194,13 +195,13 @@ function clearTargetAnalyzeTimer(): void {
 function scheduleTargetReanalysis(): void {
     clearTargetAnalyzeTimer();
 
-    if (!currentState?.analysis || currentState.executing || currentState.counting) {
+    if (!currentState?.analysis || currentState.executing || currentState.counting || currentState.analyzing) {
         return;
     }
 
     targetAnalyzeTimer = setTimeout(() => {
         targetAnalyzeTimer = undefined;
-        if (!currentState?.analysis || currentState.executing || currentState.counting) {
+        if (!currentState?.analysis || currentState.executing || currentState.counting || currentState.analyzing) {
             return;
         }
 

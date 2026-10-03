@@ -52,6 +52,7 @@ export class MigrationWizardView {
     private plan?: MigrationPlan;
     private sourceContext?: MigrationSourceContext;
     private lastExecution?: { connectionName: string; database?: string; targetQualifiedName: string };
+    private disposed = false;
 
     private constructor(
         private readonly panel: vscode.WebviewPanel,
@@ -75,6 +76,21 @@ export class MigrationWizardView {
             this.disposables,
         );
         this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+
+        // Refresh the source catalog when its metadata is invalidated or
+        // refreshed externally, so the table picker does not show stale objects.
+        const metadataCache = this.connectionManager.getMetadataCache();
+        if (metadataCache) {
+            const refreshIfRelevant = (connectionName?: string): void => {
+                if (!connectionName || connectionName === this.state.source.connectionName) {
+                    void this.reloadCatalog();
+                }
+            };
+            const invalidateDisposable = metadataCache.onDidInvalidate?.(refreshIfRelevant);
+            const externalRefreshDisposable = metadataCache.onDidExternalRefresh?.(connectionName => refreshIfRelevant(connectionName));
+            if (invalidateDisposable) this.disposables.push(invalidateDisposable);
+            if (externalRefreshDisposable) this.disposables.push(externalRefreshDisposable);
+        }
     }
 
     public static async createOrShow(
@@ -102,6 +118,12 @@ export class MigrationWizardView {
     }
 
     public async loadSession(options: MigrationWizardSessionOptions): Promise<void> {
+        if (this.state.executing || this.state.analyzing || this.state.counting) {
+            vscode.window.showInformationMessage(
+                'A migration is already in progress. Finish or close it before starting another.',
+            );
+            return;
+        }
         this.request = undefined;
         this.plan = undefined;
         this.sourceContext = undefined;
@@ -113,6 +135,7 @@ export class MigrationWizardView {
     }
 
     public dispose(): void {
+        this.disposed = true;
         if (MigrationWizardView.currentPanel === this) {
             MigrationWizardView.currentPanel = undefined;
         }
@@ -143,10 +166,12 @@ export class MigrationWizardView {
             },
             executing: false,
             counting: false,
+            analyzing: false,
         };
     }
 
     private post(message: MigrationWizardHostToWebviewMessage): void {
+        if (this.disposed) return;
         void this.panel.webview.postMessage(message).then(undefined, () => undefined);
     }
 
@@ -160,32 +185,48 @@ export class MigrationWizardView {
     }
 
     private async handleMessage(message: MigrationWizardWebviewToHostMessage): Promise<void> {
-        switch (message.type) {
-            case 'ready':
-                this.postState();
-                this.reloadCatalog();
-                return;
-            case 'analyze':
-                await this.analyze(message.source, message.target);
-                return;
-            case 'countRows':
-                await this.countRows();
-                return;
-            case 'execute':
-                await this.execute(message.customCreateTableDdl);
-                return;
-            case 'requestCatalog':
-                await this.loadCatalog(message.connectionName, message.database);
-                return;
-            case 'openInSqlWindow':
-                await this.openInSqlWindow();
-                return;
-            default:
-                return;
+        try {
+            switch (message?.type) {
+                case 'ready':
+                    this.postState();
+                    this.reloadCatalog();
+                    return;
+                case 'analyze':
+                    if (!message.source || !message.target) {
+                        throw new Error('Source and target are required.');
+                    }
+                    await this.analyze(message.source, message.target);
+                    return;
+                case 'countRows':
+                    await this.countRows();
+                    return;
+                case 'execute':
+                    await this.execute(message.customCreateTableDdl);
+                    return;
+                case 'requestCatalog':
+                    await this.loadCatalog(message.connectionName, message.database);
+                    return;
+                case 'openInSqlWindow':
+                    await this.openInSqlWindow();
+                    return;
+                default:
+                    return;
+            }
+        } catch (error) {
+            // A malformed or out-of-order message must not reject as an
+            // unhandled promise; surface it and release the busy flags.
+            this.state.executing = false;
+            this.state.counting = false;
+            this.state.analyzing = false;
+            this.state.error = error instanceof Error ? error.message : String(error);
+            this.post({ type: 'executionFailed', message: this.state.error });
         }
     }
 
     private async analyze(source: MigrationWizardSourceState, target: MigrationWizardTargetState): Promise<void> {
+        if (this.state.executing || this.state.counting || this.state.analyzing) {
+            return;
+        }
         this.request = undefined;
         this.plan = undefined;
         this.sourceContext = undefined;
@@ -196,6 +237,7 @@ export class MigrationWizardView {
         this.state.analysis = undefined;
         this.state.progress = undefined;
         this.state.counting = false;
+        this.state.analyzing = true;
         this.postState();
         try {
             if (!source.connectionName || !target.connectionName || !target.table.trim()) {
@@ -247,11 +289,16 @@ export class MigrationWizardView {
             this.post({ type: 'analysisUpdated', analysis: this.state.analysis });
         } catch (error) {
             this.state.error = error instanceof Error ? error.message : String(error);
+        } finally {
+            this.state.analyzing = false;
             this.postState();
         }
     }
 
     private async countRows(): Promise<void> {
+        if (this.state.executing || this.state.analyzing || this.state.counting) {
+            return;
+        }
         if (!this.request || !this.plan || !this.sourceContext) {
             this.state.error = 'Analyze the migration before counting rows.';
             this.postState();
@@ -280,6 +327,9 @@ export class MigrationWizardView {
     }
 
     private async execute(customCreateTableDdl?: string): Promise<void> {
+        if (this.state.executing || this.state.counting || this.state.analyzing) {
+            return;
+        }
         if (!this.request || !this.plan || !this.sourceContext) {
             this.state.error = 'Analyze the migration before executing it.';
             this.postState();
@@ -314,7 +364,7 @@ export class MigrationWizardView {
                 this.plan,
                 this.sourceContext,
                 progress => this.postProgress(toProgressState(progress)),
-                { customCreateTableDdl: effectiveCustomDdl },
+                { customCreateTableDdl: effectiveCustomDdl, isCancelled: () => this.disposed },
             );
             if (!result.success) {
                 this.state.executing = false;
