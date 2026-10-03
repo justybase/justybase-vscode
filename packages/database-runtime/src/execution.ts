@@ -789,14 +789,29 @@ export class ExecutionOrchestrator<TTarget> {
           };
         }
 
+        const isBrokenConnection = this.connectionBroken(error);
         const canRetry = attempt === 0
           && record.request.connectionMode === 'persistent'
           && record.request.retryPolicy === 'safe-read-only-on-broken-connection'
           && !rowsDelivered
-          && this.connectionBroken(error)
+          && isBrokenConnection
           && this.safeToRetry(statement.originalSql ?? statement.sql)
           && this.safeToRetry(statement.expandedSql ?? statement.sql);
-        if (!canRetry) break;
+        if (!canRetry) {
+          // A broken persistent socket must never stay cached, even when the
+          // SQL cannot be proven safe to replay. Drop it so the next statement
+          // (or the next execution) starts fresh instead of reusing a dead
+          // connection. The failed statement itself is never retried here.
+          if (isBrokenConnection && record.request.connectionMode === 'persistent') {
+            try {
+              if (this.backend.reconnect) await this.backend.reconnect(record.request.target);
+              else if (this.backend.closeTarget) await this.backend.closeTarget(record.request.target);
+            } catch (reconnectError: unknown) {
+              this.logger.warn?.(`[Execution ${record.request.executionId}] broken-connection cleanup failed.`, reconnectError);
+            }
+          }
+          break;
+        }
 
         record.phase = 'retrying';
         this.enqueue(record, {

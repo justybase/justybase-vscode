@@ -31,6 +31,7 @@ import {
 } from "../utils/sqlConsole";
 import { isConnectionBrokenError } from "./queryRunnerUtils";
 import { assertExecutionCurrent } from "./executionGuard";
+import { reestablishPersistentConnectionAfterBrokenError } from "./connectionReadiness";
 import { DesktopExecutionBackend, type DesktopExecutionTarget } from './execution/desktopExecutionBackend';
 import {
     createRetrySafetyError,
@@ -387,6 +388,20 @@ async function runBatchWithSharedOrchestrator(
                     finalReportedError = reported;
                     state.terminalized = true;
                     const cancelled = event.summary.status === 'cancelled';
+                    if (!cancelled && event.summary.error && isConnectionBrokenError(event.summary.error.cause)) {
+                        // Never replay the failed statement here; just drop the dead
+                        // persistent socket so the next query starts fresh.
+                        await reestablishPersistentConnectionAfterBrokenError(
+                            connManager,
+                            params.documentUri,
+                            {
+                                connectionName: resolvedConnectionName,
+                                keepConnectionOpen,
+                                isExecutionCurrent: params.batchOptions.isExecutionCurrent,
+                                onMessage: message => logBatch(outputChannel, params.logCallback, message),
+                            },
+                        );
+                    }
                     const message = cancelled ? 'Query cancelled' : reported.message;
                     const errorDetails = cancelled
                         ? undefined
@@ -541,6 +556,22 @@ async function runBatchWithSharedOrchestrator(
                     const reported = sharedFailureError(state, event.failure);
                     finalReportedError = reported;
                     const cancelled = event.failure.kind === 'cancellation';
+                    if (!cancelled && isConnectionBrokenError(event.failure.cause)) {
+                        // The failed statement is not replayed, but the broken
+                        // persistent connection must not stay cached. Reset it
+                        // now so continueOnError and the next execution use a
+                        // fresh connection without manual Close/Open.
+                        await reestablishPersistentConnectionAfterBrokenError(
+                            connManager,
+                            params.documentUri,
+                            {
+                                connectionName: resolvedConnectionName,
+                                keepConnectionOpen,
+                                isExecutionCurrent: params.batchOptions.isExecutionCurrent,
+                                onMessage: message => logBatch(outputChannel, params.logCallback, message),
+                            },
+                        );
+                    }
                     const message = cancelled
                         ? 'Query cancelled'
                         : state.retrying

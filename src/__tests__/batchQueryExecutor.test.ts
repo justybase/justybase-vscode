@@ -1154,7 +1154,10 @@ END_PROC;`;
             )).rejects.toThrow('database outcome may be unknown');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            // Broken but unsafe: no replay, but the persistent tab connection
+            // is reset (Close + Open) so the next query starts fresh.
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
             expect(queryEndCallback).toHaveBeenCalledTimes(1);
             expect(queryEndCallback).toHaveBeenCalledWith(
                 'exec-write',
@@ -1181,7 +1184,8 @@ END_PROC;`;
             )).rejects.toThrow('could not be proven safe to retry');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
 
         it('does not retry after an executable SQL macro was expanded', async () => {
@@ -1204,7 +1208,8 @@ END_PROC;`;
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(2);
             expect(mockExecuteAndFetch.mock.calls[0][1]).toBe('DELETE FROM audit_log RETURNING id');
             expect(mockExecuteAndFetch.mock.calls[1][1]).toBe('SELECT 1');
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
 
         it('should handle batchError from executeAndFetch', async () => {
@@ -1770,7 +1775,8 @@ END_PROC;`;
 
             expect(chunkCallback).toHaveBeenCalledWith(0, partialChunk, 'SELECT * FROM CUSTOMER');
             expect(mockExecuteWithStreaming).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
             expect(queryEndCallback).toHaveBeenCalledTimes(1);
             expect(queryEndCallback).toHaveBeenCalledWith(
                 'stream-partial',

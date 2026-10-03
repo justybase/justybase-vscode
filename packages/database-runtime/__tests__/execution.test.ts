@@ -396,7 +396,9 @@ describe('ExecutionOrchestrator', () => {
     const summary = await execution.settled;
     expect(summary.status).toBe('error');
     expect(backend.calls).toHaveLength(1);
-    expect(backend.reconnect).not.toHaveBeenCalled();
+    // No replay, but the dead persistent socket is still dropped so the next
+    // execution does not reuse it. No `retrying` event is emitted.
+    expect(backend.reconnect).toHaveBeenCalledTimes(1);
     expect(events.some(event => event.type === 'retrying')).toBe(false);
   });
 

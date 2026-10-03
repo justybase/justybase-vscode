@@ -36,6 +36,7 @@ import {
 import {
   isBusyConnectionError,
   isConnectionRecoveryError,
+  reestablishPersistentConnectionAfterBrokenError,
   waitForPersistentConnectionReady,
 } from "./connectionReadiness";
 import { metadataSessionSweeper } from "../metadata/metadataSessionSweeper";
@@ -557,6 +558,19 @@ export async function executeRawQuery(
     && !connectionOverride
     && failure instanceof ExecutedSqlError
   ) {
+    // The statement is not replayed, but the dead persistent socket must not
+    // stay cached: otherwise the next query would reuse it and force a manual
+    // Close/Open. Best-effort Close + Open so the tab is usable again.
+    await reestablishPersistentConnectionAfterBrokenError(
+      connManager,
+      documentUri,
+      {
+        connectionName: resolvedConnectionName,
+        keepConnectionOpen,
+        isExecutionCurrent,
+        onMessage: message => logOutput(logger, message),
+      },
+    );
     throw createRetrySafetyError(failure, false);
   }
   throw failure instanceof Error ? failure : new Error(String(failure), { cause: failure });
