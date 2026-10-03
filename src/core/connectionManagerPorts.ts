@@ -33,4 +33,8 @@ export interface ConnectionManagerMetadataCache {
     ): ColumnMetadata[] | undefined;
     ensureColumnsLoadedForTableKey?(connectionName: string, layerKey: string): Promise<void>;
     ensureColumnsLoaded?(connectionName: string, database: string): Promise<void>;
+    /** Fires when cached metadata for a connection (or all connections) is invalidated. */
+    onDidInvalidate?(listener: (connectionName: string | undefined) => void): { dispose(): void };
+    /** Fires when another window/process refreshed cached metadata for a connection. */
+    onDidExternalRefresh?(listener: (connectionName: string) => void): { dispose(): void };
 }
