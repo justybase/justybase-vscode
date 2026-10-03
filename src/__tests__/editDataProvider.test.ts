@@ -31,7 +31,7 @@ jest.mock('../providers/tableMetadataProvider', () => ({
     toWebviewFormat: jest.fn(columns => columns)
 }));
 
-import { runQueryRaw, runQueriesSequentially } from '../core/queryRunner';
+import { runQuery, runQueryRaw, runQueriesSequentially } from '../core/queryRunner';
 import { getTableMetadata } from '../providers/tableMetadataProvider';
 
 describe('EditDataProvider', () => {
@@ -41,6 +41,7 @@ describe('EditDataProvider', () => {
     let mockWebview: jest.Mocked<vscode.Webview>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let messageHandler: ((message: any) => Promise<void>) | undefined;
+    let disposeHandler: (() => void) | undefined;
 
     const sampleItem: EditDataItem = {
         label: 'users',
@@ -53,6 +54,7 @@ describe('EditDataProvider', () => {
         // Reset mocks
         jest.clearAllMocks();
         messageHandler = undefined;
+        disposeHandler = undefined;
 
         // Create mock webview
         mockWebview = {
@@ -70,7 +72,10 @@ describe('EditDataProvider', () => {
         mockPanel = {
             webview: mockWebview,
             dispose: jest.fn(),
-            onDidDispose: jest.fn(() => ({ dispose: jest.fn() })),
+            onDidDispose: jest.fn(handler => {
+                disposeHandler = handler;
+                return { dispose: jest.fn() };
+            }),
             reveal: jest.fn()
         } as unknown as jest.Mocked<vscode.WebviewPanel>;
 
@@ -259,6 +264,43 @@ describe('EditDataProvider', () => {
 
                 expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Column AGE dropped');
             }
+        });
+
+        it('disposes the panel when the webview requests a close', async () => {
+            await messageHandler!({ command: 'closePanel' });
+            expect(mockPanel.dispose).toHaveBeenCalled();
+        });
+
+        it('rejects a column name containing SQL metacharacters', async () => {
+            await messageHandler!({
+                command: 'addColumn',
+                name: 'AGE; DROP TABLE x',
+                type: 'INTEGER',
+            });
+
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Invalid column name'));
+            expect(runQuery).not.toHaveBeenCalled();
+        });
+
+        it('rejects a column type containing SQL metacharacters', async () => {
+            await messageHandler!({
+                command: 'addColumn',
+                name: 'AGE',
+                type: 'INTEGER; DROP TABLE x',
+            });
+
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Invalid column type'));
+            expect(runQuery).not.toHaveBeenCalled();
+        });
+
+        it('rejects an invalid drop column name', async () => {
+            await messageHandler!({
+                command: 'dropColumn',
+                column: 'AGE--',
+            });
+
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Invalid column name'));
+            expect(runQuery).not.toHaveBeenCalled();
         });
 
         it('should handle error command', async () => {
@@ -485,6 +527,113 @@ describe('EditDataProvider', () => {
 
                 expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Failed to save'));
             }
+        });
+    });
+
+    describe('Lifecycle and recovery', () => {
+        const flush = async (): Promise<void> => {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        };
+
+        it('discards stale load results when a newer load starts', async () => {
+            const deferreds: Array<(value: unknown) => void> = [];
+            (runQueryRaw as jest.Mock).mockImplementation(() => new Promise(resolve => { deferreds.push(resolve); }));
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            expect(deferreds).toHaveLength(1);
+
+            void messageHandler!({ command: 'refresh', whereClause: '', columns: '' });
+            await flush();
+            expect(deferreds).toHaveLength(2);
+
+            // The newer load resolves first, the older one afterwards.
+            deferreds[1]({ columns: [{ name: 'ID' }], data: [[2]] });
+            await flush();
+            deferreds[0]({ columns: [{ name: 'ID' }], data: [[1]] });
+            await flush();
+
+            const setDataCalls = (mockWebview.postMessage as jest.Mock).mock.calls.filter(([message]) => message.command === 'setData');
+            expect(setDataCalls).toHaveLength(1);
+            expect(setDataCalls[0][0].data).toEqual([{ ID: 2 }]);
+        });
+
+        it('stops posting to the webview after the panel is disposed', async () => {
+            let resolveData!: (value: unknown) => void;
+            (runQueryRaw as jest.Mock).mockReturnValue(new Promise(resolve => { resolveData = resolve; }));
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            expect(disposeHandler).toBeDefined();
+            disposeHandler!();
+
+            const callsBefore = (mockWebview.postMessage as jest.Mock).mock.calls.length;
+            resolveData({ columns: [{ name: 'ID' }], data: [[1]] });
+            await flush();
+
+            const afterDispose = (mockWebview.postMessage as jest.Mock).mock.calls
+                .slice(callsBefore)
+                .map(([message]) => message.command);
+            expect(afterDispose).not.toContain('setData');
+            expect(afterDispose).not.toContain('setError');
+            expect(afterDispose).not.toContain('setLoading');
+        });
+
+        it('rejects an overlapping save while one is in flight', async () => {
+            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [{ name: 'ROWID' }], data: [[1]] });
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            await flush();
+
+            let resolveSave!: (value: unknown) => void;
+            (runQueriesSequentially as jest.Mock).mockReturnValue(new Promise(resolve => { resolveSave = resolve; }));
+
+            const saveMessage = { command: 'save', changes: { deletes: [1] }, whereClause: '', columns: '' };
+            void messageHandler!(saveMessage);
+            void messageHandler!(saveMessage);
+            await flush();
+
+            expect(runQueriesSequentially).toHaveBeenCalledTimes(1);
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('A save is already in progress.');
+
+            resolveSave([]);
+            await flush();
+        });
+
+        it('attempts a rollback when the save batch fails', async () => {
+            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [{ name: 'ROWID' }], data: [[1]] });
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            await flush();
+            (runQueryRaw as jest.Mock).mockClear();
+
+            (runQueriesSequentially as jest.Mock).mockRejectedValue(new Error('boom'));
+            await messageHandler!({ command: 'save', changes: { deletes: [1] }, whereClause: '', columns: '' });
+
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Failed to save'));
+            const rollback = (runQueryRaw as jest.Mock).mock.calls.some(call => call[1] === 'ROLLBACK');
+            expect(rollback).toBe(true);
         });
     });
 });

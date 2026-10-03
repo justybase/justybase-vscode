@@ -38,6 +38,7 @@ export type EditDataPanelWebviewToHostMessage =
     | { command: 'updateColumnComment'; column: string; comment: string }
     | { command: 'addColumn'; name: string; type: string }
     | { command: 'dropColumn'; column: string }
+    | { command: 'closePanel' }
     | { command: 'error'; text: string }
     | { command: 'info'; text: string };
 
@@ -61,6 +62,7 @@ export const EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
     'updateColumnComment',
     'addColumn',
     'dropColumn',
+    'closePanel',
     'error',
     'info'
 ] as const satisfies readonly EditDataPanelWebviewToHostMessage['command'][];

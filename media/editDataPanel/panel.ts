@@ -94,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshBtn = getElementById<HTMLButtonElement>('refreshBtn');
     const saveBtn = getElementById<HTMLButtonElement>('saveBtn');
     const addRowBtn = getElementById<HTMLButtonElement>('addRowBtn');
+    const closeBtn = getElementById<HTMLButtonElement>('closeBtn');
 
     const triggerRefresh = () => {
         if (hasUnsavedChanges() && !confirm('You have unsaved changes. Discard them?')) {
@@ -123,6 +124,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (addRowBtn) addRowBtn.onclick = () => {
         addNewRow();
+    };
+
+    if (closeBtn) closeBtn.onclick = () => {
+        if (hasUnsavedChanges() && !confirm('You have unsaved changes. Close and discard them?')) {
+            return;
+        }
+        postToHost({ command: 'closePanel' });
     };
 
     document.querySelectorAll('.tab').forEach(tab => {
@@ -165,9 +173,24 @@ function setLoading(isLoading: boolean, message?: string): void {
 
 function showError(msg: string): void {
     const container = getElementById('gridContainer');
-    if (container) {
+    if (!container) return;
+
+    // Preserve already-loaded rows and surface the failure as a dismissible
+    // banner so a transient load error does not discard the working grid.
+    const hasData = tableData.columns.length > 0 || tableData.working.length > 0;
+    if (!hasData) {
         container.innerHTML = `<div style="color: var(--vscode-errorForeground); padding: 20px;">Error: ${msg}</div>`;
+        return;
     }
+
+    let banner = document.getElementById('editDataErrorBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'editDataErrorBanner';
+        banner.style.cssText = 'color: var(--vscode-errorForeground); padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);';
+        container.prepend(banner);
+    }
+    banner.textContent = `Error: ${msg}`;
 }
 
 function initData(
@@ -183,6 +206,7 @@ function initData(
     tableData.columns = columns;
     tableData.metadata = metadata;
 
+    document.getElementById('editDataErrorBanner')?.remove();
     resetChanges();
     nextInsertId = -1;
 
