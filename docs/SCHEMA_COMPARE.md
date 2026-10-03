@@ -45,13 +45,15 @@ Compares two stored procedures and highlights:
 ## Supported Databases
 
 - **Netezza** — full table and procedure comparison
-- **PostgreSQL** — table and procedure/routine comparison
-- **Db2** — table comparison
-- **Oracle** — table comparison
-- **Snowflake** — table and procedure comparison
-- **DuckDB** — table comparison
 
-> SQLite does not support schema comparison.
+The comparison flow reads Netezza catalog views (`_V_OBJECT_DATA`,
+`_V_PROCEDURE`) and uses Netezza object notation, so it is currently available
+for Netezza connections only. Other dialects require their own catalog-backed
+target enumeration and a dialect-neutral diff model before they can be
+advertised; they remain a planned capability, not a supported one.
+
+> Table comparison for non-Netezza dialects is not implemented yet; do not rely
+> on the command outside Netezza. SQLite does not support schema comparison.
 
 ## Notes
 

@@ -2409,7 +2409,7 @@
         },
         {
           "command": "netezza.alterTableWizard",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == netezza",
           "group": "5_schema@1"
         },
         {
@@ -2539,7 +2539,7 @@
         },
         {
           "command": "netezza.compareSchema",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|PROCEDURE)/) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|PROCEDURE)/) && justybase.schemaDatabaseKind == netezza",
           "group": "6_compare"
         },
         {
