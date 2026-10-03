@@ -1,6 +1,8 @@
 import { ConnectionManager } from './connectionManager';
 import { isBusyConnectionError } from './queryRunnerUtils';
 import { normalizeUriKey } from './uriUtils';
+import { logWithFallback } from '../utils/logger';
+import type { ExecutionCurrentCheck } from './executionGuard';
 
 export { isBusyConnectionError };
 
@@ -85,5 +87,53 @@ export async function ensurePersistentConnectionReadyForQuery(
         await waitForPersistentConnectionReady(connManager, documentUri, connectionName, options);
     } catch {
         // Preflight is best-effort; callers may still retry after query failure.
+    }
+}
+
+export interface ReestablishBrokenConnectionOptions {
+    connectionName?: string;
+    keepConnectionOpen?: boolean;
+    isExecutionCurrent?: ExecutionCurrentCheck;
+    onMessage?: (message: string) => void;
+}
+
+/**
+ * Close + reopen a persistent tab connection after a broken-connection failure
+ * whose SQL could not be proven safe to retry.
+ *
+ * The failed statement is never replayed here; this only drops the dead socket
+ * so the next query starts fresh without manual Close/Open. Best-effort: never
+ * throws, returns true when a fresh connection was established.
+ */
+export async function reestablishPersistentConnectionAfterBrokenError(
+    connManager: ConnectionManager,
+    documentUri: string | undefined,
+    options: ReestablishBrokenConnectionOptions = {},
+): Promise<boolean> {
+    if (!documentUri) {
+        return false;
+    }
+    const keepOpen = options.keepConnectionOpen
+        ?? connManager.getDocumentKeepConnectionOpen(documentUri);
+    if (!keepOpen) {
+        return false;
+    }
+    if (options.isExecutionCurrent && !options.isExecutionCurrent()) {
+        return false;
+    }
+
+    try {
+        options.onMessage?.('Connection was lost. Resetting connection...');
+        await connManager.closeDocumentPersistentConnection(documentUri);
+        if (options.isExecutionCurrent && !options.isExecutionCurrent()) {
+            return false;
+        }
+        await connManager.getDocumentPersistentConnection(documentUri, options.connectionName);
+        options.onMessage?.('Connection reset. Verify the database state before running the statement again.');
+        return true;
+    } catch (resetError: unknown) {
+        logWithFallback('warn', '[ConnectionManager] Failed to re-establish persistent connection after broken error:', resetError);
+        options.onMessage?.('Connection reset failed. Reopen the connection manually before retrying.');
+        return false;
     }
 }

@@ -574,7 +574,10 @@ describe('singleQueryExecutor', () => {
             })).rejects.toThrow('database outcome may be unknown');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            // Unsafe writes are never replayed, but the dead persistent socket
+            // is reset (Close + Open) so the next query starts fresh.
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
 
         it.each([
@@ -593,7 +596,8 @@ describe('singleQueryExecutor', () => {
             })).rejects.toThrow('could not be proven safe to retry');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
     });
 
@@ -744,7 +748,8 @@ describe('singleQueryExecutor', () => {
             )).rejects.toThrow('database outcome may be unknown');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
 
         it('classifies expanded SQL before allowing a reconnect retry', async () => {
@@ -767,7 +772,8 @@ describe('singleQueryExecutor', () => {
             )).rejects.toThrow('could not be proven safe to retry');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
 
         it('does not replay the main query after an executable SQL macro', async () => {
@@ -797,7 +803,8 @@ describe('singleQueryExecutor', () => {
             )).rejects.toThrow('could not be proven safe to retry');
 
             expect(mockExecuteAndFetch).toHaveBeenCalledTimes(1);
-            expect(mockConnManager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(mockConnManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(mockConnManager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
         });
 
         it('does not reconnect after its execution lease is superseded', async () => {

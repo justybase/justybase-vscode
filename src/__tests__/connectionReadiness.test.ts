@@ -2,6 +2,7 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import {
     isConnectionRecoveryError,
     isTimeoutLikeError,
+    reestablishPersistentConnectionAfterBrokenError,
     waitForPersistentConnectionReady,
 } from '../core/connectionReadiness';
 import type { ConnectionManager } from '../core/connectionManager';
@@ -62,6 +63,67 @@ describe('connectionReadiness', () => {
             (connManager.getDocumentKeepConnectionOpen as jest.Mock).mockReturnValue(false);
             await waitForPersistentConnectionReady(connManager, 'file:///test.sql');
             expect(connManager.getDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('reestablishPersistentConnectionAfterBrokenError', () => {
+        function createManager(): ConnectionManager {
+            return {
+                getDocumentKeepConnectionOpen: jest.fn().mockReturnValue(true),
+                closeDocumentPersistentConnection: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+                getDocumentPersistentConnection: jest.fn().mockResolvedValue({} as never),
+            } as unknown as ConnectionManager;
+        }
+
+        it('closes and reopens the persistent connection', async () => {
+            const manager = createManager();
+            const messages: string[] = [];
+            const reset = await reestablishPersistentConnectionAfterBrokenError(
+                manager,
+                'file:///test.sql',
+                { connectionName: 'testConn', onMessage: message => messages.push(message) },
+            );
+
+            expect(reset).toBe(true);
+            expect(manager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql');
+            expect(manager.getDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', 'testConn');
+            expect(messages.join(' ')).toMatch(/Resetting connection/);
+        });
+
+        it('skips reset without a document or when keep-open is disabled', async () => {
+            const manager = createManager();
+
+            await expect(reestablishPersistentConnectionAfterBrokenError(manager, undefined)).resolves.toBe(false);
+            await expect(reestablishPersistentConnectionAfterBrokenError(
+                manager,
+                'file:///test.sql',
+                { keepConnectionOpen: false },
+            )).resolves.toBe(false);
+            expect(manager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
+        it('skips reset after the execution lease was superseded', async () => {
+            const manager = createManager();
+
+            await expect(reestablishPersistentConnectionAfterBrokenError(
+                manager,
+                'file:///test.sql',
+                { isExecutionCurrent: () => false },
+            )).resolves.toBe(false);
+            expect(manager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+        });
+
+        it('never throws when reopen fails', async () => {
+            const manager = createManager();
+            (manager.getDocumentPersistentConnection as unknown as jest.Mock<() => Promise<unknown>>).mockRejectedValueOnce(new Error('offline'));
+            const messages: string[] = [];
+
+            await expect(reestablishPersistentConnectionAfterBrokenError(
+                manager,
+                'file:///test.sql',
+                { onMessage: message => messages.push(message) },
+            )).resolves.toBe(false);
+            expect(messages.join(' ')).toMatch(/manually/);
         });
     });
 });
