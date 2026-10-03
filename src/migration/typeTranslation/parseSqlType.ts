@@ -58,7 +58,10 @@ export function parseSqlType(typeName?: string): ParsedSqlType {
         return { base: '', normalized };
     }
 
-    const base = getSqlTypeBaseName(normalized);
+    // Strip a trailing time-zone clause so `TIMESTAMP WITH TIME ZONE` and
+    // `TIME WITH TIME ZONE` resolve to their base type. Without this the base
+    // became the whole string and the type round-tripped as `unknown`.
+    const base = getSqlTypeBaseName(normalized).replace(/\s+WITH\s+(?:LOCAL\s+)?TIME\s+ZONE$/, '');
 
     if (NUMERIC_BASES.has(base)) {
         return { base, ...parseNumericParameters(normalized), normalized };
