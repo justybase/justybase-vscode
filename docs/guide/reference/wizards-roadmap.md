@@ -4,11 +4,19 @@ description: Implementation plan for the next wave of VS Code webview wizards an
 audience: reference
 category: Reference
 status: In progress
-last_verified: 2026-09-05
+last_verified: 2026-10-02
 product_version: 3.18.2
 ---
 
 # Wizard and designer roadmap
+
+> **Retired web product notice.** The self-hosted Web Editor and its API were
+> retired on 2026-09-26. Passages below that describe what "the shared web
+> Object Designer now ships" (FK/CHECK forms, SQLite triggers, standard-view
+> forms) are historical record for that retired product and are **not** part of
+> the current VS Code extension. The desktop equivalents remain planned work.
+> The shipped desktop surface is described in
+> [wizards-inventory.md](wizards-inventory.md).
 
 This page is the implementation plan for the next wave of webview designers.
 It pairs every planned wizard with a **per-dialect construct-support matrix**:
