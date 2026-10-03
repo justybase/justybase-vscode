@@ -32,7 +32,10 @@ quality gates below.
 
 The following measurements were collected from the baseline commit on
 2026-08-31, before the Web Editor was retired on 2026-09-26. API/web entries
-are historical measurements, not current products or gates.
+are historical measurements, not current products or gates. The extended-lint
+row reflects the current frozen ratchet after that retirement; the remaining
+static/test rows are the pre-retirement snapshot and are refreshed when the
+baseline changes.
 
 | Area | Baseline | Evidence |
 | --- | --- | --- |
@@ -44,7 +47,7 @@ are historical measurements, not current products or gates.
 | React web tests | 1 suite and 3 tests pass | `npm run test:web` |
 | Browser tests | 30 Playwright tests pass | `npm run test:playwright` |
 | Extension Host | Deterministic SQLite Result Panel scenario passes | `xvfb-run -a npm run test:extension-host` |
-| Extended lint | 452 warnings: 436 in `media`, 7 in `apps`, 7 in `packages`, and 2 in the MSSQL companion | `npm run lint:extended` |
+| Extended lint | 52 warnings, all in `media` (current frozen ratchet after the Web Editor retirement) | `npm run lint:extended:check` |
 | Dependency audit | No known production or development vulnerabilities reported | `npm audit --audit-level=high` |
 | Documentation | 68 generated pages and current catalog/link checks pass | `npm run docs:check` |
 
@@ -82,8 +85,8 @@ backward compatibility at the closest production boundary.
 | --- | --- | --- | --- | --- | --- |
 | QG01 | P0 | M | Build/CI maintainer | done | Added the ignored, schema-versioned quality report (`quality/quality-report.v1.schema.json`) and reproducible artifact command (`npm run quality:report`). Evidence: `scripts/quality-report.mjs`, `scripts/quality-tools.test.mjs`. Verified 2026-08-31. |
 | QG02 | P0 | S | Repository maintainer | done | Applied the risk-based definition of done, state/failure matrix, and cleanup evidence to the PR template and contributor guide. Evidence: `.github/pull_request_template.md`, `CONTRIBUTING.md`. Verified 2026-08-31. |
-| QG03 | P0 | M | Test maintainer | done | Enforced global floors of 71% statements, 58% branches, 76% functions, and 72% lines, plus 80% changed-line/70% changed-branch coverage for high-risk `src/` roots. Evidence: `jest.config.js`, `scripts/quality-gate.mjs`, CI unit job. Verified 2026-08-31. |
-| QG04 | P0 | M | Frontend maintainer | done | Reduced the extended-lint baseline from 162 to 70 warnings (57 `media`, 7 `apps`, 6 `packages`, 0 `extensions`) while keeping the ratchet blocking. The Phase 1B target of 100 warnings is met. Evidence: `quality/quality-baseline.json`, `npm run lint:extended:check`. Verified 2026-08-31. |
+| QG03 | P0 | M | Test maintainer | done | Enforced global floors of 71% statements, 58% branches, 76% functions, and 72% lines (raised to 72/59/77/73 on 2026-10-02), plus 80% changed-line/70% changed-branch coverage for high-risk `src/` roots. Evidence: `jest.config.js`, `scripts/quality-gate.mjs`, CI unit job. Verified 2026-08-31. |
+| QG04 | P0 | M | Frontend maintainer | done | Reduced the extended-lint baseline from 162 to 70 warnings and then to the current 52 warnings after the Web Editor retirement (52 `media`, 0 `packages`, 0 `extensions`) while keeping the ratchet blocking. The Phase 1B target of 100 warnings is met. Evidence: `quality/quality-baseline.json`, `npm run lint:extended:check`. Verified 2026-08-31. |
 | QG05 | P1 | S recurring | Repository maintainer | planned | Review this scorecard monthly. A `done` item must include evidence links, verification date, and any follow-up risk; stale or contradicted status returns to `planned`. |
 
 Long-term exit criteria are at least 80% global line coverage, 70% branch
@@ -143,7 +146,7 @@ silently applies data belonging to another result identity.
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | TQ01 | P0 | M | Test infrastructure owner | done | Fixed the unit network guard so blocked sockets emit an asynchronous error and database-driver timeout cleanup runs. The complete suite now terminates naturally without forced exit. Evidence: `src/__tests__/unitNetworkGuard.setup.ts`, `src/__tests__/metadataDiskCompress.test.ts`, `npm run test:validate`. Verified 2026-08-31. |
-| TQ02 | P0 | L | Test maintainer | planned | Raise coverage first in migration, activation, views, commands, editors, imports, and exports. Reach the changed-code gate before increasing global thresholds toward 80% lines/70% branches. |
+| TQ02 | P0 | L | Test maintainer | in-progress | Raise coverage first in migration, activation, views, commands, editors, imports, and exports. Reach the changed-code gate before increasing global thresholds toward 80% lines/70% branches. Progress: lifecycle/state tests added for Edit Data, Import Wizard, and Migration Wizard; pure migration type-translation covered (107 tests) raising `src/migration` from 27% to 48% lines; the duplicated desktop formatter was removed and all dialects now delegate to `@justybase/sql-core` (parity tests per dialect); global floors raised to 72/59/77/73 (current 73.18/59.76/77.32/73.85). Evidence: `src/__tests__/editDataProvider.test.ts`, `src/__tests__/importWizardMessageHandler.test.ts`, `src/__tests__/migrationWizardView.test.ts`, `src/__tests__/translateType.test.ts`, `src/__tests__/sqlFormatter.test.ts`. Remaining: target writer/export/commands/views/activation waves. |
 | TQ03 | P0 | XL | UI owners | in-progress | Result Panel now has an executable desktop host/state contract and deep scroll/browser/Extension Host evidence covering stable identity, pinned/index transitions, source removal, streaming cancellation, late-chunk rejection, active-source recovery, filtering, sorting, grouping, aggregate analysis, hidden-view recovery, and stream ordering. Windows/Remote-WSL and remaining stateful panels remain open. Evidence: `src/__tests__/resultPanelStateContract.test.ts`, `src/__tests__/resultPanelView.scroll.test.ts`, `docs/RESULT_PANEL_REGRESSION.md`, `scripts/extensionHost/extensionHost.js`, `test-harness/tests/table-rendering.spec.ts`, and `test-harness/tests/data-grid-performance.spec.ts`. Verified 2026-09-12. Extend the same contract to remaining desktop panels. |
 | TQ04 | P0 | L | Web owner | retired | React workspace coverage work was retired with the Web Editor on 2026-09-26. Continue covering shared `ui-core`/`ui-react` packages and desktop webview behavior through their existing package and Extension Host gates. |
 | TQ05 | P0 | L | Browser/host test owner | in-progress | High-traffic authoring and Result Grid paths now run through real browser and Extension Host gates with observable readiness, sanitized reports, and live viewport metrics. Extend the same boundary coverage to the remaining desktop panels and CI environments. Evidence: `test-harness/tests/table-rendering.spec.ts`, `test-harness/tests/data-grid-performance.spec.ts`, and `scripts/extensionHost/extensionHostAuthoringSmoke.js`. Verified 2026-09-12. |
@@ -209,7 +212,7 @@ Assertions and layers:
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | UX01 | P0 | L | Frontend owners | planned | Add automated accessibility checks and keyboard-only flows for high-traffic VS Code webviews and extension workflows. Fail on serious or critical violations. |
-| UX02 | P0 | XL | Panel owners | planned | Complete loading, refresh, empty, error, cancellation, retry, focus restoration, and disabled-action behavior for every panel in the UX audit. |
+| UX02 | P0 | XL | Panel owners | in-progress | Complete loading, refresh, empty, error, cancellation, retry, focus restoration, and disabled-action behavior for every panel in the UX audit. Progress: Edit Data, Import Wizard, and Migration Wizard now surface errors, expose a distinct analyzing/busy state, and render failed imports as errors (`docs/PANEL_STATE_MATRIX.md`). |
 | UX03 | P1 | L | Accessibility owner | planned | Test accessible names, focus traps, Escape/Enter behavior, grid navigation, selection/copy, high-contrast themes, 200% zoom, and reduced motion. |
 | UX04 | P1 | L | Performance owner | planned | Run LSP, typing, quality, hydration, and grid benchmarks on stable scheduled runners. Keep existing parser construction below 2,000 ms and investigate a sustained three-run median regression above 15%. |
 | UX05 | P1 | L | Runtime owners | planned | Measure memory and resource stability across repeated query execution, panel recreation, metadata refresh, large results, and worker use. No unbounded growth or retained disposed session is acceptable. |
@@ -228,7 +231,7 @@ Assertions and layers:
 
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
-| SQ01 | P0 | L | Desktop security owner | planned | Maintain a threat model for SecretStorage, untrusted webview messages, local-file authorization, read-only bypass, DDL confirmation, and artifact redaction. |
+| SQ01 | P0 | L | Desktop security owner | done | Maintain a threat model for SecretStorage, untrusted webview messages, local-file authorization, read-only bypass, DDL confirmation, and artifact redaction. Evidence: `docs/THREAT_MODEL.md`, `SECURITY.md`. Verified 2026-10-02. |
 | SQ02 | P0 | XL | Security/test owners | planned | Add adversarial tests for every trust boundary, including malformed webview messages and SQL intended to bypass read-only classification. Preserve the MCP read-only gate on both transports. |
 | SQ03 | P1 | M | Dependency owner | planned | Add weekly dependency updates, CodeQL for JavaScript/TypeScript, release SBOM generation, license checks, and continued production/development dependency audits. |
 | SQ04 | P0 | L | Release owner | planned | Install and smoke-test packaged VSIX artifacts on Linux and Windows before publication; development-extension tests alone are insufficient release proof. |
@@ -241,7 +244,7 @@ Functional work follows quality readiness; it does not bypass it.
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | FQ01 | P0 | M | Product/documentation owner | done | Audited the desktop, shared-package, MCP, and companion-extension inventory; restored Snowflake and Vertica to the public matrix as Preview and attached executable gates to supported claims. Evidence: `docs/guide/reference/database-support.md`, `scripts/docs-check.mjs`, and `.github/workflows/optional-extension-build.yml`. Verified 2026-08-31. |
-| FQ02 | P0 | XL | Subsystem owners | planned | Close state loss, cancellation, reload, metadata invalidation, error recovery, and cleanup gaps before increasing feature breadth in that subsystem. |
+| FQ02 | P0 | XL | Subsystem owners | in-progress | Close state loss, cancellation, reload, metadata invalidation, error recovery, and cleanup gaps before increasing feature breadth in that subsystem. Progress: Edit Data (request-generation race guard, dispose cancellation, save reentrancy + rollback, DDL identifier/type validation, preserve-grid-on-error, in-panel close confirmation), Import Wizard (cancellation delivery, malformed-message error surface, failure rendering, cooperative import abort for shared batch + Netezza, target-catalog metadata invalidation), Migration Wizard (`analyzing` state, reentrancy guards, malformed-message error surface, temp log cleanup, abort-on-close, source-catalog metadata invalidation, no reset of in-progress migrations). Reload serialization and surfacing messages during import transitions remain open. Evidence: `docs/PANEL_STATE_MATRIX.md`. |
 | FQ04 | P1 | XL | Dialect owners | planned | Require the common dialect contract before promoting a database from preview to supported. Document unsupported versions and capability differences explicitly. |
 | FQ05 | P2 | XL | Product/architecture owners | planned | Defer broad AI, notebook, ETL, ERD, visual-builder, and remote-dialect expansion until their architecture, accessibility, security, and end-to-end gates are defined. |
 
