@@ -31,4 +31,11 @@ describe('MCP read-only gate', () => {
     ])('rejects unsafe or pre-wrapped input: %s', sql => {
         expect(() => buildSafeExplainForMcp(sql)).toThrow();
     });
+
+    it.each([
+        'SELECT * INTO backup FROM admin.orders',
+        'SELECT * FROM admin.orders FOR UPDATE',
+    ])('rejects data-modifying or row-locking input on both transports: %s', sql => {
+        expect(() => buildSafeExplainForMcp(sql)).toThrow();
+    });
 });
