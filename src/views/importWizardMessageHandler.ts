@@ -98,6 +98,8 @@ export class ImportWizardMessageHandler {
   private clipboardSourceDirectory?: string;
   private isExecuting = false;
   private isTransitioning = false;
+  private disposed = false;
+  private metadataSubscriptions: vscode.Disposable[] = [];
 
   public constructor(
     private readonly deps: ImportWizardMessageHandlerDependencies,
@@ -165,6 +167,8 @@ export class ImportWizardMessageHandler {
       schemaCatalog.availableSchemas,
     );
 
+    this.subscribeToMetadataInvalidation();
+
     if (this.webviewReady) {
       await this.postState(true);
       this.startBackgroundValidation(DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE);
@@ -177,6 +181,21 @@ export class ImportWizardMessageHandler {
     if (this.isExecuting || this.isTransitioning) {
       return;
     }
+    try {
+      await this.dispatchMessage(message);
+    } catch (error) {
+      // Validation and session errors must surface in the wizard instead of
+      // rejecting as an unhandled promise.
+      await this.deps.postMessage({
+        type: "executionFailed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async dispatchMessage(
+    message: ImportWizardInboundMessage,
+  ): Promise<void> {
     switch (message.type) {
       case "ready":
         this.webviewReady = true;
@@ -317,6 +336,9 @@ export class ImportWizardMessageHandler {
   }
 
   public dispose(): void {
+    this.disposed = true;
+    this.metadataSubscriptions.forEach(subscription => subscription.dispose());
+    this.metadataSubscriptions = [];
     if (this.sessionId) {
       this.deps.service.disposeSession(this.sessionId);
     }
@@ -324,6 +346,43 @@ export class ImportWizardMessageHandler {
     void removeClipboardImportSource(this.clipboardSourceDirectory);
     this.clipboardSourceDirectory = undefined;
     this.currentOptions = undefined;
+  }
+
+  /**
+   * Refresh the target catalog when cached metadata for the active connection
+   * is invalidated or refreshed by another window, so target database/schema
+   * pickers do not show stale objects.
+   */
+  private subscribeToMetadataInvalidation(): void {
+    this.metadataSubscriptions.forEach(subscription => subscription.dispose());
+    this.metadataSubscriptions = [];
+    const metadataCache = this.deps.connectionManager.getMetadataCache?.();
+    if (!metadataCache) {
+      return;
+    }
+    const refreshIfCurrent = (connectionName?: string): void => {
+      if (!this.sessionId || !this.connectionName) {
+        return;
+      }
+      if (connectionName && connectionName !== this.connectionName) {
+        return;
+      }
+      void this.refreshTargetCatalog();
+    };
+    const invalidate = metadataCache.onDidInvalidate?.(refreshIfCurrent);
+    const external = metadataCache.onDidExternalRefresh?.(name => refreshIfCurrent(name));
+    if (invalidate) this.metadataSubscriptions.push(invalidate);
+    if (external) this.metadataSubscriptions.push(external);
+  }
+
+  private async refreshTargetCatalog(): Promise<void> {
+    try {
+      const state = this.getState();
+      await this.refreshTargetSchemas(state.targetLocation.database);
+      await this.postState();
+    } catch {
+      // The session may have been disposed between the event and the refresh.
+    }
   }
 
   private async switchConnection(connectionName: string): Promise<void> {
@@ -604,10 +663,16 @@ export class ImportWizardMessageHandler {
           cancellable: false,
         },
         async (progress) =>
-          this.deps.service.executeImport(sessionId, (message, increment) =>
-            progress.report({ message, increment }),
+          this.deps.service.executeImport(
+            sessionId,
+            (message, increment) => progress.report({ message, increment }),
+            () => this.disposed,
           ),
       );
+
+      if (this.disposed) {
+        return;
+      }
 
       if (!result.success && state.executionPlan.mode === "workflow") {
         await this.handleWorkflowResult(state, result);
@@ -622,6 +687,9 @@ export class ImportWizardMessageHandler {
 
       await this.deps.postMessage({ type: "executionFinished", result });
     } catch (error) {
+      if (this.disposed) {
+        return;
+      }
       if (await presentAccessError(error, {
         outputChannel: getOutputChannel(),
         operation: "Advanced import",

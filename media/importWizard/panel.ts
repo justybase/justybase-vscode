@@ -552,14 +552,16 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             state.status = { kind: 'info', message: 'Executing import...' };
             render();
             return;
-        case 'executionFinished':
+        case 'executionFinished': {
             state.isExecuting = false;
+            const failed = message.result?.success === false;
             state.status = {
-                kind: 'success',
-                message: message.result?.message || 'Import finished.',
+                kind: failed ? 'error' : 'success',
+                message: message.result?.message || (failed ? 'Import finished with errors.' : 'Import finished.'),
             };
             render();
             return;
+        }
         case 'executionFailed':
             state.isExecuting = false;
             state.status = {
