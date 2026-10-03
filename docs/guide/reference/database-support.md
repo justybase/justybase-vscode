@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-09-05
-product_version: 3.18.3
+product_version: 3.18.4
 ---
 
 # Database support matrix
