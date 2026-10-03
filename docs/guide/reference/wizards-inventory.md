@@ -4,7 +4,7 @@ description: What object wizards and visual designers exist per dialect, and whi
 audience: reference
 category: Reference
 status: Supported
-last_verified: 2026-09-05
+last_verified: 2026-10-02
 product_version: 3.18.2
 ---
 
@@ -26,7 +26,7 @@ surface with runtime/provider gating, **dialog** QuickPick/input-box flow,
 | Wizard | Netezza | Db2 | MySQL | PostgreSQL | Oracle | MSSQL | SQLite | ClickHouse | Vertica | Snowflake | DuckDB/File | Access |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Create table designer | ✓ | ✓ | – | – | – | – | ✓ | – | – | – | – | – |
-| Alter table designer | dialog | dialog | ✓ | ✓ | – | – | – | – | – | – | – | – |
+| Alter table designer | dialog | – | ✓ | ✓ | – | – | – | – | – | – | – | – |
 | Index designer | – | ✓ | ✓ | ✓ | – | – | dialog | n/a | – | – | – | – |
 | Partition manager | – | ✓ | ✓ | dialog | – | – | n/a | view only | – | n/a | n/a | n/a |
 | Foreign key wizard | – | – | – | – | – | – | view only | n/a | – | – | – | – |
@@ -88,7 +88,8 @@ the core extension; the Db2/MySQL designers live in the companion extensions.
 
 - **Alter Table Wizard** (`netezza.alterTableWizard`) — seven ALTER operations
   (add/rename/drop column, NOT NULL, DEFAULT) with a review/execute step.
-  Netezza-flavored SQL; not dialect-gated.
+  Emits Netezza-flavored SQL, so it is gated to Netezza connections; other
+  dialects use their dedicated designer where one exists.
 - **Create View** (`netezza.createView`), **Create Procedure**
   (`netezza.createProcedure`, template-based), **Create External Table**
   (`netezza.createExternalTable`, basic/advanced) — Netezza.
@@ -107,9 +108,9 @@ the core extension; the Db2/MySQL designers live in the companion extensions.
 The largest product gaps are, in rough priority order:
 
 1. **Visual alter-table designer for every warehouse dialect.** MySQL and
-   PostgreSQL have one today. Oracle and MSSQL still rely on the
-   Netezza-flavored dialog, which cannot express dialect options (tablespaces,
-   storage, filegroups).
+   PostgreSQL have one today, and Netezza has the Netezza-flavored dialog.
+   Db2, Oracle, and MSSQL have no dedicated designer yet; the Netezza dialog is
+   gated to Netezza, so it cannot be used to emit unsupported dialect DDL.
 2. **Index Designer rollout.** PostgreSQL was upgraded from a dialog to a full
    designer (access method, INCLUDE, partial predicates, tablespace). Oracle
    (function-based, bitmap, tablespace), MSSQL (INCLUDE, filtered, columnstore),

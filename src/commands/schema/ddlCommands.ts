@@ -53,6 +53,13 @@ export function registerDDLCommands(deps: SchemaCommandsDependencies): vscode.Di
                     return;
                 }
 
+                // Table-as-view generation uses Netezza-specific DDL.
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(connectionName);
+                if (databaseKind && databaseKind !== 'netezza') {
+                    vscode.window.showErrorMessage('Table-as-view generation is available for Netezza connections only.');
+                    return;
+                }
+
                 await executeWithProgress(
                     `Generating view script for ${item.dbName}.${item.schema}.${tableName}...`,
                     async () => {
@@ -182,6 +189,15 @@ export function registerDDLCommands(deps: SchemaCommandsDependencies): vscode.Di
                     : undefined;
                 if (!connectionName || !connectionDetails) {
                     vscode.window.showErrorMessage('Connection not configured. Please connect via Netezza: Connect...');
+                    return;
+                }
+
+                // The comparison flow reads Netezza catalog views
+                // (`_V_OBJECT_DATA` / `_V_PROCEDURE`), so it is only valid for
+                // Netezza connections.
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(connectionName);
+                if (databaseKind && databaseKind !== 'netezza') {
+                    vscode.window.showErrorMessage('Schema comparison is available for Netezza connections only.');
                     return;
                 }
 

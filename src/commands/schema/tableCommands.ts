@@ -116,11 +116,11 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                 return;
             }
 
+            const connectionDetails = item.connectionName
+                ? connectionManager.getConnectionMetadata(item.connectionName)
+                : undefined;
+            const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName) ?? 'netezza';
             try {
-                const connectionDetails = item.connectionName
-                    ? connectionManager.getConnectionMetadata(item.connectionName)
-                    : undefined;
-                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName) ?? 'netezza';
                 assertDesignerOperation(
                     databaseKind,
                     'alterTable',
@@ -133,6 +133,16 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                 );
             } catch (error: unknown) {
                 vscode.window.showErrorMessage(error instanceof Error ? error.message : 'ALTER TABLE is not available for this connection.');
+                return;
+            }
+
+            // This wizard emits Netezza-flavored ALTER TABLE syntax. Other
+            // dialects either have a dedicated designer (PostgreSQL/MySQL) or
+            // require different DDL, so the generic wizard must not run there.
+            if (databaseKind !== 'netezza') {
+                vscode.window.showInformationMessage(
+                    `The Alter Table Wizard is not available for ${databaseKind}. Use the dedicated designer for this database.`
+                );
                 return;
             }
 
