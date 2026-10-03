@@ -14,6 +14,7 @@ jest.mock(
             showSaveDialog: jest.fn(),
             showQuickPick: jest.fn(),
             showInformationMessage: jest.fn(),
+            showWarningMessage: jest.fn(),
             showErrorMessage: jest.fn(),
             withProgress: jest.fn((_options, task) => task({ report: jest.fn() }))
         },
@@ -573,7 +574,13 @@ describe('ExportManager', () => {
                 resultSetIndex: 0
             });
 
-            expect(mockShowInfo).toHaveBeenCalledWith(expect.stringContaining('exported to'));
+            expect(mockShowInfo).toHaveBeenCalledWith(
+                expect.stringContaining('Export completed'),
+                'Open File',
+                'Show in Explorer',
+                'Copy to Clipboard',
+                'Close',
+            );
         });
 
         it('should handle export cancellation', async () => {
@@ -839,6 +846,95 @@ describe('ExportManager', () => {
 
             expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
             expect(vscode.window.showSaveDialog).toHaveBeenCalled();
+        });
+
+        it('should offer Open / Show in Explorer / Copy / Close after saving to disk', async () => {
+            const mockUri = { fsPath: '/test/export.csv' };
+            (vscode.window.showSaveDialog as jest.Mock).mockResolvedValue(mockUri);
+            (vscode.window.showInformationMessage as jest.Mock).mockResolvedValue(undefined);
+
+            await manager.initiateExportWithSelection(
+                {
+                    sourceUri: 'file:///test.sql',
+                    resultSetIndex: 0,
+                    rowIndices: [0],
+                    columnIds: ['0']
+                },
+                'csv',
+                'file'
+            );
+
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                expect.stringContaining('Export completed'),
+                'Open File',
+                'Show in Explorer',
+                'Copy to Clipboard',
+                'Close',
+            );
+        });
+
+        it('should open the file when Open File is chosen', async () => {
+            const mockUri = { fsPath: '/test/export.csv' };
+            (vscode.window.showSaveDialog as jest.Mock).mockResolvedValue(mockUri);
+            (vscode.window.showInformationMessage as jest.Mock).mockResolvedValue('Open File');
+
+            await manager.initiateExportWithSelection(
+                {
+                    sourceUri: 'file:///test.sql',
+                    resultSetIndex: 0,
+                    rowIndices: [0],
+                    columnIds: ['0']
+                },
+                'csv',
+                'file'
+            );
+
+            expect(vscode.env.openExternal).toHaveBeenCalled();
+        });
+
+        it('should reveal the file when Show in Explorer is chosen', async () => {
+            const mockUri = { fsPath: '/test/export.csv' };
+            (vscode.window.showSaveDialog as jest.Mock).mockResolvedValue(mockUri);
+            (vscode.window.showInformationMessage as jest.Mock).mockResolvedValue('Show in Explorer');
+
+            await manager.initiateExportWithSelection(
+                {
+                    sourceUri: 'file:///test.sql',
+                    resultSetIndex: 0,
+                    rowIndices: [0],
+                    columnIds: ['0']
+                },
+                'csv',
+                'file'
+            );
+
+            expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+                'revealFileInOS',
+                expect.anything(),
+            );
+        });
+
+        it('should do nothing when Close is chosen', async () => {
+            const mockUri = { fsPath: '/test/export.csv' };
+            (vscode.window.showSaveDialog as jest.Mock).mockResolvedValue(mockUri);
+            (vscode.window.showInformationMessage as jest.Mock).mockResolvedValue('Close');
+
+            await manager.initiateExportWithSelection(
+                {
+                    sourceUri: 'file:///test.sql',
+                    resultSetIndex: 0,
+                    rowIndices: [0],
+                    columnIds: ['0']
+                },
+                'csv',
+                'file'
+            );
+
+            expect(vscode.env.openExternal).not.toHaveBeenCalled();
+            expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+                'revealFileInOS',
+                expect.anything(),
+            );
         });
     });
 
