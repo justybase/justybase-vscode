@@ -45,6 +45,8 @@ export interface ProcedureMatrixCase {
   errorIncludes?: string;
   /** NOTICE text fragments expected after a successful CALL (trace markers). */
   expectNotices?: string[];
+  /** Rows expected from a successful CALL (result-set procedures). */
+  expectRows?: unknown[][];
   notes?: string;
 }
 
@@ -117,6 +119,85 @@ END_PROC;`,
     call: "ok",
   },
   {
+    id: "hdr_no_or_replace",
+    group: "header",
+    sql: `CREATE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "CREATE PROCEDURE without OR REPLACE is accepted.",
+  },
+  {
+    id: "hdr_returns_numeric_ps",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS NUMERIC(10,2) LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1.5;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "hdr_returns_numeric_plain",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS NUMERIC LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "hdr_returns_boolean",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS BOOLEAN LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN TRUE;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "hdr_returns_timestamp",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS TIMESTAMP LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN CURRENT_TIMESTAMP;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "hdr_returns_bigint",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS BIGINT LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
     id: "hdr_reftable",
     group: "header",
     sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS REFTABLE(${T}) LANGUAGE NZPLSQL AS
@@ -127,8 +208,8 @@ END;
 END_PROC;`,
     parse: "accept",
     create: "ok",
-    call: "skip",
-    notes: "REFTABLE procedures are invoked with CALL; they return a result set.",
+    call: "ok",
+    notes: "REFTABLE procedures are invoked with CALL and return a result set.",
   },
   {
     id: "hdr_execute_as_caller",
@@ -228,6 +309,35 @@ END_PROC;`,
     notes: "LANGUAGE is required; both parser and backend reject its absence.",
   },
   {
+    id: "hdr_missing_end_proc_rejected",
+    group: "header-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;`,
+    parse: "reject",
+    create: "error",
+    call: "skip",
+    errorIncludes: "unterminated BEGIN_PROC",
+    notes: "The body must be closed with END_PROC.",
+  },
+  {
+    id: "hdr_bad_language_rejected",
+    group: "header-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE PLPGSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "error",
+    call: "skip",
+    errorIncludes: "NZPLSQL",
+    notes: "Only LANGUAGE NZPLSQL is accepted.",
+  },
+  {
     id: "hdr_bare_begin_rejected",
     group: "header-negative",
     sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
@@ -302,6 +412,103 @@ END_PROC;`,
     create: "ok",
     call: "ok",
     callArgs: "5",
+  },
+  {
+    id: "args_numeric_ps",
+    group: "args",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(NUMERIC(10,2)) RETURNS NUMERIC(10,2) LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v ALIAS FOR $1;
+BEGIN
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    callArgs: "1.25",
+  },
+  {
+    id: "args_char_varying",
+    group: "args",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(CHARACTER VARYING(8)) RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    callArgs: "'abc'",
+  },
+  {
+    id: "args_boolean",
+    group: "args",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(BOOLEAN) RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    callArgs: "true",
+  },
+  {
+    id: "args_null_passed",
+    group: "args",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(INT) RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v ALIAS FOR $1;
+BEGIN
+  RAISE NOTICE 'STEP_01 isnull=%', v;
+  RETURN 0;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    callArgs: "NULL",
+    expectNotices: ["STEP_01 isnull=<NULL>"],
+    notes: "A NULL argument is accepted and visible as NULL.",
+  },
+  {
+    id: "args_arity_too_few",
+    group: "args-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(INT) RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "error",
+    callPhase: "runtime",
+    callArgs: "",
+    errorIncludes: "does not exist",
+    notes: "Calling with the wrong arity is a runtime resolution error.",
+  },
+  {
+    id: "args_type_mismatch",
+    group: "args-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(INT) RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "error",
+    callPhase: "runtime",
+    callArgs: "'abc'",
+    errorIncludes: "pg_atoi",
+    notes: "Passing a non-numeric literal to an INT argument fails at runtime.",
   },
   {
     id: "args_named_lenient",
@@ -467,6 +674,136 @@ END_PROC;`,
     create: "ok",
     call: "ok",
     notes: "Cursor-style FOR requires the loop variable to be declared RECORD.",
+  },
+  {
+    id: "decl_varray_methods",
+    group: "declare",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v VARRAY(3) OF INT;
+BEGIN
+  v.EXTEND(1);
+  v(1) := 9;
+  RETURN v(1);
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "VARRAY EXTEND and subscript assignment are supported.",
+  },
+  {
+    id: "decl_record_select_into",
+    group: "declare",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  r RECORD;
+BEGIN
+  SELECT id, name INTO r FROM ${T} WHERE id = 1;
+  RAISE NOTICE 'STEP_01 id=%', r.id;
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 id=1"],
+  },
+  {
+    id: "decl_rowtype_select_into",
+    group: "declare",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  r ${T}%ROWTYPE;
+BEGIN
+  SELECT id, name INTO r FROM ${T} WHERE id = 1;
+  RAISE NOTICE 'STEP_01 id=%', r.id;
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 id=1"],
+  },
+  {
+    id: "decl_nested_block_shadow",
+    group: "declare",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT := 1;
+BEGIN
+  DECLARE
+    v INT := 2;
+  BEGIN
+    RAISE NOTICE 'STEP_01 inner=%', v;
+  END;
+  RAISE NOTICE 'STEP_02 outer=%', v;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 inner=2", "STEP_02 outer=1"],
+    notes: "Inner DECLARE shadows the outer variable for the sub-block only.",
+  },
+  {
+    id: "decl_double_precision",
+    group: "declare",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v DOUBLE PRECISION := 1.5;
+BEGIN
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "decl_constant_reassign",
+    group: "declare-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  c CONSTANT INT := 1;
+BEGIN
+  c := 2;
+  RETURN c;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "error",
+    callPhase: "runtime",
+    errorIncludes: "CONSTANT",
+    notes: "Assigning to a CONSTANT fails at runtime.",
+  },
+  {
+    id: "decl_not_null_assign_null",
+    group: "declare-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  d INT NOT NULL := 1;
+BEGIN
+  d := NULL;
+  RETURN d;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "error",
+    callPhase: "runtime",
+    errorIncludes: "NOT NULL",
+    notes: "Assigning NULL to a NOT NULL variable fails at runtime.",
   },
   {
     id: "decl_missing_semicolon_lenient",
@@ -680,6 +1017,72 @@ END_PROC;`,
     notes: "CASE is not an NZPLSQL statement; use IF/ELSIF.",
   },
   {
+    id: "ctrl_for_in_execute_dynamic",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  r RECORD;
+  n INT := 0;
+BEGIN
+  FOR r IN EXECUTE 'SELECT id FROM ${T}' LOOP
+    n := n + r.id;
+  END LOOP;
+  RETURN n;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "Dynamic record-set FOR over EXECUTE requires a RECORD loop variable.",
+  },
+  {
+    id: "ctrl_elseif_chain",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  n INT := 7;
+BEGIN
+  IF n < 3 THEN
+    RETURN 1;
+  ELSEIF n < 5 THEN
+    RETURN 2;
+  ELSEIF n < 9 THEN
+    RETURN 3;
+  ELSE
+    RETURN 4;
+  END IF;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "ctrl_continue_rejected",
+    group: "control-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  i INT := 0;
+  n INT := 0;
+BEGIN
+  WHILE i < 5 LOOP
+    i := i + 1;
+    CONTINUE WHEN i = 3;
+    n := n + i;
+  END LOOP;
+  RETURN n;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    errorIncludes: "CONTINUE",
+    notes: "CONTINUE is not part of NZPLSQL iterative control (LOOP/WHILE/FOR/EXIT only).",
+  },
+  {
     id: "ctrl_nested_begin",
     group: "control",
     sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
@@ -774,6 +1177,106 @@ END_PROC;`,
     expectNotices: ["STEP_01 found"],
   },
   {
+    id: "sql_select_into_multi",
+    group: "sql",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v_id INT;
+  v_name VARCHAR(20);
+BEGIN
+  SELECT id, name INTO v_id, v_name FROM ${T} WHERE id = 1;
+  RAISE NOTICE 'STEP_01 %/%', v_id, v_name;
+  RETURN v_id;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 1/a"],
+  },
+  {
+    id: "sql_truncate",
+    group: "sql",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  CREATE TEMP TABLE jbl_matrix_trunc (a INT);
+  TRUNCATE TABLE jbl_matrix_trunc;
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "sql_commit_in_proc",
+    group: "sql",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  COMMIT;
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "COMMIT is accepted in a singleton CALL (verified live).",
+  },
+  {
+    id: "sql_rollback_in_proc",
+    group: "sql",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  ROLLBACK;
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "ROLLBACK is accepted in a singleton CALL (verified live).",
+  },
+  {
+    id: "exec_immediate_into_rejected",
+    group: "sql-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  n INT;
+BEGIN
+  EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ${T}' INTO n;
+  RETURN n;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    errorIncludes: "INTO",
+    notes: "EXECUTE IMMEDIATE ... INTO is not supported; use SELECT ... INTO.",
+  },
+  {
+    id: "insert_returning_into_rejected",
+    group: "sql-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  INSERT INTO ${T} (id, name) VALUES (99, 'z') RETURNING id INTO v;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    errorIncludes: "RETURNING",
+    notes: "INSERT ... RETURNING ... INTO is not supported.",
+  },
+  {
     id: "sql_perform_rejected",
     group: "sql-negative",
     sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
@@ -861,6 +1364,66 @@ END_PROC;`,
     parse: "accept",
     create: "ok",
     call: "ok",
+  },
+  {
+    id: "exc_sqlerrm_notice",
+    group: "exception",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RAISE EXCEPTION 'boom';
+  EXCEPTION
+    WHEN OTHERS THEN
+      RAISE NOTICE 'STEP_01 err=%', SQLERRM;
+      RETURN 0;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 err=boom"],
+    notes: "SQLERRM is available inside the OTHERS handler.",
+  },
+  {
+    id: "exc_sqlstate_var_rejected",
+    group: "exception-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RAISE EXCEPTION 'boom';
+  EXCEPTION
+    WHEN OTHERS THEN
+      RAISE NOTICE 'STEP_01 state=%', SQLSTATE;
+      RETURN 0;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    errorIncludes: "SQLSTATE",
+    notes: "SQLSTATE is not exposed as a variable in the OTHERS handler.",
+  },
+  {
+    id: "exc_nested_catch",
+    group: "exception",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  BEGIN
+    RAISE EXCEPTION 'inner';
+    EXCEPTION
+      WHEN OTHERS THEN
+        RAISE NOTICE 'STEP_01 inner caught';
+  END;
+  RAISE NOTICE 'STEP_02 outer continues';
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 inner caught", "STEP_02 outer continues"],
+    notes: "An inner block handler catches the exception and the outer block continues.",
   },
   {
     id: "exc_named_rejected",
@@ -953,6 +1516,80 @@ END_PROC;`,
     call: "ok",
   },
   {
+    id: "raise_record_field",
+    group: "raise",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  r RECORD;
+BEGIN
+  SELECT id, name INTO r FROM ${T} WHERE id = 1;
+  RAISE NOTICE 'STEP_01 id=%', r.id;
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 id=1"],
+    notes: "RAISE arguments may be record fields.",
+  },
+  {
+    id: "raise_expression_rejected",
+    group: "raise-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT := 1;
+BEGIN
+  RAISE NOTICE 'STEP_01 v=%', v + 1;
+  RETURN 0;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "syntax error",
+    notes: "RAISE arguments must be variables/record fields, not expressions.",
+  },
+  {
+    id: "raise_function_call_rejected",
+    group: "raise-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v VARCHAR(10) := 'a';
+BEGIN
+  RAISE NOTICE 'STEP_01 v=%', UPPER(v);
+  RETURN 0;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "syntax error",
+    notes: "Function calls are not valid RAISE arguments.",
+  },
+  {
+    id: "raise_no_message_rejected",
+    group: "raise-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RAISE NOTICE;
+  RETURN 0;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "STRING",
+    notes: "RAISE requires a message string (verified live).",
+  },
+  {
     id: "raise_literal_rejected",
     group: "raise-negative",
     sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
@@ -1036,6 +1673,92 @@ END_PROC;`,
     parse: "accept",
     create: "ok",
     call: "ok",
+  },
+  {
+    id: "sys_autocommit_off",
+    group: "system",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  AUTOCOMMIT OFF;
+  RAISE NOTICE 'STEP_01 off';
+  RETURN 1;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 off"],
+  },
+  {
+    id: "sys_return_no_expr",
+    group: "system",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "Bare RETURN yields a NULL scalar result.",
+  },
+  {
+    id: "sys_trailing_semicolons",
+    group: "system",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END_PROC
+;;;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    notes: "Extra trailing semicolons after END_PROC are tolerated.",
+  },
+  {
+    id: "sys_reftable_resultset",
+    group: "system",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS REFTABLE(${T}) LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  s VARCHAR(300);
+BEGIN
+  s := 'INSERT INTO ' || REFTABLENAME || ' SELECT id, name FROM ${T} ORDER BY id';
+  EXECUTE IMMEDIATE s;
+  RETURN REFTABLE;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectRows: [[1, "a"], [2, "b"]],
+    notes: "REFTABLE result sets are populated with dynamic SQL and returned via CALL.",
+  },
+  {
+    id: "cursor_explicit_rejected",
+    group: "cursor-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  c CURSOR FOR SELECT id FROM ${T};
+  v INT;
+BEGIN
+  OPEN c;
+  FETCH c INTO v;
+  CLOSE c;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "CURSOR",
+    notes: "Explicit cursors (DECLARE CURSOR/OPEN/FETCH/CLOSE) are not supported; use FOR ... IN SELECT.",
   },
   {
     id: "sys_goto_rejected",
