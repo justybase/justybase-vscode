@@ -2,10 +2,10 @@
   "$schema": "./quality-baseline.schema.json",
   "schemaVersion": 1,
   "coverage": {
-    "statements": 71,
-    "branches": 58,
-    "functions": 76,
-    "lines": 72
+    "statements": 72,
+    "branches": 59,
+    "functions": 77,
+    "lines": 73
   },
   "lint": {
     "total": 52,
@@ -35,6 +35,5 @@
       "packages/ui-core/",
       "packages/ui-react/"
     ]
-  },
-  "documentationFreshnessDays": 31
+  }
 }

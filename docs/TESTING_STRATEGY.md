@@ -76,8 +76,9 @@ cleanup.
 
 Coverage is a risk indicator, not a substitute for behavioral assertions.
 
-- The initial root floors are 71% statements, 58% branches, 76% functions, and
-  72% lines. These floors may only move upward.
+- The initial root floors were 71% statements, 58% branches, 76% functions, and
+  72% lines; they were raised to 72% statements, 59% branches, 77% functions,
+  and 73% lines. These floors may only move upward.
 - Changed high-risk code should reach at least 80% line and 70% branch coverage.
 - Generated files must be excluded explicitly rather than lowering thresholds.
 - Prioritize migration, activation, views, commands, editors, imports, and
@@ -87,9 +88,9 @@ Coverage is a risk indicator, not a substitute for behavioral assertions.
 
 Extended lint follows the same ratchet: the recorded baseline may not increase,
 and each cleanup phase lowers the allowed value. The current frozen baseline is
-70 warnings (57 `media`, 7 `apps`, 6 `packages`, and 0 `extensions`). The next
-cleanup target is zero warnings; the Phase 1B milestone of 100 warnings has
-been met.
+52 warnings (52 `media`, 0 `packages`, and 0 `extensions`); the retired Web
+Editor `apps` area no longer exists. The next cleanup target is zero warnings;
+the Phase 1B milestone of 100 warnings has been met.
 
 ## Stateful UI contract
 

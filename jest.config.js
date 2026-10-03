@@ -115,10 +115,10 @@ module.exports = {
   coverageReporters: ["text-summary", "json-summary", "lcov"],
   coverageThreshold: {
     global: {
-      branches: 58,
-      functions: 76,
-      lines: 72,
-      statements: 71,
+      branches: 59,
+      functions: 77,
+      lines: 73,
+      statements: 72,
     },
   },
   verbose: jestVerbose,
