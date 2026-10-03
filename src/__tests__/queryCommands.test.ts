@@ -102,7 +102,7 @@ jest.mock('../utils/shellUtils', () => ({
 }));
 
 // Mock internal SQL formatter
-jest.mock('../services/sqlFormatter', () => ({
+jest.mock('../services/sqlFormatting', () => ({
     formatSql: jest.fn((sql: string) => sql)
 }));
 
