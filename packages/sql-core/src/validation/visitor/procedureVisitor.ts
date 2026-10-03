@@ -125,6 +125,14 @@ export function createProcedureStatement(
   host.getScopeBuilder().enterScope();
   const scope = new ProcedureScopeBuilder();
   host.setProcedureScope(scope);
+  // Live-verified on Netezza 11.2.2.1: RETURNS without RETURN is legal
+  // (CREATE ok, CALL ok, result NULL). sql-core only serves Netezza, whose
+  // profile carries no databaseKind, so opt out for undefined/'netezza'
+  // and keep the check for any Oracle-shaped profile.
+  const databaseKind = host.getValidationProfile().databaseKind;
+  if (databaseKind === undefined || databaseKind === "netezza") {
+    scope.setMissingReturnCheckEnabled(false);
+  }
 
   if (ctx.qualifiedName) {
     const nameInfo = host.visitAs<{

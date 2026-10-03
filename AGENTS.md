@@ -295,9 +295,9 @@ Type-aware warnings **require** metadata with types. Without connection/cache, S
 **Layers:**
 
 1. **Chevrotain** — `parser.ts` (`procedureStatement`, `createProcedureStatement`, string-body `StringLiteral`) + `sqlVisitor.ts` (`inProcedureContext`, `ProcedureScopeBuilder`)
-2. **CST procedure semantics** — `src/sqlParser/procedure/procedureScopeBuilder.ts` emits **SQL037–SQL040** (SELECT without INTO, missing RETURN, unused variables, unassigned OUT/INOUT)
+2. **CST procedure semantics** — `src/sqlParser/procedure/procedureScopeBuilder.ts` emits **SQL037, SQL039–SQL040** (SELECT without INTO, unused variables, unassigned OUT/INOUT); **SQL038** (missing RETURN) is Oracle-only — Netezza allows `RETURNS` without `RETURN` (live-verified: `CALL` succeeds, result `NULL`)
 3. **String-body** — `procedureStringBody.ts` re-parses `AS '…'` bodies with offset mapping
-4. **Regex NZP** — `procedureRules.ts` calls `shouldUseProcedureRegexFallback()` from `procedureAnalysis.ts`; migrated rules (NZP004/005/006/008/011/013/017/022/024) run only when parse fails
+4. **Regex NZP** — `procedureRules.ts` calls `shouldUseProcedureRegexFallback()` from `procedureAnalysis.ts`; migrated rules (NZP004/005/006/008/011/013/017/022) run only when parse fails; NZP024 is retired (no-op — Netezza allows `RETURNS` without `RETURN`)
 
 **Note:** SQL030 is reserved for grouped-query ORDER BY warnings; procedure codes use SQL037+.
 

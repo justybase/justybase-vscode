@@ -15,6 +15,13 @@ export class ProcedureScopeBuilder {
   private hasReturnsClause = false;
   private hasReturnStatement = false;
   private returnsToken: IToken | undefined;
+  /**
+   * Netezza NZPLSQL allows a procedure with RETURNS to fall off the end
+   * without RETURN (live-verified: CREATE ok, CALL ok, result is NULL), so
+   * the Netezza visitor disables this check. Oracle keeps it enabled:
+   * a FUNCTION ... RETURN without RETURN is genuinely suspicious.
+   */
+  private checkMissingReturn = true;
   private readonly diagnostics: ProcedureScopeDiagnostic[] = [];
 
   reset(): void {
@@ -58,6 +65,10 @@ export class ProcedureScopeBuilder {
     this.hasReturnStatement = true;
   }
 
+  setMissingReturnCheckEnabled(enabled: boolean): void {
+    this.checkMissingReturn = enabled;
+  }
+
   checkStandaloneSelect(selectToken: IToken, hasInto: boolean): void {
     if (!hasInto) {
       this.diagnostics.push({
@@ -74,7 +85,7 @@ export class ProcedureScopeBuilder {
   }
 
   finalize(): ProcedureScopeDiagnostic[] {
-    if (this.hasReturnsClause && !this.hasReturnStatement && this.returnsToken) {
+    if (this.checkMissingReturn && this.hasReturnsClause && !this.hasReturnStatement && this.returnsToken) {
       this.diagnostics.push({ code: "SQL038", message: "Procedure declares RETURNS but has no RETURN statement", token: this.returnsToken, severity: "warning" });
     }
     for (const [name, variable] of this.variables) {

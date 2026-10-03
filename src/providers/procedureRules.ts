@@ -894,38 +894,20 @@ export const ruleNZP023: LintRule = {
 };
 
 // ============================================================================
-// RULE NZP024: Missing RETURN Statement
+// RULE NZP024: Missing RETURN Statement (RETIRED for Netezza)
 // ============================================================================
+// Live-verified on Netezza 11.2.2.1: a procedure with RETURNS but no RETURN
+// is legal — CREATE ok, CALL ok, result NULL (RAISE NOTICE-only bodies).
+// Emitting NZP024/SQL038 for it was a false positive, so this rule is a
+// no-op. The rule object stays registered so existing `NZP024: off`
+// configuration and the CST-migration set keep resolving.
 export const ruleNZP024: LintRule = {
     id: 'NZP024',
     name: 'Missing RETURN Statement',
-    description: 'Procedure with RETURNS type must have RETURN statement',
+    description: 'Retired: Netezza allows RETURNS without RETURN (CALL returns NULL)',
     defaultSeverity: LintSeverity.Error,
-    check(sql: string): LintIssue[] {
-        const issues: LintIssue[] = [];
-        if (shouldSkipCstMigratedProcedureRule(sql, 'NZP024')) return issues;
-
-        // Check if procedure has RETURNS clause
-        const returnsMatch = /\bRETURNS\s+(\w+)/i.exec(sql);
-        if (!returnsMatch) {
-            return issues; // No RETURNS, no problem
-        }
-
-        const procBody = extractProcedureBody(sql);
-        if (!procBody) return issues;
-
-        // Check for RETURN statement
-        if (!/\bRETURN\b/i.test(procBody.body)) {
-            issues.push({
-                ruleId: this.id,
-                message: `${this.id}: Procedure declares RETURNS ${returnsMatch[1]} but has no RETURN statement`,
-                severity: this.defaultSeverity,
-                startOffset: procBody.startOffset,
-                endOffset: procBody.startOffset + 20
-            });
-        }
-
-        return issues;
+    check(_sql: string): LintIssue[] {
+        return [];
     }
 };
 

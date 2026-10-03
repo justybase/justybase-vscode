@@ -1759,8 +1759,8 @@ END_PROC;`;
         });
     });
 
-    describe('NZP024 - Missing RETURN Statement', () => {
-        it('should detect missing RETURN when RETURNS is declared', () => {
+    describe('NZP024 - Missing RETURN Statement (retired for Netezza)', () => {
+        it('does not flag missing RETURN when RETURNS is declared (live-verified legal)', () => {
             const sql = `CREATE PROCEDURE test_proc() RETURNS VARCHAR LANGUAGE NZPLSQL IS
 BEGIN_PROC
 BEGIN
@@ -1768,9 +1768,7 @@ BEGIN
 END
 END_PROC;`;
             const issues = ruleNZP024.check(sql);
-            expect(issues.length).toBe(1);
-            expect(issues[0].ruleId).toBe('NZP024');
-            expect(issues[0].message).toContain('RETURN');
+            expect(issues.length).toBe(0);
         });
 
         it('should not flag procedure with RETURN', () => {

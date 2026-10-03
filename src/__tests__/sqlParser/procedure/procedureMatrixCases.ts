@@ -80,6 +80,20 @@ END_PROC;`,
     expectNotices: ["STEP_01 minimal"],
   },
   {
+    id: "hdr_no_return_raise_only",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INTEGER EXECUTE AS OWNER LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN RAISE NOTICE 'The customer name is alpha'; RAISE NOTICE 'The customer location is beta'; END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["The customer name is alpha", "The customer location is beta"],
+    notes:
+      "Live-verified (11.2.2.1): RETURNS without RETURN is legal; CALL succeeds and returns NULL. Guards the SQL038/NZP024 false positive.",
+  },
+  {
     id: "hdr_int8",
     group: "header",
     sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT8 LANGUAGE NZPLSQL AS

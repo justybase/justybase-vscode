@@ -43,3 +43,29 @@ describe("NZPLSQL procedure matrix (parser)", () => {
     });
   }
 });
+
+describe("NZPLSQL procedure matrix (SQL038 regression)", () => {
+  setupSqlValidatorTests();
+
+  const MATRIX_PROC = "ADMIN.MATRIX_PROC";
+  const MATRIX_TABLE = "JUST_DATA.ADMIN.DIMDATE";
+
+  // Live-verified on Netezza 11.2.2.1: RETURNS without RETURN is legal
+  // (CREATE ok, CALL ok, result NULL). These cases must not emit SQL038.
+  for (const id of ["hdr_minimal_int4", "hdr_no_return_raise_only"]) {
+    it(`${id} emits no SQL038`, () => {
+      const testCase = PROCEDURE_MATRIX_CASES.find((entry) => entry.id === id);
+      expect(testCase).toBeDefined();
+      const sql = renderProcedureMatrixSql(
+        testCase!.sql,
+        MATRIX_PROC,
+        MATRIX_TABLE,
+      );
+      const result = validator.validate(sql);
+      expect(getSyntaxErrors(result)).toHaveLength(0);
+      expect(
+        [...result.errors, ...result.warnings].some((e) => e.code === "SQL038"),
+      ).toBe(false);
+    });
+  }
+});

@@ -1761,7 +1761,7 @@ END_PROC;`);
       expect(result.warnings.some((e) => e.code === "SQL037")).toBe(false);
     });
 
-    it("should report SQL038 warning for string-body procedure missing RETURN", () => {
+    it("should not report SQL038 for string-body procedure missing RETURN (live-verified legal)", () => {
       const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_STR_BAD()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
@@ -1773,11 +1773,11 @@ END;';`);
         false,
       );
       expect(result.warnings.some((warning) => warning.code === "SQL038")).toBe(
-        true,
+        false,
       );
     });
 
-    it("should warn, not error, when VARARGS procedure omits RETURN", () => {
+    it("should not report SQL038 when VARARGS procedure omits RETURN (live-verified legal)", () => {
       const result = validator.validate(`CREATE OR REPLACE PROCEDURE sp_varargs01(varargs)
   RETURNS INT4
   LANGUAGE NZPLSQL
@@ -1800,7 +1800,22 @@ END;';`);
 
       expect(result.errors).toHaveLength(0);
       expect(result.warnings.some((warning) => warning.code === "SQL038")).toBe(
-        true,
+        false,
+      );
+    });
+
+    it("should not report SQL038 for RETURNS INTEGER with only RAISE NOTICE (issue regression)", () => {
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE JUST_DATA.ADMIN.CUSTOMER_DOTNET_JS2()
+RETURNS INTEGER
+EXECUTE AS OWNER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+ BEGIN RAISE NOTICE 'The customer name is alpha'; RAISE NOTICE 'The customer location is beta'; END;
+END_PROC;`);
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some((warning) => warning.code === "SQL038")).toBe(
+        false,
       );
     });
 
