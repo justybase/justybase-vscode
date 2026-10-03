@@ -477,7 +477,11 @@ export class NetezzaSqlParser extends BaseSqlParser {
       netezzaSqlLexer.Group,
       netezzaSqlLexer.Type,
       netezzaSqlLexer.Materialized,
-      netezzaSqlLexer.Elseif,
+      // NOTE: Elsif/Elseif are intentionally excluded (like Elsif before).
+      // Allowing Elseif as a columnReference lets `; ELSEIF` look like the
+      // start of an assignmentStatement, so IF ... ELSEIF fails with
+      // "Expecting Assign/Equals/LParen but found 'n'". Elseif remains in
+      // getNetezzaIdentifierTokens for general identifier positions.
       netezzaSqlLexer.TransactionAborted,
     ];
   }
@@ -1318,7 +1322,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
             { ALT: () => this.CONSUME(Exception) },
             { ALT: () => this.CONSUME(Debug) },
           ]);
-          this.OPTION(() => this.CONSUME(StringLiteral));
+          this.CONSUME(StringLiteral);
           this.MANY(() => {
             this.CONSUME(Comma);
             this.SUBRULE(this.columnReference);

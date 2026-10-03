@@ -59,6 +59,15 @@ function normalizeNotices(notices: string[]): string[] {
   return notices.map((notice) => notice.replace(/^NOTICE:\s*/i, "").trim());
 }
 
+/** Normalize driver values (bigint) so result-set assertions stay stable. */
+function normalizeRows(rows: unknown[][]): unknown[][] {
+  return JSON.parse(
+    JSON.stringify(rows, (_key, value) =>
+      typeof value === "bigint" ? Number(value) : value,
+    ),
+  ) as unknown[][];
+}
+
 /**
  * Netezza requires the argument-type list on DROP PROCEDURE. Derive it from the
  * rendered CREATE statement (stripping the optional IN mode).
@@ -205,6 +214,9 @@ describeIfFixture("NZPLSQL procedure matrix (live)", () => {
             for (const fragment of testCase.expectNotices) {
               expect(notices.join("\n")).toContain(fragment);
             }
+          }
+          if (testCase.expectRows) {
+            expect(normalizeRows(outcome.rows)).toEqual(testCase.expectRows);
           }
         } else {
           expect(outcome.status).toBe("error");

@@ -304,12 +304,15 @@ Type-aware warnings **require** metadata with types. Without connection/cache, S
 **Live-verified grammar (Netezza 11.2.2.1).** The NZPLSQL body is compiled lazily at first `CALL`, not at `CREATE`. `src/__tests__/sqlParser/procedure/procedureMatrixCases.ts` is the shared, live-proven case corpus (each row was executed live and, for negative rows, confirmed rejected). `procedureMatrix.test.ts` locks parser verdicts; `nzplsqlProcedureMatrix.live.integration.test.ts` re-verifies against a running database (opt-in, requires `NZ_DEV_*` + `NZ_DEV_ALLOW_FIXTURE_DDL=1`). Proven constraints to preserve:
 
 - Header: `AS` only (`IS` rejected); `RETURNS` + `LANGUAGE NZPLSQL` required; body must be `BEGIN_PROC..END_PROC` or a quoted string.
-- Arguments are **input types only** (`INT`, `(IN INT)`, `VARARGS`); named parameters and `OUT`/`INOUT` are rejected. Name arguments with `ALIAS FOR $n` in `DECLARE`.
-- `DECLARE` supports `ALIAS FOR $n`, `CONSTANT`, `NOT NULL`, `:=`/`DEFAULT`, `VARRAY(n) OF`, `RECORD`, `%TYPE`, `%ROWTYPE`.
-- Cursor-style `FOR r IN SELECT|EXECUTE … LOOP` requires `r` to be declared `RECORD`.
-- Exception handlers: only `WHEN OTHERS` and `WHEN TRANSACTION_ABORTED` (`SQLSTATE`/named exceptions rejected).
-- `RAISE` severities: `DEBUG`, `NOTICE`, `EXCEPTION` only; trailing arguments must be variables/record fields (literals rejected).
-- Unsupported: `PERFORM`, `EXECUTE IMMEDIATE … USING`, `CASE`, `GOTO`, bare `NULL;`, `$$` bodies. `ELSEIF` is accepted as an `ELSIF` synonym.
+- Arguments are **input types only** (`INT`, `(IN INT)`, `VARARGS`); named parameters and `OUT`/`INOUT` are rejected. Name arguments with `ALIAS FOR $n` in `DECLARE`. Wrong arity or an incompatible literal fails at runtime, not at `CREATE`.
+- `DECLARE` supports `ALIAS FOR $n`, `CONSTANT`, `NOT NULL`, `:=`/`DEFAULT`, `VARRAY(n) OF`, `RECORD`, `%TYPE`, `%ROWTYPE`, nested sub-blocks (inner `DECLARE` shadows the outer variable). Reassigning a `CONSTANT` or assigning `NULL` to a `NOT NULL` variable fails at runtime.
+- Cursor-style `FOR r IN SELECT|EXECUTE … LOOP` requires `r` to be declared `RECORD`. **Explicit cursors are not supported** (`DECLARE c CURSOR FOR …`, `OPEN`/`FETCH`/`CLOSE` are rejected).
+- `COMMIT` and `ROLLBACK` inside the body are accepted by a singleton `CALL`.
+- `RETURNS REFTABLE(t)` returns a result set via `CALL`; populate it with dynamic SQL against the special `REFTABLENAME` variable (`EXECUTE IMMEDIATE 'INSERT INTO ' || REFTABLENAME || …`), then `RETURN REFTABLE`.
+- Exception handlers: only `WHEN OTHERS` and `WHEN TRANSACTION_ABORTED` (`SQLSTATE`/named exceptions rejected). `SQLERRM` is available inside a handler; `SQLSTATE` is not.
+- `RAISE` severities: `DEBUG`, `NOTICE`, `EXCEPTION` only; a message string is required; trailing arguments must be variables/record fields (expressions, function calls and literals are rejected).
+- Unsupported: `PERFORM`, `EXECUTE IMMEDIATE … USING`, `EXECUTE IMMEDIATE … INTO`, `INSERT … RETURNING … INTO`, `CASE`, `CONTINUE`, `GOTO`, bare `NULL;`, `$$` bodies. `ELSEIF` is accepted as an `ELSIF` synonym.
+- Known parser limitation: qualified function/procedure calls in a `SELECT` list (`SCHEMA.PROC()`) are not parsed by the shared expression grammar; reference the routine unqualified or use `CALL`.
 
 When changing this grammar, update all of: `packages/sql-core/src/netezza/lexer.ts`, `.../parser.ts`, `src/sqlParser/visitor/*`, `procedureScopeBuilder.ts`, `src/dialects/netezza/sql/keywords.ts`, `dialects/netezza/syntaxes/netezza.tmLanguage.json`, and the live matrix corpus.
 
