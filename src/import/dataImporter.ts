@@ -14,6 +14,7 @@ import {
   type ColumnTypeChooserOptions,
 } from "../dialects/netezza/import/typeMapping";
 import { headerForcesTextImportType } from "./importTypeInferenceUtils";
+import { throwIfImportCancelled, type ImportCancellationCheck } from "./importCancellation";
 import { quoteIdentifier } from "../utils/identifierUtils";
 import {
   buildNetezzaVirtualImportName,
@@ -337,6 +338,8 @@ export interface ImportOptions {
 
 export interface NetezzaImporterOptions extends ColumnTypeChooserOptions {
   hasHeaders?: boolean;
+  /** Cooperative cancellation checked while streaming source rows. */
+  isCancelled?: ImportCancellationCheck;
 }
 
 export type {
@@ -465,6 +468,7 @@ export class NetezzaImporter {
   private isExcelFile: boolean = false;
   private excelHasHeaderRow: boolean = true;
   private hasHeadersOverride?: boolean;
+  private readonly isCancelled?: ImportCancellationCheck;
   private availableSheetNames: string[] = [];
   private selectedSheetName?: string;
 
@@ -492,6 +496,7 @@ export class NetezzaImporter {
     this.logDir = logDir || path.join(path.dirname(filePath), "netezza_logs");
     this.typeChooserOptions = typeChooserOptions ?? {};
     this.hasHeadersOverride = typeChooserOptions?.hasHeaders;
+    this.isCancelled = typeChooserOptions?.isCancelled;
 
     // Check if this is an Excel file
     const fileExt = path.extname(filePath).toLowerCase();
@@ -1616,6 +1621,7 @@ ${this.getExternalUsingClause()}
 
       try {
         for await (const row of readDelimitedRecords(self.filePath, self.csvDelimiter)) {
+          throwIfImportCancelled(self.isCancelled);
           if (self.hasHeadersOverride !== false && !headerSkipped) {
             headerSkipped = true;
             continue;
@@ -1703,6 +1709,7 @@ ${this.getExternalUsingClause()}
         let lastReportedPercent = 0;
 
         while (readerOpened && (await reader.read())) {
+          throwIfImportCancelled(self.isCancelled);
           if (!headerSkipped) {
             headerSkipped = true;
             continue;
@@ -1929,6 +1936,7 @@ export async function importDataToNetezza(
   progressCallback?: ProgressCallback,
   timeout?: number,
   columnOptions?: ImportColumnOptions,
+  isCancelled?: ImportCancellationCheck,
 ): Promise<ImportResult> {
   const startTime = Date.now();
   let connection: NzConnection | null = null;
@@ -1981,6 +1989,7 @@ export async function importDataToNetezza(
     // Create importer instance (logDir defaults to netezza_logs alongside source file)
     const importer = new NetezzaImporter(filePath, targetTable, undefined, {
       hasHeaders: columnOptions?.hasHeaders,
+      isCancelled,
     });
 
     // Analyze data types
@@ -2027,6 +2036,7 @@ export async function importDataToNetezza(
         );
       });
 
+      throwIfImportCancelled(isCancelled);
       await cmd.execute();
 
       progressCallback?.("Import completed successfully");
@@ -2082,6 +2092,7 @@ export async function importDataToNetezzaAdvanced(
   progressCallback?: ProgressCallback,
   timeout?: number,
   columnOptions?: ImportColumnOptions,
+  isCancelled?: ImportCancellationCheck,
 ): Promise<ImportResult> {
   const startTime = Date.now();
   let connection: NzConnection | null = null;
@@ -2129,6 +2140,7 @@ export async function importDataToNetezzaAdvanced(
 
     const importer = new NetezzaImporter(filePath, targetTable, undefined, {
       hasHeaders: columnOptions?.hasHeaders,
+      isCancelled,
     });
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
@@ -2174,6 +2186,7 @@ export async function importDataToNetezzaAdvanced(
       progressCallback?.("Loading rows from external stream...");
       const loadCommand = connection.createCommand(loadSql);
       loadCommand.commandTimeout = timeout || 3600;
+      throwIfImportCancelled(isCancelled);
       await loadCommand.execute();
 
       progressCallback?.("Import completed successfully");

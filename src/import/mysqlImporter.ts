@@ -8,6 +8,7 @@ import {
     type PreparedImportColumnDescriptor
 } from './batchImportSupport';
 import { getBaseDataType, normalizeDataType } from './dataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
 
 const MYSQL_MAX_VARCHAR_LENGTH = 65535;
 const MYSQL_MAX_CHAR_LENGTH = 255;
@@ -81,7 +82,8 @@ export async function importDataToMySql(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importDataWithBatching(
         mysqlBatchImportConfig,
@@ -90,7 +92,8 @@ export async function importDataToMySql(
         connectionDetails,
         progressCallback,
         timeoutSeconds,
-        columnOptions
+        columnOptions,
+        isCancelled
     );
 }
 

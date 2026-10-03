@@ -63,6 +63,7 @@ export class NetezzaImportWizardAdapter extends BaseImportWizardAdapter {
             input.progressCallback,
             input.timeoutSeconds,
             input.columnOptions,
+            input.isCancelled,
         );
     }
 }

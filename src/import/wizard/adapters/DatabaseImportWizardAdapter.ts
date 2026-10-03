@@ -8,6 +8,7 @@ import type {
     ProgressCallback,
 } from '../../dataImporter';
 import { importDataForConnection } from '../../importDispatcher';
+import type { ImportCancellationCheck } from '../../importCancellation';
 import { normalizeImportedHeader } from '../../importHeaderUtils';
 import type { TabularDataImporter } from '../../tabularDataImporter';
 import type {
@@ -60,6 +61,7 @@ export interface ImportExecutionInput {
     columnOptions?: ImportColumnOptions;
     progressCallback?: ProgressCallback;
     timeoutSeconds?: number;
+    isCancelled?: ImportCancellationCheck;
 }
 
 export interface DatabaseImportWizardAdapter {
@@ -155,6 +157,7 @@ export abstract class BaseImportWizardAdapter implements DatabaseImportWizardAda
             input.progressCallback,
             input.timeoutSeconds,
             input.columnOptions,
+            input.isCancelled,
         );
     }
 

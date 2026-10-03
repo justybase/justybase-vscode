@@ -811,6 +811,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
+                undefined,
             );
             expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('admin.target_table');
         });
@@ -843,6 +844,7 @@ describe('commands/importCommands', () => {
                 'admin.target_table',
                 expect.objectContaining({ database: 'RAW_TAB_DB' }),
                 expect.any(Function),
+                undefined,
                 undefined,
                 undefined,
             );
@@ -933,6 +935,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
+                undefined,
             );
             expect(vscode.commands.executeCommand).toHaveBeenCalledWith('netezza.refreshSchema');
         });
@@ -1013,6 +1016,7 @@ describe('commands/importCommands', () => {
                         1: 'NUMERIC(20,4)',
                     },
                 },
+                undefined,
             );
         });
 
@@ -1136,6 +1140,7 @@ describe('commands/importCommands', () => {
                 'admin.target_table',
                 expect.any(Object),
                 expect.any(Function),
+                undefined,
                 undefined,
                 undefined,
             );

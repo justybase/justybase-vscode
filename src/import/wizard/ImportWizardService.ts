@@ -10,6 +10,7 @@ import type {
   ImportWizardValidationSummary,
 } from "./ImportWizardState";
 import type { ProgressCallback, ImportResult } from "../dataImporter";
+import type { ImportCancellationCheck } from "../importCancellation";
 import {
   backgroundValidationService,
   type BackgroundValidationJob,
@@ -163,8 +164,9 @@ export class ImportWizardService {
   public async executeImport(
     sessionId: string,
     progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck,
   ): Promise<ImportResult> {
-    return this.requireSession(sessionId).executeImport(progressCallback);
+    return this.requireSession(sessionId).executeImport(progressCallback, isCancelled);
   }
 
   public startBackgroundValidation(
@@ -191,7 +193,7 @@ export class ImportWizardService {
           callback(progress, summary);
         }
 
-        if (progress.phase === "complete" && summary) {
+        if (progress.phase === "complete" || progress.phase === "cancelled") {
           this.progressCallbacks.delete(sessionId);
         }
       },
@@ -202,7 +204,12 @@ export class ImportWizardService {
 
   public cancelBackgroundValidation(sessionId: string): void {
     backgroundValidationService.cancelValidation(sessionId);
-    this.progressCallbacks.delete(sessionId);
+    // The terminal "cancelled" progress is delivered through the wrapper above,
+    // which removes the callback. Clean up immediately when no validation is
+    // active so a session that already finished does not leak a callback.
+    if (!backgroundValidationService.isValidationActive(sessionId)) {
+      this.progressCallbacks.delete(sessionId);
+    }
   }
 
   public isBackgroundValidationActive(sessionId: string): boolean {

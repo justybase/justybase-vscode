@@ -8,6 +8,7 @@ import {
     type PreparedImportColumnDescriptor
 } from './batchImportSupport';
 import { getBaseDataType, normalizeDataType } from './dataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
 
 function mapImportTypeToAccessType(typeName: string): string {
     const normalized = normalizeDataType(typeName);
@@ -74,7 +75,8 @@ export async function importDataToAccess(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importDataWithBatching(
         accessBatchImportConfig,
@@ -83,7 +85,8 @@ export async function importDataToAccess(
         connectionDetails,
         progressCallback,
         timeoutSeconds,
-        columnOptions
+        columnOptions,
+        isCancelled
     );
 }
 

@@ -17,6 +17,7 @@ import {
 } from './dataImporter';
 import { normalizeAndDeduplicateHeaders } from './importHeaderUtils';
 import { createTabularDataImporter } from './tabularDataImporter';
+import { throwIfImportCancelled, type ImportCancellationCheck } from './importCancellation';
 
 const SUPPORTED_FILE_FORMATS = ['.csv', '.txt', '.xlsx', '.xlsb'];
 
@@ -71,6 +72,8 @@ export interface ImportExecutionInput {
     fileSize?: number;
     format: string;
     detectedDelimiter?: string;
+    /** Cooperative cancellation checked between inserted batches. */
+    isCancelled?: ImportCancellationCheck;
 }
 
 export function composeQualifiedImportTargetDisplayName(
@@ -468,12 +471,14 @@ async function insertRowsInBatches(
     rows: Iterable<string[]> | AsyncIterable<string[]>,
     decimalDelimiter: string,
     totalRows: number,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<number> {
     let insertedRows = 0;
     let batch: string[][] = [];
 
     for await (const row of rows) {
+        throwIfImportCancelled(isCancelled);
         batch.push(row);
         if (batch.length < config.insertBatchSize) {
             continue;
@@ -511,6 +516,7 @@ export async function executeBatchImport(
     const warnings: string[] = [];
 
     try {
+        throwIfImportCancelled(input.isCancelled);
         const target = config.parseTargetTable(input.targetTable, input.connectionDetails);
         targetForCleanup = target;
         const columns = buildPreparedColumns(input.columns, config);
@@ -523,17 +529,21 @@ export async function executeBatchImport(
         }
 
         input.progressCallback?.(`Preparing ${config.label} import for ${input.totalRows.toLocaleString()} rows...`);
+        throwIfImportCancelled(input.isCancelled);
         connection = await createConnectedDatabaseConnectionFromDetails({
             ...input.connectionDetails,
             dbType: config.kind
         });
 
+        throwIfImportCancelled(input.isCancelled);
         if (config.beginTransactionSql) {
             await executeStatement(connection, config.beginTransactionSql);
         }
 
         if (!input.appendToExistingTable) {
+            throwIfImportCancelled(input.isCancelled);
             input.progressCallback?.(`Creating target table ${target.displayName}...`);
+            throwIfImportCancelled(input.isCancelled);
             await executeStatement(
                 connection,
                 config.buildCreateTableSql
@@ -552,7 +562,8 @@ export async function executeBatchImport(
             input.rows,
             input.decimalDelimiter,
             input.totalRows,
-            input.progressCallback
+            input.progressCallback,
+            input.isCancelled
         );
 
         if (config.commitTransactionSql) {
@@ -627,7 +638,8 @@ export async function importDataWithBatching(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     _timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     if (!filePath || !targetTable) {
         return {
@@ -672,7 +684,8 @@ export async function importDataWithBatching(
         sourceFile: filePath,
         fileSize: fs.statSync(filePath).size,
         format: path.extname(filePath).replace('.', '').toUpperCase() || 'UNKNOWN',
-        detectedDelimiter: importer.getCsvDelimiter()
+        detectedDelimiter: importer.getCsvDelimiter(),
+        isCancelled
     });
 }
 

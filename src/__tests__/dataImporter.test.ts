@@ -348,6 +348,18 @@ describe('import/dataImporter', () => {
             expect(output).toBe('1\tfirst\\\n"quoted"\\\nlast\\\n\t3\n2\tcontains\\\ttab and ; delimiter\t4\n');
         });
 
+        it('aborts the CSV data stream when the cancellation check is true', async () => {
+            const csvPath = writeTempFile('cancel.csv', 'A,B\n1,2\n3,4\n5,6\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { isCancelled: () => true });
+            await importer.analyzeDataTypes();
+
+            const stream = await importer.createDataStream();
+            const errorPromise = once(stream, 'error');
+            stream.resume();
+            const [error] = await errorPromise as [Error];
+            expect(error.message).toMatch(/cancelled/i);
+        });
+
         it('preserves quotes inside an unquoted field', async () => {
             const csvPath = writeTempFile('literal-quote.csv', 'A,B\n1,He said "OK"\n');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
