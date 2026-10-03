@@ -281,11 +281,11 @@
       "name": "keyword.control.netezza"
     },
     {
-      "match": "(?i)\\b(EXCEPTION|RAISE|OTHERS|SQLSTATE)\\b",
+      "match": "(?i)\\b(EXCEPTION|RAISE|OTHERS|SQLSTATE|TRANSACTION_ABORTED)\\b",
       "name": "keyword.control.netezza"
     },
     {
-      "match": "(?i)\\b(DECLARE|ELSIF|LOOP|WHILE|EXIT|ELSE)\\b",
+      "match": "(?i)\\b(DECLARE|ELSIF|ELSEIF|LOOP|WHILE|EXIT|ELSE)\\b",
       "name": "keyword.control.netezza"
     },
     {

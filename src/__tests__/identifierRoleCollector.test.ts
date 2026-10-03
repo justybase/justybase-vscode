@@ -124,11 +124,12 @@ describe('collectIdentifierOccurrences', () => {
   });
 
   it('classifies NZPLSQL procedure parameters and local variables separately from columns', () => {
-    const sql = `CREATE PROCEDURE p(i INT4)
+    const sql = `CREATE PROCEDURE p(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
 DECLARE
+  i ALIAS FOR $1;
   v INT4;
 BEGIN
   v := i + 1;
@@ -258,7 +259,7 @@ END_PROC;`;
   CREATED_AT TIMESTAMPTZ
 );
 
-CREATE OR REPLACE PROCEDURE ADMIN.SP_COLOR_CHECK(IN p_account INT, OUT p_count INT)
+CREATE OR REPLACE PROCEDURE ADMIN.SP_COLOR_CHECK(IN INT, INT)
 RETURNS INT
 LANGUAGE NZPLSQL
 EXECUTE AS OWNER
@@ -345,11 +346,13 @@ END_PROC;`;
   });
 
   it('uses netezza databaseKind explicitly for NZPLSQL constructs', () => {
-    const sql = `CREATE PROCEDURE p(i INT4)
+    const sql = `CREATE PROCEDURE p(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
-DECLARE v INT4;
+DECLARE
+  i ALIAS FOR $1;
+  v INT4;
 BEGIN
   v := i;
 END;

@@ -351,7 +351,16 @@ describe('Integration Tests - Connection → Query → Results Flow', () => {
                 'D:\\tmp\\query-export.csv',
                 expect.objectContaining({ format: 'csv' })
             );
-            expect(vscodeWindow.showInformationMessage).toHaveBeenCalledWith('Results exported to D:\\tmp\\query-export.csv');
+            expect(vscodeWindow.showInformationMessage).toHaveBeenCalledWith(
+                expect.any(String),
+                'Open File',
+                'Show in Explorer',
+                'Copy to Clipboard',
+                'Close'
+            );
+            const [exportMessage] = (vscodeWindow.showInformationMessage as jest.Mock).mock.calls[0];
+            expect(exportMessage).toContain('Export completed');
+            expect(exportMessage).toContain('D:\\tmp\\query-export.csv');
 
             await connectionManager.dispose();
         });

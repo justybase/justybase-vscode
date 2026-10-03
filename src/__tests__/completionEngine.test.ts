@@ -817,6 +817,34 @@ END;`);
       ]));
     });
 
+    it("completes NZPLSQL DECLARE variables and ALIAS FOR names", async () => {
+      metadataProvider.databaseKind = "netezza";
+      metadataProvider.effectiveDatabase = "JUST_DATA";
+
+      const items = await complete(`CREATE OR REPLACE PROCEDURE ADMIN.MY_PROC(INT)
+RETURNS INT4
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  V_TOTAL INT;
+  V_ARG ALIAS FOR $1;
+BEGIN
+  V_TOTAL := |;
+END;
+END_PROC;`);
+
+      expect(items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          label: "V_TOTAL",
+          kind: CompletionItemKind.Variable,
+        }),
+        expect.objectContaining({
+          label: "V_ARG",
+          kind: CompletionItemKind.Variable,
+        }),
+      ]));
+    });
+
     it("returns DB2 tables for schema dot completion even when no partial object name is typed yet", async () => {
       metadataProvider.databaseKind = "db2";
       metadataProvider.effectiveDatabase = "TESTDB";

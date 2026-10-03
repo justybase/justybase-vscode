@@ -111,6 +111,9 @@ Results are written locally to `Benchmark/lspFeature.results.md` and `Benchmark/
 
 ```bash
 npm run test:metadata-cache:integration  # Local disk-restart/cache contract test
+# Live NZPLSQL grammar matrix (requires NZ_DEV_* + NZ_DEV_ALLOW_FIXTURE_DDL=1):
+# NZ_DEV_PASSWORD=... NZ_DEV_ALLOW_FIXTURE_DDL=1 npx jest --config jest.live.config.js --runInBand \
+#   src/__tests__/integration/nzplsqlProcedureMatrix.live.integration.test.ts
 npm run test:duckdb:integration
 npm run test:file:integration
 npm run test:access:integration
@@ -297,6 +300,18 @@ Type-aware warnings **require** metadata with types. Without connection/cache, S
 4. **Regex NZP** — `procedureRules.ts` calls `shouldUseProcedureRegexFallback()` from `procedureAnalysis.ts`; migrated rules (NZP004/005/006/008/011/013/017/022/024) run only when parse fails
 
 **Note:** SQL030 is reserved for grouped-query ORDER BY warnings; procedure codes use SQL037+.
+
+**Live-verified grammar (Netezza 11.2.2.1).** The NZPLSQL body is compiled lazily at first `CALL`, not at `CREATE`. `src/__tests__/sqlParser/procedure/procedureMatrixCases.ts` is the shared, live-proven case corpus (each row was executed live and, for negative rows, confirmed rejected). `procedureMatrix.test.ts` locks parser verdicts; `nzplsqlProcedureMatrix.live.integration.test.ts` re-verifies against a running database (opt-in, requires `NZ_DEV_*` + `NZ_DEV_ALLOW_FIXTURE_DDL=1`). Proven constraints to preserve:
+
+- Header: `AS` only (`IS` rejected); `RETURNS` + `LANGUAGE NZPLSQL` required; body must be `BEGIN_PROC..END_PROC` or a quoted string.
+- Arguments are **input types only** (`INT`, `(IN INT)`, `VARARGS`); named parameters and `OUT`/`INOUT` are rejected. Name arguments with `ALIAS FOR $n` in `DECLARE`.
+- `DECLARE` supports `ALIAS FOR $n`, `CONSTANT`, `NOT NULL`, `:=`/`DEFAULT`, `VARRAY(n) OF`, `RECORD`, `%TYPE`, `%ROWTYPE`.
+- Cursor-style `FOR r IN SELECT|EXECUTE … LOOP` requires `r` to be declared `RECORD`.
+- Exception handlers: only `WHEN OTHERS` and `WHEN TRANSACTION_ABORTED` (`SQLSTATE`/named exceptions rejected).
+- `RAISE` severities: `DEBUG`, `NOTICE`, `EXCEPTION` only; trailing arguments must be variables/record fields (literals rejected).
+- Unsupported: `PERFORM`, `EXECUTE IMMEDIATE … USING`, `CASE`, `GOTO`, bare `NULL;`, `$$` bodies. `ELSEIF` is accepted as an `ELSIF` synonym.
+
+When changing this grammar, update all of: `packages/sql-core/src/netezza/lexer.ts`, `.../parser.ts`, `src/sqlParser/visitor/*`, `procedureScopeBuilder.ts`, `src/dialects/netezza/sql/keywords.ts`, `dialects/netezza/syntaxes/netezza.tmLanguage.json`, and the live matrix corpus.
 
 ### Netezza Parser: Keywords as Identifiers
 

@@ -6,7 +6,6 @@ import {
     As,
     All,
     Null,
-    Is,
     In,
     When,
     Then,
@@ -14,6 +13,7 @@ import {
     End,
     If,
     Elsif,
+    Elseif,
     Create,
     Replace,
     Table,
@@ -63,16 +63,12 @@ import {
     Raise,
     Notice,
     Debug,
-    Warning,
-    Error,
     Perform,
     Reverse,
-    Out,
-    Inout,
     LabelStart,
     LabelEnd,
-    Sqlstate,
     Others,
+    TransactionAborted,
     Using,
     External,
     SameAs,
@@ -98,6 +94,7 @@ import {
     Minus,
     Multiply,
     Divide,
+    Modulo,
     Concat,
     DoubleColon,
     Assign,
@@ -118,6 +115,7 @@ import {
     Cascade,
     Restrict,
     To,
+    Type,
     Rename,
     Modify,
     Privileges,
@@ -216,6 +214,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
   alterTableRenameTableAction!: AnyRule;
   alterTableSetPrivilegesAction!: AnyRule;
   alterTableCascadeRestrictClause!: AnyRule;
+  /** `%TYPE` / `%ROWTYPE` anchor keyword for Netezza variable declarations. */
+  procedureTypeAnchorKind!: AnyRule;
 
   /** Guard flag to prevent double-registration of alterTableStatement rule. */
   private _alterTableRuleRegistered = false;
@@ -477,6 +477,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
       netezzaSqlLexer.Group,
       netezzaSqlLexer.Type,
       netezzaSqlLexer.Materialized,
+      netezzaSqlLexer.Elseif,
+      netezzaSqlLexer.TransactionAborted,
     ];
   }
 
@@ -545,6 +547,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
       netezzaSqlLexer.When,
       netezzaSqlLexer.Then,
       netezzaSqlLexer.Elsif,
+      netezzaSqlLexer.Elseif,
       netezzaSqlLexer.If,
       netezzaSqlLexer.Else,
       netezzaSqlLexer.End,
@@ -627,6 +630,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
       netezzaSqlLexer.Notice,
       netezzaSqlLexer.Debug,
       netezzaSqlLexer.Error,
+      netezzaSqlLexer.TransactionAborted,
       netezzaSqlLexer.Rollback,
       netezzaSqlLexer.Commit,
       netezzaSqlLexer.Call,
@@ -837,7 +841,8 @@ export class NetezzaSqlParser extends BaseSqlParser {
           ]);
         });
 
-        // CREATE [OR REPLACE] PROCEDURE ... LANGUAGE NZPLSQL AS/IS ...
+        // CREATE [OR REPLACE] PROCEDURE ... LANGUAGE NZPLSQL AS ...
+        // Netezza requires AS; IS is rejected by the backend (verified live).
         this.RULE("createProcedureStatement", () => {
           this.CONSUME(Create);
           this.OPTION(() => {
@@ -850,13 +855,14 @@ export class NetezzaSqlParser extends BaseSqlParser {
           this.OPTION1(() => this.SUBRULE(this.procedureArguments));
           this.CONSUME(RParen);
           this.SUBRULE(this.procedureSignatureSpec);
-          this.OR([
-            { ALT: () => this.CONSUME(As) },
-            { ALT: () => this.CONSUME(Is) },
-          ]);
+          this.CONSUME(As);
           this.SUBRULE2(this.procedureBody);
         });
 
+        // Netezza stored procedures take input arguments only, expressed as
+        // types (optionally prefixed with IN). Named parameters and OUT/INOUT
+        // are rejected by the backend (verified live); use ALIAS FOR $n inside
+        // the body to name arguments.
         this.RULE("procedureArguments", () => {
           this.OR([
             { ALT: () => this.CONSUME(Varargs) },
@@ -873,45 +879,12 @@ export class NetezzaSqlParser extends BaseSqlParser {
         });
 
         this.RULE("procedureArgumentMode", () => {
-          this.OR([
-            { ALT: () => this.CONSUME(Inout) },
-            { ALT: () => this.CONSUME(Out) },
-            { ALT: () => this.CONSUME(In) },
-          ]);
+          this.CONSUME(In);
         });
 
         this.RULE("procedureArgument", () => {
-          this.OR([
-            {
-              GATE: () => {
-                let index = 1;
-                const modeTypes = [In, Out, Inout];
-                if (modeTypes.includes(this.LA(index).tokenType)) {
-                  index++;
-                }
-                const nameToken = this.LA(index);
-                const nextToken = this.LA(index + 1);
-                return (
-                  (nameToken.tokenType === Identifier ||
-                    nameToken.tokenType === QuotedIdentifier) &&
-                  nextToken.tokenType !== Comma &&
-                  nextToken.tokenType !== RParen &&
-                  nextToken.tokenType !== Assign
-                );
-              },
-              ALT: () => {
-                this.OPTION(() => this.SUBRULE(this.procedureArgumentMode));
-                this.SUBRULE(this.identifier);
-                this.SUBRULE(this.typeName);
-              },
-            },
-            {
-              ALT: () => {
-                this.OPTION1(() => this.SUBRULE1(this.procedureArgumentMode));
-                this.SUBRULE1(this.typeName);
-              },
-            },
-          ]);
+          this.OPTION(() => this.SUBRULE(this.procedureArgumentMode));
+          this.SUBRULE(this.typeName);
         });
 
         this.RULE("procedureReturnType", () => {
@@ -1034,6 +1007,18 @@ export class NetezzaSqlParser extends BaseSqlParser {
           this.MANY1(() => this.CONSUME1(Semicolon));
         });
 
+        this.RULE("procedureTypeAnchorKind", () => {
+          this.OR([
+            { ALT: () => this.CONSUME(Type) },
+            {
+              GATE: () =>
+                this.LA(1).tokenType === Identifier &&
+                this.LA(1).image.toUpperCase() === "ROWTYPE",
+              ALT: () => this.CONSUME(Identifier),
+            },
+          ]);
+        });
+
         this.RULE("variableDeclaration", () => {
           this.OR([
             { ALT: () => this.CONSUME(Identifier) },
@@ -1079,12 +1064,25 @@ export class NetezzaSqlParser extends BaseSqlParser {
               ALT: () => {
                 this.OPTION(() => this.CONSUME(Constant));
                 this.SUBRULE(this.typeName);
+                // Qualified %TYPE/%ROWTYPE anchor, e.g. DB.SCHEMA.TBL.COL%TYPE
+                // or DB.SCHEMA.TBL%ROWTYPE (verified live).
+                this.MANY(() => {
+                  this.CONSUME(Dot);
+                  this.SUBRULE2(this.identifier);
+                });
+                this.OPTION3(() => {
+                  this.CONSUME(Modulo);
+                  this.SUBRULE3(this.procedureTypeAnchorKind);
+                });
                 this.OPTION1(() => {
                   this.CONSUME(Not);
                   this.CONSUME(Null);
                 });
                 this.OPTION2(() => {
-                  this.CONSUME(Assign);
+                  this.OR4([
+                    { ALT: () => this.CONSUME(Assign) },
+                    { ALT: () => this.CONSUME(Default) },
+                  ]);
                   this.SUBRULE(this.expression);
                 });
               },
@@ -1149,7 +1147,6 @@ export class NetezzaSqlParser extends BaseSqlParser {
             { ALT: () => this.SUBRULE(this.exitStatement) },
             { ALT: () => this.SUBRULE(this.raiseStatement) },
             { ALT: () => this.SUBRULE(this.returnStatement) },
-            { ALT: () => this.SUBRULE(this.performStatement) },
             { ALT: () => this.SUBRULE(this.assignmentStatement) },
             { ALT: () => this.SUBRULE(this.rollbackStatement) },
             { ALT: () => this.SUBRULE(this.commitStatement) },
@@ -1244,7 +1241,10 @@ export class NetezzaSqlParser extends BaseSqlParser {
         });
 
         this.RULE("elsifClause", () => {
-          this.CONSUME(Elsif);
+          this.OR([
+            { ALT: () => this.CONSUME(Elsif) },
+            { ALT: () => this.CONSUME(Elseif) },
+          ]);
           this.SUBRULE(this.expression);
           this.CONSUME(Then);
           this.SUBRULE(this.procedureStatements);
@@ -1309,35 +1309,32 @@ export class NetezzaSqlParser extends BaseSqlParser {
           });
         });
 
+        // Netezza supports only RAISE NOTICE, RAISE EXCEPTION, and RAISE DEBUG
+        // (WARNING/ERROR are rejected by the backend; verified live).
         this.RULE("raiseStatement", () => {
           this.CONSUME(Raise);
           this.OR([
             { ALT: () => this.CONSUME(Notice) },
-            { ALT: () => this.CONSUME(Warning) },
-            { ALT: () => this.CONSUME(Debug) },
-            { ALT: () => this.CONSUME(Error) },
             { ALT: () => this.CONSUME(Exception) },
+            { ALT: () => this.CONSUME(Debug) },
           ]);
           this.OPTION(() => this.CONSUME(StringLiteral));
           this.MANY(() => {
             this.CONSUME(Comma);
-            this.SUBRULE(this.expression);
+            this.SUBRULE(this.columnReference);
           });
         });
 
+        // EXECUTE IMMEDIATE only; Netezza does not support the USING clause
+        // (verified live). Build dynamic SQL with concatenation instead.
         this.RULE("executeImmediateStatement", () => {
           this.CONSUME(Execute);
           this.CONSUME(Immediate);
           this.SUBRULE(this.expression);
-          this.OPTION(() => {
-            this.CONSUME(Using);
-            this.AT_LEAST_ONE_SEP({
-              SEP: Comma,
-              DEF: () => this.SUBRULE1(this.expression),
-            });
-          });
         });
 
+        // Netezza supports only WHEN OTHERS and WHEN TRANSACTION_ABORTED.
+        // Named exceptions and WHEN SQLSTATE are rejected (verified live).
         this.RULE("exceptionBlock", () => {
           this.CONSUME(Exception);
           this.AT_LEAST_ONE(() => this.SUBRULE(this.whenClause));
@@ -1347,13 +1344,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
           this.CONSUME(When);
           this.OR([
             { ALT: () => this.CONSUME(Others) },
-            {
-              ALT: () => {
-                this.CONSUME(Sqlstate);
-                this.CONSUME(StringLiteral);
-              },
-            },
-            { ALT: () => this.SUBRULE(this.identifier) },
+            { ALT: () => this.CONSUME(TransactionAborted) },
           ]);
           this.CONSUME(Then);
           this.SUBRULE(this.procedureStatements);
