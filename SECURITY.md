@@ -2,7 +2,9 @@
 
 The VS Code extension and companion extensions can access database credentials
 and query results. Treat connection profiles, SQL text, result data, logs,
-backups, and Extension Host artifacts as sensitive.
+backups, and Extension Host artifacts as sensitive. The maintained trust
+boundaries and controls are documented in
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 ## Reporting a vulnerability
 
@@ -20,8 +22,8 @@ reproduction steps that use synthetic data, and any proposed mitigation.
 - Keep database passwords, local secrets, and backup files out of source
   control and CI logs.
 - Keep connection profiles read-only unless a write operation is explicitly
-  previewed and confirmed. Preview tokens are short-lived and bound to the
-  exact user, connection, database, mode, and SQL.
+  previewed and confirmed. Show the exact generated SQL in a modal
+  confirmation before executing a write or DDL statement.
 - Do not bypass user confirmation for writes or weaken read-only gates to make
   a test pass. Use a synthetic fixture or an explicit opt-in integration test.
 - Review Extension Host screenshots, traces, exports, and backups before
