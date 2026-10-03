@@ -1,6 +1,7 @@
 import { SqlParser } from '../../sql/sqlParser';
 
-const FORBIDDEN_STATEMENT_KEYWORDS = /\b(?:INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|CALL|EXEC(?:UTE)?|COPY|GRANT|REVOKE)\b/i;
+const FORBIDDEN_STATEMENT_KEYWORDS = /\b(?:INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|CALL|EXEC(?:UTE)?|COPY|GRANT|REVOKE|INTO)\b/i;
+const LOCKING_CLAUSE = /\bFOR\s+(?:(?:NO\s+)?KEY\s+)?(?:UPDATE|SHARE)\b/i;
 
 function withoutSqlStringsAndComments(sql: string): string {
     return sql
@@ -27,7 +28,11 @@ export function buildSafeExplainSql(sql: string, verbose = false): string {
     if (/^EXPLAIN\b/i.test(normalized)) {
         throw new Error('Provide the SELECT or WITH statement without an EXPLAIN prefix.');
     }
-    if (!/^(?:SELECT|WITH)\b/i.test(normalized) || FORBIDDEN_STATEMENT_KEYWORDS.test(normalized)) {
+    // `SELECT ... INTO` materializes a table and locking clauses acquire row
+    // locks, so neither is planner-only. Reject them alongside DML/DDL.
+    if (!/^(?:SELECT|WITH)\b/i.test(normalized)
+        || FORBIDDEN_STATEMENT_KEYWORDS.test(normalized)
+        || LOCKING_CLAUSE.test(normalized)) {
         throw new Error('AI EXPLAIN accepts only a single SELECT or WITH ... SELECT statement.');
     }
 

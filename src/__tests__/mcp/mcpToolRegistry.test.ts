@@ -110,6 +110,35 @@ describe('MCP tool registry', () => {
         expect(introspection.explain).toHaveBeenCalledWith('EXPLAIN VERBOSE SELECT * FROM admin.orders', undefined);
     });
 
+    it.each(['explain_sql', 'analyze_query_plan'])(
+        'blocks table-materializing and row-locking SQL through %s on both transports',
+        async name => {
+            (introspection.explain as jest.Mock).mockClear();
+            (introspection.analyzeQueryPlan as jest.Mock).mockClear();
+            const tool = tools.find(t => t.name === name)!;
+
+            const pinned = await tool.handler({ sql: 'SELECT * INTO backup FROM admin.orders' });
+            expect(pinned.isError).toBe(true);
+
+            const locked = await tool.handler({ sql: 'SELECT * FROM admin.orders FOR UPDATE' });
+            expect(locked.isError).toBe(true);
+
+            expect(introspection.explain).not.toHaveBeenCalled();
+            expect(introspection.analyzeQueryPlan).not.toHaveBeenCalled();
+        },
+    );
+
+    it('routes safe SQL from both user-SQL tools through the shared gate', async () => {
+        (introspection.explain as jest.Mock).mockClear();
+        (introspection.analyzeQueryPlan as jest.Mock).mockClear();
+
+        await tools.find(t => t.name === 'explain_sql')!.handler({ sql: 'SELECT 1' });
+        await tools.find(t => t.name === 'analyze_query_plan')!.handler({ sql: 'WITH x AS (SELECT 1) SELECT * FROM x' });
+
+        expect(introspection.explain).toHaveBeenCalledWith('EXPLAIN SELECT 1', undefined);
+        expect(introspection.analyzeQueryPlan).toHaveBeenCalledWith('EXPLAIN WITH x AS (SELECT 1) SELECT * FROM x', undefined);
+    });
+
     it('validate_sql reports parser issues without a connection', async () => {
         const tool = tools.find(t => t.name === 'validate_sql')!;
         const result = await tool.handler({ sql: 'SELECT * FRO' });
