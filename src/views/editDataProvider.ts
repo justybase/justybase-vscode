@@ -9,6 +9,28 @@ import { ConnectionManager } from '../core/connectionManager';
 import { getTableMetadata, toWebviewFormat } from '../providers/tableMetadataProvider';
 import type { MetadataQueryKind } from '../metadata/metadataQueryDiagnostics';
 import { runWithMetadataQueryConcurrencyLimit } from '../metadata/metadataQueryLimiter';
+import { formatIdentifierForSql } from '../utils/identifierUtils';
+
+/**
+ * The webview supplies column names and type expressions for DDL. Validate them
+ * before interpolating into SQL: identifiers must be plain, and a type
+ * expression may only contain the characters a column type uses.
+ */
+function assertValidIdentifier(value: unknown, label: string): string {
+    const name = typeof value === 'string' ? value.trim() : '';
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error(`Invalid ${label}: "${String(value)}". Use only letters, numbers, and underscores.`);
+    }
+    return name;
+}
+
+function assertSafeTypeExpression(value: unknown): string {
+    const type = typeof value === 'string' ? value.trim() : '';
+    if (!type || !/^[A-Za-z][A-Za-z0-9_ (),.]*$/.test(type)) {
+        throw new Error(`Invalid column type: "${String(value)}".`);
+    }
+    return type;
+}
 
 export interface EditDataItem {
     label: string;
@@ -17,6 +39,18 @@ export interface EditDataItem {
     connectionName: string;
     [key: string]: unknown;
 }
+
+/**
+ * Per-panel lifecycle state. A panel is a single-shot owner of one table view,
+ * so the state is keyed by the panel and dropped with it.
+ */
+interface EditDataPanelState {
+    loadGeneration: number;
+    disposed: boolean;
+    saveInFlight: boolean;
+}
+
+const panelStates = new WeakMap<vscode.WebviewPanel, EditDataPanelState>();
 
 export class EditDataProvider {
     public static readonly viewType = 'netezza.editData';
@@ -54,6 +88,14 @@ export class EditDataProvider {
 
         // Set HTML
         panel.webview.html = this._getHtmlForWebview(panel.webview, extensionUri, fullTableName);
+
+        const state: EditDataPanelState = { loadGeneration: 0, disposed: false, saveInFlight: false };
+        panelStates.set(panel, state);
+        panel.onDidDispose(() => {
+            state.disposed = true;
+            // Invalidate any in-flight request so late results are discarded.
+            state.loadGeneration += 1;
+        });
 
         // Load Data and Metadata
         this._loadData(panel, database, schema, tableName, item.connectionName, context, connectionManager);
@@ -112,22 +154,26 @@ export class EditDataProvider {
                             'Table comment updated'
                         );
                         break;
-                    case 'updateColumnComment':
+                    case 'updateColumnComment': {
+                        const commentColumn = assertValidIdentifier(message.column, 'column name');
                         await this._execSimpleCommand(
                             context,
                             connectionManager,
                             item.connectionName,
-                            `COMMENT ON COLUMN ${fullTableName}.${message.column} IS '${(message.comment || '').replace(/'/g, "''")}'`,
+                            `COMMENT ON COLUMN ${fullTableName}.${formatIdentifierForSql(commentColumn)} IS '${(message.comment || '').replace(/'/g, "''")}'`,
                             'Column comment updated'
                         );
                         break;
-                    case 'addColumn':
+                    }
+                    case 'addColumn': {
+                        const newColumn = assertValidIdentifier(message.name, 'column name');
+                        const newType = assertSafeTypeExpression(message.type);
                         await this._execSimpleCommand(
                             context,
                             connectionManager,
                             item.connectionName,
-                            `ALTER TABLE ${fullTableName} ADD COLUMN ${message.name} ${message.type}`,
-                            `Column ${message.name} added`,
+                            `ALTER TABLE ${fullTableName} ADD COLUMN ${formatIdentifierForSql(newColumn)} ${newType}`,
+                            `Column ${newColumn} added`,
                             true // refresh after
                         );
                         this._loadData(
@@ -140,13 +186,15 @@ export class EditDataProvider {
                             connectionManager
                         );
                         break;
-                    case 'dropColumn':
+                    }
+                    case 'dropColumn': {
+                        const dropColumn = assertValidIdentifier(message.column, 'column name');
                         await this._execSimpleCommand(
                             context,
                             connectionManager,
                             item.connectionName,
-                            `ALTER TABLE ${fullTableName} DROP COLUMN ${message.column}`,
-                            `Column ${message.column} dropped`,
+                            `ALTER TABLE ${fullTableName} DROP COLUMN ${formatIdentifierForSql(dropColumn)}`,
+                            `Column ${dropColumn} dropped`,
                             true
                         );
                         this._loadData(
@@ -159,7 +207,11 @@ export class EditDataProvider {
                             connectionManager
                         );
                         break;
+                    }
 
+                    case 'closePanel':
+                        panel.dispose();
+                        break;
                     case 'error':
                         vscode.window.showErrorMessage(message.text);
                         break;
@@ -200,6 +252,10 @@ export class EditDataProvider {
         options: { whereClause?: string; columns?: string } = {}
     ) {
         const fullTableName = `${db}.${schema}.${table}`;
+        const state = panelStates.get(panel);
+        const generation = state ? ++state.loadGeneration : 0;
+        const isStale = (): boolean => Boolean(state && (state.disposed || state.loadGeneration !== generation));
+        if (state?.disposed) return;
         try {
             this._postMessage(panel, { command: 'setLoading', loading: true, message: 'Fetching data...' });
 
@@ -304,6 +360,7 @@ export class EditDataProvider {
 
             console.log('[EditDataProvider] Sending to webview:', { dataRows: data.length, columns: columns.length });
 
+            if (isStale()) return;
             this._postMessage(panel, {
                 command: 'setData',
                 data,
@@ -314,19 +371,43 @@ export class EditDataProvider {
                 }
             });
         } catch (err: unknown) {
+            if (isStale()) return;
             const msg = err instanceof Error ? err.message : String(err);
             vscode.window.showErrorMessage(`Failed to load data: ${msg}`);
             this._postMessage(panel, { command: 'setError', text: msg });
         } finally {
-            this._postMessage(panel, { command: 'setLoading', loading: false });
+            if (!isStale()) {
+                this._postMessage(panel, { command: 'setLoading', loading: false });
+            }
         }
     }
 
     private static async _handleSave(
+        panel: vscode.WebviewPanel,
+        changes: EditDataChanges,
+        tableName: string,
+        connectionName: string,
+        context: vscode.ExtensionContext,
+        connectionManager: ConnectionManager
+    ) {
+        const state = panelStates.get(panel);
+        if (state?.saveInFlight) {
+            vscode.window.showInformationMessage('A save is already in progress.');
+            return;
+        }
+        if (state) state.saveInFlight = true;
+        try {
+            await this._executeSave(panel, changes, tableName, connectionName, context, connectionManager);
+        } finally {
+            if (state) state.saveInFlight = false;
+        }
+    }
+
+    private static async _executeSave(
         _panel: vscode.WebviewPanel,
         changes: EditDataChanges,
         tableName: string,
-        _connectionName: string,
+        connectionName: string,
         context: vscode.ExtensionContext,
         connectionManager: ConnectionManager
     ) {
@@ -374,28 +455,31 @@ export class EditDataProvider {
         }
 
         try {
-            // Execute as batch/sequential
-            // Wrapped in explicit BEGIN/COMMIT transaction block
+            // Execute as batch/sequential and wrap in an explicit transaction so a
+            // mid-batch failure does not leave partial writes behind.
             const batch = ['BEGIN', ...queries, 'COMMIT'];
-
-            // To ensure they run in one transaction, we need simple query mode usually,
-            // but runQueriesSequentially does item by item.
-            // If any fails, we want rollback.
-            // Netezza via ODBC usually auto-commits unless in transaction.
-
             await runQueriesSequentially(context, batch, connectionManager);
 
             vscode.window.showInformationMessage(`Successfully executed ${queries.length} changes.`);
         } catch (err: unknown) {
+            // Best-effort rollback: if the failed batch left an open transaction
+            // on the pooled session, release it instead of holding locks.
+            try {
+                await runQueryRaw(context, 'ROLLBACK', true, connectionManager, connectionName);
+            } catch {
+                // The pooled session may already have rolled back or disconnected.
+            }
             vscode.window.showErrorMessage(`Failed to save changes: ${err instanceof Error ? err.message : String(err)}`);
-            // Attempt rollback if mid-way? (Requires session persistence which runQueriesSequentially *might* not guarantee if it opens new conns?
-            // Actually runQueriesSequentially in this ext opens one connection and reuses it?
-            // Checking runQueriesSequentially implementation is out of scope but assuming it works for now.
         }
     }
 
     private static _postMessage(panel: vscode.WebviewPanel, message: EditDataPanelOutboundMessage) {
-        void panel.webview.postMessage(message);
+        const state = panelStates.get(panel);
+        if (state?.disposed) return;
+        void panel.webview.postMessage(message).then(undefined, () => {
+            // The panel can be disposed between the guard and the post; the
+            // rejection is expected and must not surface as unhandled.
+        });
     }
 
     private static _formatValue(val: unknown): string {
@@ -458,6 +542,7 @@ export class EditDataProvider {
                             <button id="refreshBtn" title="Apply Filter / Refresh">Refresh</button>
                             <button id="addRowBtn">Add Row</button>
                             <button id="saveBtn" class="primary">Save Changes</button>
+                            <button id="closeBtn" title="Close the editor">Close</button>
                         </div>
                     </div>
                     <div id="gridContainer" class="grid-container"></div>

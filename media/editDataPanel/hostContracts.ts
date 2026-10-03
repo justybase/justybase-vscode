@@ -42,6 +42,7 @@ export type EditDataPanelWebviewToHostMessage =
     | { command: 'updateColumnComment'; column: string; comment: string }
     | { command: 'addColumn'; name: string; type: string }
     | { command: 'dropColumn'; column: string }
+    | { command: 'closePanel' }
     | { command: 'error'; text: string }
     | { command: 'info'; text: string };
 
