@@ -196,4 +196,60 @@ describe('result panel protocol', () => {
         expect(runtime.parseResultPanelWebviewMessage(null)).toBeUndefined();
         expect(runtime.parseResultPanelHostMessage({ command: 'not-a-command' })).toBeUndefined();
     });
+
+    describe('adversarial payloads', () => {
+        const loadRuntime = (): {
+            parseResultPanelWebviewMessage: (message: unknown) => unknown;
+            parseResultPanelHostMessage: (message: unknown) => unknown;
+        } => require('../contracts/webviews/resultPanelRuntime');
+
+        it.each([
+            ['null', null],
+            ['array', [1, 2, 3]],
+            ['string', 'switchResultSet'],
+            ['number', 42],
+            ['boolean', true],
+            ['function', () => undefined],
+            ['command is a number', { command: 7 }],
+            ['command is an object', { command: {} }],
+            ['command is an array', { command: ['ready'] }],
+            ['command is empty', { command: '' }],
+        ])('rejects a non-record or non-string command (%s)', (_label, payload) => {
+            expect(loadRuntime().parseResultPanelWebviewMessage(payload)).toBeUndefined();
+            expect(loadRuntime().parseResultPanelHostMessage(payload)).toBeUndefined();
+        });
+
+        it.each([
+            ['negative index', { command: 'switchToResultSet', resultSetIndex: -1 }],
+            ['fractional index', { command: 'switchToResultSet', resultSetIndex: 1.5 }],
+            ['NaN index', { command: 'switchToResultSet', resultSetIndex: Number.NaN }],
+            ['infinite index', { command: 'switchToResultSet', resultSetIndex: Number.POSITIVE_INFINITY }],
+            ['string index', { command: 'switchToResultSet', resultSetIndex: '0' }],
+            ['missing source', { command: 'switchResultSet', resultSetIndex: 0 }],
+            ['empty source', { command: 'switchSource', sourceUri: '' }],
+            ['wrong-typed rows', { command: 'appendRows', resultSetIndex: 0, rows: 'not-rows' }],
+            ['unknown format', { command: 'export', sourceUri: 'file:///a.sql', resultSetIndex: 0, format: 'exe' }],
+            ['unknown aggregation action', { command: 'diskQuery', sourceUri: 'file:///a.sql', resultSetIndex: 0, requestId: 1, action: 'drop' }],
+        ])('rejects a known command with an invalid payload (%s)', (_label, payload) => {
+            expect(loadRuntime().parseResultPanelWebviewMessage(payload)).toBeUndefined();
+        });
+
+        it('rejects malformed host streaming payloads at the host boundary', () => {
+            const runtime = loadRuntime();
+            expect(runtime.parseResultPanelHostMessage({ command: 'appendRows', resultSetIndex: 0 })).toBeUndefined();
+            expect(runtime.parseResultPanelHostMessage({ command: 'appendRows', resultSetIndex: 0, rows: [], totalRows: Number.NaN, isLastChunk: false, limitReached: false })).toBeUndefined();
+            expect(runtime.parseResultPanelHostMessage({ command: 'copySelection', copyFormat: 'sql' })).toBeUndefined();
+            expect(runtime.parseResultPanelHostMessage({ command: 'copySelection', copyFormat: 'markdown' })).toEqual({ command: 'copySelection', copyFormat: 'markdown' });
+        });
+
+        it('does not let an own __proto__ property pollute Object.prototype', () => {
+            const runtime = loadRuntime();
+            const payload = JSON.parse('{"command":"ready","__proto__":{"polluted":true}}') as Record<string, unknown>;
+            const parsed = runtime.parseResultPanelWebviewMessage(payload) as Record<string, unknown>;
+
+            expect(parsed.command).toBe('ready');
+            expect(Object.prototype.hasOwnProperty.call(parsed, '__proto__')).toBe(true);
+            expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        });
+    });
 });

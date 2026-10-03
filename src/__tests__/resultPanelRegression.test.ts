@@ -103,6 +103,52 @@ describe('result panel regression command registration', () => {
         }));
     });
 
+    it('writes a sanitized trace artifact without SQL, rows, or raw errors', () => {
+        const fs = require('node:fs') as typeof import('node:fs');
+        const os = require('node:os') as typeof import('node:os');
+        const path = require('node:path') as typeof import('node:path');
+        const traceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-trace-'));
+        const tracePath = path.join(traceDir, 'trace.json');
+        process.env.JUSTYBASE_EXTENSION_HOST_TRACE_PATH = tracePath;
+
+        try {
+            const provider = {
+                getResultPanelTraceSnapshot: () => [{
+                    seq: 1,
+                    at: 1,
+                    origin: 'webview',
+                    phase: 'hydrate_applied',
+                    sourceUri: 'file:///secret/fixture.sql',
+                    error: 'syntax error near secret_col',
+                    sql: 'SELECT secret_col FROM secret_table',
+                    rows: [[1, 'secret']],
+                }],
+                getResultsForSource: () => [],
+                getResultPanelTestBridgePendingRequestCount: () => 0,
+                getResultPanelRuntimeDiagnostics: () => ({
+                    activeCommandCount: 0,
+                    executingSourceCount: 0,
+                    streamingResultCount: 0,
+                    streamingTransportCount: 0,
+                    pendingResultSyncCount: 0,
+                }),
+            } as never;
+
+            buildReport(provider, 'sqlite', 'file:///fixture.sql', Date.now(), 'passed', true);
+
+            const written = JSON.parse(fs.readFileSync(tracePath, 'utf8')) as Array<Record<string, unknown>>;
+            expect(written).toHaveLength(1);
+            expect(written[0].error).toBeUndefined();
+            expect(written[0].sql).toBeUndefined();
+            expect(written[0].rows).toBeUndefined();
+            expect(written[0].sourceUri).toMatch(/^sha256:[0-9a-f]{64}$/u);
+            expect(JSON.stringify(written)).not.toContain('secret');
+        } finally {
+            delete process.env.JUSTYBASE_EXTENSION_HOST_TRACE_PATH;
+            fs.rmSync(traceDir, { recursive: true, force: true });
+        }
+    });
+
     it('does not register commands outside test sessions', () => {
         process.env.NODE_ENV = 'production';
 
