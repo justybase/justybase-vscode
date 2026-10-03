@@ -19,6 +19,7 @@ import {
 } from "./completionCstUtils";
 import {
   isPersistentDocumentDefinition,
+  isProcedureLocalDefinition,
   mergeLocalDefinitions,
 } from "./completionLocalDefinitionUtils";
 import type {
@@ -72,11 +73,17 @@ export class CompletionContextExtractor {
       return stripComments(normalizedText.substring(0, boundary));
     })();
 
-    const cursorCacheKey = databaseKind === "oracle"
-      ? normalizedCursorOffset ?? "full"
-      : "shared";
+    const cursorAwareNetezzaScope =
+      databaseKind === "netezza" && normalizedCursorOffset !== undefined;
+    const cacheScopeText = cursorAwareNetezzaScope
+      ? normalizedText
+      : persistentScopeText;
+    const cursorCacheKey =
+      databaseKind === "oracle" || databaseKind === "netezza"
+        ? normalizedCursorOffset ?? "full"
+        : "shared";
     const contentHash = simpleHash(
-      `${databaseKind ?? "default"}:${persistentScopeText}:${statementBoundary?.start ?? "full"}:${cursorCacheKey}`,
+      `${databaseKind ?? "default"}:${cacheScopeText}:${statementBoundary?.start ?? "full"}:${cursorCacheKey}`,
     );
 
     const cleanText = stripComments(normalizedText);
@@ -99,7 +106,20 @@ export class CompletionContextExtractor {
 
     const allLocalDefs = (() => {
       try {
-        const scopeText = databaseKind === "oracle" ? cleanText : persistentScopeText;
+        const scopeText = (() => {
+          if (databaseKind === "oracle") {
+            return cleanText;
+          }
+          if (databaseKind === "netezza" && normalizedCursorOffset !== undefined) {
+            // Mid-edit procedure bodies (e.g. `V := `) do not parse. Replace the
+            // cursor with a placeholder so DECLARE variables remain discoverable.
+            return this.insertCompletionPlaceholder(
+              normalizedText,
+              normalizedCursorOffset,
+            );
+          }
+          return persistentScopeText;
+        })();
         return this.getSemanticScope(
           document,
           scopeText,
@@ -110,9 +130,23 @@ export class CompletionContextExtractor {
         return [];
       }
     })();
+    const scopedLocalDefs = allLocalDefs.filter((def) => {
+      if (databaseKind !== "netezza" || !isProcedureLocalDefinition(def)) {
+        return true;
+      }
+      return (
+        normalizedCursorOffset !== undefined &&
+        def.scopeStart !== undefined &&
+        def.scopeEnd !== undefined &&
+        normalizedCursorOffset >= def.scopeStart &&
+        normalizedCursorOffset <= def.scopeEnd
+      );
+    });
     const localDefs = (() => {
-      const persistentDefinitions = allLocalDefs.filter((def) =>
-        isPersistentDocumentDefinition(def),
+      const persistentDefinitions = scopedLocalDefs.filter(
+        (def) =>
+          isPersistentDocumentDefinition(def) ||
+          isProcedureLocalDefinition(def),
       );
       if (databaseKind !== "oracle" || normalizedCursorOffset === undefined) {
         return persistentDefinitions;
@@ -134,7 +168,7 @@ export class CompletionContextExtractor {
     const parsed: ParsedContext = {
       contentHash,
       cleanText,
-      allLocalDefs,
+      allLocalDefs: scopedLocalDefs,
       localDefs,
       variables: parsedVariables,
     };
@@ -801,6 +835,76 @@ export class CompletionContextExtractor {
     const sameLine = this.getSameLineFromJoinFragment(linePrefix) !== undefined;
     const multiLine = /(?:FROM|JOIN)\s*$/i.test(prevLine);
     return sameLine || multiLine;
+  }
+
+  /**
+   * Insert a placeholder identifier at the cursor so an incomplete procedure
+   * body still parses for local-definition discovery.
+   */
+  private insertCompletionPlaceholder(
+    text: string,
+    cursorOffset: number,
+  ): string {
+    const clamped = Math.max(0, Math.min(cursorOffset, text.length));
+    const quotedIdentifier = this.getQuotedIdentifierSpanAtOffset(text, clamped);
+    let start = quotedIdentifier?.start ?? clamped;
+    let end = quotedIdentifier?.end ?? clamped;
+
+    if (!quotedIdentifier) {
+      while (
+        start > 0 &&
+        text[start - 1] !== '"' &&
+        this.isNetezzaIdentifierCharacter(text[start - 1])
+      ) {
+        start -= 1;
+      }
+      while (
+        end < text.length &&
+        text[end] !== '"' &&
+        this.isNetezzaIdentifierCharacter(text[end])
+      ) {
+        end += 1;
+      }
+    }
+
+    return `${text.substring(0, start)} ${this.PARSER_PLACEHOLDER} ${text.substring(end)}`;
+  }
+
+  private isNetezzaIdentifierCharacter(char: string): boolean {
+    // eslint-disable-next-line no-misleading-character-class
+    return /[#A-Za-z0-9_$\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F]/.test(char);
+  }
+
+  private getQuotedIdentifierSpanAtOffset(
+    text: string,
+    offset: number,
+  ): { start: number; end: number } | undefined {
+    let quoteStart = -1;
+
+    for (let index = 0; index < text.length; index += 1) {
+      if (text[index] !== '"') {
+        continue;
+      }
+      if (quoteStart < 0) {
+        quoteStart = index;
+        continue;
+      }
+      if (text[index + 1] === '"') {
+        index += 1;
+        continue;
+      }
+
+      const end = index + 1;
+      if (quoteStart <= offset && offset <= end) {
+        return { start: quoteStart, end };
+      }
+      quoteStart = -1;
+    }
+
+    if (quoteStart >= 0 && quoteStart <= offset) {
+      return { start: quoteStart, end: text.length };
+    }
+    return undefined;
   }
 
   private createParserFriendlyText(text: string, cursorOffset: number): string {

@@ -22,6 +22,17 @@ export function isPersistentDocumentDefinition(
   return type === "TEMP TABLE" || type === "GLOBAL TEMP TABLE" || type === "TABLE";
 }
 
+/**
+ * Procedure-local variables/parameters (NZPLSQL DECLARE, ALIAS FOR $n). They
+ * are surfaced by completion as variable items rather than table candidates.
+ */
+export function isProcedureLocalDefinition(
+  definition: LocalDefinition,
+): boolean {
+  const type = definition.type.toUpperCase();
+  return type === "VARIABLE" || type === "PARAMETER";
+}
+
 export function isCompletableLocalDefinition(
   definition: LocalDefinition,
 ): boolean {

@@ -1338,6 +1338,10 @@ export class SqlVisitor
     procedureVisitor.variableDeclaration(this, ctx);
   }
 
+  procedureTypeAnchorKind(): void {
+    // Syntax-only construct (%TYPE / %ROWTYPE anchor).
+  }
+
   procedureStatements(ctx: Record<string, CstNode[]>): void {
     procedureVisitor.procedureStatements(this, ctx);
   }

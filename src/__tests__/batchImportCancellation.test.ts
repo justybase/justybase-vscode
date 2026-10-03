@@ -34,7 +34,7 @@ describe('executeBatchImport cancellation', () => {
         (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(connection);
     });
 
-    it('stops before the first batch when cancelled and closes the connection', async () => {
+    it('stops before opening a connection when already cancelled', async () => {
         const result = await executeBatchImport(config, {
             targetTable: 'public.orders',
             connectionDetails: { host: 'db', dbType: 'postgresql' } as never,
@@ -49,6 +49,34 @@ describe('executeBatchImport cancellation', () => {
 
         expect(result.success).toBe(false);
         expect(result.message).toMatch(/cancelled/i);
+        expect(createConnectedDatabaseConnectionFromDetails).not.toHaveBeenCalled();
+        expect(connection.createCommand).not.toHaveBeenCalled();
+        // Nothing was opened, so there is no connection to close.
+        expect(connection.close).not.toHaveBeenCalled();
+    });
+
+    it('closes the connection when cancelled after connecting but before the first batch', async () => {
+        let checks = 0;
+        const result = await executeBatchImport(config, {
+            targetTable: 'public.orders',
+            connectionDetails: { host: 'db', dbType: 'postgresql' } as never,
+            columns: [{ sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }],
+            appendToExistingTable: true,
+            rows: [['1'], ['2'], ['3']],
+            totalRows: 3,
+            decimalDelimiter: '.',
+            format: 'CSV',
+            // Allow the pre-connect checks (prepare + connect) to pass, then
+            // cancel at the batch boundary so the connection is released.
+            isCancelled: () => {
+                checks += 1;
+                return checks > 3;
+            },
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.message).toMatch(/cancelled/i);
+        expect(createConnectedDatabaseConnectionFromDetails).toHaveBeenCalled();
         expect(connection.createCommand).not.toHaveBeenCalled();
         expect(connection.close).toHaveBeenCalled();
     });
@@ -68,5 +96,6 @@ describe('executeBatchImport cancellation', () => {
 
         expect(result.success).toBe(true);
         expect(connection.createCommand).toHaveBeenCalled();
+        expect(connection.close).toHaveBeenCalled();
     });
 });

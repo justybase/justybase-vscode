@@ -124,8 +124,8 @@ export function raiseStatement(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
-  if (ctx.expression) {
-    ctx.expression.forEach((expr: CstNode) => host.visit(expr));
+  if (ctx.columnReference) {
+    ctx.columnReference.forEach((ref: CstNode) => host.visit(ref));
   }
 }
 

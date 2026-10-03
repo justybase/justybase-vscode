@@ -174,6 +174,8 @@ export const Alias = createToken({ name: 'Alias', pattern: /ALIAS/i, longer_alt:
 export const Constant = createToken({ name: 'Constant', pattern: /CONSTANT/i, longer_alt: Identifier })
 export const If = createToken({ name: 'If', pattern: /IF/i, longer_alt: Identifier })
 export const Elsif = createToken({ name: 'Elsif', pattern: /ELSIF/i, longer_alt: Identifier })
+// Netezza accepts ELSEIF as a synonym for ELSIF in NZPLSQL (verified live).
+export const Elseif = createToken({ name: 'Elseif', pattern: /ELSEIF/i, longer_alt: Identifier })
 export const Loop = createToken({ name: 'Loop', pattern: /LOOP/i, longer_alt: Identifier })
 export const While = createToken({ name: 'While', pattern: /WHILE/i, longer_alt: Identifier })
 export const Exit = createToken({ name: 'Exit', pattern: /EXIT/i, longer_alt: Identifier })
@@ -188,6 +190,8 @@ export const Out = createToken({ name: 'Out', pattern: /OUT\b/i, longer_alt: Ide
 export const Inout = createToken({ name: 'Inout', pattern: /INOUT\b/i, longer_alt: Identifier })
 export const Sqlstate = createToken({ name: 'Sqlstate', pattern: /SQLSTATE/i, longer_alt: Identifier })
 export const Others = createToken({ name: 'Others', pattern: /OTHERS\b/i, longer_alt: Identifier })
+// Netezza NZPLSQL supports only WHEN OTHERS and WHEN TRANSACTION_ABORTED handlers.
+export const TransactionAborted = createToken({ name: 'TransactionAborted', pattern: /TRANSACTION_ABORTED/i, longer_alt: Identifier })
 export const Rollback = createToken({ name: 'Rollback', pattern: /ROLLBACK/i, longer_alt: Identifier })
 export const Commit = createToken({ name: 'Commit', pattern: /COMMIT/i, longer_alt: Identifier })
 export const Call = createToken({ name: 'Call', pattern: /CALL\b/i, longer_alt: Identifier })
@@ -450,6 +454,7 @@ export const allTokens = [
     When,
     Then,
     Elsif,
+    Elseif,
     If,
     Else,
     BeginProc,
@@ -473,6 +478,7 @@ export const allTokens = [
     Out,
     Sqlstate,
     Others,
+    TransactionAborted,
     Rollback,
     Commit,
     Call,

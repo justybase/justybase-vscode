@@ -40,6 +40,7 @@ export class ParserSqlContextCollector {
   private readonly _activeScopes: AliasScope[] = [];
   private _currentScopeBindings: Map<string, AliasInfo> | null = null;
   private readonly _rangeCache: NodeRangeCache = new WeakMap();
+  private readonly _routineRangeStack: Array<{ start: number; end: number }> = [];
 
   public constructor(databaseKind?: DatabaseKind) {
     this._databaseKind = databaseKind;
@@ -112,16 +113,28 @@ export class ParserSqlContextCollector {
     }
 
     switch (node.name) {
-      case "createProcedureStatement":
+      case "createProcedureStatement": {
+        const routineRange = getNodeRange(node, this._rangeCache);
+        if (routineRange) {
+          this._routineRangeStack.push(routineRange);
+        }
         this.visitOracleRoutineParameters(node);
         this.visitChildren(node);
+        if (routineRange) {
+          this._routineRangeStack.pop();
+        }
         break;
+      }
       case "oraclePackageRoutine":
         this.visitOracleRoutineParameters(node);
         this.visitChildren(node);
         break;
       case "oracleAnonymousBlock":
         this.visitOracleBlockVariables(node);
+        this.visitChildren(node);
+        break;
+      case "variableDeclaration":
+        this.visitNetezzaVariableDeclaration(node);
         this.visitChildren(node);
         break;
       case "cteDefinition":
@@ -430,6 +443,26 @@ export class ParserSqlContextCollector {
         );
       }
     }
+  }
+
+  /**
+   * Netezza NZPLSQL `DECLARE` variables (including `ALIAS FOR $n`). Registered
+   * so completion can suggest them inside procedure bodies.
+   */
+  private visitNetezzaVariableDeclaration(node: CstNode): void {
+    const identifier = this.getIdentifierToken(node);
+    if (!identifier) {
+      return;
+    }
+    const range =
+      this._routineRangeStack[this._routineRangeStack.length - 1] ??
+      getNodeRange(node, this._rangeCache);
+    this.setLocalDefinition(
+      normalizeTokenText(identifier),
+      "Variable",
+      [],
+      range,
+    );
   }
 
   private visitOracleBlockVariables(node: CstNode): void {

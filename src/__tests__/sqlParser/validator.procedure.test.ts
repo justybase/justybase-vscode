@@ -94,7 +94,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with EXECUTE AS after LANGUAGE NZPLSQL", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE ADMIN.SP_COLOR_CHECK(IN p_account INT, OUT p_count INT)
+      expectValid(`CREATE OR REPLACE PROCEDURE ADMIN.SP_COLOR_CHECK(IN INT, INT)
 RETURNS INT
 LANGUAGE NZPLSQL
 EXECUTE AS OWNER
@@ -127,7 +127,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with typed parameters", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE ADD_NUMS(p_a INT4, p_b INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE ADD_NUMS(INT4, INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -191,7 +191,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with IF/ELSIF/ELSE/END IF", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE IF_PROC(p_val INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE IF_PROC(INT4)
 RETURNS VARCHAR(20)
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -310,7 +310,7 @@ LANGUAGE NZPLSQL AS
 BEGIN_PROC
 BEGIN
     RAISE DEBUG 'debug message';
-    RAISE NOTICE 'notice message %', 42;
+    RAISE NOTICE 'notice message';
     RAISE EXCEPTION 'critical error';
     RETURN 1;
 END;
@@ -332,8 +332,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate EXECUTE IMMEDIATE with USING", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE DYN_USING_PROC()
+    it("should reject EXECUTE IMMEDIATE with USING (unsupported, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE DYN_USING_PROC()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -554,8 +554,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate procedure with IS instead of AS before body", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE IS_PROC()
+    it("should reject IS instead of AS before body (AS required, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE IS_PROC()
 RETURNS INT4
 LANGUAGE NZPLSQL IS
 BEGIN_PROC
@@ -1013,7 +1013,7 @@ END_PROC;`);
     });
 
     it("should validate RETURN in multiple branches", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE RET_BRANCHES(p_val INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE RET_BRANCHES(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1077,7 +1077,7 @@ END_PROC;`);
   // ========================================================================
   describe("NZPLSQL — parameter validation", () => {
     it("should validate procedure with single parameter", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE SINGLE_PARAM(p_id INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE SINGLE_PARAM(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1088,7 +1088,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with multiple parameters", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE MULTI_PARAM(p_a INT4, p_b VARCHAR(50), p_c NUMERIC(10,2))
+      expectValid(`CREATE OR REPLACE PROCEDURE MULTI_PARAM(INT4, VARCHAR(50), NUMERIC(10,2))
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1124,7 +1124,7 @@ END_PROC;`);
     });
 
     it("should validate parameter usage in expressions", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE PARAM_EXPR(p_base INT4, p_multiplier INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE PARAM_EXPR(INT4, INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1135,7 +1135,7 @@ END_PROC;`);
     });
 
     it("should validate parameter usage in SQL statements", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE PARAM_SQL(p_dept_id INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE PARAM_SQL(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1152,7 +1152,7 @@ END_PROC;`);
   // ========================================================================
   // Complex real-world scenarios
     it("should validate procedure with complete control flow", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE FULL_PROC(p_dept INT4, p_threshold NUMERIC(10,2))
+      expectValid(`CREATE OR REPLACE PROCEDURE FULL_PROC(INT4, NUMERIC(10,2))
 RETURNS INT4
 EXECUTE AS OWNER
 LANGUAGE NZPLSQL AS
@@ -1212,7 +1212,7 @@ END_PROC;`);
   // ========================================================================
   describe("Stored Procedures — additional valid patterns", () => {
     it("should validate procedure with IF/ELSIF/ELSE chain", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE IF_TEST(p_val INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE IF_TEST(INT4)
 RETURNS VARCHAR(50)
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1234,7 +1234,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with nested IF statements", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE NESTED_IF(p_a INT4, p_b INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE NESTED_IF(INT4, INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1279,7 +1279,7 @@ LANGUAGE NZPLSQL AS
 BEGIN_PROC
 BEGIN
     RAISE NOTICE 'Starting procedure';
-    RAISE NOTICE 'Value is: %', 42;
+    RAISE NOTICE 'Value is';
     RETURN 0;
 END;
 END_PROC;`);
@@ -1298,7 +1298,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with RAISE EXCEPTION", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE EXCEPTION_TEST(p_val INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE EXCEPTION_TEST(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1391,7 +1391,7 @@ END_PROC;`);
     });
 
     it("should validate procedure with multiple RETURN paths", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE MULTI_RETURN(p_val INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE MULTI_RETURN(INT4)
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1408,7 +1408,7 @@ END_PROC;`);
     });
 
     it("should validate procedure returning BOOL", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE BOOL_PROC(p_val INT4)
+      expectValid(`CREATE OR REPLACE PROCEDURE BOOL_PROC(INT4)
 RETURNS BOOL
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1421,16 +1421,10 @@ END;
 END_PROC;`);
     });
 
-    it("should validate procedure with named parameters", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE NAMED_PARAMS(p_name VARCHAR(100), p_age INT4, p_salary NUMERIC(10,2))
-RETURNS INT4
-LANGUAGE NZPLSQL AS
-BEGIN_PROC
-BEGIN
-    RETURN 0;
-END;
-END_PROC;`);
-    });
+    // NOTE: named parameters are rejected by the live Netezza backend, but the
+    // Chevrotain grammar cannot distinguish `p_name VARCHAR(100)` from a
+    // multi-word type name without a brittle type whitelist. The live matrix
+    // (nzplsqlProcedureMatrix.live.integration.test.ts) locks the real behavior.
 
     it("should validate procedure with multiple variable declarations", () => {
       expectValid(`CREATE OR REPLACE PROCEDURE MULTI_VARS()
@@ -1580,8 +1574,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate PERFORM statement", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_PERFORM()
+    it("should reject PERFORM (unsupported by NZPLSQL, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_PERFORM()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1592,8 +1586,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate RAISE ERROR and RAISE WARNING", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_RAISE()
+    it("should reject RAISE ERROR and RAISE WARNING (only DEBUG/NOTICE/EXCEPTION, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_RAISE()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1605,8 +1599,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate IN OUT INOUT parameters", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_MODES(
+    it("should reject OUT/INOUT and named parameters (Netezza takes input types only, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_MODES(
     IN p_id INT4,
     OUT p_cnt INT4,
     INOUT p_flag BOOLEAN
@@ -1636,8 +1630,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate EXCEPTION WHEN SQLSTATE and WHEN OTHERS", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_EXC()
+    it("should reject WHEN SQLSTATE (only OTHERS/TRANSACTION_ABORTED, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_EXC()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1799,8 +1793,7 @@ END;';`);
       for i IN 0 .. PROC_ARGUMENT_TYPES.count - 1 LOOP
         typ := PROC_ARGUMENT_TYPES(i);
         idx := i+1;
-        RAISE NOTICE 'argument $% is type % value ''%''',  idx, typ,
-                     $idx;
+        RAISE NOTICE 'argument type % value %',  typ, idx;
         END LOOP;
     END;
   END_PROC;`);
@@ -1856,8 +1849,8 @@ END;
 END_PROC;`);
     });
 
-    it("should validate EXCEPTION WHEN named exception", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_NAMED_EXC()
+    it("should reject EXCEPTION WHEN named exception (only OTHERS/TRANSACTION_ABORTED, verified live)", () => {
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_NAMED_EXC()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
