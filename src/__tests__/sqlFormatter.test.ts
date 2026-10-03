@@ -1,4 +1,6 @@
-import { formatSql } from '../services/sqlFormatter';
+import { formatNetezzaSql, formatSqlWithProfile } from '@justybase/sql-core';
+import { getDatabaseSqlAuthoring } from '../core/sqlAuthoringRegistry';
+import { formatSql } from '../services/sqlFormatting';
 
 describe('sqlFormatter', () => {
     it('formats SELECT lists and keeps Netezza DB..TABLE notation', () => {
@@ -287,6 +289,37 @@ describe('sqlFormatter', () => {
                 '    SUM(total_net_amount) OVER (PARTITION BY customer_id ORDER BY order_month) AS running_total',
                 'FROM monthly_customer_sales'
             ].join('\n')
+        );
+    });
+});
+
+describe('sqlFormatting delegation parity with @justybase/sql-core', () => {
+    const sql = 'select a,b from t where x=1';
+    const options = { tabWidth: 4, keywordCase: 'upper' as const, linesBetweenQueries: 2 };
+
+    it('routes netezza and unknown kinds through the shared Netezza formatter', () => {
+        const expected = formatNetezzaSql(sql, options);
+        expect(formatSql(sql, options)).toBe(expected);
+        expect(formatSql(sql, { ...options, databaseKind: 'netezza' })).toBe(expected);
+    });
+
+    it.each([
+        'postgresql',
+        'mysql',
+        'mssql',
+        'oracle',
+        'db2',
+        'sqlite',
+        'duckdb',
+        'vertica',
+        'snowflake',
+        'clickhouse',
+        'access',
+        'file',
+    ] as const)('delegates %s to the shared formatter with its registered profile', kind => {
+        const profile = getDatabaseSqlAuthoring(kind).formatter;
+        expect(formatSql(sql, { ...options, databaseKind: kind })).toBe(
+            formatSqlWithProfile(sql, profile, options),
         );
     });
 });

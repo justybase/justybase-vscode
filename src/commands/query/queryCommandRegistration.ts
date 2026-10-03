@@ -12,7 +12,7 @@ import {
 } from '../../core/queryRunner';
 import { DuckDbResultBridge } from '../../services/duckdbResultBridge';
 import { SqlParser } from '../../sql/sqlParser';
-import { formatSql } from '../../services/sqlFormatter';
+import { formatSql } from '../../services/sqlFormatting';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
 import type { ViewTableDataCommandArgs } from '../../providers/sqlDataAffordanceResolver';
 import { QueryCommandsDependencies } from './queryCommandTypes';
@@ -749,10 +749,15 @@ export function registerQueryCommands(
                 : editor.document.getText(selection);
 
             try {
+                const documentUri = editor.document.uri?.toString();
+                const databaseKind = documentUri
+                    ? connectionManager.getExecutionDatabaseKind?.(documentUri)
+                    : undefined;
                 const result = formatSql(text, {
                     tabWidth,
                     keywordCase,
-                    linesBetweenQueries: 2
+                    linesBetweenQueries: 2,
+                    databaseKind
                 });
 
                 await editor.edit(editBuilder => {

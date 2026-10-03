@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { formatSql, type SqlFormatterOptions } from "../services/sqlFormatter";
+import { formatSql, type SqlFormatterOptions } from "../services/sqlFormatting";
 import type { ConnectionManager } from "../core/connectionManager";
 
 export class SqlFormattingProvider
