@@ -224,6 +224,7 @@ describe('importDispatcher', () => {
             expect.objectContaining({ dbType }),
             undefined,
             undefined,
+            undefined,
             undefined
         );
     });

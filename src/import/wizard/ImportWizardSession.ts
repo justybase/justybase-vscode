@@ -5,6 +5,7 @@ import type {
   ImportResult,
   ProgressCallback,
 } from "../dataImporter";
+import type { ImportCancellationCheck } from "../importCancellation";
 import type { ImportPreviewService } from "./ImportPreviewService";
 import type { ImportValidationService } from "./ImportValidationService";
 import type { DatabaseImportWizardAdapter } from "./adapters/DatabaseImportWizardAdapter";
@@ -407,6 +408,7 @@ export class ImportWizardSession {
 
   public async executeImport(
     progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck,
   ): Promise<ImportResult> {
     if (this.requireState().hasValidationErrors) {
       throw new Error("Fix validation errors before executing the import.");
@@ -425,6 +427,7 @@ export class ImportWizardSession {
       connectionDetails: this.options.connectionDetails,
       columnOptions: this.buildColumnOptions(),
       progressCallback,
+      isCancelled,
     });
   }
 

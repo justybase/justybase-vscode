@@ -1,5 +1,6 @@
 import type { ConnectionDetails } from '../types';
 import type { ImportColumnOptions, ImportResult, ProgressCallback } from './dataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
 import { getRequiredDatabaseImportWizardProvider } from '../core/connectionFactory';
 
 export type SupportedImportDialect =
@@ -121,7 +122,8 @@ export async function importDataForConnection(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     const connectionValidation = validateImportConnection(connectionDetails);
     if (connectionValidation) {
@@ -170,7 +172,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'netezza': {
@@ -181,7 +184,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'mssql': {
@@ -203,7 +207,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'mysql': {
@@ -214,7 +219,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'clickhouse': {
@@ -225,7 +231,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'duckdb': {
@@ -236,7 +243,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'sqlite': {
@@ -247,7 +255,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'snowflake': {
@@ -273,7 +282,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         default:

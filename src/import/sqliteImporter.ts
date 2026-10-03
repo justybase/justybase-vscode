@@ -8,6 +8,7 @@ import {
     type PreparedImportColumnDescriptor
 } from './batchImportSupport';
 import { getBaseDataType, normalizeDataType } from './dataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
 import { sqliteImportTypeMapper } from '../dialects/sqlite/importTypeMapper';
 
 function mapImportTypeToSqliteType(typeName: string): string {
@@ -49,7 +50,8 @@ export async function importDataToSqlite(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importDataWithBatching(
         sqliteBatchImportConfig,
@@ -58,7 +60,8 @@ export async function importDataToSqlite(
         connectionDetails,
         progressCallback,
         timeoutSeconds,
-        columnOptions
+        columnOptions,
+        isCancelled
     );
 }
 

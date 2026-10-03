@@ -475,6 +475,7 @@ describe('ETL advanced task executors', () => {
                 baseConnectionDetails,
                 expect.any(Function),
                 undefined,
+                undefined,
                 undefined
             );
             expect(result.status).toBe('success');

@@ -9,6 +9,7 @@ import {
     type PreparedImportColumnDescriptor
 } from './batchImportSupport';
 import { getBaseDataType, normalizeDataType } from './dataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 
 const VERTICA_MAX_VARCHAR_LENGTH = 65000;
@@ -132,7 +133,8 @@ export async function importDataToVertica(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importDataWithBatching(
         verticaBatchImportConfig,
@@ -141,7 +143,8 @@ export async function importDataToVertica(
         connectionDetails,
         progressCallback,
         timeoutSeconds,
-        columnOptions
+        columnOptions,
+        isCancelled
     );
 }
 

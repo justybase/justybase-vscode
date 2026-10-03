@@ -10,6 +10,7 @@ import {
     type PreparedImportColumnDescriptor,
 } from './batchImportSupport';
 import { getBaseDataType, normalizeDataType } from './dataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 
 function mapImportTypeToClickHouseType(typeName: string): string {
@@ -131,6 +132,7 @@ export async function importDataToClickHouse(
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
     columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck,
 ): Promise<ImportResult> {
     return importDataWithBatching(
         clickhouseBatchImportConfig,
@@ -140,6 +142,7 @@ export async function importDataToClickHouse(
         progressCallback,
         timeoutSeconds,
         columnOptions,
+        isCancelled,
     );
 }
 
