@@ -29,13 +29,6 @@ interface ExportFormatOption {
     description: string;
 }
 
-interface ExportDestinationOption {
-    id: string;
-    label: string;
-    description: string;
-    formats?: string[];
-}
-
 interface ResultSetExportMetadata {
     resultSetIndex: number;
     rowIndices: number[];
@@ -217,20 +210,12 @@ const PRIMARY_EXPORT_FORMATS: ExportFormatOption[] = [
     { id: 'xpt', label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5' }
 ];
 
-const PRIMARY_EXPORT_DESTINATIONS: ExportDestinationOption[] = [
-    { id: 'file', label: 'Save to file', description: 'Choose a save location' },
-    { id: 'temp', label: 'Copy file to clipboard', description: 'Save to temp directory and copy as file object – paste directly into Explorer' },
-    { id: 'open', label: 'Open file', description: 'Save to temp and open in default app' },
-    {
-        id: 'clipboard',
-        label: 'Copy content to clipboard',
-        description: 'Copy text directly',
-        formats: ['json', 'xml', 'markdown', 'sql', 'parquet']
-    }
-];
+/** Primary export always saves straight to disk (save dialog). Post-save actions
+ * (Open / Show in Explorer / Copy to clipboard / Close) are offered by the host
+ * in the "Export completed" notification. */
+const PRIMARY_EXPORT_DESTINATION = 'file';
 
 type ExportRowScope = 'loaded' | 'all';
-let pendingPrimaryExportScope: ExportRowScope | null = null;
 
 export function collectCurrentViewExportMetadata(): ViewExportMetadata | null {
     return buildFullGridExportPayload();
@@ -258,7 +243,6 @@ function closeExportPrimaryMenu(): void {
     if (menu) {
         menu.style.display = 'none';
     }
-    pendingPrimaryExportScope = null;
     const exportBtn = document.querySelector('#exportSplitBtn .split-btn__primary');
     if (exportBtn) {
         exportBtn.setAttribute('aria-expanded', 'false');
@@ -324,12 +308,6 @@ function closeExportSplitMenu(): void {
     }
 }
 
-function getDestinationsForFormat(formatId: string): ExportDestinationOption[] {
-    return PRIMARY_EXPORT_DESTINATIONS.filter(
-        destination => !destination.formats || destination.formats.includes(formatId)
-    );
-}
-
 function createExportMenuItem(label: string, description: string, onClick: () => void): HTMLDivElement {
     const item = document.createElement('div');
     item.className = 'split-btn__menu-item export-menu-item';
@@ -371,48 +349,12 @@ function renderExportPrimaryFormatMenu(): void {
     });
 }
 
-function renderExportPrimaryDestinationMenu(formatId: string, rowScope: ExportRowScope = 'loaded'): void {
-    const format = PRIMARY_EXPORT_FORMATS.find(item => item.id === formatId);
-    const menu = getElementById('exportPrimaryMenu');
-    if (!menu || !format) {
-        return;
-    }
-
-    menu.innerHTML = '';
-    pendingPrimaryExportScope = rowScope;
-
-    const header = document.createElement('div');
-    header.className = 'export-menu-header export-menu-header--with-back';
-
-    const backButton = document.createElement('button');
-    backButton.type = 'button';
-    backButton.className = 'export-menu-back';
-    backButton.textContent = 'Back';
-    backButton.onclick = (event) => {
-        event.stopPropagation();
-        renderExportPrimaryFormatMenu();
-    };
-    header.appendChild(backButton);
-
-    const title = document.createElement('span');
-    title.className = 'export-menu-header__title';
-    title.textContent = format.label;
-    header.appendChild(title);
-    menu.appendChild(header);
-
-    getDestinationsForFormat(formatId).forEach(destination => {
-        menu.appendChild(createExportMenuItem(destination.label, destination.description, () => {
-            submitPrimaryExportSelection(formatId, destination.id);
-        }));
-    });
-}
-
 function onPrimaryExportFormatSelected(formatId: string): void {
     if (activeResultHasTrailingLimit()) {
         renderExportPrimaryScopeMenu(formatId);
         return;
     }
-    renderExportPrimaryDestinationMenu(formatId);
+    submitPrimaryExportSelection(formatId, 'loaded');
 }
 
 function activeResultHasTrailingLimit(): boolean {
@@ -426,7 +368,6 @@ function renderExportPrimaryScopeMenu(formatId: string): void {
     if (!menu) return;
 
     menu.innerHTML = '';
-    pendingPrimaryExportScope = null;
 
     const header = document.createElement('div');
     header.className = 'export-menu-header export-menu-header--with-back';
@@ -450,18 +391,17 @@ function renderExportPrimaryScopeMenu(formatId: string): void {
     menu.appendChild(createExportMenuItem(
         'Loaded rows',
         'Export only the rows currently loaded in SQL Results.',
-        () => renderExportPrimaryDestinationMenu(formatId, 'loaded'),
+        () => submitPrimaryExportSelection(formatId, 'loaded'),
     ));
     menu.appendChild(createExportMenuItem(
         'ALL rows',
         'Re-run SQL without LIMIT, then export all returned rows.',
-        () => renderExportPrimaryDestinationMenu(formatId, 'all'),
+        () => submitPrimaryExportSelection(formatId, 'all'),
     ));
 }
 
-function submitPrimaryExportSelection(formatId: string, destinationId: string): void {
+function submitPrimaryExportSelection(formatId: string, rowScope: ExportRowScope = 'loaded'): void {
     const exportData = collectCurrentViewExportMetadata();
-    const rowScope = pendingPrimaryExportScope ?? 'loaded';
     closeExportPrimaryMenu();
     closeExportSplitMenu();
 
@@ -473,7 +413,7 @@ function submitPrimaryExportSelection(formatId: string, destinationId: string): 
         command: 'initiateExportWithSelection',
         data: exportData,
         format: formatId,
-        destination: destinationId,
+        destination: PRIMARY_EXPORT_DESTINATION,
         rowScope,
     });
 }

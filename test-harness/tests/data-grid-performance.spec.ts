@@ -316,7 +316,6 @@ async function clickCsvExport(page: Page): Promise<ExportResult> {
     const menu = page.locator('#exportPrimaryMenu');
     await expect(menu).toBeVisible();
     await menu.getByRole('menuitem', { name: /^CSV Comma separated values$/ }).click();
-    await menu.getByRole('menuitem', { name: /^Save to file/ }).click();
     await page.waitForFunction(() => window.__hostMessages.some(item => item.message?.command === 'initiateExportWithSelection'));
     return page.evaluate((start) => window.__dataGridPerf.exportState(start) as ExportResult, startedAt);
 }

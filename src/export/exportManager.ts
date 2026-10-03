@@ -123,7 +123,7 @@ export class ExportManager {
                     }
                 }
             );
-            vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
+            await this.showExportCompleted(uri.fsPath, format.toUpperCase());
         } catch (err: unknown) {
             if (err instanceof ExportCancelledError) {
                 vscode.window.showInformationMessage(
@@ -149,7 +149,7 @@ export class ExportManager {
 
         if (uri) {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data));
-            vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
+            await this.showExportCompleted(uri.fsPath, 'CSV');
         }
     }
 
@@ -166,7 +166,7 @@ export class ExportManager {
 
         if (uri) {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data));
-            vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
+            await this.showExportCompleted(uri.fsPath, 'JSON');
         }
     }
 
@@ -183,7 +183,7 @@ export class ExportManager {
 
         if (uri) {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data));
-            vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
+            await this.showExportCompleted(uri.fsPath, 'XML');
         }
     }
 
@@ -200,7 +200,7 @@ export class ExportManager {
 
         if (uri) {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data));
-            vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
+            await this.showExportCompleted(uri.fsPath, 'SQL');
         }
     }
 
@@ -217,7 +217,7 @@ export class ExportManager {
 
         if (uri) {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data));
-            vscode.window.showInformationMessage(`Results exported to ${uri.fsPath}`);
+            await this.showExportCompleted(uri.fsPath, 'Markdown');
         }
     }
 
@@ -235,6 +235,7 @@ export class ExportManager {
         if (uri) {
             vscode.window.showInformationMessage(`Parquet string export not supported. Saving as text.`);
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data));
+            await this.showExportCompleted(uri.fsPath, 'Parquet');
         }
     }
 
@@ -546,7 +547,7 @@ export class ExportManager {
             vscode.env.openExternal(vscode.Uri.file(targetPath));
             vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
         } else {
-            vscode.window.showInformationMessage(`Exported to ${targetPath}`);
+            await this.showExportCompleted(targetPath, ext.toUpperCase(), this.describeExcelExport(item));
         }
     }
 
@@ -605,7 +606,7 @@ export class ExportManager {
             vscode.env.openExternal(vscode.Uri.file(targetPath));
             vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
         } else {
-            vscode.window.showInformationMessage(`Exported to ${targetPath}`);
+            await this.showExportCompleted(targetPath, 'Parquet');
         }
     }
 
@@ -664,7 +665,7 @@ export class ExportManager {
             vscode.env.openExternal(vscode.Uri.file(targetPath));
             vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
         } else {
-            vscode.window.showInformationMessage(`Exported to ${targetPath}`);
+            await this.showExportCompleted(targetPath, 'XPT');
         }
     }
 
@@ -726,7 +727,7 @@ export class ExportManager {
             vscode.env.openExternal(vscode.Uri.file(targetPath));
             vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
         } else {
-            vscode.window.showInformationMessage(`Exported to ${targetPath}`);
+            await this.showExportCompleted(targetPath, format.toUpperCase());
         }
     }
 
@@ -822,23 +823,69 @@ export class ExportManager {
                 vscode.env.openExternal(vscode.Uri.file(targetPath));
                 vscode.window.showInformationMessage(`Exported all results to temp and opened: ${targetPath}`);
             } else {
-                // Ask user what to do next for 'file' destination
-                const action = await vscode.window.showInformationMessage(
-                    `Successfully exported ${metadata.results.length} result sets to ${targetPath}`,
-                    'Open File',
-                    'Open Folder',
-                    'Close'
+                await this.showExportCompleted(
+                    targetPath,
+                    selectedFormat.id.toUpperCase(),
+                    `${metadata.results.length} result set(s)`,
                 );
-
-                if (action === 'Open File') {
-                    vscode.env.openExternal(vscode.Uri.file(targetPath));
-                } else if (action === 'Open Folder') {
-                    vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(targetPath));
-                }
             }
         } catch (error: unknown) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Export failed: ${errorMsg}`);
         }
+    }
+
+    private describeExcelExport(item: { rows?: unknown; sql?: string }): string | undefined {
+        let detail: string | undefined;
+        if (item && Array.isArray((item as { rows?: unknown }).rows)) {
+            const count = ((item as { rows?: unknown }).rows as unknown[]).length;
+            detail = `${count} row(s)`;
+        }
+        const sql = (item as { sql?: string }).sql?.trim();
+        if (sql) {
+            detail = detail ? `${detail} · with SQL sheet` : 'with SQL sheet';
+        }
+        return detail;
+    }
+
+    /**
+     * "Export completed" notification shown right after a save-to-disk export.
+     * Offers Open File / Show in Explorer / Copy to Clipboard / Close.
+     * Close (or dismiss) does nothing.
+     */
+    private async showExportCompleted(
+        targetPath: string,
+        formatLabel?: string,
+        detail?: string,
+    ): Promise<void> {
+        const fileName = path.basename(targetPath);
+        const headline = formatLabel ? `${formatLabel} · ${fileName}` : fileName;
+        const lines = ['Export completed', headline];
+        if (detail) {
+            lines.push(detail);
+        }
+        lines.push(targetPath);
+        const action = await vscode.window.showInformationMessage(
+            lines.join('\n'),
+            'Open File',
+            'Show in Explorer',
+            'Copy to Clipboard',
+            'Close',
+        );
+        if (action === 'Open File') {
+            await vscode.env.openExternal(vscode.Uri.file(targetPath));
+        } else if (action === 'Show in Explorer') {
+            await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(targetPath));
+        } else if (action === 'Copy to Clipboard') {
+            const success = await copyXlsbToClipboard(targetPath);
+            if (success) {
+                vscode.window.showInformationMessage(
+                    'File copied to clipboard – paste directly into Explorer.',
+                );
+            } else {
+                vscode.window.showWarningMessage(`Exported to ${targetPath} (copy to clipboard failed)`);
+            }
+        }
+        // 'Close' or dismissed (undefined) → do nothing.
     }
 }
