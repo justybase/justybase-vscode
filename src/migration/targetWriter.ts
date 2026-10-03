@@ -420,10 +420,9 @@ async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResu
         'netezza',
     );
     const virtualFileName = buildNetezzaVirtualImportName('virtual_migration_import');
-    const logDir = path.join(os.tmpdir(), 'netezza_migration_logs');
-    if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-    }
+    // Unique per-migration log directory, removed in the finally block so a
+    // failed or successful load does not leak temp files.
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza_migration_logs_'));
 
     let rowsRead = 0;
     const stream = new NetezzaMigrationReadable(
@@ -501,6 +500,7 @@ async function writeToNetezza(input: TargetWriterInput): Promise<TargetWriteResu
     } finally {
         unregisterImportStream?.();
         destroyNetezzaImportStream(stream);
+        fs.rmSync(logDir, { recursive: true, force: true });
     }
 }
 

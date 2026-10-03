@@ -46,6 +46,14 @@ export interface MigrationServiceDependencies {
 const DEFAULT_SAMPLE_SIZE = 100;
 const DEFAULT_REPORT_EVERY_ROWS = 5000;
 
+/** Thrown when a migration is aborted because its owner was disposed. */
+export class MigrationCancelledError extends Error {
+    public constructor(message = 'Migration cancelled.') {
+        super(message);
+        this.name = 'MigrationCancelledError';
+    }
+}
+
 export class MigrationService {
     constructor(private readonly dependencies: MigrationServiceDependencies) {}
 
@@ -406,9 +414,19 @@ export class MigrationService {
         plan: MigrationPlan,
         sourceContext: MigrationSourceContext,
         progressCallback?: MigrationProgressCallback,
-        options?: { customCreateTableDdl?: string; streamBatchSize?: number },
+        options?: { customCreateTableDdl?: string; streamBatchSize?: number; isCancelled?: () => boolean },
     ): Promise<MigrationResult> {
         const startedAt = Date.now();
+        if (options?.isCancelled?.()) {
+            return {
+                success: false,
+                message: 'Migration cancelled.',
+                rowsInserted: 0,
+                elapsedSeconds: 0,
+                warnings: plan.warnings,
+                plan,
+            };
+        }
         const targetDetails = await this.getConnectionDetails(request.target.connectionName);
 
         const totalRows = plan.totalRows;
@@ -444,6 +462,22 @@ export class MigrationService {
                 defaultValue: column.defaultValue,
             }));
 
+            if (options?.isCancelled?.()) {
+                throw new MigrationCancelledError();
+            }
+
+            // Check cancellation between row pulls so closing the panel aborts
+            // the transfer instead of writing the rest of the table.
+            const sourceRows = rowSet.rows();
+            const guardedRows = async function* (): AsyncGenerator<string[], void, unknown> {
+                for await (const row of sourceRows) {
+                    if (options?.isCancelled?.()) {
+                        throw new MigrationCancelledError();
+                    }
+                    yield row;
+                }
+            };
+
             const writeResult = await writeToTarget({
                 targetKind: plan.targetKind,
                 target: request.target,
@@ -451,7 +485,7 @@ export class MigrationService {
                 columns: preparedColumns,
                 customCreateTableDdl: options?.customCreateTableDdl,
                 streamBatchSize: options?.streamBatchSize,
-                rows: rowSet.rows(),
+                rows: guardedRows(),
                 totalRows,
                 startedAt,
                 progressCallback: progressCallback ?? (() => undefined),
@@ -477,7 +511,7 @@ export class MigrationService {
             };
         } catch (error: unknown) {
             progressCallback?.(createMigrationProgress(
-                'error',
+                error instanceof MigrationCancelledError ? 'cancelled' : 'error',
                 0,
                 totalRows,
                 error instanceof Error ? error.message : String(error),

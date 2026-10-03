@@ -215,4 +215,72 @@ describe('MigrationService source SQL execution', () => {
         const writerInput = writeToTargetMock.mock.calls[0][0];
         expect(writerInput.customCreateTableDdl).toBe(customDdl);
     });
+
+    it('returns cancelled without opening connections when already cancelled', async () => {
+        const service = new MigrationService({
+            connectionManager: {
+                getConnection: jest.fn().mockResolvedValue(oracleDetails),
+                getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza'),
+            },
+        });
+        const plan: MigrationPlan = {
+            sourceKind: 'oracle',
+            targetKind: 'netezza',
+            sourceMode: 'sql',
+            columns: [],
+            createTableDdl: 'CREATE TABLE ADMIN.SALES_COPY (ID INT)',
+            warnings: [],
+            targetQualifiedName: 'JUST_DATA.ADMIN.SALES_COPY',
+        };
+        const sourceContext = { kind: 'oracle' as const, connectionDetails: oracleDetails };
+
+        const result = await service.execute(request, plan, sourceContext, undefined, { isCancelled: () => true });
+
+        expect(result.success).toBe(false);
+        expect(result.message).toMatch(/cancelled/i);
+        expect(createConnectionMock).not.toHaveBeenCalled();
+    });
+
+    it('aborts the transfer when cancelled between row pulls', async () => {
+        const commandSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createConnection(commandSql));
+        let cancelled = false;
+        writeToTargetMock.mockImplementation(async (input: { rows: AsyncIterable<string[]> }) => {
+            for await (const row of input.rows) {
+                void row;
+                cancelled = true;
+            }
+            return { planOnly: false, rowsInserted: 0 };
+        });
+
+        const service = new MigrationService({
+            connectionManager: {
+                getConnection: jest.fn()
+                    .mockResolvedValueOnce(oracleDetails)
+                    .mockResolvedValueOnce({
+                        name: 'netezza-target',
+                        host: 'netezza.example.test',
+                        database: 'JUST_DATA',
+                        user: 'ADMIN',
+                        dbType: 'netezza',
+                    }),
+                getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza'),
+            },
+        });
+        const plan: MigrationPlan = {
+            sourceKind: 'oracle',
+            targetKind: 'netezza',
+            sourceMode: 'sql',
+            columns: [],
+            createTableDdl: 'CREATE TABLE ADMIN.SALES_COPY (ID INT)',
+            warnings: [],
+            targetQualifiedName: 'JUST_DATA.ADMIN.SALES_COPY',
+        };
+        const sourceContext = { kind: 'oracle' as const, connectionDetails: oracleDetails };
+
+        const result = await service.execute(request, plan, sourceContext, undefined, { isCancelled: () => cancelled });
+
+        expect(result.success).toBe(false);
+        expect(result.message).toMatch(/cancelled/i);
+    });
 });
