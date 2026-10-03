@@ -8,8 +8,7 @@
     "coverage",
     "lint",
     "largeModuleLineLimit",
-    "changedHighRiskCoverage",
-    "documentationFreshnessDays"
+    "changedHighRiskCoverage"
   ],
   "properties": {
     "schemaVersion": { "const": 1 },
@@ -46,8 +45,7 @@
         "branches": { "type": "number", "minimum": 0, "maximum": 100 },
         "roots": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
-    },
-    "documentationFreshnessDays": { "type": "integer", "minimum": 1 }
+    }
   },
   "additionalProperties": false
 }
