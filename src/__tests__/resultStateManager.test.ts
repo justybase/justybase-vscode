@@ -194,15 +194,20 @@ describe('ResultStateManager', () => {
             expect(results![0].name).toBe('Logs');
         });
 
-        it('should append to existing log on subsequent executions', () => {
+        it('should reuse the existing log without marker rows on subsequent executions', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);
-            const initialLength = manager.resultsMap.get(sourceUri)![0].data.length;
+            const logId = manager.resultsMap.get(sourceUri)![0].resultSetId;
 
             manager.startExecution(sourceUri);
-            const newLength = manager.resultsMap.get(sourceUri)![0].data.length;
+            const results = manager.resultsMap.get(sourceUri)!;
 
-            expect(newLength).toBeGreaterThan(initialLength);
+            expect(results).toHaveLength(1);
+            expect(results[0].isLog).toBe(true);
+            expect(results[0].resultSetId).toBe(logId);
+            // No "--- New Execution Started ---" marker rows: the terminal
+            // SUCCESS entry already aggregates the execution.
+            expect(results[0].data).toHaveLength(0);
         });
 
         it('should add source to executing sources', () => {

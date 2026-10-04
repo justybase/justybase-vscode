@@ -1172,7 +1172,8 @@ describe('ResultPanelView Scroll Preservation', () => {
 
             expect(hydratedResults).toHaveLength(2);
             expect(hydratedResults[0].isCancelled).toBe(true);
-            expect(hydratedResults[0].data).toHaveLength(1);
+            // No "--- New Execution Started ---" marker rows are added on start.
+            expect(hydratedResults[0].data).toHaveLength(0);
             expect(hydratedResults[1].isCancelled).toBe(true);
             expect(hydratedResults[1].data).toEqual([[1], [2]]);
         });
@@ -1461,7 +1462,8 @@ describe('ResultPanelView Scroll Preservation', () => {
 
             expect(lastPerfEvent).toContain('"payload_size_bucket":"xl"');
             expect(lastPerfEvent).toContain('"result_set_count":2');
-            expect(lastPerfEvent).toContain('"total_row_count":3001');
+            // 3000 data rows; the log carries no marker rows.
+            expect(lastPerfEvent).toContain('"total_row_count":3000');
             expect(lastPerfEvent).toContain(`"active_source":"${sourceUri}"`);
         });
     });

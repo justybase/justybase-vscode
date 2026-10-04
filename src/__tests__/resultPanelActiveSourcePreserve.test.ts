@@ -43,6 +43,8 @@ jest.mock('../../media/resultPanel/tabs.js', () => ({
     renderResultSetTabs: (...args: unknown[]) => mockRenderResultSetTabs(...args),
     switchToResultSet: jest.fn(),
     updateLogsTabSpinner: (...args: unknown[]) => mockUpdateLogsTabSpinner(...args),
+    shouldPreserveLogsTab: jest.fn(() => false),
+    setUserWatchingLogs: jest.fn(),
 }));
 
 const mockRenderGrids = jest.fn();

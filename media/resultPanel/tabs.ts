@@ -29,6 +29,34 @@ import { UxPerfMark, isUxPerfSessionActive } from './uxPerf.js';
 
 const vscode = { postMessage: postHostMessage };
 
+// Explicit Logs-watch: true after the user (or an explicit host instruction)
+// selects the Logs tab, false after a data tab is selected. While true, the
+// arrival of new results must render in the background without stealing the
+// visible tab. Programmatic switches never touch this flag (see
+// switchToResultSet); it is intentionally not reset on new executions, so a
+// user watching Logs keeps watching them across queued runs until they pick
+// a data tab.
+let userWatchingLogs = false;
+
+export function isUserWatchingLogs(): boolean {
+    return userWatchingLogs;
+}
+
+export function setUserWatchingLogs(value: boolean): void {
+    userWatchingLogs = value;
+}
+
+/**
+ * True when new results must not steal the visible tab: the Logs tab was
+ * explicitly selected and is still the one being viewed.
+ */
+export function shouldPreserveLogsTab(): boolean {
+    if (!userWatchingLogs) {
+        return false;
+    }
+    return getResultSetAt(getActiveGridIndex())?.isLog === true;
+}
+
 export function renderDocIndicator(docUri: string | undefined): void {
     const indicator = getElementById('docIndicator');
     if (!indicator) return;
@@ -363,6 +391,14 @@ export function switchToResultSet(
     notifyHost = true,
 ): void {
     if (index < 0 || index >= getAllGrids().length) return;
+
+    if (notifyHost) {
+        // Explicit selection (tab click, "show logs" action, test bridge):
+        // remember a Logs choice so arriving results respect it and do not
+        // steal the visible tab. Programmatic switches (hydrate, streaming
+        // appends, host sync) pass notifyHost=false and never touch this flag.
+        setUserWatchingLogs(getResultSetAt(index)?.isLog === true);
+    }
 
     const fromIndex = getActiveGridIndex();
     const targetRs = getResultSetAt(index);
