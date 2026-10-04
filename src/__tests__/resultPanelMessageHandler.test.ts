@@ -130,6 +130,12 @@ describe('ResultPanelMessageHandler', () => {
         consoleLogSpy.mockRestore();
     });
 
+
+    it('routes queue actions to the coordinator command', () => {
+        const message={command:'sqlQueueAction' as const,sourceKey:'lane',action:'remove',jobId:'next'};
+        handler.handleMessage(message);
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('netezza.sqlQueueAction',message);
+    });
     describe('ready message', () => {
         it('should trigger force hydrate on ready', () => {
             handler.handleMessage({ command: 'ready' });

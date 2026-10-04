@@ -50,7 +50,8 @@ export async function promptForVariableValues(
     variables: Set<string>,
     silent: boolean,
     defaults: Record<string, string> = {},
-    context?: vscode.ExtensionContext
+    context?: vscode.ExtensionContext,
+    signal?: AbortSignal,
 ): Promise<Record<string, string>> {
     const normalizedVariables = new Set(Array.from(variables, normalizeVariableName));
     const normalizedDefaults = normalizeVariableValues(defaults);
@@ -87,7 +88,8 @@ export async function promptForVariableValues(
     const result = await VariableInputWebviewPanel.show(
         Array.from(normalizedVariables),
         panelDefaults,
-        context
+        context,
+        ...(signal ? [signal] : []),
     );
 
     if (!result) {

@@ -3,38 +3,26 @@
  */
 
 import * as vscode from 'vscode';
-import type { DatabaseKind } from '../../contracts/database';
 import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
+import type { DatabaseKind } from '../../contracts/database';
 import {
     runQueryRaw,
-    runQueriesSequentially,
     cancelQueryByUri
 } from '../../core/queryRunner';
 import { DuckDbResultBridge } from '../../services/duckdbResultBridge';
 import { SqlParser } from '../../sql/sqlParser';
 import { formatSql } from '../../services/sqlFormatting';
-import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
 import type { ViewTableDataCommandArgs } from '../../providers/sqlDataAffordanceResolver';
 import { QueryCommandsDependencies } from './queryCommandTypes';
 import { formatQualifiedObjectName, formatQualifiedObjectPathForDisplay, quoteIdentifier } from '../../utils/identifierUtils';
 import {
-    formatAccessFailureMessage,
-    presentAccessError,
-} from '../../utils/accessErrorHandling';
-import {
-    confirmSafeExecute,
-    confirmSafeExecuteForExpandedQuery,
-    handleExecutionCompletion
-} from './queryCommandSafety';
-import {
     executeExplainQuery,
-    executeTuningAdvisor,
-    toPerfErrorCode
+    executeTuningAdvisor
 } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { runSmartSequentialQuery } from './querySmartSequentialRun';
 import {
-    markQueryExecutionCancelling,
+    markQueryExecutionCancelling, getQueryExecutionCoordinator,
     tryAcquireQueryExecution,
 } from './queryExecutionGate';
 import { createQueryExecutionRecovery } from './queryExecutionRecovery';
@@ -99,14 +87,16 @@ export function registerQueryCommands(
         currentRowCounts?: number[],
         commandId = 'netezza.cancelQuery',
     ): Promise<void> => {
-        console.log(`[${commandId}] Cancelling: ${sourceUri}`);
-        markQueryExecutionCancelling(sourceUri);
-        resultPanelProvider.cancelExecution(sourceUri, currentRowCounts);
-
-        try {
-            await cancelQueryByUri(sourceUri);
-        } catch (err) {
-            console.error(`[${commandId}] Backend cancel failed:`, err);
+        const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === sourceUri);
+        const targets = lane?.runningExecutions.length
+            ? lane.runningExecutions.map(job => job.executionUri ?? sourceUri)
+            : [sourceUri];
+        for (const target of new Set(targets)) {
+            console.log(`[${commandId}] Cancelling: ${target}`);
+            markQueryExecutionCancelling(target);
+            resultPanelProvider.cancelExecution(target, currentRowCounts);
+            try { await cancelQueryByUri(target); }
+            catch (err) { console.error(`[${commandId}] Backend cancel failed:`, err); }
         }
     };
 
@@ -179,7 +169,12 @@ export function registerQueryCommands(
                 return;
             }
 
-            const sourceUri = editor.document.uri.toString();
+            const documentUri = editor.document.uri.toString();
+            const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === documentUri);
+            const activeResultSource = resultPanelProvider.getActiveSource();
+            const activeJobs = lane?.runningExecutions ?? [];
+            const sourceUri = activeJobs.find(job => job.executionUri === activeResultSource)?.executionUri
+                ?? activeJobs[activeJobs.length - 1]?.executionUri ?? documentUri;
             if (!resultPanelProvider.getExecutingSources().includes(sourceUri)) {
                 vscode.window.showWarningMessage('No active query to cancel.');
                 return;
@@ -427,244 +422,7 @@ export function registerQueryCommands(
 
         // Run Query Batch
         vscode.commands.registerCommand('netezza.runQueryBatch', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('No active editor found');
-                return;
-            }
-
-            const document = editor.document;
-
-            // Notebook cell execution is handled by the notebook controller.
-            if (document.uri.scheme === 'vscode-notebook-cell') {
-                return;
-            }
-
-            const selection = editor.selection;
-            const sourceUri = document.uri.toString();
-            let text = '';
-            let runBatchTimer: ReturnType<typeof createPerformanceTimer> | undefined;
-            let executionStarted = false;
-            let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
-
-            try {
-                text = !selection.isEmpty
-                    ? document.getText(selection)
-                    : document.getText();
-
-                if (!text.trim()) {
-                    vscode.window.showWarningMessage('No SQL query to execute');
-                    return;
-                }
-
-                const statementsForSafeExecute = SqlParser.splitStatements(text).filter(
-                    q => q.trim().length > 0
-                );
-                const statementsForExecution = statementsForSafeExecute.length > 0
-                    ? statementsForSafeExecute
-                    : [text];
-                if (
-                    !(await confirmSafeExecute(
-                        statementsForExecution
-                    ))
-                ) {
-                    return;
-                }
-
-                const connectionName = connectionManager.getConnectionForExecution(sourceUri)
-                    || connectionManager.getActiveConnectionName()
-                    || undefined;
-                executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
-                    document,
-                    origin: 'Run Query Batch',
-                    recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName),
-                });
-                if (!executionGate) {
-                    return;
-                }
-                runBatchTimer = createPerformanceTimer('query.run_batch', {
-                    payloadSize: text.length
-                });
-
-                resultPanelProvider.setActiveSource(sourceUri);
-                resultPanelProvider.startExecution(sourceUri);
-                executionStarted = true;
-                resultPanelProvider.log(sourceUri, 'Preparing SQL batch execution...');
-
-                // Per-query logging callbacks
-                const queryStartCallback = (
-                    _queryIndex: number,
-                    sql: string,
-                    connName: string
-                ): string => {
-                    if (!executionGate?.isCurrent()) {
-                        return `stale-${executionGate?.executionId ?? 'query'}`;
-                    }
-                    return resultPanelProvider.logExecutionStart(
-                        sourceUri,
-                        sql.trim(),
-                        connName
-                    );
-                };
-
-                const queryEndCallback = (
-                    executionId: string,
-                    rowCount: number,
-                    _durationMs: number,
-                    status: 'success' | 'error' | 'cancelled' | 'retrying',
-                    error?: string
-                ) => {
-                    if (!executionGate?.isCurrent()) {
-                        return;
-                    }
-                    resultPanelProvider.logExecutionEnd(
-                        executionId,
-                        rowCount,
-                        status,
-                        error
-                    );
-                };
-
-                executionGate.markRunning();
-                await vscode.window.withProgress(
-                    {
-                        location: vscode.ProgressLocation.Window,
-                        title: `Executing batch SQL for ${sourceUri.split(/[\\/]/).pop()}...`,
-                        cancellable: false
-                    },
-                    async () => {
-                        await runQueriesSequentially(
-                            context,
-                            statementsForExecution,
-                            connectionManager,
-                            sourceUri,
-                            msg => {
-                                if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.log(sourceUri, msg);
-                                }
-                            },
-                            queryResults => {
-                                if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.updateResults(queryResults, sourceUri, true);
-                                }
-                            },
-                            undefined, // extensionUri
-                            false, // _isRetry
-                            undefined, // maxRows
-                            queryStartCallback,
-                            queryEndCallback,
-                            undefined,
-                            0,
-                            undefined,
-                            [],
-                            {
-                                retryOnBrokenConnection: false,
-                                isExecutionCurrent: () => executionGate?.isCurrent() === true,
-                                confirmSafeExecute: (sql, _queryIndex) =>
-                                    confirmSafeExecuteForExpandedQuery(statementsForExecution, sql),
-                                onStatementSucceeded: event =>
-                                    deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
-                                onStatementFailed: event => {
-                                    deps.tableDdlSynchronizer?.handleExecutionFailure(
-                                        event.connectionName,
-                                        event.documentUri,
-                                    );
-                                },
-                            },
-                        );
-                    }
-                );
-
-                const executionStillCurrent = executionGate.isCurrent();
-                executionGate.dispose();
-                if (!executionStillCurrent) {
-                    return;
-                }
-                resultPanelProvider.finalizeExecution(sourceUri);
-                await handleExecutionCompletion(sourceUri);
-                if (runBatchTimer) {
-                    const successEvent = runBatchTimer.finish({
-                        result: 'ok',
-                        metadata: {
-                            query_count: statementsForExecution.length
-                        }
-                    });
-                    console.log(formatPerformanceEvent(successEvent));
-                }
-            } catch (err: unknown) {
-                const executionStillCurrent = executionGate?.isCurrent() ?? true;
-                executionGate?.dispose();
-                if (!executionStillCurrent) {
-                    return;
-                }
-                const rawMsg = err instanceof Error ? err.message : String(err);
-                const connectionName = connectionManager.getConnectionForExecution(sourceUri)
-                    || connectionManager.getActiveConnectionName();
-                const databaseKind = connectionName
-                    ? connectionManager.getConnectionDatabaseKind(connectionName)
-                    : undefined;
-                const msg = formatAccessFailureMessage(err, {
-                    databaseKind,
-                    sql: text,
-                }) ?? rawMsg;
-
-                // If it's a cancellation error, log info but don't show error dialog or error result
-                if (rawMsg.includes('Query cancelled')) {
-                    if (executionStarted) {
-                        resultPanelProvider.log(
-                            sourceUri,
-                            'Query execution cancelled by user.'
-                        );
-                        resultPanelProvider.finalizeExecution(sourceUri);
-                    }
-                    if (runBatchTimer) {
-                        const cancelledEvent = runBatchTimer.finish({
-                            result: 'cancelled',
-                            errorCode: 'QUERY_CANCELLED'
-                        });
-                        console.log(formatPerformanceEvent(cancelledEvent));
-                    }
-                    return;
-                }
-
-                // Add error result BEFORE finalizing so it gets properly pinned
-                if (executionStarted) {
-                    const errorDetails = extractDatabaseErrorDetails(err);
-                    resultPanelProvider.updateResults(
-                        [
-                            {
-                                columns: [],
-                                data: [],
-                                message: msg,
-                                isError: true,
-                                sql: text,
-                                ...(errorDetails === undefined ? {} : { errorDetails }),
-                            }
-                        ],
-                        sourceUri,
-                        true
-                    );
-
-                    // Finalize AFTER adding error so the error pin is preserved
-                    resultPanelProvider.finalizeExecution(sourceUri);
-                }
-                if (runBatchTimer) {
-                    const errorEvent = runBatchTimer.finish({
-                        result: 'error',
-                        errorCode: toPerfErrorCode(msg)
-                    });
-                    console.log(formatPerformanceEvent(errorEvent));
-                }
-                if (!(await presentAccessError(err, {
-                    databaseKind,
-                    sql: text,
-                    operation: 'SQL execution',
-                }))) {
-                    vscode.window.showErrorMessage(`Error executing query: ${msg}`);
-                }
-            } finally {
-                executionGate?.dispose();
-            }
+            await runSmartSequentialQuery(deps, { wholeDocument: true });
         }),
 
         // Explain Query

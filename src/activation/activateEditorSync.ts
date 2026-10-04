@@ -7,6 +7,7 @@ import type { MetadataPrefetchCoordinator } from './MetadataPrefetchCoordinator'
 import { setContextIfChanged } from '../services/contextKeyService';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import {
+    getQueryExecutionCoordinator,
     restoreQueryExecutionForReopenedDocument,
     retireQueryExecutionForDocument,
 } from '../commands/query/queryExecutionGate';
@@ -76,7 +77,10 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
             });
         }
 
-        resultPanelProvider.setActiveSource(sourceUri, uxTraceId);
+        const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === sourceUri);
+        const running = lane?.runningExecutions ?? [];
+        const resultSource = running[running.length - 1]?.executionUri ?? lane?.last?.executionUri ?? sourceUri;
+        resultPanelProvider.setActiveSource(resultSource, uxTraceId);
     };
 
     const refreshConnectionAccentForDocument = (document: vscode.TextDocument | undefined) => {
@@ -122,7 +126,14 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
         vscode.workspace.onDidCloseTextDocument(doc => {
             if (isResultSyncSqlDocument(doc)) {
                 const sourceUri = doc.uri.toString();
+                const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === sourceUri);
+                const independentSources = new Set([...(lane?.runningExecutions ?? []), ...(lane?.last ? [lane.last] : [])]
+                    .map(job => job.executionUri).filter((uri): uri is string => !!uri && uri !== sourceUri));
+                for (const uri of resultPanelProvider.getExecutionGroupSources?.(sourceUri) ?? []) {
+                    if (uri !== sourceUri) independentSources.add(uri);
+                }
                 retireQueryExecutionForDocument(doc);
+                for (const uri of independentSources) resultPanelProvider.closeSource(uri);
                 if (lastSyncedSourceUri === sourceUri) {
                     lastSyncedSourceUri = undefined;
                 }

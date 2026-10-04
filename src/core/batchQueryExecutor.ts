@@ -7,7 +7,7 @@ import { QueryResult } from "../types";
 import type { NzConnection } from "../types";
 import { StreamingChunk } from "./streaming";
 import { streamingManager } from "./queryCancellation";
-import { getConnectionForDocument } from "./queryRunnerHelpers";
+import { getConnectionForDocument, executeDropSession } from "./queryRunnerHelpers";
 import {
     BatchExecutionStatus,
     BatchQueryRunOptions,
@@ -168,22 +168,26 @@ async function runBatchWithSharedOrchestrator(
     params: SharedBatchRunParams,
 ): Promise<QueryResult[]> {
     const connManager = params.connectionManager || new ConnectionManager(params.context);
-    const keepConnectionOpen = params.documentUri
-        ? connManager.getDocumentKeepConnectionOpen(params.documentUri)
-        : false;
+    const sourceDocumentUri = params.batchOptions.sourceDocumentUri ?? params.documentUri;
+    const keepConnectionOpen = params.batchOptions.keepConnectionOpenOverride ?? (sourceDocumentUri
+        ? connManager.getDocumentKeepConnectionOpen(sourceDocumentUri)
+        : false);
     const outputChannel = setupBatchLogger(
         params.logCallback,
         params.queries.length,
         params.mode,
     );
     const allResults: QueryResult[] = [...params.existingResults];
-    const resolvedConnectionName = resolveBatchConnectionName(connManager, params.documentUri);
-    if (params.documentUri && params.startIndex === 0) {
+    const resolvedConnectionName = params.batchOptions.connectionName ?? resolveBatchConnectionName(connManager, params.documentUri);
+    if (params.documentUri && params.startIndex === 0 && !params.batchOptions.cancellationPrepared) {
         streamingManager.clearAborted(params.documentUri);
     }
     assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
 
-    const resolvedVars = await resolveBatchVariables(
+    await params.batchOptions.validateExecutionTarget?.();
+    const resolvedVars = params.batchOptions.preparedVariables
+        ? { ...params.batchOptions.preparedVariables }
+        : await resolveBatchVariables(
         params.queries,
         params.context,
         params.documentUri,
@@ -193,13 +197,13 @@ async function runBatchWithSharedOrchestrator(
     const historySchema = await resolveBatchHistorySchema(
         connManager,
         resolvedConnectionName,
-        params.documentUri,
+        sourceDocumentUri,
     );
-    const historyDatabase = params.documentUri && typeof connManager.getEffectiveDatabase === 'function'
-        ? (await connManager.getEffectiveDatabase(params.documentUri, resolvedConnectionName)) ?? details.database
+    const historyDatabase = sourceDocumentUri && typeof connManager.getEffectiveDatabase === 'function'
+        ? (await connManager.getEffectiveDatabase(sourceDocumentUri, resolvedConnectionName)) ?? details.database
         : details.database;
     const historyManager = QueryHistoryManager.getInstance(params.context);
-    const historyTags = params.documentUri && isSqlConsoleDocument(params.context, params.documentUri)
+    const historyTags = sourceDocumentUri && isSqlConsoleDocument(params.context, sourceDocumentUri)
         ? SQL_CONSOLE_HISTORY_TAG
         : undefined;
 
@@ -212,13 +216,15 @@ async function runBatchWithSharedOrchestrator(
     let chunkCallbackSql = '';
 
     try {
+        await params.batchOptions.validateExecutionTarget?.();
         connectionLease = await getConnectionForDocument(
             connManager,
             resolvedConnectionName,
             keepConnectionOpen,
-            params.documentUri,
+            sourceDocumentUri,
         );
         assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
+        await params.batchOptions.validateExecutionTarget?.();
 
         const preparationNotice = (message: unknown): void => {
             const notification = message as { message?: unknown };
@@ -250,7 +256,7 @@ async function runBatchWithSharedOrchestrator(
                     sessionId,
                     connManager,
                 ),
-                createMacroFileReadContext(params.documentUri),
+                params.batchOptions.macroFileContext ?? createMacroFileReadContext(params.documentUri),
             );
             assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
             if (prepared.sql.trim().length === 0) {
@@ -293,7 +299,7 @@ async function runBatchWithSharedOrchestrator(
                 connManager,
                 resolvedConnectionName,
                 keepConnectionOpen,
-                params.documentUri,
+                sourceDocumentUri,
             ),
             onConnectionAcquired: async freshConnection => {
                 sessionId = await captureSessionId(
@@ -341,12 +347,13 @@ async function runBatchWithSharedOrchestrator(
                 await params.batchOptions.onStatementSucceeded?.({
                     sql,
                     connectionName: resolvedConnectionName,
-                    documentUri: params.documentUri,
+                    documentUri: sourceDocumentUri,
                     connection: freshConnection,
                 });
                 assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
             },
-            onDropSession: createDropSessionCallback(connManager, params.documentUri),
+            onDropSession: keepConnectionOpen ? createDropSessionCallback(connManager, params.documentUri)
+                : sessionId => executeDropSession(sessionId, connManager, sourceDocumentUri, resolvedConnectionName, { reconnectDocument: false }).then(() => undefined),
             chunkSize: params.chunkSize,
         };
 
@@ -657,6 +664,8 @@ async function runBatchWithSharedOrchestrator(
         }, observer);
         executionStarted = true;
         const summary: ExecutionSummary = await execution.settled;
+        params.batchOptions.onExecutionSettled?.(summary);
+        if (target.shouldCloseConnection && !summary.cleanupErrors?.length) params.batchOptions.onSessionIsolated?.();
         assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
         if (summary.status !== 'success' && !params.batchOptions.continueOnError) {
             const error = finalReportedError
@@ -671,6 +680,7 @@ async function runBatchWithSharedOrchestrator(
         }
         if (!executionStarted && connectionLease?.shouldCloseConnection) {
             await connectionLease.connection.close();
+            params.batchOptions.onSessionIsolated?.();
         }
     }
 }

@@ -154,6 +154,29 @@ describe('handleHydrate executingSources dedup', () => {
         };
     }
 
+
+    it('restores queue presentation from hydration without replacing result data', () => {
+        const queue=require('../../media/resultPanel/sqlQueueLogs.js');
+        const changed=jest.spyOn(queue,'updateSqlQueueLogs');
+        const {handleHydrate}=require('../../media/resultPanel/messages.js');
+        handleHydrate({...buildHydrateData([]),sqlQueueJson:'[]'});
+        expect(changed).toHaveBeenCalledWith('[]');
+    });
+    it('routes event-driven queue state and refreshes after a source change', () => {
+        const queue=require('../../media/resultPanel/sqlQueueLogs.js');
+        const changed=jest.spyOn(queue,'updateSqlQueueLogs');
+        Object.assign(require('../../media/resultPanel/protocol.js'),{asHostMessage:(message:unknown)=>message});
+        let listener!:(event:{data:unknown})=>void;
+        Object.assign(window,{addEventListener:(_name:string,callback:typeof listener)=>{listener=callback;}});
+        const {setupStreamingMessageHandler}=require('../../media/resultPanel/messages.js');
+        setupStreamingMessageHandler();
+        listener({data:{command:'sqlQueueState',lanesJson:'[]'}});
+        expect(changed).toHaveBeenCalledWith('[]');
+        listener({data:{command:'setActiveSource',sourceUri,activeResultSetIndex:0,pinnedResultsJson:'[]'}});
+        expect(changed).toHaveBeenCalledWith();
+        listener({data:{command:'setActiveSource',sourceUri,activeResultSetIndex:0,pinnedResultsJson:'broken'}});
+        expect((window as any).pinnedResults).toEqual([]);
+    });
     it('applies hydrate when only executingSources changes but payload fingerprint matches', () => {
         const { handleHydrate } = require('../../media/resultPanel/messages.js') as {
             handleHydrate: (data: Record<string, unknown>) => void;
@@ -203,6 +226,49 @@ describe('handleHydrate executingSources dedup', () => {
         });
 
         expect(mockUpdateLoadingState).toHaveBeenCalled();
+    });
+
+    it('applies hydrate when only pinned results change', () => {
+        const { handleHydrate } = require('../../media/resultPanel/messages.js') as {
+            handleHydrate: (data: Record<string, unknown>) => void;
+        };
+        const tabs = require('../../media/resultPanel/tabs.js') as { renderResultSetTabs: jest.Mock };
+        const win = window as any;
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            pinnedResultsJson: JSON.stringify([]),
+        });
+        expect(win.pinnedResults).toEqual([]);
+        tabs.renderResultSetTabs.mockClear();
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            pinnedResultsJson: JSON.stringify([{ id: 'result_1', sourceUri, resultSetIndex: 1 }]),
+        });
+
+        // A pin-only change must not be mistaken for a duplicate hydrate,
+        // otherwise the pin icon silently stops responding until an unrelated
+        // change happens to re-render the tabs.
+        expect(win.pinnedResults).toEqual([{ id: 'result_1', sourceUri, resultSetIndex: 1 }]);
+        expect(tabs.renderResultSetTabs).toHaveBeenCalled();
+    });
+
+    it('applies hydrate when only pinned sources change', () => {
+        const { handleHydrate } = require('../../media/resultPanel/messages.js') as {
+            handleHydrate: (data: Record<string, unknown>) => void;
+        };
+        const win = window as any;
+
+        handleHydrate(buildHydrateData([]));
+        expect(win.pinnedSources.has(sourceUri)).toBe(true);
+
+        handleHydrate({
+            ...buildHydrateData([]),
+            pinnedSourcesJson: JSON.stringify([]),
+        });
+
+        expect(win.pinnedSources.has(sourceUri)).toBe(false);
     });
 
     it('applies an authoritative recovery hydrate even when the ordinary fingerprint matches', () => {

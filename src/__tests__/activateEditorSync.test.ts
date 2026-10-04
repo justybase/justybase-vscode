@@ -6,6 +6,7 @@ import {
 } from '../commands/query/queryExecutionGate';
 
 jest.mock('../commands/query/queryExecutionGate', () => ({
+    getQueryExecutionCoordinator: jest.fn(() => ({ getSnapshot: () => [] })),
     restoreQueryExecutionForReopenedDocument: jest.fn(),
     retireQueryExecutionForDocument: jest.fn(),
 }));
@@ -106,5 +107,18 @@ describe('activateEditorSync document cleanup', () => {
 
         expect(connectionManager.clearDocumentConnection).not.toHaveBeenCalled();
         expect(connectionManager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:query.sql');
+    });
+
+    it('closes every retained independent result source before retiring the document', () => {
+        const document=createDocument('untitled');
+        const closeSource=jest.fn();
+        const sources=['untitled:query.sql','untitled:query.sql#query-old','untitled:query.sql#query-recent'];
+        activateEditorSync({context:{subscriptions:[]} as unknown as vscode.ExtensionContext,
+            connectionManager:{clearDocumentConnection:jest.fn(async()=>undefined)} as never,
+            connectionAccentDecorationProvider:{refresh:jest.fn()} as never,
+            resultPanelProvider:{setActiveSource:jest.fn(),closeSource,getExecutionGroupSources:()=>sources} as never,
+            metadataPrefetchCoordinator:{triggerForDocument:jest.fn()} as never});
+        closeDocumentListener?.(document);
+        expect(closeSource.mock.calls.map(([source])=>source)).toEqual([sources[1],sources[2],sources[0]]);
     });
 });

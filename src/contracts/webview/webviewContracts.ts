@@ -128,6 +128,7 @@ export type ResultPanelOutboundMessage =
         executingSourcesJson: string;
         sourcesJson: string;
         pinnedSourcesJson: string;
+        pinnedResultsJson?: string;
         formatSettings?: ResultFormattingPayload;
         diskBackedStreamCapEnabled?: boolean;
         /** Sources whose current execution delivered all rows but is still finalizing on the host. */

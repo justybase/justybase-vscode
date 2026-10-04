@@ -86,6 +86,7 @@ export interface UxPerfEventPayload {
 }
 
 export interface ResultPanelViewData {
+    sqlQueueJson?: string;
     sourcesJson: string;
     pinnedSourcesJson: string;
     pinnedResultsJson: string;
@@ -133,6 +134,7 @@ type EmptyPayload = Record<never, never>;
 
 interface ResultPanelWebviewToHostMessageMap {
     ready: EmptyPayload;
+    sqlQueueAction: { sourceKey: string; action: string; jobId?: string };
     migrateResult: { sourceUri: string; resultSetIndex: number };
     logRowsApplied: { sourceUri: string; executionTimestamp: number; totalRows: number };
     requestLogSync: { sourceUri: string; executionTimestamp?: number; currentRows: number };
@@ -318,6 +320,7 @@ interface ResultPanelWebviewToHostMessageMap {
 }
 
 interface ResultPanelHostToWebviewMessageMap {
+    sqlQueueState: { lanesJson: string };
     hydrate: { data: ResultPanelViewData; uxTraceId?: string };
     testBridge: Omit<ResultPanelTestBridgeRequest, 'command'>;
     setActiveSource: {
@@ -326,6 +329,7 @@ interface ResultPanelHostToWebviewMessageMap {
         executingSourcesJson: string;
         sourcesJson: string;
         pinnedSourcesJson: string;
+        pinnedResultsJson?: string;
         formatSettings?: unknown;
         diskBackedStreamCapEnabled?: boolean;
         streamingCompletedSourcesJson?: string;
@@ -471,7 +475,7 @@ export type ResultPanelHostToWebviewMessage = MessageFromMap<ResultPanelHostToWe
 export type ResultPanelInboundMessage = ResultPanelWebviewToHostMessage;
 export type ResultPanelOutboundMessage = ResultPanelHostToWebviewMessage;
 
-export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['openRelatedRows',
+export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['sqlQueueAction', 'openRelatedRows',
     'ready', 'migrateResult', 'logRowsApplied', 'requestLogSync', 'requestResultSync', 'selectAll',
     'reportHydrationMetrics', 'reportResultPanelTrace', 'testBridgeResult', 'reportUxPerf',
     'describeWithCopilot', 'fixSqlError', 'initiateExport', 'initiateExportWithSelection',
@@ -489,7 +493,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['openRelatedRows',
     'requestExploreComposer', 'previewExploreComposer', 'previewExploreFilteredSql', 'openExploreSqlInEditor',
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
-export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
+export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['sqlQueueState',
     'hydrate', 'testBridge', 'setActiveSource', 'uxPerfSession', 'saveScrollState', 'refreshView',
     'copySelection', 'updateCopyFormat', 'selectAll', 'cancelExecution', 'appendRows', 'streamingComplete',
     'switchToResultSet', 'resultFormattingState', 'saveEdits', 'diskBackedActivate', 'rowCountUpdate',

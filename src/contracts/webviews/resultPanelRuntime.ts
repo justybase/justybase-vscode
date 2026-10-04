@@ -76,6 +76,7 @@ const rowsPayload = all(indexField('resultSetIndex'), message => hasRows(message
 
 const webviewRules: Record<string, FieldRule> = {
     ready: noPayload,
+    sqlQueueAction: all(stringField('sourceKey'), oneOfField('action', ['cancel', 'remove', 'pause', 'resume', 'clear']), optional('jobId', stringField('jobId'))),
     migrateResult: all(stringSource, resultIndex),
     logRowsApplied: all(stringSource, numberField('executionTimestamp'), indexField('totalRows')),
     requestLogSync: all(stringSource, indexField('currentRows'), optional('executionTimestamp', numberField('executionTimestamp'))),
@@ -169,6 +170,7 @@ const webviewRules: Record<string, FieldRule> = {
 };
 
 const hostRules: Record<string, FieldRule> = {
+    sqlQueueState: stringField('lanesJson'),
     hydrate: objectField('data'),
     testBridge: all(stringField('requestId'), stringField('action')),
     setActiveSource: all(stringSource, indexField('activeResultSetIndex'), stringField('executingSourcesJson'), stringField('sourcesJson'), stringField('pinnedSourcesJson')),

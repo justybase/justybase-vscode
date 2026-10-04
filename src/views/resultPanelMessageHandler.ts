@@ -256,6 +256,9 @@ export class ResultPanelMessageHandler {
 
     public handleMessage(message: ResultPanelInboundMessage): void {
         switch (message.command) {
+            case 'sqlQueueAction':
+                void vscode.commands.executeCommand('netezza.sqlQueueAction', message);
+                return;
             case 'ready':
                 this._callbacks.onForceHydrate();
                 return;

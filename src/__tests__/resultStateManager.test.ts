@@ -29,7 +29,7 @@ jest.mock(
         }),
         workspace: {
             getConfiguration: jest.fn().mockImplementation((section: string) => {
-                if (section === 'netezza.results') {
+                if (section === 'netezza.results' || section === 'justybase.results') {
                     return {
                         get: jest.fn().mockImplementation((key: string, defaultValue: unknown) => {
                             if (key === 'maxDataResults') return 50;
@@ -289,6 +289,98 @@ describe('ResultStateManager', () => {
             expect(dataResults).toHaveLength(2);
             expect(dataResults[0]?.name).toBe('Result 1');
             expect(dataResults[1]?.name).toBe('Result 2');
+        });
+
+        it('should pin existing unpinned results when a queued execution starts', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            manager.updateResults(
+                [{ columns: [{ name: 'a', type: 'int' }], data: [[1]], name: 'Result 1' }],
+                sourceUri,
+            );
+            manager.finalizeExecution(sourceUri);
+
+            // After finalize the streaming auto-pin is gone: the tab is unpinned.
+            expect(
+                Array.from(manager.pinnedResults.values()).some(pin => pin.sourceUri === sourceUri),
+            ).toBe(false);
+
+            const { clearedUnpinnedResults } = manager.startExecution(sourceUri, { pinExistingResults: true });
+            expect(clearedUnpinnedResults).toBe(false);
+
+            const dataResults = (manager.resultsMap.get(sourceUri) ?? []).filter(resultSet => !resultSet.isLog);
+            expect(dataResults).toHaveLength(1);
+            expect(dataResults[0]?.name).toBe('Result 1');
+
+            // The preserved tab is a durable manual pin: it survives finalize (no auto-unpin).
+            manager.finalizeExecution(sourceUri);
+            expect(
+                Array.from(manager.pinnedResults.values()).some(
+                    pin => pin.sourceUri === sourceUri && pin.resultSetIndex === 1,
+                ),
+            ).toBe(true);
+            expect(
+                (manager.resultsMap.get(sourceUri) ?? []).filter(resultSet => !resultSet.isLog),
+            ).toHaveLength(1);
+        });
+
+        it('should promote in-flight auto-pins to manual pins on queued start', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            manager.appendStreamingChunk(sourceUri, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: false,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+
+            // Queued follow-up starts while the previous result is still streaming.
+            const { clearedUnpinnedResults } = manager.startExecution(sourceUri, { pinExistingResults: true });
+            expect(clearedUnpinnedResults).toBe(false);
+            manager.finalizeExecution(sourceUri);
+
+            expect(
+                (manager.resultsMap.get(sourceUri) ?? []).filter(resultSet => !resultSet.isLog),
+            ).toHaveLength(1);
+            expect(
+                Array.from(manager.pinnedResults.values()).some(pin => pin.sourceUri === sourceUri),
+            ).toBe(true);
+        });
+
+        it('should keep a just-filled streaming result when the next queued execution starts', () => {
+            const sourceUri = 'file:///test.sql';
+
+            // Job A (queued): streams a single chunk and completes.
+            manager.startExecution(sourceUri, { pinExistingResults: true });
+            manager.appendStreamingChunk(sourceUri, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[1]],
+                isFirstChunk: true,
+                isLastChunk: true,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 1');
+            manager.finalizeExecution(sourceUri);
+
+            // Job B (queued) starts immediately after: A must survive.
+            const { clearedUnpinnedResults } = manager.startExecution(sourceUri, { pinExistingResults: true });
+            expect(clearedUnpinnedResults).toBe(false);
+            manager.appendStreamingChunk(sourceUri, {
+                columns: [{ name: 'id', type: 'int' }],
+                rows: [[2]],
+                isFirstChunk: true,
+                isLastChunk: true,
+                totalRowsSoFar: 1,
+                limitReached: false,
+            }, 'SELECT 2');
+            manager.finalizeExecution(sourceUri);
+
+            const dataResults = (manager.resultsMap.get(sourceUri) ?? []).filter(resultSet => !resultSet.isLog);
+            expect(dataResults).toHaveLength(2);
+            expect(dataResults[0]?.data).toEqual([[1]]);
+            expect(dataResults[1]?.data).toEqual([[2]]);
         });
     });
 
@@ -1273,6 +1365,44 @@ describe('ResultStateManager', () => {
             }
 
             expect(rs1.data).toHaveLength(0);
+        });
+    });
+
+    describe('manual Logs selection', () => {
+        const source = 'file:///queue.sql';
+        const result = (): ResultSet => ({ columns: [{ name: 'ID', type: 'INTEGER' }], data: [[1]] } as ResultSet);
+        it('keeps Logs selected through arriving results and completion until a result is chosen', () => {
+            manager.startExecution(source);
+            manager.setActiveResultSetIndex(source, 0);
+            manager.updateResults([result()], source);
+            manager.finalizeExecution(source);
+            expect(manager.getActiveResultSetIndex(source)).toBe(0);
+            manager.startExecution(source);
+            manager.updateResults([result()], source);
+            manager.finalizeExecution(source);
+            expect(manager.getActiveResultSetIndex(source)).toBe(0);
+            manager.setActiveResultSetIndex(source, 1);
+            manager.updateResults([result()], source, true);
+            manager.finalizeExecution(source);
+            expect(manager.getActiveResultSetIndex(source)).toBeGreaterThan(0);
+        });
+        it('retains default automatic activation when Logs was never manually selected', () => {
+            manager.startExecution(source);
+            manager.updateResults([result()], source);
+            manager.finalizeExecution(source);
+            expect(manager.getActiveResultSetIndex(source)).toBe(1);
+        });
+        it('shares the preference across independent sessions but isolates documents and reopened lanes', () => {
+            const a = source + '#query-a', b = source + '#query-b';
+            manager.setExecutionGroups([{ key: 'lane-1', sources: [source, a] }]);
+            manager.startExecution(a); manager.setActiveResultSetIndex(a, 0);
+            manager.setExecutionGroups([{ key: 'lane-1', sources: [source, b] }]);
+            manager.startExecution(b); manager.updateResults([result()], b); manager.finalizeExecution(b);
+            expect(manager.getActiveResultSetIndex(b)).toBe(0);
+            manager.startExecution('file:///other.sql'); manager.updateResults([result()], 'file:///other.sql'); manager.finalizeExecution('file:///other.sql');
+            expect(manager.getActiveResultSetIndex('file:///other.sql')).toBe(1);
+            manager.setExecutionGroups([{ key: 'lane-2', sources: [source, b] }]);
+            expect(manager.getActiveResultSetIndex(b)).toBe(1);
         });
     });
 });

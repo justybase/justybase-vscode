@@ -12,8 +12,10 @@ interface VariableValueHistory {
  * Replaces the easy-to-miss showInputBox approach.
  */
 export class VariableInputWebviewPanel {
+    private static promptTail: Promise<void> = Promise.resolve();
     private static currentPanel: VariableInputWebviewPanel | undefined;
     private _panel: vscode.WebviewPanel;
+    private disposed = false;
     private _resolvePromise?: (value: Record<string, string> | undefined) => void;
     private _disposables: vscode.Disposable[] = [];
     private _variables: string[];
@@ -245,28 +247,37 @@ export class VariableInputWebviewPanel {
         variables: string[],
         defaults: Record<string, string> = {},
         context?: vscode.ExtensionContext,
+        signal?: AbortSignal,
     ): Promise<Record<string, string> | undefined> {
-        if (!context) {
-            throw new Error('ExtensionContext is required for VariableInputWebviewPanel');
+        if (!context) throw new Error('ExtensionContext is required for VariableInputWebviewPanel');
+        // The modal is shared UI. Concurrent submissions must not dispose each
+        // other's input or lose values while their execution lanes stay independent.
+        const previous = this.promptTail;
+        let release!: () => void;
+        this.promptTail = new Promise<void>(resolve => { release = resolve; });
+        await previous;
+        let panel: VariableInputWebviewPanel | undefined;
+        const abort = () => panel?.dispose();
+        try {
+            if (signal?.aborted) return undefined;
+            panel = new VariableInputWebviewPanel(context, variables, defaults);
+            this.currentPanel = panel;
+            signal?.addEventListener('abort', abort, { once: true });
+            return await new Promise<Record<string, string> | undefined>(resolve => {
+                panel!._resolvePromise = resolve;
+            });
+        } finally {
+            signal?.removeEventListener('abort', abort);
+            release();
         }
-
-        if (VariableInputWebviewPanel.currentPanel) {
-            VariableInputWebviewPanel.currentPanel.dispose();
-        }
-
-        VariableInputWebviewPanel.currentPanel = new VariableInputWebviewPanel(
-            context,
-            variables,
-            defaults,
-        );
-
-        return new Promise<Record<string, string> | undefined>((resolve) => {
-            VariableInputWebviewPanel.currentPanel!._resolvePromise = resolve;
-        });
     }
 
     public dispose(): void {
-        VariableInputWebviewPanel.currentPanel = undefined;
+        if (this.disposed) return;
+        this.disposed = true;
+        if (VariableInputWebviewPanel.currentPanel === this) VariableInputWebviewPanel.currentPanel = undefined;
+        this._resolvePromise?.(undefined);
+        this._resolvePromise = undefined;
         this._panel.dispose();
         while (this._disposables.length) {
             const d = this._disposables.pop();

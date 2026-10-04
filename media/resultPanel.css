@@ -312,18 +312,29 @@ body.vscode-dark {
 }
 
 .pin-icon {
-    font-size: 11px;
-    opacity: 0.6;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 2px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    opacity: 0.55;
     cursor: pointer;
+    color: var(--vscode-descriptionForeground);
 }
 
 .pin-icon:hover {
     opacity: 1;
+    background-color: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .pin-icon.pinned {
     opacity: 1;
-    color: var(--vscode-charts-blue);
+    color: var(--vscode-charts-yellow);
+    background-color: color-mix(in srgb, var(--vscode-charts-yellow) 22%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-charts-yellow) 60%, transparent);
 }
 
 /* Pinned Results Tabs */
@@ -727,20 +738,38 @@ body.vscode-dark {
 }
 
 .result-set-tab .pin-icon {
-    font-size: 11px;
-    opacity: 0.65;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 2px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    opacity: 0.55;
     cursor: pointer;
-    color: var(--tx3);
+    color: var(--vscode-descriptionForeground);
 }
 
 .result-set-tab:hover .pin-icon {
-    opacity: 0.85;
-    color: var(--tx2);
+    opacity: 0.9;
 }
 
 .result-set-tab .pin-icon.pinned {
     opacity: 1;
-    color: var(--ac);
+    color: var(--vscode-charts-yellow);
+    background-color: color-mix(in srgb, var(--vscode-charts-yellow) 24%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-charts-yellow) 65%, transparent);
+}
+
+/* Pinned result tab itself gets a tint + underline so state is visible at a glance. */
+.result-set-tab.is-pinned {
+    background-color: color-mix(in srgb, var(--vscode-charts-yellow) 10%, transparent);
+    box-shadow: inset 0 -2px 0 var(--vscode-charts-yellow);
+}
+
+.result-set-tab.is-pinned.active {
+    background-color: color-mix(in srgb, var(--vscode-charts-yellow) 16%, transparent);
 }
 
 .result-set-status-badge {
@@ -4710,3 +4739,38 @@ body.sidebar-layout .main-split-view {
 .range-chart-swap-axes-btn:hover {
     background: var(--vscode-button-secondaryHoverBackground);
 }
+
+/* Queue overview and transcript have independent scrolling. */
+.console-wrapper[style*="display: block"]:has(.sql-queue-overview) { display: flex !important; flex-direction: column; }
+.console-wrapper:has(.sql-queue-overview) .console-view { height: auto; flex: 1; min-height: 0; }
+.sql-queue-overview { box-sizing: border-box; max-height: 45%; flex-shrink: 0; padding: 10px 14px; overflow: auto; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-foreground); }
+.sql-queue-controls { display: flex; gap: 8px; margin: 8px 0; }
+.sql-queue-job { display: grid; grid-template-columns: 115px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 0; }
+.sql-queue-job code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family); }
+.sql-queue-job-status { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.sql-queue-overview button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid transparent; cursor: pointer; padding: 4px 8px; }
+.sql-queue-overview button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.sql-queue-overview button:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.sql-queue-overview > strong { display: block; font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+.sql-queue-job { border-top: 1px solid var(--vscode-panel-border); }
+.sql-queue-job-status { display: inline-block; width: fit-content; padding: 3px 6px; border-radius: 4px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.sql-queue-job[data-status="running"] .sql-queue-job-status { color: var(--vscode-progressBar-background); background: var(--vscode-editor-background); border: 1px solid var(--vscode-progressBar-background); }
+.sql-queue-job[data-status="cancelling"] .sql-queue-job-status { color: var(--vscode-editorWarning-foreground); }
+.sql-queue-overview button:disabled { opacity: .55; cursor: default; }
+@media (max-width: 550px) { .sql-queue-job { grid-template-columns: 95px minmax(0, 1fr) auto; gap: 6px; } .sql-queue-overview { padding: 8px; } }
+.sql-queue-job { display: block; padding: 0; }
+.sql-queue-job-summary { display: grid; grid-template-columns: 115px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 0; cursor: pointer; }
+.sql-queue-job-summary::marker { color: var(--vscode-descriptionForeground); }
+.sql-queue-job-detail, .log-run-sql { margin: 8px 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); border-radius: 4px; }
+.log-run { border: 1px solid var(--vscode-panel-border); border-radius: 5px; margin-bottom: 8px; background: var(--vscode-editor-background); }
+.log-run-summary { padding: 9px 12px; cursor: pointer; overflow-wrap: anywhere; color: var(--vscode-foreground); }
+.log-run[data-status="success"] .log-run-summary { color: var(--vscode-testing-iconPassed); }
+.log-run[data-status="error"] .log-run-summary { color: var(--vscode-errorForeground); }
+.log-run[data-status="running"] .log-run-summary { color: var(--vscode-progressBar-background); }
+.log-run-body { padding: 0 12px 10px; border-top: 1px solid var(--vscode-panel-border); }
+.log-run-summary:focus-visible, .sql-queue-job-summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+@media (max-width: 550px) { .sql-queue-job-summary { grid-template-columns: 95px minmax(0, 1fr) auto; gap: 6px; } }
+.sql-queue-job-summary { grid-template-columns: 12px 115px minmax(0, 1fr) auto; }
+.sql-queue-job-summary::before { content: '▸'; color: var(--vscode-descriptionForeground); }
+.sql-queue-job[open] > .sql-queue-job-summary::before { content: '▾'; }
+@media (max-width: 550px) { .sql-queue-job-summary { grid-template-columns: 12px 95px minmax(0, 1fr) auto; } }

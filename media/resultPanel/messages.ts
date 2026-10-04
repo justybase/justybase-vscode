@@ -1,4 +1,5 @@
 // Messages module - Message handling for result panel
+import { updateSqlQueueLogs } from './sqlQueueLogs.js';
 import { decode } from '@msgpack/msgpack';
 import { asHostMessage, postHostMessage } from './protocol.js';
 import type { ResultPanelExecutionState } from './hostContracts.js';
@@ -108,6 +109,7 @@ export {
 } from './grid/persistence.js';
 
 interface HydrateData {
+    sqlQueueJson?: string;
     activeSourceJson?: string;
     sourcesJson?: string;
     pinnedSourcesJson?: string;
@@ -622,6 +624,9 @@ export function setupStreamingMessageHandler(): void {
         callPanelMethod('selectAll');
       }
       break;
+            case 'sqlQueueState':
+                updateSqlQueueLogs(message.lanesJson);
+                break;
             case 'hydrate':
                 handleHydrate(message.data as HydrateData, typeof message.uxTraceId === 'string' ? message.uxTraceId : undefined);
                 break;
@@ -632,6 +637,7 @@ export function setupStreamingMessageHandler(): void {
                 break;
             case 'setActiveSource':
                 handleSetActiveSource(message);
+                updateSqlQueueLogs();
                 break;
             case 'uxPerfSession':
                 setUxPerfSessionActive(message.active === true);
@@ -709,6 +715,7 @@ export function handleSaveScrollState(): void {
 
 export function handleSetActiveSource(message: Record<string, unknown>): void {
     const sourceUri = message.sourceUri as string;
+    const pinsChanged = typeof message.pinnedResultsJson === 'string' && message.pinnedResultsJson !== JSON.stringify(getResultPanelWindow().pinnedResults ?? {});
     const uxTraceId = typeof message.uxTraceId === 'string' ? message.uxTraceId : undefined;
     const sourceMark = uxTraceId
         ? new UxPerfMark('result_panel.source_switch', uxTraceId)
@@ -776,6 +783,13 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     }
     if (typeof message.pinnedSourcesJson === 'string') {
         panel.pinnedSources = new Set(JSON.parse(message.pinnedSourcesJson));
+    }
+    if (typeof message.pinnedResultsJson === 'string') {
+        try {
+            panel.pinnedResults = JSON.parse(message.pinnedResultsJson);
+        } catch {
+            // Keep previous pins when payload is unreadable; tabs render from last known state.
+        }
     }
     if (typeof message.executingSourcesJson === 'string') {
         panel.executingSources = new Set(JSON.parse(message.executingSourcesJson));
@@ -845,6 +859,8 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
             setActiveGridIndex(message.activeResultSetIndex);
         }
         renderDocIndicator(getActiveSourceUri());
+        // Refresh pin chrome without rebuilding live grids or unchanged tabs.
+        if (pinsChanged) renderResultSetTabs();
         syncExecutionChrome();
         getResultPanelWindow().refreshRowView?.();
 
@@ -917,8 +933,11 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
 let _lastHydrateKey = '';
 
 function buildHydrateDedupKey(data: HydrateData): string {
-    return (
-        (data.activeSourceJson ?? '') + '|' +
+    // Pin toggles (and source-list changes) arrive as hydrate with an otherwise
+    // identical fingerprint. They must not be mistaken for duplicates, or the
+    // pin icon silently stops responding until an unrelated change re-renders.
+    const navigation = [data.sourcesJson, data.pinnedSourcesJson, data.pinnedResultsJson].join('|');
+    const key = ((data.activeSourceJson ?? '') + '|' +
         (data.activeResultSetIndex ?? '') + '|' +
         (data.resultSetsMsgPack instanceof Uint8Array ? data.resultSetsMsgPack.byteLength : 0) + '|' +
         (data.executingSourcesJson ?? '') + '|' +
@@ -926,6 +945,7 @@ function buildHydrateDedupKey(data: HydrateData): string {
         (data.dataVersion ?? '') + '|' +
         (data.resultSyncVersion ?? '')
     );
+    return key + '|' + navigation;
 }
 
 function migrateAggregationStateAcrossRefresh(
@@ -966,6 +986,7 @@ function releaseRowsForReplacedResults(previous: ResultSet[], next: ResultSet[])
 }
 
 export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
+    if (data.sqlQueueJson !== undefined) updateSqlQueueLogs(data.sqlQueueJson);
     configureResultPanelTrace(data.resultPanelTraceEnabled === true);
     traceResultPanel({
         phase: 'hydrate_received',

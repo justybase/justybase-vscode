@@ -159,6 +159,7 @@ describe('commands/queryCommands', () => {
             getActiveConnectionName: jest.fn().mockReturnValue('test-connection'),
             getConnectionDatabaseKind: jest.fn().mockReturnValue('netezza'),
             getExecutionDatabaseKind: jest.fn().mockReturnValue('netezza'),
+            getDocumentDatabase: jest.fn().mockReturnValue(undefined),
             getEffectiveDatabase: jest.fn().mockResolvedValue('TESTDB'),
             getCurrentDatabase: jest.fn().mockResolvedValue('TESTDB'),
             supportsCapability: jest.fn().mockReturnValue(true),
@@ -639,7 +640,34 @@ describe('commands/queryCommands', () => {
             );
         });
 
-        it('should ignore duplicate runQuery while the same tab is already running', async () => {
+        it('runs transient requests concurrently with distinct cancellation/result identities and captured ownership', async () => {
+            const deps: QueryCommandsDependencies = { context: mockContext, connectionManager: mockConnectionManager, resultPanelProvider: mockResultPanelProvider };
+            mockConnectionManager.getDocumentKeepConnectionOpen = jest.fn().mockReturnValue(false);
+            registerQueryCommands(deps);
+            (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({ sql: 'SELECT 1', start: 0, end: 8 });
+            Object.assign(vscode.window, { activeTextEditor: {
+                document: { uri: { toString: () => 'file:///test.sql' }, getText: () => 'SELECT 1', offsetAt: () => 1,
+                    positionAt: () => ({ line: 0, character: 0 }) },
+                selection: { isEmpty: true, active: { line: 0, character: 1 } },
+            } });
+            let finish!: () => void, ready!: () => void;
+            const completion = new Promise<void>(resolve => { finish = resolve; });
+            const bothStarted = new Promise<void>(resolve => { ready = resolve; });
+            let started = 0;
+            (runQueriesWithStreaming as jest.Mock).mockImplementation(async () => { if (++started === 2) ready(); await completion; });
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(call => call[0] === 'netezza.runQuery')[1];
+            const first = handler(), second = handler();
+            await bothStarted;
+            const calls = (runQueriesWithStreaming as jest.Mock).mock.calls;
+            expect(calls[0][3]).not.toBe(calls[1][3]);
+            expect(calls[0][3]).toMatch(/^file:\/\/\/test.sql#query-/);
+            for (const call of calls) expect(call[call.length - 1]).toEqual(expect.objectContaining({ sourceDocumentUri: 'file:///test.sql', keepConnectionOpenOverride: false }));
+            finish(); await Promise.all([first, second]);
+            expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalledWith(calls[0][3]);
+            expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalledWith(calls[1][3]);
+        });
+
+        it('queues another runQuery while the same tab is already running', async () => {
             const deps: QueryCommandsDependencies = {
                 context: mockContext,
                 connectionManager: mockConnectionManager,
@@ -648,12 +676,12 @@ describe('commands/queryCommands', () => {
             registerQueryCommands(deps);
             (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({ sql: 'SELECT 1', start: 0, end: 8 });
 
-            let resolveRun: (() => void) | undefined;
-            (runQueriesWithStreaming as jest.Mock).mockImplementation(
-                () => new Promise<void>(resolve => {
-                    resolveRun = resolve;
-                })
-            );
+            let resolveRun!: () => void;
+            let started!: () => void;
+            const running = new Promise<void>(resolve => { started = resolve; });
+            (runQueriesWithStreaming as jest.Mock).mockImplementationOnce(
+                () => new Promise<void>(resolve => { resolveRun = resolve; started(); })
+            ).mockResolvedValue(undefined);
 
             const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
                 call => call[0] === 'netezza.runQuery'
@@ -671,18 +699,13 @@ describe('commands/queryCommands', () => {
             };
 
             const firstRun = handler();
-            await Promise.resolve();
-            await handler();
-
+            await running;
+            const secondRun = handler();
             expect(runQueriesWithStreaming).toHaveBeenCalledTimes(1);
-            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                expect.stringContaining('SQL execution'),
-                'Keep Waiting',
-                'Force unlock & retry',
-            );
-
-            resolveRun?.();
-            await firstRun;
+            expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+            resolveRun();
+            await Promise.all([firstRun, secondRun]);
+            expect(runQueriesWithStreaming).toHaveBeenCalledTimes(2);
         });
 
         it('should release the query lease before an unresolved completion notification', async () => {
@@ -721,22 +744,15 @@ describe('commands/queryCommands', () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = sourceEditor;
             const firstRun = handler();
-            for (let i = 0; i < 10 && notificationResolvers.length === 0; i++) {
-                await Promise.resolve();
-            }
+            await firstRun;
 
             // The first handler is still waiting for the completion toast, but its SQL is done.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = sourceEditor;
             const secondRun = handler();
-            for (let i = 0; i < 10 && (runQueriesWithStreaming as jest.Mock).mock.calls.length < 2; i++) {
-                await Promise.resolve();
-            }
+            await secondRun;
             expect(runQueriesWithStreaming).toHaveBeenCalledTimes(2);
 
-            for (let i = 0; i < 10 && notificationResolvers.length < 2; i++) {
-                await Promise.resolve();
-            }
             notificationResolvers.forEach(resolve => resolve(undefined));
             await Promise.all([firstRun, secondRun]);
         });
@@ -1026,7 +1042,7 @@ describe('commands/queryCommands', () => {
             );
         });
 
-        it('should ignore duplicate batch run while the same tab is already running', async () => {
+        it('queues another batch request while the same tab is already running', async () => {
             const deps: QueryCommandsDependencies = {
                 context: mockContext,
                 connectionManager: mockConnectionManager,
@@ -1034,12 +1050,12 @@ describe('commands/queryCommands', () => {
             };
             registerQueryCommands(deps);
 
-            let resolveRun: (() => void) | undefined;
-            (runQueriesSequentially as jest.Mock).mockImplementation(
-                () => new Promise<void>(resolve => {
-                    resolveRun = resolve;
-                })
-            );
+            let resolveRun!: () => void;
+            let started!: () => void;
+            const running = new Promise<void>(resolve => { started = resolve; });
+            (runQueriesSequentially as jest.Mock).mockImplementationOnce(
+                () => new Promise<void>(resolve => { resolveRun = resolve; started(); })
+            ).mockResolvedValue(undefined);
 
             const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
                 call => call[0] === 'netezza.runQueryBatch'
@@ -1051,20 +1067,13 @@ describe('commands/queryCommands', () => {
             };
 
             const firstRun = handler();
-            for (let i = 0; i < 10 && (runQueriesSequentially as jest.Mock).mock.calls.length === 0; i++) {
-                await Promise.resolve();
-            }
-            await handler();
-
+            await running;
+            const secondRun = handler();
             expect(runQueriesSequentially).toHaveBeenCalledTimes(1);
-            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                expect.stringContaining('already running'),
-                'Keep Waiting',
-                'Force unlock & retry',
-            );
-
-            resolveRun?.();
-            await firstRun;
+            expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+            resolveRun();
+            await Promise.all([firstRun, secondRun]);
+            expect(runQueriesSequentially).toHaveBeenCalledTimes(2);
         });
 
         it('should show completion notification for batch when active editor is different', async () => {
