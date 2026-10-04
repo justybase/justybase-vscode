@@ -105,6 +105,7 @@ async function main() {
     './media/postgresqlAlterTableDesigner.ts',
     './media/postgresqlIndexDesigner.ts',
     './media/explainPlanGraph.ts',
+    './media/databaseAnalysis.ts',
     './media/erdDiagram.tsx',
     './media/etlDiagram.tsx',
     './media/testDataGenerator.ts'

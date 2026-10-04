@@ -4,7 +4,7 @@ description: Compare the advertised JustyBase dialects by runtime, authoring dep
 audience: reference
 category: Reference
 status: Supported
-last_verified: 2026-09-05
+last_verified: 2026-10-04
 product_version: 3.18.4
 ---
 
@@ -14,7 +14,7 @@ JustyBase presents one workspace shell, but a capability is only available when 
 
 | Database | Runtime / authentication | Parser, completion, LSP | Metadata / search | DDL / explain | Import, export, maintenance | Boundary |
 | --- | --- | --- | --- | --- | --- | --- |
-| Netezza | Bundled JavaScript driver; host/port/database/user/password; VS Code Secrets; raw TCP tunnel over HTTPS/WSS | First-class parser, CST semantics, NZPLSQL, LSP, quality, semantic tokens | Full lazy catalog/cache, source search, DDL, profiles, dependencies | DDL, EXPLAIN, plan analysis, query flow, tuning paths; Object Designer native distribution/organization and guarded NZPLSQL routine surfaces | XLSB/XLSX/CSV/compressed CSV/JSON/XML/SQL/Markdown/Parquet; GROOM, stats, skew, sessions, security | Production/core; TCP tunnel uses named relay targets |
+| Netezza | Bundled JavaScript driver; host/port/database/user/password; VS Code Secrets; raw TCP tunnel over HTTPS/WSS | First-class parser, CST semantics, NZPLSQL, LSP, quality, semantic tokens | Full lazy catalog/cache, source search, DDL, profiles; parsed dependencies, reverse lookup and bounded object/column impact analysis | DDL, EXPLAIN, plan analysis, query flow; deterministic metadata/EXPLAIN performance advisor; Object Designer native distribution/organization and guarded NZPLSQL routine surfaces | XLSB/XLSX/CSV/compressed CSV/JSON/XML/SQL/Markdown/Parquet; GROOM, stats, skew, sessions, security | Production/core; TCP tunnel uses named relay targets |
 | Db2 | Preview companion runtime; platform-specific driver package; raw TCP tunnel over HTTPS/WSS | Dialect authoring, completion, metadata-aware LSP; depth varies by statement | Catalog browsing, columns, DDL, compare | DDL, explain graph, and Db2-specific structural tooling | Spreadsheet/text import-export; `RUNSTATS`, `REORG`, dedicated Index Designer and Partition Manager | Preview; runtime setup required; tunnel uses named relay targets |
 | MS SQL Server | Preview companion runtime and `mssql` driver; raw TCP tunnel over HTTPS/WSS | Dialect parser profile, completion, formatting, diagnostics | Metadata, object/column browsing, DDL | Explain/parser support depends on provider surface | Provider-specific import/export and maintenance operations | Preview; partial by feature; tunnel uses named relay targets |
 | Oracle | Preview companion runtime; raw TCP tunnel over HTTPS/WSS | Oracle parser profile, completion, formatting, diagnostics | Metadata, DDL, object search | Explain and tuning provider paths where available | Provider-specific import/export and maintenance operations | Preview; partial by feature; tunnel requires Host/Port/Service Name |
@@ -47,3 +47,7 @@ Include database kind, version, connection mode, a minimal SQL/object example, e
 The Pages build records every advertised `DatabaseKind` found in the shared contract. A listed companion is a repository and packaging inventory claim, not a promise of identical depth: Snowflake, Vertica, and the other optional runtimes remain Preview until their common dialect contract and live validation meet the promotion criteria in the quality roadmap.
 
 <!-- GENERATED:DATABASES -->
+
+Netezza analysis scope and evidence limitations are documented in
+[Dependencies and impact analysis](dependency-analysis.md) and
+[Netezza Performance Advisor](netezza-performance-advisor.md).

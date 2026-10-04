@@ -193,6 +193,8 @@ jest.mock('../metadataCache', () => ({
         onDidPrefetchProgress: jest.fn(() => ({ dispose: jest.fn() })),
         onDidInvalidate: jest.fn(() => ({ dispose: jest.fn() })),
         onDidExternalRefresh: jest.fn(() => ({ dispose: jest.fn() })),
+        onDidPrefetchRefreshDetails: jest.fn(() => ({ dispose: jest.fn() })),
+        clearDefinitionCatalogs: jest.fn(),
         onDidNeedColumnRecovery: jest.fn(() => ({ dispose: jest.fn() })),
         dispose: jest.fn().mockResolvedValue(undefined)
     }))

@@ -183,11 +183,14 @@ function isNonExecutableAstLine(file, lineNumber) {
       file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
     let declarationLine = false;
+    let hasTemplateText = false;
     let hasPureTemplateInterpolation = false;
     let hasExecutableExpressionOnLine = false;
     const visit = node => {
       const startLine = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile)).line + 1;
       const endLine = ts.getLineAndCharacterOfPosition(sourceFile, node.end).line + 1;
+      if ((ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isNoSubstitutionTemplateLiteral(node))
+          && lineNumber > startLine && lineNumber <= endLine) { hasTemplateText = true; }
       if (ts.isTemplateExpression(node)) {
         for (const span of node.templateSpans) {
           const expressionStartLine = ts.getLineAndCharacterOfPosition(sourceFile, span.expression.getStart(sourceFile)).line + 1;
@@ -224,11 +227,15 @@ function isNonExecutableAstLine(file, lineNumber) {
           || ts.isTypeLiteralNode(node)
           || ts.isMappedTypeNode(node)
           || ts.isImportDeclaration(node)
+          || (ts.isExportDeclaration(node) && node.moduleSpecifier === undefined
+            && node.exportClause && ts.isNamedExports(node.exportClause) && node.exportClause.elements.length === 0)
           || ts.isCaseClause(node)
           || ts.isDefaultClause(node)
           || ts.isPropertyAssignment(node)
           || ts.isShorthandPropertyAssignment(node)
           || (ts.isVariableDeclaration(node) && node.initializer === undefined)
+          || (ts.isPropertyDeclaration(node) && node.initializer === undefined)
+          || (ts.isFunctionDeclaration(node) && node.body === undefined)
           || ts.isJsxAttribute(node)
           || ts.isJsxSpreadAttribute(node)
           || (ts.isCallExpression(node)
@@ -252,7 +259,7 @@ function isNonExecutableAstLine(file, lineNumber) {
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
-    return declarationLine || (hasPureTemplateInterpolation && !hasExecutableExpressionOnLine);
+    return declarationLine || ((hasPureTemplateInterpolation || hasTemplateText) && !hasExecutableExpressionOnLine);
   } catch {
     return false;
   }

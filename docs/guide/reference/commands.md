@@ -21,3 +21,7 @@ Use the Command Palette and search for the human title. Use the identifier in au
 ## SQL execution queue
 
 **JustyBase: Show SQL Execution Queue** (`netezza.showSqlQueue`) opens the per-tab queue in the JustyBase sidebar. See [SQL execution queue](sql-execution-queue.md) for snapshots, cancellation, recovery, and lifecycle behavior.
+
+See [Dependencies and impact analysis](dependency-analysis.md) and
+[Netezza Performance Advisor](netezza-performance-advisor.md) for the new
+Schema Browser and SQL analysis actions.
