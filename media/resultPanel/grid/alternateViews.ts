@@ -1,3 +1,5 @@
+import { appendRunLogRows } from '../logRunGroups.js';
+import { renderSqlQueueLogs } from '../sqlQueueLogs.js';
 import { postHostMessage } from '../protocol.js';
 import { shouldRightAlignCell } from '../utils.js';
 import {
@@ -55,13 +57,11 @@ export function createLogConsole(rs: ResultSet, rsIndex: number, container: HTML
     consoleView.className = 'console-view';
 
     if (rs.data && Array.isArray(rs.data)) {
-        rs.data.forEach((row: unknown) => {
-            const line = createLogLineElement(row as LogRow);
-            consoleView.appendChild(line);
-        });
+        appendRunLogRows(consoleView, rs.data as LogRow[], createLogLineElement);
     }
 
     wrapper.appendChild(consoleView);
+    renderSqlQueueLogs(wrapper);
     container.appendChild(wrapper);
 
     const mockGrid = {
@@ -204,10 +204,7 @@ export function appendLogRows(rsIndex: number, rows: LogRow[]): void {
         return;
     }
 
-    rows.forEach(row => {
-        const line = createLogLineElement(row);
-        consoleView.appendChild(line);
-    });
+    appendRunLogRows(consoleView as HTMLElement, rows, createLogLineElement);
 
     const shouldFollowLatest = rsIndex === getActiveGridIndex()
         && (getResultPanelWindow().executingSources?.has(getActiveSourceUri() ?? '') ?? false);
@@ -229,7 +226,7 @@ export function replaceLogRows(rsIndex: number, rows: LogRow[]): void {
         return;
     }
     consoleView.innerHTML = '';
-    rows.forEach(row => consoleView.appendChild(createLogLineElement(row)));
+    appendRunLogRows(consoleView as HTMLElement, rows, createLogLineElement);
     consoleView.scrollTop = consoleView.scrollHeight;
     requestAnimationFrame(() => {
         consoleView.scrollTop = consoleView.scrollHeight;

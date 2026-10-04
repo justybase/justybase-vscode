@@ -82,6 +82,12 @@
     "views": {
       "netezza-explorer": [
         {
+          "id": "netezza.sqlQueue",
+          "name": "SQL Queue",
+          "icon": "$(list-ordered)",
+          "visibility": "collapsed"
+        },
+        {
           "id": "netezza.schema",
           "name": "Schema",
           "icon": "$(list-tree)"
@@ -115,6 +121,11 @@
       ]
     },
     "commands": [
+      {
+        "command": "netezza.showSqlQueue",
+        "title": "Show SQL Execution Queue",
+        "category": "JustyBase"
+      },
       {
         "command": "netezza.saveAccessFileAsConnection",
         "title": "Save Access File as Connection",
@@ -4194,7 +4205,7 @@
         },
         "justybase.results.maxPinnedDataResults": {
           "type": "integer",
-          "default": 10,
+          "default": 50,
           "minimum": 1,
           "maximum": 50,
           "description": "Maximum number of result sets that can be manually pinned per SQL file."

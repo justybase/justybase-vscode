@@ -131,6 +131,26 @@ describe('ResultPanelView Scroll Preservation', () => {
         consoleLogSpy.mockRestore();
     });
 
+
+    it('projects queue state and bounded sibling logs without rebuilding streaming results', () => {
+        const source='file:///queue.sql';
+        const executions=Array.from({length:7},(_value,index)=>`${source}#query-${index}`);
+        for(const uri of executions){
+            provider.startExecution(uri);
+            const logs=provider.getResultsForSource(uri)!.find(result=>result.isLog)!;
+            logs.data.push(...Array.from({length:250},()=>['now','progress']));
+        }
+        const lane={sourceKey:'lane',sourceUri:source,paused:false,maxConcurrency:20,
+            running:executions.map((executionUri,index)=>({id:String(index),executionUri,status:'running',sql:'SELECT 1'})),queued:[]};
+        provider.updateSqlQueue(JSON.stringify([lane]));
+        const message=postedMessages.filter(item=>item.command==='sqlQueueState').slice(-1)[0] as unknown as {lanesJson:string};
+        const data=JSON.parse(message.lanesJson) as {sources:string[];archive:{sourceUri:string;rows:unknown[][]}[]}[];
+        expect(data[0].sources).toContain(executions[0]);
+        expect(data[0].archive.reduce((total, item)=>total+item.rows.length,0)).toBe(1000);
+        expect(data[0].archive.filter(item=>item.rows.length).length).toBe(5);
+        provider.updateSqlQueue('[]');
+        expect(provider.getResultsForSource(executions[0])![0].data.length).toBeGreaterThan(200);
+    });
     it('resends authoritative log rows when the webview reports a gap', () => {
         const sourceUri = 'file:///path/to/log-sync.sql';
         provider.startExecution(sourceUri);

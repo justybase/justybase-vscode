@@ -1,3 +1,4 @@
+import type { ExecutionLogDetails } from '../contracts/webviews/executionLogContracts';
 import * as vscode from 'vscode';
 import { ResultSet } from '../types';
 import { getLogger } from '../utils/logger';
@@ -74,6 +75,17 @@ type AppendStreamingResult =
     | { type: 'rowCountUpdate'; props: RowCountUpdateProps }
     | { type: 'ignore' };
 
+export interface StartExecutionOptions {
+    /**
+     * Preserve every existing result tab as a durable manual pin instead of
+     * clearing unpinned results. Used when a queued task starts: prior results
+     * must survive the follow-up execution and must not be auto-unpinned on
+     * finalize. Manual pins are protected from maxDataResults pruning, so tabs
+     * accumulate until closed via closeResult/closeAllResults.
+     */
+    pinExistingResults?: boolean;
+}
+
 interface AppendRowsMessage {
     command: 'appendRows';
     resultSetIndex: number;
@@ -95,7 +107,7 @@ interface LogAppendMessage {
     command: 'appendRows';
     sourceUri: string;
     resultSetIndex: number;
-    rows: [string, string][];
+    rows: [string, string, ExecutionLogDetails?][];
     totalRows: number;
     fromRow: number;
     logExecutionTimestamp: number;
@@ -187,6 +199,8 @@ export class ResultStateManager {
     }
 
     public dispose(): void {
+        this._manualLogsGroups.clear();
+        this._executionGroups.clear();
         if (this._idleSpillTimer) {
             clearInterval(this._idleSpillTimer);
             this._idleSpillTimer = null;
@@ -270,7 +284,7 @@ export class ResultStateManager {
      */
     private getMaxPinnedDataResults(): number {
         const config = getExtensionConfiguration('results');
-        return config.get<number>('maxPinnedDataResults', 10) ?? 10;
+        return config.get<number>('maxPinnedDataResults', 50) ?? 50;
     }
 
     public get resultsMap() {
@@ -318,7 +332,7 @@ export class ResultStateManager {
             sourceUri,
             resultSets,
             pins,
-            this._activeResultSetIndexMap.get(sourceUri) ?? 0,
+            this.getActiveResultSetIndex(sourceUri) ?? 0,
             this._executingSources.has(sourceUri),
             this._coreExecutionId(sourceUri),
         );
@@ -396,7 +410,29 @@ export class ResultStateManager {
             this._staleDataVersions.add(sourceUri);
         }
     }
+    private readonly _manualLogsGroups = new Set<string>();
+    private _executionGroups = new Map<string, string>();
+
+    /** Queue identity associates independent result sources with their editor lane. */
+    public setExecutionGroups(groups: readonly { key: string; sources: readonly string[] }[]): void {
+        const liveGroups = new Set(groups.map(group => group.key));
+        this._executionGroups = new Map([...this._executionGroups].filter(([source, key]) => liveGroups.has(key) && this._resultsMap.has(source)));
+        for (const group of groups) for (const source of group.sources) this._executionGroups.set(source, group.key);
+        for (const key of this._manualLogsGroups) {
+            if (!liveGroups.has(key) && !this._resultsMap.has(key)) this._manualLogsGroups.delete(key);
+        }
+    }
+
+    public getExecutionGroupSources(sourceUri: string): string[] {
+        const group = this._executionGroups.get(sourceUri);
+        return group ? [...this._executionGroups].filter(([, key]) => key === group).map(([source]) => source) : [sourceUri];
+    }
+
     public getActiveResultSetIndex(sourceUri: string) {
+        if (this._manualLogsGroups.has(this._executionGroups.get(sourceUri) ?? sourceUri)) {
+            const logs = this._resultsMap.get(sourceUri)?.findIndex(result => result.isLog);
+            if (logs !== undefined && logs >= 0) return logs;
+        }
         return this._activeResultSetIndexMap.get(sourceUri);
     }
 
@@ -422,7 +458,7 @@ export class ResultStateManager {
         return sourceUri.startsWith('file:') || sourceUri.startsWith('untitled:');
     }
 
-    public startExecution(sourceUri: string): { clearedUnpinnedResults: boolean } {
+    public startExecution(sourceUri: string, options?: StartExecutionOptions): { clearedUnpinnedResults: boolean } {
         if (!this._isValidSourceUri(sourceUri)) {
             return { clearedUnpinnedResults: false };
         }
@@ -444,6 +480,14 @@ export class ResultStateManager {
         }
         const existingLog = existingResults.find(resultSet => resultSet.isLog);
         const logResultSetId = existingLog?.resultSetId ?? createResultSetId();
+        // Queued tasks preserve prior result tabs: normalize the log position
+        // first so promoted pin indexes are final, then pin everything before
+        // the core retention snapshot below observes the pins.
+        const preserveExisting = options?.pinExistingResults === true;
+        if (preserveExisting) {
+            this._ensureLogResultAtFront(sourceUri, existingResults, logResultSetId);
+            this._pinAllDataResults(sourceUri, existingResults);
+        }
         const retainedResultSetIds = this._applyCoreStartExecution(
             sourceUri,
             String(newExecutionId),
@@ -483,11 +527,31 @@ export class ResultStateManager {
             }
         }
 
-        let logResultSet: ResultSet;
+        if (!preserveExisting) {
+            this._ensureLogResultAtFront(sourceUri, existingResults, logResultSetId);
+        }
 
+        this._resultsMap.set(sourceUri, existingResults);
+        this._pinnedSources.add(sourceUri);
+        this._activeSourceUri = sourceUri;
+        this._activeResultSetIndexMap.set(sourceUri, 0);
+        this._syncResultCoreAfterMutation(sourceUri);
+
+        // Bump the version so the webview receives executingSources and loading state.
+        this._incrementDataVersion(sourceUri);
+        this._onDidChangeState.fire();
+        return { clearedUnpinnedResults: resultsToRemove.length > 0 };
+    }
+
+    /**
+     * Ensure the Logs result exists at index 0, appending the new-execution
+     * marker. Extracted from startExecution so queued starts can normalize the
+     * log position before promoting pins (keeps promoted indexes final).
+     */
+    private _ensureLogResultAtFront(sourceUri: string, existingResults: ResultSet[], logResultSetId: string): void {
         const existingLogIndex = existingResults.findIndex(r => r.isLog);
         if (existingLogIndex !== -1) {
-            logResultSet = existingResults[existingLogIndex];
+            const logResultSet = existingResults[existingLogIndex];
             ensureResultSetId(logResultSet);
             const timestamp = new Date().toLocaleTimeString();
             logResultSet.data.push(['', '']);
@@ -504,7 +568,7 @@ export class ResultStateManager {
             }
         } else {
             const timestamp = new Date().toLocaleTimeString();
-            logResultSet = {
+            const logResultSet = {
                 columns: [
                     { name: 'Time', type: 'string' },
                     { name: 'Message', type: 'string' }
@@ -519,17 +583,38 @@ export class ResultStateManager {
             existingResults.unshift(logResultSet);
             this._updatePinsOnReorder(sourceUri);
         }
+    }
 
-        this._resultsMap.set(sourceUri, existingResults);
-        this._pinnedSources.add(sourceUri);
-        this._activeSourceUri = sourceUri;
-        this._activeResultSetIndexMap.set(sourceUri, 0);
-        this._syncResultCoreAfterMutation(sourceUri);
-
-        // Bump the version so the webview receives executingSources and loading state.
-        this._incrementDataVersion(sourceUri);
-        this._onDidChangeState.fire();
-        return { clearedUnpinnedResults: resultsToRemove.length > 0 };
+    /**
+     * Promote every non-log result tab to a durable manual pin so a queued
+     * follow-up execution keeps prior results instead of clearing them.
+     * Auto-pins become manual pins (no automatic unpin on finalize); unpinned
+     * tabs receive a fresh manual pin. The pin-count setting is deliberately
+     * not enforced here — system preservation must not fail execution start.
+     * Note: manual pins are protected from pruning, so tabs accumulate until
+     * the user closes them (closeResult/closeAllResults).
+     */
+    private _pinAllDataResults(sourceUri: string, results: ResultSet[]): void {
+        const filename = sourceUri.split(/[\\/]/).pop() || sourceUri;
+        results.forEach((rs, index) => {
+            if (!rs || rs.isLog) {
+                return;
+            }
+            const existing = Array.from(this._pinnedResults.entries()).find(
+                ([, info]) => info.sourceUri === sourceUri && info.resultSetIndex === index,
+            );
+            if (existing) {
+                this._autoPinnedResults.delete(existing[0]);
+                return;
+            }
+            const resultId = `result_${++this._resultIdCounter}`;
+            this._pinnedResults.set(resultId, {
+                sourceUri,
+                resultSetIndex: index,
+                timestamp: Date.now(),
+                label: `${filename} - ${rs.name || `Result ${index}`}`,
+            });
+        });
     }
 
     /** Begin a read-only panel operation without clearing the user's existing result tabs. */
@@ -601,7 +686,8 @@ export class ResultStateManager {
         if (logResultSetIndex !== -1) {
             const logResultSet = results[logResultSetIndex];
             const timestamp = new Date().toLocaleTimeString();
-            const row: [string, string] = [timestamp, message];
+            const lastExecution = this._executionLogs.get(sourceUri)?.slice(-1)[0];
+            const row: [string, string, ExecutionLogDetails?] = lastExecution ? [timestamp, message, { executionId: lastExecution.id, event: 'message' }] : [timestamp, message];
             const fromRow = logResultSet.data.length;
 
             logResultSet.data.push(row);
@@ -676,7 +762,7 @@ export class ResultStateManager {
                 const timestamp = new Date().toLocaleTimeString();
                 // Format: [time] ▶ RUNNING: [sql truncated] | [connection]
                 const logMessage = `▶ RUNNING: ${truncatedSql} | ${connectionName}`;
-                const row: [string, string] = [timestamp, logMessage];
+                const row: [string, string, ExecutionLogDetails] = [timestamp, logMessage, { executionId, event: 'start', status: 'running', sql: sql.slice(0, 64_000), connectionName }];
                 const fromRow = logResultSet.data.length;
 
                 logResultSet.data.push(row);
@@ -771,7 +857,7 @@ export class ResultStateManager {
                             logMessage = `${statusIcon} ${statusText}: ${entry.truncatedSql} | ${entry.connectionName} | ${timeStr} | ${rowCount} rows`;
                         }
 
-                        const row: [string, string] = [timestamp, logMessage];
+                        const row: [string, string, ExecutionLogDetails] = [timestamp, logMessage, { executionId, event: 'end', status, durationMs: executionTime, rowCount }];
                         const fromRow = logResultSet.data.length;
                         logResultSet.data.push(row);
                         this._incrementDataVersion(sourceUri);
@@ -1785,7 +1871,7 @@ export class ResultStateManager {
         const pinnedResult = this._pinnedResults.get(resultId);
         if (pinnedResult) {
             this._activeSourceUri = pinnedResult.sourceUri;
-            this._activeResultSetIndexMap.set(pinnedResult.sourceUri, pinnedResult.resultSetIndex);
+            this.setActiveResultSetIndex(pinnedResult.sourceUri, pinnedResult.resultSetIndex);
             this._syncResultCoreAfterMutation(pinnedResult.sourceUri);
             this._onDidChangeState.fire();
             return pinnedResult.resultSetIndex;
@@ -1968,6 +2054,9 @@ export class ResultStateManager {
     }
 
     public setActiveResultSetIndex(sourceUri: string, index: number) {
+        const group = this._executionGroups.get(sourceUri) ?? sourceUri;
+        if (this._resultsMap.get(sourceUri)?.[index]?.isLog) this._manualLogsGroups.add(group);
+        else this._manualLogsGroups.delete(group);
         this._activeResultSetIndexMap.set(sourceUri, index);
         this._syncResultCoreAfterMutation(sourceUri);
     }

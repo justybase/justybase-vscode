@@ -1228,6 +1228,29 @@ END_PROC;`;
             ).rejects.toThrow('partial failure');
         });
 
+        it('opens and closes separate sessions while keeping document target/history context', async () => {
+            const connections = [createMockConnection(), createMockConnection()];
+            mockGetConnectionForDocument.mockImplementation(async () => ({ connection: connections[mockGetConnectionForDocument.mock.calls.length - 1], shouldCloseConnection: true }));
+            let finish!: () => void, ready!: () => void;
+            const completion = new Promise<void>(resolve => { finish = resolve; });
+            const started = new Promise<void>(resolve => { ready = resolve; });
+            let active = 0;
+            mockExecuteAndFetch.mockImplementation(async () => { if (++active === 2) ready(); await completion; return { results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }], error: null }; });
+            mockConnManager.getEffectiveDatabase = jest.fn().mockResolvedValue('CAPTURED_DB');
+            const requests = ['file:///test.sql#query-a', 'file:///test.sql#query-b'].map(uri => runQueriesSequentially(
+                mockContext, ['SELECT 1'], mockConnManager, uri, undefined, undefined, undefined, false, undefined,
+                undefined, undefined, undefined, 0, undefined, [],
+                { sourceDocumentUri: 'file:///test.sql', keepConnectionOpenOverride: false, preparedVariables: {} },
+            ));
+            await started;
+            expect(mockGetConnectionForDocument.mock.calls.map(call => call.slice(2))).toEqual([[false, 'file:///test.sql'], [false, 'file:///test.sql']]);
+            expect(connections.every(connection => connection.close.mock.calls.length === 0)).toBe(true);
+            finish(); await Promise.all(requests);
+            expect(connections.every(connection => connection.close.mock.calls.length === 1)).toBe(true);
+            expect(mockConnManager.getEffectiveDatabase).toHaveBeenCalledWith('file:///test.sql', 'testConn');
+            mockExecuteAndFetch.mockReset(); mockGetConnectionForDocument.mockReset();
+        });
+
         it('should close connection when shouldCloseConnection is true', async () => {
             mockGetConnectionForDocument.mockResolvedValue({
                 connection: mockConn,

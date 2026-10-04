@@ -141,6 +141,8 @@ describe('result panel protocol', () => {
             stats: null,
             errorMessage: 'error',
             sql: 'SELECT 1',
+            sourceKey: 'lane-1',
+            lanesJson: '[]',
             editSource: { table: 'demo' },
             edits: [],
             fontFamily: 'monospace',
@@ -181,6 +183,7 @@ describe('result panel protocol', () => {
                 ...messageFixture,
                 command,
                 ...(command === 'testBridgeResult' ? { requestId: 'test-1', action: 'test' } : {}),
+                ...(command === 'sqlQueueAction' ? { action: 'pause' } : {}),
             });
             if (!parsed) throw new Error(`invalid webview fixture: ${command}`);
         }

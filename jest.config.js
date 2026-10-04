@@ -105,6 +105,9 @@ module.exports = {
   ],
   collectCoverageFrom: [
     "src/**/*.ts",
+    "media/resultPanel/messages.ts",
+    "media/resultPanel/tabs.ts",
+    "media/resultPanel/hostContracts.ts",
     "!src/**/*.d.ts",
     "!src/__tests__/**",
     "packages/sql-core/src/**/*.ts",

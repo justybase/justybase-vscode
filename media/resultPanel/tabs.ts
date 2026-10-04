@@ -161,10 +161,15 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
         tab.appendChild(statusBadge);
     }
 
-    // Pin Button
+    // Pin Button — SVG (not emoji) so CSS color distinguishes pinned vs unpinned.
+    // Emoji 📌 renders in full color and ignores `color`, which made both states look identical.
+    const PIN_PATH = 'M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.708l-.8-.8-3.535 3.535c.268.59.408 1.236.408 1.9 0 .94-.28 1.87-.828 2.672l-.172.243a.5.5 0 0 1-.756.05L8.06 10.5l-2.12 2.122a.5.5 0 0 1-.708 0L4.1 11.657a.5.5 0 0 1 0-.708l2.122-2.12-2.122-2.122a.5.5 0 0 1 .05-.756l.243-.172A4.5 4.5 0 0 1 6.9 5.88c.664 0 1.31.14 1.9.408L12.343 2.75l-.8-.8a.5.5 0 0 1 .146-.354l.132.132zM6.076 7.39l-4.243 4.243a.5.5 0 0 0 .354.854h1.5v3.5a.5.5 0 0 0 .854.354l4.243-4.243a4.5 4.5 0 0 1-2.664-2.664z';
+    const PIN_SVG_OUTLINE = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
+    const PIN_SVG_FILLED = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
     const pinSpan = document.createElement('span');
-    pinSpan.className = 'pin-icon codicon codicon-pin';
-    pinSpan.title = 'Pin this result';
+    pinSpan.className = 'pin-icon';
+    pinSpan.setAttribute('role', 'button');
+    pinSpan.setAttribute('tabindex', '0');
 
     const isPinned = getResultPanelWindow().pinnedResults?.some(p =>
         p.sourceUri === getActiveSourceUri() && p.resultSetIndex === index
@@ -172,17 +177,35 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
 
     if (isPinned) {
         pinSpan.classList.add('pinned');
-        pinSpan.title = 'Unpin this result';
+        pinSpan.title = 'Unpin this result (pinned — kept across re-runs)';
+        pinSpan.setAttribute('aria-pressed', 'true');
+        pinSpan.setAttribute('aria-label', `Unpin ${rs.name || `Result ${index}`}`);
+        pinSpan.innerHTML = PIN_SVG_FILLED;
+        tab.classList.add('is-pinned');
+    } else {
+        pinSpan.title = 'Pin this result (keep across re-runs)';
+        pinSpan.setAttribute('aria-pressed', 'false');
+        pinSpan.setAttribute('aria-label', `Pin ${rs.name || `Result ${index}`}`);
+        pinSpan.innerHTML = PIN_SVG_OUTLINE;
     }
-    pinSpan.textContent = '📌';
 
-    pinSpan.onclick = (e) => {
-        e.stopPropagation();
+    const sendToggleResultPin = () => {
         vscode.postMessage({
             command: 'toggleResultPin',
             sourceUri: requireActiveSourceUri(),
             resultSetIndex: index
         });
+    };
+    pinSpan.onclick = (e) => {
+        e.stopPropagation();
+        sendToggleResultPin();
+    };
+    pinSpan.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            sendToggleResultPin();
+        }
     };
     tab.appendChild(pinSpan);
 

@@ -1,11 +1,15 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 
+import { isCancellationError } from '../../core/cancellation';
 import { normalizeUriKey } from '../../core/queryRunnerUtils';
 
 export interface QueryExecutionResultPanel {
+    updateSqlQueue?(lanesJson: string): void;
     getActiveSource(): string | undefined;
     log(sourceUri: string, message: string): void;
+    cancelExecution?(sourceUri: string): void;
+    finalizeExecution?(sourceUri: string): void;
 }
 
 export type QueryExecutionPhase = 'preparing' | 'running' | 'cancelling';
@@ -32,6 +36,8 @@ export interface QueryExecutionAcquireOptions {
     document?: vscode.TextDocument;
     origin?: string;
     recovery?: QueryExecutionRecovery;
+    /** This request owns a new connection rather than the document session. */
+    independentConnection?: boolean;
 }
 
 export interface QueryExecutionLease extends vscode.Disposable {
@@ -43,9 +49,64 @@ export interface QueryExecutionLease extends vscode.Disposable {
     markRunning(): void;
     markCancelling(): void;
     setRecovery(recovery: QueryExecutionRecovery): void;
+    disableForcedRecovery(message: string): void;
+    recordError(message: string): void;
+    requireSessionIsolation(): void;
+    markSessionIsolated(): void;
+}
+
+export const MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT = 20;
+
+export type QueryQueueStatus = 'preparing' | 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+export type QueryQueueOutcome = 'completed' | 'failed' | 'cancelled';
+
+export interface QueryQueueSnapshot {
+    readonly id: string;
+    readonly sourceUri: string;
+    readonly sourceKey: string;
+    readonly executionUri?: string;
+    readonly sql: string;
+    readonly connectionName?: string;
+    readonly database?: string;
+    readonly sourceRange?: vscode.Range;
+    readonly queuedAt: number;
+    readonly status: QueryQueueStatus;
+    readonly error?: string;
+}
+
+export interface QueryLaneSnapshot {
+    readonly sourceKey: string;
+    readonly sourceUri: string;
+    readonly paused: boolean;
+    readonly running?: QueryQueueSnapshot;
+    readonly maxConcurrency: number;
+    readonly runningExecutions: readonly QueryQueueSnapshot[];
+    readonly queued: readonly QueryQueueSnapshot[];
+    readonly last?: QueryQueueSnapshot;
+}
+
+interface QueueJob {
+    snapshot: QueryQueueSnapshot;
+    options: QueryExecutionAcquireOptions;
+    preparation: AbortController;
+    run?: (lease: QueryExecutionLease) => Promise<QueryQueueOutcome>;
+    resolve: (outcome: QueryQueueOutcome) => void;
+}
+
+interface ExecutionLane {
+    sourceKey: string;
+    sourceUri: string;
+    paused: boolean;
+    running?: QueueJob;
+    independent: Map<string, QueueJob>;
+    queued: QueueJob[];
+    last?: QueryQueueSnapshot;
+    pumping?: boolean;
+    recovering?: boolean;
 }
 
 interface ActiveExecution {
+    laneKey?: string;
     executionId: string;
     sourceUri: string;
     sourceKey: string;
@@ -54,6 +115,9 @@ interface ActiveExecution {
     phase: QueryExecutionPhase;
     recovery?: QueryExecutionRecovery;
     recoveryError?: unknown;
+    error?: string;
+    isolationRequired?: boolean;
+    isolationVerified?: boolean;
     retired: boolean;
 }
 
@@ -99,6 +163,232 @@ export class QueryExecutionCoordinator {
     private nextDocumentKey = 0;
     private nextExecutionId = 0;
     private disposed = false;
+    private readonly lanes = new Map<string, ExecutionLane>();
+    private readonly listeners = new Set<() => void>();
+
+    public onDidChange(listener: () => void): vscode.Disposable {
+        this.listeners.add(listener);
+        return { dispose: () => { this.listeners.delete(listener); } };
+    }
+
+    private changed(): void {
+        for (const listener of this.listeners) {
+            try { listener(); }
+            catch (error: unknown) { console.error('SQL queue observer failed:', error); }
+        }
+    }
+
+    public getSnapshot(): readonly QueryLaneSnapshot[] {
+        return [...this.lanes.values()].map(lane => ({
+            sourceKey: lane.sourceKey, sourceUri: lane.sourceUri, paused: lane.paused,
+            maxConcurrency: lane.independent.size || lane.queued.some(job => job.options.independentConnection) ? MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT : 1,
+            running: this.snapshotJob(lane.running ?? lane.independent.values().next().value),
+            runningExecutions: [ ...(lane.running ? [lane.running] : []), ...lane.independent.values() ].map(job => this.snapshotJob(job)!),
+            queued: lane.queued.map(job => ({ ...job.snapshot })),
+            last: lane.last ? { ...lane.last } : undefined,
+        }));
+    }
+
+    private snapshotJob(job?: QueueJob): QueryQueueSnapshot | undefined {
+        if (!job) return undefined;
+        const active = [...this.runningSources.values()].find(entry => entry.executionId === job.snapshot.id);
+        return { ...job.snapshot, status: active?.phase ?? job.snapshot.status };
+    }
+
+    /** Reserve order synchronously, before any prompt or other asynchronous preparation. */
+    public enqueue(
+        snapshot: Omit<QueryQueueSnapshot, 'id' | 'sourceKey' | 'queuedAt' | 'status'>,
+        options: QueryExecutionAcquireOptions,
+        prepare: (signal: AbortSignal) => Promise<((lease: QueryExecutionLease) => Promise<QueryQueueOutcome>) | undefined>,
+    ): Promise<QueryQueueOutcome> {
+        if (this.disposed || (options.document && this.retiredDocuments.has(options.document))) {
+            return Promise.resolve('cancelled');
+        }
+        const sourceKey = this.getSourceKey(snapshot.sourceUri, options.document);
+        let lane = this.lanes.get(sourceKey);
+        if (!lane) {
+            lane = { sourceKey, sourceUri: snapshot.sourceUri, queued: [], independent: new Map(), paused: false };
+            this.lanes.set(sourceKey, lane);
+        }
+        let resolve!: (outcome: QueryQueueOutcome) => void;
+        const settled = new Promise<QueryQueueOutcome>(done => { resolve = done; });
+        const job: QueueJob = {
+            snapshot: Object.freeze({ ...snapshot, id: randomUUID(), sourceKey, queuedAt: Date.now(), status: 'preparing' }),
+            options: Object.freeze({ ...options }), resolve, preparation: new AbortController(),
+        };
+        lane.queued.push(job);
+        this.changed();
+        const owner = lane;
+        void Promise.resolve().then(() => job.preparation.signal.aborted ? undefined : prepare(job.preparation.signal)).then(run => {
+            if (!owner.queued.includes(job) || this.disposed) return;
+            if (!run) {
+                owner.queued.splice(owner.queued.indexOf(job), 1);
+                job.resolve('cancelled');
+                this.changed();
+                this.pump(owner);
+                return;
+            }
+            job.run = run;
+            job.snapshot = { ...job.snapshot, status: 'queued' };
+            this.changed();
+            this.pump(owner);
+        }, error => {
+            if (!owner.queued.includes(job)) return;
+            owner.queued.splice(owner.queued.indexOf(job), 1);
+            const outcome = isCancellationError(error) ? 'cancelled' : 'failed';
+            owner.last = { ...job.snapshot, status: outcome, error: error instanceof Error ? error.message : String(error) };
+            if (outcome === 'failed') owner.paused = true;
+            job.resolve(outcome);
+            this.changed();
+            this.pump(owner);
+        });
+        return settled;
+    }
+
+    private pump(lane: ExecutionLane): void {
+        if (this.disposed || this.lanes.get(lane.sourceKey) !== lane || lane.paused || lane.pumping || lane.recovering) return;
+        if (lane.independent.size + (lane.running ? 1 : 0) >= MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT) return;
+        const job = lane.queued[0];
+        if (!job?.run || (lane.running && !job.options.independentConnection)) return;
+        lane.pumping = true;
+        void this.withAcquisitionLock(lane.sourceKey, async () => {
+            lane.pumping = false;
+            if (this.disposed || this.lanes.get(lane.sourceKey) !== lane || lane.paused || lane.recovering
+                || lane.queued[0] !== job || (!job.options.independentConnection && this.runningSources.has(lane.sourceKey))) return undefined;
+            if (job.options.independentConnection) lane.independent.set(job.snapshot.id, job);
+            else lane.running = job;
+            lane.queued.shift();
+            const entry: ActiveExecution = {
+                executionId: job.snapshot.id, sourceUri: job.snapshot.executionUri ?? lane.sourceUri,
+                sourceKey: job.options.independentConnection ? `${lane.sourceKey}#execution:${job.snapshot.id}` : lane.sourceKey, laneKey: lane.sourceKey,
+                origin: job.options.origin ?? 'Run Query', startedAt: Date.now(), phase: 'preparing',
+                recovery: job.options.recovery, retired: false,
+            };
+            this.runningSources.set(entry.sourceKey, entry);
+            return this.createLease(entry);
+        }).then(async lease => {
+            if (!lease) {
+                if (!this.runningSources.has(lane.sourceKey)) this.pump(lane);
+                return;
+            }
+            job.snapshot = { ...job.snapshot, status: 'running' };
+            this.changed();
+            if (job.options.independentConnection) this.pump(lane);
+            let outcome: QueryQueueOutcome = 'failed';
+            let errorMessage: string | undefined;
+            try {
+                outcome = await job.run!(lease);
+            } catch (error: unknown) {
+                errorMessage = error instanceof Error ? error.message : String(error);
+            } finally {
+                let isolated = true;
+                // Legacy cancellation can finish its bounded reader cleanup even
+                // when the server command remains alive. Reset the session before
+                // allowing another queued request to use it.
+                const active = this.runningSources.get(lease.sourceKey);
+                if (lease.isCurrent() && !active?.isolationVerified && (outcome === 'cancelled' || active?.isolationRequired)) {
+                    isolated = await this.withAcquisitionLock(lane.sourceKey, async () => {
+                        if (!lease.isCurrent()) return true;
+                        try { return await job.options.recovery?.resetConnection?.() ?? false; }
+                        catch { return false; }
+                    });
+                }
+                if (this.lanes.get(lane.sourceKey) === lane && (lane.running === job || lane.independent.get(job.snapshot.id) === job)) {
+                    if (!isolated) {
+                        lane.paused = true;
+                        job.snapshot = { ...job.snapshot, status: 'cancelling', error: 'Session isolation failed. Use recovery before continuing.' };
+                        lease.markCancelling();
+                    } else {
+                        if (lane.running === job) lane.running = undefined;
+                        lane.independent.delete(job.snapshot.id);
+                        lane.last = { ...job.snapshot, status: outcome, error: errorMessage ?? active?.error };
+                        if (outcome === 'failed') lane.paused = true;
+                        lease.dispose();
+                    }
+                    this.changed();
+                    this.pump(lane);
+                } else {
+                    lease.dispose();
+                }
+                job.resolve(outcome);
+            }
+        });
+    }
+
+    public removeQueued(sourceKey: string, id: string): void {
+        const lane = this.lanes.get(sourceKey);
+        const index = lane?.queued.findIndex(job => job.snapshot.id === id) ?? -1;
+        if (!lane || index < 0) return;
+        const removed = lane.queued.splice(index, 1)[0];
+        removed.preparation.abort();
+        removed.resolve('cancelled');
+        this.changed();
+        this.pump(lane);
+    }
+
+    public clearQueued(sourceKey: string): void {
+        const lane = this.lanes.get(sourceKey);
+        if (!lane) return;
+        for (const job of lane.queued.splice(0)) { job.preparation.abort(); job.resolve('cancelled'); }
+        this.changed();
+    }
+
+    public setPaused(sourceKey: string, paused: boolean): void {
+        const lane = this.lanes.get(sourceKey);
+        if (!lane) return;
+        lane.paused = paused;
+        this.changed();
+        this.pump(lane);
+    }
+
+    private activeInLane(sourceKey: string, id?: string): ActiveExecution | undefined {
+        return [...this.runningSources.values()].find(entry => (entry.sourceKey === sourceKey || entry.laneKey === sourceKey) && (!id || entry.executionId === id));
+    }
+
+    public async cancelRunning(sourceKey: string, id?: string): Promise<void> {
+        const entry = this.activeInLane(sourceKey, id);
+        if (!entry || !this.isCurrent(entry)) return;
+        entry.phase = 'cancelling';
+        entry.isolationRequired = true;
+        this.changed();
+        // Sending cancellation is not completion. Only settlement releases the lane.
+        try { await entry.recovery?.requestCancel?.(); }
+        catch (error: unknown) {
+            entry.recoveryError = error;
+            const lane = this.lanes.get(sourceKey);
+            if (lane) lane.paused = true;
+            this.changed();
+        }
+    }
+
+    public async recoverRunning(sourceKey: string, panel: QueryExecutionResultPanel, id?: string): Promise<void> {
+        const entry = this.activeInLane(sourceKey, id);
+        if (!entry) return;
+        const lane = this.lanes.get(sourceKey);
+        if (lane?.recovering) return;
+        const oldJob = lane?.running?.snapshot.id === entry.executionId ? lane.running : lane?.independent.get(entry.executionId);
+        if (lane) { lane.paused = true; lane.recovering = true; }
+        this.changed();
+        try {
+            if (await this.withAcquisitionLock(sourceKey, () => this.resolveDuplicate(entry, entry.sourceUri, panel))) {
+                // Only the captured job can be detached; late completions must
+                // never retire a replacement execution.
+                if (lane && oldJob && (lane.running === oldJob || lane.independent.get(oldJob.snapshot.id) === oldJob)) {
+                    oldJob.resolve('cancelled');
+                    lane.last = { ...oldJob.snapshot, status: 'cancelled' };
+                    if (lane.running === oldJob) lane.running = undefined;
+                    lane.independent.delete(oldJob.snapshot.id);
+                }
+                panel.finalizeExecution?.(entry.sourceUri);
+            }
+        } catch (error: unknown) {
+            entry.recoveryError = error;
+            void vscode.window.showErrorMessage(`SQL recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            if (lane) { lane.recovering = false; lane.paused = true; }
+            this.changed();
+        }
+    }
 
     private getSourceKey(sourceUri: string, document?: vscode.TextDocument): string {
         const uriKey = normalizeUriKey(sourceUri);
@@ -123,6 +413,9 @@ export class QueryExecutionCoordinator {
         const current = this.runningSources.get(entry.sourceKey);
         if (current?.executionId === entry.executionId) {
             this.runningSources.delete(entry.sourceKey);
+            const lane = this.lanes.get(entry.laneKey ?? entry.sourceKey);
+            if (lane) this.pump(lane);
+            this.changed();
         }
     }
 
@@ -146,10 +439,30 @@ export class QueryExecutionCoordinator {
         }
     }
 
+    private pauseForRecovery(entry: ActiveExecution): void {
+        const lane = this.lanes.get(entry.laneKey ?? entry.sourceKey);
+        if (lane) lane.paused = true;
+        this.changed();
+    }
+
+    private retireRecovered(entry: ActiveExecution): void {
+        const lane = this.lanes.get(entry.laneKey ?? entry.sourceKey);
+        const job = lane?.running?.snapshot.id === entry.executionId ? lane.running : lane?.independent.get(entry.executionId);
+        if (lane && job?.snapshot.id === entry.executionId) {
+            job.resolve('cancelled');
+            lane.last = { ...job.snapshot, status: 'cancelled' };
+            if (lane.running === job) lane.running = undefined;
+            lane.independent.delete(job.snapshot.id);
+            lane.paused = true;
+        }
+        this.retire(entry);
+    }
+
     private async forceRecover(entry: ActiveExecution, useDropSession: boolean): Promise<boolean> {
         if (!this.isCurrent(entry)) {
             return true;
         }
+        this.pauseForRecovery(entry);
         entry.phase = 'cancelling';
         try {
             await entry.recovery?.requestCancel?.();
@@ -171,7 +484,7 @@ export class QueryExecutionCoordinator {
 
             entry.recovery?.clearCancellation?.();
             if (this.isCurrent(entry)) {
-                this.retire(entry);
+                this.retireRecovered(entry);
             }
             return true;
         } catch (error: unknown) {
@@ -184,6 +497,7 @@ export class QueryExecutionCoordinator {
         if (!this.isCurrent(entry)) {
             return true;
         }
+        this.pauseForRecovery(entry);
         entry.phase = 'cancelling';
         try {
             await entry.recovery?.requestCancel?.();
@@ -193,7 +507,7 @@ export class QueryExecutionCoordinator {
 
             entry.recovery?.clearCancellation?.();
             if (this.isCurrent(entry)) {
-                this.retire(entry);
+                this.retireRecovered(entry);
             }
             return true;
         } catch (error: unknown) {
@@ -346,12 +660,27 @@ export class QueryExecutionCoordinator {
             markRunning: () => {
                 if (this.isCurrent(entry)) {
                     entry.phase = 'running';
+                    this.changed();
                 }
             },
             markCancelling: () => {
                 if (this.isCurrent(entry)) {
                     entry.phase = 'cancelling';
+                    this.changed();
                 }
+            },
+            disableForcedRecovery: message => {
+                if (this.isCurrent(entry)) entry.recovery = { ...entry.recovery,
+                    allowForcedRecovery: false, forcedRecoveryUnavailableMessage: message };
+            },
+            recordError: message => {
+                if (this.isCurrent(entry)) entry.error = message;
+            },
+            markSessionIsolated: () => {
+                if (this.isCurrent(entry)) entry.isolationVerified = true;
+            },
+            requireSessionIsolation: () => {
+                if (this.isCurrent(entry)) entry.isolationRequired = true;
             },
             setRecovery: recovery => {
                 if (this.isCurrent(entry)) {
@@ -394,6 +723,9 @@ export class QueryExecutionCoordinator {
                 return undefined;
             }
 
+            const lane = this.lanes.get(sourceKey);
+            if (lane?.running || (lane?.queued.length && !lane.paused)) return undefined;
+
             const entry: ActiveExecution = {
                 executionId: `query-execution-${++this.nextExecutionId}-${randomUUID()}`,
                 sourceUri,
@@ -412,11 +744,16 @@ export class QueryExecutionCoordinator {
     /** Mark a closed document's lease stale so a new document reusing its URI cannot inherit it. */
     public retireForDocument(document: vscode.TextDocument): void {
         this.retiredDocuments.add(document);
-        const sourceUri = document.uri.toString();
-        const documentKey = this.documentKeys.get(document);
-        const entries = documentKey
-            ? [this.runningSources.get(documentKey)]
-            : [this.runningSources.get(normalizeUriKey(sourceUri))];
+        const key = this.documentKeys.get(document) ?? normalizeUriKey(document.uri.toString());
+        const lane = this.lanes.get(key);
+        if (lane) {
+            this.clearQueued(key);
+            lane.running?.resolve('cancelled');
+            for (const job of lane.independent.values()) job.resolve('cancelled');
+            this.lanes.delete(key);
+            this.changed();
+        }
+        const entries = [...this.runningSources.values()].filter(entry => entry.sourceKey === key || entry.laneKey === key);
         for (const entry of entries) {
             if (!entry || !this.isCurrent(entry)) continue;
             entry.phase = 'cancelling';
@@ -433,15 +770,16 @@ export class QueryExecutionCoordinator {
     public isRunning(sourceUri: string): boolean {
         const normalizedUri = normalizeUriKey(sourceUri);
         return Array.from(this.runningSources.values()).some(entry =>
-            this.isCurrent(entry) && normalizeUriKey(entry.sourceUri) === normalizedUri,
+            this.isCurrent(entry) && (normalizeUriKey(entry.sourceUri) === normalizedUri || normalizeUriKey(this.lanes.get(entry.laneKey ?? entry.sourceKey)?.sourceUri ?? '') === normalizedUri),
         );
     }
 
     public markCancelling(sourceUri: string): void {
         const normalizedUri = normalizeUriKey(sourceUri);
         for (const entry of this.runningSources.values()) {
-            if (this.isCurrent(entry) && normalizeUriKey(entry.sourceUri) === normalizedUri) {
+            if (this.isCurrent(entry) && (normalizeUriKey(entry.sourceUri) === normalizedUri || normalizeUriKey(this.lanes.get(entry.laneKey ?? entry.sourceKey)?.sourceUri ?? '') === normalizedUri)) {
                 entry.phase = 'cancelling';
+                this.changed();
             }
         }
     }
@@ -452,6 +790,14 @@ export class QueryExecutionCoordinator {
             return;
         }
         this.disposed = true;
+        for (const lane of this.lanes.values()) {
+            for (const job of lane.queued) { job.preparation.abort(); job.resolve('cancelled'); }
+            lane.running?.resolve('cancelled');
+            for (const job of lane.independent.values()) job.resolve('cancelled');
+        }
+        this.lanes.clear();
+        this.changed();
+        this.listeners.clear();
         const active = [...this.runningSources.values()];
         this.runningSources.clear();
         this.acquisitionLocks.clear();
@@ -464,6 +810,7 @@ export class QueryExecutionCoordinator {
 
     /** Test-only reset; production callers should dispose an activation instance. */
     public clearForTests(): void {
+        this.dispose();
         this.runningSources.clear();
         this.acquisitionLocks.clear();
         this.documentKeys = new WeakMap<vscode.TextDocument, string>();
@@ -516,4 +863,9 @@ export function markQueryExecutionCancelling(sourceUri: string): void {
 
 export function clearQueryExecutionGateForTests(): void {
     defaultCoordinator.clearForTests();
+}
+
+/** Access the activation-owned queue for commands and its view. */
+export function getQueryExecutionCoordinator(): QueryExecutionCoordinator {
+    return defaultCoordinator;
 }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
 import {
     runQueriesSequentially,
     runQueriesWithStreaming,
@@ -16,8 +17,13 @@ import {
 import { toPerfErrorCode } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import {
-    tryAcquireQueryExecution,
+    getQueryExecutionCoordinator,
+    QueryExecutionLease,
+    QueryQueueOutcome,
 } from './queryExecutionGate';
+import { streamingManager } from '../../core/queryCancellation';
+import { isCancellationError } from '../../core/cancellation';
+import { executionTargetFingerprint, prepareQueuedQuery } from './queryQueuePreparation';
 import { createQueryExecutionRecovery } from './queryExecutionRecovery';
 import {
     formatAccessFailureMessage,
@@ -28,10 +34,12 @@ import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
+    wholeDocument?: boolean;
 }
 
 function resolveSmartSequentialQueries(
     editor: vscode.TextEditor,
+    wholeDocument = false,
 ): { queries: string[]; sourceUri: string } | null {
     const document = editor.document;
 
@@ -44,7 +52,15 @@ function resolveSmartSequentialQueries(
     const sourceUri = document.uri.toString();
     let queries: string[];
 
-    if (!selection.isEmpty) {
+    if (wholeDocument) {
+        const sql = selection.isEmpty ? text : document.getText(selection);
+        if (!sql.trim()) {
+            vscode.window.showWarningMessage('No SQL query to execute');
+            return null;
+        }
+        queries = SqlParser.splitStatements(sql).filter(q => q.trim().length > 0);
+        if (!queries.length) queries = [sql];
+    } else if (!selection.isEmpty) {
         const selectedText = document.getText(selection);
         if (!selectedText.trim()) {
             vscode.window.showWarningMessage('No SQL query selected');
@@ -98,7 +114,8 @@ export async function runSmartSequentialQuery(
     deps: QueryCommandsDependencies,
     options: SmartSequentialRunOptions = {},
 ): Promise<void> {
-    const { context, connectionManager, resultPanelProvider } = deps;
+    options = Object.freeze({ ...options });
+    const { context, connectionManager } = deps;
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showErrorMessage('No active editor found');
@@ -112,48 +129,78 @@ export async function runSmartSequentialQuery(
         ? connectionManager.getConnectionDatabaseKind(connectionName)
         : undefined;
 
-    let queriesForError: string[] = [];
+    const resolved = resolveSmartSequentialQueries(editor, options.wholeDocument);
+    if (!resolved) return;
+    const queries = resolved.queries;
+    const sourceRange = new vscode.Range(editor.selection.start, editor.selection.end);
+    const keepConnectionOpen = connectionManager.getDocumentKeepConnectionOpen?.(sourceUri) ?? true;
+    const independentConnection = !keepConnectionOpen;
+    const executionUri = independentConnection ? `${sourceUri}#query-${randomUUID()}` : sourceUri;
+    const recovery = createQueryExecutionRecovery(connectionManager, executionUri, connectionName ?? undefined);
+    if (independentConnection) {
+        recovery.allowForcedRecovery = false;
+        recovery.resetConnection = async () => false;
+        recovery.openFreshConnection = async () => false;
+        recovery.forcedRecoveryUnavailableMessage = 'This request owns a transient session. Cancel it and wait for its cleanup; other independent requests remain isolated.';
+    }
+    const databaseOverride = connectionManager.getDocumentDatabase(sourceUri);
+    const profile = connectionName ? connectionManager.getConnection(connectionName).then(executionTargetFingerprint) : Promise.resolve(undefined);
+    const coordinator = getQueryExecutionCoordinator();
+    await coordinator.enqueue({ sourceUri, sql: queries.join(';\n\n'), connectionName: connectionName ?? undefined,
+        database: databaseOverride, sourceRange, executionUri }, {
+        document: editor.document,
+        origin: options.wholeDocument ? 'Run Query Batch' : options.continueOnError ? 'Run Query Continue on Error' : 'Run Query',
+        recovery, independentConnection,
+    }, async signal => {
+        try {
+            if (!(await confirmSafeExecute(queries))) return undefined;
+            if (signal.aborted) throw new Error('Query preparation cancelled');
+            const prepared = await prepareQueuedQuery(queries, context, sourceUri, connectionManager,
+                connectionName ?? undefined, databaseOverride, await profile, signal);
+            return lease => executePreparedQuery(deps, options, executionUri, databaseKind, queries, lease, { ...prepared, sourceDocumentUri: sourceUri, keepConnectionOpenOverride: keepConnectionOpen });
+        } catch (error: unknown) {
+            if (signal.aborted) throw error;
+            void vscode.window.showErrorMessage(`Could not prepare queued query: ${error instanceof Error ? error.message : String(error)}`);
+            throw error;
+        }
+    });
+}
+
+async function executePreparedQuery(
+    deps: QueryCommandsDependencies,
+    options: SmartSequentialRunOptions,
+    sourceUri: string,
+    databaseKind: string | undefined,
+    queries: string[],
+    executionGate: QueryExecutionLease,
+    prepared: BatchQueryRunOptions,
+): Promise<QueryQueueOutcome> {
+    const { context, connectionManager, resultPanelProvider } = deps;
+    const queriesForError = queries;
+    let hadFailure = false;
+    let hadCancellation = false;
     let runQueryTimer: ReturnType<typeof createPerformanceTimer> | undefined;
     let executionStarted = false;
-    let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
 
     try {
-        const resolved = resolveSmartSequentialQueries(editor);
-        if (!resolved) {
-            return;
-        }
-
-        const { queries } = resolved;
-        queriesForError = queries;
+        streamingManager.clearAborted(sourceUri);
         const continueOnError = options.continueOnError === true;
-
-        if (!(await confirmSafeExecute(queries))) {
-            return;
-        }
-
-        executionGate = await tryAcquireQueryExecution(sourceUri, resultPanelProvider, {
-            document: editor.document,
-            origin: options.continueOnError ? 'Run Query Continue on Error' : 'Run Query',
-            recovery: createQueryExecutionRecovery(connectionManager, sourceUri, connectionName ?? undefined),
-        });
-        if (!executionGate) {
-            return;
-        }
-
         runQueryTimer = createPerformanceTimer(
-            continueOnError ? 'query.run_continue_on_error' : 'query.run',
+            options.wholeDocument ? 'query.run_batch' : continueOnError ? 'query.run_continue_on_error' : 'query.run',
             {
                 payloadSize: queries.reduce((sum, q) => sum + q.length, 0),
             },
         );
 
         resultPanelProvider.setActiveSource(sourceUri);
-        resultPanelProvider.startExecution(sourceUri);
+        // Queued tasks must not wipe prior result tabs: pin every existing tab
+        // as a durable manual pin (no automatic unpin on finalize).
+        resultPanelProvider.startExecution(sourceUri, { pinExistingResults: true });
         executionStarted = true;
         resultPanelProvider.log(sourceUri, 'Preparing SQL execution...');
 
         const config = getExtensionConfiguration();
-        const enableStreaming = config.get<boolean>('enableStreaming', true) ?? true;
+        const enableStreaming = !options.wholeDocument && (config.get<boolean>('enableStreaming', true) ?? true);
         const streamingChunkSize = config.get<number>('streamingChunkSize', 5000) ?? 5000;
 
         const queryStartCallback = (
@@ -177,16 +224,39 @@ export async function runSmartSequentialQuery(
             if (!executionGate?.isCurrent()) {
                 return;
             }
+            if (status === 'error') {
+                hadFailure = true;
+                if (error) executionGate.recordError(error);
+            }
+            if (status === 'cancelled') hadCancellation = true;
             resultPanelProvider.logExecutionEnd(executionId, rowCount, status, error);
         };
 
         const confirmExpandedQuery = createExpandedQuerySafetyChecker(queries);
 
         const batchOptions: BatchQueryRunOptions = {
+            ...prepared,
+            macroFileContext: {
+                ...prepared.macroFileContext,
+                onExecutableMacro: kind => {
+                    if (kind === 'python' || kind === 'export') executionGate.disableForcedRecovery(
+                        'This request has external macro side effects. Cancel it and wait for completion before continuing.');
+                },
+            },
+            cancellationPrepared: true,
+            onSessionIsolated: () => executionGate.markSessionIsolated(),
+            onExecutionSettled: summary => {
+                if (summary.status === 'cancelled' || summary.error?.kind === 'timeout' || summary.cleanupErrors?.length) {
+                    executionGate.requireSessionIsolation();
+                }
+            },
+            retryOnBrokenConnection: !options.wholeDocument,
             isExecutionCurrent: () => executionGate?.isCurrent() === true,
             confirmSafeExecute: confirmExpandedQuery,
             onStatementSucceeded: event => deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
             onStatementFailed: event => {
+                if (isCancellationError(event.errorMessage)) hadCancellation = true;
+                else hadFailure = true;
                 deps.tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);
             },
             ...(continueOnError
@@ -316,12 +386,11 @@ export async function runSmartSequentialQuery(
         );
 
         const executionStillCurrent = executionGate.isCurrent();
-        executionGate.dispose();
         if (!executionStillCurrent) {
-            return;
+            return 'cancelled';
         }
         resultPanelProvider.finalizeExecution(sourceUri);
-        await handleExecutionCompletion(sourceUri);
+        void handleExecutionCompletion(sourceUri);
         if (runQueryTimer) {
             const successEvent = runQueryTimer.finish({
                 result: 'ok',
@@ -333,15 +402,17 @@ export async function runSmartSequentialQuery(
             });
             console.log(formatPerformanceEvent(successEvent));
         }
+        return hadCancellation ? 'cancelled' : hadFailure ? 'failed' : 'completed';
     } catch (err: unknown) {
         const executionStillCurrent = executionGate?.isCurrent() ?? true;
-        executionGate?.dispose();
         if (!executionStillCurrent) {
-            return;
+            return 'cancelled';
         }
         const msg = err instanceof Error ? err.message : String(err);
+        executionGate.recordError(msg);
 
-        if (msg.includes('Query cancelled')) {
+        if (isCancellationError(err)) {
+            executionGate.requireSessionIsolation();
             if (executionStarted) {
                 resultPanelProvider.log(sourceUri, 'Query execution cancelled by user.');
                 resultPanelProvider.finalizeExecution(sourceUri);
@@ -357,7 +428,7 @@ export async function runSmartSequentialQuery(
                 });
                 console.log(formatPerformanceEvent(cancelledEvent));
             }
-            return;
+            return 'cancelled';
         }
 
         if (executionStarted) {
@@ -391,7 +462,11 @@ export async function runSmartSequentialQuery(
         }))) {
             vscode.window.showErrorMessage(`Error executing query: ${msg}`);
         }
+        return 'failed';
     } finally {
-        executionGate?.dispose();
+        if (prepared.keepConnectionOpenOverride === false) {
+            streamingManager.clearAborted(sourceUri);
+            if (executionStarted && !executionGate.isCurrent()) resultPanelProvider.finalizeExecution(sourceUri);
+        }
     }
 }

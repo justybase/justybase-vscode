@@ -17,3 +17,7 @@ Command titles and identifiers are generated from `package.json` and companion e
 ## Finding a command
 
 Use the Command Palette and search for the human title. Use the identifier in automation, CodeLens, tests, or issue reports. Commands with a `netezza.` prefix can still be exposed for companion dialects because the shared UI owns the action; the capability guard decides whether it is shown.
+
+## SQL execution queue
+
+**JustyBase: Show SQL Execution Queue** (`netezza.showSqlQueue`) opens the per-tab queue in the JustyBase sidebar. See [SQL execution queue](sql-execution-queue.md) for snapshots, cancellation, recovery, and lifecycle behavior.

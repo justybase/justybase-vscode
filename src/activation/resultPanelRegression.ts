@@ -1,3 +1,4 @@
+import { runQueryQueueRegression, runQueryQueueLogsRegression } from './queryQueueRegression';
 import * as fs from 'fs';
 import { createHash } from 'crypto';
 import * as path from 'path';
@@ -580,8 +581,19 @@ async function runExtensionHostScenario(
 
         const sql = buildScenarioSql(tableName, engine === 'netezza' ? schemaName : undefined);
 
-        clearResultPanelTrace();
+        const queueDocument = await openUntitledSql('SELECT 101;');
+        documentUris.push(queueDocument.uri.toString());
+        await connectionManager.setDocumentConnection(queueDocument.uri.toString(), connectionName);
+        connectionManager.setDocumentKeepConnectionOpen(queueDocument.uri.toString(), true);
+        await runQueryQueueRegression(queueDocument, provider);
+        connectionManager.setDocumentKeepConnectionOpen(queueDocument.uri.toString(), false);
+        await runQueryQueueRegression(queueDocument, provider, true);
+        connectionManager.setDocumentKeepConnectionOpen(queueDocument.uri.toString(), true);
+
         await provider.ensureResultPanelTestBridgeReady();
+        await runQueryQueueLogsRegression(queueDocument, provider, keepOpen =>
+            connectionManager.setDocumentKeepConnectionOpen(queueDocument.uri.toString(), keepOpen));
+        clearResultPanelTrace();
         await requestExtensionHostScreenshot('01-result-panel-ready');
 
         const firstUntitled = await openUntitledSql('SELECT 10 AS RESULT_PANEL_LIFECYCLE_VALUE;');

@@ -26,7 +26,7 @@ import {
 } from "./macroPreprocessor";
 import { createMacroPythonExecutor } from "./macroPythonExecutor";
 import { NzConnection } from "../types";
-import type { DatabaseErrorDetails } from "@justybase/contracts";
+import type { ExecutionSummary, DatabaseErrorDetails } from "@justybase/contracts";
 import type { DatabaseConnection } from "../contracts/database";
 import { streamingManager } from "./queryCancellation";
 import {
@@ -93,6 +93,21 @@ export type BatchExecutionStatus =
     | "retrying";
 
 export interface BatchQueryRunOptions {
+    /** Runtime/streaming identity may differ from the document when sessions run independently. */
+    sourceDocumentUri?: string;
+    /** Capture connection ownership at submission rather than reread a changed tab setting. */
+    keepConnectionOpenOverride?: boolean;
+    /** The command cleared the abort marker before exposing its running lease. */
+    cancellationPrepared?: boolean;
+    onExecutionSettled?: (summary: ExecutionSummary) => void;
+    onSessionIsolated?: () => void;
+
+    /** Inputs captured by a user queue submission; executable macros still use its session. */
+    preparedVariables?: Readonly<Record<string, string>>;
+    macroFileContext?: MacroPreprocessorContext;
+    connectionName?: string;
+    validateExecutionTarget?: () => Promise<void>;
+
     continueOnError?: boolean;
     retryOnBrokenConnection?: boolean;
     /** Execution-scoped guard that remains false after force recovery. */
@@ -173,12 +188,12 @@ export async function resolveBatchVariables(
     queries: string[],
     context: vscode.ExtensionContext,
     documentUri?: string,
+    macroContext = createMacroFileReadContext(documentUri),
+    signal?: AbortSignal,
 ): Promise<Record<string, string>> {
     const unresolvedVariables = new Set<string>();
     const scanEnvironment = new MacroEnvironment();
     const preprocessor = new MacroPreprocessor();
-    const macroContext = createMacroFileReadContext(documentUri);
-
     for (const q of queries) {
         const result = await preprocessor.processScript(q, {
             environment: scanEnvironment,
@@ -195,6 +210,7 @@ export async function resolveBatchVariables(
             false,
             {},
             context,
+            ...(signal ? [signal] : []),
         );
     }
 

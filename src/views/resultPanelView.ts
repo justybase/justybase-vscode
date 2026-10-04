@@ -12,6 +12,7 @@ import type {
 import { parseResultPanelWebviewMessage } from '../contracts/webviews/resultPanelRuntime';
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
+import type { StartExecutionOptions } from '../state/resultStateManager';
 import { ensureResultSetId } from '../state/resultSetIdentity';
 import { ExportManager } from '../export/exportManager';
 import {
@@ -169,6 +170,34 @@ function getTraceSourceUri(
 }
 
 export class ResultPanelView implements vscode.WebviewViewProvider {
+    private sqlQueueJson = '[]';
+
+    private _prepareQueueLogs(): string {
+        const lanes = JSON.parse(this.sqlQueueJson) as { sourceUri: string }[];
+        return JSON.stringify(lanes.map(lane => {
+            const sources = this._stateManager.getExecutionGroupSources(lane.sourceUri);
+            let remaining = 1000;
+            const archive = sources.map(source => {
+                const rows = this._stateManager.resultsMap.get(source)?.find(result => result.isLog)?.data ?? [];
+                const bounded = remaining > 0 ? rows.slice(-Math.min(remaining, 200)) : [];
+                remaining -= bounded.length;
+                return { sourceUri: source, rows: bounded };
+            });
+            return { ...lane, sources, archive };
+        }));
+    }
+
+    public getExecutionGroupSources(sourceUri: string): string[] {
+        return this._stateManager.getExecutionGroupSources(sourceUri);
+    }
+
+    public updateSqlQueue(lanesJson: string): void {
+        this.sqlQueueJson = lanesJson;
+        const lanes = JSON.parse(lanesJson) as { sourceKey: string; sourceUri: string; lastExecutionUri?: string; running: { executionUri?: string }[] }[];
+        this._stateManager.setExecutionGroups(lanes.map(lane => ({ key: lane.sourceKey, sources: [lane.sourceUri, lane.lastExecutionUri, ...lane.running.map(job => job.executionUri)].filter((source): source is string => !!source) })));
+        this._postMessageToWebview({ command: 'sqlQueueState', lanesJson: this._prepareQueueLogs() });
+    }
+
     public static readonly viewType = 'netezza.results';
 
     private _view?: vscode.WebviewView;
@@ -782,7 +811,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._updateWebview();
     }
 
-    public startExecution(sourceUri: string) {
+    public startExecution(sourceUri: string, options?: StartExecutionOptions) {
         const hadResultSets = (this._stateManager.resultsMap.get(sourceUri)?.length ?? 0) > 0;
         traceResultPanelEvent({
             phase: 'start_execution',
@@ -790,7 +819,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             resultSetCount: this._stateManager.resultsMap.get(sourceUri)?.length ?? 0,
             reason: hadResultSets ? 'existing-results' : 'new-source',
         });
-        const { clearedUnpinnedResults } = this._stateManager.startExecution(sourceUri);
+        const { clearedUnpinnedResults } = this._stateManager.startExecution(sourceUri, options);
         this._streamingResultSets.delete(sourceUri);
         this._streamingTransportSequence.delete(sourceUri);
         // Full hydrate only when unpinned tabs (e.g. Error) were removed — avoids wiping
@@ -2821,6 +2850,10 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _postLightweightActiveSourceUpdate(sourceUri: string): void {
+        const pinnedResults = Array.from(this._stateManager.pinnedResults.entries()).map(([id, info]) => ({
+            id,
+            ...info
+        }));
         this._postMessageToWebview({
             command: 'setActiveSource',
             sourceUri,
@@ -2828,6 +2861,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             executingSourcesJson: JSON.stringify(Array.from(this._stateManager.executingSources)),
             sourcesJson: JSON.stringify(Array.from(this._stateManager.resultsMap.keys())),
             pinnedSourcesJson: JSON.stringify(Array.from(this._stateManager.pinnedSources)),
+            pinnedResultsJson: JSON.stringify(pinnedResults),
             streamingCompletedSourcesJson: JSON.stringify(Array.from(this._stateManager.streamingCompletedSources)),
             diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
             formatSettings: this._formattingStore
@@ -2989,6 +3023,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
 
         return {
             viewData: {
+                sqlQueueJson: this._prepareQueueLogs(),
                 sourcesJson: JSON.stringify(sources),
                 pinnedSourcesJson: JSON.stringify(pinnedSources),
                 pinnedResultsJson: JSON.stringify(pinnedResults),

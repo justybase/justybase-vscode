@@ -293,22 +293,29 @@ export enum StatusBarAlignment {
   Right = 2,
 }
 
-export class CancellationTokenSource {
-  private _token: CancellationToken;
-  constructor() {
-    this._token = { isCancellationRequested: false };
-  }
-  get token(): CancellationToken {
-    return this._token;
-  }
-  cancel(): void {
-    this._token = { isCancellationRequested: true };
-  }
-  dispose(): void { }
+export class CancellationError extends Error {
+  constructor() { super('Canceled'); this.name = 'Canceled'; }
 }
-
+export class CancellationTokenSource {
+  private readonly listeners = new Set<() => void>();
+  private readonly _token: CancellationToken = {
+    isCancellationRequested: false,
+    onCancellationRequested: (listener: () => void) => {
+      this.listeners.add(listener);
+      return { dispose: () => { this.listeners.delete(listener); } };
+    },
+  };
+  get token(): CancellationToken { return this._token; }
+  cancel(): void {
+    if (this._token.isCancellationRequested) { return; }
+    this._token.isCancellationRequested = true;
+    this.listeners.forEach(listener => listener());
+  }
+  dispose(): void { this.listeners.clear(); }
+}
 export interface CancellationToken {
   isCancellationRequested: boolean;
+  onCancellationRequested?: (listener: () => void) => { dispose: () => void };
 }
 
 export enum CompletionItemKind {
@@ -565,3 +572,5 @@ export class SemanticTokensBuilder {
     return new SemanticTokens(new Uint32Array(this.data), resultId);
   }
 }
+
+export enum ProgressLocation { SourceControl = 1, Window = 10, Notification = 15 }

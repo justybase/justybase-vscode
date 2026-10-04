@@ -71,6 +71,9 @@ function hasKnownCommand(message: MessageRecord, commands: readonly string[]): b
 
 function validateWebviewMessage(message: MessageRecord): boolean {
     switch (message.command) {
+        case 'sqlQueueAction':
+            return hasString(message, 'sourceKey') && ['cancel', 'remove', 'pause', 'resume', 'clear'].includes(String(message.action))
+                && (message.jobId === undefined || hasString(message, 'jobId'));
         case 'ready':
         case 'selectAll':
         case 'addFileToDataWorkspace':
@@ -227,6 +230,8 @@ function validateHostMessage(message: MessageRecord): boolean {
         case 'refreshView':
         case 'selectAll':
             return true;
+        case 'sqlQueueState':
+            return typeof message.lanesJson === 'string';
         case 'hydrate':
             return isRecord(message.data);
         case 'testBridge':
