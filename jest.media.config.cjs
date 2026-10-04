@@ -33,6 +33,7 @@ module.exports = {
     'media/resultPanel/hostContracts.ts',
     'media/resultPanel/protocol.ts',
     'media/resultPanel/tabs.ts',
+    'media/databaseAnalysis.ts',
     'media/resultPanel/sqlQueueLogs.ts',
     'media/resultPanel/logRunGroups.ts',
     'media/resultPanel/grid/alternateViews.ts',

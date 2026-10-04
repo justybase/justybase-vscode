@@ -87,11 +87,34 @@ import { evaluateCompleteness } from '@justybase/metadata-core';
 import type { DatabaseForeignKeyColumnReference } from '../../contracts/database';
 import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
 
+import type { DefinitionCatalogSnapshot } from '../definitionCatalog';
+
 export type { CacheStatsSnapshot, CacheLayer } from '../cacheStats';
 export type { PerKeyEntry, CacheType, DatabaseMetadata } from '../types';
 
 export class MetadataCache implements MetadataPrefetchTarget {
   private readonly _store: MetadataStore;
+  /** Ephemeral catalog definitions: never persisted to disk or restored on startup. */
+  private readonly definitionCatalogs = new Map<string, { connection: string; at: number; snapshot: DefinitionCatalogSnapshot }>();
+
+  getDefinitionCatalog(connection: string, database: string): DefinitionCatalogSnapshot | undefined {
+    const entry = this.definitionCatalogs.get(JSON.stringify([connection, database]));
+    return entry && Date.now() - entry.at < 5 * 60_000 ? entry.snapshot : undefined;
+  }
+
+  setDefinitionCatalog(connection: string, database: string, snapshot: DefinitionCatalogSnapshot): void {
+    const key = JSON.stringify([connection, database]);
+    this.definitionCatalogs.delete(key);
+    if (this.definitionCatalogs.size >= 4) { this.definitionCatalogs.delete(this.definitionCatalogs.keys().next().value!); }
+    this.definitionCatalogs.set(key, { connection, at: Date.now(), snapshot });
+  }
+
+  clearDefinitionCatalogs(connection?: string): void {
+    for (const [key, entry] of this.definitionCatalogs) {
+      if (!connection || entry.connection === connection) { this.definitionCatalogs.delete(key); }
+    }
+  }
+
   private readonly _stats = new CacheStatsTracker();
   private readonly _layers: MetadataLayerAccess;
 
@@ -478,6 +501,7 @@ export class MetadataCache implements MetadataPrefetchTarget {
   }
 
   async dispose(): Promise<void> {
+    this.clearDefinitionCatalogs();
     this._diskLifecycleState.cacheGeneration++;
     this.relationshipRetries.clear();
     try {

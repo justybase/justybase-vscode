@@ -1,3 +1,4 @@
+import { registerDatabaseAnalysisCommands } from './commands/databaseAnalysisCommands';
 import { QueryQueueView } from './views/queryQueueView';
 /**
  * Netezza VS Code Extension - Main Entry Point
@@ -335,6 +336,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     context.subscriptions.push(...registerImportCommands({ context, connectionManager, metadataCache, outputChannel }));
     context.subscriptions.push(...registerMigrationCommands({ context, connectionManager }));
     context.subscriptions.push(...registerFileConnectionCommands({ context, connectionManager }));
+    context.subscriptions.push(...registerDatabaseAnalysisCommands(context, connectionManager, metadataCache));
     context.subscriptions.push(new QueryQueueView(queryExecutionCoordinator, resultPanelProvider));
     context.subscriptions.push(...registerQueryCommands({
         context,

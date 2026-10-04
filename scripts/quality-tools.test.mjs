@@ -493,3 +493,30 @@ test('rejects failed collectors and missing quality inputs', () => {
   assert.match(qualityInputFailures({ ...validInputs, lintResults: undefined }).join('\n'), /lint artifact/);
   assert.match(qualityInputFailures({ ...validInputs, audit: undefined }).join('\n'), /audit artifact/);
 });
+
+test('coverage recognizes erased class fields while still requiring runtime initializers', () => {
+  const fixture = path.resolve(process.cwd(), 'src/__quality_class_fields_fixture__.ts');
+  fs.writeFileSync(fixture, 'export class Owner {\n  private value: string;\n  private active = true;\n}\ndeclare function acquireApi(): void;\nexport {};\n');
+  const baseline = { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } };
+  try {
+    const declared = checkChangedCoverage({ diff: '+++ b/src/__quality_class_fields_fixture__.ts\n@@ -2 +2 @@\n', lcov: 'SF:src/__quality_class_fields_fixture__.ts\nDA:1,1\nend_of_record\n', baseline });
+    assert.deepEqual(declared.failures, []);
+    const ambient = checkChangedCoverage({ diff: '+++ b/src/__quality_class_fields_fixture__.ts\n@@ -5 +5 @@\n', lcov: 'SF:src/__quality_class_fields_fixture__.ts\nDA:1,1\nend_of_record\n', baseline });
+    assert.deepEqual(ambient.failures, []);
+    const moduleMarker = checkChangedCoverage({ diff: '+++ b/src/__quality_class_fields_fixture__.ts\n@@ -6 +6 @@\n', lcov: 'SF:src/__quality_class_fields_fixture__.ts\nDA:1,1\nend_of_record\n', baseline });
+    assert.deepEqual(moduleMarker.failures, []);
+    const initialized = checkChangedCoverage({ diff: '+++ b/src/__quality_class_fields_fixture__.ts\n@@ -3 +3 @@\n', lcov: 'SF:src/__quality_class_fields_fixture__.ts\nDA:1,1\nDA:3,0\nend_of_record\n', baseline });
+    assert.match(initialized.failures[0], /line coverage/);
+  } finally { fs.rmSync(fixture, { force: true }); }
+});
+
+test('coverage recognizes static template text but retains embedded call coverage', () => {
+  const fixture = path.resolve(process.cwd(), 'src/__quality_static_template_fixture__.ts');
+  fs.writeFileSync(fixture, 'export function render() {\n  return `<main>\n    <p>Static text</p>\n    ${loadData()}\n  </main>`;\n}\n');
+  const baseline = { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } };
+  const lcov = 'SF:src/__quality_static_template_fixture__.ts\nDA:2,1\nend_of_record\n';
+  try {
+    assert.deepEqual(checkChangedCoverage({ diff: '+++ b/src/__quality_static_template_fixture__.ts\n@@ -3 +3 @@\n', lcov, baseline }).failures, []);
+    assert.match(checkChangedCoverage({ diff: '+++ b/src/__quality_static_template_fixture__.ts\n@@ -4 +4 @@\n', lcov, baseline }).failures[0], /missing from LCOV/);
+  } finally { fs.rmSync(fixture, { force: true }); }
+});

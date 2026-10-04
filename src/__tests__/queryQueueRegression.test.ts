@@ -53,6 +53,11 @@ describe('Extension Host queue fixture contract', () => {
         const previous = process.env.JUSTYBASE_RESULT_PANEL_TRACE;
         process.env.JUSTYBASE_RESULT_PANEL_TRACE = '1';
         const { document, provider, executed, setIndependent } = fixture();
+        Object.assign(provider, {
+            ensureResultPanelTestBridgeReady: async () => undefined,
+            setActiveSource: jest.fn(),
+            runResultPanelTestBridge: async () => { throw new Error('Stop after queue fixture'); },
+        });
         const manager = { saveConnection: jest.fn(async () => undefined), setDocumentConnection: jest.fn(async () => undefined),
             setDocumentKeepConnectionOpen: jest.fn((_uri: string, value: boolean) => setIndependent(!value)),
             clearDocumentConnection: jest.fn(async () => undefined), deleteConnection: jest.fn(async () => undefined) };

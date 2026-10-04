@@ -897,6 +897,36 @@
       {
         "command": "netezza.fileSearch.run",
         "title": "File Search: Search in Files"
+      },
+      {
+        "command": "netezza.showDependencies",
+        "title": "Show Dependencies",
+        "category": "JustyBase"
+      },
+      {
+        "command": "netezza.showUsedBy",
+        "title": "Show Used By",
+        "category": "JustyBase"
+      },
+      {
+        "command": "netezza.impactAnalysis",
+        "title": "Impact Analysis",
+        "category": "JustyBase"
+      },
+      {
+        "command": "netezza.findColumnReferences",
+        "title": "Find Column References",
+        "category": "JustyBase"
+      },
+      {
+        "command": "netezza.analyzeQueryPerformance",
+        "title": "Analyze Query Performance",
+        "category": "JustyBase"
+      },
+      {
+        "command": "netezza.analyzeLastExecution",
+        "title": "Analyze Last Execution",
+        "category": "JustyBase"
       }
     ],
     "chatParticipants": [
@@ -1952,6 +1982,11 @@
           "submenu": "netezza.justybase",
           "when": "resourceLangId == sql",
           "group": "navigation@1"
+        },
+        {
+          "command": "netezza.analyzeQueryPerformance",
+          "when": "editorLangId == sql",
+          "group": "5_analysis"
         }
       ],
       "explorer/context": [
@@ -2657,6 +2692,31 @@
           "command": "netezza.favorites.includeNow",
           "when": "view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)/",
           "group": "3_copilot@3"
+        },
+        {
+          "command": "netezza.showDependencies",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|PROCEDURE|EXTERNAL TABLE)$/",
+          "group": "5_analysis"
+        },
+        {
+          "command": "netezza.showUsedBy",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|PROCEDURE|EXTERNAL TABLE)$/",
+          "group": "5_analysis"
+        },
+        {
+          "command": "netezza.impactAnalysis",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|PROCEDURE|EXTERNAL TABLE)$/",
+          "group": "5_analysis"
+        },
+        {
+          "command": "netezza.findColumnReferences",
+          "when": "view == netezza.schema && viewItem == column",
+          "group": "5_analysis"
+        },
+        {
+          "command": "netezza.impactAnalysis",
+          "when": "view == netezza.schema && viewItem == column",
+          "group": "5_analysis"
         }
       ]
     },

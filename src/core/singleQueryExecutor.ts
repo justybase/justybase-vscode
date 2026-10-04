@@ -1062,6 +1062,7 @@ export async function runExplainQuery(
   connectionName?: string,
   connectionManager?: ConnectionManager,
   documentUri?: string,
+  connectionOverride?: NzConnection,
 ): Promise<string> {
   const connManager = connectionManager || new ConnectionManager(context);
   const keepConnectionOpen = documentUri
@@ -1079,12 +1080,9 @@ export async function runExplainQuery(
     documentUri,
   );
 
-  const { connection, shouldCloseConnection } = await getConnectionForDocument(
-    connManager,
-    resolvedConnectionName,
-    keepConnectionOpen,
-    documentUri,
-  );
+  const { connection, shouldCloseConnection } = connectionOverride
+    ? { connection: connectionOverride, shouldCloseConnection: false }
+    : await getConnectionForDocument(connManager, resolvedConnectionName, keepConnectionOpen, documentUri);
 
   try {
     const noticeHandler = (msg: unknown) => {

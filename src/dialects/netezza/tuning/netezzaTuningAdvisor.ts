@@ -1,3 +1,4 @@
+import { analyzeNetezzaPerformance, type PerformanceInput, type PerformanceReport } from '../../../services/analysis/performanceAdvisor';
 import {
     clampConfidence,
     createTuningReport,
@@ -52,6 +53,10 @@ export class NetezzaTuningAdvisor {
 
     constructor(options: NetezzaTuningAdvisorOptions = {}) {
         this.options = { ...DEFAULT_OPTIONS, ...options };
+    }
+
+    public analyzePerformance(input: PerformanceInput): PerformanceReport {
+        return analyzeNetezzaPerformance(input);
     }
 
     public analyze(input: NetezzaTuningAdvisorInput): TuningReport {

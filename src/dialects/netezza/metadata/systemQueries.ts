@@ -1357,6 +1357,13 @@ ${unionSql}
      * @param viewName - View name
      * @param schema - Optional schema name
      */
+    /** Bulk definitions; connect to this database to populate DEFINITION. */
+    listViewDefinitions: (database: string): string =>
+        `SELECT SCHEMA, VIEWNAME, DEFINITION FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.VIEW)}`,
+
+    listProcedureSources: (database: string): string =>
+        `SELECT SCHEMA, PROCEDURE, PROCEDURESIGNATURE, PROCEDURESOURCE FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.PROCEDURE)} WHERE ${buildIdentifierCondition('DATABASE', database)}`,
+
     getViewDefinition: (database: string, viewName: string, schema?: string): string => {
         const db = database;
         let whereClause = buildIdentifierCondition('VIEWNAME', viewName);

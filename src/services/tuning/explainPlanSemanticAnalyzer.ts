@@ -314,13 +314,21 @@ export function parseExplainPlanNodes(planText: string): {
 } {
     const candidateLines = getPlanCandidateLines(planText);
     const nodes: ExplainPlanSemanticNode[] = [];
+    const indents: number[] = [];
 
     for (const line of candidateLines) {
         const node = parseNodeLine(line, nodes.length + 1);
         if (node) {
             nodes.push(node);
+            indents.push(line.match(/^(\s*)/)?.[1].length ?? 0);
         }
     }
+
+    // Derive the indentation unit rather than assuming one server formatting width.
+    const baseline = indents.length ? Math.min(...indents) : 0;
+    const positive = indents.filter(indent => indent > baseline);
+    const unit = positive.length ? Math.min(...positive) - baseline : 3;
+    nodes.forEach((node, index) => { node.depth = Math.floor((indents[index] - baseline) / unit); });
 
     return {
         nodes,
