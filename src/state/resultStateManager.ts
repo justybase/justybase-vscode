@@ -544,18 +544,15 @@ export class ResultStateManager {
     }
 
     /**
-     * Ensure the Logs result exists at index 0, appending the new-execution
-     * marker. Extracted from startExecution so queued starts can normalize the
-     * log position before promoting pins (keeps promoted indexes final).
+     * Ensure the Logs result exists at index 0. No marker rows are appended:
+     * the per-statement terminal entry (e.g. ✓ SUCCESS with SQL, connection,
+     * duration and row count) already aggregates the execution.
      */
     private _ensureLogResultAtFront(sourceUri: string, existingResults: ResultSet[], logResultSetId: string): void {
         const existingLogIndex = existingResults.findIndex(r => r.isLog);
         if (existingLogIndex !== -1) {
             const logResultSet = existingResults[existingLogIndex];
             ensureResultSetId(logResultSet);
-            const timestamp = new Date().toLocaleTimeString();
-            logResultSet.data.push(['', '']);
-            logResultSet.data.push([timestamp, '--- New Execution Started ---']);
             logResultSet.message = 'Execution started...';
             logResultSet.executionTimestamp = Date.now();
 
@@ -567,13 +564,12 @@ export class ResultStateManager {
                 this._updatePinsOnReorder(sourceUri);
             }
         } else {
-            const timestamp = new Date().toLocaleTimeString();
             const logResultSet = {
                 columns: [
                     { name: 'Time', type: 'string' },
                     { name: 'Message', type: 'string' }
                 ],
-                data: [[timestamp, '--- New Execution Started ---']],
+                data: [],
                 message: 'Execution started...',
                 executionTimestamp: Date.now(),
                 isLog: true,

@@ -23,7 +23,7 @@ import {
     releaseResultSetRows,
 } from './state.js';
 import { showError } from './utils.js';
-import { renderDocIndicator, renderResultSetTabs, switchToResultSet, updateLogsTabSpinner } from './tabs.js';
+import { renderDocIndicator, renderResultSetTabs, switchToResultSet, updateLogsTabSpinner, shouldPreserveLogsTab, setUserWatchingLogs } from './tabs.js';
 import { renderGrids, updateLoadingState, appendLogRows, replaceLogRows, updateControlsVisibility, syncGlobalFilterInput } from './grid.js';
 import { updateRowCountInfo, applyRowLimitReachedFlag, renderRowCountInfo } from './filter.js';
 import { syncDiskStreamingRowCount } from './diskQuerySpec.js';
@@ -604,6 +604,9 @@ export function setupStreamingMessageHandler(): void {
                 break;
             case 'switchToResultSet':
                 if (typeof message.resultSetIndex === 'number') {
+                    // Explicit host instruction (e.g. pinned sidebar selection):
+                    // treat like a user selection for Logs-watch purposes.
+                    setUserWatchingLogs(getResultSetAt(message.resultSetIndex)?.isLog === true);
                     switchToResultSet(message.resultSetIndex, false, false);
                 }
                 break;
@@ -846,8 +849,14 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     // permanently replace the restored data-tab selection.
     const hostActiveResultSetIndex = message.activeResultSetIndex;
     const switchedResultSets = getResultSets();
+    // The user explicitly watches Logs: keep the visible tab and ignore the
+    // host's data-tab selection (lightweight refreshes must not steal it).
+    const preserveLogsTab = shouldPreserveLogsTab()
+        && typeof hostActiveResultSetIndex === 'number'
+        && switchedResultSets[hostActiveResultSetIndex]?.isLog !== true;
     if (
-        typeof hostActiveResultSetIndex === 'number'
+        !preserveLogsTab
+        && typeof hostActiveResultSetIndex === 'number'
         && hostActiveResultSetIndex >= 0
         && hostActiveResultSetIndex < switchedResultSets.length
     ) {
@@ -855,7 +864,7 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
     }
 
     if (shouldPreserveGridsOnActiveSourceRefresh(sourceUri, activeSource, resultSets)) {
-        if (typeof message.activeResultSetIndex === 'number') {
+        if (!preserveLogsTab && typeof message.activeResultSetIndex === 'number') {
             setActiveGridIndex(message.activeResultSetIndex);
         }
         renderDocIndicator(getActiveSourceUri());
@@ -865,7 +874,7 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         getResultPanelWindow().refreshRowView?.();
 
         const activeRsIndex = getActiveGridIndex();
-        if (activeRsIndex !== previousGridIndex) {
+        if (!preserveLogsTab && activeRsIndex !== previousGridIndex) {
             switchToResultSet(activeRsIndex, false, false);
         } else {
             updateControlsVisibility(activeRsIndex);
@@ -1150,7 +1159,16 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
 
         if (hydratedResultSets.length > 0) {
             if (getActiveGridIndex() >= hydratedResultSets.length) setActiveGridIndex(0);
-            switchToResultSet(getActiveGridIndex(), true, false);
+            const hostIndex = getActiveGridIndex();
+            if (shouldPreserveLogsTab() && hydratedResultSets[hostIndex]?.isLog !== true) {
+                // The user explicitly watches Logs: keep the visible tab and
+                // only sync chrome for it instead of switching to new results.
+                updateControlsVisibility(hostIndex);
+                syncGlobalFilterInput(hostIndex);
+                renderRowCountInfo(hostIndex);
+            } else {
+                switchToResultSet(hostIndex, true, false);
+            }
             syncAnalysisView();
 
             const activeSource = data.activeSourceJson
@@ -1391,7 +1409,12 @@ export function handleAppendRows(message: Record<string, unknown>): void {
                 nextResultSets[resultSetIndex] = shell;
             }
             setResultSets(nextResultSets);
-            setActiveGridIndex(resultSetIndex);
+            if (shouldPreserveLogsTab()) {
+                // The user explicitly watches Logs: render the new tab in the
+                // background without stealing the visible selection.
+            } else {
+                setActiveGridIndex(resultSetIndex);
+            }
             createdShell = true;
         }
     }

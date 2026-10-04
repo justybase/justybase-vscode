@@ -59,7 +59,9 @@ jest.mock('../../media/resultPanel/utils.js', () => ({
 jest.mock('../../media/resultPanel/tabs.js', () => ({
     renderDocIndicator: jest.fn(),
     renderResultSetTabs: jest.fn(),
-    switchToResultSet: jest.fn()
+    switchToResultSet: jest.fn(),
+    shouldPreserveLogsTab: jest.fn(() => false),
+    setUserWatchingLogs: jest.fn(),
 }));
 
 const mockUpdateLoadingState = jest.fn();
