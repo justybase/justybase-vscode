@@ -78,10 +78,15 @@ type AppendStreamingResult =
 export interface StartExecutionOptions {
     /**
      * Preserve every existing result tab as a durable manual pin instead of
-     * clearing unpinned results. Used when a queued task starts: prior results
-     * must survive the follow-up execution and must not be auto-unpinned on
-     * finalize. Manual pins are protected from maxDataResults pruning, so tabs
-     * accumulate until closed via closeResult/closeAllResults.
+     * clearing unpinned results. Callers must set this only when the new SQL
+     * was enqueued while previous results were not fully completed (running
+     * or still queued/preparing — see QueryExecutionCoordinator.hasPendingWork).
+     * A fresh run after idle must omit it so unpinned tabs are cleared.
+     * The flag is honored even though the predecessor has already finalized
+     * by the time the queued job starts: the queue serializes work, so the
+     * overlap can only be observed at enqueue time. Manual pins are protected
+     * from maxDataResults pruning, so tabs accumulate until closed via
+     * closeResult/closeAllResults.
      */
     pinExistingResults?: boolean;
 }
