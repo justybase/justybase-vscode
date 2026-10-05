@@ -285,7 +285,6 @@ export class ResultsHtmlGenerator {
                             </button>
                         </div>
                     </div>
-                    <div id="resultStatusline" class="result-statusline" role="status" aria-live="polite"></div>
                 </div>
             </div>
             <div id="rangeChartOverlay" class="range-chart-overlay" aria-hidden="true"></div>

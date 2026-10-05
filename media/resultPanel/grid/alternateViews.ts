@@ -565,9 +565,6 @@ export function updateControlsVisibility(index: number): void {
 
     const groupingPanel = document.getElementById('groupingPanel');
     if (groupingPanel) groupingPanel.style.display = hideControls ? 'none' : '';
-
-    const statusline = document.getElementById('resultStatusline');
-    if (statusline) statusline.style.display = hideControls ? 'none' : '';
 }
 
 export function syncGlobalFilterInput(index = getActiveGridIndex()) {
