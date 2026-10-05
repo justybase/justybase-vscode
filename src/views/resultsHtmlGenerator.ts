@@ -21,17 +21,7 @@ export interface ResultsHtmlOptions {
   sharedUiMode?: boolean;
 }
 
-const DEFAULT_RESULTS_GRID_FONT_FAMILY =
-  "'JetBrains Mono', monospace";
-
-function buildFilterHistoryControlsMarkup(): string {
-  const parts: string[] = [];
-  parts.push('<div class="filter-history-controls" role="group" aria-label="Filter history">');
-  parts.push('<button type="button" class="btn btn-icon" id="undoFilterBtn" onclick="undoFilterHistory()" title="Undo filter or sort" aria-label="Undo filter or sort" disabled>↶</button>');
-  parts.push('<button type="button" class="btn btn-icon" id="redoFilterBtn" onclick="redoFilterHistory()" title="Redo filter or sort" aria-label="Redo filter or sort" disabled>↷</button>');
-  parts.push('</div>');
-  return parts.join('');
-}
+const DEFAULT_RESULTS_GRID_FONT_FAMILY = "'JetBrains Mono', monospace";
 
 function buildResponsiveCollapseMenuItemMarkup(): string {
   const attributes = [
@@ -58,12 +48,12 @@ export class ResultsHtmlGenerator {
     options: ResultsHtmlOptions = {},
   ): string {
     const icons = this._getIcons();
+    const exportButtonIcon = icons.export;
     const resultGridFontFamily = JSON.stringify(
       options.resultGridFontFamily || DEFAULT_RESULTS_GRID_FONT_FAMILY,
     );
     const resultGridFontSize = options.resultGridFontSize || 12;
     const uiMode = options.sharedUiMode === true ? 'shared' : 'legacy';
-    const filterHistoryControls = buildFilterHistoryControlsMarkup();
     const responsiveCollapseMenuItem = buildResponsiveCollapseMenuItemMarkup();
     return `<!DOCTYPE html>
         <html lang="en">
@@ -129,21 +119,18 @@ export class ResultsHtmlGenerator {
                         </div>
                         <div class="toolbar-separator" aria-hidden="true"></div>
                         <div class="toolbar-group toolbar-group--search">
-                        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter rows..." onkeyup="onFilterChanged()" aria-label="Filter rows">
-                        ${filterHistoryControls}
+                        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter rows... (Esc = clear)" onkeyup="onFilterChanged()" onkeydown="onGlobalFilterKeydown(event)" aria-label="Filter rows. Press Escape to clear">
                         <div class="column-search-group">
                             <div class="column-search-wrapper">
                                 <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column..." autocomplete="off" oninput="onColumnSearchChanged()" onkeydown="onColumnSearchKeydown(event)" onblur="onColumnSearchBlur()" onfocus="onColumnSearchFocus()" aria-label="Find column">
                                 <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
                             </div>
                         </div>
-                        <button type="button" class="btn btn-icon refresh-sql-btn" onclick="refreshActiveResult()" title="Re-run SQL for the active result set in the same source session" id="refreshResultBtn" aria-label="Refresh SQL">${icons.refresh}</button>
-                        <button type="button" class="btn btn-icon clear-filters-btn" onclick="clearAllFilters()" title="Remove all filters and aggregations" id="clearFiltersBtn" aria-label="Clear filters and aggregations">${icons.clear}</button>
                         </div>
                         <div class="toolbar-separator" aria-hidden="true"></div>
                         <div class="toolbar-group toolbar-group--export">
                         <div class="split-btn" id="exportSplitBtn">
-                            <button class="btn split-btn__primary" onclick="toggleExportPrimaryMenu(event)" title="Export results (active view)" aria-haspopup="menu" aria-expanded="false" aria-controls="exportPrimaryMenu">${icons.export} Export</button>
+                            <button class="btn split-btn__primary" onclick="handleExportPrimaryClick(event)" title="Export results (active view)" aria-label="Export results (active view)">${exportButtonIcon} Export</button>
                             <button class="btn split-btn__arrow" onclick="toggleExportSplitMenu(event)" title="Quick export and copy options" aria-label="Quick export and copy options">▾</button>
                             <div class="split-btn__menu export-primary-menu" id="exportPrimaryMenu" style="display:none" role="menu" aria-label="Export format"></div>
                             <div class="split-btn__menu" id="exportSplitMenu" style="display:none" onclick="handleExportSplitMenuClick(event)">
@@ -166,11 +153,18 @@ export class ResultsHtmlGenerator {
                         </div>
 
                         <div class="split-btn toolbar-more-btn" id="toolbarMoreBtn">
-                            <button class="btn split-btn__primary" onclick="toggleToolbarMoreMenu(event)" title="More actions" aria-label="More actions" aria-haspopup="menu">⋯ More</button>
+                            <button class="btn split-btn__primary" onclick="toggleToolbarMoreMenu(event)" title="More actions" aria-label="More actions" aria-haspopup="menu">⋯ <span class="toolbar-more-btn__label">More</span></button>
                             <div class="split-btn__menu toolbar-more-menu" id="toolbarMoreMenu" style="display:none" onclick="handleToolbarMoreMenuClick(event)" role="menu">
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">View</div>
                                 ${responsiveCollapseMenuItem}
                                 <div class="split-btn__menu-item" data-action="formatting">Formatting…</div>
+                                <div class="split-btn__menu-separator"></div>
+                                <div class="split-btn__menu-item toolbar-more-menu__section-label">Filter</div>
+                                <div class="split-btn__menu-item" data-action="filter-undo">Undo filter (Alt+Z)</div>
+                                <div class="split-btn__menu-item" data-action="filter-redo">Redo filter (Alt+Y)</div>
+                                <div class="split-btn__menu-item" data-action="filter-clear">Clear all filters</div>
+                                <div class="split-btn__menu-item" data-action="filter-refresh">Refresh SQL</div>
+                                <div class="split-btn__menu-item" data-action="find-column">Find column…</div>
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">Analyze</div>
                                 <div class="split-btn__menu-item" data-action="query-duckdb">Query Locally (DuckDB)</div>
@@ -291,6 +285,7 @@ export class ResultsHtmlGenerator {
                             </button>
                         </div>
                     </div>
+                    <div id="resultStatusline" class="result-statusline" role="status" aria-live="polite"></div>
                 </div>
             </div>
             <div id="rangeChartOverlay" class="range-chart-overlay" aria-hidden="true"></div>

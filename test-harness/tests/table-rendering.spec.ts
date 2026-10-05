@@ -370,21 +370,18 @@ test.describe('Table rendering', () => {
 
     test('undoes and redoes a global filter for the active result', async ({ page }) => {
         const filterInput = page.locator('#globalFilter');
-        const undo = page.locator('#undoFilterBtn');
-        const redo = page.locator('#redoFilterBtn');
+        const moreToggle = page.locator('#toolbarMoreToggle');
 
-        await expect(undo).toBeDisabled();
         await filterInput.fill('Anna');
         await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/125 rows of 1,000/);
-        await expect(undo).toBeEnabled();
 
-        await undo.click();
+        await moreToggle.click();
+        await page.locator('#toolbarMoreMenu [data-action="filter-undo"]').click();
         await expect.poll(() => page.locator('#rowCountInfo').textContent()).toContain('1,000 rows');
-        await expect(redo).toBeEnabled();
 
-        await redo.click();
+        await moreToggle.click();
+        await page.locator('#toolbarMoreMenu [data-action="filter-redo"]').click();
         await expect.poll(() => page.locator('#rowCountInfo').textContent()).toMatch(/125 rows of 1,000/);
-        await expect(redo).toBeDisabled();
     });
 
     test('stages a typed edit against the original row after filtering', async ({ page }) => {
@@ -441,7 +438,8 @@ test.describe('Table rendering', () => {
             .toBeVisible();
 
         await page.keyboard.press('Escape');
-        await page.locator('#clearFiltersBtn').click();
+        await page.locator('#toolbarMoreToggle').click();
+        await page.locator('#toolbarMoreMenu [data-action="filter-clear"]').click();
         await expect.poll(() => page.locator('#rowCountInfo').textContent()).toContain('1,000 rows');
     });
 

@@ -6,7 +6,7 @@ import {
     getGlobalDragState
 } from './state.js';
 import { getCurrentExportFormattingMetadata } from './formatting.js';
-import { postHostMessage } from './protocol.js';
+import { postHostMessage, getHostState, setHostState } from './protocol.js';
 import { asHtml, getElementById } from './dom.js';
 import {
     getActiveSourceUri,
@@ -400,7 +400,7 @@ function renderExportPrimaryScopeMenu(formatId: string): void {
     ));
 }
 
-function submitPrimaryExportSelection(formatId: string, rowScope: ExportRowScope = 'loaded'): void {
+function submitPrimaryExportSelection(formatId: string, rowScope: ExportRowScope = 'loaded', remember = true): void {
     const exportData = collectCurrentViewExportMetadata();
     closeExportPrimaryMenu();
     closeExportSplitMenu();
@@ -416,6 +416,68 @@ function submitPrimaryExportSelection(formatId: string, rowScope: ExportRowScope
         destination: PRIMARY_EXPORT_DESTINATION,
         rowScope,
     });
+    if (remember) {
+        rememberLastExportSelection(formatId, rowScope);
+    }
+}
+
+interface LastExportSelection {
+    format: string;
+    rowScope: ExportRowScope;
+}
+
+const LAST_EXPORT_STATE_KEY = '_lastExport';
+
+/** In-memory fallback when the host state API is unavailable (tests, harness). */
+let lastExportMemory: LastExportSelection | null = null;
+
+export function readLastExportSelection(): LastExportSelection | null {
+    const state = getHostState() as Record<string, unknown> | null | undefined;
+    const raw = (state?.[LAST_EXPORT_STATE_KEY] ?? lastExportMemory) as Partial<LastExportSelection> | undefined;
+    if (!raw || typeof raw.format !== 'string') return null;
+    if (!PRIMARY_EXPORT_FORMATS.some((format) => format.id === raw.format)) return null;
+    const rowScope: ExportRowScope = raw.rowScope === 'all' ? 'all' : 'loaded';
+    return { format: raw.format, rowScope };
+}
+
+export function rememberLastExportSelection(formatId: string, rowScope: ExportRowScope): void {
+    const state = (getHostState() as Record<string, unknown> | null | undefined) ?? {};
+    state[LAST_EXPORT_STATE_KEY] = { format: formatId, rowScope } satisfies LastExportSelection;
+    setHostState(state);
+    lastExportMemory = { format: formatId, rowScope };
+    updateExportPrimaryButton(formatId);
+}
+
+function updateExportPrimaryButton(formatId?: string): void {
+    const exportBtn = document.querySelector('#exportSplitBtn .split-btn__primary');
+    if (!exportBtn) return;
+    const format = PRIMARY_EXPORT_FORMATS.find((candidate) => candidate.id === formatId);
+    const label = format ? `Repeat last export: ${format.label}` : 'Export results (active view)';
+    exportBtn.setAttribute('title', label);
+    exportBtn.setAttribute('aria-label', label);
+}
+
+/** Restore the repeat-last-export hint after webview revival. */
+export function syncExportPrimaryButton(): void {
+    updateExportPrimaryButton(readLastExportSelection()?.format);
+}
+
+/**
+ * Variant C: the primary Export button repeats the last format in one click;
+ * the ▾ arrow (and this fallback) opens the format menu instead.
+ */
+export function handleExportPrimaryClick(event?: Event): void {
+    event?.stopPropagation?.();
+    const last = readLastExportSelection();
+    if (last && collectCurrentViewExportMetadata()) {
+        // Repeat uses the stored preference. A context-forced downgrade to
+        // 'loaded' (no trailing LIMIT) must not overwrite a remembered ALL
+        // scope, otherwise the next LIMIT result would silently forget it.
+        const rowScope: ExportRowScope = last.rowScope === 'all' && activeResultHasTrailingLimit() ? 'all' : 'loaded';
+        submitPrimaryExportSelection(last.format, rowScope, false);
+        return;
+    }
+    toggleExportPrimaryMenu(event);
 }
 
 export function toggleExportPrimaryMenu(event?: Event): void {

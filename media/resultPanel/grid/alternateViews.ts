@@ -548,7 +548,7 @@ export function updateControlsVisibility(index: number): void {
         // Explicit allow-list: only the log clearer survives on Logs/Text views.
         // Every other toolbar group is hidden as a whole, so adding a new
         // group to `.controls` never leaks onto Logs/Text by accident.
-        const groups = controls.querySelectorAll(':scope > .toolbar-group, :scope > .toolbar-separator, :scope > .layout-switcher, :scope > .split-btn, :scope > input, :scope > button, :scope > select, :scope > .column-search-group, :scope > .filter-history-controls');
+        const groups = controls.querySelectorAll(':scope > .toolbar-group, :scope > .toolbar-separator, :scope > .layout-switcher, :scope > .split-btn, :scope > input, :scope > button, :scope > select, :scope > .column-search-group');
         groups.forEach((node) => {
             const child = node as HTMLElement;
             if (child.id === 'clearLogsBtn' || child.querySelector?.('#clearLogsBtn')) {
@@ -565,6 +565,9 @@ export function updateControlsVisibility(index: number): void {
 
     const groupingPanel = document.getElementById('groupingPanel');
     if (groupingPanel) groupingPanel.style.display = hideControls ? 'none' : '';
+
+    const statusline = document.getElementById('resultStatusline');
+    if (statusline) statusline.style.display = hideControls ? 'none' : '';
 }
 
 export function syncGlobalFilterInput(index = getActiveGridIndex()) {

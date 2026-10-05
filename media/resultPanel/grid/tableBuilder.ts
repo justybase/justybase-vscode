@@ -848,7 +848,6 @@ export function createResultSetGrid(
                 : currentResult.databaseFilterSpec ? 'database' : 'loaded',
             databaseFilterSpec: currentResult.databaseFilterSpec,
         });
-        callPanelMethod('updateFilterHistoryButtons');
     };
 
     if (rs.storageMode === 'sqlite' && tableState.grouping.length > 0) {

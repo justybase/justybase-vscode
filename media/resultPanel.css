@@ -623,7 +623,7 @@ body.vscode-dark {
 }
 
 .toolbar-more-btn .split-btn__primary {
-    min-width: 72px;
+    min-width: 0;
     justify-content: center;
 }
 
@@ -920,11 +920,9 @@ body.vscode-dark {
     background-color: var(--vscode-editor-background);
     border-bottom: 1px solid var(--vscode-panel-border);
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     column-gap: 4px;
-    row-gap: 4px;
     align-items: center;
-    align-content: flex-start;
     flex-shrink: 0;
 }
 
@@ -977,6 +975,26 @@ body.vscode-dark {
     align-self: stretch;
 }
 
+/* Narrow panels: toolbar controls clip inside their own box instead of
+   painting over neighbouring buttons (flex groups may shrink below the
+   content width once .controls stops wrapping). */
+.controls .toolbar-group > .btn,
+.controls .toolbar-group .split-btn,
+.controls .toolbar-group .layout-switcher,
+.controls > .split-btn {
+    flex-shrink: 1;
+    min-width: 0;
+}
+.controls .toolbar-group .btn,
+.controls .toolbar-group .split-btn__primary,
+.controls .toolbar-group .split-btn__arrow,
+.controls .toolbar-edit-control,
+.controls .layout-switcher__btn {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Grouped compact toolbar: view | search | export | table | more | edit */
 .toolbar-group {
     display: inline-flex;
@@ -990,9 +1008,11 @@ body.vscode-dark {
 }
 .toolbar-group--search .global-filter-input {
     flex: 1 1 140px;
+    min-width: 64px;
 }
 .toolbar-group--search .column-search-group {
     flex: 0 1 180px;
+    min-width: 0;
 }
 .toolbar-group--edit:empty {
     display: none;
@@ -1011,6 +1031,46 @@ body.vscode-dark {
     }
     .toolbar-group--export .split-btn__primary {
         padding: 2px 6px;
+    }
+    .toolbar-more-btn__label {
+        display: none;
+    }
+    .toolbar-more-btn .split-btn__primary {
+        padding: 2px 6px;
+    }
+}
+
+@media (max-width: 700px) {
+    .layout-switcher .layout-switcher__btn {
+        padding: 3px 5px;
+    }
+    .toolbar-group--search .global-filter-input {
+        min-width: 48px;
+    }
+}
+
+@media (max-width: 640px) {
+    .toolbar-group--search .column-search-group {
+        display: none;
+    }
+    /* Revealed by the "⋯ → Find column…" menu entry. */
+    .controls.show-column-search .toolbar-group--search .column-search-group {
+        display: inline-flex;
+    }
+}
+
+@media (max-width: 560px) {
+    /* The statusline under the grid keeps the count readable. */
+    #rowCountInfo {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    /* Last resort: below ~480px even iconified controls no longer fit in
+       one line — wrap instead of clipping them out of reach. */
+    .controls {
+        flex-wrap: wrap;
     }
 }
 
@@ -1074,20 +1134,6 @@ body.vscode-dark {
   /* Allow text selection in filter input */
   user-select: text;
   -webkit-user-select: text;
-}
-
-.filter-history-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-
-.filter-history-controls .btn-icon {
-  min-width: 24px;
-  width: 24px;
-  padding: 0;
-  font-size: 16px;
 }
 
 .column-search-group {
@@ -1317,15 +1363,31 @@ body.vscode-dark {
 }
 
 .row-count-info {
-    flex: 1 1 140px;
+    flex: 0 1 auto;
     margin-left: auto;
-    min-width: 120px;
+    min-width: 0;
     color: var(--vscode-descriptionForeground);
     font-size: 11px;
     text-align: right;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Statusline under the grid — mirrors the toolbar row counter (variant C). */
+.result-statusline {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    background-color: var(--vscode-editor-background);
+    border-top: 1px solid var(--vscode-panel-border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.result-statusline:empty {
+    display: none;
 }
 
 /* Table Styles */

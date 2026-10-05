@@ -77,6 +77,11 @@
             <button class="btn split-btn__primary" id="toolbarMoreToggle" onclick="toggleToolbarMoreMenu(event)" aria-haspopup="menu">⋯ More</button>
             <div class="split-btn__menu toolbar-more-menu" id="toolbarMoreMenu" style="display:none" onclick="handleToolbarMoreMenuClick(event)" role="menu">
                 <div class="split-btn__menu-item" data-action="responsive-collapse" role="menuitemcheckbox" aria-checked="false" aria-disabled="false" tabindex="0">Responsive collapsed columns</div>
+                <div class="split-btn__menu-separator"></div>
+                <div class="split-btn__menu-item" data-action="filter-undo" role="menuitem">Undo filter (Alt+Z)</div>
+                <div class="split-btn__menu-item" data-action="filter-redo" role="menuitem">Redo filter (Alt+Y)</div>
+                <div class="split-btn__menu-item" data-action="filter-clear" role="menuitem">Clear all filters</div>
+                <div class="split-btn__menu-item" data-action="filter-refresh" role="menuitem">Refresh SQL</div>
             </div>
         </div>
         <div class="toolbar-separator"></div>
@@ -122,9 +127,6 @@
             </div>
         </div>
         <div class="toolbar-separator"></div>
-        <button type="button" class="btn btn-icon" id="undoFilterBtn" onclick="undoFilterHistory()" title="Undo filter or sort" aria-label="Undo filter or sort" disabled>↶</button>
-        <button type="button" class="btn btn-icon" id="redoFilterBtn" onclick="redoFilterHistory()" title="Redo filter or sort" aria-label="Redo filter or sort" disabled>↷</button>
-        <button class="btn btn-destructive" id="clearFiltersBtn" onclick="clearAllFilters()">Clear Filters</button>
         <button id="clearLogsBtn" style="display: none;">Clear Logs</button>
         <span id="rowCountInfo" class="row-count-info"></span>
     </div>

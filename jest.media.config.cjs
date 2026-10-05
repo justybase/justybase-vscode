@@ -38,6 +38,8 @@ module.exports = {
     'media/resultPanel/logRunGroups.ts',
     'media/resultPanel/grid/alternateViews.ts',
     'media/resultPanel/init.ts',
+    'media/resultPanel/export.ts',
+    'media/resultPanel/rowCount.ts',
     'media/resultPanel/selection/menu.ts',
     'media/resultPanel/grid/responsiveCollapse.ts',
     '!media/**/*.d.ts',
