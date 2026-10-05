@@ -74,14 +74,15 @@ actions, and the graph supports pan, zoom and keyboard activation.
 
 | Rule | Finding | Evidence |
 | --- | --- | --- |
-| NZPERF001 | Distribution keys do not fully align with equality joins | CST + distribution metadata |
+| NZPERF001 | Distribution does not co-locate equality joins (alignment or RANDOM) | CST + distribution HASH/RANDOM/UNKNOWN |
 | NZPERF002 | Significant maximum/average slice skew | Explicit existing skew scan |
-| NZPERF003 | Missing or potentially inadequate statistics on a large relation | Supplied metadata or zero-confidence EXPLAIN scan |
+| NZPERF003A | Catalog-reported missing statistics on a large relation | Supplied catalog statistics state |
+| NZPERF003B | Zero-confidence large scan | EXPLAIN confidence |
 | NZPERF004 | Large estimated scan | EXPLAIN |
 | NZPERF005 | Function/cast on columns in join/filter predicates | CST |
 | NZPERF006 | Join column types differ | CST + cached types |
 | NZPERF007 | JOIN without ON/USING/NATURAL | CST |
-| NZPERF008 | Wide SELECT * with large row estimate | CST + columns + cardinality |
+| NZPERF008 | Wide SELECT * on the wildcard-projected relation | Per-scope CST wildcard + columns + cardinality |
 | NZPERF009 | Large sort/aggregation | EXPLAIN |
 | NZPERF010 | UNION duplicate elimination | CST; conditional semantics-preserving advice |
 | NZPERF011 | Large redistribution/broadcast/movement | EXPLAIN |

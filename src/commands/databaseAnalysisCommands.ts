@@ -7,7 +7,35 @@ import { extractProcedureBaseName } from '../metadata/procedureSignatureUtils';
 import type { SchemaItemData } from './schema/itemTypes';
 import { DatabaseAnalysisService } from '../services/analysis/databaseAnalysisService';
 import { DatabaseAnalysisView } from '../views/databaseAnalysisView';
+import { describeProposedChange, parseProposedChange, type ProposedChange } from '../services/analysis/dependencyIndex';
 import type { ObjectReference, AnalysisObjectType } from '../services/analysis/sqlAnalysis';
+
+/** Structured impact input with a classified free-text fallback; the analysis never applies the change. */
+async function promptProposedChange(column?: string): Promise<{ change: ProposedChange; described?: string } | undefined> {
+    const options = column ? ['Drop column', 'Rename column', 'Change column type', 'Describe other change'] : ['Drop object', 'Rename object', 'Describe other change'];
+    const pick = await vscode.window.showQuickPick(options, { placeHolder: 'Impact Analysis — proposed change (analysis does not apply it)' });
+    if (pick === undefined) { return undefined; }
+    if (pick === 'Drop column' && column) { return { change: { kind: 'dropColumn', column } }; }
+    if (pick === 'Drop object') { return { change: { kind: 'dropObject' } }; }
+    if (pick === 'Rename object') {
+        const to = await vscode.window.showInputBox({ title: 'Rename object — new name' });
+        if (to === undefined || !to.trim()) { return undefined; }
+        return { change: { kind: 'renameObject', to: to.trim() } };
+    }
+    if (pick === 'Rename column' && column) {
+        const to = await vscode.window.showInputBox({ title: 'Rename column — new name', value: column });
+        if (to === undefined || !to.trim()) { return undefined; }
+        return { change: { kind: 'renameColumn', from: column, to: to.trim() } };
+    }
+    if (pick === 'Change column type' && column) {
+        const toType = await vscode.window.showInputBox({ title: 'Change column type — new type', prompt: 'e.g. VARCHAR(5)' });
+        if (toType === undefined || !toType.trim()) { return undefined; }
+        return { change: { kind: 'changeColumnType', column, toType: toType.trim() } };
+    }
+    const described = await vscode.window.showInputBox({ title: 'Impact Analysis — proposed change', prompt: 'Describe the proposed change (analysis does not apply it).' });
+    if (described === undefined || !described.trim()) { return undefined; }
+    return { change: parseProposedChange(described, column), described: described.trim() };
+}
 
 export function registerDatabaseAnalysisCommands(context: vscode.ExtensionContext, manager: ConnectionManager, cache: MetadataCache): vscode.Disposable[] {
     const service = new DatabaseAnalysisService(context, manager, cache);
@@ -31,17 +59,20 @@ export function registerDatabaseAnalysisCommands(context: vscode.ExtensionContex
         if (manager.getConnectionDatabaseKind(connection) !== 'netezza') { throw new Error('Dependencies and impact analysis currently support Netezza.'); }
         const type = (column ? 'TABLE' : item.objType ?? item.contextValue?.replace(/^netezza:/, '') ?? 'UNKNOWN') as AnalysisObjectType;
         const root: ObjectReference = { database: item.dbName, schema: item.schema, name: type === 'PROCEDURE' ? extractProcedureBaseName(name) : name, type };
-        let change: string | undefined;
+        let change: ProposedChange | undefined;
+        let changeText: string | undefined;
         if (impact) {
-            change = await vscode.window.showInputBox({ title: 'Impact Analysis — proposed change', prompt: 'Describe the proposed change (analysis does not apply it).', value: column ? `Drop or change column ${root.name}.${column}` : `Drop or change ${root.name}` });
-            if (change === undefined) { return; }
+            const prompted = await promptProposedChange(column);
+            if (!prompted) { return; }
+            change = prompted.change;
+            changeText = prompted.described ?? describeProposedChange(change, root);
         }
         const action = async (depth: number, token: vscode.CancellationToken) => {
-            const report = await service.dependencies(connection, root, direction, depth, token, column);
-            report.proposedChange = change; return report;
+            const report = await service.dependencies(connection, root, direction, depth, token, impact ? undefined : column, change);
+            report.proposedChange = changeText; return report;
         };
         const report = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Loading dependency catalog', cancellable: true }, (_progress, token) => action(2, token));
-        const panel = new DatabaseAnalysisView(context, change ? `Impact: ${change}` : direction === 'incoming' ? 'Used By' : 'Dependencies', { dependencies: action, onDispose: () => panels.delete(panel), openObject: openObject(connection) });
+        const panel = new DatabaseAnalysisView(context, changeText ? `Impact: ${changeText}` : direction === 'incoming' ? 'Used By' : 'Dependencies', { dependencies: action, onDispose: () => panels.delete(panel), openObject: openObject(connection) });
         panels.add(panel); panel.showDependencies(report);
     };
     const performance = async (lastExecution = false) => {

@@ -48,8 +48,8 @@ describe('analysis webview ownership and protocol',()=>{
         const longName='A'.repeat(40);const source={...root,name:longName,type:'VIEW' as const};
         view.showDependencies({...dependency,direction:'outgoing',proposedChange:'Drop EMAIL',truncated:true,
             affected:[{object:source,depth:1,severity:'high',reason:'Column reference'}],
-            edges:[{source:root,target:source,kind:'object',confidence:'exact',location:{start:1,end:2}},
-                {source:root,target:{...root,name:'unresolved'},kind:'object',confidence:'probable',location:{start:1,end:2}}]});
+            edges:[{source:root,target:source,kind:'object',confidence:'exact',location:{start:1,end:2},evidence:[{kind:'object',confidence:'exact',location:{start:1,end:2}}]},
+                {source:root,target:{...root,name:'unresolved'},kind:'object',confidence:'probable',location:{start:1,end:2},evidence:[{kind:'object',confidence:'probable',location:{start:1,end:2}}]}]});
         expect(panel.webview.html).toContain('marker-end');expect(panel.webview.html).toContain('Graph truncated');
         expect(panel.webview.html).toContain('Depends On');expect(panel.webview.html).toContain('Drop EMAIL');
         expect(panel.webview.html).toContain(longName.slice(0,27)+'…');view.dispose();

@@ -34,12 +34,19 @@ describe('analysis command integration',()=>{
         editor.selection.isEmpty=false;document.getText.mockReturnValue('SELECT 1;SELECT 2;');await handlers.get('netezza.analyzeQueryPerformance')!();
         expect(service.performance).toHaveBeenCalledTimes(1);expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('one statement'));
     });
-    test('schema column impact supplies root, column and proposed change without applying it',async()=>{
-        const {handlers,service,panel}=setup();(vscode.window.showInputBox as jest.Mock).mockResolvedValue('Drop EMAIL');
+    test('schema column impact supplies root, change model and evidence without applying it',async()=>{
+        const {handlers,service,panel}=setup();(vscode.window.showQuickPick as jest.Mock).mockResolvedValue('Drop column');
         await handlers.get('netezza.impactAnalysis')!({label:'EMAIL',parentName:'CUSTOMER',contextValue:'column',dbName:'DB',schema:'PUBLIC',connectionName:'NZ'});
-        expect(service.dependencies).toHaveBeenCalledWith('NZ',expect.objectContaining({name:'CUSTOMER',type:'TABLE'}),'incoming',2,expect.anything(),'EMAIL');
-        expect(panel.showDependencies).toHaveBeenCalledWith(expect.objectContaining({proposedChange:'Drop EMAIL'}));
+        expect(service.dependencies).toHaveBeenCalledWith('NZ',expect.objectContaining({name:'CUSTOMER',type:'TABLE'}),'incoming',2,expect.anything(),undefined,expect.objectContaining({kind:'dropColumn',column:'EMAIL'}));
+        expect(panel.showDependencies).toHaveBeenCalledWith(expect.objectContaining({proposedChange:'Drop column CUSTOMER.EMAIL'}));
         expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+    });
+    test('free-text impact description is classified into the change model',async()=>{
+        const {handlers,service,panel}=setup();(vscode.window.showQuickPick as jest.Mock).mockResolvedValue('Describe other change');
+        (vscode.window.showInputBox as jest.Mock).mockResolvedValue('Drop EMAIL');
+        await handlers.get('netezza.impactAnalysis')!({label:'CUSTOMER',objType:'TABLE',dbName:'DB',schema:'PUBLIC',connectionName:'NZ'});
+        expect(service.dependencies).toHaveBeenCalledWith('NZ',expect.objectContaining({name:'CUSTOMER',type:'TABLE'}),'incoming',2,expect.anything(),undefined,expect.objectContaining({kind:'dropObject'}));
+        expect(panel.showDependencies).toHaveBeenCalledWith(expect.objectContaining({proposedChange:'Drop EMAIL'}));
     });
     test('last execution preserves history target and requires matching connection',async()=>{
         const {handlers,service}=setup();(QueryHistoryManager.getInstance as jest.Mock).mockReturnValue({getHistory:async()=>[{query:'SELECT * FROM HISTORICAL',database:'OLD_DB',schema:'OLD_SCHEMA',connectionName:'NZ'}]});
@@ -48,9 +55,9 @@ describe('analysis command integration',()=>{
     test('only procedure signatures lose argument lists; table names remain intact',async()=>{
         const {handlers,service}=setup();
         await handlers.get('netezza.showDependencies')!({label:'CUSTOMER(ARCHIVE)',objType:'TABLE',dbName:'DB',schema:'PUBLIC'});
-        expect(service.dependencies).toHaveBeenLastCalledWith('NZ',expect.objectContaining({name:'CUSTOMER(ARCHIVE)',type:'TABLE'}),'outgoing',2,expect.anything(),undefined);
+        expect(service.dependencies).toHaveBeenLastCalledWith('NZ',expect.objectContaining({name:'CUSTOMER(ARCHIVE)',type:'TABLE'}),'outgoing',2,expect.anything(),undefined,undefined);
         await handlers.get('netezza.showDependencies')!({label:'REFRESH(INT)',objType:'PROCEDURE',dbName:'DB',schema:'PUBLIC'});
-        expect(service.dependencies).toHaveBeenLastCalledWith('NZ',expect.objectContaining({name:'REFRESH',type:'PROCEDURE'}),'outgoing',2,expect.anything(),undefined);
+        expect(service.dependencies).toHaveBeenLastCalledWith('NZ',expect.objectContaining({name:'REFRESH',type:'PROCEDURE'}),'outgoing',2,expect.anything(),undefined,undefined);
     });
     test('unsupported connections and cancelled impact create no background work',async()=>{
         const {handlers,manager,service}=setup();manager.getConnectionDatabaseKind=()=> 'sqlite';
