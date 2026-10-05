@@ -66,7 +66,6 @@ type EditingWindow = Window & {
     getActiveGridIndex?: () => number;
     undoFilterHistory?: () => void;
     redoFilterHistory?: () => void;
-    updateFilterHistoryButtons?: () => void;
     toggleToolbarMoreMenu?: (event: { stopPropagation: () => void }) => void;
     handleToolbarMoreMenuClick?: (event: MouseEvent) => void;
     recordDatabaseFilterHistoryBefore?: (resultSetIndex: number) => void;
@@ -82,7 +81,6 @@ type EditingWindow = Window & {
 const initialPanelCallbacks: Pick<EditingWindow,
     | 'undoFilterHistory'
     | 'redoFilterHistory'
-    | 'updateFilterHistoryButtons'
     | 'recordDatabaseFilterHistoryBefore'
     | 'recordDatabaseFilterHistoryApplied'
     | 'clearAllFilters'
@@ -93,7 +91,6 @@ const initialPanelCallbacks: Pick<EditingWindow,
     return {
         undoFilterHistory: panel.undoFilterHistory,
         redoFilterHistory: panel.redoFilterHistory,
-        updateFilterHistoryButtons: panel.updateFilterHistoryButtons,
         recordDatabaseFilterHistoryBefore: panel.recordDatabaseFilterHistoryBefore,
         recordDatabaseFilterHistoryApplied: panel.recordDatabaseFilterHistoryApplied,
         clearAllFilters: panel.clearAllFilters,
@@ -715,7 +712,6 @@ describe('SQL editor result panel quick-win coverage', () => {
         });
         const recordBefore = jest.fn();
         const recordApplied = jest.fn();
-        const updateButtons = jest.fn();
         Object.assign(window, {
             activeSource: 'file:///database-filter.sql',
             resultSets: [{
@@ -725,7 +721,6 @@ describe('SQL editor result panel quick-win coverage', () => {
             } as ResultSet],
             recordDatabaseFilterHistoryBefore: recordBefore,
             recordDatabaseFilterHistoryApplied: recordApplied,
-            updateFilterHistoryButtons: updateButtons,
         });
         const column = {
             id: '0',
@@ -781,7 +776,6 @@ describe('SQL editor result panel quick-win coverage', () => {
         );
         expect(recordBefore).toHaveBeenCalledTimes(1);
         expect(recordApplied).toHaveBeenCalledWith(0, { columnFilters: [{ columnIndex: 0, values: ['A'] }] });
-        expect(updateButtons).toHaveBeenCalledTimes(1);
     });
 
     it('keeps responsive column collapse opt-in, expandable and suspended while grouped', () => {
@@ -1209,28 +1203,21 @@ describe('SQL editor result panel quick-win coverage', () => {
             activeSource: historySource,
             resultSets: [resultSet],
         });
-        const undoButton = document.createElement('button');
-        undoButton.id = 'undoFilterBtn';
-        const redoButton = document.createElement('button');
-        redoButton.id = 'redoFilterBtn';
         const globalFilter = document.createElement('input');
         globalFilter.id = 'globalFilter';
-        document.body.append(undoButton, redoButton, globalFilter);
+        document.body.append(globalFilter);
+        const historyAvailability = () =>
+            getFilterHistoryAvailability(buildFilterHistoryScope(historySource, resultSet, 0));
 
-        expect(panel.updateFilterHistoryButtons).toEqual(expect.any(Function));
-        expect(getFilterHistoryAvailability(buildFilterHistoryScope(historySource, resultSet, 0)))
-            .toEqual({ canUndo: false, canRedo: false });
-        panel.updateFilterHistoryButtons?.();
-        expect(undoButton.disabled).toBe(true);
+        expect(historyAvailability()).toEqual({ canUndo: false, canRedo: false });
         panel.undoFilterHistory?.();
         panel.recordDatabaseFilterHistoryBefore?.(0);
         state.globalFilter = 'alpha';
         panel.recordDatabaseFilterHistoryBefore?.(0);
-        panel.updateFilterHistoryButtons?.();
-        expect(undoButton.disabled).toBe(false);
+        expect(historyAvailability().canUndo).toBe(true);
         panel.undoFilterHistory?.();
         expect(state.globalFilter).toBe('');
-        expect(redoButton.disabled).toBe(false);
+        expect(historyAvailability().canRedo).toBe(true);
         panel.redoFilterHistory?.();
         expect(state.globalFilter).toBe('alpha');
 
@@ -1250,8 +1237,7 @@ describe('SQL editor result panel quick-win coverage', () => {
         panel.redoFilterHistory?.();
         await Promise.resolve();
         await Promise.resolve();
-        expect(undoButton.disabled).toBe(false);
-        expect(redoButton.disabled).toBe(true);
+        expect(historyAvailability()).toEqual({ canUndo: true, canRedo: false });
 
         databaseFilters.applyDatabaseFilter.mockResolvedValue(undefined);
         resultSet.databaseFilterSpec = { globalSearch: 'old search' };

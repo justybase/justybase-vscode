@@ -33,7 +33,6 @@ import {
   recordFilterHistorySnapshot,
   getFilterHistoryTarget,
   moveFilterHistoryCursor,
-  getFilterHistoryAvailability,
   setFilterHistoryRestoring,
   type FilterHistorySnapshot,
 } from "./state.js";
@@ -97,6 +96,8 @@ import {
   clearGroupDropTargets,
   handleClickExport,
   toggleExportPrimaryMenu,
+  handleExportPrimaryClick,
+  syncExportPrimaryButton,
   handleClickQueryLocallyDuckDB,
   setGlobalDragStateForExport,
   exportAllVisibleToCsv,
@@ -372,6 +373,18 @@ window.addEventListener('keydown', function(e) {
   }
 });
 
+// Filter-history buttons were removed from the toolbar (variant C) — their
+// shortcuts live here and as entries in the "⋯" Filter menu section.
+document.addEventListener("keydown", function (e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  if (key !== 'z' && key !== 'y') return;
+  const direction = key === 'z' ? 'undo' as const : 'redo' as const;
+  if (!canMoveFilterHistory(direction)) return;
+  e.preventDefault();
+  void moveFilterHistory(direction);
+});
+
 // Do not touch the row model until the user has paused typing for this interval.
 const GLOBAL_FILTER_DEBOUNCE_MS = 200;
 let globalFilterSearchSeq = 0;
@@ -497,6 +510,15 @@ export function onGlobalFilterChanged(): void {
   debouncedSearch(value);
 }
 
+/** Escape in the filter field clears all filters (variant C has no Clear button). */
+export function onGlobalFilterKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    getResultPanelWindow().clearAllFilters?.();
+    (event.target as HTMLElement | null)?.blur?.();
+  }
+}
+
 function readFilterHistorySnapshot(resultSetIndex: number): FilterHistorySnapshot | undefined {
   const resultSet = getResultSetAt(resultSetIndex);
   const table = getGrid(resultSetIndex)?.tanTable;
@@ -528,19 +550,7 @@ function recordFilterHistoryForResult(
   }
   const scope = buildFilterHistoryScope(getActiveSourceUri(), resultSet, resultSetIndex);
   recordFilterHistorySnapshot(scope, snapshot);
-  updateFilterHistoryButtons();
   return scope;
-}
-
-function updateFilterHistoryButtons(): void {
-  const resultSetIndex = getActiveGridIndex();
-  const resultSet = getResultSetAt(resultSetIndex);
-  const scope = buildFilterHistoryScope(getActiveSourceUri(), resultSet, resultSetIndex);
-  const availability = getFilterHistoryAvailability(scope);
-  const undoButton = getElementById<HTMLButtonElement>('undoFilterBtn');
-  const redoButton = getElementById<HTMLButtonElement>('redoFilterBtn');
-  if (undoButton) undoButton.disabled = !availability.canUndo;
-  if (redoButton) redoButton.disabled = !availability.canRedo;
 }
 
 async function moveFilterHistory(direction: 'undo' | 'redo'): Promise<void> {
@@ -580,8 +590,16 @@ async function moveFilterHistory(direction: 'undo' | 'redo'): Promise<void> {
     });
   } finally {
     setFilterHistoryRestoring(scope, false);
-    updateFilterHistoryButtons();
   }
+}
+
+/** Cheap availability probe so global shortcuts do not swallow no-op keys. */
+function canMoveFilterHistory(direction: 'undo' | 'redo'): boolean {
+  const resultSetIndex = getActiveGridIndex();
+  const resultSet = getResultSetAt(resultSetIndex);
+  if (!resultSet) return false;
+  const scope = buildFilterHistoryScope(getActiveSourceUri(), resultSet, resultSetIndex);
+  return getFilterHistoryTarget(scope, direction) !== undefined;
 }
 
 /**
@@ -2865,6 +2883,22 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
     return;
   }
 
+  if (action === "filter-undo") { void moveFilterHistory('undo'); return; }
+  if (action === "filter-redo") { void moveFilterHistory('redo'); return; }
+  if (action === "filter-clear") {
+    getResultPanelWindow().clearAllFilters?.();
+    return;
+  }
+  if (action === "filter-refresh") {
+    refreshResultAt(getActiveGridIndex());
+    return;
+  }
+  if (action === "find-column") {
+    document.querySelector('.controls')?.classList.add('show-column-search');
+    getElementById<HTMLInputElement>('columnSearch')?.focus();
+    return;
+  }
+
   if (action === "move-to-disk") {
     const sourceUri = getActiveSourceUri();
     if (!sourceUri) {
@@ -2932,23 +2966,9 @@ function updateEditButtonsState(): void {
   const editBtn = getElementById('editToggleBtn');
   const saveBtn = getElementById('saveEditsBtn');
   const discardBtn = getElementById('discardEditsBtn');
-  const refreshBtn = getElementById<HTMLButtonElement>('refreshResultBtn');
-  const clearFiltersBtn = getElementById<HTMLButtonElement>('clearFiltersBtn');
   const rs = getResultSetAt(getActiveGridIndex());
   const isEditable = rs && rs.isEditable;
-  const canRefresh = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent && typeof rs.refreshSql === 'string' && rs.refreshSql.trim().length > 0);
-  const canFilter = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent);
   const inEdit = getIsEditMode();
-
-  if (refreshBtn) {
-    refreshBtn.style.display = canRefresh ? 'inline-flex' : 'none';
-    refreshBtn.disabled = !canRefresh;
-  }
-  if (clearFiltersBtn) {
-    clearFiltersBtn.style.display = canFilter ? 'inline-flex' : 'none';
-    clearFiltersBtn.disabled = !canFilter;
-  }
-  updateFilterHistoryButtons();
 
   if (editBtn) {
     editBtn.style.display = isEditable ? 'inline-flex' : 'none';
@@ -2991,7 +3011,9 @@ function postRefreshResult(resultSetIndex: number, limitValue?: string): void {
 function showRefreshLimitPanel(resultSetIndex: number, defaultLimit: string): void {
   closeRefreshLimitPanel();
 
-  const anchor = getElementById('refreshResultBtn');
+  // Refresh now lives in the "⋯" More menu; anchor the limit panel to it when
+  // the legacy toolbar button is absent.
+  const anchor = getElementById('refreshResultBtn') ?? getElementById('toolbarMoreBtn');
   const panel = document.createElement('div');
   panel.id = 'refreshLimitPanel';
   panel.className = 'refresh-limit-panel';
@@ -3108,6 +3130,7 @@ function setupWindowFunctions(): void {
   panel.exportToSqlInsert = exportToSqlInsert;
   panel.exportToMarkdown = exportToMarkdown;
   panel.onFilterChanged = onGlobalFilterChanged;
+  panel.onGlobalFilterKeydown = onGlobalFilterKeydown;
   panel.clearFilter = function () {
     const filter = getElementById<HTMLInputElement>("globalFilter");
     if (filter) filter.value = "";
@@ -3166,7 +3189,6 @@ function setupWindowFunctions(): void {
   };
   panel.undoFilterHistory = () => { void moveFilterHistory('undo'); };
   panel.redoFilterHistory = () => { void moveFilterHistory('redo'); };
-  panel.updateFilterHistoryButtons = updateFilterHistoryButtons;
   panel.recordDatabaseFilterHistoryBefore = (resultSetIndex) => {
     recordFilterHistoryForResult(resultSetIndex);
   };
@@ -3199,6 +3221,7 @@ function setupWindowFunctions(): void {
   panel.openValueViewer = openValueViewer;
   panel.closeValueViewer = closeValueViewer;
   panel.handleClickExport = handleClickExport;
+  panel.handleExportPrimaryClick = handleExportPrimaryClick;
   panel.toggleExportPrimaryMenu = toggleExportPrimaryMenu;
   panel.setResultViewMode = setActiveResultViewMode;
   panel.initializeResultView = initializeResultView;
@@ -3484,6 +3507,8 @@ function setupWindowFunctions(): void {
   panel.onColumnSearchBlur = onColumnSearchBlur;
   panel.onColumnSearchFocus = onColumnSearchFocus;
   panel.init = init;
+  // Restore the repeat-last-export hint (the button exists: scripts run at end of body).
+  syncExportPrimaryButton();
 }
 
 // Initialize window functions

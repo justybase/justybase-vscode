@@ -1169,7 +1169,6 @@ export function showColumnFilterDropdown(
                 isRetry ? { isRetry: true } : undefined,
             );
             callPanelMethod('recordDatabaseFilterHistoryApplied', rsIndex, spec);
-            callPanelMethod('updateFilterHistoryButtons');
             dropdown.remove();
         } catch (error) {
             showInlineErrorWithRetry(applyErrorBanner, error, () => {

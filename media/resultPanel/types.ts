@@ -459,11 +459,11 @@ export interface ResultPanelGlobals {
     };
     renderSidebarSchema?: () => void;
     onFilterChanged?: () => void;
+    onGlobalFilterKeydown?: (event: KeyboardEvent) => void;
     clearFilter?: () => void;
     clearAllFilters?: () => void;
     undoFilterHistory?: () => void;
     redoFilterHistory?: () => void;
-    updateFilterHistoryButtons?: () => void;
     recordDatabaseFilterHistoryBefore?: (resultSetIndex: number) => void;
     recordDatabaseFilterHistoryApplied?: (resultSetIndex: number, spec?: DiskQuerySpec) => void;
     openRelatedRows?: (rowIndex: number, columnIndex: number) => void;
@@ -484,6 +484,7 @@ export interface ResultPanelGlobals {
     exportActiveGridAsXlsb?: () => void;
     toggleExportSplitMenu?: (event: Event) => void;
     toggleExportPrimaryMenu?: (event?: Event) => void;
+    handleExportPrimaryClick?: (event?: Event) => void;
     toggleToolbarMoreMenu?: (event: Event) => void;
     handleToolbarMoreMenuClick?: (event: MouseEvent) => void;
     handleExportSplitMenuClick?: (event: MouseEvent) => void;

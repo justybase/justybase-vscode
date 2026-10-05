@@ -21,10 +21,47 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('id="valueViewerOverlay"');
         expect(html).toContain('id="valueViewerBody"');
         expect(html).toContain('Copy Value');
-        expect(html).toContain('id="undoFilterBtn"');
-        expect(html).toContain('id="redoFilterBtn"');
         expect(html).toContain('data-action="responsive-collapse"');
         expect(html).toContain('role="menuitemcheckbox" aria-checked="false"');
+    });
+
+    it('keeps the variant-C toolbar to one line with filter actions in the overflow menu', () => {
+        const generator = new ResultsHtmlGenerator('test-csp');
+        const html = generator.generateHtml({
+            scriptUri: { toString: () => 'script.js' } as never,
+            virtualUri: { toString: () => 'virtual.js' } as never,
+            mainScriptUri: { toString: () => 'main.js' } as never,
+            styleUri: { toString: () => 'style.css' } as never,
+            workerUri: { toString: () => 'worker.js' } as never,
+            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
+            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
+            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
+        });
+
+        // History, refresh and clear no longer occupy toolbar slots…
+        expect(html).not.toContain('id="undoFilterBtn"');
+        expect(html).not.toContain('id="redoFilterBtn"');
+        expect(html).not.toContain('id="refreshResultBtn"');
+        expect(html).not.toContain('id="clearFiltersBtn"');
+        expect(html).not.toContain('filter-history-controls');
+        // …they live in the "⋯" Filter section with shortcut hints…
+        expect(html).toContain('data-action="filter-undo"');
+        expect(html).toContain('Undo filter (Alt+Z)');
+        expect(html).toContain('data-action="filter-redo"');
+        expect(html).toContain('Redo filter (Alt+Y)');
+        expect(html).toContain('data-action="filter-clear"');
+        expect(html).toContain('data-action="filter-refresh"');
+        expect(html).toContain('data-action="find-column"');
+        // …Escape clears the filter field…
+        expect(html).toContain('onGlobalFilterKeydown(event)');
+        expect(html).toContain('Esc = clear');
+        // …the primary Export repeats the last format…
+        expect(html).toContain('handleExportPrimaryClick(event)');
+        // …and the row counter is mirrored in a statusline under the grid.
+        expect(html).toContain('id="resultStatusline"');
+        expect(html).toContain('id="rowCountInfo"');
+        // The overflow-menu label is wrapped so narrow panels can iconify it.
+        expect(html).toContain('toolbar-more-btn__label');
     });
 
     it('does not acquire the VS Code API in the inline bootstrap script', () => {
