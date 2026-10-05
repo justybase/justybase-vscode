@@ -545,14 +545,21 @@ export function updateControlsVisibility(index: number): void {
     const controls = document.querySelector('.controls');
 
     if (controls) {
-        const children = controls.children;
-        for (let i = 0; i < children.length; i++) {
-            const child = children[i] as HTMLElement;
-            if (child.id === 'clearLogsBtn') {
+        // Explicit allow-list: only the log clearer survives on Logs/Text views.
+        // Every other toolbar group is hidden as a whole, so adding a new
+        // group to `.controls` never leaks onto Logs/Text by accident.
+        const groups = controls.querySelectorAll(':scope > .toolbar-group, :scope > .toolbar-separator, :scope > .layout-switcher, :scope > .split-btn, :scope > input, :scope > button, :scope > select, :scope > .column-search-group, :scope > .filter-history-controls');
+        groups.forEach((node) => {
+            const child = node as HTMLElement;
+            if (child.id === 'clearLogsBtn' || child.querySelector?.('#clearLogsBtn')) {
                 child.style.display = isLog ? 'inline-flex' : 'none';
             } else {
                 child.style.display = hideControls ? 'none' : '';
             }
+        });
+        const clearLogsBtn = document.getElementById('clearLogsBtn');
+        if (clearLogsBtn && !controls.contains(clearLogsBtn)) {
+            clearLogsBtn.style.display = isLog ? 'inline-flex' : 'none';
         }
     }
 

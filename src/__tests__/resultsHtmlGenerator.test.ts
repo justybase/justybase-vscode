@@ -87,6 +87,40 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('split-btn__menu-item');
     });
 
+    it('groups the compact toolbar with a single Sidebar/Diff view switcher and scoped export labels', () => {
+        const generator = new ResultsHtmlGenerator('test-csp');
+        const html = generator.generateHtml({
+            scriptUri: { toString: () => 'script.js' } as never,
+            virtualUri: { toString: () => 'virtual.js' } as never,
+            mainScriptUri: { toString: () => 'main.js' } as never,
+            styleUri: { toString: () => 'style.css' } as never,
+            workerUri: { toString: () => 'worker.js' } as never,
+            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
+            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
+            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
+        });
+
+        expect(html).toContain('data-layout="sidebar"');
+        expect(html).toContain('>Sidebar</button>');
+        expect(html).toContain('data-layout="diff"');
+        expect(html).not.toContain('data-layout="table2"');
+        expect(html).not.toContain('>Table2</button>');
+        expect(html).not.toContain('id="viewSplitBtn"');
+        expect(html).not.toContain('id="viewModeLabel"');
+        expect(html).not.toContain('id="rowViewBarBtn"');
+        expect(html).toContain('toolbar-group--view');
+        expect(html).toContain('toolbar-group--search');
+        expect(html).toContain('toolbar-group--export');
+        expect(html).toContain('toolbar-group--table');
+        expect(html).toContain('Excel (.xlsb — fast, active view)');
+        expect(html).toContain('Copy selection as Markdown');
+        expect(html).toContain('data-action="query-duckdb"');
+        expect(html).not.toContain('fast xlsb export');
+        // Legacy table2 layout choice still resolves to the sidebar.
+        expect(html).toContain("mode === 'table2' ? 'sidebar' : mode");
+        expect(html).toContain("layout === 'table2' ? 'sidebar' : layout");
+    });
+
     it('marks the shared Result Panel mode explicitly while keeping the legacy default', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
         const uris = {

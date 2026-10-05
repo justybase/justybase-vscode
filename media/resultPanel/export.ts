@@ -197,15 +197,15 @@ export function exportToCsv(): void {
 }
 
 const PRIMARY_EXPORT_FORMATS: ExportFormatOption[] = [
-    { id: 'excel', label: 'Excel (XLSB)', description: 'Binary Excel format' },
-    { id: 'xlsx', label: 'Excel (XLSX)', description: 'Modern Excel format' },
+    { id: 'excel', label: 'Excel (.xlsb — fast, active view)', description: 'Binary Excel of the active view' },
+    { id: 'xlsx', label: 'Excel (.xlsx)', description: 'Modern Excel format' },
     { id: 'csv', label: 'CSV', description: 'Comma separated values' },
     { id: 'csv.gz', label: 'CSV.GZ', description: 'Gzip-compressed CSV' },
     { id: 'csv.zst', label: 'CSV.ZST', description: 'Zstandard-compressed CSV' },
     { id: 'json', label: 'JSON', description: 'JavaScript object notation' },
     { id: 'xml', label: 'XML', description: 'Extensible markup language' },
     { id: 'sql', label: 'SQL INSERT', description: 'SQL insert statements' },
-    { id: 'markdown', label: 'Markdown', description: 'Markdown table' },
+    { id: 'markdown', label: 'Markdown (.md — file, with SQL)', description: 'Markdown document with SQL (up to 1000 rows)' },
     { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format' },
     { id: 'xpt', label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5' }
 ];
