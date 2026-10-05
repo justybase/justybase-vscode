@@ -253,6 +253,92 @@ function parseYyyymmdd(value: unknown): number | null {
     : null;
 }
 
+const TIME_ONLY_PATTERN = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?$/u;
+const ISO_DATE_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}(?:[T ].*)?$/u;
+
+function parseTimeOnly(value: string): number | null {
+  const match = TIME_ONLY_PATTERN.exec(value);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3] ?? 0);
+  if (hours > 23 || minutes > 59 || seconds > 59) return null;
+  const milliseconds = Number((match[4] ?? '').padEnd(3, '0').slice(0, 3));
+  return ((hours * 3600) + (minutes * 60) + seconds) * 1000 + milliseconds;
+}
+
+interface TemporalCandidate {
+  readonly key: number;
+  readonly display: string;
+}
+
+/**
+ * Parses a temporal cell into a sortable key plus its original display text.
+ * Undeclared columns only infer temporal literals that look like an ISO
+ * date/timestamp or a time of day; wider Date.parse formats require a
+ * declared temporal column type.
+ */
+function parseTemporalCandidate(value: unknown, declaredTemporal: boolean): TemporalCandidate | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isNaN(time) ? null : { key: time, display: value.toISOString() };
+  }
+  if (typeof value === 'object') {
+    const record = value as { hours?: unknown; minutes?: unknown; seconds?: unknown };
+    if (!('hours' in record || 'minutes' in record || 'seconds' in record)) return null;
+    const hours = Number(record.hours ?? 0);
+    const minutes = Number(record.minutes ?? 0);
+    const seconds = Number(record.seconds ?? 0);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+    return {
+      key: ((hours * 3600) + (minutes * 60) + seconds) * 1000,
+      display: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`,
+    };
+  }
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    if (!declaredTemporal) return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    const key = numeric >= 1_000_000_000 && numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+    return { key, display: String(value) };
+  }
+  const raw = String(value);
+  const trimmed = raw.trim();
+  const timeOnly = parseTimeOnly(trimmed);
+  if (timeOnly !== null) return { key: timeOnly, display: raw };
+  if (!declaredTemporal && !ISO_DATE_PREFIX_PATTERN.test(trimmed)) return null;
+  const parsed = Date.parse(trimmed.replace(/(\.\d{3})\d+/u, '$1'));
+  return Number.isNaN(parsed) ? null : { key: parsed, display: raw };
+}
+
+/**
+ * Temporal fallback for min/max: exact decimals cannot represent DATE/TIME/
+ * TIMESTAMP text, so compare parsed temporal keys and keep the original
+ * display text of the winning row. Inferred (undeclared) columns require
+ * every non-null value to look temporal to avoid misclassifying free text.
+ */
+function aggregateTemporalExtremum(
+  values: readonly unknown[],
+  request: AggregationRequest,
+  fn: 'min' | 'max',
+): string | null {
+  if (request.numeric === true) return null;
+  const declaredTemporal = isTemporalType(request.dataType);
+  let best: TemporalCandidate | null = null;
+  for (const value of values) {
+    const candidate = parseTemporalCandidate(value, declaredTemporal);
+    if (!candidate) {
+      if (!declaredTemporal) return null;
+      continue;
+    }
+    if (!best || (fn === 'min' ? candidate.key < best.key : candidate.key > best.key)) {
+      best = candidate;
+    }
+  }
+  return best ? best.display : null;
+}
+
 function likeSearch(value: string, pattern: string): boolean {
   if (!pattern) return false;
   try {
@@ -459,6 +545,17 @@ export function aggregateResultRows(
       return { columnIndex: request.columnIndex, function: request.function, count: nonNull.length, value: distinct.size };
     }
     const precision = boundedPrecision(request.precision ?? DEFAULT_DECIMAL_PRECISION, DEFAULT_DECIMAL_PRECISION);
+    if (request.function === 'min' || request.function === 'max') {
+      const numeric = numericValues(rows, request.columnIndex);
+      return {
+        columnIndex: request.columnIndex,
+        function: request.function,
+        count: nonNull.length,
+        value: numeric.length > 0
+          ? aggregateNumeric(numeric, request.function, precision)
+          : aggregateTemporalExtremum(nonNull, request, request.function),
+      };
+    }
     return {
       columnIndex: request.columnIndex,
       function: request.function,

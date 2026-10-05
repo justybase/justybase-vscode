@@ -270,7 +270,7 @@ export function createHeaderCellWithFilter(
 
     aggBtn.onclick = (e) => {
         e.stopPropagation();
-        showAggregationDropdown(header.column, table, aggBtn, rsIndex, resultSet.executionTimestamp);
+        showAggregationDropdown(header.column, table, aggBtn, rsIndex, resultSet.executionTimestamp, scheduleRender);
     };
 
     const groupBtn = document.createElement('span');
@@ -2082,7 +2082,8 @@ export function showAggregationDropdown(
     _table: TanStackTable,
     anchorElement: HTMLElement,
     rsIndex: number,
-    executionTimestamp: number | undefined
+    executionTimestamp: number | undefined,
+    scheduleRender?: HeaderScheduleRenderFn,
 ): void {
     const existing = document.querySelector('.column-aggregation-dropdown');
     if (existing) existing.remove();
@@ -2606,9 +2607,15 @@ export function showAggregationDropdown(
         setAggregationState(rsIndex, currentAggs, executionTimestamp, getResultPanelWindow().activeSource);
         savePinnedState();
         dropdown.remove();
-        const grid = getGrid(rsIndex);
-        if (grid && grid.render) {
-            grid.render();
+        // The active badge lives in the column header, which only rebuilds on a
+        // chrome-dirty render; a body-only render would leave it stale.
+        if (scheduleRender) {
+            scheduleRender({ chrome: true });
+        } else {
+            const grid = getGrid(rsIndex);
+            if (grid && grid.render) {
+                grid.render();
+            }
         }
     };
 

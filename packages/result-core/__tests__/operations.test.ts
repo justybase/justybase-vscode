@@ -115,4 +115,62 @@ describe('result-core exact aggregation', () => {
       { columnIndex: 0, function: 'avg' },
     ]).map(item => item.value)).toEqual([null, null]);
   });
+
+  it('keeps numeric min/max for eight-digit date keys', () => {
+    const result = aggregateResultRows([[20050111], [20050109], [20050110]], [
+      { columnIndex: 0, function: 'min', dataType: 'INT4' },
+      { columnIndex: 0, function: 'max', dataType: 'INT4' },
+    ]);
+
+    expect(result.map(item => item.value)).toEqual(['20050109', '20050111']);
+  });
+
+  it('aggregates min/max for declared DATE, TIMESTAMP and TIME columns', () => {
+    const timestamps: unknown[][] = [
+      ['2005-01-11 00:00:00'],
+      [null],
+      ['2005-01-09 00:00:00'],
+      ['2005-01-10 12:30:00'],
+    ];
+    const stampResult = aggregateResultRows(timestamps, [
+      { columnIndex: 0, function: 'min', dataType: 'TIMESTAMP' },
+      { columnIndex: 0, function: 'max', dataType: 'TIMESTAMP' },
+    ]);
+    expect(stampResult.map(item => item.value)).toEqual([
+      '2005-01-09 00:00:00',
+      '2005-01-11 00:00:00',
+    ]);
+
+    const dates: unknown[][] = [['2005-03-01'], ['2004-12-31'], ['2005-01-15']];
+    expect(aggregateResultRows(dates, [{ columnIndex: 0, function: 'min', dataType: 'DATE' }])[0]?.value)
+      .toBe('2004-12-31');
+
+    const times: unknown[][] = [['13:45:00'], ['09:00:00'], ['23:59:59.500']];
+    const timeResult = aggregateResultRows(times, [
+      { columnIndex: 0, function: 'min', dataType: 'TIME' },
+      { columnIndex: 0, function: 'max', dataType: 'TIME' },
+    ]);
+    expect(timeResult.map(item => item.value)).toEqual(['09:00:00', '23:59:59.500']);
+  });
+
+  it('infers temporal min/max from undeclared ISO-like columns only when every value is temporal', () => {
+    const inferred = aggregateResultRows([['2005-01-11'], ['2005-01-02'], ['2005-01-07']], [
+      { columnIndex: 0, function: 'min' },
+      { columnIndex: 0, function: 'max' },
+    ]);
+    expect(inferred.map(item => item.value)).toEqual(['2005-01-02', '2005-01-11']);
+
+    const mixed: unknown[][] = [['2005-01-11'], ['not a date']];
+    expect(aggregateResultRows(mixed, [{ columnIndex: 0, function: 'max' }])[0]?.value).toBeNull();
+
+    const freeText: unknown[][] = [['March 2024'], ['April 2024']];
+    expect(aggregateResultRows(freeText, [{ columnIndex: 0, function: 'min' }])[0]?.value).toBeNull();
+  });
+
+  it('ignores temporal inference when the request declares a numeric column', () => {
+    const result = aggregateResultRows([['2005-01-11'], ['2005-01-02']], [
+      { columnIndex: 0, function: 'min', numeric: true },
+    ]);
+    expect(result[0]?.value).toBeNull();
+  });
 });
