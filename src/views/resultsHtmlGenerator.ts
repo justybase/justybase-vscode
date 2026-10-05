@@ -118,12 +118,17 @@ export class ResultsHtmlGenerator {
             <div id="resultLimitBanner" class="result-limit-banner" style="display: none;" role="status" aria-live="polite"></div>
             <div class="layout-wrapper" id="layoutWrapper">
                     <div class="controls">
+                        <div class="toolbar-group toolbar-group--view">
                         <div class="layout-switcher" id="layoutSwitcher" role="radiogroup" aria-label="Result layout">
                             <button type="button" class="layout-switcher__btn active" data-layout="table" aria-pressed="true" title="Standard table layout">Table</button>
-                            <button type="button" class="layout-switcher__btn" data-layout="table2" aria-pressed="false" title="Sidebar layout with schema and grouping">Table2</button>
+                            <button type="button" class="layout-switcher__btn" data-layout="sidebar" aria-pressed="false" title="Table with schema sidebar and grouping">Sidebar</button>
                             <button type="button" class="layout-switcher__btn" data-layout="charts" aria-pressed="false" title="Professional range charts (ECharts)">Charts</button>
+                            <button type="button" class="layout-switcher__btn" data-layout="diff" aria-pressed="false" title="Compare two result sets">Diff</button>
                             <button type="button" class="layout-switcher__btn" data-layout="explore" aria-pressed="false" title="Explore columns, pivot and time composer">Explore</button>
                         </div>
+                        </div>
+                        <div class="toolbar-separator" aria-hidden="true"></div>
+                        <div class="toolbar-group toolbar-group--search">
                         <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter rows..." onkeyup="onFilterChanged()" aria-label="Filter rows">
                         ${filterHistoryControls}
                         <div class="column-search-group">
@@ -131,42 +136,44 @@ export class ResultsHtmlGenerator {
                                 <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column..." autocomplete="off" oninput="onColumnSearchChanged()" onkeydown="onColumnSearchKeydown(event)" onblur="onColumnSearchBlur()" onfocus="onColumnSearchFocus()" aria-label="Find column">
                                 <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
                             </div>
-                            <button type="button" class="btn btn-icon refresh-sql-btn" onclick="refreshActiveResult()" title="Re-run SQL for the active result set in the same source session" id="refreshResultBtn" aria-label="Refresh SQL">${icons.refresh}</button>
-                            <button type="button" class="btn btn-icon clear-filters-btn" onclick="clearAllFilters()" title="Remove all filters and aggregations" id="clearFiltersBtn" aria-label="Clear filters and aggregations">${icons.clear}</button>
                         </div>
+                        <button type="button" class="btn btn-icon refresh-sql-btn" onclick="refreshActiveResult()" title="Re-run SQL for the active result set in the same source session" id="refreshResultBtn" aria-label="Refresh SQL">${icons.refresh}</button>
+                        <button type="button" class="btn btn-icon clear-filters-btn" onclick="clearAllFilters()" title="Remove all filters and aggregations" id="clearFiltersBtn" aria-label="Clear filters and aggregations">${icons.clear}</button>
+                        </div>
+                        <div class="toolbar-separator" aria-hidden="true"></div>
+                        <div class="toolbar-group toolbar-group--export">
                         <div class="split-btn" id="exportSplitBtn">
-                            <button class="btn split-btn__primary" onclick="toggleExportPrimaryMenu(event)" title="Export results" aria-haspopup="menu" aria-expanded="false" aria-controls="exportPrimaryMenu">${icons.export} Export</button>
-                            <button class="btn split-btn__arrow" onclick="toggleExportSplitMenu(event)" title="More export options" aria-label="More export options">▾</button>
+                            <button class="btn split-btn__primary" onclick="toggleExportPrimaryMenu(event)" title="Export results (active view)" aria-haspopup="menu" aria-expanded="false" aria-controls="exportPrimaryMenu">${icons.export} Export</button>
+                            <button class="btn split-btn__arrow" onclick="toggleExportSplitMenu(event)" title="Quick export and copy options" aria-label="Quick export and copy options">▾</button>
                             <div class="split-btn__menu export-primary-menu" id="exportPrimaryMenu" style="display:none" role="menu" aria-label="Export format"></div>
                             <div class="split-btn__menu" id="exportSplitMenu" style="display:none" onclick="handleExportSplitMenuClick(event)">
-                                <div class="split-btn__menu-item" data-action="excel">fast xlsb export</div>
-                                <div class="split-btn__menu-item" data-action="markdown">Markdown (.md)</div>
-                                <div class="split-btn__menu-item" data-action="json">JSON</div>
-                                <div class="split-btn__menu-item" data-action="csv">CSV</div>
-                                <div class="split-btn__menu-separator"></div>
-                                <div class="split-btn__menu-item" data-action="copy-html">Copy as HTML to clipboard</div>
-                                <div class="split-btn__menu-item" data-action="copy-md">Copy as Markdown to clipboard</div>
-                                <div class="split-btn__menu-item" data-action="copy-image">Copy as Image to clipboard</div>
-                                <div class="split-btn__menu-separator"></div>
+                                <div class="split-btn__menu-item" data-action="excel">Excel (.xlsb — fast, active view)</div>
                                 <div class="split-btn__menu-item" data-action="export-all-excel">Export All to Excel</div>
                                 <div class="split-btn__menu-separator"></div>
-                                <div class="split-btn__menu-item" data-action="query-duckdb">Query Locally</div>
+                                <div class="split-btn__menu-item" data-action="markdown">Export to Markdown file (with SQL)</div>
+                                <div class="split-btn__menu-item" data-action="json">Export to JSON file</div>
+                                <div class="split-btn__menu-item" data-action="csv">Export to CSV file</div>
+                                <div class="split-btn__menu-separator"></div>
+                                <div class="split-btn__menu-item" data-action="copy-html">Copy selection as HTML</div>
+                                <div class="split-btn__menu-item" data-action="copy-md">Copy selection as Markdown</div>
+                                <div class="split-btn__menu-item" data-action="copy-image">Copy selection as Image (up to 500 rows)</div>
                             </div>
                         </div>
-                        <button type="button" class="btn btn-icon" onclick="exportActiveGridAsXlsb()" title="Fast XLSB export of the active data grid" aria-label="Export active data grid as XLSB">${icons.excel}</button>
+                        </div>
+                        <div class="toolbar-group toolbar-group--table">
                         <button class="btn" onclick="toggleColumnVisibilityDropdown()" title="Show/hide columns" id="columnVisibilityBtn" aria-label="Show or hide columns">${icons.eye} Columns</button>
                         <button class="btn" onclick="toggleRowView()" title="Row details and comparison (select 1–10 rows)" id="rowViewBtn" aria-label="Toggle row view" aria-pressed="false">${icons.rowView} Row View</button>
+                        </div>
 
                         <div class="split-btn toolbar-more-btn" id="toolbarMoreBtn">
                             <button class="btn split-btn__primary" onclick="toggleToolbarMoreMenu(event)" title="More actions" aria-label="More actions" aria-haspopup="menu">⋯ More</button>
                             <div class="split-btn__menu toolbar-more-menu" id="toolbarMoreMenu" style="display:none" onclick="handleToolbarMoreMenuClick(event)" role="menu">
-                                <div class="split-btn__menu-item toolbar-more-menu__section-label">View mode</div>
+                                <div class="split-btn__menu-item toolbar-more-menu__section-label">View</div>
                                 ${responsiveCollapseMenuItem}
-                                <div class="split-btn__menu-item" data-action="view-chart">Trend charts</div>
-                                <div class="split-btn__menu-item" data-action="view-diff">Diff</div>
-                                <div class="split-btn__menu-item" data-action="view-explore">Explore</div>
-                                <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item" data-action="formatting">Formatting…</div>
+                                <div class="split-btn__menu-separator"></div>
+                                <div class="split-btn__menu-item toolbar-more-menu__section-label">Analyze</div>
+                                <div class="split-btn__menu-item" data-action="query-duckdb">Query Locally (DuckDB)</div>
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">Storage</div>
                                 <div class="split-btn__menu-item" data-action="move-to-disk">Move to disk (SQLite)</div>
@@ -174,28 +181,19 @@ export class ResultsHtmlGenerator {
                             </div>
                         </div>
 
-                        <!-- Secondary controls (view mode — driven from More menu) -->
-                        <div class="split-btn view-split-btn toolbar-secondary-control" id="viewSplitBtn">
-                            <button class="btn split-btn__primary view-split-btn__label" id="viewModeLabel" onclick="setViewMode('table')" title="Current view mode">Table</button>
-                            <button class="btn split-btn__arrow" onclick="toggleViewSplitMenu(event)" title="Switch view mode" aria-label="Switch view mode">▾</button>
-                            <div class="split-btn__menu" id="viewSplitMenu" style="display:none" onclick="handleViewSplitMenuClick(event)">
-                                <div class="split-btn__menu-item" data-mode="table">Table</div>
-                                <div class="split-btn__menu-item" data-mode="chart">Charts</div>
-                                <div class="split-btn__menu-item" data-mode="diff">Diff</div>
-                                <div class="split-btn__menu-item" data-mode="explore">Explore</div>
-                            </div>
-                            <select id="viewModeSelect" class="view-mode-select-hidden" aria-hidden="true">
-                                <option value="table">Table</option>
-                                <option value="chart">Charts</option>
-                                <option value="diff">Diff</option>
-                                <option value="explore">Explore</option>
-                            </select>
-                            <select id="diffBaselineSelect" class="view-mode-select-hidden" title="Choose baseline result set" style="display: none;" aria-hidden="true"></select>
-                        </div>
+                        <select id="viewModeSelect" class="view-mode-select-hidden" aria-hidden="true">
+                            <option value="table">Table</option>
+                            <option value="chart">Charts</option>
+                            <option value="diff">Diff</option>
+                            <option value="explore">Explore</option>
+                        </select>
+                        <select id="diffBaselineSelect" class="view-mode-select-hidden" title="Choose baseline result set" style="display: none;" aria-hidden="true"></select>
 
+                        <div class="toolbar-group toolbar-group--edit">
                         <button id="editToggleBtn" class="toolbar-edit-control" onclick="toggleEditMode()" title="Toggle edit mode for editable result sets" style="display: none;">Edit</button>
                         <button id="saveEditsBtn" class="toolbar-edit-control primary" onclick="saveEdits()" title="Save all pending edits" style="display: none;">Save Changes</button>
                         <button id="discardEditsBtn" class="toolbar-edit-control" onclick="discardEdits()" title="Discard all pending edits" style="display: none;">Discard</button>
+                        </div>
 
                         <button id="clearLogsBtn" onclick="clearLogs()" title="Clear execution logs" style="display: none;">${icons.trash} Clear Logs</button>
                         <span id="rowCountInfo" class="row-count-info" aria-live="polite"></span>
@@ -287,10 +285,6 @@ export class ResultsHtmlGenerator {
                             </div>
                         </div>
                         <div class="result-panel-right-bar" id="resultPanelRightBar">
-                            <button type="button" class="bar-btn" onclick="toggleRowView()" id="rowViewBarBtn" title="Row Details &amp; Comparison">
-                                <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M1 3h14v1H1V3zm0 4h8v1H1V7zm0 4h6v1H1v-1zM11 3h4v10h-4V3zm1 1v8h2V4h-2z"/></svg>
-                                <span class="tooltip">Row View</span>
-                            </button>
                             <button type="button" class="bar-btn" onclick="toggleDatabaseGroupingPanel()" id="groupingBarBtn" title="Database Grouping">
                                 <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M1 2h14v3H1V2zm0 5h14v3H1V7zm0 5h14v3H1v-3z"/><rect x="4" y="5" width="8" height="9" rx="1" fill="currentColor" opacity="0.3"/></svg>
                                 <span class="tooltip">Database Grouping</span>
@@ -337,16 +331,13 @@ export class ResultsHtmlGenerator {
                 function setViewMode(mode) {
                     var sel = document.getElementById('viewModeSelect');
                     if (sel) { sel.value = mode; sel.dispatchEvent(new Event('change')); }
-                    var label = document.getElementById('viewModeLabel');
-                    if (label) {
-                        var names = { table:'Table', chart:'Charts', diff:'Diff', explore:'Explore' };
-                        label.textContent = names[mode] || mode;
-                    }
-                    document.getElementById('viewSplitMenu').style.display = 'none';
+                    var splitMenu = document.getElementById('viewSplitMenu');
+                    if (splitMenu) splitMenu.style.display = 'none';
                 }
                 window.toggleViewSplitMenu = function(event) {
-                    event.stopPropagation();
+                    if (event && event.stopPropagation) event.stopPropagation();
                     var m = document.getElementById('viewSplitMenu');
+                    if (!m) return;
                     m.style.display = m.style.display === 'none' ? 'block' : 'none';
                 };
                 window.handleViewSplitMenuClick = function(event) {
@@ -369,11 +360,6 @@ export class ResultsHtmlGenerator {
                     else if (action === 'markdown') copyRowViewAsMarkdown();
                 };
                 window.syncViewModeBar = function(mode) {
-                    var label = document.getElementById('viewModeLabel');
-                    if (label) {
-                        var names = { table:'Table', chart:'Charts', diff:'Diff', explore:'Explore' };
-                        label.textContent = names[mode] || mode;
-                    }
                     if (typeof window.syncLayoutSwitcher === 'function') {
                         window.syncLayoutSwitcher(mode);
                     }
@@ -405,7 +391,8 @@ export class ResultsHtmlGenerator {
                     }
                 };
                 window.setLayoutMode = function(mode) {
-                    var isSidebar = mode === 'sidebar';
+                    var normalized = mode === 'table2' ? 'sidebar' : mode;
+                    var isSidebar = normalized === 'sidebar';
                     document.body.classList.toggle('sidebar-layout', isSidebar);
                     window.layoutMode = isSidebar ? 'sidebar' : 'top';
                     var stateObj = window.__getHostState ? window.__getHostState() : {};
@@ -425,10 +412,12 @@ export class ResultsHtmlGenerator {
                     var switcher = document.getElementById('layoutSwitcher');
                     if (!switcher) return;
                     var activeLayout = null;
-                    if (viewMode === 'range-chart') {
+                    if (viewMode === 'range-chart' || viewMode === 'chart') {
                         activeLayout = 'charts';
                     } else if (viewMode === 'table') {
-                        activeLayout = document.body.classList.contains('sidebar-layout') ? 'table2' : 'table';
+                        activeLayout = document.body.classList.contains('sidebar-layout') ? 'sidebar' : 'table';
+                    } else if (viewMode === 'diff') {
+                        activeLayout = 'diff';
                     } else if (viewMode === 'explore') {
                         activeLayout = 'explore';
                     }
@@ -447,22 +436,27 @@ export class ResultsHtmlGenerator {
                     if (disabled) window.syncLayoutSwitcher('table');
                 };
                 window.applyLayoutSwitcherChoice = function(layout) {
-                    if (layout === 'table') {
+                    var normalized = layout === 'table2' ? 'sidebar' : layout;
+                    if (normalized === 'table') {
                         if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
                         window.setLayoutMode('top');
                         setViewMode('table');
-                    } else if (layout === 'table2') {
+                    } else if (normalized === 'sidebar') {
                         if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
                         window.setLayoutMode('sidebar');
                         setViewMode('table');
-                    } else if (layout === 'charts') {
+                    } else if (normalized === 'charts') {
                         var opened = typeof window.openRangeChartForActiveResult === 'function'
                             && window.openRangeChartForActiveResult();
                         if (!opened && typeof window.syncLayoutSwitcher === 'function') {
                             var modeSelect = document.getElementById('viewModeSelect');
                             window.syncLayoutSwitcher(modeSelect && modeSelect.value === 'table' ? 'table' : 'table');
                         }
-                    } else if (layout === 'explore') {
+                    } else if (normalized === 'diff') {
+                        if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
+                        window.setLayoutMode('top');
+                        setViewMode('diff');
+                    } else if (normalized === 'explore') {
                         if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
                         window.setLayoutMode('top');
                         setViewMode('explore');
@@ -477,10 +471,10 @@ export class ResultsHtmlGenerator {
                         window.applyLayoutSwitcherChoice(btn.dataset.layout);
                     });
                 })();
-                // Restore layout from persisted state
+                // Restore layout from persisted state (accept legacy 'table2')
                 try {
                     var savedState = window.__getHostState ? window.__getHostState() : null;
-                    if (savedState && savedState._layoutMode === 'sidebar') {
+                    if (savedState && (savedState._layoutMode === 'sidebar' || savedState._layoutMode === 'table2')) {
                         window.setLayoutMode('sidebar');
                     }
                 } catch(e) {}

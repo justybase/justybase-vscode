@@ -977,6 +977,43 @@ body.vscode-dark {
     align-self: stretch;
 }
 
+/* Grouped compact toolbar: view | search | export | table | more | edit */
+.toolbar-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+.toolbar-group--search {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.toolbar-group--search .global-filter-input {
+    flex: 1 1 140px;
+}
+.toolbar-group--search .column-search-group {
+    flex: 0 1 180px;
+}
+.toolbar-group--edit:empty {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .toolbar-group--table .btn,
+    .toolbar-group--export .split-btn__primary {
+        font-size: 0;
+        gap: 0;
+    }
+    .toolbar-group--table .btn svg,
+    .toolbar-group--export .split-btn__primary svg {
+        width: 14px;
+        height: 14px;
+    }
+    .toolbar-group--export .split-btn__primary {
+        padding: 2px 6px;
+    }
+}
+
 /* View mode split button */
 .view-split-btn__label {
     min-width: 64px;
@@ -1069,36 +1106,26 @@ body.vscode-dark {
 .column-search-group .column-search-input {
   width: 100%;
   max-width: none;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right: none;
 }
 
 .refresh-sql-btn {
   flex: 0 0 auto;
-  align-self: stretch;
+  align-self: center;
   min-width: 26px;
   width: 26px;
-  height: 24px;
+  height: 26px;
   padding: 0;
   justify-content: center;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right: none;
 }
 
 .clear-filters-btn {
   flex: 0 0 auto;
-  align-self: stretch;
+  align-self: center;
   min-width: 26px;
   width: 26px;
-  height: 24px;
+  height: 26px;
   padding: 0;
   justify-content: center;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
 }
 
 .refresh-sql-btn svg,

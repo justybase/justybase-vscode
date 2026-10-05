@@ -2859,6 +2859,7 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
   if (action === "view-chart") { setViewMode("chart"); return; }
   if (action === "view-diff") { setViewMode("diff"); return; }
   if (action === "view-explore") { setViewMode("explore"); return; }
+  if (action === "query-duckdb") { handleClickQueryLocallyDuckDB(); return; }
   if (action === "formatting") {
     callPanelMethod('openResultFormattingPanel', { scope: "result" });
     return;
@@ -2916,7 +2917,7 @@ getResultPanelWindow().handleExportSplitMenuClick = function (event: MouseEvent)
   if (splitMenu) splitMenu.style.display = "none";
   if (action === "current-view") { handleClickExport(); }
   else if (action === "all-rows") { exportAllVisibleToExcel(); }
-  else if (action === "excel") { openInExcel(); }
+  else if (action === "excel") { exportAllVisibleToExcel(); }
   else if (action === "markdown") { exportToMdFile(); }
   else if (action === "json") { exportToJson(); }
   else if (action === "csv") { exportToCsv(); }
@@ -2936,6 +2937,7 @@ function updateEditButtonsState(): void {
   const rs = getResultSetAt(getActiveGridIndex());
   const isEditable = rs && rs.isEditable;
   const canRefresh = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent && typeof rs.refreshSql === 'string' && rs.refreshSql.trim().length > 0);
+  const canFilter = Boolean(rs && !rs.isLog && !rs.isError && !rs.isTextContent);
   const inEdit = getIsEditMode();
 
   if (refreshBtn) {
@@ -2943,8 +2945,8 @@ function updateEditButtonsState(): void {
     refreshBtn.disabled = !canRefresh;
   }
   if (clearFiltersBtn) {
-    clearFiltersBtn.style.display = canRefresh ? 'inline-flex' : 'none';
-    clearFiltersBtn.disabled = !canRefresh;
+    clearFiltersBtn.style.display = canFilter ? 'inline-flex' : 'none';
+    clearFiltersBtn.disabled = !canFilter;
   }
   updateFilterHistoryButtons();
 
