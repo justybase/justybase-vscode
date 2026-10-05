@@ -5,7 +5,7 @@ audience: developer
 category: Developers
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.18.4
+product_version: 3.18.5
 ---
 
 # Data Grid performance benchmarks
