@@ -269,6 +269,29 @@ describe('ResultStateManager', () => {
             expect(clearedUnpinnedResults).toBe(false);
         });
 
+        it('should clear unpinned data results on a fresh run after idle (no overlap)', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            manager.updateResults(
+                [{ columns: [{ name: 'a', type: 'int' }], data: [[1]], name: 'Result 1' }],
+                sourceUri,
+            );
+            manager.finalizeExecution(sourceUri);
+
+            // Fresh SQL started after previous results fully completed: no
+            // pinExistingResults flag (caller snapshots overlap at enqueue time
+            // via QueryExecutionCoordinator.hasPendingWork), so the unpinned
+            // tab is cleared instead of being promoted to a manual pin.
+            const { clearedUnpinnedResults } = manager.startExecution(sourceUri);
+            expect(clearedUnpinnedResults).toBe(true);
+
+            const dataResults = (manager.resultsMap.get(sourceUri) ?? []).filter(resultSet => !resultSet.isLog);
+            expect(dataResults).toHaveLength(0);
+            expect(
+                Array.from(manager.pinnedResults.values()).some(pin => pin.sourceUri === sourceUri),
+            ).toBe(false);
+        });
+
         it('should keep manually pinned results when a new execution starts', () => {
             const sourceUri = 'file:///test.sql';
 
@@ -297,6 +320,10 @@ describe('ResultStateManager', () => {
         });
 
         it('should pin existing unpinned results when a queued execution starts', () => {
+            // Overlap case: the caller passes pinExistingResults only when the
+            // new SQL was enqueued while previous results were not fully
+            // completed (hasPendingWork at enqueue time). The manager honors
+            // the flag even though the predecessor finalized before this start.
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);
             manager.updateResults(

@@ -146,6 +146,13 @@ export async function runSmartSequentialQuery(
     const databaseOverride = connectionManager.getDocumentDatabase(sourceUri);
     const profile = connectionName ? connectionManager.getConnection(connectionName).then(executionTargetFingerprint) : Promise.resolve(undefined);
     const coordinator = getQueryExecutionCoordinator();
+    // Snapshot overlap synchronously before enqueue: preserve prior result tabs
+    // only when the new SQL starts while previous results are not fully
+    // completed (running or still queued/preparing). A fresh run after idle
+    // must clear unpinned tabs instead of pinning them. The queue serializes
+    // work, so by the time this job's run() starts the predecessor has already
+    // finalized — checking at run() time would always see idle.
+    const preserveExistingResults = coordinator.hasPendingWork(sourceUri);
     await coordinator.enqueue({ sourceUri, sql: queries.join(';\n\n'), connectionName: connectionName ?? undefined,
         database: databaseOverride, sourceRange, executionUri }, {
         document: editor.document,
@@ -157,7 +164,7 @@ export async function runSmartSequentialQuery(
             if (signal.aborted) throw new Error('Query preparation cancelled');
             const prepared = await prepareQueuedQuery(queries, context, sourceUri, connectionManager,
                 connectionName ?? undefined, databaseOverride, await profile, signal);
-            return lease => executePreparedQuery(deps, options, executionUri, databaseKind, queries, lease, { ...prepared, sourceDocumentUri: sourceUri, keepConnectionOpenOverride: keepConnectionOpen });
+            return lease => executePreparedQuery(deps, options, executionUri, databaseKind, queries, lease, { ...prepared, sourceDocumentUri: sourceUri, keepConnectionOpenOverride: keepConnectionOpen }, preserveExistingResults);
         } catch (error: unknown) {
             if (signal.aborted) throw error;
             void vscode.window.showErrorMessage(`Could not prepare queued query: ${error instanceof Error ? error.message : String(error)}`);
@@ -174,6 +181,7 @@ async function executePreparedQuery(
     queries: string[],
     executionGate: QueryExecutionLease,
     prepared: BatchQueryRunOptions,
+    preserveExistingResults = false,
 ): Promise<QueryQueueOutcome> {
     const { context, connectionManager, resultPanelProvider } = deps;
     const queriesForError = queries;
@@ -193,9 +201,10 @@ async function executePreparedQuery(
         );
 
         resultPanelProvider.setActiveSource(sourceUri);
-        // Queued tasks must not wipe prior result tabs: pin every existing tab
-        // as a durable manual pin (no automatic unpin on finalize).
-        resultPanelProvider.startExecution(sourceUri, { pinExistingResults: true });
+        // Preserve prior tabs only when this SQL was enqueued while previous
+        // results were still incomplete (see enqueue-time snapshot above).
+        // A fresh run after idle clears unpinned tabs instead of pinning them.
+        resultPanelProvider.startExecution(sourceUri, preserveExistingResults ? { pinExistingResults: true } : undefined);
         executionStarted = true;
         resultPanelProvider.log(sourceUri, 'Preparing SQL execution...');
 

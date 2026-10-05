@@ -425,4 +425,69 @@ describe('queryExecutionGate', () => {
         expect(second.isRunning('file:///first.sql')).toBe(true);
         secondLease?.dispose();
     });
+
+    describe('hasPendingWork', () => {
+        it('is false when idle and true while a job is queued or running', async () => {
+            const coordinator = new QueryExecutionCoordinator();
+            const sourceUri = 'file:///pending.sql';
+            const otherUri = 'file:///other.sql';
+            try {
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(false);
+
+                let release!: (outcome: 'completed') => void;
+                const gate = new Promise<'completed'>(resolve => { release = resolve; });
+                const pending = coordinator.enqueue(
+                    { sourceUri, sql: 'SELECT 1' },
+                    {},
+                    async () => async () => gate,
+                );
+                // Enqueue reserves the lane synchronously, before preparation.
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(true);
+                expect(coordinator.hasPendingWork(otherUri)).toBe(false);
+
+                await Promise.resolve();
+                await Promise.resolve();
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(true);
+
+                release('completed');
+                await pending;
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(false);
+            } finally {
+                coordinator.dispose();
+            }
+        });
+
+        it('stays true for a follow-up enqueued while the predecessor runs', async () => {
+            const coordinator = new QueryExecutionCoordinator();
+            const sourceUri = 'file:///queued.sql';
+            try {
+                let releaseFirst!: (outcome: 'completed') => void;
+                const firstGate = new Promise<'completed'>(resolve => { releaseFirst = resolve; });
+                const first = coordinator.enqueue(
+                    { sourceUri, sql: 'SELECT 1' },
+                    {},
+                    async () => async () => firstGate,
+                );
+                await Promise.resolve();
+                await Promise.resolve();
+
+                // Second SQL starts while previous results are not completed.
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(true);
+
+                const second = coordinator.enqueue(
+                    { sourceUri, sql: 'SELECT 2' },
+                    {},
+                    async () => async () => 'completed',
+                );
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(true);
+
+                releaseFirst('completed');
+                await first;
+                await second;
+                expect(coordinator.hasPendingWork(sourceUri)).toBe(false);
+            } finally {
+                coordinator.dispose();
+            }
+        });
+    });
 });

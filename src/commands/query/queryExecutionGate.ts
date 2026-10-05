@@ -774,6 +774,32 @@ export class QueryExecutionCoordinator {
         );
     }
 
+    /**
+     * True when a new SQL run for `sourceUri` overlaps with previous results
+     * that are not fully completed. Covers both actively running executions
+     * (`runningSources`) and jobs waiting in the per-tab queue (`preparing` /
+     * `queued`, including the window where the predecessor has not acquired
+     * its lease yet). Must be snapshotted synchronously before `enqueue()`,
+     * because the queue serializes work: by the time the follow-up job's
+     * `run()` starts, the predecessor has already finalized and `isRunning()`
+     * alone would return false.
+     */
+    public hasPendingWork(sourceUri: string): boolean {
+        if (this.isRunning(sourceUri)) {
+            return true;
+        }
+        const normalizedUri = normalizeUriKey(sourceUri);
+        for (const lane of this.lanes.values()) {
+            if (normalizeUriKey(lane.sourceUri) !== normalizedUri) {
+                continue;
+            }
+            if (lane.running || lane.queued.length > 0 || lane.independent.size > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public markCancelling(sourceUri: string): void {
         const normalizedUri = normalizeUriKey(sourceUri);
         for (const entry of this.runningSources.values()) {
@@ -855,6 +881,10 @@ export function restoreQueryExecutionForReopenedDocument(document: vscode.TextDo
 
 export function isQueryExecutionRunning(sourceUri: string): boolean {
     return defaultCoordinator.isRunning(sourceUri);
+}
+
+export function hasPendingQueryExecution(sourceUri: string): boolean {
+    return defaultCoordinator.hasPendingWork(sourceUri);
 }
 
 export function markQueryExecutionCancelling(sourceUri: string): void {
