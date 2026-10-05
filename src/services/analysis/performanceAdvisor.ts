@@ -2,16 +2,19 @@ import { analyzeExplainPlanSemantic, type ExplainPlanSemanticAnalysis } from '..
 import { createTuningReport, type TuningEvidence, type TuningRecommendation, type TuningReport } from '../tuning/types';
 import { analyzeSql, objectId, objectLabel, type ObjectReference, type SqlAnalysis, type SqlLocation } from './sqlAnalysis';
 
+/** HASH means co-located on keys; RANDOM means no co-location; UNKNOWN means the catalog did not say. */
+export type TableDistribution = { kind: 'hash'; keys: string[] } | { kind: 'random' } | { kind: 'unknown' };
 export interface PerformanceTable {
     object: ObjectReference;
-    distributionKeys?: string[];
+    distribution?: TableDistribution;
     columns?: { name: string; type?: string }[];
     rows?: number;
     skewRatio?: number;
     skewCoverage?: 'populated-slices';
     averageRowsPerSlice?: number;
     maximumRowsPerSlice?: number;
-    statistics?: 'missing' | 'available' | 'unknown';
+    /** Catalog-level optimizer statistics state; NZPERF003A only fires when proven missing. */
+    statisticsState?: 'missing' | 'available' | 'unknown';
 }
 export interface PerformanceFinding extends TuningRecommendation {
     category: 'distribution' | 'skew' | 'statistics' | 'scan' | 'join' | 'filter' | 'sort' | 'aggregation' | 'cardinality' | 'result-size';
@@ -35,23 +38,28 @@ export interface PerformanceInput {
     plan?: ExplainPlanSemanticAnalysis;
 }
 const LARGE_ROWS = 1_000_000;
+const describeDistribution = (distribution: TableDistribution): string =>
+    distribution.kind === 'hash' ? `HASH (${distribution.keys.join(', ')})` : distribution.kind.toUpperCase();
+/** The advisor only tracks relations; parser references are UNKNOWN, so normalize relation identity. */
+const relationId = (object: ObjectReference): string => objectId({ ...object, type: 'UNKNOWN' });
 /** Evidence-driven Netezza rules, using the existing tuning evidence and plan model. */
 export function analyzeNetezzaPerformance(input: PerformanceInput): PerformanceReport {
     const analysis = input.analysis ?? analyzeSql(input.sql, input.context);
-    const tables = new Map((input.tables ?? []).map(t => [objectId(t.object), t]));
+    const tables = new Map((input.tables ?? []).map(t => [relationId(t.object), t]));
     const plan = input.plan ?? (input.explainPlanText ? analyzeExplainPlanSemantic(input.explainPlanText) : undefined);
     const findings: PerformanceFinding[] = [];
+    const advisorIssues: string[] = [];
     const add = (finding: PerformanceFinding) => findings.push(finding);
     const base = (id: string, category: PerformanceFinding['category'], title: string, summary: string, evidence: TuningEvidence[], confidence = 0.8): PerformanceFinding => ({
         id, category, title, summary, severity: 'warning', confidence, risk: 'medium', actions: [], evidence
     });
     const groups = new Map<string, typeof analysis.joins>();
     for (const join of analysis.joins) {
-        const key = [objectId(join.left.target), objectId(join.right.target)].sort().join('|');
+        const key = [relationId(join.left.target), relationId(join.right.target)].sort().join('|');
         const group = groups.get(key) ?? [];
         group.push(join); groups.set(key, group);
-        const left = tables.get(objectId(join.left.target))?.columns?.find(c => c.name === join.left.column);
-        const right = tables.get(objectId(join.right.target))?.columns?.find(c => c.name === join.right.column);
+        const left = tables.get(relationId(join.left.target))?.columns?.find(c => c.name === join.left.column);
+        const right = tables.get(relationId(join.right.target))?.columns?.find(c => c.name === join.right.column);
         if (left?.type && right?.type && left.type.toUpperCase() !== right.type.toUpperCase()) {
             add({ ...base('NZPERF006', 'join', 'Join column types differ', `${left.type} and ${right.type} may require conversion; verify compatible types.`, [
                 { source: 'sql_analysis', summary: `${join.left.column} = ${join.right.column}` }, { source: 'table_stats', summary: 'Cached column types', details: `${left.type} / ${right.type}` }
@@ -60,23 +68,40 @@ export function analyzeNetezzaPerformance(input: PerformanceInput): PerformanceR
     }
     for (const group of groups.values()) {
         const first = group[0];
-        const left = tables.get(objectId(first.left.target));
-        const right = tables.get(objectId(first.right.target));
-        if (!left?.distributionKeys?.length || !right?.distributionKeys?.length) { continue; }
-        const mappings = group.map(j => objectId(j.left.target) === objectId(left.object) ? [j.left.column, j.right.column] : [j.right.column, j.left.column]);
-        const aligned = left.distributionKeys.length === right.distributionKeys.length && left.distributionKeys.every((key, i) => mappings.some(([l,r]) => l === key && r === right.distributionKeys![i]));
-        if (!aligned) {
-            const finding = base('NZPERF001', 'distribution', 'Join may require redistribution', 'Distribution keys do not align fully with the equality join. Review distribution against the wider workload before making changes.', [
+        const left = tables.get(relationId(first.left.target));
+        const right = tables.get(relationId(first.right.target));
+        if (!left || !right) { continue; }
+        const leftDistribution = left.distribution;
+        const rightDistribution = right.distribution;
+        const mappings = group.map(j => relationId(j.left.target) === relationId(left.object) ? [j.left.column, j.right.column] : [j.right.column, j.left.column]);
+        if (leftDistribution?.kind === 'hash' && rightDistribution?.kind === 'hash') {
+            const aligned = leftDistribution.keys.length === rightDistribution.keys.length && leftDistribution.keys.every((key, i) => mappings.some(([l,r]) => l === key && r === rightDistribution.keys[i]));
+            if (!aligned) {
+                const finding = base('NZPERF001', 'distribution', 'Join may require redistribution', 'Distribution keys do not align fully with the equality join. Review distribution against the wider workload before making changes.', [
+                    { source: 'sql_analysis', summary: 'Equality join columns', details: mappings.map(m => m.join(' = ')).join(', ') },
+                    { source: 'table_stats', summary: `${objectLabel(left.object)} DISTRIBUTE ON (${leftDistribution.keys.join(', ')})` },
+                    { source: 'table_stats', summary: `${objectLabel(right.object)} DISTRIBUTE ON (${rightDistribution.keys.join(', ')})` }
+                ], 0.7);
+                finding.object = right.object; finding.sqlRange = first.right.location; add(finding);
+            }
+        } else if (leftDistribution && rightDistribution && leftDistribution.kind !== 'unknown' && rightDistribution.kind !== 'unknown') {
+            // At least one RANDOM side cannot be co-located on a hash key.
+            const randomSide = leftDistribution.kind === 'random' ? left : right;
+            const finding = base('NZPERF001', 'distribution', 'Join may require data movement',
+                'At least one side of this join is DISTRIBUTE ON RANDOM, so the join cannot be co-located on a hash key and may move rows. Review distribution against the wider workload before making changes.', [
                 { source: 'sql_analysis', summary: 'Equality join columns', details: mappings.map(m => m.join(' = ')).join(', ') },
-                { source: 'table_stats', summary: `${objectLabel(left.object)} DISTRIBUTE ON (${left.distributionKeys.join(', ')})` },
-                { source: 'table_stats', summary: `${objectLabel(right.object)} DISTRIBUTE ON (${right.distributionKeys.join(', ')})` }
-            ], 0.7);
-            finding.object = right.object; finding.sqlRange = first.right.location; add(finding);
+                { source: 'table_stats', summary: `${objectLabel(left.object)} distribution is ${describeDistribution(leftDistribution)}` },
+                { source: 'table_stats', summary: `${objectLabel(right.object)} distribution is ${describeDistribution(rightDistribution)}` }
+            ], leftDistribution.kind === 'random' && rightDistribution.kind === 'random' ? 0.65 : 0.7);
+            finding.object = randomSide.object; finding.sqlRange = first.right.location; add(finding);
+        } else {
+            advisorIssues.push(`${objectLabel(left.object)} / ${objectLabel(right.object)}: distribution is unknown; the alignment check was skipped.`);
         }
     }
-    const referenced = new Set(analysis.references.map(ref => objectId(ref.target)));
+    const referenced = new Set(analysis.references.map(ref => relationId(ref.target)));
+    const wildcardTargets = new Set(analysis.references.filter(ref => ref.kind === 'wildcard').map(ref => relationId(ref.target)));
     for (const table of tables.values()) {
-        if (!referenced.has(objectId(table.object))) { continue; }
+        if (!referenced.has(relationId(table.object))) { continue; }
         if (table.skewRatio !== undefined && table.skewRatio >= 2) {
             const finding = base('NZPERF002', 'skew', 'Significant distribution skew', `${objectLabel(table.object)} has uneven rows per slice; skew can limit parallelism in this query.`, [
                 { source: 'skew_check', summary: table.skewCoverage === 'populated-slices' ? 'Maximum / average rows per populated slice (lower bound)' : 'Maximum / average rows per slice', value: table.skewRatio, details: `Average: ${table.averageRowsPerSlice ?? 'unknown'}; maximum: ${table.maximumRowsPerSlice ?? 'unknown'}` }
@@ -85,10 +110,10 @@ export function analyzeNetezzaPerformance(input: PerformanceInput): PerformanceR
             if (table.rows !== undefined && table.rows >= LARGE_ROWS) { finding.severity = 'critical'; }
             add(finding);
         }
-        if (table.statistics === 'missing' && (table.rows ?? 0) >= LARGE_ROWS) {
-            add({ ...base('NZPERF003', 'statistics', 'Missing optimizer statistics', `Statistics are reported missing for ${objectLabel(table.object)}. Consider GENERATE STATISTICS after reviewing the maintenance workload.`, [{ source: 'table_stats', summary: 'Catalog reports missing statistics', value: table.rows }], 0.9), object: table.object });
+        if (table.statisticsState === 'missing' && (table.rows ?? 0) >= LARGE_ROWS) {
+            add({ ...base('NZPERF003A', 'statistics', 'Missing optimizer statistics (catalog)', `The catalog reports missing statistics for ${objectLabel(table.object)}. Consider GENERATE STATISTICS after reviewing the maintenance workload.`, [{ source: 'table_stats', summary: 'Catalog reports missing statistics', value: table.rows }], 0.9), object: table.object });
         }
-        if (analysis.patterns.some(p => p.kind === 'star') && (table.columns?.length ?? 0) >= 40 && (table.rows ?? 0) >= LARGE_ROWS) {
+        if (wildcardTargets.has(relationId(table.object)) && (table.columns?.length ?? 0) >= 40 && (table.rows ?? 0) >= LARGE_ROWS) {
             add({ ...base('NZPERF008', 'result-size', 'Wide SELECT * on a large relation', `${objectLabel(table.object)} has ${table.columns!.length} columns. Select required columns to reduce processing and result transfer when semantics allow.`, [
                 { source: 'sql_analysis', summary: 'SELECT * detected' }, { source: 'table_stats', summary: 'Column count and row estimate', details: `${table.columns!.length} columns; ${table.rows} rows` }
             ], 0.7), severity: 'info', object: table.object });
@@ -114,7 +139,7 @@ export function analyzeNetezzaPerformance(input: PerformanceInput): PerformanceR
             add({ ...base('NZPERF004', 'scan', 'Large estimated scan', 'This scan processes a large estimated row set. Review selective predicates and zone-map-friendly filters; a scan can still be appropriate.', evidence, 0.85), planNodeIds: [node.id] });
         }
         if (node.confidence === 0 && node.rows >= LARGE_ROWS && /scan/i.test(node.operator)) {
-            add({ ...base('NZPERF003', 'statistics', 'Low-confidence large scan estimate', 'EXPLAIN confidence is zero. Statistics may be missing or insufficient; verify before generating statistics. No last-updated date is inferred.', evidence, 0.65), planNodeIds: [node.id] });
+            add({ ...base('NZPERF003B', 'statistics', 'Low-confidence large scan estimate', 'EXPLAIN confidence is zero. Statistics may be missing or insufficient; verify before generating statistics. No last-updated date is inferred.', evidence, 0.65), planNodeIds: [node.id] });
         }
         if (/sort|aggregate|group|unique|distinct/i.test(node.operator) && node.rows >= LARGE_ROWS) {
             add({ ...base('NZPERF009', /sort/i.test(node.operator) ? 'sort' : 'aggregation', 'Large sort or aggregation', 'EXPLAIN estimates substantial sort/aggregation work. Review whether filtering or reducing columns earlier preserves semantics.', evidence, 0.9), planNodeIds: [node.id] });
@@ -125,7 +150,7 @@ export function analyzeNetezzaPerformance(input: PerformanceInput): PerformanceR
             add({ ...base('NZPERF012', 'cardinality', 'Estimated intermediate row explosion', `Estimated join output ${node.rows} rows exceeds its inputs (${inputRows}) by at least 10×. Investigate duplicate matches and join cardinality.`, [...evidence, { source: 'explain_plan', summary: 'Combined child row estimates', value: inputRows }], 0.9), severity: 'critical', planNodeIds: [node.id, ...children.map(n => n.id)] });
         }
     }
-    const issues = [...analysis.issues, ...(input.issues ?? [])];
+    const issues = [...analysis.issues, ...(input.issues ?? []), ...advisorIssues];
     if (!plan) { issues.push('EXPLAIN unavailable: only static and available metadata evidence is shown.'); }
     else if (!plan.nodes.length) { issues.push('EXPLAIN format could not be structured; raw plan remains available.'); }
     if (!input.tables?.length) { issues.push('Table metadata unavailable; distribution, skew and statistics conclusions are limited.'); }

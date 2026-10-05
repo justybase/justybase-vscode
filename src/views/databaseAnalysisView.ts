@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import type { DependencyReport } from '../services/analysis/dependencyIndex';
+import { describeProposedChange } from '../services/analysis/dependencyIndex';
 import type { PerformanceReport } from '../services/analysis/performanceAdvisor';
 import { objectLabel, objectId, type ObjectReference } from '../services/analysis/sqlAnalysis';
 
@@ -91,7 +92,9 @@ export class DatabaseAnalysisView implements vscode.Disposable {
             const graphHeight = Math.max(350,objects.length*65);
             const depthOptions = [1,2,3,100].map(n => `<option value="${n}" ${n === this.depth ? 'selected' : ''}>${n === 100 ? 'All (bounded)' : n}</option>`).join('');
             const affectedCards = dependency.affected.map((item,i) => `<article><strong>${item.severity.toUpperCase()}</strong> <button data-command="open" data-index="${i}">${escape(objectLabel(item.object))}</button><p>Depth ${item.depth} · ${escape(item.reason)}</p></article>`).join('');
-            content = `<h1>${dependency.direction === 'incoming' ? 'Used By / Impact Analysis' : 'Depends On'}</h1><h2>${escape(objectLabel(dependency.root))}</h2>${dependency.proposedChange ? `<p>Proposed change: ${escape(dependency.proposedChange)}</p>` : ''}
+            const proposedChangeText = dependency.proposedChange ?? (dependency.change ? describeProposedChange(dependency.change, dependency.root) : undefined);
+            const changeKind = dependency.change ? ` (${escape(dependency.change.kind.replace(/([A-Z])/g, ' $1').toLowerCase().trim())})` : '';
+            content = `<h1>${dependency.direction === 'incoming' ? 'Used By / Impact Analysis' : 'Depends On'}</h1><h2>${escape(objectLabel(dependency.root))}</h2>${proposedChangeText ? `<p>Proposed change: ${escape(proposedChangeText)}${changeKind}</p>` : ''}
                 <p>${direct} direct · ${indirect} indirect references${truncationNotice}</p>
                 <label>Depth <select id="depth">${depthOptions}</select></label> <button data-command="refresh">Refresh report</button>
                 <p>Arrows point from the referencing object to its dependency. Click a node for DDL. Use wheel to zoom and drag to pan.</p>

@@ -14,21 +14,49 @@ In Schema Browser, right-click a Netezza table, view, procedure or external tabl
 
 - **Show Dependencies** shows objects referenced by that object.
 - **Show Used By** shows objects referencing it.
-- **Impact Analysis** accepts a description of a proposed change and shows direct
-  and indirect objects to review. It does not apply the change.
+- **Impact Analysis** prompts for the proposed change kind (drop object, drop
+  column, rename column, change column type, rename object) with a classified
+  free-text fallback, and shows direct and indirect objects to review. It does
+  not apply the change.
 
-On a column, **Find Column References** and **Impact Analysis** filter the first
-hop to references to that column, including uncertain wildcard references.
+On a column, **Find Column References** filters the first hop to references to
+that column, including uncertain wildcard references. **Impact Analysis** on a
+column keeps every dependent but derives severity from the proposed change:
+references to the affected column are high, wildcard exposure is medium, and
+object-only references are low. Removing or renaming the whole object is high
+for direct references. A free-text description that cannot be classified falls
+back to the conservative drop interpretation.
 
 The panel has a list and a graph. Arrows point **from the referencing object to
 its dependency**. Colors distinguish tables, views and procedures. Click a node
 or list item to use the existing object DDL action. Drag the graph to pan; use
 its wheel to zoom. Depth defaults to two hops; choose 1, 2, 3 or All. All remains
-bounded to 100 hops, 300 objects and 3,000 evidence edges. Cycles terminate.
+bounded to 100 hops, 300 objects and 3,000 evidence edges (edges are unique
+object-to-object relations; multiple columns on one relation are evidence on a
+single edge). Cycles terminate.
 
 High means a direct parsed or catalog dependency, medium an indirect dependency,
 and low a probable reference, such as a wildcard or literal dynamic SQL.
 These indicate objects to review, not proof that every proposed change breaks them.
+
+## Identity and scoping
+
+Object identity includes an identity namespace: **relation** (table, view,
+external table), **routine** (procedure) and **sequence**. A procedure and a
+table with the same name in one schema remain separate nodes, so
+`PUBLIC.X` as a routine never merges with `PUBLIC.X` as a relation. Parser
+references that do not carry a catalog type resolve to the relation namespace
+first, then the routine namespace, against the loaded snapshot.
+
+A bare `SELECT *` contributes wildcard exposure only for the relation set of
+its own `SELECT` scope, resolved from that query's FROM clause; it does not mark
+every object in the statement. A qualified `alias.*` contributes only for the
+aliased relation. Sibling subqueries and `EXISTS` scopes therefore keep their
+own wildcard exposure.
+
+Only exact `column = column` comparisons count as equality joins. An operand
+must be a single column reference with no literals, arithmetic, casts or
+function calls, so `A.X + B.Y = 100` is not treated as `A.X = B.Y`.
 
 ## Coverage and limitations
 

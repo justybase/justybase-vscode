@@ -23,6 +23,7 @@ module.exports = [
   "migration.live.integration.test.ts",
   "netezzaImport.live.integration.test.ts",
   "netezzaSchemaRefresh.live.integration.test.ts",
+  "databaseAnalysis.live.integration.test.ts",
   "netezzaCompletionKeywordLegality.live.integration.test.ts",
   "netezzaDoubleDotCompletion.live.integration.test.ts",
   "netezzaTimestampFilterFormats.live.integration.test.ts",

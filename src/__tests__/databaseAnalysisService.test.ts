@@ -17,7 +17,7 @@ function setup() {
     const cache = { onDidInvalidate:invalidation.event,onDidExternalRefresh:external.event,onDidPrefetchRefreshDetails:refresh.event,
         getDefinitionCatalog:jest.fn((connection:string)=>catalogs.get(connection)),setDefinitionCatalog:jest.fn((connection:string,_db:string,value:DefinitionCatalogSnapshot)=>catalogs.set(connection,value)),
         clearDefinitionCatalogs:jest.fn((connection?:string)=> { if(connection){catalogs.delete(connection);}else{catalogs.clear();} }),
-        setForeignKeyRelationshipsForDatabase:jest.fn(),getForeignKeyRelationshipsForDatabase:jest.fn(()=>({complete:true,references:[]})),getColumns:jest.fn(()=>undefined),getColumnsAnySchema:jest.fn(()=>undefined),setColumns:jest.fn() };
+        setForeignKeyRelationshipsForDatabase:jest.fn(),getForeignKeyRelationshipsForDatabase:jest.fn(()=>({complete:true,references:[]})),getColumns:jest.fn(()=>undefined),getColumnsAnySchema:jest.fn(()=>undefined),setColumns:jest.fn(),getObjectsWithSchema:jest.fn(()=>[]) };
     const session = { open:jest.fn(async()=>undefined),close:jest.fn(async()=>undefined),database:'DB',connectionName:'NZ',
         rows:jest.fn(async(query:string): Promise<Record<string,unknown>[]>=>query.includes("'EXTERNAL TABLE' AS OBJTYPE")?[{OBJNAME:'EXT',SCHEMA:'PUBLIC',OBJTYPE:'EXTERNAL TABLE'}]:query.includes('PROCEDURESOURCE')?[]:query.includes('DEFINITION')?[{SCHEMA:'PUBLIC',VIEWNAME:'V',DEFINITION:'SELECT C.EMAIL FROM CUSTOMER C'}]:[{OBJNAME:'CUSTOMER',SCHEMA:'PUBLIC',OBJTYPE:'TABLE'}]),
         explain:jest.fn(async()=> 'Sequential Scan table "CUSTOMER" (cost=0.0..20.0 rows=2000000.0 width=32.0 conf=0.0)') };
@@ -85,6 +85,42 @@ describe('database analysis lifecycle',()=>{
         await service.dependencies('NZ',root,'incoming',2,new vscode.CancellationTokenSource().token);
         expect(session.rows.mock.calls.filter(([query])=>query.includes('FROM_DATABASE'))).toHaveLength(1);
         expect(cache.setForeignKeyRelationshipsForDatabase).toHaveBeenCalledWith('NZ','DB',expect.arrayContaining([expect.objectContaining({fromTable:'ORDERS',toTable:'CUSTOMER',toColumn:'ID'})]),true);
+        service.dispose();
+    });
+
+    test('performance resolves relation types so object links can open DDL',async()=>{
+        const {service,session,cache}=setup();cache.getObjectsWithSchema.mockReturnValue([]);
+        const original=session.rows.getMockImplementation()!;
+        session.rows.mockImplementation(async query=>query.includes('REFOBJNAME')?[{OBJNAME:'CUSTOMER',SCHEMA:'PUBLIC',OBJTYPE:'VIEW'}]:query.includes('COUNT(*)')?[{DATASLICEID:1,ROW_COUNT:100},{DATASLICEID:2,ROW_COUNT:0}]:original(query));
+        const report=await service.performance('NZ','SELECT * FROM CUSTOMER',root,new vscode.CancellationTokenSource().token,true);
+        expect(report.recommendations.find(r=>r.id==='NZPERF002')?.object).toMatchObject({name:'CUSTOMER',type:'VIEW'});
+        service.dispose();
+    });
+
+    test('cached columns without distribution flags are not treated as RANDOM',async()=>{
+        const {service,session,cache}=setup();
+        (cache.getColumns as jest.Mock).mockReturnValue([{ATTNAME:'ID',FORMAT_TYPE:'INTEGER',isDistributionKey:false}]);
+        const original=session.rows.getMockImplementation()!;
+        session.rows.mockImplementation(async query=>{
+            if(query.includes('_V_RELATION_COLUMN')){return [
+                {OBJID:1,TABLENAME:'A',SCHEMA:'PUBLIC',DBNAME:'DB',ATTNAME:'ID',FORMAT_TYPE:'INTEGER',ATTNUM:1},
+                {OBJID:2,TABLENAME:'B',SCHEMA:'PUBLIC',DBNAME:'DB',ATTNAME:'ID',FORMAT_TYPE:'INTEGER',ATTNUM:1},
+            ];}
+            if(query.includes('_V_TABLE_DIST_MAP')){return [{OBJID:1,ATTNAME:'ID'},{OBJID:2,ATTNAME:'ID'}];}
+            return original(query);
+        });
+        const report=await service.performance('NZ','SELECT A.ID FROM A JOIN B ON A.ID = B.ID',root,new vscode.CancellationTokenSource().token);
+        expect(report.recommendations.map(r=>r.id)).not.toContain('NZPERF001');
+        service.dispose();
+    });
+
+    test('performance uses typed objects from the schema cache without a catalog listing',async()=>{
+        const {service,session,cache}=setup();
+        (cache.getObjectsWithSchema as jest.Mock).mockReturnValue([{item:{label:'CUSTOMER',objType:'TABLE'},schema:'PUBLIC'}]);
+        session.rows.mockImplementation(async query=>query.includes('COUNT(*)')?[{DATASLICEID:1,ROW_COUNT:100},{DATASLICEID:2,ROW_COUNT:0}]:[]);
+        const report=await service.performance('NZ','SELECT * FROM CUSTOMER',root,new vscode.CancellationTokenSource().token,true);
+        expect(report.recommendations.find(r=>r.id==='NZPERF002')?.object).toMatchObject({name:'CUSTOMER',type:'TABLE'});
+        expect(session.rows.mock.calls.some(([q])=>q.includes('REFOBJNAME'))).toBe(false);
         service.dispose();
     });
 });

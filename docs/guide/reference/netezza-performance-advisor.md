@@ -33,14 +33,15 @@ EXPLAIN costs and rows are **estimates**, not measured execution times.
 
 | ID | Evidence and purpose |
 | --- | --- |
-| NZPERF001 | CST equality joins + distribution metadata: keys do not fully align; review redistribution risk against the wider workload. |
+| NZPERF001 | CST equality joins + distribution metadata: keys do not fully align, or a RANDOM side cannot co-locate; review redistribution risk against the wider workload. |
 | NZPERF002 | Explicit skew measurement: maximum/average rows per slice is at least 2. |
-| NZPERF003 | Reported missing statistics on a large relation, or a zero-confidence large scan in EXPLAIN; verify statistics. |
+| NZPERF003A | Catalog-reported missing statistics on a large relation; verify statistics. |
+| NZPERF003B | Zero-confidence large scan in EXPLAIN; statistics may be missing or insufficient. |
 | NZPERF004 | EXPLAIN scan estimates at least one million rows; review selective and zone-map-friendly filters. |
 | NZPERF005 | CST function/cast inside a join or filter; review processing and native type compatibility. |
 | NZPERF006 | Join columns have different cached types; verify conversions and compatibility. |
 | NZPERF007 | JOIN without ON/USING/NATURAL; verify Cartesian multiplication is intended. |
-| NZPERF008 | SELECT * with at least 40 columns and a row estimate of at least one million; review required columns. |
+| NZPERF008 | Wildcard projection of a relation with at least 40 columns and a row estimate of at least one million; review required columns. |
 | NZPERF009 | EXPLAIN sort/aggregation estimates at least one million rows. |
 | NZPERF010 | UNION performs duplicate elimination; consider UNION ALL only when semantics permit. |
 | NZPERF011 | EXPLAIN redistribution/broadcast/movement estimates at least one million rows. |
@@ -48,8 +49,17 @@ EXPLAIN costs and rows are **estimates**, not measured execution times.
 
 Distribution advice is deliberately phrased as a review. A change that helps
 one query can hurt others; a single query is insufficient to select a new key.
-Aligned equality keys do not generate a mismatch warning. Unknown distribution
-metadata does not produce an invented recommendation.
+Distribution is modelled as HASH (with keys), RANDOM or UNKNOWN. Aligned HASH
+equality keys do not generate a mismatch warning. A HASH/RANDOM or RANDOM/RANDOM
+join is reported as possible data movement. Unknown distribution metadata does
+not produce an invented recommendation; the report notes that the alignment
+check was skipped.
+
+NZPERF003 is split by evidence source. **NZPERF003A** requires a catalog
+statistics signal that the current catalog queries do not expose, so it only
+fires when a statistics state is explicitly supplied; **NZPERF003B** is the
+live EXPLAIN confidence signal. This avoids conflating catalog state with
+optimizer confidence. No statistics date is fabricated.
 
 ## Optional skew measurement
 

@@ -7,14 +7,20 @@ import { wrapProcedureStringBody } from '../../sqlParser/procedure/procedureStri
 import { normalizeForeignKeyRelationshipRows } from '../../metadata/foreignKeyRelationships';
 import { buildColumnCacheKey, mapRawColumnRowToMetadata } from '../../metadata/columnRowMapping';
 import type { DefinitionCatalogSnapshot } from '../../metadata/definitionCatalog';
-import { DependencyIndex, type DependencyEdge, type DependencyReport } from './dependencyIndex';
-import { analyzeSql, objectId, type ObjectReference } from './sqlAnalysis';
-import { type PerformanceTable, type PerformanceReport } from './performanceAdvisor';
+import { extractLabel, inferObjectType } from '../../metadata/helpers';
+import { DependencyIndex, type DependencyEdge, type DependencyReport, type ProposedChange } from './dependencyIndex';
+import { analyzeSql, objectId, resolveKnownObject, type ObjectReference } from './sqlAnalysis';
+import { type PerformanceTable, type PerformanceReport, type TableDistribution } from './performanceAdvisor';
 import { analyzeExplainPlanSemantic, type ExplainPlanSemanticAnalysis } from '../tuning/explainPlanSemanticAnalyzer';
 import { NetezzaTuningAdvisor } from '../../dialects/netezza/tuning/netezzaTuningAdvisor';
 import { AnalysisSession } from './analysisSession';
 
 const MAX_OBJECTS = 20_000;
+/** Only catalog-confirmed physical tables have a Netezza distribution policy to infer. */
+function distributionFromKeys(keys: string[] | undefined, object: ObjectReference, hasMetadata: boolean): TableDistribution | undefined {
+    if (!hasMetadata || object.type !== 'TABLE') { return undefined; }
+    return keys?.length ? { kind: 'hash', keys } : { kind: 'random' };
+}
 function text(row: Record<string, unknown>, key: string): string { return String(row[key] ?? '').trimEnd(); }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 interface IndexEntry { index: DependencyIndex; snapshot?: DefinitionCatalogSnapshot; connection: string }
@@ -54,7 +60,7 @@ export class DatabaseAnalysisService implements vscode.Disposable {
         try { await session.open(); return await action(session, source.token); }
         finally { await session.close(); listener.dispose(); source.dispose(); this.active.delete(source); }
     }
-    async dependencies(connection: string, root: ObjectReference, direction: 'incoming' | 'outgoing', depth: number, token: vscode.CancellationToken, column?: string): Promise<DependencyReport> {
+    async dependencies(connection: string, root: ObjectReference, direction: 'incoming' | 'outgoing', depth: number, token: vscode.CancellationToken, column?: string, change?: ProposedChange): Promise<DependencyReport> {
         const generation = this.generation;
         let snapshot = this.cache.getDefinitionCatalog(connection, root.database);
         if (!snapshot) {
@@ -71,12 +77,13 @@ export class DatabaseAnalysisService implements vscode.Disposable {
             const edges: DependencyEdge[] = (slice?.references ?? []).map(fk => ({
                 source: { database: fk.fromDatabase ?? root.database, schema: fk.fromSchema, name: fk.fromTable, type: 'TABLE' },
                 target: { database: fk.toDatabase ?? root.database, schema: fk.toSchema, name: fk.toTable, type: 'TABLE' },
-                kind: 'column', column: fk.toColumn, confidence: slice?.complete ? 'exact' : 'probable', location: { start: 0, end: 0 }
+                kind: 'column', column: fk.toColumn, confidence: slice?.complete ? 'exact' : 'probable', location: { start: 0, end: 0 },
+                evidence: [{ column: fk.toColumn, kind: 'column', confidence: slice?.complete ? 'exact' : 'probable', location: { start: 0, end: 0 } }]
             }));
             if (!await entry.index.update(snapshot.definitions, snapshot.objects, () => token.isCancellationRequested || this.disposed || generation !== this.generation, edges)) { throw new vscode.CancellationError(); }
             entry.snapshot = snapshot;
         }
-        const report = entry.index.getReport(root, direction, depth, column);
+        const report = entry.index.getReport(root, direction, depth, column, 300, change);
         report.issues.push(...snapshot.issues, `Catalog scope: ${root.database}. Incoming references from other databases are not included.`, 'Sequences, function calls and complex column lineage are not resolved.');
         if (!this.cache.getForeignKeyRelationshipsForDatabase(connection, root.database)?.complete) { report.issues.push('Foreign-key catalog snapshot is incomplete or unavailable.'); }
         return report;
@@ -125,23 +132,69 @@ export class DatabaseAnalysisService implements vscode.Disposable {
         }
         return snapshot;
     }
+    /** Relation types from the existing schema metadata cache; performs no database query. */
+    private cachedRelationTypes(connection: string, database: string): Map<string, ObjectReference> {
+        const known = new Map<string, ObjectReference>();
+        for (const entry of this.cache.getObjectsWithSchema(connection, database)) {
+            const name = extractLabel(entry.item) ?? String(entry.item.OBJNAME ?? entry.item.TABLENAME ?? '');
+            const type = inferObjectType(entry.item).toUpperCase();
+            if (!name || (type !== 'TABLE' && type !== 'VIEW' && type !== 'EXTERNAL TABLE')) { continue; }
+            const object: ObjectReference = { database, schema: entry.schema, name, type };
+            known.set(objectId(object), object);
+        }
+        return known;
+    }
+    /** Bulk catalog listing used only when the cache cannot type a referenced relation. */
+    private async catalogRelationTypes(session: AnalysisSession, database: string, token: vscode.CancellationToken): Promise<Map<string, ObjectReference>> {
+        const known = new Map<string, ObjectReference>();
+        for (const query of [NZ_QUERIES.listTablesAndViews([database]), NZ_QUERIES.listExternalTables([database])]) {
+            let rows: Record<string, unknown>[];
+            try { rows = await session.rows(query, MAX_OBJECTS + 1); }
+            catch { if (token.isCancellationRequested) { throw new vscode.CancellationError(); } continue; }
+            if (rows.length > MAX_OBJECTS) { continue; }
+            for (const row of rows) {
+                const name = text(row, 'OBJNAME');
+                const type = text(row, 'OBJTYPE').toUpperCase();
+                if (!name || (type !== 'TABLE' && type !== 'VIEW' && type !== 'EXTERNAL TABLE')) { continue; }
+                const object: ObjectReference = { database, schema: text(row, 'SCHEMA'), name, type };
+                known.set(objectId(object), object);
+            }
+        }
+        return known;
+    }
+    /** Parser references are UNKNOWN; resolve them to catalog relations so object links open DDL. */
+    private resolveRelationTypes(tables: Map<string, PerformanceTable>, known: ReadonlyMap<string, ObjectReference>): void {
+        if (!known.size) { return; }
+        for (const table of tables.values()) {
+            if (table.object.type === 'UNKNOWN') { table.object = resolveKnownObject(table.object, known); }
+        }
+    }
     async performance(connection: string, sql: string, context: ObjectReference, token: vscode.CancellationToken, measureSkew = false): Promise<PerformanceReport> {
         const analysis = analyzeSql(sql, context);
         const issues: string[] = context.schema ? [] : ['Default schema is unknown; unqualified references cannot be resolved reliably.'];
         const tables = new Map<string, PerformanceTable>();
         for (const reference of analysis.references.filter(r => r.kind === 'object')) {
-            const columns = reference.target.schema ? this.cache.getColumns(connection,
+            const cached = reference.target.schema ? this.cache.getColumns(connection,
                 buildColumnCacheKey(reference.target.database, reference.target.schema, reference.target.name, { preserveCase: true, exactNetezza: true })) : undefined;
+            const keys = cached?.filter(c => c.isDistributionKey).map(c => c.ATTNAME);
             tables.set(objectId(reference.target), { object: reference.target,
-                columns: columns?.map(c => ({ name: c.ATTNAME, type: c.FORMAT_TYPE })),
-                distributionKeys: columns?.filter(c => c.isDistributionKey).map(c => c.ATTNAME) });
+                columns: cached?.map(c => ({ name: c.ATTNAME, type: c.FORMAT_TYPE })),
+                // Cached columns may omit distribution flags (schema-tree/prefetch entries), so their absence is not proof of RANDOM.
+                distribution: reference.target.type === 'TABLE' && keys?.length ? { kind: 'hash', keys } : undefined });
+        }
+        for (const database of new Set([...tables.values()].map(table => table.object.database))) {
+            this.resolveRelationTypes(tables, this.cachedRelationTypes(connection, database));
         }
         let explainPlanText: string | undefined;
         let plan: ExplainPlanSemanticAnalysis | undefined;
         try {
             await this.withSession(connection, context.database, token, async (session, activeToken) => {
                 for (const database of new Set([...tables.values()].map(table => table.object.database))) {
-                    if ([...tables.values()].filter(t => t.object.database === database).every(t => t.columns?.length && t.distributionKeys !== undefined)) { continue; }
+                    if ([...tables.values()].some(table => table.object.database === database && table.object.type === 'UNKNOWN')) {
+                        this.resolveRelationTypes(tables, await this.catalogRelationTypes(session, database, activeToken));
+                    }
+                    if ([...tables.values()].filter(t => t.object.database === database).every(t =>
+                        t.columns?.length && (t.object.type !== 'TABLE' || t.distribution !== undefined))) { continue; }
                     try {
                         const queries = buildNetezzaColumnsWithKeysQueries(database);
                         const columns = await session.rows(queries.columns, 50_001);
@@ -154,7 +207,7 @@ export class DatabaseAnalysisService implements vscode.Disposable {
                             if (matching.length) {
                                 this.cache.setColumns(connection, buildColumnCacheKey(table.object.database, table.object.schema, table.object.name, { preserveCase: true, exactNetezza: true }), matching.map(row => mapRawColumnRowToMetadata({ TABLENAME: text(row, 'TABLENAME'), ATTNAME: text(row, 'ATTNAME'), FORMAT_TYPE: text(row, 'FORMAT_TYPE'), SCHEMA: text(row, 'SCHEMA'), DBNAME: text(row, 'DBNAME'), IS_DISTRIBUTION_KEY: Number(row.IS_DISTRIBUTION_KEY) })));
                                 table.columns = matching.map(c => ({ name: text(c, 'ATTNAME'), type: text(c, 'FORMAT_TYPE') }));
-                                table.distributionKeys = matching.filter(c => c.IS_DISTRIBUTION_KEY === 1).map(c => text(c, 'ATTNAME'));
+                                table.distribution = distributionFromKeys(matching.filter(c => c.IS_DISTRIBUTION_KEY === 1).map(c => text(c, 'ATTNAME')), table.object, true);
                             }
                         }
                     } catch (error) { if (activeToken.isCancellationRequested) { throw error; } issues.push(`${database}: column/distribution metadata unavailable: ${errorText(error)}`); }
