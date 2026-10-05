@@ -1374,22 +1374,6 @@ body.vscode-dark {
     text-overflow: ellipsis;
 }
 
-/* Statusline under the grid — mirrors the toolbar row counter (variant C). */
-.result-statusline {
-    flex: 0 0 auto;
-    padding: 3px 10px;
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
-    background-color: var(--vscode-editor-background);
-    border-top: 1px solid var(--vscode-panel-border);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.result-statusline:empty {
-    display: none;
-}
-
 /* Table Styles */
 table {
     border-collapse: separate;

@@ -56,7 +56,6 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
     }
     const rowCountInfo = document.getElementById('rowCountInfo');
     if (!rowCountInfo) {
-        clearResultStatusline();
         return;
     }
 
@@ -65,7 +64,6 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
     if (!rs || rs.isLog || rs.isError || rs.isTextContent) {
         rowCountInfo.textContent = '';
         rowCountInfo.style.opacity = '';
-        syncResultStatusline();
         return;
     }
 
@@ -78,7 +76,6 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         label.className = 'global-filter-searching-label';
         label.textContent = 'Searching…';
         rowCountInfo.appendChild(label);
-        syncResultStatusline();
         return;
     }
 
@@ -123,7 +120,6 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         if (isResultSetRowLimitReached(rs)) {
             appendRowLimitWarning(rowCountInfo);
         }
-        syncResultStatusline();
         return;
     }
 
@@ -138,7 +134,6 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         if (isResultSetRowLimitReached(rs)) {
             appendRowLimitWarning(rowCountInfo);
         }
-        syncResultStatusline();
         return;
     }
 
@@ -163,23 +158,6 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
     if (isResultSetRowLimitReached(rs)) {
         appendRowLimitWarning(rowCountInfo);
     }
-    syncResultStatusline();
-}
-
-/** Mirror the toolbar row counter into the statusline under the grid. */
-function syncResultStatusline(): void {
-    const statusline = document.getElementById('resultStatusline');
-    if (!statusline) return;
-    const text = (document.getElementById('rowCountInfo')?.textContent ?? '').trim();
-    statusline.textContent = text;
-    statusline.style.display = text ? '' : 'none';
-}
-
-function clearResultStatusline(): void {
-    const statusline = document.getElementById('resultStatusline');
-    if (!statusline) return;
-    statusline.textContent = '';
-    statusline.style.display = 'none';
 }
 
 export function updateRowCountInfo(resultSetIndex: number, _totalRows: number, limitReached: boolean): void {

@@ -57,8 +57,8 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('Esc = clear');
         // …the primary Export repeats the last format…
         expect(html).toContain('handleExportPrimaryClick(event)');
-        // …and the row counter is mirrored in a statusline under the grid.
-        expect(html).toContain('id="resultStatusline"');
+        // …and no separate statusline is rendered under the grid.
+        expect(html).not.toContain('id="resultStatusline"');
         expect(html).toContain('id="rowCountInfo"');
         // The overflow-menu label is wrapped so narrow panels can iconify it.
         expect(html).toContain('toolbar-more-btn__label');

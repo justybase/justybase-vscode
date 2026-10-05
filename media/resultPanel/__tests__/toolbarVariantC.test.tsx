@@ -7,7 +7,6 @@ import {
     syncExportPrimaryButton,
 } from '../export.js';
 import { renderRowCountInfo } from '../rowCount.js';
-import { updateControlsVisibility } from '../grid/alternateViews.js';
 import {
     addGrid,
     resetGrids,
@@ -241,89 +240,52 @@ describe('export repeat-last-format (variant C)', () => {
     });
 });
 
-describe('result statusline (variant C)', () => {
-    it('clears the statusline when there is no data result', () => {
-        document.body.innerHTML = '<span id="rowCountInfo"></span><div id="resultStatusline"></div>';
+describe('row count info (variant C)', () => {
+    it('clears the counter when there is no data result', () => {
+        document.body.innerHTML = '<span id="rowCountInfo"></span>';
 
         renderRowCountInfo(0);
 
         expect(document.getElementById('rowCountInfo')?.textContent).toBe('');
-        expect(document.getElementById('resultStatusline')?.textContent).toBe('');
-        expect(document.getElementById('resultStatusline')?.style.display).toBe('none');
     });
 
-    it('mirrors the toolbar counter text', () => {
-        document.body.innerHTML = '<span id="rowCountInfo"></span><div id="resultStatusline"></div>';
+    it('renders the toolbar counter text', () => {
+        document.body.innerHTML = '<span id="rowCountInfo"></span>';
         getResultPanelWindow().resultSets = [minimalResultSet()];
 
         renderRowCountInfo(0);
 
         expect(document.getElementById('rowCountInfo')?.textContent).toContain('0 rows');
-        expect(document.getElementById('resultStatusline')?.textContent).toContain('0 rows');
-        expect(document.getElementById('resultStatusline')?.style.display).not.toBe('none');
     });
 
-    it('clears a stale statusline when the counter is gone', () => {
-        document.body.innerHTML = '<div id="resultStatusline">stale</div>';
-
-        renderRowCountInfo(0);
-
-        expect(document.getElementById('resultStatusline')?.textContent).toBe('');
-    });
-
-    it('shows the searching state in both surfaces', () => {
-        document.body.innerHTML = '<span id="rowCountInfo"></span><div id="resultStatusline"></div>';
+    it('shows the searching state', () => {
+        document.body.innerHTML = '<span id="rowCountInfo"></span>';
         getResultPanelWindow().resultSets = [minimalResultSet()];
         setIsSearching(true);
 
         renderRowCountInfo(0);
 
-        expect(document.getElementById('resultStatusline')?.textContent).toContain('Searching');
+        expect(document.getElementById('rowCountInfo')?.textContent).toContain('Searching');
     });
 
-    it('mirrors disk-backed counts', () => {
-        document.body.innerHTML = '<span id="rowCountInfo"></span><div id="resultStatusline"></div>';
+    it('renders disk-backed counts', () => {
+        document.body.innerHTML = '<span id="rowCountInfo"></span>';
         getResultPanelWindow().resultSets = [
             minimalResultSet({ storageMode: 'sqlite', totalRowCount: 5, data: [[1], [2]] }),
         ];
 
         renderRowCountInfo(0);
 
-        expect(document.getElementById('resultStatusline')?.textContent).toContain('5 rows');
+        expect(document.getElementById('rowCountInfo')?.textContent).toContain('5 rows');
     });
 
-    it('flags a reached row limit in both surfaces', () => {
-        document.body.innerHTML = '<span id="rowCountInfo"></span><div id="resultStatusline"></div>';
+    it('flags a reached row limit', () => {
+        document.body.innerHTML = '<span id="rowCountInfo"></span>';
         getResultPanelWindow().queryRowLimit = 2;
         getResultPanelWindow().resultSets = [minimalResultSet({ data: [[1], [2], [3]] })];
 
         renderRowCountInfo(0);
 
         expect(document.getElementById('rowCountInfo')?.textContent).toContain('limit reached');
-        expect(document.getElementById('resultStatusline')?.textContent).toContain('limit reached');
-    });
-
-    it('hides the statusline on Logs/Text views', () => {
-        document.body.innerHTML =
-            `<div class="controls"><span id="rowCountInfo"></span></div>` +
-            `<div id="groupingPanel"></div><div id="resultStatusline">3 rows</div>`;
-        getResultPanelWindow().resultSets = [minimalResultSet({ isLog: true })];
-
-        updateControlsVisibility(0);
-
-        expect(document.getElementById('resultStatusline')?.style.display).toBe('none');
-
-        getResultPanelWindow().resultSets = [minimalResultSet()];
-        updateControlsVisibility(0);
-        expect(document.getElementById('resultStatusline')?.style.display).not.toBe('none');
-    });
-
-    it('tolerates a missing statusline element', () => {
-        document.body.innerHTML =
-            `<div class="controls"><span id="rowCountInfo"></span></div>` +
-            `<div id="groupingPanel"></div>`;
-        getResultPanelWindow().resultSets = [minimalResultSet({ isLog: true })];
-
-        expect(() => updateControlsVisibility(0)).not.toThrow();
     });
 });
