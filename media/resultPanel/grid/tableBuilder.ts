@@ -46,7 +46,6 @@ import {
     requireActiveSourceUri,
     getResultPanelWindow,
     getResultSetAt,
-    callPanelMethod,
 } from '../types.js';
 import {
     RESULT_GRID_MAX_AUTO_SIZE_ROWS,
