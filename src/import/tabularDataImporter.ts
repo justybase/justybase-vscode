@@ -9,6 +9,7 @@ import {
     type ProgressCallback
 } from './dataImporter';
 import { normalizeAndDeduplicateHeaders, normalizeImportedHeader } from './importHeaderUtils';
+import type { ImportCancellationCheck } from './importCancellation';
 
 export interface TabularDataImporterOptions {
     kind?: string | DatabaseKind;
@@ -19,6 +20,7 @@ export interface TabularDataImporterOptions {
     skipRows?: number;
     maxErrors?: number;
     encoding?: string;
+    isCancelled?: ImportCancellationCheck;
 }
 
 function normalizeKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
@@ -90,6 +92,7 @@ export class TabularDataImporter {
             skipRows: resolvedOptions?.skipRows,
             maxErrors: resolvedOptions?.maxErrors,
             encoding: resolvedOptions?.encoding,
+            isCancelled: resolvedOptions?.isCancelled,
         });
     }
 

@@ -352,7 +352,14 @@ export async function importDataToDb2(
         }
 
         progressCallback?.('Analyzing source file...');
-        const importer = createTabularDataImporter(filePath, targetTable, { kind: 'db2', hasHeaders: columnOptions?.hasHeaders });
+        const importer = createTabularDataImporter(filePath, targetTable, {
+            kind: 'db2',
+            hasHeaders: columnOptions?.hasHeaders,
+            delimiter: columnOptions?.delimiter,
+            skipRows: columnOptions?.skipRows,
+            encoding: columnOptions?.encoding,
+            isCancelled,
+        });
         if (columnOptions?.sheetName?.trim()) {
             importer.setSelectedSheet(columnOptions.sheetName);
         }

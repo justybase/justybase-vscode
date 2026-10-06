@@ -12,6 +12,7 @@ export class ImportValidationService {
         previewRows: readonly string[][],
         validationSampleSize: number,
         adapter: DatabaseImportWizardAdapter,
+        decimalDelimiter?: string,
     ): ImportWizardValidationSummary {
         const warnings: string[] = [];
         const issues: ImportWizardCellIssue[] = [];
@@ -59,7 +60,7 @@ export class ImportValidationService {
                 }
 
                 const value = row[columnIndex] ?? '';
-                const validationMessage = validateImportCellValue(value, column.selectedType);
+                const validationMessage = validateImportCellValue(value, column.selectedType, decimalDelimiter);
                 if (!validationMessage) {
                     continue;
                 }

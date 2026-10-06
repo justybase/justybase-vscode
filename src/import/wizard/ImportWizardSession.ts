@@ -568,6 +568,7 @@ export class ImportWizardSession {
       validationRows,
       state.validationSampleSize,
       this.adapter,
+      state.decimalDelimiter,
     );
 
     const executionPlan = this.adapter.buildExecutionPlan({

@@ -374,7 +374,14 @@ export async function importDataToMsSql(
         }
 
         progressCallback?.('Analyzing source file...');
-        const importer = createTabularDataImporter(filePath, targetTable, { kind: 'mssql', hasHeaders: columnOptions?.hasHeaders });
+        const importer = createTabularDataImporter(filePath, targetTable, {
+            kind: 'mssql',
+            hasHeaders: columnOptions?.hasHeaders,
+            delimiter: columnOptions?.delimiter,
+            skipRows: columnOptions?.skipRows,
+            encoding: columnOptions?.encoding,
+            isCancelled,
+        });
         if (columnOptions?.sheetName?.trim()) {
             importer.setSelectedSheet(columnOptions.sheetName);
         }

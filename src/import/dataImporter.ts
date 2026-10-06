@@ -805,6 +805,7 @@ export class NetezzaImporter {
       onReadProgress,
       this.sourceEncoding,
     )) {
+      throwIfImportCancelled(this.isCancelled);
       if (remainingSkip > 0) {
         remainingSkip--;
         continue;
@@ -871,8 +872,17 @@ export class NetezzaImporter {
 
       const rows: string[][] = [];
       let headerSkipped = !this.excelHasHeaderRow;
+      let sourceRowsRead = 0;
 
       while ((await reader.read()) && rows.length < limit) {
+        throwIfImportCancelled(this.isCancelled);
+        sourceRowsRead++;
+        if (sourceRowsRead <= this.skipRowCount) {
+          if (sourceRowsRead % 10000 === 0) {
+            await delay();
+          }
+          continue;
+        }
         if (!headerSkipped) {
           headerSkipped = true;
           continue;
@@ -886,6 +896,9 @@ export class NetezzaImporter {
           }
         }
         rows.push(row);
+        if (sourceRowsRead % 10000 === 0) {
+          await delay();
+        }
       }
 
       return rows;
@@ -925,8 +938,22 @@ export class NetezzaImporter {
 
       const rows: string[][] = [];
 
-      let rowCount = 0;
+      let sourceRowsRead = 0;
       while (await reader.read()) {
+        throwIfImportCancelled(this.isCancelled);
+        sourceRowsRead++;
+        if (sourceRowsRead <= this.skipRowCount) {
+          if (sourceRowsRead % 10000 === 0) {
+            progressCallback?.(
+              `Read ${sourceRowsRead.toLocaleString()} source rows...`,
+              undefined,
+              false,
+            );
+            await delay();
+          }
+          continue;
+        }
+
         const row: string[] = [];
         const currentRow = reader._currentRow;
         if (currentRow && Array.isArray(currentRow)) {
@@ -936,11 +963,10 @@ export class NetezzaImporter {
         }
 
         rows.push(row);
-        rowCount++;
 
-        if (rowCount % 10000 === 0) {
+        if (sourceRowsRead % 10000 === 0) {
           progressCallback?.(
-            `Processed ${rowCount.toLocaleString()} rows...`,
+            `Processed ${rows.length.toLocaleString()} rows...`,
             undefined,
             false,
           );
@@ -990,6 +1016,7 @@ export class NetezzaImporter {
   async analyzeDataTypes(
     progressCallback?: ProgressCallback,
   ): Promise<ColumnTypeChooser[]> {
+    throwIfImportCancelled(this.isCancelled);
     progressCallback?.("Analyzing data types...");
     this.analysisProgressOffset = 0;
 
@@ -1142,6 +1169,7 @@ export class NetezzaImporter {
       headers = [...this.sqlHeaders];
     }
     initializeTypes();
+    throwIfImportCancelled(this.isCancelled);
     this.rowsCount = rowCount;
     this.dataTypes = dataTypes;
     progressCallback?.(`Analysis complete: ${rowCount.toLocaleString()} rows`);
@@ -1158,6 +1186,7 @@ export class NetezzaImporter {
 
     const content = fs.readFileSync(this.filePath, this.sourceEncoding);
     const parsedRows = parseDelimitedRecords(content, this.csvDelimiter);
+    throwIfImportCancelled(this.isCancelled);
     const rows = this.skipRowCount > 0
       ? parsedRows.slice(this.skipRowCount)
       : parsedRows;
@@ -1189,6 +1218,7 @@ export class NetezzaImporter {
 
     // Process data rows, including the first row when no header is selected.
     for (let i = hasHeaders ? 1 : 0; i < rows.length; i++) {
+      throwIfImportCancelled(this.isCancelled);
       const row = rows[i];
       if (row.length !== dataTypes.length) {
         this.widthMismatchCount++;
@@ -1209,6 +1239,7 @@ export class NetezzaImporter {
       }
     }
 
+    throwIfImportCancelled(this.isCancelled);
     this.rowsCount = Math.max(0, rows.length - (hasHeaders ? 1 : 0));
     progressCallback?.(
       `Analysis complete: ${this.rowsCount.toLocaleString()} rows`,
@@ -1246,6 +1277,7 @@ export class NetezzaImporter {
       let firstRawRow: unknown[] | undefined;
       let firstRow: string[] | undefined;
       let firstRowHandled = false;
+      let sourceRowsRead = 0;
       const decimalSampleCells: string[] = [];
       const maxDecimalSamples = 100;
 
@@ -1287,6 +1319,20 @@ export class NetezzaImporter {
       };
 
       while (await reader.read()) {
+        throwIfImportCancelled(this.isCancelled);
+        sourceRowsRead++;
+        if (sourceRowsRead <= this.skipRowCount) {
+          if (sourceRowsRead % 10000 === 0) {
+            progressCallback?.(
+              `Analyzed ${rowsCount.toLocaleString()} rows...`,
+              undefined,
+              false,
+            );
+            await delay();
+          }
+          continue;
+        }
+
         const currentRow = reader._currentRow;
         const row: string[] = [];
         if (currentRow && Array.isArray(currentRow)) {
@@ -1313,6 +1359,19 @@ export class NetezzaImporter {
         }
 
         processDataRow(row);
+
+        if (sourceRowsRead % 10000 === 0) {
+          progressCallback?.(
+            `Analyzed ${rowsCount.toLocaleString()} rows...`,
+            undefined,
+            false,
+          );
+          await delay();
+        }
+      }
+
+      if (!firstRow) {
+        throw new Error("No data found in file");
       }
 
       if (firstRow && !firstRowHandled) {
@@ -1325,15 +1384,7 @@ export class NetezzaImporter {
         }
       }
 
-      if (rowsCount > 0 && rowsCount % 10000 === 0) {
-        progressCallback?.(
-          `Analyzed ${rowsCount.toLocaleString()} rows...`,
-          undefined,
-          false,
-        );
-        await delay();
-      }
-
+      throwIfImportCancelled(this.isCancelled);
       this.rowsCount = rowsCount;
       this.dataTypes = dataTypes;
 
@@ -1725,11 +1776,19 @@ ${this.getExternalUsingClause()}
         await self.selectExcelReaderSheet(reader);
 
         let headerSkipped = !self.excelHasHeaderRow;
+        let sourceRowsRead = 0;
         let lastReportTime = 0;
         let lastReportedPercent = 0;
 
         while (readerOpened && (await reader.read())) {
           throwIfImportCancelled(self.isCancelled);
+          sourceRowsRead++;
+          if (sourceRowsRead <= self.skipRowCount) {
+            if (sourceRowsRead % 10000 === 0) {
+              await delay();
+            }
+            continue;
+          }
           if (!headerSkipped) {
             headerSkipped = true;
             continue;
