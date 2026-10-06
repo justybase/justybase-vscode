@@ -237,7 +237,6 @@ export class QueryExecutionCoordinator {
             owner.queued.splice(owner.queued.indexOf(job), 1);
             const outcome = isCancellationError(error) ? 'cancelled' : 'failed';
             owner.last = { ...job.snapshot, status: outcome, error: error instanceof Error ? error.message : String(error) };
-            if (outcome === 'failed') owner.paused = true;
             job.resolve(outcome);
             this.changed();
             this.pump(owner);
@@ -282,9 +281,9 @@ export class QueryExecutionCoordinator {
                 errorMessage = error instanceof Error ? error.message : String(error);
             } finally {
                 let isolated = true;
-                // Legacy cancellation can finish its bounded reader cleanup even
-                // when the server command remains alive. Reset the session before
-                // allowing another queued request to use it.
+                // Best-effort reset only. A failed reset must never park the lane:
+                // the queue advances and the database rejects the next command if
+                // the previous one is still running on the session.
                 const active = this.runningSources.get(lease.sourceKey);
                 if (lease.isCurrent() && !active?.isolationVerified && (outcome === 'cancelled' || active?.isolationRequired)) {
                     isolated = await this.withAcquisitionLock(lane.sourceKey, async () => {
@@ -294,17 +293,14 @@ export class QueryExecutionCoordinator {
                     });
                 }
                 if (this.lanes.get(lane.sourceKey) === lane && (lane.running === job || lane.independent.get(job.snapshot.id) === job)) {
-                    if (!isolated) {
-                        lane.paused = true;
-                        job.snapshot = { ...job.snapshot, status: 'cancelling', error: 'Session isolation failed. Use recovery before continuing.' };
-                        lease.markCancelling();
-                    } else {
-                        if (lane.running === job) lane.running = undefined;
-                        lane.independent.delete(job.snapshot.id);
-                        lane.last = { ...job.snapshot, status: outcome, error: errorMessage ?? active?.error };
-                        if (outcome === 'failed') lane.paused = true;
-                        lease.dispose();
-                    }
+                    if (lane.running === job) lane.running = undefined;
+                    lane.independent.delete(job.snapshot.id);
+                    const isolationNote = isolated || outcome === 'completed'
+                        ? undefined
+                        : 'Session could not be reset; the next request may fail while the previous command is still running.';
+                    const terminalError = [errorMessage ?? active?.error, isolationNote].filter(Boolean).join(' ');
+                    lane.last = { ...job.snapshot, status: outcome, ...(terminalError ? { error: terminalError } : {}) };
+                    lease.dispose();
                     this.changed();
                     this.pump(lane);
                 } else {
@@ -355,8 +351,6 @@ export class QueryExecutionCoordinator {
         try { await entry.recovery?.requestCancel?.(); }
         catch (error: unknown) {
             entry.recoveryError = error;
-            const lane = this.lanes.get(sourceKey);
-            if (lane) lane.paused = true;
             this.changed();
         }
     }
@@ -367,7 +361,7 @@ export class QueryExecutionCoordinator {
         const lane = this.lanes.get(sourceKey);
         if (lane?.recovering) return;
         const oldJob = lane?.running?.snapshot.id === entry.executionId ? lane.running : lane?.independent.get(entry.executionId);
-        if (lane) { lane.paused = true; lane.recovering = true; }
+        if (lane) { lane.recovering = true; }
         this.changed();
         try {
             if (await this.withAcquisitionLock(sourceKey, () => this.resolveDuplicate(entry, entry.sourceUri, panel))) {
@@ -385,8 +379,9 @@ export class QueryExecutionCoordinator {
             entry.recoveryError = error;
             void vscode.window.showErrorMessage(`SQL recovery failed: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
-            if (lane) { lane.recovering = false; lane.paused = true; }
+            if (lane) { lane.recovering = false; }
             this.changed();
+            if (lane) this.pump(lane);
         }
     }
 
@@ -439,12 +434,6 @@ export class QueryExecutionCoordinator {
         }
     }
 
-    private pauseForRecovery(entry: ActiveExecution): void {
-        const lane = this.lanes.get(entry.laneKey ?? entry.sourceKey);
-        if (lane) lane.paused = true;
-        this.changed();
-    }
-
     private retireRecovered(entry: ActiveExecution): void {
         const lane = this.lanes.get(entry.laneKey ?? entry.sourceKey);
         const job = lane?.running?.snapshot.id === entry.executionId ? lane.running : lane?.independent.get(entry.executionId);
@@ -453,7 +442,6 @@ export class QueryExecutionCoordinator {
             lane.last = { ...job.snapshot, status: 'cancelled' };
             if (lane.running === job) lane.running = undefined;
             lane.independent.delete(job.snapshot.id);
-            lane.paused = true;
         }
         this.retire(entry);
     }
@@ -462,7 +450,6 @@ export class QueryExecutionCoordinator {
         if (!this.isCurrent(entry)) {
             return true;
         }
-        this.pauseForRecovery(entry);
         entry.phase = 'cancelling';
         try {
             await entry.recovery?.requestCancel?.();
@@ -497,7 +484,6 @@ export class QueryExecutionCoordinator {
         if (!this.isCurrent(entry)) {
             return true;
         }
-        this.pauseForRecovery(entry);
         entry.phase = 'cancelling';
         try {
             await entry.recovery?.requestCancel?.();
@@ -709,6 +695,7 @@ export class QueryExecutionCoordinator {
                 return undefined;
             }
 
+            let recovered = false;
             while (true) {
                 const existing = this.runningSources.get(sourceKey);
                 if (!existing || !this.isCurrent(existing)) {
@@ -717,14 +704,18 @@ export class QueryExecutionCoordinator {
                 if (!(await this.resolveDuplicate(existing, sourceUri, resultPanelProvider))) {
                     return undefined;
                 }
+                recovered = true;
             }
 
             if (this.disposed || (options.document && this.retiredDocuments.has(options.document))) {
                 return undefined;
             }
 
+            // A confirmed "retry" keeps the request the user explicitly asked
+            // for: it may run ahead of SQL queued behind the recovered
+            // execution, and the queue drains automatically once it settles.
             const lane = this.lanes.get(sourceKey);
-            if (lane?.running || (lane?.queued.length && !lane.paused)) return undefined;
+            if (!recovered && (lane?.running || (lane?.queued.length && !lane.paused))) return undefined;
 
             const entry: ActiveExecution = {
                 executionId: `query-execution-${++this.nextExecutionId}-${randomUUID()}`,

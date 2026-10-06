@@ -4,7 +4,7 @@ description: Submit, inspect, pause, cancel and recover independent SQL requests
 audience: reference
 category: Reference
 status: Supported
-last_verified: 2026-10-04
+last_verified: 2026-10-06
 product_version: 3.18.5
 ---
 
@@ -38,7 +38,8 @@ and latest terminal status.
 - **Clear queued** discards pending requests without cancelling running SQL.
 - **Pause queue** prevents the next request from starting; **Resume queue** continues it.
 - **Recover running execution…** opens the existing force-unlock, DROP SESSION,
-  and fresh-connection recovery flow. Recovery pauses the queue; resume it explicitly.
+  and fresh-connection recovery flow for a request that never settles. Recovery
+  retires that request and the next queued request starts automatically.
 
 The queue displays submissions immediately, including requests preparing inputs.
 Check the count if you press the execution shortcut repeatedly: repeated SQL is
@@ -59,10 +60,11 @@ Their results can depend on the session and external environment at that time.
 Safety confirmation for SQL introduced by macro expansion can also occur then.
 
 Changing the tab's connection, database override, or saved connection profile
-invalidates execution against that target. The request fails and pauses the
-queue. Restore the original target and submit the failed SQL again, or remove
-pending requests and submit against the intended new target. A failed request
-is never automatically replayed by the queue.
+invalidates execution against that target. The request fails and is closed like
+any other terminal request; the queue continues with the next submission. Restore
+the original target and submit the failed SQL again, or remove pending requests
+and submit against the intended new target. A failed request is never
+automatically replayed by the queue.
 
 Each executed request uses normal result streaming, row limits, Logs, timing,
 and query history. Removing a request before execution does not create an
@@ -70,16 +72,18 @@ executed history entry. Results retain the existing result-panel pinning rules.
 
 ## Errors, cancellation, and lifecycle
 
-Errors pause subsequent requests by default. Inspect the failed result before
-choosing **Resume queue** or **Clear queued**. Continue on Error applies to
-statements within its single request; failures still pause subsequent requests.
+Errors do not block the queue. A request that fails is terminal: it shows its
+error result and the next queued request starts automatically. A failed request
+is never retried or replayed. Continue on Error applies to statements within its
+single request only.
 
-Cancellation acknowledgement does not advance the lane. It must first settle
-and clean up. Persistent sessions are reset before advancing after cancellation
-or uncertain cleanup; confirmed closed transient sessions can advance directly.
-If session isolation fails, the running lane stays protected even after Resume.
-Use recovery or close the tab rather than starting SQL on a potentially busy
-session. A reset can discard session-local state such as temporary tables.
+Cancellation acknowledgement does not advance the lane; the request must first
+settle and clean up. Persistent sessions are reset before advancing after
+cancellation or uncertain cleanup; confirmed closed transient sessions advance
+directly. If the session cannot be reset, the queue still advances: the next
+request runs and the database reports an error if the previous command is still
+busy. Recovery remains available for a request that never settles. A reset can
+discard session-local state such as temporary tables.
 
 Closing the document discards pending SQL and retires/cancels running work using
 the existing document and connection cleanup. A reopened untitled URI receives
