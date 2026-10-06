@@ -122,8 +122,12 @@ export const verticaBatchImportConfig: BatchImportDialectConfig = {
     beginTransactionSql: 'BEGIN',
     commitTransactionSql: 'COMMIT',
     rollbackTransactionSql: 'ROLLBACK',
+    cleanupCreatedTargetOnFailure: true,
     buildInsertSql(target, columns, rows, decimalDelimiter) {
         return buildVerticaInsertSql(target, columns, rows, decimalDelimiter);
+    },
+    buildDropTableSql(target) {
+        return `DROP TABLE ${target.qualifiedName}`;
     }
 };
 
@@ -153,7 +157,8 @@ export async function importClipboardDataToVertica(
     connectionDetails: ConnectionDetails,
     formatPreference?: string | null,
     options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importClipboardWithBatching(
         verticaBatchImportConfig,
@@ -161,6 +166,7 @@ export async function importClipboardDataToVertica(
         connectionDetails,
         formatPreference,
         options,
-        progressCallback
+        progressCallback,
+        isCancelled
     );
 }

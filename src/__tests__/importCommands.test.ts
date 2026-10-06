@@ -317,6 +317,18 @@ describe('commands/importCommands', () => {
         it('should handle empty string', () => {
             expect(fileUriToPath('')).toBe('');
         });
+
+        it('should decode percent-encoded characters', () => {
+            expect(fileUriToPath('file:///C:/my%20files/data.csv')).toBe('C:/my files/data.csv');
+        });
+
+        it('should convert file URIs with a host authority to UNC paths', () => {
+            expect(fileUriToPath('file://server/share/data.csv')).toBe('//server/share/data.csv');
+        });
+
+        it('should fall back to the raw path when percent-decoding fails', () => {
+            expect(fileUriToPath('file:///C:/bad%ZZ.csv')).toBe('C:/bad%ZZ.csv');
+        });
     });
 
     describe('registerImportCommands', () => {
@@ -811,7 +823,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
-                undefined,
+                expect.any(Function),
             );
             expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('admin.target_table');
         });
@@ -846,7 +858,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
-                undefined,
+                expect.any(Function),
             );
 
             (vscode.window.activeTextEditor as unknown) = undefined;
@@ -879,6 +891,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
+                expect.any(Function),
             );
             expect(importDataToNetezza).not.toHaveBeenCalled();
         });
@@ -910,6 +923,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
+                expect.any(Function),
             );
             expect(importDataToDb2).not.toHaveBeenCalled();
             expect(importDataToNetezza).not.toHaveBeenCalled();
@@ -935,7 +949,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
-                undefined,
+                expect.any(Function),
             );
             expect(vscode.commands.executeCommand).toHaveBeenCalledWith('netezza.refreshSchema');
         });
@@ -1016,7 +1030,7 @@ describe('commands/importCommands', () => {
                         1: 'NUMERIC(20,4)',
                     },
                 },
-                undefined,
+                expect.any(Function),
             );
         });
 
@@ -1043,8 +1057,12 @@ describe('commands/importCommands', () => {
 
             expect(validateInput).toBeDefined();
             expect(validateInput(undefined)).toBeNull();
-            expect(validateInput('db..table')).toBe(
-                'Invalid target table format. Use TABLE, SCHEMA.TABLE, or DATABASE.SCHEMA.TABLE.',
+            expect(validateInput('db..table')).toBeNull();
+            expect(validateInput('db...table')).toBe(
+                'Invalid target table format. Use TABLE, SCHEMA.TABLE, DATABASE.SCHEMA.TABLE, or DATABASE..TABLE.',
+            );
+            expect(validateInput('..table')).toBe(
+                'Invalid target table format. Use TABLE, SCHEMA.TABLE, DATABASE.SCHEMA.TABLE, or DATABASE..TABLE.',
             );
         });
 
@@ -1142,7 +1160,7 @@ describe('commands/importCommands', () => {
                 expect.any(Function),
                 undefined,
                 undefined,
-                undefined,
+                expect.any(Function),
             );
         });
 
@@ -1196,6 +1214,40 @@ describe('commands/importCommands', () => {
             expect(mockOutputChannel.appendLine).toHaveBeenCalledWith('[Import] Reading file');
             expect(mockOutputChannel.appendLine).not.toHaveBeenCalledWith('[Import] Reading stealthy');
             expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Data import failed'));
+        });
+
+        it('reports cancellation without a success toast when the progress token is cancelled', async () => {
+            (vscode.window.showInputBox as jest.Mock).mockResolvedValue('target_table');
+            (vscode.window.showQuickPick as jest.Mock).mockResolvedValue({
+                value: {},
+            });
+
+            (vscode.window.withProgress as jest.Mock).mockImplementationOnce(async (_options, callback) => {
+                return callback({ report: jest.fn() }, { isCancellationRequested: true });
+            });
+            (importDataToNetezza as jest.Mock).mockResolvedValueOnce({
+                success: false,
+                message: 'Import cancelled.',
+            });
+
+            const deps: ImportCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            };
+            registerImportCommands(deps);
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                (call) => call[0] === 'netezza.importData',
+            )?.[1];
+
+            (require('fs').existsSync as jest.Mock).mockReturnValue(true);
+            await handler('D:\\test.csv');
+
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Import cancelled.');
+            expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(
+                expect.stringContaining('Import cancelled.'),
+            );
         });
     });
 
@@ -1647,6 +1699,31 @@ describe('commands/importCommands', () => {
             expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
                 'netezza.importData',
                 { mode: 'simple' },
+            );
+        });
+
+        it('should show mode quickpick for file source and route to form import', async () => {
+            const deps: ImportCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            };
+            registerImportCommands(deps);
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                (call) => call[0] === 'netezza.importWithPicker',
+            )?.[1];
+
+            (vscode.window.showQuickPick as jest.Mock)
+                .mockResolvedValueOnce({ value: 'file' })
+                .mockResolvedValueOnce({ value: 'form' });
+
+            await handler();
+
+            expect(vscode.window.showQuickPick).toHaveBeenCalledTimes(2);
+            expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+                'netezza.importData',
+                { mode: 'form' },
             );
         });
 

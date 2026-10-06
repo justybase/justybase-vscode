@@ -1,6 +1,7 @@
 import type { DatabaseKind } from '../contracts/database';
 import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
+import { transliterateImportHeader } from '@justybase/database-utils/importColumnNameUtils';
 
 const PRESERVE_CASE_IMPORT_KINDS = new Set<DatabaseKind>(['mysql', 'sqlite']);
 const LOWER_CASE_IMPORT_KINDS = new Set<DatabaseKind>(['postgresql', 'duckdb']);
@@ -16,7 +17,7 @@ function normalizeImportKind(kind?: string | DatabaseKind): DatabaseKind | undef
 
 function sanitizeHeaderToken(value: string, preserveTrailingLineBreak: boolean): string {
     const hasTrailingLineBreak = /(?:\r\n|\r|\n)+[\t ]*$/.test(value);
-    const sanitized = value
+    const sanitized = transliterateImportHeader(value)
         .replace(/^[\t ]+|[\t ]+$/g, '')
         .replace(/\r\n|\r|\n/g, '_')
         .replace(/[^0-9A-Za-z_$]+/g, '_')
@@ -64,7 +65,13 @@ export function normalizeImportedHeader(header: string, kind?: string | Database
 }
 
 export function normalizeAndDeduplicateHeaders(headers: readonly string[], kind?: string | DatabaseKind): string[] {
-    const cleaned = headers.map(header => normalizeImportedHeader(header, kind));
+    // Empty header cells become positional COLUMN_<n> placeholders, matching
+    // the Netezza importer's generated header scheme across every dialect.
+    const cleaned = headers.map((header, index) => (
+        String(header ?? '').trim().length > 0
+            ? normalizeImportedHeader(header, kind)
+            : normalizeImportedHeader(`COLUMN_${index + 1}`, kind)
+    ));
     const seen = new Map<string, number>();
 
     return cleaned.map(name => {

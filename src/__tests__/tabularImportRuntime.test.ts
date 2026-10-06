@@ -10,7 +10,43 @@ interface TestXlsxWriter {
   finalize(): Promise<void>;
 }
 
-const XlsxWriter = require('@justybase/spreadsheet-tasks').XlsxWriter as new (filePath: string) => TestXlsxWriter;
+const spreadsheetTasks = require('@justybase/spreadsheet-tasks') as {
+  XlsxWriter: new (filePath: string) => TestXlsxWriter;
+  XlsbWriter: new (filePath: string) => TestXlsxWriter;
+};
+const XlsxWriter = spreadsheetTasks.XlsxWriter;
+
+async function writeTwoSheetWorkbook(
+  filePath: string,
+  createWriter: (filePath: string) => TestXlsxWriter,
+): Promise<void> {
+  const writer = createWriter(filePath);
+  writer.startSheet('First', 2, ['ID', 'NAME']);
+  writer.writeRow([1, 'Alice']);
+  writer.endSheet();
+  writer.startSheet('Second', 2, ['CODE', 'VALUE']);
+  writer.writeRow([9, 'Zulu']);
+  writer.writeRow([10, 'Yankee']);
+  writer.endSheet();
+  await writer.finalize();
+}
+
+const SHEET_FORMATS: Array<{
+  format: 'xlsx' | 'xlsb';
+  extension: string;
+  createWriter: (filePath: string) => TestXlsxWriter;
+}> = [
+  {
+    format: 'xlsx',
+    extension: '.xlsx',
+    createWriter: (filePath) => new spreadsheetTasks.XlsxWriter(filePath),
+  },
+  {
+    format: 'xlsb',
+    extension: '.xlsb',
+    createWriter: (filePath) => new spreadsheetTasks.XlsbWriter(filePath),
+  },
+];
 
 describe('tabular-import-runtime regressions', () => {
   let tempDir: string;
@@ -30,6 +66,32 @@ describe('tabular-import-runtime regressions', () => {
     const importer = createTabularDataImporter(filePath);
 
     expect(importer.getCsvDelimiter()).toBe(';');
+  });
+
+  it('parses quoted fields with embedded newlines like the desktop importer', async () => {
+    const filePath = path.join(tempDir, 'quoted-newlines.csv');
+    fs.writeFileSync(filePath, 'id,note\n1,"first\nsecond"\n2,"has,comma"\n', 'utf8');
+
+    const importer = createTabularDataImporter(filePath);
+    await importer.analyzeDataTypes();
+    const rows = await importer.getAllRows();
+
+    expect(rows).toEqual([
+      ['1', 'first\nsecond'],
+      ['2', 'has,comma'],
+    ]);
+  });
+
+  it('honors hasHeaders=false when reading delimited rows', async () => {
+    const filePath = path.join(tempDir, 'headerless.csv');
+    fs.writeFileSync(filePath, '1,Alice\n2,Bob\n', 'utf8');
+
+    const importer = createTabularDataImporter(filePath, { hasHeaders: false });
+    await importer.analyzeDataTypes();
+    const rows = await importer.getAllRows();
+
+    expect(rows).toHaveLength(2);
+    expect(importer.getSourceHeaders()).toEqual(['COL_1', 'COL_2']);
   });
 
   it('keeps the legacy target-table constructor call compatible with runtime options', async () => {
@@ -67,6 +129,57 @@ describe('tabular-import-runtime regressions', () => {
       fieldCount: 2,
       getValue: (index: number) => index === 0 ? 'A' : 'B',
     })).toEqual(['A', 'B']);
+  });
+
+  it.each(SHEET_FORMATS)(
+    'reads the selected non-first worksheet from $format workbooks',
+    async ({ extension, createWriter }) => {
+      const filePath = path.join(tempDir, `two-sheets${extension}`);
+      await writeTwoSheetWorkbook(filePath, createWriter);
+
+      const importer = createTabularDataImporter(filePath);
+      await expect(importer.getAvailableSheetNames()).resolves.toEqual(['First', 'Second']);
+
+      importer.setSelectedSheet('Second');
+      await importer.analyzeDataTypes();
+
+      expect(importer.getSourceHeaders()).toEqual(['CODE', 'VALUE']);
+      await expect(importer.getAllRows()).resolves.toEqual([
+        ['9', 'Zulu'],
+        ['10', 'Yankee'],
+      ]);
+    },
+  );
+
+  it.each(SHEET_FORMATS)(
+    'fails with the available worksheet list for unknown $format sheets',
+    async ({ extension, createWriter }) => {
+      const filePath = path.join(tempDir, `two-sheets${extension}`);
+      await writeTwoSheetWorkbook(filePath, createWriter);
+
+      const importer = createTabularDataImporter(filePath);
+      importer.setSelectedSheet('Missing');
+
+      await expect(importer.analyzeDataTypes()).rejects.toThrow(
+        /Worksheet "Missing" was not found.*Available worksheets: First, Second\./,
+      );
+    },
+  );
+
+  it('detects comma decimals when the sample also contains dotted dates', async () => {
+    const filePath = path.join(tempDir, 'pl-dates.csv');
+    fs.writeFileSync(
+      filePath,
+      'DATA;KWOTA\n07.06.2024;1 234,56\n08.06.2024;2 345,67\n',
+      'utf8',
+    );
+
+    const importer = createTabularDataImporter(filePath);
+    await importer.analyzeDataTypes();
+
+    expect(importer.getDecimalDelimiter()).toBe(',');
+    const kwota = importer.getEffectiveColumnDescriptors()[1];
+    expect(kwota?.dataType).toMatch(/^NUMERIC/);
   });
 
   it('keeps columns introduced by later rows in a headerless workbook', async () => {

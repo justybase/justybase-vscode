@@ -240,12 +240,18 @@ Use **Open SQL** in the manager to query the local tables. Right-clicking a CSV 
 **Features:**
 - Automatic data type detection (INTEGER, BIGINT, NUMERIC, VARCHAR, DATE, TIMESTAMP)
 - Locale-aware number parsing (handles both `.` and `,` decimals)
-- UTF-8 BOM handling
-- Progress reporting for large files
+- UTF-8 and UTF-16LE BOM handling; an explicit `encoding` option is available to programmatic callers
+- CSV/TXT/TSV quotes and embedded newlines are parsed as logical records
+- Conservative CSV header detection: a first record without data-like cells followed by data rows is treated as a header; ambiguous all-text files keep the header-first default
+- Progress reporting for large files with cooperative cancellation, including the advanced wizard
 - Column-level include/exclude, reorder, rename, and type override controls
-- Background validation with progressive issue reporting while the wizard remains open
+- Background validation with progressive issue reporting while the wizard remains open (controlled by the `justybase.importWizard.backgroundValidation*` settings)
+- Warnings for rows whose column count differs from the header; extra fields are ignored
+- Failed batch imports roll back their transaction (where the dialect supports one) and drop a newly created target table instead of leaving a partial load
 - SQL preview for both the table-creation step and the load step when direct load SQL is available
 - Plan / workflow preview for dialects that use a guided or staged import path instead of direct load SQL
+
+Programmatic callers can pass `delimiter`, `skipRows`, `maxErrors`, and `encoding` through `ImportColumnOptions`. Netezza targets accept `TABLE`, `SCHEMA.TABLE`, `DATABASE.SCHEMA.TABLE`, and the database-only `DATABASE..TABLE` notation.
 
 ### Advanced Import Wizard details
 

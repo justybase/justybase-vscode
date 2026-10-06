@@ -5,4 +5,6 @@ export * from './maintenanceProviderUtils';
 export * from './query';
 export * from './importTypeInferenceUtils';
 export * from './importTypeMapping';
+export * from './importNumberParsing';
+export * from './importColumnNameUtils';
 export * from './sessionMonitorProviderUtils';

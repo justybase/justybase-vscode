@@ -115,12 +115,12 @@ describe('import/clipboardImporter real module', () => {
         expect(analyzer.getDataTypes()[0]?.currentType.toString()).toBe('NVARCHAR(20)');
     });
 
-    it('should force text type for PESEL-like clipboard headers', async () => {
+    it('should ignore a PESEL header and infer 11-digit values as numeric', async () => {
         (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('PESEL\tamount\n12345678901\t1\n22345678901\t2');
         const processor = new ClipboardDataProcessor();
         const analyzer = await processor.analyzeClipboardData();
 
-        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toBe('NVARCHAR(20)');
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toBe('BIGINT');
         expect(analyzer.getDataTypes()[1]?.currentType.toString()).toBe('BIGINT');
     });
 
@@ -150,9 +150,34 @@ describe('import/clipboardImporter real module', () => {
         expect(mockUnregisterImportStream).toHaveBeenCalledTimes(1);
 
         const executedSql = mockCreateCommand.mock.calls[0]?.[0] ?? '';
-        expect(executedSql).toContain('SELECT\n        COL1,\n        COL2\n    FROM EXTERNAL');
-        expect(executedSql).toContain('COL2 NVARCHAR(20)');
+        expect(executedSql).toContain('CREATE TABLE "DB1"."ADMIN"."T_IMPORT" AS');
+        expect(executedSql).toContain('SELECT\n        "COL1",\n        "COL2"\n    FROM EXTERNAL');
+        expect(executedSql).toContain('"COL2" NVARCHAR(20)');
         expect(executedSql).toMatch(/FROM EXTERNAL 'virtual_clipboard_import_[^']+\.txt'/);
+    });
+
+    it('quotes the clipboard target and preserves Netezza DB..TABLE notation', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('a b\n1');
+
+        const result = await importClipboardDataToNetezza(
+            'DB1..T_IMPORT',
+            {
+                host: 'localhost',
+                port: 5480,
+                database: 'DB1',
+                user: 'user',
+                password: 'pass'
+            },
+            null,
+            {},
+            jest.fn()
+        );
+
+        expect(result.success).toBe(true);
+        const executedSql = mockCreateCommand.mock.calls[0]?.[0] ?? '';
+        expect(executedSql).toContain('CREATE TABLE "DB1".."T_IMPORT" AS');
+        expect(executedSql).not.toContain('""');
+        expect(executedSql).toContain('"A_B"');
     });
 
     it('should fail fast for invalid parameters', async () => {
@@ -198,6 +223,168 @@ describe('import/clipboardImporter real module', () => {
 
         expect(result.success).toBe(false);
         expect(result.message).toContain('No data found in clipboard');
+    });
+
+    it('should keep a single spaced Polish number in one column', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('col1\n 123 456,78   \n');
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDelimiter()).toBe('\t');
+        expect(analyzer.getHeaders()).toEqual(['col1']);
+        expect(analyzer.getRowCount()).toBe(1);
+        expect(analyzer.getDecimalDelimiter()).toBe(',');
+        expect([...analyzer.dataRowIterator()]).toEqual([[' 123 456,78   ']]);
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toMatch(/^NUMERIC\(/);
+    });
+
+    it('should infer Polish currency/percent/parens as numeric and ignore lone dashes', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'kwota\n123 456,78 zł\n(1 234,56)\n-\n12,8%',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDecimalDelimiter()).toBe(',');
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toMatch(/^NUMERIC\(/);
+    });
+
+    it('should infer integer currency columns (zł) as NUMERIC', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'kwota\n123 457 zł\n223 457 zł\n323 457 zł',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toBe('NUMERIC(16,0)');
+    });
+
+    it('should infer GBP values (£123,456.78) as NUMERIC', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'amount\n£123,456.78\n£123,457',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDecimalDelimiter()).toBe('.');
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toBe('NUMERIC(16,2)');
+    });
+
+    it('should infer Anglo-Saxon thousands as numeric', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'amount\n123,456.78\n($1,234.56)',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDecimalDelimiter()).toBe('.');
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toMatch(/^NUMERIC\(/);
+    });
+
+    it('should infer a PESEL-valued column as text regardless of the header', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'LICZBA\timie\n44051401359\tJan\n92071314764\tAnna\n55030101193\tEwa\n02070803628\tOla',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toMatch(/^NVARCHAR/);
+        expect([...analyzer.dataRowIterator()][3]).toEqual(['02070803628', 'Ola']);
+    });
+
+    it('should keep leading-zero PESEL values as text under a non-generic header', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'nr_klienta\n02070803628\n44051401359\n55030101193',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toMatch(/^NVARCHAR/);
+    });
+
+    it('should keep an 11-digit column numeric when values fail PESEL validation', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'LICZBA\n12345678901\n22345678901\n32345678901',
+        );
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getDataTypes()[0]?.currentType.toString()).toBe('BIGINT');
+    });
+
+    it('streams formatted rows for text, numeric and datetime columns', async () => {
+        const registeredStreams: NodeJS.ReadableStream[] = [];
+        mockRegisterImportStream.mockImplementation((_name: string, stream: NodeJS.ReadableStream) => {
+            registeredStreams.push(stream);
+        });
+        let payload = '';
+        mockExecute.mockImplementationOnce(async () => {
+            for await (const chunk of registeredStreams[0]) {
+                payload += String(chunk);
+            }
+        });
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(
+            'when\tamount\tnote\n05.02.2024 10:00:00\t12.34\tAda\n06.02.2024 11:00:00\t-\t-\n',
+        );
+
+        const result = await importClipboardDataToNetezza(
+            'DB1.ADMIN.T_IMPORT',
+            {
+                host: 'localhost',
+                port: 5480,
+                database: 'DB1',
+                user: 'user',
+                password: 'pass'
+            },
+            null,
+            {},
+            jest.fn()
+        );
+
+        expect(result.success).toBe(true);
+        expect(registeredStreams).toHaveLength(1);
+        expect(payload).toContain('2024-02-05 10:00:00');
+        expect(payload).toContain('12.34');
+        expect(payload).toContain('Ada');
+
+        mockRegisterImportStream.mockReset();
+    });
+
+    it('caps decimal sampling at one thousand cells', async () => {
+        const columnCount = 1005;
+        const header = Array.from({ length: columnCount }, (_unused, index) => `c${index}`).join('\t');
+        const dataRow = Array.from({ length: columnCount }, (_unused, index) => String(index)).join('\t');
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue(`${header}\n${dataRow}\n${dataRow}`);
+
+        const processor = new ClipboardDataProcessor();
+        const analyzer = await processor.analyzeClipboardData();
+
+        expect(analyzer.getHeaders()).toHaveLength(columnCount);
+        expect(analyzer.getRowCount()).toBe(2);
+    });
+
+    it('should transliterate Polish diacritics in column names', async () => {
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValue('Śląsk\tZażółć\n1\t2');
+
+        const result = await importClipboardDataToNetezza(
+            'DB1.ADMIN.T_IMPORT',
+            {
+                host: 'localhost',
+                port: 5480,
+                database: 'DB1',
+                user: 'user',
+                password: 'pass'
+            },
+            null,
+            {},
+            jest.fn()
+        );
+
+        expect(result.success).toBe(true);
+        const executedSql = mockCreateCommand.mock.calls[0]?.[0] ?? '';
+        expect(executedSql).toContain('SLASK');
+        expect(executedSql).toContain('ZAZOLC');
+        expect(executedSql).not.toContain('Ś');
     });
 });
 

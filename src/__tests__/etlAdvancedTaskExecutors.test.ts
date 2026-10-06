@@ -508,6 +508,7 @@ describe('ETL advanced task executors', () => {
                 expect.objectContaining({ dbType: 'postgresql' }),
                 expect.any(Function),
                 undefined,
+                undefined,
                 undefined
             );
             expect(importDataToNetezzaMock).not.toHaveBeenCalled();

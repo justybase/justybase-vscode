@@ -59,9 +59,31 @@ export interface ImportExecutionInput {
     targetTable: string;
     connectionDetails: ConnectionDetails;
     columnOptions?: ImportColumnOptions;
+    /**
+     * Worksheet to read from an xlsx/xlsb source. Overrides
+     * `columnOptions.sheetName` when both are present.
+     */
+    sheetName?: string;
     progressCallback?: ProgressCallback;
     timeoutSeconds?: number;
     isCancelled?: ImportCancellationCheck;
+}
+
+/**
+ * Returns column options carrying the explicitly requested worksheet. When no
+ * worksheet is requested the original options are returned unchanged so
+ * delimited imports and legacy callers keep their behavior.
+ */
+export function withImportSheetOption(
+    columnOptions: ImportColumnOptions | undefined,
+    sheetName: string | undefined,
+): ImportColumnOptions | undefined {
+    const normalizedSheet = sheetName?.trim();
+    if (!normalizedSheet) {
+        return columnOptions;
+    }
+
+    return { ...columnOptions, sheetName: normalizedSheet };
 }
 
 export interface DatabaseImportWizardAdapter {
@@ -156,7 +178,7 @@ export abstract class BaseImportWizardAdapter implements DatabaseImportWizardAda
             input.connectionDetails,
             input.progressCallback,
             input.timeoutSeconds,
-            input.columnOptions,
+            withImportSheetOption(input.columnOptions, input.sheetName),
             input.isCancelled,
         );
     }

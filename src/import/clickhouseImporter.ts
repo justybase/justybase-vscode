@@ -87,6 +87,7 @@ export const clickhouseBatchImportConfig: BatchImportDialectConfig = {
         });
     },
     toSqlLiteral: toClickHouseLiteral,
+    cleanupCreatedTargetOnFailure: true,
     buildCreateTableSql(target, columns) {
         const columnDefinitions = columns.map(column =>
             `    ${formatIdentifierForSql(column.columnName, 'clickhouse')} ${makeClickHouseImportTypeNullable(column.targetDataType)}`,
@@ -97,6 +98,9 @@ export const clickhouseBatchImportConfig: BatchImportDialectConfig = {
             ') ENGINE = MergeTree',
             'ORDER BY tuple();',
         ].join('\n');
+    },
+    buildDropTableSql(target) {
+        return `DROP TABLE ${target.qualifiedName}`;
     },
 };
 
@@ -152,6 +156,7 @@ export async function importClipboardDataToClickHouse(
     formatPreference?: string | null,
     options?: unknown,
     progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck,
 ): Promise<ImportResult> {
     return importClipboardWithBatching(
         clickhouseBatchImportConfig,
@@ -160,5 +165,6 @@ export async function importClipboardDataToClickHouse(
         formatPreference,
         options,
         progressCallback,
+        isCancelled,
     );
 }

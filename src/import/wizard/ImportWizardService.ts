@@ -165,8 +165,9 @@ export class ImportWizardService {
     sessionId: string,
     progressCallback?: ProgressCallback,
     isCancelled?: ImportCancellationCheck,
+    options?: { ignoreValidationErrors?: boolean },
   ): Promise<ImportResult> {
-    return this.requireSession(sessionId).executeImport(progressCallback, isCancelled);
+    return this.requireSession(sessionId).executeImport(progressCallback, isCancelled, options);
   }
 
   public startBackgroundValidation(

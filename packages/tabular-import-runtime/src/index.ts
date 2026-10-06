@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import * as readline from 'node:readline';
 import type {
   DatabaseKind,
   ImportColumnDescriptor,
@@ -10,7 +9,15 @@ import type {
 } from '@justybase/contracts';
 import { tryNormalizeDatabaseKind } from '@justybase/contracts';
 import { applyGeneratedIdentifierCase } from '@justybase/dialect-utils';
-import { headerForcesTextImportType, ColumnTypeChooser } from '@justybase/database-utils';
+import {
+  detectImportDecimalDelimiter,
+  headerForcesTextImportType,
+  ColumnTypeChooser,
+} from '@justybase/database-utils';
+import {
+  DelimitedRecordParser,
+  detectDelimitedTextDelimiter,
+} from '@justybase/database-utils/delimitedRecordParser';
 
 export type {
   ImportColumnDescriptor,
@@ -24,6 +31,11 @@ export type {
 export interface TabularDataImporterOptions {
   kind?: string | DatabaseKind;
   inferBoolean?: boolean;
+  /**
+   * Whether the first delimited record is a header row. Defaults to true,
+   * matching the desktop importer's historical behavior.
+   */
+  hasHeaders?: boolean;
 }
 
 interface ExcelReader {
@@ -46,56 +58,60 @@ let readerFactory: ExcelReaderFactory | undefined;
 try {
   const loaded = createRequire(__filename)('@justybase/spreadsheet-tasks') as { ReaderFactory?: ExcelReaderFactory };
   readerFactory = loaded.ReaderFactory;
-} catch {
+} catch (error) {
   readerFactory = undefined;
+  console.warn(
+    'Excel support is unavailable because @justybase/spreadsheet-tasks could not be loaded.',
+    error instanceof Error ? error.message : error,
+  );
 }
 
 const FORCED_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9_ ]*(\(\s*\d+\s*(,\s*\d+\s*)?\))?$/;
 const DECIMAL_SAMPLE_ROW_LIMIT = 100;
 const FIRST_LINE_READ_CHUNK_SIZE = 64 * 1024;
 
-function readFirstLine(filePath: string): string {
+function readDetectionPrefix(filePath: string, maxBytes = 2 * 1024 * 1024): string {
   const descriptor = fs.openSync(filePath, 'r');
+  const chunks: Buffer[] = [];
+  let total = 0;
   try {
-    const chunks: Buffer[] = [];
-    let bytesReadTotal = 0;
-    let recordEnd = -1;
-    let inQuotes = false;
-    let quotePending = false;
-
-    while (recordEnd < 0) {
+    // Read whole chunks until a record boundary appears so a first record
+    // wider than one chunk is still available to delimiter detection.
+    while (total < maxBytes) {
       const buffer = Buffer.allocUnsafe(FIRST_LINE_READ_CHUNK_SIZE);
-      const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, bytesReadTotal);
+      const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, total);
       if (bytesRead === 0) break;
-      const chunk = buffer.subarray(0, bytesRead);
-      chunks.push(Buffer.from(chunk));
-
-      for (let index = 0; index < chunk.length; index += 1) {
-        const byte = chunk[index];
-        if (quotePending) {
-          quotePending = false;
-          if (byte === 0x22) continue;
-          inQuotes = false;
-        }
-        if (byte === 0x22) {
-          if (inQuotes) quotePending = true;
-          else inQuotes = true;
-        } else if (byte === 0x0a && !inQuotes) {
-          recordEnd = bytesReadTotal + index;
-          break;
-        }
-      }
-      bytesReadTotal += bytesRead;
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+      total += bytesRead;
+      const text = Buffer.concat(chunks, total).toString('utf8');
+      if (/[\r\n]/.test(text)) break;
     }
-
-    const contents = Buffer.concat(chunks, bytesReadTotal);
-    return contents
-      .subarray(0, recordEnd >= 0 ? recordEnd : contents.length)
-      .toString('utf8')
-      .replace(/^\ufeff/, '')
-      .replace(/\r$/, '');
+    return Buffer.concat(chunks, total).toString('utf8');
   } finally {
     fs.closeSync(descriptor);
+  }
+}
+
+async function* readCsvFileRecords(filePath: string, delimiter: string): AsyncGenerator<string[]> {
+  const parser = new DelimitedRecordParser(delimiter);
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  let firstChunk = true;
+  try {
+    for await (const rawChunk of stream) {
+      let chunk = String(rawChunk);
+      if (firstChunk) {
+        firstChunk = false;
+        chunk = chunk.replace(/^\ufeff/, '');
+      }
+      for (const record of parser.push(chunk)) {
+        yield record;
+      }
+    }
+    for (const record of parser.push('', true)) {
+      yield record;
+    }
+  } finally {
+    stream.destroy();
   }
 }
 
@@ -143,38 +159,8 @@ function validateForcedType(typeName: string): string {
   return normalized;
 }
 
-function parseCsvLine(line: string, delimiter: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    if (character === '"') {
-      if (inQuotes && line[index + 1] === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (character === delimiter && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += character;
-    }
-  }
-  result.push(current);
-  return result;
-}
-
-function detectDelimiter(firstLine: string): string {
-  const delimiters = [';', '\t', '|', ','];
-  const counts = delimiters.map(delimiter => ({
-    delimiter,
-    count: firstLine.split(delimiter).length - 1,
-  }));
-  const best = counts.reduce((current, candidate) => candidate.count > current.count ? candidate : current);
-  return best.count > 0 ? best.delimiter : ',';
+function detectDelimiter(prefix: string): string {
+  return detectDelimitedTextDelimiter(prefix, [';', '\t', '|', ','], ',');
 }
 
 function valueToString(value: unknown): string {
@@ -208,6 +194,7 @@ export class TabularDataImporter {
   private readonly filePath: string;
   private readonly kind?: DatabaseKind;
   private readonly inferBoolean: boolean;
+  private readonly hasHeaders?: boolean;
   private readonly isExcelFile: boolean;
   private csvDelimiter: string;
   private decimalSeparator = '.';
@@ -234,11 +221,11 @@ export class TabularDataImporter {
     this.filePath = filePath;
     this.kind = normalizeKind(options?.kind);
     this.inferBoolean = options?.inferBoolean === true;
+    this.hasHeaders = options?.hasHeaders;
     this.isExcelFile = ['.xlsx', '.xlsb'].includes(path.extname(filePath).toLowerCase());
-    const firstLine = this.isExcelFile
-      ? ''
-      : readFirstLine(filePath);
-    this.csvDelimiter = detectDelimiter(firstLine);
+    this.csvDelimiter = this.isExcelFile
+      ? ','
+      : detectDelimiter(readDetectionPrefix(filePath));
   }
 
   private setHeaders(headers: readonly string[]): void {
@@ -258,12 +245,21 @@ export class TabularDataImporter {
 
   private async prepareExcelReader(reader: ExcelReader): Promise<void> {
     this.availableSheetNames = reader.getSheetNames ? [...reader.getSheetNames()] : [];
-    if (this.selectedSheetName && this.availableSheetNames.length > 0 && reader._initSheet) {
-      const index = this.availableSheetNames.indexOf(this.selectedSheetName);
-      if (index >= 0) {
-        reader._currentSheetIndex = index;
-        await reader._initSheet(index);
-      }
+    if (!this.selectedSheetName || this.availableSheetNames.length === 0) {
+      return;
+    }
+
+    const index = this.availableSheetNames.indexOf(this.selectedSheetName);
+    if (index < 0) {
+      throw new Error(
+        `Worksheet "${this.selectedSheetName}" was not found in "${path.basename(this.filePath)}". ` +
+          `Available worksheets: ${this.availableSheetNames.join(', ')}.`,
+      );
+    }
+
+    reader._currentSheetIndex = index;
+    if (reader._initSheet) {
+      await reader._initSheet(index);
     }
   }
 
@@ -322,58 +318,39 @@ export class TabularDataImporter {
   }
 
   private async readCsvRows(): Promise<string[][]> {
-    const stream = fs.createReadStream(this.filePath, { encoding: 'utf8' });
-    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
     const rows: string[][] = [];
-    try {
-      for await (const rawLine of lines) {
-        const line = rawLine.replace(/^\ufeff/, '');
-        if (line.trim().length > 0) {
-          rows.push(parseCsvLine(line, this.csvDelimiter));
-        }
-      }
-      return rows;
-    } finally {
-      lines.close();
-      stream.destroy();
+    for await (const record of readCsvFileRecords(this.filePath, this.csvDelimiter)) {
+      rows.push(record);
     }
+    return rows;
   }
 
   private async readCsvSampleRows(limit: number): Promise<string[][]> {
-    const stream = fs.createReadStream(this.filePath, { encoding: 'utf8' });
-    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
     const rows: string[][] = [];
     let headerSkipped = false;
-    try {
-      for await (const rawLine of lines) {
-        const line = rawLine.replace(/^\ufeff/, '');
-        if (!line.trim()) continue;
-        if (!headerSkipped) {
-          headerSkipped = true;
+    for await (const record of readCsvFileRecords(this.filePath, this.csvDelimiter)) {
+      if (!headerSkipped) {
+        headerSkipped = true;
+        if (this.hasHeaders !== false) {
           continue;
         }
-        rows.push(parseCsvLine(line, this.csvDelimiter));
-        if (rows.length >= limit) break;
       }
-      return rows;
-    } finally {
-      lines.close();
-      stream.destroy();
+      rows.push(record);
+      if (rows.length >= limit) break;
     }
+    return rows;
   }
 
   private async analyzeCsvDataTypes(progressCallback?: ProgressCallback): Promise<ColumnTypeChooser[]> {
-    const stream = fs.createReadStream(this.filePath, { encoding: 'utf8' });
-    const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
     let headerProcessed = false;
     let dataRowsCount = 0;
     let dataTypes: ColumnTypeChooser[] | undefined;
     const pendingRows: string[][] = [];
-    const decimalSamples = { dots: 0, commas: 0 };
+    const decimalSampleCells: string[] = [];
 
     const initializeDataTypes = (): void => {
       if (dataTypes || !headerProcessed) return;
-      this.decimalSeparator = decimalSamples.commas > decimalSamples.dots && decimalSamples.commas > 0 ? ',' : '.';
+      this.decimalSeparator = detectImportDecimalDelimiter(decimalSampleCells);
       dataTypes = this.sourceHeaders.map(header => new ColumnTypeChooser(this.decimalSeparator, {
         forceText: headerForcesTextImportType(header),
         inferBoolean: this.inferBoolean,
@@ -388,9 +365,7 @@ export class TabularDataImporter {
       dataRowsCount += 1;
       if (dataRowsCount <= DECIMAL_SAMPLE_ROW_LIMIT) {
         for (const value of row) {
-          const normalized = value.trim();
-          if (/^\d+\.\d+$/.test(normalized)) decimalSamples.dots += 1;
-          if (/^\d+,\d+$/.test(normalized)) decimalSamples.commas += 1;
+          if (value.trim()) decimalSampleCells.push(value);
         }
       }
 
@@ -402,28 +377,24 @@ export class TabularDataImporter {
       this.applyRowToTypeInference(row, dataTypes);
     };
 
-    try {
-      for await (const rawLine of lines) {
-        let line = rawLine;
-        if (!headerProcessed && line.startsWith('\ufeff')) line = line.slice(1);
-        if (!line.trim()) continue;
-
-        const row = parseCsvLine(line, this.csvDelimiter);
-        if (!headerProcessed) {
-          this.setHeaders(row);
+    for await (const record of readCsvFileRecords(this.filePath, this.csvDelimiter)) {
+      if (!headerProcessed) {
+        if (this.hasHeaders === false) {
+          this.setHeaders(Array.from({ length: record.length }, (_unused, index) => `COL_${index + 1}`));
           headerProcessed = true;
+          processDataRow(record);
           continue;
         }
-
-        processDataRow(row);
-        if (dataRowsCount % 10000 === 0) {
-          progressCallback?.(`Analyzed ${dataRowsCount.toLocaleString()} rows...`, undefined, false);
-          await new Promise<void>(resolve => setImmediate(resolve));
-        }
+        this.setHeaders(record);
+        headerProcessed = true;
+        continue;
       }
-    } finally {
-      lines.close();
-      stream.destroy();
+
+      processDataRow(record);
+      if (dataRowsCount % 10000 === 0) {
+        progressCallback?.(`Analyzed ${dataRowsCount.toLocaleString()} rows...`, undefined, false);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
     }
 
     if (!headerProcessed) throw new Error('No data found in file');
@@ -450,11 +421,11 @@ export class TabularDataImporter {
     let dataRowsCount = 0;
     let dataTypes: ColumnTypeChooser[] | undefined;
     const pendingRows: string[][] = [];
-    const decimalSamples = { dots: 0, commas: 0 };
+    const decimalSampleCells: string[] = [];
 
     const initializeDataTypes = (): void => {
       if (dataTypes || !firstRowHandled) return;
-      this.decimalSeparator = decimalSamples.commas > decimalSamples.dots && decimalSamples.commas > 0 ? ',' : '.';
+      this.decimalSeparator = detectImportDecimalDelimiter(decimalSampleCells);
       dataTypes = this.sourceHeaders.map(header => new ColumnTypeChooser(this.decimalSeparator, {
         forceText: headerForcesTextImportType(header),
         inferBoolean: this.inferBoolean,
@@ -469,9 +440,7 @@ export class TabularDataImporter {
       dataRowsCount += 1;
       if (dataRowsCount <= DECIMAL_SAMPLE_ROW_LIMIT) {
         for (const value of row) {
-          const normalized = value.trim();
-          if (/^\d+\.\d+$/.test(normalized)) decimalSamples.dots += 1;
-          if (/^\d+,\d+$/.test(normalized)) decimalSamples.commas += 1;
+          if (value.trim()) decimalSampleCells.push(value);
         }
       }
 
@@ -646,7 +615,9 @@ export class TabularDataImporter {
 
   public async getAllRows(): Promise<string[][]> {
     const rows = this.isExcelFile ? await this.openExcelRows() : await this.readCsvRows();
-    const start = this.isExcelFile ? (this.excelHasHeaderRow ? 1 : 0) : 1;
+    const start = this.isExcelFile
+      ? (this.excelHasHeaderRow ? 1 : 0)
+      : (this.hasHeaders === false ? 0 : 1);
     const dataRows = rows.slice(start);
     this.rowsCount = dataRows.length;
     return dataRows;

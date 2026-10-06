@@ -3,7 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { importClipboardDataToNetezza } from '../import/clipboardImporter';
 import { importDataToNetezza } from '../import/dataImporter';
+import { importClipboardDataToClickHouse } from '../import/clickhouseImporter';
 import { importClipboardDataToDb2, importDataToDb2 } from '../import/db2Importer';
+import { importClipboardDataToMsSql, importDataToMsSql } from '../import/mssqlImporter';
 import { importClipboardDataToPostgreSql, importDataToPostgreSql } from '../import/postgresqlImporter';
 import { importClipboardDataToVertica, importDataToVertica } from '../import/verticaImporter';
 import { importClipboardDataToOracle, importDataToOracle } from '../import/oracleImporter';
@@ -44,6 +46,16 @@ jest.mock('../import/dataImporter', () => ({
 jest.mock('../import/db2Importer', () => ({
     importClipboardDataToDb2: jest.fn().mockResolvedValue({ success: true, message: 'db2-clipboard' }),
     importDataToDb2: jest.fn().mockResolvedValue({ success: true, message: 'db2-file' })
+}));
+
+jest.mock('../import/mssqlImporter', () => ({
+    importClipboardDataToMsSql: jest.fn().mockResolvedValue({ success: true, message: 'mssql-clipboard' }),
+    importDataToMsSql: jest.fn().mockResolvedValue({ success: true, message: 'mssql-file' })
+}));
+
+jest.mock('../import/clickhouseImporter', () => ({
+    importClipboardDataToClickHouse: jest.fn().mockResolvedValue({ success: true, message: 'clickhouse-clipboard' }),
+    importDataToClickHouse: jest.fn().mockResolvedValue({ success: true, message: 'clickhouse-file' })
 }));
 
 jest.mock('../import/postgresqlImporter', () => ({
@@ -140,6 +152,7 @@ describe('importDispatcher', () => {
             undefined,
             undefined,
             undefined,
+            undefined,
         );
     });
 
@@ -193,6 +206,7 @@ describe('importDispatcher', () => {
             expect.objectContaining({ dbType: 'postgresql' }),
             undefined,
             120,
+            undefined,
             undefined
         );
         expect(importDataToDb2).not.toHaveBeenCalled();
@@ -262,6 +276,7 @@ describe('importDispatcher', () => {
             expect.objectContaining({ dbType: 'postgresql' }),
             undefined,
             undefined,
+            undefined,
             undefined
         );
         expect(importClipboardDataToNetezza).not.toHaveBeenCalled();
@@ -277,6 +292,7 @@ describe('importDispatcher', () => {
             expect.objectContaining({ dbType: 'oracle' }),
             undefined,
             undefined,
+            undefined,
             undefined
         );
 
@@ -289,6 +305,7 @@ describe('importDispatcher', () => {
         expect(importClipboardDataToVertica).toHaveBeenCalledWith(
             'public.orders',
             expect.objectContaining({ dbType: 'vertica' }),
+            undefined,
             undefined,
             undefined,
             undefined
@@ -382,6 +399,105 @@ describe('importDispatcher', () => {
             undefined,
             undefined,
             undefined,
+            undefined,
+        );
+    });
+
+    it('forwards the cancellation predicate to DB2, PostgreSQL and MSSQL importers', async () => {
+        const isCancelled = () => false;
+
+        await importDataForConnection('C:\\data.csv', 'public.t', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'db2inst1',
+            dbType: 'db2'
+        }, undefined, undefined, undefined, isCancelled);
+        expect(importDataToDb2).toHaveBeenCalledWith(
+            'C:\\data.csv',
+            'public.t',
+            expect.objectContaining({ dbType: 'db2' }),
+            undefined,
+            undefined,
+            undefined,
+            isCancelled
+        );
+
+        await importDataForConnection('C:\\data.csv', 'public.t', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'postgres',
+            dbType: 'postgresql'
+        }, undefined, undefined, undefined, isCancelled);
+        expect(importDataToPostgreSql).toHaveBeenCalledWith(
+            'C:\\data.csv',
+            'public.t',
+            expect.objectContaining({ dbType: 'postgresql' }),
+            undefined,
+            undefined,
+            undefined,
+            isCancelled
+        );
+
+        await importDataForConnection('C:\\data.csv', 'dbo.t', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'sa',
+            dbType: 'mssql'
+        }, undefined, undefined, undefined, isCancelled);
+        expect(importDataToMsSql).toHaveBeenCalledWith(
+            'C:\\data.csv',
+            'dbo.t',
+            expect.objectContaining({ dbType: 'mssql' }),
+            undefined,
+            undefined,
+            undefined,
+            isCancelled
+        );
+    });
+
+    it('routes clipboard imports for Netezza, MSSQL and ClickHouse', async () => {
+        await expect(importClipboardDataForConnection('public.orders', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'admin',
+            dbType: 'netezza'
+        })).resolves.toEqual({ success: true, message: 'netezza-clipboard' });
+        expect(importClipboardDataToNetezza).toHaveBeenCalled();
+
+        await expect(importClipboardDataForConnection('public.orders', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'sa',
+            dbType: 'mssql'
+        })).resolves.toEqual({ success: true, message: 'mssql-clipboard' });
+        expect(importClipboardDataToMsSql).toHaveBeenCalled();
+
+        await expect(importClipboardDataForConnection('public.orders', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'default',
+            dbType: 'clickhouse'
+        })).resolves.toEqual({ success: true, message: 'clickhouse-clipboard' });
+        expect(importClipboardDataToClickHouse).toHaveBeenCalled();
+    });
+
+    it('forwards the cancellation predicate to clipboard importers', async () => {
+        const isCancelled = () => false;
+
+        await importClipboardDataForConnection('public.orders', {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'postgres',
+            dbType: 'postgresql'
+        }, undefined, undefined, undefined, isCancelled);
+
+        expect(importClipboardDataToPostgreSql).toHaveBeenCalledWith(
+            'public.orders',
+            expect.objectContaining({ dbType: 'postgresql' }),
+            undefined,
+            undefined,
+            undefined,
+            isCancelled
         );
     });
 });

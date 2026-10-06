@@ -70,7 +70,8 @@ export async function importClipboardDataToSqlite(
     connectionDetails: ConnectionDetails,
     formatPreference?: string | null,
     options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importClipboardWithBatching(
         sqliteBatchImportConfig,
@@ -78,6 +79,7 @@ export async function importClipboardDataToSqlite(
         connectionDetails,
         formatPreference,
         options,
-        progressCallback
+        progressCallback,
+        isCancelled
     );
 }

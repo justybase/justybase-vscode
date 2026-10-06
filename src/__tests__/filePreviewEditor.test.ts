@@ -45,6 +45,94 @@ describe('FilePreviewEditor Data Workspace action', () => {
         expect(render(tempFile.replace(/\.csv$/, '.parquet'))).not.toContain('id="add-file-to-data-workspace"');
     });
 
+    interface PreviewResult {
+        columns: Array<{ name: string }>;
+        rows: unknown[][];
+        totalRows: number;
+        limitReached: boolean;
+    }
+
+    function createEditor(): FilePreviewEditor {
+        return new FilePreviewEditor(
+            vscode.Uri.file('/test-extension'),
+            { globalStorageUri: vscode.Uri.file('/tmp/workspace-preview-test') } as unknown as vscode.ExtensionContext,
+            {} as never,
+        );
+    }
+
+    async function readFile(filePath: string): Promise<PreviewResult[]> {
+        return (createEditor() as unknown as {
+            _readFile(path: string): Promise<PreviewResult[]>;
+        })._readFile(filePath);
+    }
+
+    it('reads quoted CSV records with embedded newlines without splitting rows', async () => {
+        const csvPath = path.join('/tmp', `justybase-preview-quoted-${process.pid}.csv`);
+        fs.writeFileSync(csvPath, 'id,note\n1,"first\nsecond"\n\n2,"has,comma"\n', 'utf8');
+
+        try {
+            const data = await readFile(csvPath);
+            expect(data[0].columns.map(column => column.name)).toEqual(['id', 'note']);
+            expect(data[0].rows).toEqual([
+                ['1', 'first\nsecond'],
+                ['2', 'has,comma'],
+            ]);
+            expect(data[0].totalRows).toBe(2);
+            expect(data[0].limitReached).toBe(false);
+        } finally {
+            fs.rmSync(csvPath, { force: true });
+        }
+    });
+
+    it('detects tab-delimited .tsv previews', async () => {
+        const tsvPath = path.join('/tmp', `justybase-preview-${process.pid}.tsv`);
+        fs.writeFileSync(tsvPath, 'id\tname\n1\tAda\n', 'utf8');
+
+        try {
+            const data = await readFile(tsvPath);
+            expect(data[0].columns.map(column => column.name)).toEqual(['id', 'name']);
+            expect(data[0].rows).toEqual([['1', 'Ada']]);
+        } finally {
+            fs.rmSync(tsvPath, { force: true });
+        }
+    });
+
+    it('generates positional names for empty header cells', async () => {
+        const csvPath = path.join('/tmp', `justybase-preview-empty-${process.pid}.csv`);
+        fs.writeFileSync(csvPath, 'a,,c\n1,2,3\n', 'utf8');
+
+        try {
+            const data = await readFile(csvPath);
+            expect(data[0].columns.map(column => column.name)).toEqual(['a', 'Column 2', 'c']);
+        } finally {
+            fs.rmSync(csvPath, { force: true });
+        }
+    });
+
+    it('marks the preview as truncated when it exceeds the configured row limit', async () => {
+        const csvPath = path.join('/tmp', `justybase-preview-limit-${process.pid}.csv`);
+        fs.writeFileSync(csvPath, 'id\n1\n2\n3\n', 'utf8');
+
+        const originalGetConfiguration = (vscode.workspace.getConfiguration as jest.Mock).getMockImplementation();
+        (vscode.workspace.getConfiguration as jest.Mock).mockReturnValueOnce({
+            get: (key: string, defaultValue?: unknown) => (key === 'maxRows' ? 1 : defaultValue),
+        });
+
+        try {
+            const data = await readFile(csvPath);
+            expect(data[0].rows).toHaveLength(1);
+            expect(data[0].totalRows).toBe(3);
+            expect(data[0].limitReached).toBe(true);
+        } finally {
+            if (originalGetConfiguration) {
+                (vscode.workspace.getConfiguration as jest.Mock).mockImplementation(originalGetConfiguration);
+            } else {
+                (vscode.workspace.getConfiguration as jest.Mock).mockReset();
+            }
+            fs.rmSync(csvPath, { force: true });
+        }
+    });
+
     it('adds a previewed file to a selected existing workspace', async () => {
         const workspace = {
             name: 'Reporting',

@@ -181,7 +181,8 @@ export async function importClipboardDataToOracle(
     connectionDetails: ConnectionDetails,
     formatPreference?: string | null,
     options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importClipboardWithBatching(
         oracleBatchImportConfig,
@@ -189,6 +190,7 @@ export async function importClipboardDataToOracle(
         connectionDetails,
         formatPreference,
         options,
-        progressCallback
+        progressCallback,
+        isCancelled
     );
 }

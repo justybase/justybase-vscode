@@ -47,6 +47,21 @@
       "require": "./dist/importTypeMapping.js",
       "default": "./dist/importTypeMapping.js"
     },
+    "./importNumberParsing": {
+      "types": "./dist/importNumberParsing.d.ts",
+      "require": "./dist/importNumberParsing.js",
+      "default": "./dist/importNumberParsing.js"
+    },
+    "./importColumnNameUtils": {
+      "types": "./dist/importColumnNameUtils.d.ts",
+      "require": "./dist/importColumnNameUtils.js",
+      "default": "./dist/importColumnNameUtils.js"
+    },
+    "./delimitedRecordParser": {
+      "types": "./dist/delimitedRecordParser.d.ts",
+      "require": "./dist/delimitedRecordParser.js",
+      "default": "./dist/delimitedRecordParser.js"
+    },
     "./sessionMonitorProviderUtils": {
       "types": "./dist/sessionMonitorProviderUtils.d.ts",
       "require": "./dist/sessionMonitorProviderUtils.js",

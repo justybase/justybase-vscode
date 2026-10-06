@@ -11,6 +11,7 @@ import {
     NetezzaDataType,
     ColumnTypeChooser,
     NetezzaImporter,
+    buildWidthMismatchWarning,
     importDataToNetezza,
     readDelimitedTextPrefix,
     resolveNetezzaImportProgress
@@ -235,8 +236,8 @@ describe('import/dataImporter', () => {
             it('should handle negative integers', () => {
                 const chooser = new ColumnTypeChooser();
                 const type = chooser.refreshCurrentType('-12345');
-                // Negative numbers should fallback to NVARCHAR since regex only matches digits
-                expect(type.dbType).toBe('NVARCHAR');
+                // Excel minus/parens negatives import as numeric
+                expect(type.dbType).toBe('BIGINT');
             });
 
             it('should handle very long integers (fallback)', () => {
@@ -281,13 +282,16 @@ describe('import/dataImporter', () => {
             fs.rmSync(tempDir, { recursive: true, force: true });
         });
 
-        it('detects CSV delimiter and creates log directory in constructor', () => {
+        it('detects CSV delimiter without creating the log directory in the constructor', () => {
             const csvPath = writeTempFile('data.csv', 'A;B;C\n1;2;3\n');
             const logDir = path.join(tempDir, 'logs');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', logDir);
 
             expect(importer.getCsvDelimiter()).toBe(';');
             expect(importer.getExternalDelimiter()).toBe(';');
+            expect(fs.existsSync(logDir)).toBe(false);
+
+            importer.ensureLogDir();
             expect(fs.existsSync(logDir)).toBe(true);
         });
 
@@ -358,6 +362,213 @@ describe('import/dataImporter', () => {
             stream.resume();
             const [error] = await errorPromise as [Error];
             expect(error.message).toMatch(/cancelled/i);
+        });
+
+        it('streams data rows through iterateRows without materializing them first', async () => {
+            const csvPath = writeTempFile('iterate.csv', 'id,name\n1,A\n2,B\n3,C\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            const rows: string[][] = [];
+            for await (const row of importer.iterateRows()) {
+                rows.push(row);
+            }
+
+            expect(rows).toEqual([
+                ['1', 'A'],
+                ['2', 'B'],
+                ['3', 'C'],
+            ]);
+            expect(importer.getRowsCount()).toBe(3);
+        });
+
+        it('stops iterateRows when the cancellation check is true', async () => {
+            const csvPath = writeTempFile('iterate-cancel.csv', 'id\n1\n2\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { isCancelled: () => true });
+            await importer.analyzeDataTypes();
+
+            await expect(importer.iterateRows().next()).rejects.toThrow(/cancelled/i);
+        });
+
+        it('honors an explicit delimiter override instead of detection', async () => {
+            const csvPath = writeTempFile('override.csv', 'id;name\n1;Alice\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { delimiter: ';' });
+            await importer.analyzeDataTypes();
+
+            expect(importer.getCsvDelimiter()).toBe(';');
+            await expect(importer.getSampleRows()).resolves.toEqual([['1', 'Alice']]);
+        });
+
+        it('skips leading rows before the header when skipRows is set', async () => {
+            const csvPath = writeTempFile('skip.csv', 'junk1\njunk2\nid,name\n1,Alice\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { skipRows: 2 });
+            await importer.analyzeDataTypes();
+
+            expect(importer.getSourceHeaders()).toEqual(['id', 'name']);
+            expect(importer.getRowsCount()).toBe(1);
+            await expect(importer.getSampleRows()).resolves.toEqual([['1', 'Alice']]);
+        });
+
+        it('uses maxErrors in the external table USING clause', async () => {
+            const csvPath = writeTempFile('maxerrors.csv', 'id\n1\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { maxErrors: 25 });
+            await importer.analyzeDataTypes();
+
+            const createSql = importer.generateCreateTableSql();
+            expect(createSql).toContain('MAXERRORS 25');
+        });
+
+        it('counts rows whose column count differs from the header', async () => {
+            const csvPath = writeTempFile('width-mismatch.csv', 'a,b\n1,2\n3,4,extra\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            expect(importer.getWidthMismatchCount()).toBe(1);
+        });
+
+        it('auto-detects a missing CSV header row', async () => {
+            const csvPath = writeTempFile('no-header.csv', '1,Alice\n2,Bob\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            expect(importer.getHasHeaders()).toBe(false);
+            expect(importer.getSourceHeaders()).toEqual(['COL_1', 'COL_2']);
+            expect(importer.getRowsCount()).toBe(2);
+        });
+
+        it('keeps a text header when data values follow', async () => {
+            const csvPath = writeTempFile('with-header.csv', 'id,name\n1,Alice\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            expect(importer.getHasHeaders()).toBe(true);
+            expect(importer.getSourceHeaders()).toEqual(['id', 'name']);
+            expect(importer.getRowsCount()).toBe(1);
+        });
+
+        it('normalizes explicit source encodings and falls back for unknown ones', async () => {
+            const latinPath = writeTempFile('latin.csv', 'id,name\n1,Ada\n');
+            const latinImporter = new NetezzaImporter(latinPath, 'TEST_TABLE', undefined, { encoding: 'latin-1' });
+            await latinImporter.analyzeDataTypes();
+            expect(latinImporter.getSourceHeaders()).toEqual(['id', 'name']);
+
+            const utf16Path = path.join(os.tmpdir(), `utf16-explicit-${Date.now()}.csv`);
+            fs.writeFileSync(utf16Path, Buffer.from('\ufeffid,name\n1,Ada\n', 'utf16le'));
+            const utf16Importer = new NetezzaImporter(utf16Path, 'TEST_TABLE', undefined, { encoding: 'utf-16' });
+            await utf16Importer.analyzeDataTypes();
+            expect(utf16Importer.getSourceHeaders()).toEqual(['id', 'name']);
+            fs.rmSync(utf16Path, { force: true });
+
+            const unknownPath = writeTempFile('unknown-encoding.csv', 'id,name\n1,Ada\n');
+            const unknownImporter = new NetezzaImporter(unknownPath, 'TEST_TABLE', undefined, { encoding: 'klingon' });
+            await unknownImporter.analyzeDataTypes();
+            expect(unknownImporter.getSourceHeaders()).toEqual(['id', 'name']);
+        });
+
+        it('returns no warning for a zero width-mismatch count', () => {
+            expect(buildWidthMismatchWarning(0)).toBeUndefined();
+            expect(buildWidthMismatchWarning(Number.NaN)).toBeUndefined();
+            expect(buildWidthMismatchWarning(2)).toContain('2 source row(s)');
+        });
+
+        it('reuses an existing log directory', async () => {
+            const csvPath = writeTempFile('logdir-existing.csv', 'a\n1\n');
+            const logDir = path.join(path.dirname(csvPath), 'netezza_logs');
+            fs.mkdirSync(logDir, { recursive: true });
+
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            expect(() => {
+                importer.ensureLogDir();
+                importer.ensureLogDir();
+            }).not.toThrow();
+
+            fs.rmSync(logDir, { recursive: true, force: true });
+        });
+
+        it('analyzes very large CSV files through the streaming path', async () => {
+            const csvPath = path.join(os.tmpdir(), `large-stream-${Date.now()}.csv`);
+            const lines: string[] = ['id,name,amount'];
+            const totalRows = 500_000;
+            for (let i = 0; i < totalRows; i++) {
+                lines.push(`${i},user_with_a_longer_name_${i},${(i % 100) / 10}`);
+            }
+            fs.writeFileSync(csvPath, lines.join('\n') + '\n', 'utf8');
+
+            try {
+                const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+                await importer.analyzeDataTypes();
+
+                expect(importer.getSourceHeaders()).toEqual(['id', 'name', 'amount']);
+                expect(importer.getRowsCount()).toBe(totalRows);
+
+                let streamed = 0;
+                for await (const row of importer.iterateRows()) {
+                    streamed++;
+                    if (streamed >= 3) {
+                        break;
+                    }
+                    expect(row[0]).toBe(String(streamed - 1));
+                }
+                expect(streamed).toBe(3);
+            } finally {
+                fs.rmSync(csvPath, { force: true });
+            }
+        });
+
+        it('formats datetimes and locale numbers for the external stream', async () => {
+            const dtPath = writeTempFile('format-datetime.csv', 'when\n05.02.2024 10:00:00\n');
+            const dtImporter = new NetezzaImporter(dtPath, 'TEST_TABLE');
+            await dtImporter.analyzeDataTypes();
+            const dtStream = await dtImporter.createDataStream();
+            let dtOutput = '';
+            dtStream.on('data', chunk => {
+                dtOutput += String(chunk);
+            });
+            await once(dtStream, 'end');
+            expect(dtOutput).toContain('2024-02-05 10:00:00');
+
+            const numPath = writeTempFile('format-number.csv', 'amount\n12.34\n56.78\n');
+            const numImporter = new NetezzaImporter(numPath, 'TEST_TABLE');
+            await numImporter.analyzeDataTypes();
+            const numStream = await numImporter.createDataStream();
+            let numOutput = '';
+            numStream.on('data', chunk => {
+                numOutput += String(chunk);
+            });
+            await once(numStream, 'end');
+            expect(numOutput).toContain('12.34');
+            expect(numOutput).toContain('56.78');
+        });
+
+        it('does not create the log directory until an import executes', async () => {
+            const csvPath = writeTempFile('logdir.csv', 'a\n1\n');
+            const logDir = path.join(path.dirname(csvPath), 'netezza_logs');
+            if (fs.existsSync(logDir)) {
+                fs.rmSync(logDir, { recursive: true, force: true });
+            }
+
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+            expect(fs.existsSync(logDir)).toBe(false);
+
+            importer.ensureLogDir();
+            expect(fs.existsSync(logDir)).toBe(true);
+            fs.rmSync(logDir, { recursive: true, force: true });
+        });
+
+        it('decodes UTF-16LE sources with a BOM', async () => {
+            const csvPath = path.join(os.tmpdir(), `utf16-${Date.now()}.csv`);
+            fs.writeFileSync(csvPath, Buffer.from('\ufeffid,name\n1,Alice\n', 'utf16le'));
+
+            try {
+                const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+                await importer.analyzeDataTypes();
+
+                expect(importer.getSourceHeaders()).toEqual(['id', 'name']);
+                await expect(importer.getSampleRows()).resolves.toEqual([['1', 'Alice']]);
+            } finally {
+                fs.unlinkSync(csvPath);
+            }
         });
 
         it('preserves quotes inside an unquoted field', async () => {
@@ -501,6 +712,22 @@ describe('import/dataImporter', () => {
             );
         });
 
+        it('detects comma decimals when dotted dates share the sample', async () => {
+            const csvPath = writeTempFile(
+                'pl-dates.csv',
+                'DATA;KWOTA\n17.06.2024;1 234,56\n25.12.2023;2 345,67\n',
+            );
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+
+            await importer.analyzeDataTypes();
+
+            expect(importer.getDecimalDelimiter()).toBe(',');
+            const mappings = importer.getColumnMappings();
+            expect(mappings.find(column => column.targetColumn === 'DATA')?.dataType).toBe('DATETIME');
+            expect(mappings.find(column => column.targetColumn === 'KWOTA')?.dataType).toMatch(/^NUMERIC/);
+            expect(importer.formatValue('1 234,56', 1)).toBe('1234.56');
+        });
+
         it('formats DATETIME and NUMERIC values according to detected column types', async () => {
             const csvPath = writeTempFile('format.csv', 'dt;num\n07.06.2024 14:30;1,23\n');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
@@ -519,13 +746,15 @@ describe('import/dataImporter', () => {
             expect(importer.formatValue('0123', 0)).toBe('0123');
         });
 
-        it('forces text type for PESEL-style headers during file analysis', async () => {
-            const csvPath = writeTempFile('pesel.csv', 'PESEL_ID,amount\n12345678901,1\n22345678901,2\n');
+        it('infers PESEL-valued columns as text regardless of the header', async () => {
+            const csvPath = writeTempFile('pesel.csv', 'PESEL_ID,amount\n02070803628,1\n44051401359,2\n55030101193,3\n');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
             await importer.analyzeDataTypes();
 
-            expect(importer.getColumnMappings()[0]?.dataType).toBe('NVARCHAR(20)');
+            expect(importer.getColumnMappings()[0]?.dataType).toMatch(/^NVARCHAR/);
             expect(importer.getColumnMappings()[1]?.dataType).toBe('BIGINT');
+            // Leading zero is preserved end-to-end for the text column.
+            expect(importer.formatValue('02070803628', 0)).toBe('02070803628');
         });
 
         it('generates CREATE TABLE SQL with quoted identifiers and detected delimiter', async () => {
@@ -537,6 +766,16 @@ describe('import/dataImporter', () => {
             expect(createSql).toContain('CREATE TABLE "MYDB"."PUBLIC"."ORDER ITEMS"');
             expect(createSql).toContain('DELIMITER \';\'');
             expect(createSql).toContain('"FULL_NAME"');
+        });
+
+        it('preserves Netezza database-only DB..TABLE notation when quoting the target', async () => {
+            const csvPath = writeTempFile('dbonly.csv', 'id\n1\n');
+            const importer = new NetezzaImporter(csvPath, 'MYDB..ORDER ITEMS');
+            await importer.analyzeDataTypes();
+
+            const createSql = importer.generateCreateTableSql();
+            expect(createSql).toContain('CREATE TABLE "MYDB".."ORDER ITEMS"');
+            expect(createSql).not.toContain('""');
         });
 
         it('creates stream that skips header and returns rows with detected delimiter', async () => {

@@ -31,6 +31,7 @@ export interface SnowflakeStageImportPlan {
     rowCountEstimate: number;
     detectedDelimiter?: string;
     detectedDecimalDelimiter?: string;
+    worksheet?: string;
     columns: SnowflakePlannedImportColumn[];
     createTableSql: string;
     copyIntoSql?: string;
@@ -201,6 +202,10 @@ export function renderSnowflakeStageImportPlanMarkdown(plan: SnowflakeStageImpor
         `- Columns: \`${plan.columns.length}\``,
     ];
 
+    if (plan.worksheet) {
+        lines.push(`- Worksheet: \`${plan.worksheet}\``);
+    }
+
     if (plan.detectedDelimiter) {
         lines.push(`- Detected delimiter: \`${plan.detectedDelimiter}\``);
     }
@@ -268,6 +273,9 @@ export async function planSnowflakeStageImport(
     }
 
     const importer = createTabularDataImporter(sourceFile);
+    if (columnOptions?.sheetName?.trim()) {
+        importer.setSelectedSheet(columnOptions.sheetName);
+    }
     await importer.analyzeDataTypes();
     importer.applyColumnOptions(columnOptions);
 
@@ -300,6 +308,9 @@ export async function planSnowflakeStageImport(
         rowCountEstimate: importer.getRowsCount(),
         detectedDelimiter: importer.getCsvDelimiter(),
         detectedDecimalDelimiter: importer.getDecimalDelimiter(),
+        worksheet: SPREADSHEET_EXTENSIONS.has(sourceFormat)
+            ? importer.getSelectedSheet()
+            : undefined,
         columns,
         createTableSql,
         copyIntoSql,

@@ -34,6 +34,14 @@ npm run test:netezza:import:integration
 
 It validates virtual-stream imports for XLSX/CSV/TXT and clipboard data, plus SQLite and Parquet/File SQL migrations. The Db2 case runs when `DB2_LIVE_TEST_*` credentials and the native `ibm_db` runtime are available. These suites are excluded from the normal unit-test configurations by `scripts/jestLiveDbIgnorePatterns.cjs`.
 
+Locale-formatted number imports have their own round-trip suite that creates and drops uniquely named tables:
+
+```bash
+NZ_DEV_PASSWORD='...' NZ_DEV_ALLOW_FIXTURE_DDL=1 npm run test:netezza:import-formats:integration
+```
+
+It imports Polish and Anglo-Saxon number formats (`123 456,78`, `123 456,78 zł`, `12,8%`, `(123 456,78)`, `123,5`, `1,23E+05`, `123 456,8 kg`, `$123,456.78`, `£123,457`, `12.75%`, …), verifies the created Netezza column types through `INFORMATION_SCHEMA.COLUMNS`, reads the values back, and checks that dashes load as `0` in numeric columns and stay literal in text columns, and that PESEL-valued columns stay text with leading zeros intact.
+
 The complete Netezza live contract is available through one command:
 
 ```bash

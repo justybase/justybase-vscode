@@ -81,6 +81,152 @@ describe('executeBatchImport cancellation', () => {
         expect(connection.close).toHaveBeenCalled();
     });
 
+    it('drops a newly created target table when the import fails', async () => {
+        const executedSql: string[] = [];
+        const failingConnection = {
+            createCommand: jest.fn((sql: string) => {
+                executedSql.push(sql);
+                return {
+                    commandTimeout: 0,
+                    execute: sql.startsWith('INSERT')
+                        ? jest.fn().mockRejectedValue(new Error('insert failed'))
+                        : jest.fn().mockResolvedValue(undefined),
+                };
+            }),
+            close: jest.fn().mockResolvedValue(undefined),
+        };
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(failingConnection);
+        const configWithCleanup = {
+            ...config,
+            cleanupCreatedTargetOnFailure: true,
+            buildCreateTableSql: () => 'CREATE TABLE "orders" (ID BIGINT)',
+            buildDropTableSql: (target: { qualifiedName: string }) => `DROP TABLE ${target.qualifiedName}`,
+        } as unknown as BatchImportDialectConfig;
+
+        const result = await executeBatchImport(configWithCleanup, {
+            targetTable: 'public.orders',
+            connectionDetails: { host: 'db', dbType: 'postgresql' } as never,
+            columns: [{ sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }],
+            rows: [['1']],
+            totalRows: 1,
+            decimalDelimiter: '.',
+            format: 'CSV',
+        });
+
+        expect(result.success).toBe(false);
+        expect(executedSql).toContain('CREATE TABLE "orders" (ID BIGINT)');
+        expect(executedSql).toContain('DROP TABLE public.orders');
+    });
+
+    it('keeps the created target table when no cleanup is configured', async () => {
+        const executedSql: string[] = [];
+        const failingConnection = {
+            createCommand: jest.fn((sql: string) => {
+                executedSql.push(sql);
+                return {
+                    commandTimeout: 0,
+                    execute: sql.startsWith('INSERT')
+                        ? jest.fn().mockRejectedValue(new Error('insert failed'))
+                        : jest.fn().mockResolvedValue(undefined),
+                };
+            }),
+            close: jest.fn().mockResolvedValue(undefined),
+        };
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(failingConnection);
+        const configWithoutCleanup = {
+            ...config,
+            buildCreateTableSql: () => 'CREATE TABLE "orders" (ID BIGINT)',
+        } as unknown as BatchImportDialectConfig;
+
+        const result = await executeBatchImport(configWithoutCleanup, {
+            targetTable: 'public.orders',
+            connectionDetails: { host: 'db', dbType: 'postgresql' } as never,
+            columns: [{ sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }],
+            rows: [['1']],
+            totalRows: 1,
+            decimalDelimiter: '.',
+            format: 'CSV',
+        });
+
+        expect(result.success).toBe(false);
+        expect(executedSql.some(sql => sql.startsWith('DROP TABLE'))).toBe(false);
+    });
+
+    it('applies the requested statement timeout to batch statements', async () => {
+        const timeouts: number[] = [];
+        const recordingConnection = {
+            createCommand: jest.fn(() => {
+                const command = {
+                    commandTimeout: 0,
+                    execute: jest.fn(async () => {
+                        timeouts.push(command.commandTimeout);
+                    }),
+                };
+                return command;
+            }),
+            close: jest.fn().mockResolvedValue(undefined),
+        };
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(recordingConnection);
+
+        const result = await executeBatchImport(config, {
+            targetTable: 'public.orders',
+            connectionDetails: { host: 'db', dbType: 'postgresql' } as never,
+            columns: [{ sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }],
+            appendToExistingTable: true,
+            rows: [['1'], ['2'], ['3']],
+            totalRows: 3,
+            decimalDelimiter: '.',
+            format: 'CSV',
+            timeoutSeconds: 42,
+        });
+
+        expect(result.success).toBe(true);
+        expect(timeouts.length).toBeGreaterThan(0);
+        expect(timeouts.every((timeout) => timeout === 42)).toBe(true);
+    });
+
+    it('rolls back transactions, drops the target and surfaces source warnings on failure', async () => {
+        const executedSql: string[] = [];
+        const failingConnection = {
+            createCommand: jest.fn((sql: string) => {
+                executedSql.push(sql);
+                return {
+                    commandTimeout: 0,
+                    execute: sql.includes('INSERT')
+                        ? jest.fn().mockRejectedValue(new Error('insert failed'))
+                        : jest.fn().mockResolvedValue(undefined),
+                };
+            }),
+            close: jest.fn().mockResolvedValue(undefined),
+        };
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(failingConnection);
+        const transactionalConfig = {
+            ...config,
+            beginTransactionSql: 'BEGIN',
+            commitTransactionSql: 'COMMIT',
+            rollbackTransactionSql: 'ROLLBACK',
+            cleanupCreatedTargetOnFailure: true,
+            buildCreateTableSql: () => 'CREATE TABLE "orders" (ID BIGINT)',
+            buildDropTableSql: (target: { qualifiedName: string }) => `DROP TABLE ${target.qualifiedName}`,
+        } as unknown as BatchImportDialectConfig;
+
+        const result = await executeBatchImport(transactionalConfig, {
+            targetTable: 'public.orders',
+            connectionDetails: { host: 'db', dbType: 'postgresql' } as never,
+            columns: [{ sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }],
+            rows: [['1']],
+            totalRows: 1,
+            decimalDelimiter: '.',
+            format: 'CSV',
+            sourceWarnings: ['1 source row had a different column count.'],
+        });
+
+        expect(result.success).toBe(false);
+        expect(executedSql).toContain('ROLLBACK');
+        expect(executedSql).toContain('DROP TABLE public.orders');
+        expect(result.details?.warnings).toContain('1 source row had a different column count.');
+    });
+
     it('completes normally when not cancelled', async () => {
         const result = await executeBatchImport(config, {
             targetTable: 'public.orders',

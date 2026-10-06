@@ -7,6 +7,7 @@ import type {
 } from './DatabaseImportWizardAdapter';
 import {
     BaseImportWizardAdapter,
+    withImportSheetOption,
     type ImportWizardValidationIssue,
 } from './DatabaseImportWizardAdapter';
 
@@ -55,7 +56,7 @@ export class SnowflakeImportWizardAdapter extends BaseImportWizardAdapter {
             return provider.createResult({
                 filePath: input.filePath,
                 targetTable: input.targetTable,
-                columnOptions: input.columnOptions,
+                columnOptions: withImportSheetOption(input.columnOptions, input.sheetName),
             });
         }
 
