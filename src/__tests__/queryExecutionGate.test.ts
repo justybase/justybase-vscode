@@ -135,6 +135,41 @@ describe('queryExecutionGate', () => {
         expect(isQueryExecutionRunning(sourceUri)).toBe(false);
     });
 
+    it('runs a forced retry ahead of queued SQL and drains the queue afterwards', async () => {
+        const sourceUri = 'file:///queued-recovery.sql';
+        const coordinator = new QueryExecutionCoordinator();
+        try {
+            const resetConnection = jest.fn().mockResolvedValue(true);
+            (vscode.window.showWarningMessage as jest.Mock)
+                .mockResolvedValueOnce('Force unlock & retry')
+                .mockResolvedValueOnce('Force unlock & retry');
+
+            const firstLease = await coordinator.tryAcquire(sourceUri, provider, {
+                recovery: { resetConnection },
+            });
+            const order: string[] = [];
+            const queuedJob = coordinator.enqueue(
+                { sourceUri, sql: 'SELECT queued' },
+                {},
+                async () => async () => { order.push('queued'); return 'completed'; },
+            );
+            expect(coordinator.getSnapshot()[0]?.queued).toHaveLength(1);
+
+            const retryLease = await coordinator.tryAcquire(sourceUri, provider);
+
+            expect(retryLease).toBeDefined();
+            expect(firstLease?.isCurrent()).toBe(false);
+            expect(resetConnection).toHaveBeenCalledTimes(1);
+            expect(order).toEqual([]);
+
+            retryLease?.dispose();
+            expect(await queuedJob).toBe('completed');
+            expect(order).toEqual(['queued']);
+        } finally {
+            coordinator.dispose();
+        }
+    });
+
     it('drops the recorded session and resets the connection before retrying', async () => {
         const sourceUri = 'file:///query.sql';
         const requestCancel = jest.fn().mockResolvedValue(undefined);

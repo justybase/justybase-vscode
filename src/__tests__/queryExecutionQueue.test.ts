@@ -94,18 +94,21 @@ describe('per-document execution queue', () => {
         expect(run).not.toHaveBeenCalled();
     });
 
-    it('pauses on errors and executes the next job only on explicit resume', async () => {
+    it('advances to the next queued request when a request fails', async () => {
         const doc = document();
         const a = enqueue('bad SQL', doc, async () => 'failed');
-        const run = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
+        const next = deferred<QueryQueueOutcome>();
+        const run = jest.fn(() => next.promise);
         const b = enqueue('B', doc, run);
-        await a;
+        expect(await a).toBe('failed');
+        await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
         const lane = coordinator.getSnapshot()[0];
-        expect(lane.paused).toBe(true);
+        expect(lane.paused).toBe(false);
         expect(lane.last?.status).toBe('failed');
-        expect(run).not.toHaveBeenCalled();
-        coordinator.setPaused(lane.sourceKey, false);
+        expect(lane.last?.sql).toBe('bad SQL');
+        next.resolve('completed');
         expect(await b).toBe('completed');
+        expect(run).toHaveBeenCalledTimes(1);
     });
 
     it('does not advance on cancellation acknowledgement; waits for settlement and session isolation', async () => {
@@ -128,22 +131,24 @@ describe('per-document execution queue', () => {
         expect(run).toHaveBeenCalledTimes(1);
     });
 
-    it('holds the lane even after resume when cancellation could not isolate the session', async () => {
+    it('advances after cancellation even when the session could not be reset', async () => {
         const doc = document();
         const finish = deferred<QueryQueueOutcome>();
         const a = enqueue('A', doc, () => finish.promise, { resetConnection: async () => false });
-        const run = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
+        const next = deferred<QueryQueueOutcome>();
+        const run = jest.fn(() => next.promise);
         const b = enqueue('B', doc, run);
         await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
         finish.resolve('cancelled');
-        await a;
+        expect(await a).toBe('cancelled');
+        await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
         const lane = coordinator.getSnapshot()[0];
-        expect(lane.paused).toBe(true);
-        expect(lane.running?.status).toBe('cancelling');
-        coordinator.setPaused(lane.sourceKey, false);
-        expect(run).not.toHaveBeenCalled();
-        coordinator.clearQueued(lane.sourceKey);
-        await b;
+        expect(lane.paused).toBe(false);
+        expect(lane.last?.status).toBe('cancelled');
+        expect(lane.last?.error).toContain('could not be reset');
+        next.resolve('completed');
+        expect(await b).toBe('completed');
+        expect(run).toHaveBeenCalledTimes(1);
     });
 
     it('discards pending jobs on close and isolates reused untitled identities from stale completions', async () => {
@@ -218,7 +223,7 @@ describe('per-document execution queue', () => {
         expect(prepare).not.toHaveBeenCalled();
     });
 
-    it('safely recovers a stuck execution and ignores its late completion after resume', async () => {
+    it('safely recovers a stuck execution, continues automatically and ignores its late completion', async () => {
         const doc = document();
         const stuck = deferred<QueryQueueOutcome>();
         let oldLease: QueryExecutionLease | undefined;
@@ -233,8 +238,7 @@ describe('per-document execution queue', () => {
         await coordinator.recoverRunning(key, { getActiveSource: () => undefined, log: () => undefined });
         expect(await a).toBe('cancelled');
         expect(oldLease?.isCurrent()).toBe(false);
-        expect(coordinator.getSnapshot()[0].paused).toBe(true);
-        coordinator.setPaused(key, false);
+        expect(coordinator.getSnapshot()[0].paused).toBe(false);
         expect(await b).toBe('completed');
         stuck.resolve('completed');
         expect(coordinator.getSnapshot()[0].last?.sql).toBe('B');
@@ -257,19 +261,17 @@ describe('per-document execution queue', () => {
         const key = coordinator.getSnapshot()[0].sourceKey;
         const recovery = coordinator.recoverRunning(key, { getActiveSource: () => undefined, log: () => undefined });
         await requested.promise;
-        coordinator.setPaused(key, false);
         finish.resolve('completed');
         await a;
         expect(run).not.toHaveBeenCalled();
         decision.resolve('Keep Waiting');
         await recovery;
-        expect(coordinator.getSnapshot()[0].paused).toBe(true);
-        coordinator.setPaused(key, false);
+        expect(coordinator.getSnapshot()[0].paused).toBe(false);
         expect(await b).toBe('completed');
         warning.mockRestore();
     });
 
-    it('pauses when preparation fails, but cancelling input does not pause the remaining requests', async () => {
+    it('continues after preparation failures and cancelled input', async () => {
         const doc = document();
         const a = coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: 'A' }, { document: doc }, async () => {
             throw new Error('Variable input cancelled by user');
@@ -281,8 +283,46 @@ describe('per-document execution queue', () => {
             throw new Error('Include file unavailable');
         });
         expect(await failed).toBe('failed');
-        expect(coordinator.getSnapshot()[0].paused).toBe(true);
         expect(coordinator.getSnapshot()[0].last?.error).toBe('Include file unavailable');
+        expect(await enqueue('C', doc, async () => 'completed')).toBe('completed');
+        expect(coordinator.getSnapshot()[0].paused).toBe(false);
+    });
+
+    it('advances after a failed request even when session isolation cannot be verified', async () => {
+        const doc = document();
+        const a = enqueue('A', doc, async lease => { lease.requireSessionIsolation(); return 'failed'; },
+            { resetConnection: async () => false });
+        expect(await a).toBe('failed');
+        const lane = coordinator.getSnapshot()[0];
+        expect(lane.paused).toBe(false);
+        expect(lane.running).toBeUndefined();
+        expect(lane.last?.status).toBe('failed');
+        expect(lane.last?.error).toContain('could not be reset');
+    });
+
+    it('does not attach the reset warning to a completed request', async () => {
+        const doc = document();
+        const a = enqueue('A', doc, async lease => { lease.requireSessionIsolation(); return 'completed'; },
+            { resetConnection: async () => false });
+        expect(await a).toBe('completed');
+        const lane = coordinator.getSnapshot()[0];
+        expect(lane.paused).toBe(false);
+        expect(lane.last?.status).toBe('completed');
+        expect(lane.last?.error).toBeUndefined();
+    });
+
+    it('does not park the lane when the cancellation request fails', async () => {
+        const doc = document();
+        const finish = deferred<QueryQueueOutcome>();
+        const a = enqueue('A', doc, () => finish.promise, { requestCancel: async () => { throw new Error('cancel failed'); } });
+        const run = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
+        const b = enqueue('B', doc, run);
+        await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
+        await coordinator.cancelRunning(coordinator.getSnapshot()[0].sourceKey);
+        expect(coordinator.getSnapshot()[0].paused).toBe(false);
+        finish.resolve('completed');
+        await Promise.all([a, b]);
+        expect(run).toHaveBeenCalledTimes(1);
     });
 
 });
