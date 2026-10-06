@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-09-26
-product_version: 3.18.5
+product_version: 3.18.6
 ---
 
 # SQL completion: scope, settings, and verification
