@@ -106,6 +106,7 @@ export class BackgroundValidationService {
       sampleSize,
       progressCallback,
     } = job;
+    const decimalDelimiter = importer.getDecimalDelimiter();
 
     const getTrackedEntry = ():
       | {
@@ -223,7 +224,11 @@ export class BackgroundValidationService {
           }
 
           const value = row[column.sourceIndex] ?? "";
-          const validationMessage = validateImportCellValue(value, column.selectedType);
+          const validationMessage = validateImportCellValue(
+            value,
+            column.selectedType,
+            decimalDelimiter,
+          );
           if (!validationMessage) {
             continue;
           }

@@ -1,3 +1,7 @@
+import {
+    detectImportDecimalDelimiter,
+    parseFormattedImportNumber,
+} from '@justybase/database-utils/importNumberParsing';
 import { getBaseImportTypeName } from './adapters/DatabaseImportWizardAdapter';
 
 function normalizeDateCandidate(value: string): string | null {
@@ -70,16 +74,22 @@ function isRealTimestamp(value: string): boolean {
  * Shared by the synchronous preview validation and the background sample
  * validation so both surfaces report identical messages.
  */
-export function validateImportCellValue(value: string, typeName: string): string | null {
+export function validateImportCellValue(
+    value: string,
+    typeName: string,
+    decimalDelimiter?: string,
+): string | null {
     const trimmed = String(value || '').trim();
     if (!trimmed) {
         return null;
     }
 
     const baseType = getBaseImportTypeName(typeName);
+    const effectiveDecimalDelimiter = decimalDelimiter ?? detectImportDecimalDelimiter([trimmed]);
 
-    if (['INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT', 'NUMBER'].includes(baseType)) {
-        return /^[-+]?\d+$/.test(trimmed) ? null : 'Expected an integer value.';
+    if (['INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'].includes(baseType)) {
+        const parsed = parseFormattedImportNumber(trimmed, effectiveDecimalDelimiter);
+        return parsed && !parsed.fractionDigits ? null : 'Expected an integer value.';
     }
 
     if (
@@ -90,12 +100,15 @@ export function validateImportCellValue(value: string, typeName: string): string
             'DOUBLE',
             'FLOAT',
             'DOUBLE PRECISION',
+            'NUMBER',
             'MONEY',
             'SMALLMONEY',
             'DECFLOAT',
         ].includes(baseType)
     ) {
-        return /^[-+]?\d+(?:[.,]\d+)?$/.test(trimmed) ? null : 'Expected a numeric value.';
+        return parseFormattedImportNumber(trimmed, effectiveDecimalDelimiter)
+            ? null
+            : 'Expected a numeric value.';
     }
 
     if (['BOOLEAN', 'BOOL', 'BIT'].includes(baseType)) {

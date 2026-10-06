@@ -373,14 +373,8 @@ export function normalizeImportedLiteralValue(
     }
 
     if (
-        normalizedSourceType === 'NUMERIC'
-        || normalizedSourceType === 'DECIMAL'
-        || normalizedTargetType === 'NUMERIC'
-        || normalizedTargetType === 'DECIMAL'
-        || normalizedTargetType === 'NUMBER'
-        || normalizedTargetType === 'DOUBLE'
-        || normalizedTargetType === 'REAL'
-        || normalizedTargetType === 'FLOAT'
+        BATCH_NUMERIC_BASE_TYPES.has(normalizedSourceType)
+        || BATCH_NUMERIC_BASE_TYPES.has(normalizedTargetType)
     ) {
         const scale = getNumericScale(targetType) ?? 0;
         const normalized = normalizeImportNumberForDb(
@@ -703,6 +697,7 @@ export async function importDataWithBatching(
         skipRows: columnOptions?.skipRows,
         maxErrors: columnOptions?.maxErrors,
         encoding: columnOptions?.encoding,
+        isCancelled,
     });
     if (columnOptions?.sheetName?.trim()) {
         importer.setSelectedSheet(columnOptions.sheetName);

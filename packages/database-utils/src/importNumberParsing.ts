@@ -344,7 +344,15 @@ export function detectImportDecimalDelimiter(values: Iterable<string>): ImportDe
         }
         const wrapped = stripWrappingParens(cell);
         let text = wrapped.text.replace(/^[-−–—+]\s*/, '');
-        text = stripEdges(text).text;
+        const hasLeadingCurrency = LEADING_CURRENCY_PATTERN.test(text) || LEADING_CODE_PATTERN.test(text);
+        const edges = stripEdges(text);
+        text = edges.text;
+        // Currency may precede the sign (`$-123,45`, `USD -123,45`).
+        // Strip that sign only when a leading currency token was present, so
+        // malformed values such as `--123 EUR` still abstain from voting.
+        if (hasLeadingCurrency) {
+            text = text.replace(/^[-−–—+]\s*/, '');
+        }
         if (!text) {
             continue;
         }
