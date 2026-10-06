@@ -11,6 +11,7 @@ import type { ConnectionDetails } from '../types';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../utils/identifierUtils';
 import { ClipboardDataProcessor } from './clipboardImporter';
 import {
+    buildWidthMismatchWarning,
     ImportColumnDescriptor,
     ImportColumnOptions,
     ImportResult,
@@ -18,10 +19,16 @@ import {
 } from './dataImporter';
 import { normalizeAndDeduplicateHeaders } from './importHeaderUtils';
 import { createTabularDataImporter } from './tabularDataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
+import { throwIfImportCancelled } from './importCancellation';
+import {
+    isDashZeroImportCell,
+    normalizeImportNumberForDb,
+} from '@justybase/database-utils/importNumberParsing';
 
 const POSTGRESQL_COPY_STREAM_MARKER = 'JBL_IMPORT_STREAM';
 const POSTGRESQL_DEFAULT_TIMEOUT_SECONDS = 3600;
-const SUPPORTED_FILE_FORMATS = ['.csv', '.txt', '.xlsx', '.xlsb'];
+const SUPPORTED_FILE_FORMATS = ['.csv', '.txt', '.tsv', '.xlsx', '.xlsb'];
 
 interface PostgreSqlTargetTable {
     providedDatabase?: string;
@@ -42,7 +49,7 @@ interface PostgreSqlImportExecutionOptions {
     targetTable: string;
     connectionDetails: ConnectionDetails;
     columns: ImportColumnDescriptor[];
-    rows: Iterable<string[]>;
+    rows: Iterable<string[]> | AsyncIterable<string[]>;
     totalRows: number;
     decimalDelimiter: string;
     copyDelimiter: string;
@@ -53,6 +60,8 @@ interface PostgreSqlImportExecutionOptions {
     format: string;
     detectedDelimiter?: string;
     appendToExistingTable?: boolean;
+    isCancelled?: ImportCancellationCheck;
+    sourceWarnings?: string[];
 }
 
 function normalizeImportType(typeName: string): string {
@@ -224,6 +233,11 @@ function truncateNumeric(value: string, scale: number, decimalDelimiter: string)
         return value;
     }
 
+    const normalized = normalizeImportNumberForDb(value, decimalDelimiter, scale);
+    if (normalized !== null) {
+        return normalized;
+    }
+
     const parts = value.split(decimalDelimiter);
     if (parts.length !== 2) {
         return value;
@@ -245,6 +259,13 @@ function normalizeValueForCopy(value: string, dataType: string, decimalDelimiter
 
     const baseType = getBaseImportType(dataType);
 
+    // Lone dash (`-`/`–` for zero): 0 in numeric columns, the dash itself in
+    // text columns.
+    if (isDashZeroImportCell(trimmed)) {
+        const isNumeric = baseType === 'NUMERIC' || baseType === 'DECIMAL' || baseType === 'BIGINT';
+        return isNumeric ? '0' : trimmed;
+    }
+
     if (baseType === 'DATE') {
         return normalizeDateValue(trimmed);
     }
@@ -253,16 +274,26 @@ function normalizeValueForCopy(value: string, dataType: string, decimalDelimiter
         return normalizeTimestampValue(trimmed);
     }
 
-    if (baseType === 'NUMERIC' || baseType === 'DECIMAL') {
-        let normalized = trimmed;
+    if (baseType === 'NUMERIC' || baseType === 'DECIMAL' || baseType === 'BIGINT') {
         const declaredScale = getNumericScale(dataType) ?? 0;
-        if (declaredScale > 0) {
-            normalized = truncateNumeric(normalized, declaredScale, decimalDelimiter);
+        const normalized = normalizeImportNumberForDb(
+            trimmed,
+            decimalDelimiter,
+            (baseType === 'NUMERIC' || baseType === 'DECIMAL') && declaredScale > 0
+                ? declaredScale
+                : undefined
+        );
+        if (normalized !== null) {
+            return normalized;
+        }
+        let fallback = trimmed.replace(/\s/g, '');
+        if ((baseType === 'NUMERIC' || baseType === 'DECIMAL') && declaredScale > 0) {
+            fallback = truncateNumeric(fallback, declaredScale, decimalDelimiter);
         }
         if (decimalDelimiter === ',') {
-            normalized = normalized.replace(',', '.');
+            fallback = fallback.replace(',', '.');
         }
-        return normalized;
+        return fallback;
     }
 
     return trimmed;
@@ -285,23 +316,38 @@ function buildVirtualStreamName(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}.txt`;
 }
 
+function toAsyncIterator(
+    rows: Iterable<string[]> | AsyncIterable<string[]>,
+): AsyncIterator<string[]> {
+    const asyncIterable = rows as AsyncIterable<string[]>;
+    if (typeof asyncIterable[Symbol.asyncIterator] === 'function') {
+        return asyncIterable[Symbol.asyncIterator]();
+    }
+
+    const syncIterator = (rows as Iterable<string[]>)[Symbol.iterator]();
+    return {
+        next: async () => syncIterator.next(),
+    };
+}
+
 class PostgreSqlCopyDataStream extends Readable {
-    private readonly _rowIterator: Iterator<string[]>;
+    private readonly _rowIterator: AsyncIterator<string[]>;
     private readonly _recordDelimiter = '\n';
     private _currentIndex = 0;
     private _lastReportTime = 0;
     private _isReading = false;
 
     public constructor(
-        rows: Iterable<string[]>,
+        rows: Iterable<string[]> | AsyncIterable<string[]>,
         private readonly _columns: ImportColumnDescriptor[],
         private readonly _decimalDelimiter: string,
         private readonly _totalRows: number,
         private readonly _delimiter: string,
-        private readonly _progressCallback?: ProgressCallback
+        private readonly _progressCallback?: ProgressCallback,
+        private readonly _isCancelled?: ImportCancellationCheck
     ) {
         super();
-        this._rowIterator = rows[Symbol.iterator]();
+        this._rowIterator = toAsyncIterator(rows);
     }
 
     _read(_size: number): void {
@@ -310,17 +356,18 @@ class PostgreSqlCopyDataStream extends Readable {
         }
 
         this._isReading = true;
-        this.readBatch();
+        void this.readBatch();
     }
 
-    private readBatch(): void {
+    private async readBatch(): Promise<void> {
         try {
             let more = true;
             let processedInBatch = 0;
             const batchSize = 100;
 
             while (more && processedInBatch < batchSize) {
-                const nextRow = this._rowIterator.next();
+                throwIfImportCancelled(this._isCancelled);
+                const nextRow = await this._rowIterator.next();
                 if (nextRow.done) {
                     this.reportProgress(true);
                     this._isReading = false;
@@ -403,9 +450,13 @@ async function executePostgreSqlCopyImport(options: PostgreSqlImportExecutionOpt
     const startTime = Date.now();
     let connection: DatabaseConnection | null = null;
     let streamName: string | undefined;
+    let createdTargetTable = false;
+    let targetForCleanup: PostgreSqlTargetTable | undefined;
 
     try {
+        throwIfImportCancelled(options.isCancelled);
         const target = parsePostgreSqlTargetTable(options.targetTable, options.connectionDetails);
+        targetForCleanup = target;
         if (options.columns.length === 0) {
             throw new Error('No columns selected for import.');
         }
@@ -414,14 +465,7 @@ async function executePostgreSqlCopyImport(options: PostgreSqlImportExecutionOpt
         }
 
         streamName = buildVirtualStreamName('virtual_postgresql_import');
-        const copyStream = new PostgreSqlCopyDataStream(
-            options.rows,
-            options.columns,
-            options.decimalDelimiter,
-            options.totalRows,
-            options.copyDelimiter,
-            options.progressCallback
-        );
+        const copyStream = new PostgreSqlCopyDataStream(options.rows, options.columns, options.decimalDelimiter, options.totalRows, options.copyDelimiter, options.progressCallback, options.isCancelled);
 
         registerImportStream(streamName, copyStream);
 
@@ -431,9 +475,11 @@ async function executePostgreSqlCopyImport(options: PostgreSqlImportExecutionOpt
         });
 
         const timeoutSeconds = options.timeoutSeconds || POSTGRESQL_DEFAULT_TIMEOUT_SECONDS;
+        throwIfImportCancelled(options.isCancelled);
         if (!options.appendToExistingTable) {
             options.progressCallback?.(`Creating target table ${target.displayName}...`);
             await executeStatement(connection, buildCreateTableSql(target, options.columns), timeoutSeconds);
+            createdTargetTable = true;
         }
 
         options.progressCallback?.(`Loading ${options.totalRows.toLocaleString()} rows with PostgreSQL COPY...`);
@@ -456,10 +502,22 @@ async function executePostgreSqlCopyImport(options: PostgreSqlImportExecutionOpt
                 rowsInserted: options.totalRows,
                 processingTime: `${processingTime.toFixed(2)} seconds`,
                 columns: options.columns.length,
-                detectedDelimiter: options.detectedDelimiter
+                detectedDelimiter: options.detectedDelimiter,
+                warnings: options.sourceWarnings
             }
         };
     } catch (error: unknown) {
+        if (connection && createdTargetTable && targetForCleanup) {
+            try {
+                await executeStatement(
+                    connection,
+                    `DROP TABLE ${targetForCleanup.qualifiedName}`,
+                    POSTGRESQL_DEFAULT_TIMEOUT_SECONDS
+                );
+            } catch {
+                // Surface the original import error while best-effort cleaning up.
+            }
+        }
         return {
             success: false,
             message: error instanceof Error ? error.message : String(error)
@@ -480,7 +538,8 @@ export async function importDataToPostgreSql(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     timeoutSeconds?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     if (!filePath || !fs.existsSync(filePath)) {
         return {
@@ -513,11 +572,15 @@ export async function importDataToPostgreSql(
 
     progressCallback?.('Analyzing source file...');
     const importer = createTabularDataImporter(filePath, targetTable, { kind: 'postgresql', hasHeaders: columnOptions?.hasHeaders });
+    if (columnOptions?.sheetName?.trim()) {
+        importer.setSelectedSheet(columnOptions.sheetName);
+    }
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
     const typeMapper = getRequiredDatabaseImportTypeMapper('postgresql');
-    const rows = await importer.getAllRows();
+    const rows = importer.iterateRows();
+    const totalRows = importer.getRowsCount();
     const columns = mapImportColumnsToPostgreSql(importer.getEffectiveColumnDescriptors(), typeMapper);
 
     return executePostgreSqlCopyImport({
@@ -525,7 +588,7 @@ export async function importDataToPostgreSql(
         connectionDetails,
         columns,
         rows,
-        totalRows: rows.length,
+        totalRows,
         decimalDelimiter: importer.getDecimalDelimiter(),
         copyDelimiter: importer.getCsvDelimiter(),
         progressCallback,
@@ -535,6 +598,11 @@ export async function importDataToPostgreSql(
         format: path.extname(filePath).replace('.', '').toUpperCase() || 'UNKNOWN',
         detectedDelimiter: importer.getCsvDelimiter(),
         appendToExistingTable: columnOptions?.appendToExistingTable,
+        isCancelled,
+        sourceWarnings: (() => {
+            const warning = buildWidthMismatchWarning(importer.getWidthMismatchCount());
+            return warning ? [warning] : undefined;
+        })(),
     });
 }
 
@@ -542,9 +610,13 @@ export async function importClipboardDataToPostgreSql(
     targetTable: string,
     connectionDetails: ConnectionDetails,
     _formatPreference?: string | null,
-    _options?: unknown,
-    progressCallback?: ProgressCallback
+    options?: unknown,
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
+    const columnOptions = options && typeof options === 'object'
+        ? options as ImportColumnOptions
+        : undefined;
     if (!targetTable) {
         return {
             success: false,
@@ -583,6 +655,8 @@ export async function importClipboardDataToPostgreSql(
         copyDelimiter: '\t',
         progressCallback,
         format: 'CLIPBOARD',
-        detectedDelimiter: analyzer.getDelimiter()
+        detectedDelimiter: analyzer.getDelimiter(),
+        isCancelled,
+        appendToExistingTable: columnOptions?.appendToExistingTable
     });
 }

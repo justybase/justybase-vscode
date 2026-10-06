@@ -129,10 +129,10 @@ describe("import/dataImporter", () => {
       expect(type.dbType).toBe("BIGINT");
     });
 
-    it("should handle negative numbers as NVARCHAR", () => {
+    it("should handle negative numbers as numeric (Excel minus/parens)", () => {
       const chooser = new ColumnTypeChooser();
       const type = chooser.refreshCurrentType("-123");
-      expect(type.dbType).toBe("NVARCHAR");
+      expect(type.dbType).toBe("BIGINT");
     });
 
     it("should handle numbers with leading zeros as NUMERIC", () => {
@@ -147,7 +147,7 @@ describe("import/dataImporter", () => {
       expect(type.dbType).toBe("NVARCHAR");
     });
 
-    it("should force text type for PESEL-like headers", () => {
+    it("should honor the explicit forceText option", () => {
       const chooser = new ColumnTypeChooser(".", { forceText: true });
       const type = chooser.refreshCurrentType("12345678901");
       expect(type.dbType).toBe("NVARCHAR");

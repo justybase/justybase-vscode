@@ -7,6 +7,7 @@ import type { ConnectionDetails } from '../types';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 import { ClipboardDataProcessor } from './clipboardImporter';
 import {
+    buildWidthMismatchWarning,
     getBaseDataType,
     getNumericScale,
     ImportColumnDescriptor,
@@ -18,8 +19,12 @@ import {
 import { normalizeAndDeduplicateHeaders } from './importHeaderUtils';
 import { createTabularDataImporter } from './tabularDataImporter';
 import { throwIfImportCancelled, type ImportCancellationCheck } from './importCancellation';
+import {
+    isDashZeroImportCell,
+    normalizeImportNumberForDb,
+} from '@justybase/database-utils/importNumberParsing';
 
-const SUPPORTED_FILE_FORMATS = ['.csv', '.txt', '.xlsx', '.xlsb'];
+const SUPPORTED_FILE_FORMATS = ['.csv', '.txt', '.tsv', '.xlsx', '.xlsb'];
 
 export interface BatchImportTargetTable {
     providedDatabase?: string;
@@ -74,6 +79,10 @@ export interface ImportExecutionInput {
     detectedDelimiter?: string;
     /** Cooperative cancellation checked between inserted batches. */
     isCancelled?: ImportCancellationCheck;
+    /** Source-format warnings surfaced in the import result. */
+    sourceWarnings?: string[];
+    /** Per-statement timeout in seconds; dialect defaults apply when omitted. */
+    timeoutSeconds?: number;
 }
 
 export function composeQualifiedImportTargetDisplayName(
@@ -281,6 +290,11 @@ export function truncateNumeric(value: string, scale: number, decimalDelimiter: 
         return value;
     }
 
+    const normalized = normalizeImportNumberForDb(value, decimalDelimiter, scale);
+    if (normalized !== null) {
+        return normalized;
+    }
+
     const parts = value.split(decimalDelimiter);
     if (parts.length !== 2) {
         return value;
@@ -293,6 +307,8 @@ export function truncateNumeric(value: string, scale: number, decimalDelimiter: 
 
     return `${integerPart}${decimalDelimiter}${decimalPart.slice(0, scale)}`;
 }
+
+const BATCH_NUMERIC_BASE_TYPES = new Set(['NUMERIC', 'DECIMAL', 'NUMBER', 'DOUBLE', 'REAL', 'FLOAT', 'BIGINT', 'INT', 'INTEGER', 'SMALLINT']);
 
 function normalizeBooleanValue(value: string): string {
     const normalized = value.trim().toLowerCase();
@@ -320,6 +336,12 @@ export function normalizeImportedLiteralValue(
 
     const normalizedSourceType = getBaseDataType(sourceType);
     const normalizedTargetType = getBaseDataType(targetType);
+    // Lone dash (`-`/`–` for zero): 0 in numeric columns, the dash itself in
+    // text columns.
+    if (isDashZeroImportCell(trimmed)) {
+        const isNumericColumn = BATCH_NUMERIC_BASE_TYPES.has(normalizedSourceType) || BATCH_NUMERIC_BASE_TYPES.has(normalizedTargetType);
+        return isNumericColumn ? '0' : trimmed;
+    }
     const sourceTypeWithZone = normalizeDataType(sourceType);
     const targetTypeWithZone = normalizeDataType(targetType);
 
@@ -361,14 +383,22 @@ export function normalizeImportedLiteralValue(
         || normalizedTargetType === 'FLOAT'
     ) {
         const scale = getNumericScale(targetType) ?? 0;
-        let normalized = trimmed;
+        const normalized = normalizeImportNumberForDb(
+            trimmed,
+            decimalDelimiter,
+            scale > 0 ? scale : undefined
+        );
+        if (normalized !== null) {
+            return normalized;
+        }
+        let fallback = trimmed.replace(/\s/g, '');
         if (scale > 0) {
-            normalized = truncateNumeric(normalized, scale, decimalDelimiter);
+            fallback = truncateNumeric(fallback, scale, decimalDelimiter);
         }
         if (decimalDelimiter === ',') {
-            normalized = normalized.replace(',', '.');
+            fallback = fallback.replace(',', '.');
         }
-        return normalized;
+        return fallback;
     }
 
     return trimmed;
@@ -457,9 +487,9 @@ export function buildBatchLoadPreview(
     return `${previewSql}\n-- Preview shows sample rows only. Execution inserts all selected rows in batches.`;
 }
 
-export async function executeStatement(connection: DatabaseConnection, sql: string, timeoutSeconds: number = 1800): Promise<void> {
+export async function executeStatement(connection: DatabaseConnection, sql: string, timeoutSeconds?: number): Promise<void> {
     const command = connection.createCommand(sql);
-    command.commandTimeout = timeoutSeconds;
+    command.commandTimeout = timeoutSeconds ?? 1800;
     await command.execute();
 }
 
@@ -472,7 +502,8 @@ async function insertRowsInBatches(
     decimalDelimiter: string,
     totalRows: number,
     progressCallback?: ProgressCallback,
-    isCancelled?: ImportCancellationCheck
+    isCancelled?: ImportCancellationCheck,
+    timeoutSeconds?: number
 ): Promise<number> {
     let insertedRows = 0;
     let batch: string[][] = [];
@@ -487,7 +518,7 @@ async function insertRowsInBatches(
         const insertSql = config.buildInsertSql
             ? config.buildInsertSql(target, columns, batch, decimalDelimiter)
             : buildDefaultInsertSql(config, target, columns, batch, decimalDelimiter);
-        await executeStatement(connection, insertSql);
+        await executeStatement(connection, insertSql, timeoutSeconds);
         insertedRows += batch.length;
         batch = [];
         progressCallback?.(`Inserted ${insertedRows.toLocaleString()}/${totalRows.toLocaleString()} rows`, undefined, false);
@@ -497,7 +528,7 @@ async function insertRowsInBatches(
         const insertSql = config.buildInsertSql
             ? config.buildInsertSql(target, columns, batch, decimalDelimiter)
             : buildDefaultInsertSql(config, target, columns, batch, decimalDelimiter);
-        await executeStatement(connection, insertSql);
+        await executeStatement(connection, insertSql, timeoutSeconds);
         insertedRows += batch.length;
         progressCallback?.(`Inserted ${insertedRows.toLocaleString()}/${totalRows.toLocaleString()} rows`, undefined, false);
     }
@@ -513,7 +544,7 @@ export async function executeBatchImport(
     let connection: DatabaseConnection | null = null;
     let createdTargetTable = false;
     let targetForCleanup: BatchImportTargetTable | undefined;
-    const warnings: string[] = [];
+    const warnings: string[] = [...(input.sourceWarnings ?? [])];
 
     try {
         throwIfImportCancelled(input.isCancelled);
@@ -537,7 +568,7 @@ export async function executeBatchImport(
 
         throwIfImportCancelled(input.isCancelled);
         if (config.beginTransactionSql) {
-            await executeStatement(connection, config.beginTransactionSql);
+            await executeStatement(connection, config.beginTransactionSql, input.timeoutSeconds);
         }
 
         if (!input.appendToExistingTable) {
@@ -549,7 +580,7 @@ export async function executeBatchImport(
                 config.buildCreateTableSql
                     ? config.buildCreateTableSql(target, columns)
                     : buildCreateTableSql(target, columns, config.kind),
-                3600,
+                input.timeoutSeconds ?? 3600,
             );
             createdTargetTable = true;
         }
@@ -563,11 +594,12 @@ export async function executeBatchImport(
             input.decimalDelimiter,
             input.totalRows,
             input.progressCallback,
-            input.isCancelled
+            input.isCancelled,
+            input.timeoutSeconds
         );
 
         if (config.commitTransactionSql) {
-            await executeStatement(connection, config.commitTransactionSql);
+            await executeStatement(connection, config.commitTransactionSql, input.timeoutSeconds);
         }
 
         const processingTime = (Date.now() - startTime) / 1000;
@@ -637,7 +669,7 @@ export async function importDataWithBatching(
     targetTable: string,
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
-    _timeoutSeconds?: number,
+    timeoutSeconds?: number,
     columnOptions?: ImportColumnOptions,
     isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
@@ -667,25 +699,35 @@ export async function importDataWithBatching(
         kind: config.kind,
         inferBoolean: config.inferBoolean,
         hasHeaders: columnOptions?.hasHeaders,
+        delimiter: columnOptions?.delimiter,
+        skipRows: columnOptions?.skipRows,
+        maxErrors: columnOptions?.maxErrors,
+        encoding: columnOptions?.encoding,
     });
+    if (columnOptions?.sheetName?.trim()) {
+        importer.setSelectedSheet(columnOptions.sheetName);
+    }
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
 
-    const rows = await importer.getAllRows();
+    const rows = importer.iterateRows();
+    const widthWarning = buildWidthMismatchWarning(importer.getWidthMismatchCount());
     return executeBatchImport(config, {
         targetTable,
         connectionDetails,
         columns: importer.getEffectiveColumnDescriptors(),
         appendToExistingTable: columnOptions?.appendToExistingTable,
         rows,
-        totalRows: rows.length,
+        totalRows: importer.getRowsCount(),
         decimalDelimiter: importer.getDecimalDelimiter(),
         progressCallback,
         sourceFile: filePath,
         fileSize: fs.statSync(filePath).size,
         format: path.extname(filePath).replace('.', '').toUpperCase() || 'UNKNOWN',
         detectedDelimiter: importer.getCsvDelimiter(),
-        isCancelled
+        isCancelled,
+        sourceWarnings: widthWarning ? [widthWarning] : undefined,
+        timeoutSeconds
     });
 }
 
@@ -694,8 +736,9 @@ export async function importClipboardWithBatching(
     targetTable: string,
     connectionDetails: ConnectionDetails,
     _formatPreference?: string | null,
-    _options?: unknown,
-    progressCallback?: ProgressCallback
+    options?: unknown,
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     if (!targetTable) {
         return {
@@ -704,6 +747,9 @@ export async function importClipboardWithBatching(
         };
     }
 
+    const columnOptions = options && typeof options === 'object'
+        ? options as ImportColumnOptions
+        : undefined;
     const processor = new ClipboardDataProcessor({ inferBoolean: config.inferBoolean });
     const analyzer = await processor.analyzeClipboardData(progressCallback);
     const headers = normalizeAndDeduplicateHeaders(analyzer.getHeaders(), config.kind);
@@ -734,11 +780,13 @@ export async function importClipboardWithBatching(
         targetTable,
         connectionDetails,
         columns,
+        appendToExistingTable: columnOptions?.appendToExistingTable,
         rows: analyzer.dataRowIterator(),
         totalRows,
         decimalDelimiter: analyzer.getDecimalDelimiter(),
         progressCallback,
         format: 'CLIPBOARD',
-        detectedDelimiter: analyzer.getDelimiter()
+        detectedDelimiter: analyzer.getDelimiter(),
+        isCancelled
     });
 }

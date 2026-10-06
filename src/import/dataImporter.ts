@@ -5,6 +5,7 @@
  */
 
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { Readable } from "stream";
 import { ConnectionDetails, NzConnection } from "../types";
@@ -14,8 +15,15 @@ import {
   type ColumnTypeChooserOptions,
 } from "../dialects/netezza/import/typeMapping";
 import { headerForcesTextImportType } from "./importTypeInferenceUtils";
+import {
+  detectImportDecimalDelimiter,
+  mapDashZeroImportCell,
+  normalizeImportNumberForDb,
+} from "@justybase/database-utils/importNumberParsing";
+import { transliterateImportHeader } from "@justybase/database-utils/importColumnNameUtils";
 import { throwIfImportCancelled, type ImportCancellationCheck } from "./importCancellation";
 import { quoteIdentifier } from "../utils/identifierUtils";
+import { Logger } from "../utils/logger";
 import {
   buildNetezzaVirtualImportName,
   destroyNetezzaImportStream,
@@ -27,140 +35,30 @@ import type {
   ImportResult,
   ProgressCallback,
 } from '@justybase/contracts';
+import {
+  DelimitedRecordParser,
+  detectDelimitedTextDelimiter,
+  parseDelimitedRecords,
+} from '@justybase/database-utils/delimitedRecordParser';
+export {
+  detectDelimitedTextDelimiter,
+  iterateDelimitedRecords,
+  parseDelimitedRecords,
+} from '@justybase/database-utils/delimitedRecordParser';
 
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-class DelimitedRecordParser {
-  private field = "";
-  private row: string[] = [];
-  private recordHasMeaningfulInput = false;
-  private inQuotes = false;
-  private pendingQuote = false;
-  private skipLfAfterCr = false;
-  private recordNumber = 0;
-
-  constructor(private readonly delimiter: string) {
-    if (delimiter.length !== 1) {
-      throw new Error("Delimited import requires a single-character delimiter");
-    }
-  }
-
-  *push(chunk: string, final = false): Generator<string[], void, unknown> {
-    const emitRecord = (): string[] | undefined => {
-      this.row.push(this.field);
-      const record = this.recordHasMeaningfulInput ? this.row : undefined;
-      this.field = "";
-      this.row = [];
-      this.recordHasMeaningfulInput = false;
-      this.recordNumber++;
-      return record;
-    };
-
-    for (let index = 0; index < chunk.length; index++) {
-      const char = chunk[index];
-
-      if (this.skipLfAfterCr) {
-        this.skipLfAfterCr = false;
-        if (char === "\n") {
-          continue;
-        }
-      }
-
-      if (this.pendingQuote) {
-        this.pendingQuote = false;
-        if (char === '"') {
-          this.field += '"';
-          continue;
-        }
-        this.inQuotes = false;
-      }
-
-      if (this.inQuotes) {
-        if (char === '"') {
-          this.pendingQuote = true;
-        } else {
-          this.field += char;
-        }
-        continue;
-      }
-
-      if (char === '"') {
-        this.recordHasMeaningfulInput = true;
-        if (this.field.length === 0) {
-          this.inQuotes = true;
-        } else {
-          this.field += char;
-        }
-      } else if (char === this.delimiter) {
-        if (!/\s/.test(char)) {
-          this.recordHasMeaningfulInput = true;
-        }
-        this.row.push(this.field);
-        this.field = "";
-      } else if (char === "\r" || char === "\n") {
-        const record = emitRecord();
-        if (record) {
-          yield record;
-        }
-        this.skipLfAfterCr = char === "\r";
-      } else {
-        if (!/\s/.test(char)) {
-          this.recordHasMeaningfulInput = true;
-        }
-        this.field += char;
-      }
-    }
-
-    if (final) {
-      if (this.pendingQuote) {
-        this.pendingQuote = false;
-        this.inQuotes = false;
-      }
-      if (this.inQuotes) {
-        throw new Error(`Unterminated quoted field in record ${this.recordNumber + 1}`);
-      }
-      if (this.recordHasMeaningfulInput) {
-        const record = emitRecord();
-        if (record) {
-          yield record;
-        }
-      }
-    }
-  }
-}
-
-export function parseDelimitedRecords(text: string, delimiter: string): string[][] {
-  const parser = new DelimitedRecordParser(delimiter);
-  return Array.from(parser.push(text.startsWith("\ufeff") ? text.slice(1) : text, true));
-}
-
-export function* iterateDelimitedRecords(
-  text: string,
-  delimiter: string,
-  chunkSize = 64 * 1024,
-): Generator<string[], void, unknown> {
-  if (chunkSize < 1) {
-    throw new Error("Delimited import chunk size must be positive");
-  }
-
-  const parser = new DelimitedRecordParser(delimiter);
-  const source = text.startsWith("\ufeff") ? text.slice(1) : text;
-  for (let offset = 0; offset < source.length; offset += chunkSize) {
-    yield* parser.push(source.slice(offset, offset + chunkSize));
-  }
-  yield* parser.push("", true);
-}
-
 export function readDelimitedTextPrefix(
   filePath: string,
   maxBytes = 64 * 1024,
+  encoding: BufferEncoding = "utf-8",
 ): string {
   const descriptor = fs.openSync(filePath, "r");
   const buffer = Buffer.alloc(maxBytes);
   try {
     const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
-    return buffer.toString("utf-8", 0, bytesRead);
+    return buffer.toString(encoding, 0, bytesRead);
   } finally {
     fs.closeSync(descriptor);
   }
@@ -170,9 +68,10 @@ export async function* readDelimitedRecords(
   filePath: string,
   delimiter: string,
   onReadProgress?: (bytesRead: number, totalBytes: number) => void,
+  encoding: BufferEncoding = "utf-8",
 ): AsyncGenerator<string[]> {
   const parser = new DelimitedRecordParser(delimiter);
-  const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+  const stream = fs.createReadStream(filePath, { encoding });
   const totalBytes = fs.statSync(filePath).size;
   let firstChunk = true;
 
@@ -199,102 +98,6 @@ export async function* readDelimitedRecords(
   }
 }
 
-export function detectDelimitedTextDelimiter(
-  text: string,
-  delimiters: readonly string[],
-  fallback: string,
-): string {
-  const countsByRecord = new Map(delimiters.map((delimiter) => [delimiter, [] as number[]]));
-  const delimiterSet = new Set(delimiters);
-  let inQuotes = false;
-  let atFieldStart = true;
-  let recordHasContent = false;
-  let recordCounts = new Map(delimiters.map((delimiter) => [delimiter, 0]));
-  let sampledRecords = 0;
-  const source = text.startsWith("\ufeff") ? text.slice(1) : text;
-  const sampleRecordLimit = 10;
-
-  const finishRecord = () => {
-    if (recordHasContent) {
-      for (const delimiter of delimiters) {
-        countsByRecord.get(delimiter)?.push(recordCounts.get(delimiter) ?? 0);
-      }
-      sampledRecords++;
-    }
-    recordHasContent = false;
-    atFieldStart = true;
-    recordCounts = new Map(delimiters.map((delimiter) => [delimiter, 0]));
-  };
-
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (inQuotes) {
-      if (char === '"' && source[index + 1] === '"') {
-        index++;
-      } else if (char === '"') {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === '"' && atFieldStart) {
-      inQuotes = true;
-      atFieldStart = false;
-    } else {
-      if (char === "\r" || char === "\n") {
-        finishRecord();
-        if (sampledRecords >= sampleRecordLimit) {
-          break;
-        }
-      } else if (delimiterSet.has(char)) {
-        recordCounts.set(char, (recordCounts.get(char) ?? 0) + 1);
-        recordHasContent = true;
-        atFieldStart = true;
-      } else {
-        if (!/\s/.test(char)) {
-          recordHasContent = true;
-        }
-        atFieldStart = false;
-      }
-    }
-  }
-
-  if (sampledRecords < sampleRecordLimit) {
-    finishRecord();
-  }
-
-  let detected = fallback;
-  let maxConsistentCount = 0;
-  let hasConsistentDelimiter = false;
-  const fallbackCounts = countsByRecord.get(fallback) ?? [];
-  const fallbackCount = fallbackCounts[0] ?? 0;
-  const hasConsistentFallback = fallbackCount > 0
-    && fallbackCounts.every((recordCount) => recordCount === fallbackCount);
-
-  if (hasConsistentFallback) {
-    return fallback;
-  }
-
-  for (const delimiter of delimiters) {
-    if (delimiter === fallback) {
-      continue;
-    }
-    const counts = countsByRecord.get(delimiter) ?? [];
-    const count = counts[0] ?? 0;
-    const isConsistent = count > 0 && counts.every((recordCount) => recordCount === count);
-    if (
-      isConsistent
-      && (
-        !hasConsistentDelimiter
-        || count > maxConsistentCount
-        || (count === maxConsistentCount && delimiter === fallback)
-      )
-    ) {
-      detected = delimiter;
-      maxConsistentCount = count;
-      hasConsistentDelimiter = true;
-    }
-  }
-  return detected;
-}
-
 // XLSX import for Excel file support
 // Custom Excel Reader from ExcelHelpersTs
 interface IExcelReader {
@@ -316,7 +119,7 @@ try {
   const { ReaderFactory: RF } = require("@justybase/spreadsheet-tasks");
   ReaderFactory = RF;
 } catch (e: unknown) {
-  console.error("libs/ExcelHelpersTs/ReaderFactory module not available", e);
+  Logger.tryGetInstance()?.error("Excel reader module is not available", e);
 }
 
 // ConnectionDetails is imported from '../types' - no need for parseConnectionString
@@ -340,6 +143,58 @@ export interface NetezzaImporterOptions extends ColumnTypeChooserOptions {
   hasHeaders?: boolean;
   /** Cooperative cancellation checked while streaming source rows. */
   isCancelled?: ImportCancellationCheck;
+  /** Explicit field delimiter override; otherwise detected from the file. */
+  delimiter?: string;
+  /** Number of leading source records to skip before the header row. */
+  skipRows?: number;
+  /** Rejected-row budget for the external load. Defaults to 1. */
+  maxErrors?: number;
+  /** Source text encoding. Defaults to utf-8. */
+  encoding?: string;
+}
+
+/**
+ * Sniff the source encoding from a UTF-16 little-endian BOM. Falls back to
+ * UTF-8 for BOM-less/BOM-marked UTF-8 files and unreadable paths.
+ */
+export function detectSourceEncoding(filePath: string): BufferEncoding {
+  try {
+    const descriptor = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(2);
+    try {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+      if (bytesRead >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+        return "utf16le";
+      }
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  } catch {
+    // Fall through to the default encoding.
+  }
+  return "utf-8";
+}
+
+function normalizeSourceEncoding(encoding?: string): BufferEncoding {
+  const normalized = (encoding || "").trim().toLowerCase();
+  switch (normalized) {
+    case "utf-8":
+    case "utf8":
+      return "utf-8";
+    case "utf-16le":
+    case "utf16le":
+    case "utf-16":
+    case "utf16":
+      return "utf16le";
+    case "latin-1":
+    case "latin1":
+    case "iso-8859-1":
+      return "latin1";
+    case "ascii":
+      return "ascii";
+    default:
+      return "utf-8";
+  }
 }
 
 export type {
@@ -440,6 +295,17 @@ export function getNumericScale(typeName: string): number | null {
 }
 
 /**
+ * Build a user-facing warning for rows whose field count differed from the
+ * header width. Returns undefined when no mismatch was observed.
+ */
+export function buildWidthMismatchWarning(count: number): string | undefined {
+  if (!Number.isFinite(count) || count <= 0) {
+    return undefined;
+  }
+  return `${count.toLocaleString()} source row(s) had a different column count than the header; extra fields were ignored.`;
+}
+
+/**
  * Netezza Data Importer class
  *
  * Historical note: its tabular-file parsing and type-inference methods are also reused by other
@@ -467,8 +333,12 @@ export class NetezzaImporter {
 
   private isExcelFile: boolean = false;
   private excelHasHeaderRow: boolean = true;
+  private csvHasHeaderRow?: boolean;
   private hasHeadersOverride?: boolean;
   private readonly isCancelled?: ImportCancellationCheck;
+  private readonly skipRowCount: number = 0;
+  private readonly maxErrors: number = 1;
+  private readonly sourceEncoding: BufferEncoding = "utf-8";
   private availableSheetNames: string[] = [];
   private selectedSheetName?: string;
 
@@ -477,6 +347,7 @@ export class NetezzaImporter {
   private sqlHeaders: string[] = [];
   private dataTypes: ColumnTypeChooser[] = [];
   private rowsCount: number = 0;
+  private widthMismatchCount: number = 0;
   private streamedRowsCount: number = 0;
   private analysisProgressOffset = 0;
   private valuesToEscape: string[] = [];
@@ -497,17 +368,27 @@ export class NetezzaImporter {
     this.typeChooserOptions = typeChooserOptions ?? {};
     this.hasHeadersOverride = typeChooserOptions?.hasHeaders;
     this.isCancelled = typeChooserOptions?.isCancelled;
+    this.skipRowCount = Math.max(0, Math.trunc(typeChooserOptions?.skipRows ?? 0));
+    this.maxErrors = Math.max(0, Math.trunc(typeChooserOptions?.maxErrors ?? 1));
 
     // Check if this is an Excel file
     const fileExt = path.extname(filePath).toLowerCase();
     this.isExcelFile = [".xlsx", ".xlsb"].includes(fileExt);
+    this.sourceEncoding = typeChooserOptions?.encoding
+      ? normalizeSourceEncoding(typeChooserOptions.encoding)
+      : (this.isExcelFile ? "utf-8" : detectSourceEncoding(filePath));
 
     // Initialize virtual filename
     this.virtualFileName = `virtual_import_${Date.now()}_${Math.floor(Math.random() * 1000)}.txt`;
 
-    // For non-Excel files, detect and set the external delimiter
+    // For non-Excel files, honor an explicit delimiter override, otherwise detect.
     if (!this.isExcelFile) {
-      this.detectCsvDelimiter();
+      const delimiterOverride = typeChooserOptions?.delimiter;
+      if (delimiterOverride && delimiterOverride.length > 0) {
+        this.csvDelimiter = delimiterOverride;
+      } else {
+        this.detectCsvDelimiter();
+      }
       this.externalDelimiter = this.csvDelimiter;
     }
 
@@ -519,10 +400,28 @@ export class NetezzaImporter {
       this.externalDelimiter,
     ];
 
-    // Log dir is still useful for log files from Netezza if any (though mapped through stream now?)
-    // Actually, Netezza logs come back as data streams too in the new driver version
-    if (!fs.existsSync(this.logDir)) {
+  }
+
+  /**
+   * Create the Netezza log directory just before an import executes.
+   *
+   * Deliberately lazy: previews, Copilot inspection and wizard SQL generation
+   * must not create directories next to the source file. Falls back to a temp
+   * directory when the source location is read-only.
+   */
+  public ensureLogDir(): void {
+    try {
+      if (fs.existsSync(this.logDir)) {
+        return;
+      }
       fs.mkdirSync(this.logDir, { recursive: true });
+    } catch {
+      this.logDir = path.join(os.tmpdir(), "justybase_netezza_logs");
+      try {
+        fs.mkdirSync(this.logDir, { recursive: true });
+      } catch {
+        // Best effort: the USING clause still carries the path.
+      }
     }
   }
 
@@ -538,7 +437,53 @@ export class NetezzaImporter {
   public getHasHeaders(): boolean {
     return this.isExcelFile
       ? this.excelHasHeaderRow
-      : (this.hasHeadersOverride ?? true);
+      : (this.hasHeadersOverride ?? this.csvHasHeaderRow ?? true);
+  }
+
+  private isLikelyDataValue(value: string): boolean {
+    const text = String(value ?? "").trim();
+    if (!text) {
+      return false;
+    }
+    if (/^[-+]?\d+(?:[.,]\d+)?$/.test(text)) {
+      return true;
+    }
+    if (/^\d{4}[./-]\d{1,2}[./-]\d{1,2}(?:[ T]\d{1,2}:\d{2})?/.test(text)) {
+      return true;
+    }
+    return /^(true|false|yes|no)$/i.test(text);
+  }
+
+  /**
+   * Decide whether the first record is a header row.
+   *
+   * Conservative rule: only declare "no header" when the second record looks
+   * like data and the first does not (numeric/date/boolean cells). Ambiguous
+   * all-text files keep the historical header-first behavior.
+   */
+  private resolveCsvHeaderDecision(firstRow: string[], secondRow?: string[]): boolean {
+    if (this.hasHeadersOverride !== undefined) {
+      this.csvHasHeaderRow = this.hasHeadersOverride;
+      return this.hasHeadersOverride;
+    }
+
+    if (!secondRow) {
+      this.csvHasHeaderRow = true;
+      return true;
+    }
+
+    const firstLooksLikeData = firstRow.some((value) => this.isLikelyDataValue(value));
+    const secondLooksLikeData = secondRow.some((value) => this.isLikelyDataValue(value));
+    if (!secondLooksLikeData) {
+      // Ambiguous all-text sample: keep the historical header-first behavior.
+      this.csvHasHeaderRow = true;
+      return true;
+    }
+
+    const firstHasContent = firstRow.some((value) => String(value ?? "").trim().length > 0);
+    const decision = firstHasContent && !firstLooksLikeData;
+    this.csvHasHeaderRow = decision;
+    return decision;
   }
 
   getDelimiter(): string {
@@ -565,16 +510,28 @@ export class NetezzaImporter {
     this.sqlHeaders = [];
     this.dataTypes = [];
     this.rowsCount = 0;
+    this.widthMismatchCount = 0;
     this.streamedRowsCount = 0;
     this.analysisProgressOffset = 0;
     this.excelHasHeaderRow = this.hasHeadersOverride ?? true;
+    this.csvHasHeaderRow = this.hasHeadersOverride;
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
     this.columnNameOverrides.clear();
   }
 
   private async selectExcelReaderSheet(reader: IExcelReader): Promise<void> {
-    if (!this.selectedSheetName || this.availableSheetNames.length === 0) {
+    if (!this.selectedSheetName) {
+      return;
+    }
+
+    if (this.availableSheetNames.length === 0) {
+      if (typeof reader.getSheetNames === "function") {
+        this.availableSheetNames = [...reader.getSheetNames()];
+      }
+    }
+
+    if (this.availableSheetNames.length === 0) {
       return;
     }
 
@@ -582,7 +539,9 @@ export class NetezzaImporter {
       (name) => name === this.selectedSheetName,
     );
     if (targetIndex < 0) {
-      return;
+      const available = this.availableSheetNames.join(", ");
+      const message = `Worksheet "${this.selectedSheetName}" was not found in "${path.basename(this.filePath)}". Available worksheets: ${available}.`;
+      throw new Error(message);
     }
 
     reader._currentSheetIndex = targetIndex;
@@ -820,7 +779,7 @@ export class NetezzaImporter {
    * Auto-detect CSV delimiter
    */
   private detectCsvDelimiter(): void {
-    const content = readDelimitedTextPrefix(this.filePath);
+    const content = readDelimitedTextPrefix(this.filePath, 64 * 1024, this.sourceEncoding);
     const fallback = path.extname(this.filePath).toLowerCase() === ".tsv"
       ? "\t"
       : ",";
@@ -832,11 +791,34 @@ export class NetezzaImporter {
   }
 
   /**
+   * Read source records with the configured encoding and leading-row skip
+   * applied. Analysis, previews and the import stream all read through this
+   * helper so `skipRows` and `encoding` behave identically everywhere.
+   */
+  private async *readSourceRecords(
+    onReadProgress?: (bytesRead: number, totalBytes: number) => void,
+  ): AsyncGenerator<string[]> {
+    let remainingSkip = this.skipRowCount;
+    for await (const row of readDelimitedRecords(
+      this.filePath,
+      this.csvDelimiter,
+      onReadProgress,
+      this.sourceEncoding,
+    )) {
+      if (remainingSkip > 0) {
+        remainingSkip--;
+        continue;
+      }
+      yield row;
+    }
+  }
+
+  /**
    * Clean column name for SQL compatibility
    */
   private cleanColumnName(colName: string): string {
     const hasTrailingLineBreak = /(?:\r\n|\r|\n)+\s*$/.test(colName);
-    let cleanName = String(colName).replace(/\r\n|\r|\n/g, "_").trim();
+    let cleanName = transliterateImportHeader(String(colName).replace(/\r\n|\r|\n/g, "_")).trim();
     cleanName = cleanName
       .replace(/[^0-9a-zA-Z]+/g, "_")
       .toUpperCase();
@@ -974,7 +956,7 @@ export class NetezzaImporter {
         try {
           await reader.close();
         } catch (err) {
-          console.error("Error closing Excel reader:", err);
+          Logger.tryGetInstance()?.warn("Error closing Excel reader", err);
         }
       }
     }
@@ -984,23 +966,21 @@ export class NetezzaImporter {
    * Detect decimal delimiter from sample of rows
    */
   private detectDecimalDelimiter(rows: string[][]): string {
-    let dotCount = 0;
-    let commaCount = 0;
     const sampleLimit = Math.min(100, rows.length - 1);
+    const samples: string[] = [];
 
     for (let i = 1; i <= sampleLimit; i++) {
       const row = rows[i];
       if (!row) continue;
 
       for (const cell of row) {
-        if (!cell?.trim()) continue;
-        const val = cell.trim();
-        if (/^\d+\.\d+$/.test(val)) dotCount++;
-        if (/^\d+,\d+$/.test(val)) commaCount++;
+        if (cell?.trim()) {
+          samples.push(cell);
+        }
       }
     }
 
-    return commaCount > dotCount && commaCount > 0 ? "," : ".";
+    return detectImportDecimalDelimiter(samples);
   }
 
   /**
@@ -1039,12 +1019,13 @@ export class NetezzaImporter {
     progressCallback?: ProgressCallback,
   ): Promise<ColumnTypeChooser[]> {
     const pendingRows: string[][] = [];
-    const decimalSamples = { dot: 0, comma: 0 };
+    const decimalSampleCells: string[] = [];
     const maxDecimalSamples = 1000;
     let headers: string[] = [];
     let dataTypes: ColumnTypeChooser[] = [];
     let decimalDelimiter = ".";
     let headerProcessed = false;
+    let pendingFirstRow: string[] | undefined;
     let sampleCount = 0;
     let rowCount = 0;
     let lastReportedAnalysisPercent = 0;
@@ -1062,10 +1043,7 @@ export class NetezzaImporter {
       if (dataTypes.length > 0 || headers.length === 0) {
         return;
       }
-      decimalDelimiter =
-        decimalSamples.comma > decimalSamples.dot && decimalSamples.comma > 0
-          ? ","
-          : ".";
+      decimalDelimiter = detectImportDecimalDelimiter(decimalSampleCells);
       this.decimalDelimiter = decimalDelimiter;
       this.sqlHeaders = headers;
       dataTypes = this.createColumnTypeChoosers(
@@ -1079,9 +1057,7 @@ export class NetezzaImporter {
       pendingRows.length = 0;
     };
 
-    for await (const row of readDelimitedRecords(
-      this.filePath,
-      this.csvDelimiter,
+    for await (const row of this.readSourceRecords(
       (bytesRead, totalBytes) => {
         const readPercent = totalBytes > 0
           ? Math.min(100, Math.floor((bytesRead / totalBytes) * 100))
@@ -1099,36 +1075,50 @@ export class NetezzaImporter {
         );
       },
     )) {
+      const processDataRow = (dataRow: string[]) => {
+        rowCount++;
+        if (dataRow.length !== headers.length) {
+          this.widthMismatchCount++;
+        }
+        pendingRows.push(dataRow);
+        if (sampleCount < maxDecimalSamples) {
+          sampleCount++;
+          for (const cell of dataRow) {
+            if (cell?.trim()) {
+              decimalSampleCells.push(cell);
+            }
+          }
+        }
+
+        if (dataTypes.length > 0) {
+          applyRow(dataRow);
+          pendingRows.length = 0;
+        } else if (sampleCount === maxDecimalSamples || rowCount >= 100) {
+          initializeTypes();
+        }
+      };
+
       if (!headerProcessed) {
-        if (this.hasHeadersOverride ?? true) {
-          this.setHeaders(row);
+        if (!pendingFirstRow) {
+          pendingFirstRow = row;
+          continue;
+        }
+
+        const hasHeaders = this.resolveCsvHeaderDecision(pendingFirstRow, row);
+        if (hasHeaders) {
+          this.setHeaders(pendingFirstRow);
         } else {
-          this.setGeneratedHeaders(row.length);
+          this.setGeneratedHeaders(Math.max(pendingFirstRow.length, row.length));
         }
         headers = [...this.sqlHeaders];
         headerProcessed = true;
         progressCallback?.(`Headers: ${headers.length} columns`);
-        if (this.hasHeadersOverride ?? true) {
-          continue;
+        if (!hasHeaders) {
+          processDataRow(pendingFirstRow);
         }
-      }
-
-      rowCount++;
-      pendingRows.push(row);
-      if (sampleCount < maxDecimalSamples) {
-        sampleCount++;
-        for (const cell of row) {
-          const value = cell?.trim() ?? "";
-          if (/^\d+\.\d+$/.test(value)) decimalSamples.dot++;
-          if (/^\d+,\d+$/.test(value)) decimalSamples.comma++;
-        }
-      }
-
-      if (dataTypes.length > 0) {
-        applyRow(row);
-        pendingRows.length = 0;
-      } else if (sampleCount === maxDecimalSamples || rowCount >= 100) {
-        initializeTypes();
+        processDataRow(row);
+      } else {
+        processDataRow(row);
       }
 
       if (rowCount % 10000 === 0) {
@@ -1138,7 +1128,18 @@ export class NetezzaImporter {
     }
 
     if (!headerProcessed) {
-      throw new Error("No data found in file");
+      if (!pendingFirstRow) {
+        throw new Error("No data found in file");
+      }
+      const hasHeaders = this.resolveCsvHeaderDecision(pendingFirstRow, undefined);
+      if (hasHeaders) {
+        this.setHeaders(pendingFirstRow);
+      } else {
+        this.setGeneratedHeaders(pendingFirstRow.length);
+        pendingRows.push(pendingFirstRow);
+        rowCount++;
+      }
+      headers = [...this.sqlHeaders];
     }
     initializeTypes();
     this.rowsCount = rowCount;
@@ -1155,8 +1156,11 @@ export class NetezzaImporter {
   ): Promise<ColumnTypeChooser[]> {
     this.detectCsvDelimiter();
 
-    const content = fs.readFileSync(this.filePath, "utf-8");
-    const rows = parseDelimitedRecords(content, this.csvDelimiter);
+    const content = fs.readFileSync(this.filePath, this.sourceEncoding);
+    const parsedRows = parseDelimitedRecords(content, this.csvDelimiter);
+    const rows = this.skipRowCount > 0
+      ? parsedRows.slice(this.skipRowCount)
+      : parsedRows;
 
     if (!rows || rows.length === 0) {
       throw new Error("No data found in file");
@@ -1170,7 +1174,7 @@ export class NetezzaImporter {
 
     const dataTypes: ColumnTypeChooser[] = [];
 
-    const hasHeaders = this.hasHeadersOverride ?? true;
+    const hasHeaders = this.resolveCsvHeaderDecision(rows[0], rows[1]);
     if (hasHeaders) {
       this.setHeaders(rows[0]);
     } else {
@@ -1186,6 +1190,9 @@ export class NetezzaImporter {
     // Process data rows, including the first row when no header is selected.
     for (let i = hasHeaders ? 1 : 0; i < rows.length; i++) {
       const row = rows[i];
+      if (row.length !== dataTypes.length) {
+        this.widthMismatchCount++;
+      }
       for (let j = 0; j < row.length; j++) {
         if (j < dataTypes.length && row[j] && row[j].trim()) {
           dataTypes[j].refreshCurrentType(row[j].trim());
@@ -1239,10 +1246,7 @@ export class NetezzaImporter {
       let firstRawRow: unknown[] | undefined;
       let firstRow: string[] | undefined;
       let firstRowHandled = false;
-      const decimalSamples: { dot: number; comma: number } = {
-        dot: 0,
-        comma: 0,
-      };
+      const decimalSampleCells: string[] = [];
       const maxDecimalSamples = 100;
 
       const initializeDataTypes = () => {
@@ -1250,10 +1254,7 @@ export class NetezzaImporter {
           return;
         }
 
-        this.decimalDelimiter =
-          decimalSamples.comma > decimalSamples.dot && decimalSamples.comma > 0
-            ? ","
-            : ".";
+        this.decimalDelimiter = detectImportDecimalDelimiter(decimalSampleCells);
         progressCallback?.(
           `Detected decimal separator: '${this.decimalDelimiter}'`,
         );
@@ -1270,9 +1271,9 @@ export class NetezzaImporter {
 
         if (rowsCount <= maxDecimalSamples) {
           for (const cell of row) {
-            const val = cell?.trim() || "";
-            if (/^\d+\.\d+$/.test(val)) decimalSamples.dot++;
-            if (/^\d+,\d+$/.test(val)) decimalSamples.comma++;
+            if (cell?.trim()) {
+              decimalSampleCells.push(cell);
+            }
           }
         }
 
@@ -1346,7 +1347,7 @@ export class NetezzaImporter {
         try {
           await reader.close();
         } catch (err) {
-          console.error("Error closing Excel reader:", err);
+          Logger.tryGetInstance()?.warn("Error closing Excel reader", err);
         }
       }
     }
@@ -1368,6 +1369,11 @@ export class NetezzaImporter {
    */
   private truncateNumeric(value: string, scale: number): string {
     if (!value || scale < 0) return value;
+
+    const normalized = normalizeImportNumberForDb(value, this.decimalDelimiter, scale);
+    if (normalized !== null) {
+      return normalized;
+    }
 
     const parts = value.split(this.decimalDelimiter);
     if (parts.length !== 2) return value;
@@ -1396,6 +1402,13 @@ export class NetezzaImporter {
     const effectiveType = this.getEffectiveDataType(colIndex);
     const baseType = getBaseDataType(effectiveType);
     const isTextType = /^(N?CHAR|N?VARCHAR|TEXT|CLOB)/.test(baseType);
+    const isNumericType = baseType === "NUMERIC" || baseType === "DECIMAL" || baseType === "BIGINT";
+    // Lone dash (`-`/`–` for zero): 0 in numeric columns, the dash itself in
+    // text columns.
+    const dashMapped = mapDashZeroImportCell(val, isNumericType);
+    if (dashMapped !== undefined) {
+      return dashMapped;
+    }
     let result = this.escapeValue(isTextType ? val : val.trim());
 
     if (baseType === "BOOLEAN") {
@@ -1418,7 +1431,23 @@ export class NetezzaImporter {
       }
     }
 
-    // Handle NUMERIC - truncate to scale and convert delimiter
+    // Handle numerics via the locale-aware parser (spaces, NBSP,
+    // dot/apostrophe thousands, currency, percent, (negatives), exponent).
+    if (isNumericType) {
+      const scale = getNumericScale(effectiveType) || 0;
+      const normalized = normalizeImportNumberForDb(
+        result,
+        this.decimalDelimiter,
+        (baseType === "NUMERIC" || baseType === "DECIMAL") && scale > 0 ? scale : undefined
+      );
+      if (normalized !== null) {
+        return normalized;
+      }
+      result = result.replace(/\s/g, "");
+    }
+
+    // Fallback for values the locale parser rejects (keeps previous behavior
+    // so mixed content surfaces as a DB error instead of silent NULL).
     if (baseType === "NUMERIC" || baseType === "DECIMAL") {
       // Truncate to declared scale
       const scale = getNumericScale(effectiveType) || 0;
@@ -1448,33 +1477,35 @@ export class NetezzaImporter {
   }
 
   private getQuotedTargetTable(): string {
-    return this.targetTable.includes(".")
-      ? this.targetTable
-          .split(".")
-          .map((p) => this.quoteIdentifier(p))
-          .join(".")
-      : this.quoteIdentifier(this.targetTable);
+    const parts = this.targetTable.split(".").map((part) => part.trim());
+    if (parts.length === 3 && parts[0] && !parts[1] && parts[2]) {
+      return `${this.quoteIdentifier(parts[0])}..${this.quoteIdentifier(parts[2])}`;
+    }
+    return parts
+      .filter((part) => part.length > 0)
+      .map((part) => this.quoteIdentifier(part))
+      .join(".");
   }
 
   private getExternalUsingClause(): string {
     const logDirUnix = this.logDir.replace(/\\/g, "/");
     const delimiterPlain = this.getDelimiterPlain();
 
-    return `    USING
-    (
-        REMOTESOURCE 'jdbc'
-        DELIMITER '${delimiterPlain}'
-        RecordDelim '${this.recordDelimPlain}'
-        ESCAPECHAR '${this.escapechar}'
-        NULLVALUE ''
-        ENCODING 'Utf-8'
-        TIMESTYLE '24hour'
-        BOOLSTYLE '1_0'
-        SKIPROWS 0
-        MAXERRORS 1
-        COMPRESS FALSE
-        LOGDIR '${logDirUnix}'
-    )`;
+    let clause = "    USING\n    (\n";
+    clause += "        REMOTESOURCE 'jdbc'\n";
+    clause += `        DELIMITER '${delimiterPlain}'\n`;
+    clause += `        RecordDelim '${this.recordDelimPlain}'\n`;
+    clause += `        ESCAPECHAR '${this.escapechar}'\n`;
+    clause += "        NULLVALUE ''\n";
+    clause += "        ENCODING 'Utf-8'\n";
+    clause += "        TIMESTYLE '24hour'\n";
+    clause += "        BOOLSTYLE '1_0'\n";
+    clause += "        SKIPROWS 0\n";
+    clause += `        MAXERRORS ${this.maxErrors}\n`;
+    clause += "        COMPRESS FALSE\n";
+    clause += `        LOGDIR '${logDirUnix}'\n`;
+    clause += "    )";
+    return clause;
   }
 
   private buildImportSelectColumns(
@@ -1620,9 +1651,9 @@ ${this.getExternalUsingClause()}
       self.streamedRowsCount = 0;
 
       try {
-        for await (const row of readDelimitedRecords(self.filePath, self.csvDelimiter)) {
+        for await (const row of self.readSourceRecords()) {
           throwIfImportCancelled(self.isCancelled);
-          if (self.hasHeadersOverride !== false && !headerSkipped) {
+          if (self.getHasHeaders() && !headerSkipped) {
             headerSkipped = true;
             continue;
           }
@@ -1689,20 +1720,9 @@ ${this.getExternalUsingClause()}
         await reader.open(self.filePath);
         readerOpened = true;
 
-        // Apply sheet selection if set
-        if (
-          self.availableSheetNames.length > 0 &&
-          self.selectedSheetName &&
-          typeof reader._initSheet === "function"
-        ) {
-          const targetIndex = self.availableSheetNames.findIndex(
-            (name) => name === self.selectedSheetName,
-          );
-          if (targetIndex >= 0) {
-            reader._currentSheetIndex = targetIndex;
-            await reader._initSheet(targetIndex);
-          }
-        }
+        // Apply sheet selection if set. Throws for an unknown worksheet so the
+        // import aborts before any row reaches the database.
+        await self.selectExcelReaderSheet(reader);
 
         let headerSkipped = !self.excelHasHeaderRow;
         let lastReportTime = 0;
@@ -1775,6 +1795,14 @@ ${this.getExternalUsingClause()}
    */
   getRowsCount(): number {
     return this.rowsCount;
+  }
+
+  /**
+   * Number of data rows whose field count differed from the header width.
+   * Extra fields are ignored by importers; callers surface this as a warning.
+   */
+  getWidthMismatchCount(): number {
+    return this.widthMismatchCount;
   }
 
   /**
@@ -1882,8 +1910,8 @@ ${this.getExternalUsingClause()}
 
     const rows: string[][] = [];
     let headerSkipped = false;
-    for await (const row of readDelimitedRecords(this.filePath, this.csvDelimiter)) {
-      if (this.hasHeadersOverride !== false && !headerSkipped) {
+    for await (const row of this.readSourceRecords()) {
+      if (this.getHasHeaders() && !headerSkipped) {
         headerSkipped = true;
         continue;
       }
@@ -1905,8 +1933,8 @@ ${this.getExternalUsingClause()}
     }
 
     const rows: string[][] = [];
-    let skipHeader = this.hasHeadersOverride !== false;
-    for await (const row of readDelimitedRecords(this.filePath, this.csvDelimiter)) {
+    let skipHeader = this.getHasHeaders();
+    for await (const row of this.readSourceRecords()) {
       if (skipHeader) {
         skipHeader = false;
         continue;
@@ -1916,6 +1944,35 @@ ${this.getExternalUsingClause()}
 
     this.rowsCount = rows.length;
     return rows;
+  }
+
+  /**
+   * Stream data rows without materializing the whole CSV/TXT file.
+   *
+   * Excel workbooks still require the reader's in-memory sheet access, so
+   * their rows are yielded from the parsed workbook; CSV/TXT files are parsed
+   * incrementally and never fully buffered.
+   */
+  async *iterateRows(): AsyncIterableIterator<string[]> {
+    if (this.isExcelFile) {
+      const allRows = await this.readExcelFile();
+      const startIndex = this.excelHasHeaderRow ? 1 : 0;
+      for (let index = startIndex; index < allRows.length; index++) {
+        throwIfImportCancelled(this.isCancelled);
+        yield allRows[index];
+      }
+      return;
+    }
+
+    let skipHeader = this.getHasHeaders();
+    for await (const row of this.readSourceRecords()) {
+      if (skipHeader) {
+        skipHeader = false;
+        continue;
+      }
+      throwIfImportCancelled(this.isCancelled);
+      yield row;
+    }
   }
 
   /**
@@ -1990,11 +2047,19 @@ export async function importDataToNetezza(
     const importer = new NetezzaImporter(filePath, targetTable, undefined, {
       hasHeaders: columnOptions?.hasHeaders,
       isCancelled,
+      delimiter: columnOptions?.delimiter,
+      skipRows: columnOptions?.skipRows,
+      maxErrors: columnOptions?.maxErrors,
+      encoding: columnOptions?.encoding,
     });
+    if (columnOptions?.sheetName?.trim()) {
+      importer.setSelectedSheet(columnOptions.sheetName);
+    }
 
     // Analyze data types
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
+    importer.ensureLogDir();
 
     progressCallback?.("Preparing data stream...");
     importStream = await importer.createDataStream(progressCallback);
@@ -2060,6 +2125,10 @@ export async function importDataToNetezza(
 
         columns: importer.getImportColumnCount(),
         detectedDelimiter: importer.getCsvDelimiter(),
+        warnings: (() => {
+          const warning = buildWidthMismatchWarning(importer.getWidthMismatchCount());
+          return warning ? [warning] : undefined;
+        })(),
       },
     };
   } catch (e: unknown) {
@@ -2141,9 +2210,17 @@ export async function importDataToNetezzaAdvanced(
     const importer = new NetezzaImporter(filePath, targetTable, undefined, {
       hasHeaders: columnOptions?.hasHeaders,
       isCancelled,
+      delimiter: columnOptions?.delimiter,
+      skipRows: columnOptions?.skipRows,
+      maxErrors: columnOptions?.maxErrors,
+      encoding: columnOptions?.encoding,
     });
+    if (columnOptions?.sheetName?.trim()) {
+      importer.setSelectedSheet(columnOptions.sheetName);
+    }
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
+    importer.ensureLogDir();
 
     progressCallback?.("Preparing data stream...");
     importStream = await importer.createDataStream(progressCallback);
@@ -2208,6 +2285,10 @@ export async function importDataToNetezzaAdvanced(
         processingTime: `${processingTime.toFixed(1)}s`,
         columns: importer.getImportColumnCount(),
         detectedDelimiter: importer.getCsvDelimiter(),
+        warnings: (() => {
+          const warning = buildWidthMismatchWarning(importer.getWidthMismatchCount());
+          return warning ? [warning] : undefined;
+        })(),
       },
     };
   } catch (error) {

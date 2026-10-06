@@ -1,10 +1,12 @@
 import * as fs from 'fs';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { ClipboardDataProcessor } from '../import/clipboardImporter';
+import { importClipboardDataToAccess, importDataToAccess } from '../import/accessImporter';
+import { importClipboardDataToClickHouse } from '../import/clickhouseImporter';
 import { importClipboardDataToMySql, importDataToMySql } from '../import/mysqlImporter';
 import { importDataToOracle } from '../import/oracleImporter';
 import { importClipboardDataToSqlite } from '../import/sqliteImporter';
-import { importDataToVertica } from '../import/verticaImporter';
+import { importClipboardDataToVertica, importDataToVertica } from '../import/verticaImporter';
 import { createTabularDataImporter } from '../import/tabularDataImporter';
 
 jest.mock('../core/connectionFactory', () => ({
@@ -32,7 +34,7 @@ interface MockCommand {
     _recordsAffected: number;
 }
 
-function createMockConnection(executedSql: string[]) {
+function createMockConnection(executedSql: string[], failWhenSqlIncludes?: string) {
     return {
         createCommand: jest.fn((sql: string): MockCommand => ({
             commandTimeout: 0,
@@ -41,6 +43,9 @@ function createMockConnection(executedSql: string[]) {
             }),
             cancel: jest.fn(async () => undefined),
             execute: jest.fn(async () => {
+                if (failWhenSqlIncludes && sql.includes(failWhenSqlIncludes)) {
+                    throw new Error('simulated SQL failure');
+                }
                 executedSql.push(sql);
             }),
             _recordsAffected: 0
@@ -49,6 +54,19 @@ function createMockConnection(executedSql: string[]) {
         connect: jest.fn(async () => undefined),
         on: jest.fn(),
         removeListener: jest.fn()
+    };
+}
+
+function createClipboardAnalyzer(headers: string[], rows: string[][]): Record<string, jest.Mock | ((...args: never[]) => unknown)> {
+    return {
+        getHeaders: jest.fn().mockReturnValue(headers),
+        getDataTypes: jest.fn().mockReturnValue(
+            headers.map(() => ({ currentType: { toString: () => 'NVARCHAR(255)' } })),
+        ),
+        dataRowIterator: jest.fn().mockReturnValue(rows),
+        getRowCount: jest.fn().mockReturnValue(rows.length),
+        getDecimalDelimiter: jest.fn().mockReturnValue('.'),
+        getDelimiter: jest.fn().mockReturnValue('\t')
     };
 }
 
@@ -78,6 +96,12 @@ describe('new dialect importers', () => {
                 ['1', '10.50', '2024-01-02 03:04:05'],
                 ['2', '11.25', '2024-01-03 04:05:06']
             ]),
+            getRowsCount: jest.fn().mockReturnValue(2),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1', '10.50', '2024-01-02 03:04:05'];
+                yield ['2', '11.25', '2024-01-03 04:05:06'];
+            })()),
             getDecimalDelimiter: jest.fn().mockReturnValue('.'),
             getCsvDelimiter: jest.fn().mockReturnValue(','),
         });
@@ -105,6 +129,38 @@ describe('new dialect importers', () => {
         expect(executedSql[3]).toBe('COMMIT');
     });
 
+    it('accepts .tsv files in the shared batch import path', async () => {
+        const executedSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createMockConnection(executedSql));
+        createTabularImporterMock.mockReturnValue({
+            analyzeDataTypes: jest.fn().mockResolvedValue([]),
+            applyColumnOptions: jest.fn(),
+            getEffectiveColumnDescriptors: jest.fn().mockReturnValue([
+                { sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }
+            ]),
+            getRowsCount: jest.fn().mockReturnValue(1),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1'];
+            })()),
+            getDecimalDelimiter: jest.fn().mockReturnValue('.'),
+            getCsvDelimiter: jest.fn().mockReturnValue('\t'),
+        });
+
+        const result = await importDataToMySql(
+            '/tmp/orders.tsv',
+            'sales.orders',
+            {
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'tester',
+                dbType: 'mysql'
+            }
+        );
+
+        expect(result.success).toBe(true);
+    });
+
     it('imports file data into Oracle using INSERT ALL and Oracle type mapping', async () => {
         const executedSql: string[] = [];
         createConnectionMock.mockResolvedValue(createMockConnection(executedSql));
@@ -119,6 +175,11 @@ describe('new dialect importers', () => {
             getAllRows: jest.fn().mockResolvedValue([
                 ['1', '2024-03-01', '2024-03-01 10:11:12']
             ]),
+            getRowsCount: jest.fn().mockReturnValue(1),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1', '2024-03-01', '2024-03-01 10:11:12'];
+            })()),
             getDecimalDelimiter: jest.fn().mockReturnValue('.'),
             getCsvDelimiter: jest.fn().mockReturnValue(','),
         });
@@ -161,6 +222,12 @@ describe('new dialect importers', () => {
                 ['1', 'Alice', '2024-03-01 10:11:12', 'true'],
                 ['2', 'Bob', '2024-03-02 11:12:13', 'false']
             ]),
+            getRowsCount: jest.fn().mockReturnValue(2),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1', 'Alice', '2024-03-01 10:11:12', 'true'];
+                yield ['2', 'Bob', '2024-03-02 11:12:13', 'false'];
+            })()),
             getDecimalDelimiter: jest.fn().mockReturnValue('.'),
             getCsvDelimiter: jest.fn().mockReturnValue(','),
         });
@@ -268,4 +335,118 @@ describe('new dialect importers', () => {
         expect(executedSql[2]).toContain('TRUE');
         expect(executedSql[2]).toContain("'Alice'");
     });
+
+    it.each([
+        ['mysql', importDataToMySql, 'sales.orders'],
+        ['vertica', importDataToVertica, 'sales.orders'],
+    ] as const)('drops the created %s target table after a failed batch insert', async (dbType, importFn, target) => {
+        const executedSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createMockConnection(executedSql, 'INSERT'));
+        createTabularImporterMock.mockReturnValue(createFileImporterMockForDropTest());
+
+        const result = await importFn('/tmp/drop.csv', target, {
+            host: 'localhost',
+            database: 'warehouse',
+            user: 'tester',
+            dbType
+        } as never);
+
+        expect(result.success).toBe(false);
+        expect(executedSql).toContain(`DROP TABLE ${target}`);
+    });
+
+    it('drops the created Access target table after a failed batch insert', async () => {
+        const executedSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createMockConnection(executedSql, 'INSERT'));
+        createTabularImporterMock.mockReturnValue(createFileImporterMockForDropTest());
+
+        const result = await importDataToAccess(
+            '/tmp/drop.csv',
+            'orders',
+            { host: '', database: '/tmp/data.accdb', user: '', dbType: 'access' } as never
+        );
+
+        expect(result.success).toBe(false);
+        expect(executedSql).toContain('DROP TABLE orders');
+    });
+
+    it('appends Access clipboard rows without creating the table', async () => {
+        const executedSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createMockConnection(executedSql));
+        ClipboardDataProcessorMock.mockImplementation(() => ({
+            analyzeClipboardData: jest.fn().mockResolvedValue(createClipboardAnalyzer(['Id'], [['1']]))
+        }));
+
+        const result = await importClipboardDataToAccess(
+            'orders',
+            { host: '', database: '/tmp/data.accdb', user: '', dbType: 'access' } as never,
+            null,
+            { appendToExistingTable: true },
+            undefined,
+            () => false
+        );
+
+        expect(result.success).toBe(true);
+        expect(executedSql.some(sql => sql.includes('CREATE TABLE'))).toBe(false);
+        expect(executedSql.some(sql => sql.includes('INSERT'))).toBe(true);
+    });
+
+    it('drops the created ClickHouse target table after a failed batch insert', async () => {
+        const executedSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createMockConnection(executedSql, 'INSERT'));
+        createTabularImporterMock.mockReturnValue(createFileImporterMockForDropTest());
+
+        const result = await importClipboardDataToClickHouse(
+            'analytics.orders',
+            { host: 'localhost', database: 'analytics', user: 'default', dbType: 'clickhouse' } as never,
+            null,
+            undefined,
+            undefined,
+            () => false
+        );
+
+        expect(result.success).toBe(false);
+        expect(executedSql).toContain('DROP TABLE analytics.orders');
+    });
+
+    it.each([
+        ['vertica', importClipboardDataToVertica, 'sales.orders'],
+        ['clickhouse', importClipboardDataToClickHouse, 'analytics.orders'],
+    ] as const)('appends %s clipboard rows without creating the table', async (dbType, importFn, target) => {
+        const executedSql: string[] = [];
+        createConnectionMock.mockResolvedValue(createMockConnection(executedSql));
+        ClipboardDataProcessorMock.mockImplementation(() => ({
+            analyzeClipboardData: jest.fn().mockResolvedValue(createClipboardAnalyzer(['Id'], [['1']]))
+        }));
+
+        const result = await importFn(
+            target,
+            { host: 'localhost', database: 'warehouse', user: 'tester', dbType } as never,
+            null,
+            { appendToExistingTable: true },
+            undefined,
+            () => false
+        );
+
+        expect(result.success).toBe(true);
+        expect(executedSql.some(sql => sql.includes('CREATE TABLE'))).toBe(false);
+        expect(executedSql.some(sql => sql.includes('INSERT'))).toBe(true);
+    });
 });
+
+function createFileImporterMockForDropTest() {
+    return {
+        analyzeDataTypes: jest.fn().mockResolvedValue([]),
+        applyColumnOptions: jest.fn(),
+        getEffectiveColumnDescriptors: jest.fn().mockReturnValue([
+            { sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }
+        ]),
+        getRowsCount: jest.fn().mockReturnValue(1),
+        getWidthMismatchCount: jest.fn().mockReturnValue(0),
+        iterateRows: jest.fn(() => (async function* () {
+            yield ['1'];
+        })()),
+        getDecimalDelimiter: jest.fn().mockReturnValue('.'),
+        getCsvDelimiter: jest.fn().mockReturnValue(',')
+    };
+}

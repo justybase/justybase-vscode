@@ -8,6 +8,7 @@ import {
     BaseImportWizardAdapter,
     getBaseImportTypeName,
     normalizeImportTypeName,
+    withImportSheetOption,
 } from './DatabaseImportWizardAdapter';
 
 const CLICKHOUSE_NATIVE_TYPE_PATTERN = /^(?:Nullable|LowCardinality|Array|Map|Tuple|FixedString|Decimal(?:32|64|128|256)?|Enum(?:8|16)|U?Int(?:8|16|32|64|128|256)|Float(?:32|64)|BFloat16|Bool|Boolean|String|UUID|Date(?:32)?|DateTime(?:64)?|IPv4|IPv6|JSON)(?:\s*\([\s\S]*\))?$/i;
@@ -62,7 +63,7 @@ export class ClickHouseImportWizardAdapter extends BaseImportWizardAdapter {
             input.connectionDetails,
             input.progressCallback,
             input.timeoutSeconds,
-            input.columnOptions,
+            withImportSheetOption(input.columnOptions, input.sheetName),
             input.isCancelled,
         );
     }

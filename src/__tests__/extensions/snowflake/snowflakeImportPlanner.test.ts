@@ -8,6 +8,17 @@ import {
     renderSnowflakeStageImportPlanMarkdown,
 } from '../../../../extensions/snowflake/src/snowflakeImportPlanner';
 
+interface TestWorkbookWriter {
+    startSheet(sheetName: string, columnCount: number, headers?: string[]): void;
+    writeRow(row: unknown[]): void;
+    endSheet(): void;
+    finalize(): Promise<void>;
+}
+
+const XlsxWriter = require('@justybase/spreadsheet-tasks').XlsxWriter as new (
+    filePath: string,
+) => TestWorkbookWriter;
+
 describe('snowflakeImportPlanner', () => {
     let tempDir: string;
 
@@ -36,6 +47,55 @@ describe('snowflakeImportPlanner', () => {
         expect(markdown).toContain('# Snowflake staged import workflow');
         expect(markdown).toContain('Generated COPY INTO SQL');
         expect(result.details?.snowflakeWorkflow?.workflowMarkdown).toContain('Recommended column mapping');
+    });
+
+    it('plans the selected worksheet of an Excel workbook', async () => {
+        const sourceFile = path.join(tempDir, 'two-sheets.xlsx');
+        const writer = new XlsxWriter(sourceFile);
+        writer.startSheet('First', 2, ['ID', 'NAME']);
+        writer.writeRow([1, 'Alice']);
+        writer.endSheet();
+        writer.startSheet('Second', 2, ['CODE', 'VALUE']);
+        writer.writeRow([9, 'Zulu']);
+        writer.writeRow([10, 'Yankee']);
+        writer.endSheet();
+        await writer.finalize();
+
+        const plan = await planSnowflakeStageImport(sourceFile, 'analytics.public.orders', {
+            sheetName: 'Second',
+        });
+        const markdown = renderSnowflakeStageImportPlanMarkdown(plan);
+
+        expect(plan.worksheet).toBe('Second');
+        expect(plan.rowCountEstimate).toBe(2);
+        expect(plan.columns.map((column) => column.sourceColumn)).toEqual(['CODE', 'VALUE']);
+        expect(markdown).toContain('- Worksheet: `Second`');
+    });
+
+    it('detects comma decimals when dotted dates share the sample', async () => {
+        const sourceFile = path.join(tempDir, 'pl-dates.csv');
+        fs.writeFileSync(sourceFile, 'DATA;KWOTA\n07.06.2024;1 234,56\n08.06.2024;2 345,67\n', 'utf8');
+
+        const plan = await planSnowflakeStageImport(sourceFile, 'analytics.public.orders');
+
+        expect(plan.detectedDecimalDelimiter).toBe(',');
+        const kwota = plan.columns.find((column) => column.sourceColumn === 'KWOTA');
+        expect(kwota?.sourceType).toMatch(/^NUMERIC/);
+    });
+
+    it('rejects an unknown worksheet before producing a plan', async () => {
+        const sourceFile = path.join(tempDir, 'unknown-sheet.xlsx');
+        const writer = new XlsxWriter(sourceFile);
+        writer.startSheet('First', 1, ['ID']);
+        writer.writeRow([1]);
+        writer.endSheet();
+        await writer.finalize();
+
+        await expect(
+            planSnowflakeStageImport(sourceFile, 'analytics.public.orders', {
+                sheetName: 'Missing',
+            }),
+        ).rejects.toThrow(/Worksheet "Missing" was not found/);
     });
 
     it('returns actionable clipboard guidance for Snowflake', () => {

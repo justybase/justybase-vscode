@@ -89,6 +89,8 @@ function renderExecutionPlanDocument(state: ImportWizardState): string {
 }
 
 const DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE = 5000;
+const MIN_BACKGROUND_VALIDATION_SAMPLE_SIZE = 100;
+const MAX_BACKGROUND_VALIDATION_SAMPLE_SIZE = 50000;
 
 export class ImportWizardMessageHandler {
   private sessionId?: string;
@@ -171,7 +173,7 @@ export class ImportWizardMessageHandler {
 
     if (this.webviewReady) {
       await this.postState(true);
-      this.startBackgroundValidation(DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE);
+      this.startBackgroundValidation();
     }
   }
 
@@ -200,9 +202,7 @@ export class ImportWizardMessageHandler {
       case "ready":
         this.webviewReady = true;
         await this.postState(true);
-        this.startBackgroundValidation(
-          DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE,
-        );
+        this.startBackgroundValidation();
         return;
       case "setPreviewRowCount":
         await this.deps.service.setPreviewRowCount(
@@ -217,9 +217,7 @@ export class ImportWizardMessageHandler {
           message.sheetName,
         );
         await this.postState();
-        this.startBackgroundValidation(
-          DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE,
-        );
+        this.startBackgroundValidation();
         return;
       case "renameColumn":
         await this.deps.service.renameColumn(
@@ -253,9 +251,7 @@ export class ImportWizardMessageHandler {
           String(message.selectedType || ""),
         );
         await this.postState();
-        this.startBackgroundValidation(
-          DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE,
-        );
+        this.startBackgroundValidation();
         return;
       case "setHasHeaders":
         await this.deps.service.setHasHeaders(
@@ -263,7 +259,7 @@ export class ImportWizardMessageHandler {
           Boolean(message.hasHeaders),
         );
         await this.postState();
-        this.startBackgroundValidation(DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE);
+        this.startBackgroundValidation();
         return;
       case "setCreateTable":
         await this.deps.service.setCreateTable(
@@ -322,10 +318,7 @@ export class ImportWizardMessageHandler {
         await this.executeImport();
         return;
       case "startBackgroundValidation":
-        this.startBackgroundValidation(
-          message.backgroundValidationSampleSize ||
-            DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE,
-        );
+        this.startBackgroundValidation(message.backgroundValidationSampleSize);
         return;
       case "cancelBackgroundValidation":
         this.deps.service.cancelBackgroundValidation(this.requireSessionId());
@@ -478,15 +471,50 @@ export class ImportWizardMessageHandler {
     }, true);
   }
 
-  private startBackgroundValidation(sampleSize: number): void {
+  private getBackgroundValidationSettings(): {
+    enabled: boolean;
+    sampleSize: number;
+  } {
+    const config = vscode.workspace.getConfiguration("justybase");
+    const configuredSize = config.get<number>(
+      "importWizard.backgroundValidationSampleSize",
+      DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE,
+    );
+    const sampleSize = Number.isFinite(configuredSize)
+      ? Math.min(
+        MAX_BACKGROUND_VALIDATION_SAMPLE_SIZE,
+        Math.max(MIN_BACKGROUND_VALIDATION_SAMPLE_SIZE, Math.trunc(configuredSize)),
+      )
+      : DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE;
+
+    return {
+      enabled: config.get<boolean>(
+        "importWizard.backgroundValidationEnabled",
+        true,
+      ) !== false,
+      sampleSize,
+    };
+  }
+
+  private startBackgroundValidation(sampleSizeOverride?: number): void {
     const sessionId = this.sessionId;
     if (!sessionId) {
       return;
     }
 
+    const { enabled, sampleSize } = this.getBackgroundValidationSettings();
+    if (!enabled) {
+      return;
+    }
+
+    const hasOverride = typeof sampleSizeOverride === "number" && Number.isFinite(sampleSizeOverride) && sampleSizeOverride > 0;
+    const effectiveSampleSize = hasOverride
+      ? Math.min(MAX_BACKGROUND_VALIDATION_SAMPLE_SIZE, Math.max(MIN_BACKGROUND_VALIDATION_SAMPLE_SIZE, Math.trunc(sampleSizeOverride)))
+      : sampleSize;
+
     this.deps.service.startBackgroundValidation(
       sessionId,
-      sampleSize,
+      effectiveSampleSize,
       (
         progress: BackgroundValidationProgress,
         summary?: ImportWizardValidationSummary,
@@ -656,17 +684,36 @@ export class ImportWizardMessageHandler {
 
     try {
       await this.deps.postMessage({ type: "executionStarted" });
+
+      let ignoreValidationErrors = false;
+      if (state.hasValidationErrors) {
+        const choice = await vscode.window.showWarningMessage(
+          `${state.issues.length} cell(s) failed validation. Import anyway? Rows may still be rejected by the database.`,
+          { modal: true },
+          "Import Anyway",
+        );
+        if (choice !== "Import Anyway") {
+          await this.deps.postMessage({
+            type: "executionFinished",
+            result: { success: false, message: "Import cancelled." },
+          });
+          return;
+        }
+        ignoreValidationErrors = true;
+      }
+
       const result = await vscode.window.withProgress<ImportResult>(
         {
           location: vscode.ProgressLocation.Window,
           title: "Running advanced import...",
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) =>
+        async (progress, token) =>
           this.deps.service.executeImport(
             sessionId,
             (message, increment) => progress.report({ message, increment }),
-            () => this.disposed,
+            () => this.disposed || token.isCancellationRequested,
+            { ignoreValidationErrors },
           ),
       );
 

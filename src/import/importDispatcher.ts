@@ -150,7 +150,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'postgresql': {
@@ -161,7 +162,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'vertica': {
@@ -196,7 +198,8 @@ export async function importDataForConnection(
                 connectionDetails,
                 progressCallback,
                 timeoutSeconds,
-                columnOptions
+                columnOptions,
+                isCancelled
             );
         }
         case 'oracle': {
@@ -265,7 +268,7 @@ export async function importDataForConnection(
                 if (!provider.createResult) {
                     return buildValidationError('Snowflake import provider does not expose staged import execution.');
                 }
-                return provider.createResult({
+                return await provider.createResult({
                     filePath: normalizedFilePath,
                     targetTable: normalizedTargetTable,
                     columnOptions,
@@ -299,7 +302,8 @@ export async function importClipboardDataForConnection(
     connectionDetails: ConnectionDetails,
     formatPreference?: string | null,
     options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     const connectionValidation = validateImportConnection(connectionDetails);
     if (connectionValidation) {
@@ -320,7 +324,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'postgresql': {
@@ -330,7 +335,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'vertica': {
@@ -340,7 +346,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'netezza': {
@@ -350,7 +357,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'mssql': {
@@ -360,7 +368,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'oracle': {
@@ -370,7 +379,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'mysql': {
@@ -380,7 +390,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'clickhouse': {
@@ -390,7 +401,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'duckdb': {
@@ -400,7 +412,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'sqlite': {
@@ -410,7 +423,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         case 'snowflake': {
@@ -431,7 +445,8 @@ export async function importClipboardDataForConnection(
                 connectionDetails,
                 formatPreference,
                 options,
-                progressCallback
+                progressCallback,
+                isCancelled
             );
         }
         default:

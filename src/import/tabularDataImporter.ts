@@ -15,6 +15,10 @@ export interface TabularDataImporterOptions {
     logDir?: string;
     inferBoolean?: boolean;
     hasHeaders?: boolean;
+    delimiter?: string;
+    skipRows?: number;
+    maxErrors?: number;
+    encoding?: string;
 }
 
 function normalizeKind(kind?: string | DatabaseKind): DatabaseKind | undefined {
@@ -82,6 +86,10 @@ export class TabularDataImporter {
         this.importer = new NetezzaImporter(filePath, targetTable, resolvedOptions?.logDir, {
             inferBoolean: resolvedOptions?.inferBoolean === true,
             hasHeaders: resolvedOptions?.hasHeaders,
+            delimiter: resolvedOptions?.delimiter,
+            skipRows: resolvedOptions?.skipRows,
+            maxErrors: resolvedOptions?.maxErrors,
+            encoding: resolvedOptions?.encoding,
         });
     }
 
@@ -212,6 +220,10 @@ export class TabularDataImporter {
         return this.importer.getRowsCount();
     }
 
+    public getWidthMismatchCount(): number {
+        return this.importer.getWidthMismatchCount();
+    }
+
     public getSqlHeaders(): string[] {
         this.ensureAnalyzed();
         return [...this.normalizedHeaders];
@@ -265,6 +277,10 @@ export class TabularDataImporter {
 
     public async getAllRows(): Promise<string[][]> {
         return this.importer.getAllRows();
+    }
+
+    public iterateRows(): AsyncIterableIterator<string[]> {
+        return this.importer.iterateRows();
     }
 
     public getDelegate(): NetezzaImporter {

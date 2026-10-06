@@ -34,6 +34,7 @@ export class ImportWizardSession {
   public readonly id = randomUUID();
   private importer?: TabularDataImporter;
   private state?: ImportWizardState;
+  private rawSampleRows?: string[][];
 
   public constructor(
     private readonly options: ImportWizardSessionOptions,
@@ -108,6 +109,7 @@ export class ImportWizardSession {
       typeOptions: this.adapter.getSupportedTypeOptions(),
     };
 
+    this.rawSampleRows = preview.rawPreviewRows;
     await this.refreshDerivedState(preview.rawPreviewRows);
     return this.getState();
   }
@@ -260,6 +262,7 @@ export class ImportWizardSession {
     state.hasValidationErrors = false;
     state.detectedDelimiter = preview.detectedDelimiter;
     state.decimalDelimiter = preview.decimalDelimiter;
+    this.rawSampleRows = preview.rawPreviewRows;
     await this.refreshDerivedState(preview.rawPreviewRows);
     return this.getState();
   }
@@ -397,6 +400,7 @@ export class ImportWizardSession {
     state.decimalDelimiter = preview.decimalDelimiter;
     state.sourceHeaders = preview.sourceHeaders;
     state.columns = preview.columns;
+    this.rawSampleRows = preview.rawPreviewRows;
     await this.refreshDerivedState(preview.rawPreviewRows);
     return this.getState();
   }
@@ -409,8 +413,9 @@ export class ImportWizardSession {
   public async executeImport(
     progressCallback?: ProgressCallback,
     isCancelled?: ImportCancellationCheck,
+    options?: { ignoreValidationErrors?: boolean },
   ): Promise<ImportResult> {
-    if (this.requireState().hasValidationErrors) {
+    if (this.requireState().hasValidationErrors && !options?.ignoreValidationErrors) {
       throw new Error("Fix validation errors before executing the import.");
     }
 
@@ -426,6 +431,7 @@ export class ImportWizardSession {
       targetTable: this.options.targetTable,
       connectionDetails: this.options.connectionDetails,
       columnOptions: this.buildColumnOptions(),
+      sheetName: this.requireState().sheetName,
       progressCallback,
       isCancelled,
     });
@@ -506,7 +512,27 @@ export class ImportWizardSession {
           : undefined,
       appendToExistingTable: !state.createTable,
       hasHeaders: state.hasHeaders,
+      sheetName: state.sheetName,
     };
+  }
+
+  /**
+   * Reuse the rows already read for this source state. Column renames,
+   * toggles, type changes and reorders must not re-read the file; only a
+   * sheet/header change invalidates the cache (those paths pass fresh rows).
+   */
+  private async getCachedSampleRows(fetchCount: number): Promise<string[][]> {
+    const cached = this.rawSampleRows;
+    if (
+      cached
+      && (cached.length >= fetchCount || cached.length >= this.requireImporter().getRowsCount())
+    ) {
+      return cached;
+    }
+
+    const rows = await this.requireImporter().getSampleRows(fetchCount);
+    this.rawSampleRows = rows;
+    return rows;
   }
 
   private buildPreviewRows(rawRows: readonly string[][]): string[][] {
@@ -530,7 +556,7 @@ export class ImportWizardSession {
       state.validationSampleSize,
     );
     const rawRows =
-      rawPreviewRows ?? (await importer.getSampleRows(fetchCount));
+      rawPreviewRows ?? (await this.getCachedSampleRows(fetchCount));
     const previewRows = this.buildPreviewRows(
       rawRows.slice(0, state.previewRowCount),
     );

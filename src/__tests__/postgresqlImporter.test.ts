@@ -29,7 +29,9 @@ jest.mock('../import/clipboardImporter', () => ({
     ClipboardDataProcessor: jest.fn()
 }));
 
-function createMockConnectionCollector(): {
+function createMockConnectionCollector(options?: {
+    failWhenSqlIncludes?: string;
+}): {
     connection: DatabaseConnection;
     executedSql: string[];
 } {
@@ -39,11 +41,16 @@ function createMockConnectionCollector(): {
         close: jest.fn().mockResolvedValue(undefined),
         createCommand: jest.fn((sql: string): DatabaseCommand => {
             executedSql.push(sql);
+            const shouldFail = options?.failWhenSqlIncludes
+                ? sql.includes(options.failWhenSqlIncludes)
+                : false;
             return {
                 commandTimeout: 0,
                 executeReader: jest.fn().mockRejectedValue(new Error('Reader execution is not expected in postgresqlImporter tests')),
                 cancel: jest.fn().mockResolvedValue(undefined),
-                execute: jest.fn().mockResolvedValue(undefined),
+                execute: shouldFail
+                    ? jest.fn().mockRejectedValue(new Error('simulated SQL failure'))
+                    : jest.fn().mockResolvedValue(undefined),
                 _recordsAffected: 0
             };
         }),
@@ -124,8 +131,15 @@ describe('postgresqlImporter', () => {
                 ['1', '01.02.2024 10:20:30', 'Alice'],
                 ['2', '2024-02-03 09:00:00', 'Bob']
             ]),
+            getRowsCount: jest.fn().mockReturnValue(2),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1', '01.02.2024 10:20:30', 'Alice'];
+                yield ['2', '2024-02-03 09:00:00', 'Bob'];
+            })()),
             getDecimalDelimiter: jest.fn().mockReturnValue('.'),
-            getCsvDelimiter: jest.fn().mockReturnValue(';')
+            getCsvDelimiter: jest.fn().mockReturnValue(';'),
+            setSelectedSheet: jest.fn()
         }));
 
         const result = await importDataToPostgreSql(tempFile, 'warehouse.public.orders_import', {
@@ -133,7 +147,7 @@ describe('postgresqlImporter', () => {
             database: 'warehouse',
             user: 'postgres',
             dbType: 'postgresql'
-        });
+        }, undefined, undefined, { sheetName: 'Sheet1' });
 
         expect(result.success).toBe(true);
         expect(executedSql[0]).toContain('CREATE TABLE public.orders_import');
@@ -163,6 +177,11 @@ describe('postgresqlImporter', () => {
                 { sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }
             ]),
             getAllRows: jest.fn().mockResolvedValue([['1']]),
+            getRowsCount: jest.fn().mockReturnValue(1),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1'];
+            })()),
             getDecimalDelimiter: jest.fn().mockReturnValue('.'),
             getCsvDelimiter: jest.fn().mockReturnValue(',')
         }));
@@ -218,5 +237,125 @@ describe('postgresqlImporter', () => {
         expect(result.details?.detectedDelimiter).toBe(',');
         expect(mockRegisterImportStream).toHaveBeenCalledTimes(1);
         expect(mockUnregisterImportStream).toHaveBeenCalledTimes(1);
+    });
+
+    it('appends clipboard data without creating the target table when requested', async () => {
+        const { connection, executedSql } = createMockConnectionCollector();
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(connection);
+
+        const analyzer = {
+            getHeaders: jest.fn().mockReturnValue(['id']),
+            getDataTypes: jest.fn().mockReturnValue([{ currentType: { toString: () => 'BIGINT' } }]),
+            getDecimalDelimiter: jest.fn().mockReturnValue('.'),
+            getDelimiter: jest.fn().mockReturnValue(','),
+            getRowCount: jest.fn().mockReturnValue(1),
+            *dataRowIterator() {
+                yield ['1'];
+            }
+        };
+        (ClipboardDataProcessor as jest.Mock).mockImplementation(() => ({
+            analyzeClipboardData: jest.fn().mockResolvedValue(analyzer)
+        }));
+
+        const result = await importClipboardDataToPostgreSql(
+            'public.clip_import',
+            { host: 'localhost', database: 'warehouse', user: 'postgres', dbType: 'postgresql' },
+            null,
+            { appendToExistingTable: true }
+        );
+
+        expect(result.success).toBe(true);
+        expect(executedSql.some(sql => sql.includes('CREATE TABLE'))).toBe(false);
+        expect(executedSql.some(sql => sql.includes('COPY public.clip_import'))).toBe(true);
+    });
+
+    it('drops the newly created table when the COPY fails', async () => {
+        const tempFile = path.join(os.tmpdir(), `postgresql-drop-${Date.now()}.csv`);
+        fs.writeFileSync(tempFile, 'id\n1\n', 'utf8');
+
+        const { connection, executedSql } = createMockConnectionCollector({ failWhenSqlIncludes: 'COPY' });
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(connection);
+        (NetezzaImporter as jest.Mock).mockImplementation(() => ({
+            analyzeDataTypes: jest.fn().mockResolvedValue([]),
+            applyColumnOptions: jest.fn(),
+            getSourceHeaders: jest.fn().mockReturnValue(['id']),
+            getColumnMappings: jest.fn().mockReturnValue([
+                { sourceColumn: 'id', targetColumn: 'id', dataType: 'BIGINT' }
+            ]),
+            getEffectiveColumnDescriptors: jest.fn().mockReturnValue([
+                { sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' }
+            ]),
+            getRowsCount: jest.fn().mockReturnValue(1),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['1'];
+            })()),
+            getDecimalDelimiter: jest.fn().mockReturnValue('.'),
+            getCsvDelimiter: jest.fn().mockReturnValue(',')
+        }));
+
+        const result = await importDataToPostgreSql(
+            tempFile,
+            'public.orders_import',
+            { host: 'localhost', database: 'warehouse', user: 'postgres', dbType: 'postgresql' }
+        );
+
+        expect(result.success).toBe(false);
+        expect(executedSql).toContain('DROP TABLE public.orders_import');
+
+        fs.unlinkSync(tempFile);
+    });
+
+    it('formats dash-zero and locale decimals while streaming COPY rows', async () => {
+        const registeredStreams: NodeJS.ReadableStream[] = [];
+        mockRegisterImportStream.mockImplementation((_name: string, stream: NodeJS.ReadableStream) => {
+            registeredStreams.push(stream);
+        });
+
+        const { connection } = createMockConnectionCollector();
+        (createConnectedDatabaseConnectionFromDetails as jest.Mock).mockResolvedValue(connection);
+        (NetezzaImporter as jest.Mock).mockImplementation(() => ({
+            analyzeDataTypes: jest.fn().mockResolvedValue([]),
+            applyColumnOptions: jest.fn(),
+            getSourceHeaders: jest.fn().mockReturnValue(['id', 'amount']),
+            getColumnMappings: jest.fn().mockReturnValue([
+                { sourceColumn: 'id', targetColumn: 'ID', dataType: 'BIGINT' },
+                { sourceColumn: 'amount', targetColumn: 'AMOUNT', dataType: 'DECIMAL(10,2)' }
+            ]),
+            getEffectiveColumnDescriptors: jest.fn().mockReturnValue([
+                { sourceIndex: 0, columnName: 'ID', dataType: 'BIGINT' },
+                { sourceIndex: 1, columnName: 'AMOUNT', dataType: 'DECIMAL(10,2)' }
+            ]),
+            getRowsCount: jest.fn().mockReturnValue(2),
+            getWidthMismatchCount: jest.fn().mockReturnValue(0),
+            iterateRows: jest.fn(() => (async function* () {
+                yield ['-', 'abc'];
+                yield ['2', '5,00'];
+            })()),
+            getDecimalDelimiter: jest.fn().mockReturnValue(','),
+            getCsvDelimiter: jest.fn().mockReturnValue(',')
+        }));
+
+        const tempFile = path.join(os.tmpdir(), `postgresql-stream-${Date.now()}.csv`);
+        fs.writeFileSync(tempFile, 'id,amount\n1,12.34\n', 'utf8');
+
+        const result = await importDataToPostgreSql(
+            tempFile,
+            'public.orders_import',
+            { host: 'localhost', database: 'warehouse', user: 'postgres', dbType: 'postgresql' }
+        );
+
+        expect(result.success).toBe(true);
+        expect(registeredStreams).toHaveLength(1);
+
+        let payload = '';
+        for await (const chunk of registeredStreams[0]) {
+            payload += String(chunk);
+        }
+
+        expect(payload).toContain('0,abc\n');
+        expect(payload).toContain('2,5.00\n');
+
+        fs.unlinkSync(tempFile);
     });
 });

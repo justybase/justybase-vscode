@@ -20,6 +20,15 @@ import { NzConnection, ConnectionDetails } from '../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import { headerForcesTextImportType } from './importTypeInferenceUtils';
 import {
+    detectImportDecimalDelimiter,
+    mapDashZeroImportCell,
+    normalizeImportNumberForDb,
+} from '@justybase/database-utils/importNumberParsing';
+import { transliterateImportHeader } from '@justybase/database-utils/importColumnNameUtils';
+import { quoteIdentifier } from '../utils/identifierUtils';
+import type { ImportCancellationCheck } from './importCancellation';
+import { throwIfImportCancelled } from './importCancellation';
+import {
     buildNetezzaVirtualImportName,
     destroyNetezzaImportStream,
     registerNetezzaImportStream,
@@ -59,9 +68,7 @@ class TextDataAnalyzer {
      * Must be called BEFORE analyze()
      */
     private detectDecimalDelimiter(): string {
-        let dotCount = 0;
-        let commaCount = 0;
-        let dataRowsSampled = 0;
+        const samples: string[] = [];
         let isHeader = true;
 
         for (const row of iterateDelimitedRecords(this.textData, this.delimiter)) {
@@ -69,20 +76,20 @@ class TextDataAnalyzer {
                 isHeader = false;
                 continue;
             }
-            if (dataRowsSampled >= 100) {
+            if (samples.length >= 1000) {
                 break;
             }
-            dataRowsSampled++;
             for (const cell of row) {
-                if (!cell?.trim()) continue;
-                // Ignore spaces (like thousand separators) when guessing if it's a number
-                const val = cell.trim().replace(/\s/g, '');
-                if (/^\d+\.\d+$/.test(val)) dotCount++;
-                if (/^\d+,\d+$/.test(val)) commaCount++;
+                if (cell?.trim()) {
+                    samples.push(cell);
+                }
+                if (samples.length >= 1000) {
+                    break;
+                }
             }
         }
 
-        return (commaCount > dotCount && commaCount > 0) ? ',' : '.';
+        return detectImportDecimalDelimiter(samples);
     }
 
     /**
@@ -238,7 +245,7 @@ export class ClipboardDataProcessor {
  */
 function cleanColumnName(colName: string): string {
     const hasTrailingLineBreak = /(?:\r\n|\r|\n)+\s*$/.test(colName);
-    let cleanName = String(colName).replace(/\r\n|\r|\n/g, '_').trim();
+    let cleanName = transliterateImportHeader(String(colName).replace(/\r\n|\r|\n/g, '_')).trim();
 
     if (!cleanName) {
         return 'COL_EMPTY';
@@ -290,11 +297,18 @@ function escapeValue(val: string, escapechar: string, valuesToEscape: string[]):
 }
 
 /**
- * Truncate numeric value to specified scale (decimal places)
- * Example: truncateNumeric("0,661868517", 8, ",") -> "0,66186852"
+ * Truncate numeric value to specified scale (decimal places).
+ * Values are first normalized through the locale-aware parser, so PL
+ * (`1 234,567`) and EN (`1,234.567`) thousands no longer leak into the DB.
+ * Example: truncateNumeric("0,661868517", 8, ",") -> "0.66186852"
  */
 function truncateNumeric(value: string, scale: number, decimalDelimiter: string): string {
     if (!value || scale < 0) return value;
+
+    const normalized = normalizeImportNumberForDb(value, decimalDelimiter, scale);
+    if (normalized !== null) {
+        return normalized;
+    }
 
     const parts = value.split(decimalDelimiter);
     if (parts.length !== 2) return value;
@@ -328,6 +342,13 @@ function formatValue(
     const typeChooser = dataTypes[colIndex];
     const dbType = typeChooser.currentType.dbType;
     const isTextType = /^(N?CHAR|N?VARCHAR|TEXT|CLOB)/.test(dbType);
+    const isNumericType = dbType === 'BIGINT' || dbType === 'NUMERIC';
+    // Lone dash (`-`/`–` for zero): 0 in numeric columns, the dash itself in
+    // text columns.
+    const dashMapped = mapDashZeroImportCell(val, isNumericType);
+    if (dashMapped !== undefined) {
+        return dashMapped;
+    }
     let result = escapeValue(isTextType ? val : val.trim(), escapechar, valuesToEscape);
 
     if (dbType === 'BOOLEAN') {
@@ -349,14 +370,24 @@ function formatValue(
         }
     }
 
-    // Handle BIGINT and NUMERIC - remove spaces used as thousand separators
-    if (dbType === 'BIGINT' || dbType === 'NUMERIC') {
+    // Handle BIGINT and NUMERIC via the locale-aware parser (spaces, NBSP,
+    // dot/apostrophe thousands, currency, percent, (negatives), exponent).
+    if (isNumericType) {
+        const scale = typeChooser.currentType.scale || typeChooser.getMaxScale();
+        const normalized = normalizeImportNumberForDb(
+            result,
+            decimalDelimiter,
+            dbType === 'NUMERIC' && scale > 0 ? scale : undefined
+        );
+        if (normalized !== null) {
+            return normalized;
+        }
         result = result.replace(/\s/g, '');
     }
 
-    // Handle NUMERIC - replace comma with dot and truncate to declared scale
+    // Fallback for values the locale parser rejects (keeps previous behavior
+    // so mixed content surfaces as a DB error instead of silent NULL).
     if (dbType === 'NUMERIC') {
-        // Truncate to declared scale before converting delimiter
         const scale = typeChooser.currentType.scale || typeChooser.getMaxScale();
         if (scale > 0) {
             result = truncateNumeric(result, scale, decimalDelimiter);
@@ -399,7 +430,8 @@ class StreamingClipboardDataStream extends Readable {
         escapechar: string,
         valuesToEscape: string[],
         decimalDelimiter: string,
-        progressCallback?: ProgressCallback
+        progressCallback?: ProgressCallback,
+        private readonly isCancelled?: ImportCancellationCheck
     ) {
         super();
         this.analyzer = analyzer;
@@ -440,6 +472,7 @@ class StreamingClipboardDataStream extends Readable {
             const batchSize = 100; // Process 100 rows per batch
 
             while (more && batchCount < batchSize) {
+                throwIfImportCancelled(this.isCancelled);
                 const result = this.rowIterator.next();
 
                 if (result.done) {
@@ -487,6 +520,22 @@ class StreamingClipboardDataStream extends Readable {
 }
 
 /**
+ * Quote a Netezza import target while preserving the `DB..TABLE`
+ * database-only notation (empty schema segment).
+ */
+function quoteNetezzaImportTarget(targetTable: string): string {
+    const parts = targetTable.split('.').map(part => part.trim());
+    if (parts.length === 3 && parts[0] && !parts[1] && parts[2]) {
+        return `${quoteIdentifier(parts[0])}..${quoteIdentifier(parts[2])}`;
+    }
+
+    return parts
+        .filter(part => part.length > 0)
+        .map(part => quoteIdentifier(part))
+        .join('.');
+}
+
+/**
  * Import clipboard data to Netezza table
  */
 export async function importClipboardDataToNetezza(
@@ -494,13 +543,15 @@ export async function importClipboardDataToNetezza(
     connectionDetails: ConnectionDetails,
     _formatPreference?: string | null,
     _options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     const startTime = Date.now();
     let virtualFileName: string;
     let importStream: Readable | undefined;
     let unregisterImportStream: (() => void) | undefined;
     let connection: NzConnection | null = null;
+    let tempLogDir: string | undefined;
 
     try {
         // Validate parameters
@@ -553,19 +604,11 @@ export async function importClipboardDataToNetezza(
         const escapechar = '\\';
         const valuesToEscape = [escapechar, recordDelim, '\r', delimiter];
 
-        const dataStream = new StreamingClipboardDataStream(
-            analyzer,
-            dataTypes,
-            delimiter,
-            recordDelim,
-            escapechar,
-            valuesToEscape,
-            decimalDelimiter,
-            progressCallback
-        );
+        const dataStream = new StreamingClipboardDataStream(analyzer, dataTypes, delimiter, recordDelim, escapechar, valuesToEscape, decimalDelimiter, progressCallback, isCancelled);
 
         // Create temp directory for logs
         const tempDir = path.join(os.tmpdir(), 'netezza_clipboard_logs');
+        tempLogDir = tempDir;
         if (!fs.existsSync(tempDir)) {
             fs.mkdirSync(tempDir, { recursive: true });
         }
@@ -576,7 +619,8 @@ export async function importClipboardDataToNetezza(
         progressCallback?.(`Registered virtual clipboard stream: ${virtualFileName}`);
 
         // Generate CREATE TABLE SQL
-        const columns = sqlHeaders.map((header, i) =>
+        const quotedHeaders = sqlHeaders.map(header => quoteIdentifier(header));
+        const columns = quotedHeaders.map((header, i) =>
             `        ${header} ${dataTypes[i].currentType.toString()}`
         );
 
@@ -584,10 +628,10 @@ export async function importClipboardDataToNetezza(
         const recordDelimPlain = '\\n';
         const logDirUnix = tempDir.replace(/\\/g, '/');
 
-        const createSql = `CREATE TABLE ${targetTable} AS
+        const createSql = `CREATE TABLE ${quoteNetezzaImportTarget(targetTable)} AS
 (
     SELECT
-${sqlHeaders.map(header => `        ${header}`).join(',\n')}
+${quotedHeaders.map(header => `        ${header}`).join(',\n')}
     FROM EXTERNAL '${virtualFileName}'
     (
 ${columns.join(',\n')}
@@ -618,6 +662,7 @@ ${columns.join(',\n')}
         connection = await createConnectedDatabaseConnectionFromDetails(connectionDetails);
 
         try {
+            throwIfImportCancelled(isCancelled);
             progressCallback?.('Executing CREATE TABLE with EXTERNAL clipboard data...');
             const cmd = connection!.createCommand(createSql);
             cmd.commandTimeout = 3600;
@@ -663,5 +708,13 @@ ${columns.join(',\n')}
 
         unregisterImportStream?.();
         destroyNetezzaImportStream(importStream);
+
+        if (tempLogDir) {
+            try {
+                fs.rmSync(tempLogDir, { recursive: true, force: true });
+            } catch {
+                // Best-effort cleanup of the clipboard log directory.
+            }
+        }
     }
 }

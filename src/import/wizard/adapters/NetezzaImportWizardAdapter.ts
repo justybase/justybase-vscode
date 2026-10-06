@@ -8,6 +8,7 @@ import {
     BaseImportWizardAdapter,
     formatQualifiedImportTarget,
     getBaseImportTypeName,
+    withImportSheetOption,
 } from './DatabaseImportWizardAdapter';
 
 export class NetezzaImportWizardAdapter extends BaseImportWizardAdapter {
@@ -62,7 +63,7 @@ export class NetezzaImportWizardAdapter extends BaseImportWizardAdapter {
             input.connectionDetails,
             input.progressCallback,
             input.timeoutSeconds,
-            input.columnOptions,
+            withImportSheetOption(input.columnOptions, input.sheetName),
             input.isCancelled,
         );
     }

@@ -73,7 +73,11 @@ export const mysqlBatchImportConfig: BatchImportDialectConfig = {
     toSqlLiteral: toMySqlLiteral,
     beginTransactionSql: 'START TRANSACTION',
     commitTransactionSql: 'COMMIT',
-    rollbackTransactionSql: 'ROLLBACK'
+    rollbackTransactionSql: 'ROLLBACK',
+    cleanupCreatedTargetOnFailure: true,
+    buildDropTableSql(target) {
+        return `DROP TABLE ${target.qualifiedName}`;
+    }
 };
 
 export async function importDataToMySql(
@@ -102,7 +106,8 @@ export async function importClipboardDataToMySql(
     connectionDetails: ConnectionDetails,
     formatPreference?: string | null,
     options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importClipboardWithBatching(
         mysqlBatchImportConfig,
@@ -110,6 +115,7 @@ export async function importClipboardDataToMySql(
         connectionDetails,
         formatPreference,
         options,
-        progressCallback
+        progressCallback,
+        isCancelled
     );
 }

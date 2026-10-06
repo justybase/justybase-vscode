@@ -67,6 +67,7 @@ describe('ImportWizardService', () => {
         }),
         getCsvDelimiter: jest.fn(() => ','),
         getDecimalDelimiter: jest.fn(() => '.'),
+        getRowsCount: jest.fn(() => 2),
         updateTargetTable: jest.fn(),
         setHasHeaders: jest.fn(),
         getHasHeaders: jest.fn(() => true),
@@ -155,6 +156,31 @@ describe('ImportWizardService', () => {
         expect(validatedState.issues.some((issue) => issue.rowIndex === 1)).toBe(true);
     });
 
+    it('reuses the initial sample for column edits instead of re-reading the file', async () => {
+        const service = new ImportWizardService();
+        const state = await service.createSession({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'public.orders',
+            connectionDetails: {
+                dbType: 'postgresql',
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'postgres',
+            } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        });
+
+        const sampleCallsAfterInit = fakeImporter.getSampleRows.mock.calls.length;
+
+        await service.renameColumn(state.id, 0, 'order_id');
+        await service.toggleColumn(state.id, 1, false);
+        await service.setColumnType(state.id, 1, 'VARCHAR(50)');
+        await service.reorderColumns(state.id, [1, 0]);
+
+        expect(fakeImporter.getSampleRows.mock.calls.length).toBe(sampleCallsAfterInit);
+    });
+
     it('builds execution column options and delegates execution', async () => {
         const service = new ImportWizardService();
         const state = await service.createSession({
@@ -186,9 +212,42 @@ describe('ImportWizardService', () => {
                     columnNameOverrides: { 1: 'customer_name' },
                     appendToExistingTable: false,
                     hasHeaders: true,
+                    sheetName: 'Sheet1',
                 },
             }),
         );
+    });
+
+    it('blocks execution on validation errors unless explicitly allowed', async () => {
+        const service = new ImportWizardService();
+        const state = await service.createSession({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'public.orders',
+            connectionDetails: {
+                dbType: 'postgresql',
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'postgres',
+            } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        });
+
+        await service.setColumnType(state.id, 0, 'DATE');
+        expect(service.getSessionState(state.id).hasValidationErrors).toBe(true);
+
+        await expect(service.executeImport(state.id)).rejects.toThrow(/validation errors/i);
+        expect(executeMock).not.toHaveBeenCalled();
+
+        const result = await service.executeImport(
+            state.id,
+            undefined,
+            undefined,
+            { ignoreValidationErrors: true },
+        );
+
+        expect(result.success).toBe(true);
+        expect(executeMock).toHaveBeenCalledTimes(1);
     });
 
     it('forces create-table mode for adapters that do not support appending', async () => {
@@ -214,6 +273,34 @@ describe('ImportWizardService', () => {
         expect(executeMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 columnOptions: expect.objectContaining({ appendToExistingTable: false }),
+            }),
+        );
+    });
+
+    it('propagates the selected worksheet to import execution', async () => {
+        const service = new ImportWizardService();
+        const state = await service.createSession({
+            filePath: '/tmp/orders.xlsx',
+            targetTable: 'public.orders',
+            connectionDetails: {
+                dbType: 'postgresql',
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'postgres',
+            } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        });
+
+        const changedState = await service.setSheet(state.id, 'Sheet2');
+        expect(changedState.sheetName).toBe('Sheet2');
+
+        await service.executeImport(state.id);
+
+        expect(executeMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                sheetName: 'Sheet2',
+                columnOptions: expect.objectContaining({ sheetName: 'Sheet2' }),
             }),
         );
     });

@@ -27,6 +27,7 @@ import type { AliasInfo } from '../providers/types';
 import { ImportWizardView } from '../views/importWizardView';
 import { presentAccessError } from '../utils/accessErrorHandling';
 import { getDatabaseStageWorkflowProvider } from '../core/connectionFactory';
+import { Logger } from '../utils/logger';
 
 export interface ImportCommandsDependencies {
     context: vscode.ExtensionContext;
@@ -170,18 +171,29 @@ export function fileUriToPath(fileUri: string): string {
         trimmed = trimmed.slice(1, -1);
     }
 
-    // Check if it's a file URI
-    if (!/^file:\/\/\//i.test(trimmed)) {
+    const match = trimmed.match(/^file:\/\/([^/]*)(\/.*)$/i);
+    if (!match) {
         return trimmed; // Return as-is if not a file URI
     }
 
-    // Remove file:/// prefix
-    const path = trimmed.substring(8);
+    const [, authority, pathPart] = match;
+    let resolvedPath: string;
+    if (authority) {
+        // file://server/share -> //server/share (UNC)
+        resolvedPath = `//${authority}${pathPart}`;
+    } else if (/^\/[a-zA-Z]:/.test(pathPart)) {
+        // file:///C:/path -> C:/path
+        resolvedPath = pathPart.slice(1);
+    } else {
+        // file:///path -> path (legacy relative-style handling)
+        resolvedPath = pathPart.replace(/^\//, '');
+    }
 
-    // Handle Windows paths: file:///C:/path/to/file.csv -> C:/path/to/file.csv
-    // Unix paths: file:///path/to/file.csv -> /path/to/file.csv
-    // The path after file:/// is already in the correct format
-    return path;
+    try {
+        return decodeURIComponent(resolvedPath);
+    } catch {
+        return resolvedPath;
+    }
 }
 
 /**
@@ -277,8 +289,8 @@ interface ImportTargetPromptProfile {
 const IMPORT_TARGET_PROMPT_PROFILES: Readonly<Record<SupportedImportDialect, ImportTargetPromptProfile>> = {
     netezza: {
         label: 'Netezza',
-        formatHint: 'TABLE, SCHEMA.TABLE, or DATABASE.SCHEMA.TABLE',
-        placeholder: 'TABLE, SCHEMA.TABLE, or DATABASE.SCHEMA.TABLE',
+        formatHint: 'TABLE, SCHEMA.TABLE, DATABASE.SCHEMA.TABLE, or DATABASE..TABLE',
+        placeholder: 'TABLE, SCHEMA.TABLE, DATABASE.SCHEMA.TABLE, or DATABASE..TABLE',
         supportsThreePartName: true,
         enforceActiveDatabaseMatch: false,
     },
@@ -404,6 +416,16 @@ function validateImportTargetTableInput(
     const normalizedValue = value.trim();
     const profile = getImportTargetPromptProfile(connectionDetails.dbType);
     const rawParts = normalizedValue.split('.').map((part) => part.trim());
+    const allowsDatabaseOnlyReference = resolveImportDialect(connectionDetails.dbType) === 'netezza';
+    if (
+        allowsDatabaseOnlyReference
+        && rawParts.length === 3
+        && rawParts[0].length > 0
+        && rawParts[1].length === 0
+        && rawParts[2].length > 0
+    ) {
+        return null;
+    }
     if (rawParts.some((part) => part.length === 0)) {
         return `Invalid target table format. Use ${profile.formatHint}.`;
     }
@@ -607,7 +629,7 @@ async function resolveSourceFile(filePath?: string | vscode.Uri): Promise<string
     }
 
     const fs = await import('fs');
-    const dataExtensions = ['.csv', '.txt', '.tsv', '.xlsx', '.xlsb', '.parquet'];
+    const dataExtensions = ['.csv', '.txt', '.tsv', '.xlsx', '.xlsb'];
     const ext = normalizedFilePath ? normalizedFilePath.toLowerCase().slice(normalizedFilePath.lastIndexOf('.')) : '';
     const isDataFile = dataExtensions.includes(ext);
 
@@ -917,13 +939,15 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
 
                 const startTime = Date.now();
                 let generatedSnowflakeWorkflow = false;
+                let importCancelled = false;
 
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Window,
                         title: 'Importing data...',
+                        cancellable: true,
                     },
-                    async (progress) => {
+                    async (progress, token) => {
                         let lastLoggedMessage = '';
                         const reportProgress = (message: string, increment?: number, logToOutput: boolean = true) => {
                             progress.report({ message, increment });
@@ -951,6 +975,7 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                             reportProgress,
                             undefined,
                             formImportOptions,
+                            () => token.isCancellationRequested,
                         );
 
                         const workflowMarkdown = result.details?.snowflakeWorkflow?.workflowMarkdown;
@@ -969,6 +994,10 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                         }
 
                         if (!result.success) {
+                            if (token.isCancellationRequested) {
+                                importCancelled = true;
+                                return;
+                            }
                             throw new Error(result.message);
                         }
 
@@ -979,6 +1008,11 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                         }
                     },
                 );
+
+                if (importCancelled) {
+                    vscode.window.showInformationMessage('Import cancelled.');
+                    return;
+                }
 
                 if (generatedSnowflakeWorkflow) {
                     logExecutionTime(outputChannel, 'Prepare Snowflake Import Workflow', startTime);
@@ -1227,6 +1261,7 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
             const mode = await vscode.window.showQuickPick(
                 [
                     { label: '$(zap) Simple', description: 'Auto-detect settings and import', value: 'simple' },
+                    { label: '$(list-selection) Form', description: 'Choose columns and force data types', value: 'form' },
                     { label: '$(table) Advanced', description: 'Open advanced import wizard', value: 'advanced' },
                 ],
                 { placeHolder: 'Select import mode' },
@@ -1236,7 +1271,7 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
             if (mode.value === 'advanced') {
                 await vscode.commands.executeCommand('netezza.importDataAdvanced');
             } else {
-                await vscode.commands.executeCommand('netezza.importData', { mode: 'simple' });
+                await vscode.commands.executeCommand('netezza.importData', { mode: mode.value });
             }
         }),
 
@@ -1370,7 +1405,7 @@ function registerPasteDetection(
                     } catch (err: unknown) {
                         const errorMsg = err instanceof Error ? err.message : String(err);
                         vscode.window.showErrorMessage(`Import failed: ${errorMsg}`);
-                        console.error('Import error:', err);
+                        Logger.tryGetInstance()?.error('Import error', err);
                     }
                 }
             }

@@ -5,6 +5,20 @@ export interface ImportColumnOptions {
   columnNameOverrides?: Record<number, string>;
   appendToExistingTable?: boolean;
   hasHeaders?: boolean;
+  /**
+   * Worksheet to read from an xlsx/xlsb source. When omitted, the first
+   * worksheet is used or the option is not applicable (delimited files).
+   * Unknown worksheet names abort the import before any database write.
+   */
+  sheetName?: string;
+  /** Number of leading source rows to skip before the header row. */
+  skipRows?: number;
+  /** Explicit field delimiter override; otherwise detected from the source. */
+  delimiter?: string;
+  /** Maximum rejected rows tolerated by a database load. Defaults per dialect. */
+  maxErrors?: number;
+  /** Source text encoding (for example `utf8`, `utf16le`, `latin1`). */
+  encoding?: string;
 }
 
 /** A normalized source column descriptor shared by import planners. */

@@ -5,6 +5,7 @@ import { createConnectedDatabaseConnectionFromDetails } from '../core/connection
 import type { ConnectionDetails } from '../types';
 import { ClipboardDataProcessor } from './clipboardImporter';
 import {
+    buildWidthMismatchWarning,
     ImportColumnDescriptor,
     ImportColumnOptions,
     ImportResult,
@@ -12,8 +13,14 @@ import {
 } from './dataImporter';
 import { normalizeAndDeduplicateHeaders } from './importHeaderUtils';
 import { createTabularDataImporter } from './tabularDataImporter';
+import type { ImportCancellationCheck } from './importCancellation';
+import { throwIfImportCancelled } from './importCancellation';
 import { quoteIdentifier } from '../utils/identifierUtils';
 import { escapeSqlString as escapeSqlLiteral } from '../utils/sqlUtils';
+import {
+    isDashZeroImportCell,
+    normalizeImportNumberForDb,
+} from '@justybase/database-utils/importNumberParsing';
 
 const DB2_MAX_VARCHAR_LENGTH = 32672;
 const DB2_MAX_CHAR_LENGTH = 254;
@@ -170,6 +177,11 @@ function truncateNumeric(value: string, scale: number, decimalDelimiter: string)
         return value;
     }
 
+    const normalized = normalizeImportNumberForDb(value, decimalDelimiter, scale);
+    if (normalized !== null) {
+        return normalized;
+    }
+
     const parts = value.split(decimalDelimiter);
     if (parts.length !== 2) {
         return value;
@@ -183,6 +195,8 @@ function truncateNumeric(value: string, scale: number, decimalDelimiter: string)
     return `${integerPart}${decimalDelimiter}${decimalPart.slice(0, scale)}`;
 }
 
+const DB2_NUMERIC_BASE_TYPES = new Set(['NUMERIC', 'DECIMAL', 'BIGINT', 'INTEGER', 'INT', 'SMALLINT', 'REAL', 'DOUBLE', 'FLOAT', 'DECFLOAT']);
+
 function normalizeValueForType(value: string, dataType: string, decimalDelimiter: string): string | null {
     const trimmed = String(value || '').trim();
     if (!trimmed) {
@@ -190,6 +204,11 @@ function normalizeValueForType(value: string, dataType: string, decimalDelimiter
     }
 
     const baseType = getBaseDataType(dataType);
+
+    // Lone dash: 0 in numeric columns, the dash itself in text columns.
+    if (isDashZeroImportCell(trimmed)) {
+        return DB2_NUMERIC_BASE_TYPES.has(baseType) ? '0' : trimmed;
+    }
 
     if (baseType === 'DATE') {
         return formatDateValue(trimmed);
@@ -199,16 +218,26 @@ function normalizeValueForType(value: string, dataType: string, decimalDelimiter
         return formatTimestampValue(trimmed);
     }
 
-    if (baseType === 'NUMERIC' || baseType === 'DECIMAL') {
+    if (DB2_NUMERIC_BASE_TYPES.has(baseType)) {
         const declaredScale = getNumericScale(dataType) ?? 0;
-        let normalized = trimmed;
-        if (declaredScale > 0) {
-            normalized = truncateNumeric(normalized, declaredScale, decimalDelimiter);
+        const normalized = normalizeImportNumberForDb(
+            trimmed,
+            decimalDelimiter,
+            (baseType === 'NUMERIC' || baseType === 'DECIMAL') && declaredScale > 0
+                ? declaredScale
+                : undefined
+        );
+        if (normalized !== null) {
+            return normalized;
+        }
+        let fallback = trimmed.replace(/\s/g, '');
+        if ((baseType === 'NUMERIC' || baseType === 'DECIMAL') && declaredScale > 0) {
+            fallback = truncateNumeric(fallback, declaredScale, decimalDelimiter);
         }
         if (decimalDelimiter === ',') {
-            normalized = normalized.replace(',', '.');
+            fallback = fallback.replace(',', '.');
         }
-        return normalized;
+        return fallback;
     }
 
     return trimmed;
@@ -264,21 +293,24 @@ async function insertRows(
     connection: DatabaseConnection,
     target: Db2TargetTable,
     columns: ImportColumnDescriptor[],
-    rows: Iterable<string[]>,
+    rows: Iterable<string[]> | AsyncIterable<string[]>,
     decimalDelimiter: string,
     totalRows: number,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<number> {
     let insertedRows = 0;
     let batch: string[][] = [];
 
-    for (const row of rows) {
+    for await (const row of rows) {
+        throwIfImportCancelled(isCancelled);
         batch.push(row);
         if (batch.length < INSERT_BATCH_SIZE) {
             continue;
         }
 
         const insertSql = buildInsertSql(target, columns, batch, decimalDelimiter);
+        throwIfImportCancelled(isCancelled);
         await executeStatement(connection, insertSql);
         insertedRows += batch.length;
         batch = [];
@@ -287,6 +319,7 @@ async function insertRows(
 
     if (batch.length > 0) {
         const insertSql = buildInsertSql(target, columns, batch, decimalDelimiter);
+        throwIfImportCancelled(isCancelled);
         await executeStatement(connection, insertSql);
         insertedRows += batch.length;
         progressCallback?.(`Inserted ${insertedRows.toLocaleString()}/${totalRows.toLocaleString()} rows`, undefined, false);
@@ -301,12 +334,16 @@ export async function importDataToDb2(
     connectionDetails: ConnectionDetails,
     progressCallback?: ProgressCallback,
     _timeout?: number,
-    columnOptions?: ImportColumnOptions
+    columnOptions?: ImportColumnOptions,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     const startTime = Date.now();
     let connection: DatabaseConnection | null = null;
+    let createdTargetTable = false;
+    let targetForCleanup: Db2TargetTable | undefined;
 
     try {
+        throwIfImportCancelled(isCancelled);
         if (!filePath || !targetTable) {
             throw new Error('Source file path and target table are required.');
         }
@@ -316,40 +353,47 @@ export async function importDataToDb2(
 
         progressCallback?.('Analyzing source file...');
         const importer = createTabularDataImporter(filePath, targetTable, { kind: 'db2', hasHeaders: columnOptions?.hasHeaders });
+        if (columnOptions?.sheetName?.trim()) {
+            importer.setSelectedSheet(columnOptions.sheetName);
+        }
         await importer.analyzeDataTypes(progressCallback);
         importer.applyColumnOptions(columnOptions);
 
         const target = parseDb2TargetTable(targetTable, connectionDetails);
+        targetForCleanup = target;
         const columns = importer.getEffectiveColumnDescriptors();
         if (columns.length === 0) {
             throw new Error('No columns selected for import.');
         }
 
-        const rows = await importer.getAllRows();
-        if (rows.length === 0) {
+        const totalRows = importer.getRowsCount();
+        if (totalRows === 0) {
             throw new Error('No data rows found in source file.');
         }
 
-        progressCallback?.(`Preparing Db2 import for ${rows.length.toLocaleString()} rows...`);
+        progressCallback?.(`Preparing Db2 import for ${totalRows.toLocaleString()} rows...`);
         connection = await createConnectedDatabaseConnectionFromDetails({
             ...connectionDetails,
             dbType: 'db2'
         });
 
+        throwIfImportCancelled(isCancelled);
         if (!columnOptions?.appendToExistingTable) {
             const createTableSql = buildCreateTableSql(target, columns);
             progressCallback?.(`Creating target table ${target.displayName}...`);
             await executeStatement(connection, createTableSql, 3600);
+            createdTargetTable = true;
         }
 
         const insertedRows = await insertRows(
             connection,
             target,
             columns,
-            rows,
+            importer.iterateRows(),
             importer.getDecimalDelimiter(),
-            rows.length,
-            progressCallback
+            totalRows,
+            progressCallback,
+            isCancelled
         );
 
         const processingTime = (Date.now() - startTime) / 1000;
@@ -361,14 +405,25 @@ export async function importDataToDb2(
                 targetTable: target.displayName,
                 fileSize: fs.statSync(filePath).size,
                 format: path.extname(filePath).replace('.', '').toUpperCase() || 'UNKNOWN',
-                rowsProcessed: rows.length,
+                rowsProcessed: totalRows,
                 rowsInserted: insertedRows,
                 processingTime: `${processingTime.toFixed(2)} seconds`,
                 columns: columns.length,
-                detectedDelimiter: importer.getCsvDelimiter()
+                detectedDelimiter: importer.getCsvDelimiter(),
+                warnings: (() => {
+                    const warning = buildWidthMismatchWarning(importer.getWidthMismatchCount());
+                    return warning ? [warning] : undefined;
+                })()
             }
         };
     } catch (error: unknown) {
+        if (connection && createdTargetTable && targetForCleanup) {
+            try {
+                await executeStatement(connection, `DROP TABLE ${targetForCleanup.qualifiedName}`, 3600);
+            } catch {
+                // Surface the original import error while best-effort cleaning up.
+            }
+        }
         return {
             success: false,
             message: error instanceof Error ? error.message : String(error)
@@ -384,13 +439,20 @@ export async function importClipboardDataToDb2(
     targetTable: string,
     connectionDetails: ConnectionDetails,
     _formatPreference?: string | null,
-    _options?: unknown,
-    progressCallback?: ProgressCallback
+    options?: unknown,
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
+    const columnOptions = options && typeof options === 'object'
+        ? options as ImportColumnOptions
+        : undefined;
     const startTime = Date.now();
     let connection: DatabaseConnection | null = null;
+    let createdTargetTable = false;
+    let targetForCleanup: Db2TargetTable | undefined;
 
     try {
+        throwIfImportCancelled(isCancelled);
         if (!targetTable) {
             throw new Error('Target table name is required.');
         }
@@ -416,13 +478,18 @@ export async function importClipboardDataToDb2(
         }));
 
         const target = parseDb2TargetTable(targetTable, connectionDetails);
+        targetForCleanup = target;
         connection = await createConnectedDatabaseConnectionFromDetails({
             ...connectionDetails,
             dbType: 'db2'
         });
 
-        progressCallback?.(`Creating target table ${target.displayName}...`);
-        await executeStatement(connection, buildCreateTableSql(target, columns), 3600);
+        throwIfImportCancelled(isCancelled);
+        if (!columnOptions?.appendToExistingTable) {
+            progressCallback?.(`Creating target table ${target.displayName}...`);
+            await executeStatement(connection, buildCreateTableSql(target, columns), 3600);
+            createdTargetTable = true;
+        }
 
         const insertedRows = await insertRows(
             connection,
@@ -431,7 +498,8 @@ export async function importClipboardDataToDb2(
             rowsIterator,
             analyzer.getDecimalDelimiter(),
             totalRows,
-            progressCallback
+            progressCallback,
+            isCancelled
         );
 
         const processingTime = (Date.now() - startTime) / 1000;
@@ -448,6 +516,13 @@ export async function importClipboardDataToDb2(
             }
         };
     } catch (error: unknown) {
+        if (connection && createdTargetTable && targetForCleanup) {
+            try {
+                await executeStatement(connection, `DROP TABLE ${targetForCleanup.qualifiedName}`, 3600);
+            } catch {
+                // Surface the original import error while best-effort cleaning up.
+            }
+        }
         return {
             success: false,
             message: error instanceof Error ? error.message : String(error)

@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { readParquetFile } from '../export/parquetHyparquet';
+import {
+    detectDelimitedTextDelimiter,
+    detectSourceEncoding,
+    readDelimitedRecords,
+    readDelimitedTextPrefix,
+} from '../import/dataImporter';
 import type { ConnectionManager } from '../core/connectionManager';
 import {
     DataWorkspaceService,
@@ -680,32 +686,33 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
     }
 
     private async _readCsv(filePath: string, fileSizeBytes: number, maxRows: number): Promise<FilePreviewData> {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const lines = content.split(/\r?\n/);
-
-        const delimiter = this._detectCsvDelimiter(lines[0] || '');
+        const encoding = detectSourceEncoding(filePath);
+        const delimiter = this._detectFileCsvDelimiter(filePath, encoding);
 
         const columns: ColumnInfo[] = [];
         const rows: unknown[][] = [];
         let totalRows = 0;
         let headerParsed = false;
 
-        for (const line of lines) {
-            if (!line.trim()) continue;
-
-            const parsed = this._parseCsvLine(line, delimiter);
-
+        for await (const record of readDelimitedRecords(filePath, delimiter, undefined, encoding)) {
             if (!headerParsed) {
-                for (const name of parsed) {
+                if (record.length === 1 && !record[0].trim()) {
+                    continue;
+                }
+                for (const name of record) {
                     columns.push({ name: name || `Column ${columns.length + 1}` });
                 }
                 headerParsed = true;
                 continue;
             }
 
+            if (record.length === 1 && !record[0].trim()) {
+                continue;
+            }
+
             totalRows++;
             if (rows.length < maxRows) {
-                rows.push(parsed.map(v => (v === null || v === undefined ? null : v)));
+                rows.push(record.map(v => (v === null || v === undefined ? null : v)));
             }
         }
 
@@ -726,44 +733,16 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
         };
     }
 
-    private _detectCsvDelimiter(firstLine: string): string {
-        const delimiters = [';', '\t', '|', ','];
-        let best = ',';
-        let maxCount = 0;
-        for (const delim of delimiters) {
-            const escaped = delim === '|' ? '\\|' : delim === '\t' ? '\\t' : delim;
-            const count = (firstLine.match(new RegExp(escaped, 'g')) || []).length;
-            if (count > maxCount) {
-                maxCount = count;
-                best = delim;
-            }
+    private _detectFileCsvDelimiter(filePath: string, encoding: BufferEncoding = 'utf-8'): string {
+        const fallback = path.extname(filePath).toLowerCase() === '.tsv' ? '\t' : ',';
+        try {
+            const prefix = readDelimitedTextPrefix(filePath, 64 * 1024, encoding);
+            return detectDelimitedTextDelimiter(prefix, [';', '\t', '|', ','], fallback);
+        } catch {
+            return fallback;
         }
-        return best;
     }
 
-    private _parseCsvLine(line: string, delimiter: string): string[] {
-        const result: string[] = [];
-        let current = '';
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '"') {
-                if (inQuotes && line[i + 1] === '"') {
-                    current += '"';
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (char === delimiter && !inQuotes) {
-                result.push(current);
-                current = '';
-            } else {
-                current += char;
-            }
-        }
-        result.push(current);
-        return result;
-    }
 }
 
 function escHtml(s: string): string {

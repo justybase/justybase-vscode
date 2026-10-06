@@ -54,12 +54,12 @@ Data Workspace uses a local DuckDB/SQLite-backed profile to query files as table
 1. Select a target table in Schema Browser and choose **Import Data** from the
    main bar or **Import Data (Advanced Wizard)** where the desktop wizard is
    available.
-2. Choose CSV/TXT, XLSX, or XLSB, or use **Smart Paste** for a path or tabular clipboard data.
+2. Choose CSV/TXT/TSV, XLSX, or XLSB, or use **Smart Paste** for a path or tabular clipboard data. Every database importer accepts `.tsv` sources.
 3. Confirm delimiter, decimal separator, header handling, encoding, and inferred types.
 4. Map source columns to target columns; choose defaults, nullable behavior, and conversions explicitly.
 5. Review the generated DDL and import plan. A preview is not an execution.
 6. Run synchronous sample validation, then allow background validation for the larger sample when enabled.
-7. Confirm the write and monitor progress. Cancelled or failed stages clean up temporary state where possible; retry from the preview if the source changed.
+7. Confirm the write and monitor progress. Cancellation stops the transfer for every database importer. A failed batch import rolls back its transaction where supported and drops a newly created target table instead of leaving a partial load.
 
 The simple importer is useful for a known, clean file. The advanced wizard is safer for mixed types, renamed columns, nullability, date formats, and large files because it separates inference, mapping, validation, and execution.
 
@@ -68,6 +68,8 @@ For ClickHouse, the companion uses the HTTP runtime and generates a `MergeTree` 
 For Netezza, CSV/TSV/TXT, XLSX, and XLSB imports use the driver's virtual external-table stream. The source rows are registered under a transient name and consumed with `FROM EXTERNAL`; they are not first copied to a local data file. This keeps the client-side stream and the driver's external-load protocol ordered and avoids failures caused by a prematurely closed or partially materialized temporary file. The Netezza driver must be version 2.4.4 or newer.
 
 Excel header handling is defensive: a row containing numeric values is treated as data rather than a header, missing headers receive `COL_1`, `COL_2`, and repeated names receive suffixes such as `COL_1`. Consequently, a workbook with a first row `1, a` retains that row in the target table.
+
+CSV/TXT/TSV files use a conservative header heuristic: when the first record has no data-like cells and the second record does, the first record becomes the header; ambiguous all-text files keep the historical header-first behavior. Empty header cells become `COLUMN_<n>` placeholders across dialects.
 
 Parquet is supported by the DuckDB/File SQL connection, not by the direct Netezza file importer. To load Parquet into Netezza, open the file as a File SQL source and use Migration Studio; the live migration path reads the Parquet view and streams rows into Netezza.
 
@@ -83,8 +85,8 @@ Quoted CSV/TSV cells are parsed as logical records, so delimiters, doubled quote
 
 - Preview and DDL generation happen before a write confirmation.
 - Progress and cancellation are shown for long imports/exports.
-- Background validation is controlled by `justybase.importWizard.backgroundValidationEnabled` and its sample-size setting.
-- A failed import does not make a partially written table safe; use a staging table and transaction/database-specific cleanup policy where available.
+- Background validation is controlled by `justybase.importWizard.backgroundValidationEnabled` and `justybase.importWizard.backgroundValidationSampleSize`; disabling the setting skips both automatic and requested background validation.
+- Batch imports use the per-dialect transaction and drop-on-failure behavior; Netezza and PostgreSQL loads are single statements. A failed import never claims a partially written table is complete.
 - Access and local file operations use the embedded reader/runtime and have no warehouse transaction boundary.
 
 ## Access and database boundaries

@@ -66,7 +66,11 @@ export const accessBatchImportConfig: BatchImportDialectConfig = {
             supportsThreePartName: false
         });
     },
-    toSqlLiteral: toAccessLiteral
+    toSqlLiteral: toAccessLiteral,
+    cleanupCreatedTargetOnFailure: true,
+    buildDropTableSql(target) {
+        return `DROP TABLE ${target.qualifiedName}`;
+    }
 };
 
 export async function importDataToAccess(
@@ -95,7 +99,8 @@ export async function importClipboardDataToAccess(
     connectionDetails: ConnectionDetails,
     formatPreference?: string | null,
     options?: unknown,
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    isCancelled?: ImportCancellationCheck
 ): Promise<ImportResult> {
     return importClipboardWithBatching(
         accessBatchImportConfig,
@@ -103,6 +108,7 @@ export async function importClipboardDataToAccess(
         connectionDetails,
         formatPreference,
         options,
-        progressCallback
+        progressCallback,
+        isCancelled
     );
 }
