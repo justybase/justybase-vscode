@@ -42,8 +42,15 @@ export function renderSqlQueueLogs(wrapper: HTMLElement): void {
     overview.append(title);
     const action = (label: string, command: string, job?: QueueJob) => {
         const button = document.createElement('button');
+        button.type = 'button';
         button.textContent = label;
-        button.addEventListener('click', () => postHostMessage({ command: 'sqlQueueAction', sourceKey: lane.sourceKey, action: command, jobId: job?.id }));
+        button.addEventListener('click', event => {
+            // Job controls live inside <summary>: without these the click also
+            // toggles the <details> disclosure (and a submit default in forms).
+            event.preventDefault();
+            event.stopPropagation();
+            postHostMessage({ command: 'sqlQueueAction', sourceKey: lane.sourceKey, action: command, jobId: job?.id });
+        });
         return button;
     };
     const controls = document.createElement('div');
@@ -70,7 +77,6 @@ export function renderSqlQueueLogs(wrapper: HTMLElement): void {
         sql.title = `${job.database ?? ''}\n${job.sql}`;
         const control = action(index < lane.running.length ? 'Cancel' : 'Remove', index < lane.running.length ? 'cancel' : 'remove', job);
         control.disabled = job.status === 'cancelling';
-        control.addEventListener('click', event => event.preventDefault());
         summary.append(status, sql, control);
         const detail = document.createElement('pre');
         detail.className = 'sql-queue-job-detail';

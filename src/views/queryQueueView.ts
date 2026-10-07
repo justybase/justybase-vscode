@@ -52,7 +52,21 @@ export class QueryQueueView implements vscode.TreeDataProvider<QueueNode>, vscod
                     case 'clear': coordinator.clearQueued(key); break;
                     case 'pause': coordinator.setPaused(key, true); break;
                     case 'resume': coordinator.setPaused(key, false); break;
-                    case 'cancel': panel.cancelExecution?.(node.job?.executionUri ?? node.lane.sourceUri); await coordinator.cancelRunning(key, node.job?.id); break;
+                    case 'cancel': {
+                        // Result-panel bookkeeping must not be able to block the
+                        // backend cancel: it used to run unguarded first, so its
+                        // throw skipped cancelRunning entirely and left a visibly
+                        // dead Cancel button in the Logs queue. It stays first so
+                        // cancelled marking/row truncation applies immediately,
+                        // without waiting for the backend round-trip.
+                        try {
+                            panel.cancelExecution?.(node.job?.executionUri ?? node.lane.sourceUri);
+                        } catch (error: unknown) {
+                            console.error('[sqlQueueAction] cancel bookkeeping failed:', error);
+                        }
+                        await coordinator.cancelRunning(key, node.job?.id);
+                        break;
+                    }
                     case 'recover': await coordinator.recoverRunning(key, panel, node.job?.id); break;
                 }
             }));

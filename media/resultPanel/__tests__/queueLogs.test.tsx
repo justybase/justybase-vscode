@@ -20,6 +20,9 @@ describe('SQL queue and grouped Logs', () => {
         expect(document.querySelector('strong')?.textContent).toBe('1 running / 20 · 2 queued');
         expect(document.querySelector('unsafe')).toBeNull();
         const buttons=[...document.querySelectorAll('button')];
+        // Queue controls sit inside <summary>: they must not submit forms or
+        // toggle the disclosure when clicked.
+        for (const button of buttons) expect(button.type).toBe('button');
         for (const button of buttons) button.click();
         expect(posted.mock.calls.map(([message])=>message.action)).toEqual(['pause','clear','cancel','remove','remove']);
         expect(posted.mock.calls[2][0].jobId).toBe('a');
