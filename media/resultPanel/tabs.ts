@@ -144,6 +144,10 @@ export function renderResultSetTabs() {
     const container = document.getElementById('resultSetTabs');
     if (!container) return;
 
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('[data-result-id]')?.dataset.resultId : undefined;
+    const focusControl = document.activeElement instanceof HTMLElement ? document.activeElement.className : undefined;
+    container.setAttribute('role', 'tablist');
+    container.setAttribute('aria-label', 'Query results');
     container.innerHTML = '';
 
     if (getResultSets().length === 0) {
@@ -159,11 +163,19 @@ export function renderResultSetTabs() {
         }
         const tab = createResultSetTab(rs, index);
         container.appendChild(tab);
+        const panel = getGridWrapperForResultSet(index);
+        if (panel) { panel.id = `result-panel-${index}`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `result-tab-${index}`); }
+        if (focused && tab.dataset.resultId === focused) {
+            const control = [...tab.querySelectorAll<HTMLElement>('button')].find(button => button.className === focusControl);
+            control?.focus();
+        }
     });
+    if (focused && !container.contains(document.activeElement)) container.querySelector<HTMLButtonElement>('[role=tab][aria-selected=true]')?.focus();
 }
 
 export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement {
     const tab = document.createElement('div');
+    tab.dataset.resultId = rs.resultSetId ?? String(index);
     tab.className = 'result-set-tab' + (index === getActiveGridIndex() ? ' active' : '');
 
     if (rs.isLog) {
@@ -173,7 +185,22 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
     }
 
     // Tab Text
-    const textSpan = document.createElement('span');
+    const textSpan = document.createElement('button');
+    textSpan.type = 'button';
+    textSpan.className = 'result-tab-control';
+    textSpan.setAttribute('role', 'tab');
+    textSpan.setAttribute('aria-selected', String(index === getActiveGridIndex()));
+    textSpan.tabIndex = index === getActiveGridIndex() ? 0 : -1;
+    textSpan.id = `result-tab-${index}`;
+    textSpan.setAttribute('aria-controls', `result-panel-${index}`);
+    textSpan.onkeydown = event => {
+        const controls = [...document.querySelectorAll<HTMLButtonElement>('.result-tab-control')];
+        const position = controls.indexOf(textSpan);
+        const next = event.key === 'ArrowRight' ? (position + 1) % controls.length
+            : event.key === 'ArrowLeft' ? (position + controls.length - 1) % controls.length
+            : event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1 : -1;
+        if (next >= 0) { event.preventDefault(); controls[next].click(); controls[next].focus(); }
+    };
     const defaultLabel = rs.isLog ? 'Logs' : (rs.isTextContent ? 'MD Export' : `Result ${index}`);
     textSpan.textContent = rs.name || defaultLabel;
     if (rs.isLog) {
@@ -194,7 +221,8 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
     const PIN_PATH = 'M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.708l-.8-.8-3.535 3.535c.268.59.408 1.236.408 1.9 0 .94-.28 1.87-.828 2.672l-.172.243a.5.5 0 0 1-.756.05L8.06 10.5l-2.12 2.122a.5.5 0 0 1-.708 0L4.1 11.657a.5.5 0 0 1 0-.708l2.122-2.12-2.122-2.122a.5.5 0 0 1 .05-.756l.243-.172A4.5 4.5 0 0 1 6.9 5.88c.664 0 1.31.14 1.9.408L12.343 2.75l-.8-.8a.5.5 0 0 1 .146-.354l.132.132zM6.076 7.39l-4.243 4.243a.5.5 0 0 0 .354.854h1.5v3.5a.5.5 0 0 0 .854.354l4.243-4.243a4.5 4.5 0 0 1-2.664-2.664z';
     const PIN_SVG_OUTLINE = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
     const PIN_SVG_FILLED = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="${PIN_PATH}"/></svg>`;
-    const pinSpan = document.createElement('span');
+    const pinSpan = document.createElement('button');
+    pinSpan.type = 'button';
     pinSpan.className = 'pin-icon';
     pinSpan.setAttribute('role', 'button');
     pinSpan.setAttribute('tabindex', '0');
@@ -221,24 +249,20 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
         vscode.postMessage({
             command: 'toggleResultPin',
             sourceUri: requireActiveSourceUri(),
-            resultSetIndex: index
+            resultSetIndex: index,
+            resultSetId: rs.resultSetId
         });
     };
     pinSpan.onclick = (e) => {
         e.stopPropagation();
         sendToggleResultPin();
     };
-    pinSpan.onkeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            e.stopPropagation();
-            sendToggleResultPin();
-        }
-    };
     tab.appendChild(pinSpan);
 
     // Close Button (x)
-    const closeSpan = document.createElement('span');
+    const closeSpan = document.createElement('button');
+    closeSpan.type = 'button';
+    closeSpan.setAttribute('aria-label', `Close ${rs.name || (rs.isLog ? 'Logs' : `Result ${index}`)}`);
     closeSpan.className = 'result-set-close-btn';
     closeSpan.textContent = '×';
     closeSpan.title = 'Close this result';
@@ -255,7 +279,8 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
         vscode.postMessage({
             command: 'closeResult',
             sourceUri: requireActiveSourceUri(),
-            resultSetIndex: index
+            resultSetIndex: index,
+            resultSetId: rs.resultSetId
         });
     };
     tab.appendChild(closeSpan);
@@ -330,7 +355,8 @@ function showContextMenu(e: MouseEvent, index: number): void {
         vscode.postMessage({
             command: 'closeResult',
             sourceUri: requireActiveSourceUri(),
-            resultSetIndex: index
+            resultSetIndex: index,
+            resultSetId: rs.resultSetId
         });
     });
     menu.appendChild(closeResultItem);
@@ -439,6 +465,11 @@ export function switchToResultSet(
     // Update tab styling
     const tabs = document.querySelectorAll('.result-set-tab');
     tabs.forEach((tab, i) => {
+        const control = tab.querySelector<HTMLElement>('[role=tab]');
+        control?.setAttribute('aria-selected', String(i === index));
+        if (control) control.tabIndex = i === index ? 0 : -1;
+        const panel = getGridWrapperForResultSet(i);
+        if (panel) { panel.id = `result-panel-${i}`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `result-tab-${i}`); }
         if (i === index) {
             tab.classList.add('active');
         } else {

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 
 import { isCancellationError } from '../../core/cancellation';
+import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { normalizeUriKey } from '../../core/queryRunnerUtils';
 
 export interface QueryExecutionResultPanel {
@@ -42,6 +43,9 @@ export interface QueryExecutionAcquireOptions {
 
 export interface QueryExecutionLease extends vscode.Disposable {
     readonly executionId: string;
+    /** Real editor context; sourceUri remains the legacy execution identity. */
+    readonly documentUri?: string;
+    readonly executionUri?: string;
     readonly sourceUri: string;
     readonly sourceKey: string;
     readonly origin: string;
@@ -55,7 +59,13 @@ export interface QueryExecutionLease extends vscode.Disposable {
     markSessionIsolated(): void;
 }
 
-export const MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT = 20;
+export const MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT = 4;
+export type QuerySessionState = 'reusable' | 'closed' | 'unknown';
+
+export function clampQueryParallelLimit(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value)
+        ? Math.max(1, Math.min(100, Math.trunc(value))) : fallback;
+}
 
 export type QueryQueueStatus = 'preparing' | 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
 export type QueryQueueOutcome = 'completed' | 'failed' | 'cancelled';
@@ -72,12 +82,14 @@ export interface QueryQueueSnapshot {
     readonly queuedAt: number;
     readonly status: QueryQueueStatus;
     readonly error?: string;
+    readonly sessionState?: QuerySessionState;
 }
 
 export interface QueryLaneSnapshot {
     readonly sourceKey: string;
     readonly sourceUri: string;
     readonly paused: boolean;
+    readonly recoveryRequired?: boolean;
     readonly running?: QueryQueueSnapshot;
     readonly maxConcurrency: number;
     readonly runningExecutions: readonly QueryQueueSnapshot[];
@@ -89,6 +101,7 @@ interface QueueJob {
     snapshot: QueryQueueSnapshot;
     options: QueryExecutionAcquireOptions;
     preparation: AbortController;
+    sequence: number;
     run?: (lease: QueryExecutionLease) => Promise<QueryQueueOutcome>;
     resolve: (outcome: QueryQueueOutcome) => void;
 }
@@ -103,9 +116,11 @@ interface ExecutionLane {
     last?: QueryQueueSnapshot;
     pumping?: boolean;
     recovering?: boolean;
+    blockedSession?: ActiveExecution;
 }
 
 interface ActiveExecution {
+    documentUri: string;
     laneKey?: string;
     executionId: string;
     sourceUri: string;
@@ -166,6 +181,35 @@ export class QueryExecutionCoordinator {
     private readonly lanes = new Map<string, ExecutionLane>();
     private readonly listeners = new Set<() => void>();
 
+    private nextSubmission = 0;
+    private perTabLimit = 4;
+    private globalLimit = 12;
+
+    public configureParallelLimits(perTab: unknown, global: unknown): void {
+        this.perTabLimit = clampQueryParallelLimit(perTab, 4);
+        this.globalLimit = clampQueryParallelLimit(global, 12);
+        this.changed();
+        this.pumpAll();
+    }
+
+    private pumpAll(): void {
+        for (const lane of this.lanes.values()) this.pump(lane);
+    }
+
+    private nextEligibleJob(lane: ExecutionLane): QueueJob | undefined {
+        // An unsafe shared session cannot block independently owned connections.
+        return lane.blockedSession
+            ? lane.queued.find(job => job.options.independentConnection)
+            : lane.queued[0];
+    }
+
+    private canAdmit(lane: ExecutionLane, job: QueueJob): boolean {
+        if (lane.paused || lane.recovering || !job.run) return false;
+        if (!job.options.independentConnection) return !lane.blockedSession && !lane.running && !this.runningSources.has(lane.sourceKey);
+        const total = [...this.lanes.values()].reduce((count, item) => count + item.independent.size, 0);
+        return lane.independent.size < this.perTabLimit && total < this.globalLimit;
+    }
+
     public onDidChange(listener: () => void): vscode.Disposable {
         this.listeners.add(listener);
         return { dispose: () => { this.listeners.delete(listener); } };
@@ -180,8 +224,8 @@ export class QueryExecutionCoordinator {
 
     public getSnapshot(): readonly QueryLaneSnapshot[] {
         return [...this.lanes.values()].map(lane => ({
-            sourceKey: lane.sourceKey, sourceUri: lane.sourceUri, paused: lane.paused,
-            maxConcurrency: lane.independent.size || lane.queued.some(job => job.options.independentConnection) ? MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT : 1,
+            sourceKey: lane.sourceKey, sourceUri: lane.sourceUri, paused: lane.paused, recoveryRequired: !!lane.blockedSession,
+            maxConcurrency: lane.independent.size || lane.queued.some(job => job.options.independentConnection) ? this.perTabLimit : 1,
             running: this.snapshotJob(lane.running ?? lane.independent.values().next().value),
             runningExecutions: [ ...(lane.running ? [lane.running] : []), ...lane.independent.values() ].map(job => this.snapshotJob(job)!),
             queued: lane.queued.map(job => ({ ...job.snapshot })),
@@ -214,7 +258,7 @@ export class QueryExecutionCoordinator {
         const settled = new Promise<QueryQueueOutcome>(done => { resolve = done; });
         const job: QueueJob = {
             snapshot: Object.freeze({ ...snapshot, id: randomUUID(), sourceKey, queuedAt: Date.now(), status: 'preparing' }),
-            options: Object.freeze({ ...options }), resolve, preparation: new AbortController(),
+            options: Object.freeze({ ...options }), resolve, preparation: new AbortController(), sequence: ++this.nextSubmission,
         };
         lane.queued.push(job);
         this.changed();
@@ -225,13 +269,13 @@ export class QueryExecutionCoordinator {
                 owner.queued.splice(owner.queued.indexOf(job), 1);
                 job.resolve('cancelled');
                 this.changed();
-                this.pump(owner);
+                this.pumpAll();
                 return;
             }
             job.run = run;
             job.snapshot = { ...job.snapshot, status: 'queued' };
             this.changed();
-            this.pump(owner);
+            this.pumpAll();
         }, error => {
             if (!owner.queued.includes(job)) return;
             owner.queued.splice(owner.queued.indexOf(job), 1);
@@ -239,26 +283,32 @@ export class QueryExecutionCoordinator {
             owner.last = { ...job.snapshot, status: outcome, error: error instanceof Error ? error.message : String(error) };
             job.resolve(outcome);
             this.changed();
-            this.pump(owner);
+            this.pumpAll();
         });
         return settled;
     }
 
     private pump(lane: ExecutionLane): void {
         if (this.disposed || this.lanes.get(lane.sourceKey) !== lane || lane.paused || lane.pumping || lane.recovering) return;
-        if (lane.independent.size + (lane.running ? 1 : 0) >= MAX_INDEPENDENT_SQL_EXECUTIONS_PER_DOCUMENT) return;
-        const job = lane.queued[0];
-        if (!job?.run || (lane.running && !job.options.independentConnection)) return;
+        const job = this.nextEligibleJob(lane);
+        if (!job || !this.canAdmit(lane, job)) return;
+        if (job.options.independentConnection) {
+            const olderEligible = [...this.lanes.values()].some(other => {
+                const candidate = this.nextEligibleJob(other);
+                return candidate?.options.independentConnection && candidate.sequence < job.sequence && this.canAdmit(other, candidate);
+            });
+            if (olderEligible) return;
+        }
         lane.pumping = true;
         void this.withAcquisitionLock(lane.sourceKey, async () => {
             lane.pumping = false;
             if (this.disposed || this.lanes.get(lane.sourceKey) !== lane || lane.paused || lane.recovering
-                || lane.queued[0] !== job || (!job.options.independentConnection && this.runningSources.has(lane.sourceKey))) return undefined;
+                || this.nextEligibleJob(lane) !== job || !this.canAdmit(lane, job)) return undefined;
             if (job.options.independentConnection) lane.independent.set(job.snapshot.id, job);
             else lane.running = job;
-            lane.queued.shift();
+            lane.queued.splice(lane.queued.indexOf(job), 1);
             const entry: ActiveExecution = {
-                executionId: job.snapshot.id, sourceUri: job.snapshot.executionUri ?? lane.sourceUri,
+                documentUri: lane.sourceUri, executionId: job.snapshot.id, sourceUri: job.snapshot.executionUri ?? lane.sourceUri,
                 sourceKey: job.options.independentConnection ? `${lane.sourceKey}#execution:${job.snapshot.id}` : lane.sourceKey, laneKey: lane.sourceKey,
                 origin: job.options.origin ?? 'Run Query', startedAt: Date.now(), phase: 'preparing',
                 recovery: job.options.recovery, retired: false,
@@ -272,37 +322,39 @@ export class QueryExecutionCoordinator {
             }
             job.snapshot = { ...job.snapshot, status: 'running' };
             this.changed();
-            if (job.options.independentConnection) this.pump(lane);
+            if (job.options.independentConnection) this.pumpAll();
             let outcome: QueryQueueOutcome = 'failed';
             let errorMessage: string | undefined;
             try {
                 outcome = await job.run!(lease);
             } catch (error: unknown) {
+                outcome = isCancellationError(error) ? 'cancelled' : 'failed';
                 errorMessage = error instanceof Error ? error.message : String(error);
             } finally {
-                let isolated = true;
-                // Best-effort reset only. A failed reset must never park the lane:
-                // the queue advances and the database rejects the next command if
-                // the previous one is still running on the session.
+                let isolated = false;
                 const active = this.runningSources.get(lease.sourceKey);
-                if (lease.isCurrent() && !active?.isolationVerified && (outcome === 'cancelled' || active?.isolationRequired)) {
+                if (!job.options.independentConnection && lease.isCurrent() && !active?.isolationVerified && (outcome === 'cancelled' || active?.isolationRequired)) {
                     isolated = await this.withAcquisitionLock(lane.sourceKey, async () => {
                         if (!lease.isCurrent()) return true;
-                        try { return await job.options.recovery?.resetConnection?.() ?? false; }
+                        try { return await active?.recovery?.resetConnection?.() ?? false; }
                         catch { return false; }
                     });
                 }
                 if (this.lanes.get(lane.sourceKey) === lane && (lane.running === job || lane.independent.get(job.snapshot.id) === job)) {
                     if (lane.running === job) lane.running = undefined;
                     lane.independent.delete(job.snapshot.id);
-                    const isolationNote = isolated || outcome === 'completed'
-                        ? undefined
-                        : 'Session could not be reset; the next request may fail while the previous command is still running.';
+                    const sessionState: QuerySessionState = active?.isolationVerified || (isolated && (outcome === 'cancelled' || active?.isolationRequired))
+                        ? 'closed' : (outcome === 'cancelled' || active?.isolationRequired) ? 'unknown' : 'reusable';
+                    if (sessionState === 'unknown' && !job.options.independentConnection && active) lane.blockedSession = active;
+                    const isolationNote = sessionState === 'unknown'
+                        ? job.options.independentConnection
+                            ? 'Transient session cleanup could not be verified; sibling sessions remain independent.'
+                            : 'Session could not be reset; recover the connection before running more SQL on this shared session.' : undefined;
                     const terminalError = [errorMessage ?? active?.error, isolationNote].filter(Boolean).join(' ');
-                    lane.last = { ...job.snapshot, status: outcome, ...(terminalError ? { error: terminalError } : {}) };
+                    lane.last = { ...job.snapshot, status: outcome, sessionState, ...(terminalError ? { error: terminalError } : {}) };
                     lease.dispose();
                     this.changed();
-                    this.pump(lane);
+                    this.pumpAll();
                 } else {
                     lease.dispose();
                 }
@@ -319,7 +371,7 @@ export class QueryExecutionCoordinator {
         removed.preparation.abort();
         removed.resolve('cancelled');
         this.changed();
-        this.pump(lane);
+        this.pumpAll();
     }
 
     public clearQueued(sourceKey: string): void {
@@ -327,6 +379,7 @@ export class QueryExecutionCoordinator {
         if (!lane) return;
         for (const job of lane.queued.splice(0)) { job.preparation.abort(); job.resolve('cancelled'); }
         this.changed();
+        this.pumpAll();
     }
 
     public setPaused(sourceKey: string, paused: boolean): void {
@@ -334,7 +387,7 @@ export class QueryExecutionCoordinator {
         if (!lane) return;
         lane.paused = paused;
         this.changed();
-        this.pump(lane);
+        this.pumpAll();
     }
 
     private activeInLane(sourceKey: string, id?: string): ActiveExecution | undefined {
@@ -356,15 +409,19 @@ export class QueryExecutionCoordinator {
     }
 
     public async recoverRunning(sourceKey: string, panel: QueryExecutionResultPanel, id?: string): Promise<void> {
+        const lane = this.lanes.get(sourceKey);
+        if (lane?.blockedSession && (!id || id === lane.blockedSession.executionId)) {
+            await this.recoverBlockedSession(lane, panel);
+            return;
+        }
         const entry = this.activeInLane(sourceKey, id);
         if (!entry) return;
-        const lane = this.lanes.get(sourceKey);
         if (lane?.recovering) return;
         const oldJob = lane?.running?.snapshot.id === entry.executionId ? lane.running : lane?.independent.get(entry.executionId);
         if (lane) { lane.recovering = true; }
         this.changed();
         try {
-            if (await this.withAcquisitionLock(sourceKey, () => this.resolveDuplicate(entry, entry.sourceUri, panel))) {
+            if (await this.withAcquisitionLock(sourceKey, () => this.resolveDuplicate(entry, entry.documentUri, panel))) {
                 // Only the captured job can be detached; late completions must
                 // never retire a replacement execution.
                 if (lane && oldJob && (lane.running === oldJob || lane.independent.get(oldJob.snapshot.id) === oldJob)) {
@@ -381,7 +438,41 @@ export class QueryExecutionCoordinator {
         } finally {
             if (lane) { lane.recovering = false; }
             this.changed();
-            if (lane) this.pump(lane);
+            if (lane) this.pumpAll();
+        }
+    }
+
+    private async recoverBlockedSession(lane: ExecutionLane, panel: QueryExecutionResultPanel): Promise<void> {
+        const blocked = lane.blockedSession;
+        if (!blocked || lane.recovering) return;
+        lane.recovering = true;
+        this.changed();
+        try {
+            const actions = ['Reset connection', 'Open fresh connection'];
+            if (blocked.recovery?.getSessionId?.() && blocked.recovery.dropSession) actions.push('Drop session');
+            const choice = await vscode.window.showWarningMessage(
+                'The previous request has settled, but its shared session is unsafe. Recover before continuing queued SQL.', ...actions);
+            if (this.lanes.get(lane.sourceKey) !== lane || lane.blockedSession !== blocked) return;
+            const recovered = await this.withAcquisitionLock(lane.sourceKey, async () => {
+                if (choice === 'Reset connection') return await blocked.recovery?.resetConnection?.() ?? false;
+                if (choice === 'Open fresh connection') return await blocked.recovery?.openFreshConnection?.() ?? false;
+                if (choice === 'Drop session') {
+                    const session = blocked.recovery?.getSessionId?.();
+                    if (session && await blocked.recovery?.dropSession?.(session)) return await blocked.recovery?.resetConnection?.() ?? false;
+                }
+                return false;
+            });
+            if (recovered && this.lanes.get(lane.sourceKey) === lane && lane.blockedSession === blocked) {
+                blocked.recovery?.clearCancellation?.();
+                lane.blockedSession = undefined;
+                panel.log(lane.sourceUri, 'Shared SQL connection recovered; queued requests can continue.');
+            }
+        } catch (error: unknown) {
+            void vscode.window.showErrorMessage(`SQL recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            lane.recovering = false;
+            this.changed();
+            this.pumpAll();
         }
     }
 
@@ -409,7 +500,7 @@ export class QueryExecutionCoordinator {
         if (current?.executionId === entry.executionId) {
             this.runningSources.delete(entry.sourceKey);
             const lane = this.lanes.get(entry.laneKey ?? entry.sourceKey);
-            if (lane) this.pump(lane);
+            if (lane) this.pumpAll();
             this.changed();
         }
     }
@@ -639,6 +730,8 @@ export class QueryExecutionCoordinator {
     private createLease(entry: ActiveExecution): QueryExecutionLease {
         return {
             executionId: entry.executionId,
+            documentUri: entry.documentUri,
+            executionUri: entry.sourceUri,
             sourceUri: entry.sourceUri,
             sourceKey: entry.sourceKey,
             origin: entry.origin,
@@ -715,10 +808,12 @@ export class QueryExecutionCoordinator {
             // for: it may run ahead of SQL queued behind the recovered
             // execution, and the queue drains automatically once it settles.
             const lane = this.lanes.get(sourceKey);
+            if (lane?.blockedSession) return undefined;
             if (!recovered && (lane?.running || (lane?.queued.length && !lane.paused))) return undefined;
 
             const entry: ActiveExecution = {
                 executionId: `query-execution-${++this.nextExecutionId}-${randomUUID()}`,
+                documentUri: sourceUri,
                 sourceUri,
                 sourceKey,
                 origin: options.origin ?? 'Run Query',
@@ -834,6 +929,7 @@ export class QueryExecutionCoordinator {
         this.retiredDocuments = new WeakSet<vscode.TextDocument>();
         this.nextDocumentKey = 0;
         this.nextExecutionId = 0;
+        this.nextSubmission = 0;
         this.disposed = false;
     }
 }
@@ -842,7 +938,18 @@ let defaultCoordinator = new QueryExecutionCoordinator();
 
 /** Create the coordinator owned by one extension activation. */
 export function createQueryExecutionCoordinator(): QueryExecutionCoordinator {
-    return new QueryExecutionCoordinator();
+    const coordinator = new QueryExecutionCoordinator();
+    const refreshLimits = () => {
+        const config = getExtensionConfiguration();
+        coordinator.configureParallelLimits(config.get('query.maxParallelPerTab', 4), config.get('query.maxParallelGlobal', 12));
+    };
+    refreshLimits();
+    const listener = vscode.workspace.onDidChangeConfiguration?.(event => {
+        if (event.affectsConfiguration('justybase.query')) refreshLimits();
+    });
+    const dispose = coordinator.dispose.bind(coordinator);
+    coordinator.dispose = () => { listener?.dispose(); dispose(); };
+    return coordinator;
 }
 
 /** Install an activation-owned coordinator behind the legacy command facade. */

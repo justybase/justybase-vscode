@@ -4,7 +4,7 @@ import { postHostMessage } from './protocol.js';
 import { getActiveSourceUri } from './types.js';
 
 interface QueueJob { id: string; sql: string; status: string; executionUri?: string; database?: string }
-interface QueueLane { sourceKey: string; sourceUri: string; lastExecutionUri?: string; paused: boolean; maxConcurrency: number; running: QueueJob[]; queued: QueueJob[]; sources?: string[]; archive?: {sourceUri: string; rows: LogRow[]}[] }
+interface QueueLane { sourceKey: string; sourceUri: string; lastExecutionUri?: string; paused: boolean; recoveryRequired?: boolean; workspace?: boolean; maxConcurrency: number; running: QueueJob[]; queued: QueueJob[]; sources?: string[]; archive?: {sourceUri: string; rows: LogRow[]}[] }
 let lanes: QueueLane[] = [];
 const disclosures = new Map<string, boolean>();
 
@@ -26,19 +26,19 @@ export function renderSqlQueueLogs(wrapper: HTMLElement): void {
         || (source !== undefined && (item.lastExecutionUri === source || item.sources?.includes(source))));
     const transcript = wrapper.querySelector<HTMLElement>('.console-view');
     transcript?.querySelector('.log-run-archive')?.remove();
-    if (lane && transcript) {
+    if (lane && transcript && !lane.workspace) {
         const archive = document.createElement('div');
         archive.className = 'log-run-archive';
         const rows = (lane.archive ?? []).filter(item => item.sourceUri !== source).flatMap(item => item.rows);
         appendRunLogRows(archive, rows, row => { const line = document.createElement('div'); line.className = 'console-line'; line.textContent = `[${String(row[0] ?? '')}] ${String(row[1] ?? '')}`; return line; });
         transcript.prepend(archive);
     }
-    if (!lane || (!lane.running.length && !lane.queued.length && !lane.paused)) return;
+    if (!lane || (!lane.running.length && !lane.queued.length && !lane.paused && !lane.recoveryRequired)) return;
     const overview = document.createElement('section');
     overview.className = 'sql-queue-overview';
     overview.setAttribute('aria-label', 'SQL execution queue');
     const title = document.createElement('strong');
-    title.textContent = `${lane.running.length} running${lane.maxConcurrency > 1 ? ` / ${lane.maxConcurrency}` : ''} · ${lane.queued.length} queued${lane.paused ? ' · Paused' : ''}`;
+    title.textContent = `${lane.running.length} running${lane.maxConcurrency > 1 ? ` / ${lane.maxConcurrency}` : ''} · ${lane.queued.length} queued${lane.recoveryRequired ? ' · Recovery required' : lane.paused ? ' · Paused' : ''}`;
     overview.append(title);
     const action = (label: string, command: string, job?: QueueJob) => {
         const button = document.createElement('button');
@@ -49,6 +49,7 @@ export function renderSqlQueueLogs(wrapper: HTMLElement): void {
     const controls = document.createElement('div');
     controls.className = 'sql-queue-controls';
     controls.append(action(lane.paused ? 'Resume queue' : 'Pause queue', lane.paused ? 'resume' : 'pause'));
+    if (lane.recoveryRequired) controls.append(action('Recover connection…', 'recover'));
     if (lane.queued.length) controls.append(action('Clear queued', 'clear'));
     overview.append(controls);
     const list = document.createElement('div');

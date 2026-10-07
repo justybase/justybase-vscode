@@ -18,8 +18,10 @@ test('manual pins show distinct SVG states and keyboard/click controls remain ac
     button.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
     button.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));
     button.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-    expect(posted).toHaveBeenCalledTimes(3);
-    expect(posted).toHaveBeenCalledWith({command:'toggleResultPin',sourceUri:'file:///a.sql',resultSetIndex:1});
+    // jsdom does not synthesize native button clicks from keyboard events.
+    expect(button.tagName).toBe('BUTTON');
+    expect(posted).toHaveBeenCalledTimes(1);
+    expect(posted).toHaveBeenCalledWith({command:'toggleResultPin',sourceUri:'file:///a.sql',resultSetIndex:1,resultSetId:undefined});
     Object.assign(panel,{pinnedResults:[{sourceUri:'file:///a.sql',resultSetIndex:1}]});
     const pinned=createResultSetTab({...result,name:undefined},1);
     expect(pinned.classList.contains('is-pinned')).toBe(true);

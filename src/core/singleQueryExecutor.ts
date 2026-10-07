@@ -82,6 +82,8 @@ export interface RunQueryRawOptions {
   connectionManager?: ConnectionManager;
   connectionName?: string;
   documentUri?: string;
+  /** Runtime identity for an independently owned operation; documentUri remains the editor context. */
+  executionUri?: string;
   logCallback?: (msg: string) => void;
   extensionUri?: vscode.Uri;
   maxRows?: number;
@@ -180,6 +182,7 @@ export async function runQueryRaw(
     connectionManager,
     connectionName,
     documentUri,
+    executionUri,
     logCallback,
     maxRows,
     isUserQuery = true,
@@ -255,7 +258,7 @@ export async function runQueryRaw(
       connManager,
       resolvedConnectionName,
       keepConnectionOpen,
-      documentUri,
+      executionUri ?? documentUri,
       queryToExecute,
       maxRows,
       logger,
@@ -320,7 +323,7 @@ export async function runQueryRaw(
           connManager,
           resolvedConnectionName,
           keepConnectionOpen,
-          documentUri,
+          executionUri ?? documentUri,
           queryToExecute,
           maxRows,
           logger,

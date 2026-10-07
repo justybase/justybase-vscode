@@ -109,7 +109,7 @@ export class ResultsHtmlGenerator {
             <div class="layout-wrapper" id="layoutWrapper">
                     <div class="controls">
                         <div class="toolbar-group toolbar-group--view">
-                        <div class="layout-switcher" id="layoutSwitcher" role="radiogroup" aria-label="Result layout">
+                        <div class="layout-switcher" id="layoutSwitcher" role="group" aria-label="Result layout">
                             <button type="button" class="layout-switcher__btn active" data-layout="table" aria-pressed="true" title="Standard table layout">Table</button>
                             <button type="button" class="layout-switcher__btn" data-layout="sidebar" aria-pressed="false" title="Table with schema sidebar and grouping">Sidebar</button>
                             <button type="button" class="layout-switcher__btn" data-layout="charts" aria-pressed="false" title="Professional range charts (ECharts)">Charts</button>

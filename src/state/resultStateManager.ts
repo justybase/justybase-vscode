@@ -76,18 +76,9 @@ type AppendStreamingResult =
     | { type: 'ignore' };
 
 export interface StartExecutionOptions {
-    /**
-     * Preserve every existing result tab as a durable manual pin instead of
-     * clearing unpinned results. Callers must set this only when the new SQL
-     * was enqueued while previous results were not fully completed (running
-     * or still queued/preparing — see QueryExecutionCoordinator.hasPendingWork).
-     * A fresh run after idle must omit it so unpinned tabs are cleared.
-     * The flag is honored even though the predecessor has already finalized
-     * by the time the queued job starts: the queue serializes work, so the
-     * overlap can only be observed at enqueue time. Manual pins are protected
-     * from maxDataResults pruning, so tabs accumulate until closed via
-     * closeResult/closeAllResults.
-     */
+    /** Preserve existing tabs for an overlapping submission without creating manual pins. */
+    preserveExistingResults?: boolean;
+    /** Legacy explicit pin promotion, retained for callers that request durable pins. */
     pinExistingResults?: boolean;
 }
 
@@ -206,6 +197,10 @@ export class ResultStateManager {
     public dispose(): void {
         this._manualLogsGroups.clear();
         this._executionGroups.clear();
+        this.executionDocuments.clear();
+        this.workspaceDocuments.clear();
+        this.workspaceSelection.clear();
+        this.workspaceAutoOwner.clear();
         if (this._idleSpillTimer) {
             clearInterval(this._idleSpillTimer);
             this._idleSpillTimer = null;
@@ -415,6 +410,91 @@ export class ResultStateManager {
             this._staleDataVersions.add(sourceUri);
         }
     }
+    private readonly workspaceDocuments = new Set<string>();
+    private readonly executionDocuments = new Map<string, string>();
+    private readonly workspaceSelection = new Map<string, string>();
+    private readonly workspaceAutoOwner = new Map<string, string>();
+
+    /** Register ownership in submission order, before asynchronous execution preparation. */
+    public registerExecutionSource(documentUri: string, executionUri: string): void {
+        if (documentUri === executionUri) return;
+        this.workspaceDocuments.add(documentUri);
+        this.executionDocuments.set(executionUri, documentUri);
+    }
+
+    public getDocumentUri(sourceUri: string): string {
+        return this.executionDocuments.get(sourceUri) ?? sourceUri;
+    }
+
+    public isWorkspace(sourceUri: string): boolean {
+        return this.workspaceDocuments.has(sourceUri);
+    }
+
+    public getWorkspaceSources(documentUri: string): string[] {
+        return [documentUri, ...[...this.executionDocuments].filter(([, owner]) => owner === documentUri).map(([source]) => source)];
+    }
+
+    public getWorkspaceEntries(documentUri: string): { sourceUri: string; resultSetIndex: number; result: ResultSet }[] {
+        const entries = this.getWorkspaceSources(documentUri).flatMap(sourceUri =>
+            (this._resultsMap.get(sourceUri) ?? []).map((result, resultSetIndex) => ({ sourceUri, resultSetIndex, result })));
+        const logs = entries.filter(entry => entry.result.isLog);
+        const data = entries.filter(entry => !entry.result.isLog);
+        if (!logs.length) return data;
+        const log = { ...logs[0].result, data: logs.flatMap(entry => entry.result.data).slice(-1000), resultSetId: `workspace-log:${documentUri}` };
+        return [{ sourceUri: documentUri, resultSetIndex: 0, result: log }, ...data];
+    }
+
+    public getWorkspaceResults(sourceUri: string): ResultSet[] {
+        return this.isWorkspace(sourceUri) ? this.getWorkspaceEntries(sourceUri).map(entry => entry.result) : this._resultsMap.get(sourceUri) ?? [];
+    }
+
+    public resolveWorkspaceResult(sourceUri: string, index: number): { sourceUri: string; resultSetIndex: number } | undefined {
+        if (!this.isWorkspace(sourceUri)) return { sourceUri, resultSetIndex: index };
+        return this.getWorkspaceEntries(sourceUri)[index];
+    }
+
+    public beginWorkspaceExecution(documentUri: string, executionUri: string, preserve: boolean): void {
+        if (!preserve) {
+            for (const source of this.getWorkspaceSources(documentUri)) {
+                const results = this._resultsMap.get(source) ?? [];
+                for (let index = results.length - 1; index >= 0; index--) {
+                    const manualPin = [...this._pinnedResults].some(([id, pin]) => pin.sourceUri === source && pin.resultSetIndex === index && !this._autoPinnedResults.has(id));
+                    if (!results[index].isLog && !manualPin) this.closeResult(source, index, true);
+                }
+                // Archive idle executions without data into the document Logs
+                // and release their synthetic stores. Manual pins keep their owner.
+                if (source !== documentUri && source !== executionUri && results.length && results.every(result => result.isLog) && ![...this._pinnedResults].some(([id, pin]) => pin.sourceUri === source && !this._autoPinnedResults.has(id))) {
+                    const documentResults = this._resultsMap.get(documentUri) ?? [];
+                    let documentLog = documentResults.find(result => result.isLog);
+                    if (!documentLog) {
+                        documentLog = { ...results[0], data: [] };
+                        ensureResultSetId(documentLog);
+                        documentResults.unshift(documentLog);
+                        this._resultsMap.set(documentUri, documentResults);
+                    }
+                    documentLog.data = [...documentLog.data, ...results.flatMap(result => result.data)].slice(-1000);
+                    this.closeSource(source);
+                }
+            }
+        }
+        this.workspaceAutoOwner.set(documentUri, executionUri);
+    }
+
+    public getSelectedExecutionSource(documentUri: string): string | undefined {
+        if (!this.isWorkspace(documentUri)) return undefined;
+        const selected = this.getWorkspaceEntries(documentUri)[this.getActiveResultSetIndex(documentUri) ?? 0];
+        return selected && !selected.result.isLog ? selected.sourceUri : this.workspaceAutoOwner.get(documentUri);
+    }
+
+    public getWorkspacePinnedResults(): { id: string; sourceUri: string; resultSetIndex: number; timestamp: number; label: string }[] {
+        return [...this._pinnedResults].map(([id, pin]) => {
+            const owner = this.getDocumentUri(pin.sourceUri);
+            const result = this._resultsMap.get(pin.sourceUri)?.[pin.resultSetIndex];
+            const index = owner === pin.sourceUri ? pin.resultSetIndex : this.getWorkspaceResults(owner).indexOf(result!);
+            return { id, ...pin, sourceUri: owner, resultSetIndex: index, label: `${owner.split(/[\\/]/).pop()} - Result ${index}` };
+        }).filter(pin => pin.resultSetIndex >= 0);
+    }
+
     private readonly _manualLogsGroups = new Set<string>();
     private _executionGroups = new Map<string, string>();
 
@@ -429,11 +509,22 @@ export class ResultStateManager {
     }
 
     public getExecutionGroupSources(sourceUri: string): string[] {
+        const documentUri = this.getDocumentUri(sourceUri);
+        if (this.isWorkspace(documentUri)) return this.getWorkspaceSources(documentUri);
         const group = this._executionGroups.get(sourceUri);
         return group ? [...this._executionGroups].filter(([, key]) => key === group).map(([source]) => source) : [sourceUri];
     }
 
     public getActiveResultSetIndex(sourceUri: string) {
+        if (this.isWorkspace(sourceUri)) {
+            const entries = this.getWorkspaceEntries(sourceUri);
+            const selected = this.workspaceSelection.get(sourceUri);
+            const selectedIndex = entries.findIndex(entry => entry.result.resultSetId === selected);
+            if (selectedIndex >= 0) return selectedIndex;
+            const owner = this.workspaceAutoOwner.get(sourceUri);
+            const latest = entries.map(entry => entry.sourceUri === owner && !entry.result.isLog).lastIndexOf(true);
+            return latest >= 0 ? latest : 0;
+        }
         if (this._manualLogsGroups.has(this._executionGroups.get(sourceUri) ?? sourceUri)) {
             const logs = this._resultsMap.get(sourceUri)?.findIndex(result => result.isLog);
             if (logs !== undefined && logs >= 0) return logs;
@@ -442,12 +533,13 @@ export class ResultStateManager {
     }
 
     public setActiveSource(sourceUri: string): boolean {
+        sourceUri = this.getDocumentUri(sourceUri);
         if (!this._isValidSourceUri(sourceUri)) {
             return false;
         }
         if (this._activeSourceUri === sourceUri) return false;
 
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
 
         if (!this._resultsMap.has(sourceUri)) {
             this._resultsMap.set(sourceUri, []);
@@ -504,7 +596,7 @@ export class ResultStateManager {
         const resultsToRemove: number[] = [];
         existingResults.forEach((rs, index) => {
             // Keep logs and manually pinned results
-            if (!rs.isLog && !retainedResultSetIds.has(this._coreResultSetId(rs))) {
+            if (!options?.preserveExistingResults && !rs.isLog && !retainedResultSetIds.has(this._coreResultSetId(rs))) {
                 resultsToRemove.push(index);
             }
         });
@@ -538,7 +630,7 @@ export class ResultStateManager {
 
         this._resultsMap.set(sourceUri, existingResults);
         this._pinnedSources.add(sourceUri);
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
         this._activeResultSetIndexMap.set(sourceUri, 0);
         this._syncResultCoreAfterMutation(sourceUri);
 
@@ -625,7 +717,7 @@ export class ResultStateManager {
         }
         this._executingSources.add(sourceUri);
         this._cancelledSources.delete(sourceUri);
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
         this._incrementDataVersion(sourceUri);
         this._syncResultCoreAfterMutation(sourceUri);
         this._onDidChangeState.fire();
@@ -644,7 +736,7 @@ export class ResultStateManager {
         results.push(resultSet);
         this._resultsMap.set(sourceUri, results);
         this._pinnedSources.add(sourceUri);
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
         this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
 
         const filename = sourceUri.split(/[\\/]/).pop() || sourceUri;
@@ -1036,7 +1128,7 @@ export class ResultStateManager {
         this._executingSources.add(sourceUri);
         this._cancelledSources.delete(sourceUri);
         this._streamingCompletedSources.delete(sourceUri);
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
         this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
         this._incrementDataVersion(sourceUri);
         this._syncResultCoreAfterMutation(sourceUri);
@@ -1122,7 +1214,7 @@ export class ResultStateManager {
         }
 
         results[resultSetIndex] = resultSet;
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
         this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
         this.touchResultSetAccess(sourceUri, resultSetIndex);
 
@@ -1249,7 +1341,7 @@ export class ResultStateManager {
         });
 
         if (!this._activeSourceUri || this._activeSourceUri === sourceUri) {
-            this._activeSourceUri = sourceUri;
+            this._activeSourceUri = this.getDocumentUri(sourceUri);
         }
         const lastNewResultIndex = newResultSets.length > 0
             ? currentResults.indexOf(newResultSets[newResultSets.length - 1])
@@ -1386,6 +1478,11 @@ export class ResultStateManager {
     }
 
     private _incrementDataVersion(sourceUri: string) {
+        const documentUri = this.getDocumentUri(sourceUri);
+        if (documentUri !== sourceUri) {
+            this._dataVersions.set(documentUri, (this._dataVersions.get(documentUri) ?? 0) + 1);
+            this._globalStateVersion++;
+        }
         const current = this._dataVersions.get(sourceUri) || 0;
         this._dataVersions.set(sourceUri, current + 1);
         if (!this._activeSourceUri || this._activeSourceUri === sourceUri) {
@@ -1694,7 +1791,7 @@ export class ResultStateManager {
             this._autoPinnedResults.add(resultId);
 
             if (!this._activeSourceUri || this._activeSourceUri === sourceUri) {
-                this._activeSourceUri = sourceUri;
+                this._activeSourceUri = this.getDocumentUri(sourceUri);
             }
             // Show streaming data as it arrives — Logs remain available on tab 0
             this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
@@ -1913,7 +2010,7 @@ export class ResultStateManager {
         });
         this._autoPinnedResults.add(resultId);
         this._activeResultSetIndexMap.set(sourceUri, resultSetIndex);
-        this._activeSourceUri = sourceUri;
+        this._activeSourceUri = this.getDocumentUri(sourceUri);
         this._incrementDataVersion(sourceUri);
         this._pruneResults(sourceUri);
         this._syncResultCoreAfterMutation(sourceUri);
@@ -1923,6 +2020,14 @@ export class ResultStateManager {
     }
 
     public closeSource(sourceUri: string) {
+        if (this.isWorkspace(sourceUri)) {
+            for (const execution of this.getWorkspaceSources(sourceUri).slice(1)) this.closeSource(execution);
+            this.workspaceSelection.delete(sourceUri);
+            this.workspaceAutoOwner.delete(sourceUri);
+            this.workspaceDocuments.delete(sourceUri);
+        }
+        this.executionDocuments.delete(sourceUri);
+        this._executionGroups.delete(sourceUri);
         this._syncResultCoreSource(sourceUri);
         this._resultCoreState.apply({ type: 'close-source', sourceId: sourceUri });
         const results = this._resultsMap.get(sourceUri);
@@ -1958,11 +2063,17 @@ export class ResultStateManager {
         }
     }
 
-    public closeResult(sourceUri: string, resultSetIndex: number) {
+    public closeResult(sourceUri: string, resultSetIndex: number, preserveSelection = false) {
         const results = this._resultsMap.get(sourceUri);
         if (!results || resultSetIndex < 0 || resultSetIndex >= results.length) return;
 
         const rs = results[resultSetIndex];
+        const documentUri = this.getDocumentUri(sourceUri);
+        if (!preserveSelection && this.isWorkspace(documentUri) && this.workspaceSelection.get(documentUri) === rs?.resultSetId) {
+            const projected = this.getWorkspaceResults(documentUri);
+            const previous = projected[Math.max(0, projected.indexOf(rs) - 1)];
+            if (previous?.resultSetId) this.workspaceSelection.set(documentUri, previous.resultSetId);
+        }
         if (rs) {
             ensureResultSetId(rs);
             this._syncResultCoreSource(sourceUri);
@@ -2055,6 +2166,11 @@ export class ResultStateManager {
     }
 
     public setActiveResultSetIndex(sourceUri: string, index: number) {
+        const documentUri = this.getDocumentUri(sourceUri);
+        if (this.isWorkspace(documentUri)) {
+            const result = sourceUri === documentUri ? this.getWorkspaceResults(documentUri)[index] : this._resultsMap.get(sourceUri)?.[index];
+            if (result?.resultSetId) this.workspaceSelection.set(documentUri, result.resultSetId);
+        }
         const group = this._executionGroups.get(sourceUri) ?? sourceUri;
         if (this._resultsMap.get(sourceUri)?.[index]?.isLog) this._manualLogsGroups.add(group);
         else this._manualLogsGroups.delete(group);

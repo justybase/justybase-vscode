@@ -214,9 +214,10 @@ function clearPendingResultSyncSourcesNotInList(activeSources: readonly string[]
     }
 }
 
-function resetStreamingCompletionMarkers(resultSets: ResultSet[] = getResultSets()): void {
+function resetStreamingCompletionMarkers(resultSets: ResultSet[] = getResultSets(), preserveCompleted = false): void {
     for (const resultSet of resultSets) {
-        if (resultSet && !resultSet.isLog && !resultSet.isError && !resultSet.isTextContent) {
+        if (resultSet && !resultSet.isLog && !resultSet.isError && !resultSet.isTextContent
+            && !(preserveCompleted && resultSet.isStreamingComplete === true)) {
             resultSet.isStreamingComplete = false;
         }
     }
@@ -359,7 +360,7 @@ export function cancelActiveQuery(): void {
         ? undefined
         : getResultSets().map((rs) => (Array.isArray(rs?.data) ? rs.data.length : 0));
 
-    const executingSources = Array.from(ensureExecutingSources());
+    const executingSources = Array.from(ensureExecutingSources()).filter(source => source === getActiveSourceUri());
 
     if (executingSources.length > 0) {
         executingSources.forEach((sourceUri) => {
@@ -813,7 +814,7 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         && panel.streamingCompletedSources instanceof Set
         && !panel.streamingCompletedSources.has(sourceUri)
     ) {
-        resetStreamingCompletionMarkers();
+        resetStreamingCompletionMarkers(getResultSets(), true);
     }
     const cached = !isExecutingSource
         ? getCachedSource(sourceUri) as { resultSets?: ResultSet[]; activeGridIndex?: number } | undefined
@@ -1134,7 +1135,7 @@ export function handleHydrate(data: HydrateData, uxTraceId?: string): void {
             && panel.streamingCompletedSources instanceof Set
             && !panel.streamingCompletedSources.has(activeHydratedSource)
         ) {
-            resetStreamingCompletionMarkers(hydratedResultSets);
+            resetStreamingCompletionMarkers(hydratedResultSets, true);
         }
         if (data.formatSettings) {
             setResultFormattingPayload(data.formatSettings as ReturnType<typeof getResultFormattingPayload>);
@@ -1365,10 +1366,11 @@ export function handleAppendRows(message: Record<string, unknown>): void {
     if (isFirstChunk && !isLog) {
         const panel = getResultPanelWindow();
         const completionSource = sourceUri ?? activeSource;
-        if (completionSource) {
+        const workspaceStream = message.workspace === true;
+        if (completionSource && !workspaceStream) {
             panel.streamingCompletedSources?.delete(completionSource);
         }
-        resetStreamingCompletionMarkers();
+        if (!workspaceStream) resetStreamingCompletionMarkers();
         clearAllSearchWorkerData();
         clearAllDiskGrouping();
         resetEditSession();
@@ -1662,7 +1664,8 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
         });
         return;
     }
-    if (!isDiskBackedResultSet(rs)) {
+    const workspaceCompletion = message.workspace === true;
+    if (!workspaceCompletion && !isDiskBackedResultSet(rs)) {
         const sequenceDecision = streamingSequenceTracker.complete(
             sourceUri,
             resultSetId,
@@ -1684,7 +1687,7 @@ export function handleStreamingComplete(message: Record<string, unknown>): void 
         }
     }
 
-    if (sourceUri) {
+    if (sourceUri && !workspaceCompletion) {
         const panel = getResultPanelWindow();
         if (!panel.streamingCompletedSources) {
             panel.streamingCompletedSources = new Set<string>();

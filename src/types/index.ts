@@ -103,6 +103,8 @@ export type ResultSet = QueryResult & {
   webviewStreamedRows?: number;
   /** Last accepted transport chunk sequence for duplicate/out-of-order rejection. */
   lastChunkSequence?: number;
+  /** This result's rows reached a terminal stream chunk; sibling executions may continue. */
+  isStreamingComplete?: boolean;
   /** Approximate bytes held by the in-memory row buffer before SQLite spill. */
   bufferedBytes?: number;
 };

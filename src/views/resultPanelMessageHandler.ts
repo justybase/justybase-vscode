@@ -1862,7 +1862,7 @@ export class ResultPanelMessageHandler {
     }
 
     private _buildMarkdownDocument(sourceUri: string, resultSetIndices?: number[]): string {
-        const resultSets = this._stateManager.resultsMap.get(sourceUri) ?? [];
+        const resultSets = this._stateManager.getWorkspaceResults(sourceUri);
         const selectedResultSets = resultSetIndices
             ? resultSetIndices
                 .map(index => resultSets[index])

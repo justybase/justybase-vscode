@@ -244,6 +244,15 @@ describe('singleQueryExecutor', () => {
             expect(result.data).toEqual([[1]]);
         });
 
+        it('keeps document context separate from an independent raw execution identity', async () => {
+            mockExecuteAndFetch.mockResolvedValue({ results: [{ columns: [{ name: 'id' }], rows: [[1]], limitReached: false }], error: null });
+            await runQueryRaw({ context: mockContext, query: 'SELECT 1', connectionManager: mockConnManager,
+                documentUri: 'file:///query.sql', executionUri: 'file:///query.sql#result-one', connectionOverride: mockConn as unknown as NzConnection });
+            expect(mockConnManager.getDocumentKeepConnectionOpen).toHaveBeenCalledWith('file:///query.sql');
+            expect(mockConnManager.setDocumentLastSessionId).toHaveBeenCalledWith('file:///query.sql#result-one', '99999');
+            expect(mockLogQueryToHistory.mock.calls[0][5]).toBe('file:///query.sql');
+        });
+
         it('removes normally completed metadata sessions from the sweeper', async () => {
             mockExecuteAndFetch.mockResolvedValue({
                 results: [{ columns: [], rows: [], limitReached: false }],

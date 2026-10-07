@@ -132,6 +132,69 @@ describe('ResultPanelView Scroll Preservation', () => {
     });
 
 
+    it('hydrates sibling data tabs under one document identity and routes closing to the backing result', () => {
+        const source = 'file:///workspace.sql', a = `${source}#query-a`, b = `${source}#query-b`;
+        provider.registerExecutionSource(source, a); provider.registerExecutionSource(source, b);
+        provider.beginWorkspaceExecution(source, a, false); provider.setActiveSource(source); provider.startExecution(a);
+        provider.beginWorkspaceExecution(source, b, true); provider.startExecution(b);
+        provider.updateResults([{ columns: [{ name: 'n' }], data: [[2]] }], b, true);
+        provider.finalizeExecution(b);
+        provider.updateResults([{ columns: [{ name: 'n' }], data: [[1]] }], a, true);
+        provider.finalizeExecution(a);
+        const hydrate = postedMessages.filter(message => message.command === 'hydrate').slice(-1)[0] as unknown as { data: { activeSourceJson: string; sourcesJson: string; resultSetsMsgPack: Uint8Array } };
+        expect(JSON.parse(hydrate.data!.activeSourceJson!)).toBe(source);
+        expect(JSON.parse(hydrate.data!.sourcesJson!)).toEqual([source]);
+        const results = decode(hydrate.data!.resultSetsMsgPack!) as { isLog?: boolean; resultSetId?: string; data: number[][] }[];
+        expect(results.filter(result => !result.isLog).map(result => result.data[0][0])).toEqual([1, 2]);
+        const listener = mockWebview.webview.onDidReceiveMessage.mock.calls[0][0];
+        // A queued click from an older layout still closes the identified result.
+        listener({ command: 'closeResult', sourceUri: source, resultSetIndex: 1, resultSetId: results[2].resultSetId });
+        expect(provider.getResultsForSource(a)!.filter(result => !result.isLog)).toHaveLength(1);
+        expect(provider.getResultsForSource(b)!.filter(result => !result.isLog)).toHaveLength(0);
+        provider.closeSource(source);
+        expect(provider.getResultsForSource(a)).toBeUndefined();
+        expect(provider.getResultsForSource(b)).toBeUndefined();
+    });
+
+    it('reports completion by result identity while a sibling workspace stream remains active', () => {
+        const source = 'file:///workspace-stream.sql', a = `${source}#query-a`, b = `${source}#query-b`;
+        provider.registerExecutionSource(source, a); provider.registerExecutionSource(source, b);
+        provider.beginWorkspaceExecution(source, a, false); provider.setActiveSource(source); provider.startExecution(a);
+        provider.beginWorkspaceExecution(source, b, true); provider.startExecution(b);
+        postedMessages = [];
+
+        provider.appendStreamingChunk(a, 0, {
+            columns: [{ name: 'n' }], rows: [[1]], isFirstChunk: true, isLastChunk: true,
+            totalRowsSoFar: 1, limitReached: true,
+        }, 'SELECT 1');
+        const firstComplete = postedMessages.find(message => message.command === 'streamingComplete') as
+            (typeof postedMessages)[number] & { resultSetId?: string };
+        expect(firstComplete).toEqual(expect.objectContaining({
+            sourceUri: source, resultSetIndex: 1, resultSetId: expect.any(String), workspace: true,
+        }));
+        const firstHydrate = postedMessages.filter(message => message.command === 'hydrate').slice(-1)[0] as unknown as { data: { resultSetsMsgPack: Uint8Array } };
+        let results = decode(firstHydrate.data.resultSetsMsgPack) as { resultSetId?: string; isStreamingComplete?: boolean }[];
+        expect(results.find(result => result.resultSetId === firstComplete!.resultSetId)?.isStreamingComplete).toBe(true);
+
+        provider.appendStreamingChunk(b, 0, {
+            columns: [{ name: 'n' }], rows: [[2]], isFirstChunk: true, isLastChunk: false,
+            totalRowsSoFar: 1, limitReached: false,
+        }, 'SELECT 2');
+        const secondHydrate = postedMessages.filter(message => message.command === 'hydrate').slice(-1)[0] as unknown as { data: { resultSetsMsgPack: Uint8Array } };
+        results = decode(secondHydrate.data.resultSetsMsgPack) as { resultSetId?: string; isStreamingComplete?: boolean }[];
+        expect(results.find(result => result.resultSetId === firstComplete!.resultSetId)?.isStreamingComplete).toBe(true);
+        expect(postedMessages.filter(message => message.command === 'streamingComplete')).toHaveLength(1);
+
+        postedMessages = [];
+        provider.appendStreamingChunk(b, 0, {
+            columns: [{ name: 'n' }], rows: [[3]], isFirstChunk: false, isLastChunk: true,
+            totalRowsSoFar: 2, limitReached: false,
+        }, 'SELECT 2');
+        expect(postedMessages.find(message => message.command === 'streamingComplete')).toEqual(expect.objectContaining({
+            sourceUri: source, resultSetIndex: 2, resultSetId: expect.any(String), workspace: true,
+        }));
+    });
+
     it('projects queue state and bounded sibling logs without rebuilding streaming results', () => {
         const source='file:///queue.sql';
         const executions=Array.from({length:7},(_value,index)=>`${source}#query-${index}`);

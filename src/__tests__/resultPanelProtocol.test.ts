@@ -241,6 +241,9 @@ describe('result panel protocol', () => {
             const runtime = loadRuntime();
             expect(runtime.parseResultPanelHostMessage({ command: 'appendRows', resultSetIndex: 0 })).toBeUndefined();
             expect(runtime.parseResultPanelHostMessage({ command: 'appendRows', resultSetIndex: 0, rows: [], totalRows: Number.NaN, isLastChunk: false, limitReached: false })).toBeUndefined();
+            expect(runtime.parseResultPanelHostMessage({ command: 'appendRows', resultSetIndex: 1, rows: [[2]], totalRows: 1, isLastChunk: false, limitReached: false, workspace: 'yes' })).toBeUndefined();
+            expect(runtime.parseResultPanelHostMessage({ command: 'streamingComplete', sourceUri: 'file:///a.sql', resultSetIndex: 1, totalRows: 1, limitReached: false, resultSetId: 'result-a', workspace: true })).toMatchObject({ workspace: true });
+            expect(runtime.parseResultPanelHostMessage({ command: 'streamingComplete', sourceUri: 'file:///a.sql', resultSetIndex: 1, totalRows: 1, limitReached: false, workspace: 'yes' })).toBeUndefined();
             expect(runtime.parseResultPanelHostMessage({ command: 'copySelection', copyFormat: 'sql' })).toBeUndefined();
             expect(runtime.parseResultPanelHostMessage({ command: 'copySelection', copyFormat: 'markdown' })).toEqual({ command: 'copySelection', copyFormat: 'markdown' });
         });

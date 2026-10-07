@@ -88,9 +88,11 @@ export function registerQueryCommands(
         commandId = 'netezza.cancelQuery',
     ): Promise<void> => {
         const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === sourceUri);
-        const targets = lane?.runningExecutions.length
-            ? lane.runningExecutions.map(job => job.executionUri ?? sourceUri)
-            : [sourceUri];
+        const selected = resultPanelProvider.getSelectedExecutionSource?.(sourceUri);
+        const running = lane?.runningExecutions ?? [];
+        const target = running.find(job => job.executionUri === selected)?.executionUri
+            ?? running[running.length - 1]?.executionUri ?? sourceUri;
+        const targets = [target];
         for (const target of new Set(targets)) {
             console.log(`[${commandId}] Cancelling: ${target}`);
             markQueryExecutionCancelling(target);
@@ -171,7 +173,7 @@ export function registerQueryCommands(
 
             const documentUri = editor.document.uri.toString();
             const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === documentUri);
-            const activeResultSource = resultPanelProvider.getActiveSource();
+            const activeResultSource = resultPanelProvider.getSelectedExecutionSource?.(documentUri) ?? resultPanelProvider.getActiveSource();
             const activeJobs = lane?.runningExecutions ?? [];
             const sourceUri = activeJobs.find(job => job.executionUri === activeResultSource)?.executionUri
                 ?? activeJobs[activeJobs.length - 1]?.executionUri ?? documentUri;

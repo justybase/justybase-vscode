@@ -158,6 +158,16 @@ describe('ConnectionManager', () => {
         jest.clearAllMocks();
     });
 
+    it('reports strict close failure and retries cleanup instead of claiming a safe session', async () => {
+        await manager.saveConnection(sampleConnection);
+        const uri = 'file:///strict-close.sql';
+        const connection = await manager.getDocumentPersistentConnection(uri, sampleConnection.name);
+        const close = jest.spyOn(connection, 'close').mockRejectedValueOnce(new Error('close failed')).mockResolvedValueOnce(undefined);
+        await expect(manager.closeDocumentPersistentConnection(uri, true)).rejects.toThrow('close failed');
+        await expect(manager.closeDocumentPersistentConnection(uri, true)).resolves.toBeUndefined();
+        expect(close).toHaveBeenCalledTimes(2);
+    });
+
     describe('Connection CRUD Operations', () => {
         it('should save a new connection', async () => {
             await manager.saveConnection(sampleConnection);

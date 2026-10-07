@@ -48,11 +48,15 @@ import { iterateResultRows, resolveExportRows } from '../core/resultDataProvider
 import { ExportCancelledError } from '../core/cancellation';
 
 export class ExportManager {
-    constructor(private _resultsMap: Map<string, ResultSet[]>) { }
+    constructor(private _resultsMap: Map<string, ResultSet[]>, private resolveResults?: (sourceUri: string) => ResultSet[] | undefined) { }
+
+    private getResults(sourceUri: string): ResultSet[] | undefined {
+        return this.resolveResults ? this.resolveResults(sourceUri) : this._resultsMap.get(sourceUri);
+    }
 
     public async handleExport(message: ExportRequest): Promise<void> {
         const { sourceUri, resultSetIndex, format, rowIndices, columnIds } = message;
-        const results = this._resultsMap.get(sourceUri);
+        const results = this.getResults(sourceUri);
         if (!results || resultSetIndex === undefined || results[resultSetIndex] === undefined) {
             vscode.window.showErrorMessage('Export failed: Result set not found');
             return;
@@ -326,7 +330,7 @@ export class ExportManager {
     public hydrateExportData(metadata: ExcelExportMetadata): HydratedExportItem[] {
         if (!metadata || !metadata.results) return [];
         const { sourceUri, results } = metadata;
-        const allResults = this._resultsMap.get(sourceUri);
+        const allResults = this.getResults(sourceUri);
         if (!allResults) return [];
 
         const hydrated: HydratedExportItem[] = [];
@@ -371,7 +375,7 @@ export class ExportManager {
     /** Builds Excel/export items backed by the ResultSet iterator instead of a full row copy. */
     public createStreamingExportData(metadata: ExcelExportMetadata): StructuredExportItem[] {
         if (!metadata?.results) return [];
-        const allResults = this._resultsMap.get(metadata.sourceUri);
+        const allResults = this.getResults(metadata.sourceUri);
         if (!allResults) return [];
 
         const items: StructuredExportItem[] = [];
@@ -449,7 +453,7 @@ export class ExportManager {
         formatId: string,
         destinationId: string
     ): Promise<void> {
-        const resultSet = this._resultsMap.get(exportData.sourceUri)?.[exportData.resultSetIndex];
+        const resultSet = this.getResults(exportData.sourceUri)?.[exportData.resultSetIndex];
         if (!resultSet) {
             vscode.window.showErrorMessage('Result set not found');
             return;

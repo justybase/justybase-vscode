@@ -59,6 +59,16 @@ export async function runQueryQueueRegression(document: vscode.TextDocument, pro
         if (independent && peakRunning < 2) throw new Error('Transient requests did not overlap in the production lane.');
         const done = coordinator.getSnapshot().find(item => item.sourceUri === sourceUri)!;
         if (done.running || done.queued.length || done.paused) throw new Error('Queue did not drain cleanly.');
+        if (independent) {
+            provider.setActiveSource(sourceUri);
+            const workspace = provider.getResultsForSource(sourceUri) ?? [];
+            if (workspace.filter(result => !result.isLog).length !== 2 || workspace.filter(result => result.isLog).length !== 1) {
+                throw new Error('Concurrent results did not form one document workspace with two data tabs and one Logs tab.');
+            }
+            await provider.ensureResultPanelTestBridgeReady();
+            const rendered = await provider.runResultPanelTestBridge('snapshot') as { sourceUri: string; resultSetCount: number };
+            if (rendered.sourceUri !== sourceUri || rendered.resultSetCount !== 3) throw new Error('Renderer exposed execution sources instead of the document Results workspace.');
+        }
     } finally {
         if (timer) clearTimeout(timer);
         listener.dispose();
@@ -72,8 +82,7 @@ export async function runQueryQueueLogsRegression(document: vscode.TextDocument,
     try {
         for (const keepOpen of [true, false]) {
             setKeepOpen(keepOpen);
-            const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === document.uri.toString());
-            provider.setActiveSource(keepOpen ? document.uri.toString() : lane?.last?.executionUri ?? document.uri.toString());
+            provider.setActiveSource(document.uri.toString());
             await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: 0 });
             await vscode.window.showTextDocument(document, { preview: false });
             await vscode.commands.executeCommand('netezza.runQuery');

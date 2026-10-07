@@ -72,7 +72,7 @@ function hasKnownCommand(message: MessageRecord, commands: readonly string[]): b
 function validateWebviewMessage(message: MessageRecord): boolean {
     switch (message.command) {
         case 'sqlQueueAction':
-            return hasString(message, 'sourceKey') && ['cancel', 'remove', 'pause', 'resume', 'clear'].includes(String(message.action))
+            return hasString(message, 'sourceKey') && ['cancel', 'remove', 'pause', 'resume', 'clear', 'recover'].includes(String(message.action))
                 && (message.jobId === undefined || hasString(message, 'jobId'));
         case 'ready':
         case 'selectAll':
@@ -255,12 +255,14 @@ function validateHostMessage(message: MessageRecord): boolean {
                 && typeof message.limitReached === 'boolean'
                 && (message.resultSetId === undefined || hasString(message, 'resultSetId'))
                 && (message.chunkSequence === undefined || isIndex(message.chunkSequence))
-                && (message.fromRow === undefined || isIndex(message.fromRow));
+                && (message.fromRow === undefined || isIndex(message.fromRow))
+                && (message.workspace === undefined || typeof message.workspace === 'boolean');
         case 'streamingComplete':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.totalRows) && typeof message.limitReached === 'boolean'
                 && (message.resultSetId === undefined || hasString(message, 'resultSetId'))
-                && (message.lastChunkSequence === undefined || isIndex(message.lastChunkSequence));
+                && (message.lastChunkSequence === undefined || isIndex(message.lastChunkSequence))
+                && (message.workspace === undefined || typeof message.workspace === 'boolean');
         case 'rowCountUpdate':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.totalRows) && typeof message.limitReached === 'boolean';

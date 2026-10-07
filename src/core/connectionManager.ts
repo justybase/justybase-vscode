@@ -1203,13 +1203,13 @@ export class ConnectionManager {
     /**
      * Close persistent connection for a specific document
      */
-    async closeDocumentPersistentConnection(documentUri: string): Promise<void> {
+    async closeDocumentPersistentConnection(documentUri: string, strict = false): Promise<void> {
         const normalizedUri = normalizeUriKey(documentUri);
         this.bumpDocumentConnectionGeneration(normalizedUri);
 
         const existingClose = this._documentConnectionClosePromises.get(normalizedUri);
         if (existingClose) {
-            await existingClose;
+            try { await existingClose; } catch (error: unknown) { if (strict) throw error; }
             return;
         }
 
@@ -1223,6 +1223,7 @@ export class ConnectionManager {
                 await conn.close();
             } catch (e: unknown) {
                 logWithFallback('error', `[ConnectionManager] Error closing document connection for ${documentUri}:`, e);
+                throw e;
             }
 
             // A new connection may have been created while the old one was
@@ -1236,6 +1237,8 @@ export class ConnectionManager {
         this._documentConnectionClosePromises.set(normalizedUri, closePromise);
         try {
             await closePromise;
+        } catch (error: unknown) {
+            if (strict) throw error;
         } finally {
             if (this._documentConnectionClosePromises.get(normalizedUri) === closePromise) {
                 this._documentConnectionClosePromises.delete(normalizedUri);

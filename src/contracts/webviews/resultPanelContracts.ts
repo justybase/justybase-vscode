@@ -207,11 +207,11 @@ export type ResultPanelWebviewToHostMessage =
     }
     | { command: 'switchSource'; sourceUri: string }
     | { command: 'togglePin'; sourceUri: string }
-    | { command: 'toggleResultPin'; sourceUri: string; resultSetIndex: number }
+    | { command: 'toggleResultPin'; sourceUri: string; resultSetIndex: number; resultSetId?: string }
     | { command: 'switchToPinnedResult'; resultId: string }
     | { command: 'unpinResult'; resultId: string }
     | { command: 'closeSource'; sourceUri: string }
-    | { command: 'closeResult'; sourceUri: string; resultSetIndex: number }
+    | { command: 'closeResult'; sourceUri: string; resultSetIndex: number; resultSetId?: string }
     | { command: 'refreshResult'; sourceUri: string; resultSetIndex: number; limitValue?: string }
     | { command: 'clearRefreshFailure'; sourceUri: string; resultSetIndex: number }
     | {
@@ -258,7 +258,7 @@ export type ResultPanelWebviewToHostMessage =
     | { command: 'focusView' }
     | { command: 'setContext'; key: string; value: unknown }
     | { command: 'clearLogs'; sourceUri: string }
-    | { command: 'switchResultSet'; sourceUri: string; resultSetIndex: number }
+    | { command: 'switchResultSet'; sourceUri: string; resultSetIndex: number; resultSetId?: string }
     | { command: 'selectionStatsChanged'; stats: SelectionStatsUpdatePayload | null }
     | { command: 'insertCellContent'; text: string; dataType?: string; sqlText?: string }
     | ({ command: 'updateResultFormatting' } & ResultFormattingUpdateRequest)
@@ -419,6 +419,8 @@ export type ResultPanelHostToWebviewMessage =
         chunkSequence?: number;
         /** Mirrors host isDiskBackedResultsAvailable — webview caps rows only when true. */
         diskBackedStreamCapEnabled?: boolean;
+        /** This append belongs to one result in a document-owned concurrent workspace. */
+        workspace?: boolean;
     }
     | {
         command: 'streamingComplete';
@@ -428,6 +430,8 @@ export type ResultPanelHostToWebviewMessage =
         limitReached: boolean;
         resultSetId?: string;
         lastChunkSequence?: number;
+        /** Completion applies to this result only; sibling executions may still be streaming. */
+        workspace?: boolean;
     }
     | { command: 'switchToResultSet'; resultSetIndex: number }
     | { command: 'resultFormattingState'; data: ResultFormattingPayload }

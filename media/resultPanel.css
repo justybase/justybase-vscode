@@ -4847,3 +4847,22 @@ body.sidebar-layout .main-split-view {
 .sql-queue-job-summary::before { content: '▸'; color: var(--vscode-descriptionForeground); }
 .sql-queue-job[open] > .sql-queue-job-summary::before { content: '▾'; }
 @media (max-width: 550px) { .sql-queue-job-summary { grid-template-columns: 12px 95px minmax(0, 1fr) auto; } }
+
+/* Native result-tab controls retain the compact tab appearance. */
+.result-tab-control, .result-set-tab button.result-set-close-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+}
+.result-set-tab button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+@media (max-width: 480px) {
+    .layout-switcher { flex-wrap: wrap; max-width: 100%; }
+}
+
+.result-tab-control, .result-set-tab button.result-set-close-btn { color: inherit; }

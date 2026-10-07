@@ -179,11 +179,11 @@ interface ResultPanelWebviewToHostMessageMap {
     };
     switchSource: { sourceUri: string };
     togglePin: { sourceUri: string };
-    toggleResultPin: { sourceUri: string; resultSetIndex: number };
+    toggleResultPin: { sourceUri: string; resultSetIndex: number; resultSetId?: string };
     switchToPinnedResult: { resultId: string };
     unpinResult: { resultId: string };
     closeSource: { sourceUri: string };
-    closeResult: { sourceUri: string; resultSetIndex: number };
+    closeResult: { sourceUri: string; resultSetIndex: number; resultSetId?: string };
     refreshResult: { sourceUri: string; resultSetIndex: number; limitValue?: string };
     clearRefreshFailure: { sourceUri: string; resultSetIndex: number };
     requestDatabaseAggregations: {
@@ -226,7 +226,7 @@ interface ResultPanelWebviewToHostMessageMap {
     focusView: EmptyPayload;
     setContext: { key: string; value: unknown };
     clearLogs: { sourceUri: string };
-    switchResultSet: { sourceUri: string; resultSetIndex: number };
+    switchResultSet: { sourceUri: string; resultSetIndex: number; resultSetId?: string };
     selectionStatsChanged: { stats: SelectionStatsUpdatePayload | null };
     insertCellContent: { text: string; dataType?: string; sqlText?: string };
     updateResultFormatting: ResultFormattingUpdateRequest;
@@ -360,6 +360,7 @@ interface ResultPanelHostToWebviewMessageMap {
         resultSetId?: string;
         chunkSequence?: number;
         diskBackedStreamCapEnabled?: boolean;
+        workspace?: boolean;
     };
     streamingComplete: {
         sourceUri: string;
@@ -368,6 +369,7 @@ interface ResultPanelHostToWebviewMessageMap {
         limitReached: boolean;
         resultSetId?: string;
         lastChunkSequence?: number;
+        workspace?: boolean;
     };
     switchToResultSet: { resultSetIndex: number };
     resultFormattingState: { data: unknown };

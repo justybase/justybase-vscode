@@ -77,10 +77,7 @@ export function activateEditorSync(params: ActivateEditorSyncParams): void {
             });
         }
 
-        const lane = getQueryExecutionCoordinator().getSnapshot().find(item => item.sourceUri === sourceUri);
-        const running = lane?.runningExecutions ?? [];
-        const resultSource = running[running.length - 1]?.executionUri ?? lane?.last?.executionUri ?? sourceUri;
-        resultPanelProvider.setActiveSource(resultSource, uxTraceId);
+        resultPanelProvider.setActiveSource(sourceUri, uxTraceId);
     };
 
     const refreshConnectionAccentForDocument = (document: vscode.TextDocument | undefined) => {

@@ -22,6 +22,7 @@ import {
     QueryQueueOutcome,
 } from './queryExecutionGate';
 import { streamingManager } from '../../core/queryCancellation';
+import { isConnectionBrokenError } from '../../core/queryRunnerUtils';
 import { isCancellationError } from '../../core/cancellation';
 import { executionTargetFingerprint, prepareQueuedQuery } from './queryQueuePreparation';
 import { createQueryExecutionRecovery } from './queryExecutionRecovery';
@@ -153,6 +154,7 @@ export async function runSmartSequentialQuery(
     // work, so by the time this job's run() starts the predecessor has already
     // finalized — checking at run() time would always see idle.
     const preserveExistingResults = coordinator.hasPendingWork(sourceUri);
+    deps.resultPanelProvider.registerExecutionSource?.(sourceUri, executionUri);
     await coordinator.enqueue({ sourceUri, sql: queries.join(';\n\n'), connectionName: connectionName ?? undefined,
         database: databaseOverride, sourceRange, executionUri }, {
         document: editor.document,
@@ -176,7 +178,7 @@ export async function runSmartSequentialQuery(
 async function executePreparedQuery(
     deps: QueryCommandsDependencies,
     options: SmartSequentialRunOptions,
-    sourceUri: string,
+    executionUri: string,
     databaseKind: string | undefined,
     queries: string[],
     executionGate: QueryExecutionLease,
@@ -184,6 +186,7 @@ async function executePreparedQuery(
     preserveExistingResults = false,
 ): Promise<QueryQueueOutcome> {
     const { context, connectionManager, resultPanelProvider } = deps;
+    const documentUri = prepared.sourceDocumentUri ?? executionGate.documentUri ?? executionUri;
     const queriesForError = queries;
     let hadFailure = false;
     let hadCancellation = false;
@@ -191,7 +194,7 @@ async function executePreparedQuery(
     let executionStarted = false;
 
     try {
-        streamingManager.clearAborted(sourceUri);
+        streamingManager.clearAborted(executionUri);
         const continueOnError = options.continueOnError === true;
         runQueryTimer = createPerformanceTimer(
             options.wholeDocument ? 'query.run_batch' : continueOnError ? 'query.run_continue_on_error' : 'query.run',
@@ -200,13 +203,14 @@ async function executePreparedQuery(
             },
         );
 
-        resultPanelProvider.setActiveSource(sourceUri);
+        resultPanelProvider.beginWorkspaceExecution?.(documentUri, executionUri, preserveExistingResults);
+        resultPanelProvider.setActiveSource(documentUri);
         // Preserve prior tabs only when this SQL was enqueued while previous
         // results were still incomplete (see enqueue-time snapshot above).
         // A fresh run after idle clears unpinned tabs instead of pinning them.
-        resultPanelProvider.startExecution(sourceUri, preserveExistingResults ? { pinExistingResults: true } : undefined);
+        resultPanelProvider.startExecution(executionUri, preserveExistingResults ? { preserveExistingResults: true } : undefined);
         executionStarted = true;
-        resultPanelProvider.log(sourceUri, 'Preparing SQL execution...');
+        resultPanelProvider.log(executionUri, 'Preparing SQL execution...');
 
         const config = getExtensionConfiguration();
         const enableStreaming = !options.wholeDocument && (config.get<boolean>('enableStreaming', true) ?? true);
@@ -220,7 +224,7 @@ async function executePreparedQuery(
             if (!executionGate?.isCurrent()) {
                 return `stale-${executionGate?.executionId ?? 'query'}`;
             }
-            return resultPanelProvider.logExecutionStart(sourceUri, sql.trim(), connName);
+            return resultPanelProvider.logExecutionStart(executionUri, sql.trim(), connName);
         };
 
         const queryEndCallback = (
@@ -255,7 +259,7 @@ async function executePreparedQuery(
             cancellationPrepared: true,
             onSessionIsolated: () => executionGate.markSessionIsolated(),
             onExecutionSettled: summary => {
-                if (summary.status === 'cancelled' || summary.error?.kind === 'timeout' || summary.cleanupErrors?.length) {
+                if (summary.status === 'cancelled' || summary.error?.kind === 'timeout' || (summary.error && isConnectionBrokenError(summary.error.cause)) || summary.cleanupErrors?.length) {
                     executionGate.requireSessionIsolation();
                 }
             },
@@ -279,7 +283,7 @@ async function executePreparedQuery(
                     });
                     resultPanelProvider.updateResults(
                         [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage, databaseKind, errorDetails)],
-                        sourceUri,
+                        executionUri,
                         true,
                     );
                 },
@@ -288,8 +292,8 @@ async function executePreparedQuery(
         };
 
         const progressTitle = continueOnError
-            ? `Executing SQL (continue on error) for ${sourceUri.split(/[\\/]/).pop()}...`
-            : `Executing SQL for ${sourceUri.split(/[\\/]/).pop()}...`;
+            ? `Executing SQL (continue on error) for ${documentUri.split(/[\\/]/).pop()}...`
+            : `Executing SQL for ${documentUri.split(/[\\/]/).pop()}...`;
 
         executionGate.markRunning();
         await vscode.window.withProgress(
@@ -300,7 +304,7 @@ async function executePreparedQuery(
             },
             async progress => {
                 const cancelListener = resultPanelProvider.onDidCancel(cancelledUri => {
-                    if (cancelledUri === sourceUri) {
+                    if (cancelledUri === executionUri) {
                         progress.report({ message: 'Cancelling query...' });
                     }
                 });
@@ -312,10 +316,10 @@ async function executePreparedQuery(
                             context,
                             queries,
                             connectionManager,
-                            sourceUri,
+                            executionUri,
                             msg => {
                                 if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.log(sourceUri, msg);
+                                    resultPanelProvider.log(executionUri, msg);
                                 }
                             },
                             (queryIndex: number, chunk: StreamingChunk, sql: string) => {
@@ -330,7 +334,7 @@ async function executePreparedQuery(
                                         : sql;
                                 if (executionGate?.isCurrent()) {
                                     resultPanelProvider.appendStreamingChunk(
-                                        sourceUri,
+                                        executionUri,
                                         queryIndex,
                                         chunk,
                                         fullSql,
@@ -354,10 +358,10 @@ async function executePreparedQuery(
                             context,
                             queries,
                             connectionManager,
-                            sourceUri,
+                            executionUri,
                             msg => {
                                 if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.log(sourceUri, msg);
+                                    resultPanelProvider.log(executionUri, msg);
                                 }
                             },
                             queryResults => {
@@ -373,7 +377,7 @@ async function executePreparedQuery(
                                     }
                                 }
                                 if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.updateResults(queryResults, sourceUri, true);
+                                    resultPanelProvider.updateResults(queryResults, executionUri, true);
                                 }
                             },
                             undefined,
@@ -398,8 +402,8 @@ async function executePreparedQuery(
         if (!executionStillCurrent) {
             return 'cancelled';
         }
-        resultPanelProvider.finalizeExecution(sourceUri);
-        void handleExecutionCompletion(sourceUri);
+        resultPanelProvider.finalizeExecution(executionUri);
+        void handleExecutionCompletion(documentUri);
         if (runQueryTimer) {
             const successEvent = runQueryTimer.finish({
                 result: 'ok',
@@ -419,12 +423,13 @@ async function executePreparedQuery(
         }
         const msg = err instanceof Error ? err.message : String(err);
         executionGate.recordError(msg);
+        if (isConnectionBrokenError(err)) executionGate.requireSessionIsolation();
 
         if (isCancellationError(err)) {
             executionGate.requireSessionIsolation();
             if (executionStarted) {
-                resultPanelProvider.log(sourceUri, 'Query execution cancelled by user.');
-                resultPanelProvider.finalizeExecution(sourceUri);
+                resultPanelProvider.log(executionUri, 'Query execution cancelled by user.');
+                resultPanelProvider.finalizeExecution(executionUri);
             }
             if (runQueryTimer) {
                 const cancelledEvent = runQueryTimer.finish({
@@ -448,10 +453,10 @@ async function executePreparedQuery(
                     databaseKind,
                     extractDatabaseErrorDetails(err),
                 )],
-                sourceUri,
+                executionUri,
                 true,
             );
-            resultPanelProvider.finalizeExecution(sourceUri);
+            resultPanelProvider.finalizeExecution(executionUri);
         }
         if (runQueryTimer) {
             const errorEvent = runQueryTimer.finish({
@@ -474,8 +479,8 @@ async function executePreparedQuery(
         return 'failed';
     } finally {
         if (prepared.keepConnectionOpenOverride === false) {
-            streamingManager.clearAborted(sourceUri);
-            if (executionStarted && !executionGate.isCurrent()) resultPanelProvider.finalizeExecution(sourceUri);
+            streamingManager.clearAborted(executionUri);
+            if (executionStarted && !executionGate.isCurrent()) resultPanelProvider.finalizeExecution(executionUri);
         }
     }
 }

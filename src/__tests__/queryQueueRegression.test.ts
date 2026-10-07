@@ -40,7 +40,11 @@ describe('Extension Host queue fixture contract', () => {
             });
         });
         const provider = {
-            getResultsForSource: () => [{ isLog: false, isError: false, data: rows }],
+            getResultsForSource: (source: string) => source === document.uri.toString() && independent
+                ? [{ isLog: true, data: [] }, { isLog: false, data: [[101]] }, { isLog: false, data: [[202]] }]
+                : [{ isLog: false, isError: false, data: rows }],
+            setActiveSource: jest.fn(),
+            runResultPanelTestBridge: async () => ({ sourceUri: document.uri.toString(), resultSetCount: 3 }),
             getResultPanelTraceSnapshot: () => [],
             getResultPanelTestBridgePendingRequestCount: () => 0,
             getResultPanelRuntimeDiagnostics: () => ({}),
