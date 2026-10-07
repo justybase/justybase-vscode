@@ -17,7 +17,7 @@ import type {
 
 const PARSER_RULE_ID_PATTERN = /^(?:SQL|PAR|LEX|PARW)\d+$/i;
 const PARSER_TO_QUALITY_RULE_ID = new Map<string, string>([
-  ["SQL043", "NZ002"], ["SQL044", "NZ003"], ["SQL051", "NZ004"],
+  ["SQL043", "NZ002"], ["SQL044", "NZ003"], ["SQL051", "NZ004"], ["NZ004", "NZ004"],
   ["SQL052", "NZ010"], ["SQL053", "NZ016"], ["PAR005", "NZ019"],
   ["PAR002", "NZ021"], ["SQL042", "NZ022"], ["SQL045", "NZ011"],
   ["SQL046", "NZ012"], ["SQL048", "NZ023"],

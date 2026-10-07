@@ -19,12 +19,11 @@ import {
  * (this extension vs. the JustyBase.NetezzaSql engine).
  *
  * Live-database verdicts (see
- * netezzaCompletionKeywordLegality.live.integration.test.ts) override the
- * parser in three cases:
- *   - standalone OUTER JOIN: parser accepts, live NPS rejects  -> not suggested
- *   - FETCH FIRST:           parser accepts, live NPS rejects  -> not suggested
- *   - OFFSET without LIMIT:  parser rejects (PAR001), live NPS accepts
- *                           -> still suggested
+ * netezzaCompletionKeywordLegality.live.integration.test.ts) now drive the
+ * grammar itself:
+ *   - standalone OUTER JOIN: live NPS rejects -> syntax error
+ *   - FETCH FIRST:           live NPS rejects -> syntax error (NZS002)
+ *   - OFFSET without LIMIT:  live NPS accepts -> valid
  */
 describe("Netezza SQL - completion keyword legality matrix", () => {
   setupSqlValidatorTests();
@@ -55,7 +54,7 @@ describe("Netezza SQL - completion keyword legality matrix", () => {
     });
 
     it("OUTER (standalone)", () => {
-      expectValid(`${E} OUTER JOIN TESTDB.PUBLIC.DEPARTMENTS D ON 1=1;`);
+      expectSyntaxError(`${E} OUTER JOIN TESTDB.PUBLIC.DEPARTMENTS D ON 1=1;`);
     });
 
     it("CROSS", () => {
@@ -87,7 +86,7 @@ describe("Netezza SQL - completion keyword legality matrix", () => {
     });
 
     it("FETCH FIRST n ROWS ONLY", () => {
-      expectValid(`${E} FETCH FIRST 1 ROWS ONLY;`);
+      expectSyntaxError(`${E} FETCH FIRST 1 ROWS ONLY;`);
     });
 
     it("UNION", () => {
@@ -102,9 +101,9 @@ describe("Netezza SQL - completion keyword legality matrix", () => {
       expectValid(`${E} EXCEPT SELECT 1 FROM TESTDB.PUBLIC.DEPARTMENTS;`);
     });
 
-    it("OFFSET is ILLEGAL without a preceding LIMIT", () => {
-      expectSyntaxError(`${E} OFFSET 5;`);
-      expectSyntaxError(`${E} ORDER BY E.EMPLOYEE_ID OFFSET 5;`);
+    it("OFFSET is legal without a preceding LIMIT", () => {
+      expectValid(`${E} OFFSET 5;`);
+      expectValid(`${E} ORDER BY E.EMPLOYEE_ID OFFSET 5;`);
       expectValid(`${E} LIMIT 10 OFFSET 5;`);
     });
   });

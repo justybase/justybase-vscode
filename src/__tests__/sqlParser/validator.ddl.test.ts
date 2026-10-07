@@ -323,16 +323,16 @@ FROM TESTDB..EMPLOYEES d;`);
       expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES;");
     });
 
-    it("should validate DROP TABLE IF EXISTS", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
+    it("should reject DROP TABLE IF EXISTS", () => {
+      expectSyntaxError("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
     });
 
     it("should not require a cached qualified relation with trailing IF EXISTS", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.MISSING_TABLE IF EXISTS;");
+      expectSyntaxError("DROP TABLE TESTDB.PUBLIC.MISSING_TABLE IF EXISTS;");
     });
 
     it("should validate DROP TABLE with multiple targets", () => {
-      expectValid(
+      expectSyntaxError(
         "DROP TABLE TESTDB.PUBLIC.EMPLOYEES, TESTDB.PUBLIC.DEPARTMENTS IF EXISTS;",
       );
     });
@@ -431,14 +431,14 @@ FROM TESTDB..EMPLOYEES d;`);
       );
     });
 
-    it("should validate ALTER TABLE DROP multiple columns", () => {
-      expectValid(
+    it("should reject ALTER TABLE DROP multiple columns without RESTRICT/CASCADE", () => {
+      expectSyntaxError(
         "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES DROP COLUMN STATUS, MIDDLE_NAME;",
       );
     });
 
-    it("should validate ALTER TABLE DROP column without COLUMN keyword", () => {
-      expectValid("ALTER TABLE TESTDB..EMPLOYEES DROP MIDDLE_NAME;");
+    it("should reject ALTER TABLE DROP column without COLUMN keyword", () => {
+      expectSyntaxError("ALTER TABLE TESTDB..EMPLOYEES DROP MIDDLE_NAME;");
     });
 
     it("should validate ALTER DATABASE OWNER TO", () => {
@@ -558,8 +558,8 @@ FROM TESTDB..EMPLOYEES d;`);
       expectValid("DROP VIEW TESTDB..EMP_VIEW;");
     });
 
-    it("should validate DROP TABLE IF EXISTS with schema", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
+    it("should reject DROP TABLE IF EXISTS with schema", () => {
+      expectSyntaxError("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
     });
 
     it("should validate CREATE SEQUENCE", () => {
@@ -576,8 +576,8 @@ FROM TESTDB..EMPLOYEES d;`);
       );
     });
 
-    it("should validate ALTER TABLE DROP COLUMN", () => {
-      expectValid("ALTER TABLE TESTDB..EMPLOYEES DROP COLUMN MIDDLE_NAME;");
+    it("should reject ALTER TABLE DROP COLUMN", () => {
+      expectSyntaxError("ALTER TABLE TESTDB..EMPLOYEES DROP COLUMN MIDDLE_NAME;");
     });
 
     it("should validate ALTER TABLE RENAME COLUMN", () => {
@@ -718,8 +718,8 @@ DROP TABLE JUST_DATA.ADMIN.DIMACCOUNT_BACKUP;`);
       );
     });
 
-    it("should validate ALTER TABLE DROP COLUMN", () => {
-      expectValid("ALTER TABLE TESTDB..EMPLOYEES DROP COLUMN STATUS;");
+    it("should reject ALTER TABLE DROP COLUMN without RESTRICT/CASCADE", () => {
+      expectSyntaxError("ALTER TABLE TESTDB..EMPLOYEES DROP COLUMN STATUS;");
     });
 
     it("should validate ALTER TABLE OWNER TO", () => {
@@ -893,8 +893,8 @@ USING (
   // DROP variants — valid syntax
   // ====================================================================
   describe("DROP variants — valid syntax", () => {
-    it("should validate DROP TABLE IF EXISTS", () => {
-      expectValid("DROP TABLE my_table IF EXISTS");
+    it("should reject DROP TABLE IF EXISTS", () => {
+      expectSyntaxError("DROP TABLE my_table IF EXISTS");
     });
 
     it("should validate DROP TABLE multiple", () => {

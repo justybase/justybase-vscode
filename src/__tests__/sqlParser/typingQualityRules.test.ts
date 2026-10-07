@@ -5,10 +5,11 @@ import { SqlValidator } from "../../sqlParser/validator";
 import { createMockSchemaProvider } from "../../sqlParser/schemaProvider";
 
 describe("typing quality rules", () => {
-  it("emits SQL051 for a CROSS JOIN in the existing CST visitor pass", () => {
+  it("emits NZ004 without a missing-ON error for CROSS JOIN", () => {
     const result = new SqlValidator().validate("SELECT * FROM T1 CROSS JOIN T2;");
 
-    expect(result.warnings.some((warning) => warning.code === "SQL051")).toBe(true);
+    expect(result.warnings.some((warning) => warning.code === "NZ004")).toBe(true);
+    expect(result.errors.some((error) => error.code === "SQL027")).toBe(false);
   });
 
   it("emits SQL052 for an unaliased JOIN source and stays quiet when it has an alias", () => {

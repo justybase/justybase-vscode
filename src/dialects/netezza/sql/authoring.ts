@@ -14,6 +14,7 @@ export const netezzaSqlAuthoring: DatabaseSqlAuthoring = {
     signatures: NETEZZA_FUNCTION_SIGNATURES,
     formatter: netezzaFormatterProfile,
     validation: {
+        databaseKind: 'netezza',
         builtinFunctions: NETEZZA_BUILTIN_FUNCTIONS,
         systemColumns: NETEZZA_SYSTEM_COLUMNS,
         specialBuiltinValues: NETEZZA_SPECIAL_BUILTIN_VALUES,

@@ -333,6 +333,10 @@ export class NetezzaSqlParser extends BaseSqlParser {
     return true;
   }
 
+  protected supportsStandaloneOffsetClause(): boolean {
+    return true;
+  }
+
   private overrideSharedGrammarForNetezza(): void {
     // The shared base parser intentionally treats keywords as reserved words so
     // future dialects start from ANSI-safe behavior. Netezza historically

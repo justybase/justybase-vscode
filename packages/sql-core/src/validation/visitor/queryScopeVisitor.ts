@@ -177,6 +177,10 @@ export function selectStatement(
     host.visit(ctx.fetchFirstClause[0]);
   }
 
+  if (ctx.offsetClause) {
+    host.visit(ctx.offsetClause[0]);
+  }
+
   if (ctx.offsetFetchClause) {
     host.visit(ctx.offsetFetchClause[0]);
   }
@@ -664,7 +668,7 @@ export function joinClause(
         "CROSS JOIN produces a Cartesian product; verify that this is intentional",
         getTokenSpanPositionFromEndpoints(crossToken, joinToken),
         "warning",
-        "SQL051",
+        "NZ004",
       );
     }
   }

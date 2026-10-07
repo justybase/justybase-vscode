@@ -112,7 +112,10 @@ export let schemaProvider: InMemorySchemaProvider;
 
 export const getSyntaxErrors = (result: { errors: Array<{ code: string }> }) =>
   result.errors.filter(
-    (e) => e.code.startsWith("PAR") || e.code.startsWith("LEX"),
+    (e) =>
+      e.code.startsWith("PAR") ||
+      e.code.startsWith("LEX") ||
+      e.code.startsWith("NZS"),
   );
 
 export const expectValid = (sql: string) => {

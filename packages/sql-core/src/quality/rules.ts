@@ -440,6 +440,27 @@ const ruleNZ021 = regexRule(
   (match) => ({ start: match.index + 1, end: match.index + 2 }),
 );
 
+const ruleNZL006 = regexRule(
+  "NZL006",
+  "Equals Null",
+  "Comparison with '= NULL' never matches; use IS NULL (or IS NOT NULL).",
+  1,
+  /(?<![!<>])=[\t ]*NULL\b/gi,
+  (match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+    fix: "IS NULL",
+  }),
+);
+
+const ruleNZL008 = regexRule(
+  "NZL008",
+  "Empty In List",
+  "IN requires at least one value.",
+  0,
+  /\bIN\s*\(\s*\)/gi,
+);
+
 /**
  * Netezza quality rules owned by sql-core. Parser-owned ids remain exported
  * for configuration compatibility but are intentionally not executed here.
@@ -467,6 +488,8 @@ export const netezzaSqlQualityRules: readonly DatabaseSqlQualityRule[] = [
   ruleNZ020,
   ruleNZ021,
   ruleNZ022,
+  ruleNZL006,
+  ruleNZL008,
 ].filter((rule) => !PARSER_OWNED_RULES.has(rule.id));
 
 export const parserOwnedNetezzaQualityRuleIds = PARSER_OWNED_RULES;

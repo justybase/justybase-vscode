@@ -21,6 +21,7 @@ import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
 import type { CstNode, IRecognitionException, IToken } from "chevrotain";
 import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
 import { getAvailableTokenLocation, getTokenLocationOr } from "./tokenLocation";
+import { detectNetezzaSyntaxRestrictions } from "./netezzaSyntaxRestrictions";
 
 import { SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN, SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN, SCRIPT_SCOPE_DROP_STATEMENT_PATTERN, SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN } from "./scriptScopeStatements";
 
@@ -768,6 +769,7 @@ export class NetezzaSqlSemanticValidator {
     }
 
     errors.push(...this.detectKeywordTyposInTokens(lexResult.tokens));
+    errors.push(...detectNetezzaSyntaxRestrictions(lexResult.tokens));
 
     return {
       errors,

@@ -610,6 +610,61 @@ describe('providers/linterCodeActions', () => {
         );
     });
 
+    it('adds SQL046 quick fix with the production safe-action policy', () => {
+        const statementSql = 'UPDATE DB..CUSTOMERS AS C SET NAME = \'X\'';
+        const asOffset = statementSql.indexOf('AS');
+        const document = makeDocument(statementSql);
+        const diagnostic = makeDiagnostic('SQL046', 'SQL046: UPDATE alias cannot use AS', asOffset, asOffset + 2);
+
+        const actions = provider.provideCodeActions(
+            document as vscode.TextDocument,
+            {} as vscode.Range,
+            { diagnostics: [diagnostic] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        const removeAsFix = actions.find(action => action.title === 'Remove AS in UPDATE alias');
+        expect(removeAsFix).toBeDefined();
+        const edit = removeAsFix?.edit as unknown as MockWorkspaceEdit;
+        expect(edit.replace).toHaveBeenCalledWith(
+            document.uri,
+            {
+                start: diagnostic.range.start,
+                end: { line: 0, character: asOffset + 3 },
+            },
+            ''
+        );
+        expect(applyMockWorkspaceEdit(document, edit)).toBe(
+            "UPDATE DB..CUSTOMERS C SET NAME = 'X'",
+        );
+    });
+
+    it('adds NZL006 quick fix that rewrites = NULL to IS NULL', () => {
+        const statementSql = 'SELECT ID FROM T WHERE EMAIL = NULL';
+        const start = statementSql.indexOf('= NULL');
+        const document = makeDocument(statementSql);
+        const diagnostic = makeDiagnostic('NZL006', 'NZL006: use IS NULL', start, start + '= NULL'.length);
+
+        const actions = provider.provideCodeActions(
+            document as vscode.TextDocument,
+            {} as vscode.Range,
+            { diagnostics: [diagnostic] } as unknown as vscode.CodeActionContext,
+            {} as vscode.CancellationToken
+        );
+
+        const nullFix = actions.find(action => action.title === 'Replace = NULL with IS NULL');
+        expect(nullFix).toBeDefined();
+        const edit = nullFix?.edit as unknown as MockWorkspaceEdit;
+        expect(edit.replace).toHaveBeenCalledWith(
+            document.uri,
+            diagnostic.range,
+            'IS NULL'
+        );
+        expect(applyMockWorkspaceEdit(document, edit)).toBe(
+            'SELECT ID FROM T WHERE EMAIL IS NULL',
+        );
+    });
+
     it('adds NZP012 quick fix to normalize ELSEIF syntax to ELSIF', () => {
         const statementSql = 'ELSEIF amount > 0 THEN';
         const elseifOffset = statementSql.indexOf('ELSEIF');

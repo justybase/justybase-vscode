@@ -1122,6 +1122,10 @@ export class SqlVisitor
     // No validation needed
   }
 
+  offsetClause(): void {
+    // No validation needed
+  }
+
   offsetFetchClause(): void {
     // No validation needed
   }

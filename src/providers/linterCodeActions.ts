@@ -20,6 +20,11 @@ import { SqlLexer, type Scope, type TableInfo } from '../sqlParser';
 import { parseSqlStatements } from '../sqlParser/parsingRuntime';
 import { createSqlValidatorForDocument } from '../commands/validationCommands';
 import { parseSemanticScopeWithParser } from './parsers/parserSqlContext';
+import {
+    buildNetezzaQuickFix,
+    EQUALS_NULL_QUICK_FIX,
+    UPDATE_ALIAS_AS_QUICK_FIX,
+} from '../server/netezzaQuickFixes';
 
 type DatabaseKindResolver = (documentUri: string) => DatabaseKind | undefined;
 
@@ -106,8 +111,12 @@ const ERROR_CODE_ACTIONS: Record<string, { title: string; fix: string }> = {
         fix: ''
     },
     'SQL046': {
-        title: 'Remove AS in UPDATE alias',
+        title: UPDATE_ALIAS_AS_QUICK_FIX.title,
         fix: ''
+    },
+    'NZL006': {
+        title: EQUALS_NULL_QUICK_FIX.title,
+        fix: EQUALS_NULL_QUICK_FIX.newText
     },
     'NZ013': {
         title: 'Replace UNION with UNION ALL',
@@ -188,6 +197,13 @@ const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
         safety: 'safe',
         fixAllEligible: false,
         rationale: 'Deterministic insertion of the required AS keyword in a CTE definition.'
+    },
+    PAR004: {
+        code: 'PAR004',
+        title: 'Fix keyword typo',
+        safety: 'safe',
+        fixAllEligible: false,
+        rationale: 'Replaces a recognized keyword typo with the parser-provided intended keyword.'
     },
     NZ001: {
         code: 'NZ001',
@@ -275,10 +291,17 @@ const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
     },
     SQL046: {
         code: 'SQL046',
-        title: ERROR_CODE_ACTIONS.SQL046.title,
-        safety: 'safe',
-        fixAllEligible: true,
+        title: UPDATE_ALIAS_AS_QUICK_FIX.title,
+        safety: UPDATE_ALIAS_AS_QUICK_FIX.safety,
+        fixAllEligible: UPDATE_ALIAS_AS_QUICK_FIX.fixAllEligible,
         rationale: 'Netezza syntax normalization; removes unsupported AS keyword.'
+    },
+    NZL006: {
+        code: 'NZL006',
+        title: EQUALS_NULL_QUICK_FIX.title,
+        safety: EQUALS_NULL_QUICK_FIX.safety,
+        fixAllEligible: EQUALS_NULL_QUICK_FIX.fixAllEligible,
+        rationale: 'Deterministic rewrite of an equality-to-NULL predicate as IS NULL.'
     },
     NZ013: {
         code: 'NZ013',
@@ -343,6 +366,10 @@ const SAFE_FIX_ALL_CODES = new Set(
         .filter(entry => entry.fixAllEligible)
         .map(entry => entry.code)
 );
+
+export function getNetezzaQuickFixSafety(code: string): QuickFixSafety | undefined {
+    return QUICK_FIX_MATRIX[code]?.safety;
+}
 
 const LSP_SERVED_CODES = new Set([
     'SQL004', 'SQL007', 'SQL012', 'SQL019', 'SQL048', 'SQL051', 'SQL052', 'SQL053',
@@ -472,6 +499,13 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
 
             if (code === 'NZ012' || code === 'SQL046') {
                 const action = this.createUpdateAliasAsFix(document, diagnostic);
+                if (action) {
+                    actions.push(action);
+                }
+            }
+
+            if (code === 'NZL006') {
+                const action = this.createEqualsNullFix(document, diagnostic);
                 if (action) {
                     actions.push(action);
                 }
@@ -1871,16 +1905,43 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
 
     private createUpdateAliasAsFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
         const code = this.getDiagnosticCode(diagnostic);
-        const normalizedCode = code === 'SQL046' ? 'SQL046' : 'NZ012';
-        const edit = this.buildSafeFixEdit(document, diagnostic, normalizedCode);
+        if (code === 'SQL046') {
+            const contract = buildNetezzaQuickFix('SQL046', diagnostic.range, document.getText());
+            const action = new vscode.CodeAction(contract.title, vscode.CodeActionKind.QuickFix);
+            action.diagnostics = [diagnostic];
+            action.isPreferred = true;
+            action.edit = new vscode.WorkspaceEdit();
+            action.edit.replace(
+                document.uri,
+                contract.edit.range as vscode.Range,
+                contract.edit.newText,
+            );
+            return action;
+        }
+
+        const edit = this.buildSafeFixEdit(document, diagnostic, 'NZ012');
         if (!edit) {
             return undefined;
         }
 
-        const action = new vscode.CodeAction(ERROR_CODE_ACTIONS[normalizedCode].title, vscode.CodeActionKind.QuickFix);
+        const action = new vscode.CodeAction(ERROR_CODE_ACTIONS.NZ012.title, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
         action.isPreferred = true;
         action.edit = edit;
+        return action;
+    }
+
+    private createEqualsNullFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction {
+        const contract = buildNetezzaQuickFix('NZL006', diagnostic.range, document.getText());
+        const action = new vscode.CodeAction(contract.title, vscode.CodeActionKind.QuickFix);
+        action.diagnostics = [diagnostic];
+        action.isPreferred = true;
+        action.edit = new vscode.WorkspaceEdit();
+        action.edit.replace(
+            document.uri,
+            contract.edit.range as vscode.Range,
+            contract.edit.newText,
+        );
         return action;
     }
 
