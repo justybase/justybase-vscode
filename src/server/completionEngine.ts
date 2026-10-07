@@ -1,3 +1,4 @@
+import { isOffsetInSingleQuotedString, isOffsetInSqlComment } from "@justybase/sql-core/sourceScan";
 import {
   CompletionItem,
   CompletionTriggerKind,
@@ -117,6 +118,12 @@ export class LspCompletionEngine {
     });
     if (macroVariableItems !== undefined) {
       return finalizeCompletionItems(macroVariableItems, triggerKind);
+    }
+
+    const text = document.getText();
+    const offset = document.offsetAt(position);
+    if (offset > 0 && (isOffsetInSingleQuotedString(text, offset - 1) || isOffsetInSqlComment(text, offset - 1))) {
+      return [];
     }
 
     const pathItems = await this.pathResolver.resolveRequestPathCompletions(

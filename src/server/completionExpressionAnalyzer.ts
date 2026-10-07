@@ -59,10 +59,26 @@ export function buildExpressionClauseKeywordItems(
     return [];
   }
 
-  const allowedKeywords = new Set(["AND", "OR", "NOT"]);
+  const allowedKeywords = new Set(predicateKeywords(statementPrefix));
   return toKeywordItems(typedPrefix, position, completionKeywords).filter(
     (item) => allowedKeywords.has(item.label.toUpperCase()),
   );
+}
+
+/** Keywords following the current predicate operand or completed comparison. */
+function predicateKeywords(statementPrefix: string): readonly string[] {
+  const tokens = SqlLexer.tokenize(statementPrefix).tokens;
+  let boundary = -1;
+  for (let index = 0; index < tokens.length; index++) {
+    if (["Where", "On", "Having", "And", "Or"].includes(tokens[index].tokenType.name)) boundary = index;
+  }
+  const expression = tokens.slice(boundary + 1);
+  const last = expression.at(-1)?.tokenType.name;
+  const comparison = expression.some(token => ["Equals", "NotEquals", "LessThan", "LessThanEquals", "GreaterThan", "GreaterThanEquals", "In", "Between", "Like", "Is"].includes(token.tokenType.name));
+  if (last && isExpressionEndingToken(last)) {
+    return comparison ? ["AND", "OR"] : ["IN", "BETWEEN", "NOT", "LIKE", "IS", "AND", "OR"];
+  }
+  return ["AND", "OR", "NOT"];
 }
 
 const CLAUSE_KEYWORD_MAP: Record<string, readonly string[]> = {
@@ -94,7 +110,9 @@ export function buildContextualKeywordItems(
     return [];
   }
 
-  const allowed = CLAUSE_KEYWORD_MAP[clause];
+  const allowed = clause === "where" || clause === "on" || clause === "having"
+    ? [...predicateKeywords(statementPrefix), ...CLAUSE_KEYWORD_MAP[clause].filter(keyword => keyword !== "AND" && keyword !== "OR" && keyword !== "NOT")]
+    : CLAUSE_KEYWORD_MAP[clause];
   if (!allowed || allowed.length === 0) {
     return [];
   }

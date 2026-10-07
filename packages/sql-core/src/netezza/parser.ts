@@ -316,8 +316,14 @@ export class NetezzaSqlParser extends BaseSqlParser {
       this.CONSUME(Alter);
       this.CONSUME(Table);
       this.SUBRULE(this.qualifiedName);
-      this.OPTION(() => this.SUBRULE(this.alterTableAction));
-      this.OPTION1(() => this.SUBRULE(this.organizeClause));
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === netezzaSqlLexer.Organize,
+          ALT: () => this.SUBRULE(this.organizeClause) },
+        { ALT: () => {
+          this.SUBRULE(this.alterTableAction);
+          this.OPTION(() => this.SUBRULE1(this.organizeClause));
+        } },
+      ]);
     });
   }
 
@@ -479,6 +485,7 @@ export class NetezzaSqlParser extends BaseSqlParser {
       netezzaSqlLexer.Key,
       netezzaSqlLexer.User,
       netezzaSqlLexer.Group,
+      netezzaSqlLexer.Database,
       netezzaSqlLexer.Type,
       netezzaSqlLexer.Materialized,
       // NOTE: Elsif/Elseif are intentionally excluded (like Elsif before).
@@ -1587,10 +1594,18 @@ export class NetezzaSqlParser extends BaseSqlParser {
         this.RULE("alterTableModifyColumnAction", () => {
           this.CONSUME(Modify);
           this.CONSUME(Column);
-          this.CONSUME(LParen);
-          this.SUBRULE(this.columnName);
-          this.SUBRULE(this.typeName);
-          this.CONSUME(RParen);
+          this.OR([
+            { ALT: () => {
+              this.CONSUME(LParen);
+              this.SUBRULE(this.columnName);
+              this.SUBRULE(this.typeName);
+              this.CONSUME(RParen);
+            } },
+            { ALT: () => {
+              this.SUBRULE1(this.columnName);
+              this.SUBRULE1(this.typeName);
+            } },
+          ]);
         });
 
         this.RULE("alterTableOwnerAction", () => {

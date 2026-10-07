@@ -477,6 +477,21 @@ describe("LspCompletionEngine", () => {
     engine = new LspCompletionEngine(metadataProvider);
   });
 
+  describe("P1 conformance regression", () => {
+    it("offers functions after a completed INSERT column list", async () => {
+      expect(labels(await complete("INSERT INTO JUST_DATA..DIMACCOUNT (ACCOUNTKEY) VALUES (ABS|)"))).toContain("ABS");
+    });
+    it("omits unary NOT after a completed predicate", async () => {
+      expect(labels(await complete("SELECT ACCOUNTKEY FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY = 1 |"))).not.toContain("NOT");
+    });
+    it("offers comparison operators after a WHERE operand", async () => {
+      expect(labels(await complete("SELECT ACCOUNTKEY FROM JUST_DATA..DIMACCOUNT WHERE ACCOUNTKEY |"))).toEqual(expect.arrayContaining(["IN", "BETWEEN", "NOT"]));
+    });
+    it.each(["SELECT /* unfinished |", "SELECT 'unfinished |"])("suppresses SQL completion inside %s", async (sql) => {
+      expect(await complete(sql)).toEqual([]);
+    });
+  });
+
   describe("object path and target-context completions", () => {
     it("suggests XLSX sheet views inside a full-path File SQL identifier", async () => {
       metadataProvider.databaseKind = "file";

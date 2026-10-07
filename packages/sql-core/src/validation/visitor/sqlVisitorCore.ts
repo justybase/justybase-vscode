@@ -426,8 +426,9 @@ export class SqlVisitor
       startColumn,
       endLine: getTokenLocationOr(token.endLine, startLine),
       endColumn:
-        getAvailableTokenLocation(token.endColumn) ??
-        startColumn + (token.image?.length || 0),
+        (getAvailableTokenLocation(token.endColumn) !== undefined
+          ? token.endColumn! + 1
+          : startColumn + (token.image?.length || 0)),
       offset: getTokenLocationOr(token.startOffset, 0),
     };
   }

@@ -50,6 +50,49 @@ export function detectNetezzaSyntaxRestrictions(
 
   for (let index = 0; index < tokens.length; index += 1) {
     const name = tokenName(tokens[index]);
+    const image = tokens[index].image.toUpperCase();
+    if (image === "INTERVAL" && tokenName(tokens[index + 1]) === "StringLiteral"
+      && /^(YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)$/.test(tokens[index + 2]?.image.toUpperCase() ?? "")) {
+      errors.push(errorAt("NZS007", "Netezza interval units belong inside the interval literal.", tokens[index + 2]));
+    }
+    if (image === "TIMESTAMPTZ" && (tokenName(tokens[index - 1]) === "As"
+      || tokenName(tokens[index + 1]) === "StringLiteral")) {
+      errors.push(errorAt("NZS008", "TIMESTAMPTZ literals and casts are not supported by Netezza.", tokens[index]));
+    }
+    if (name === "Create" && tokenName(tokens[index + 1]) === "Materialized") {
+      let depth = 0;
+      let queryDepth: number | undefined;
+      let hasSource = false;
+      let hasWhere = false;
+      for (let scan = index + 2; scan < tokens.length && tokenName(tokens[scan]) !== "Semicolon"; scan++) {
+        const current = tokenName(tokens[scan]);
+        if (current === "LParen") depth++;
+        if (current === "RParen") depth--;
+        if (current === "Select" && queryDepth === undefined) queryDepth = depth;
+        if (depth === queryDepth && current === "From") hasSource = true;
+        if (depth === queryDepth && current === "Where") hasWhere = true;
+      }
+      if (!hasSource || hasWhere) errors.push(errorAt("NZS009",
+        "Netezza materialized views require a source relation and do not support a WHERE filter.", tokens[index]));
+    }
+    if (name === "Merge") {
+      let depth = 0;
+      let matched: boolean | undefined;
+      for (let scan = index + 1; scan < tokens.length && tokenName(tokens[scan]) !== "Semicolon"; scan++) {
+        const current = tokenName(tokens[scan]);
+        if (current === "LParen") depth++;
+        if (current === "RParen") depth--;
+        if (depth !== 0) continue;
+        if (current === "When") matched = tokenName(tokens[scan + 1]) !== "Not";
+        if (matched !== undefined && current === "Then") {
+          const action = tokenName(tokens[scan + 1]);
+          if (matched && action === "Insert" || !matched && (action === "Update" || action === "Delete"))
+            errors.push(errorAt("NZS010", "This MERGE action is not valid for its MATCHED branch.", tokens[scan + 1]));
+        }
+        if (matched !== undefined && current === "Where")
+          errors.push(errorAt("NZS011", "Netezza does not support a WHERE suffix on MERGE actions.", tokens[scan]));
+      }
+    }
 
     // FETCH FIRST / FETCH NEXT
     if (name === "Fetch") {

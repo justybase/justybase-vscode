@@ -80,6 +80,9 @@ export function endsInsideUnclosedParen(
       depth += 1;
     } else if (char === ")") {
       depth -= 1;
+      // Once this opening parenthesis closes, a later VALUES/function
+      // parenthesis cannot make the original column list incomplete again.
+      if (depth === 0) return false;
     }
   }
 
