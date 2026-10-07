@@ -1,3 +1,4 @@
+import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   Hover,
@@ -70,12 +71,12 @@ export interface HoverDependencies {
   isCancellationRequested: () => boolean;
 }
 
-export async function provideHover(
+export async function provideHoverWithTarget(
   document: TextDocument,
   params: { position: Position },
   deps: HoverDependencies,
   metadataBridge: MetadataBridge,
-): Promise<Hover | null> {
+): Promise<(Hover & { targetKind: string }) | null> {
   if (deps.isCancellationRequested()) {
     return null;
   }
@@ -221,6 +222,7 @@ export async function provideHover(
     }
 
     return {
+      targetKind: symbol.kind === "table_alias" ? "alias" : symbol.kind,
       contents: {
         kind: MarkupKind.Markdown,
         value: markdownLines.join("\n"),
@@ -257,6 +259,16 @@ export async function provideHover(
 
   // Try table name match first (handles JUST_DATA_2.ADMIN.FACT_SALES_2)
   const upperWord = hoverWord.toUpperCase();
+  const signatures = getDatabaseSqlAuthoring(context.databaseKind).signatures.get(upperWord);
+  const afterWord = fullLineText.slice(wordStart + hoverWord.length);
+  if (signatures?.length && /^\s*\(/.test(afterWord)) {
+    return {
+      targetKind: "function",
+      contents: { kind: MarkupKind.Markdown, value: signatures.map(signature =>
+        `${signature.name}(${signature.parameters.join(", ")})`).join("\n") },
+    };
+  }
+
   const localDefinition = deps.findLocalDefinition(localDefinitions, hoverWord);
   if (
     localDefinition &&
@@ -264,6 +276,7 @@ export async function provideHover(
       localDefinition.type.toUpperCase() === "PARAMETER")
   ) {
     return {
+      targetKind: "variable",
       contents: {
         kind: MarkupKind.Markdown,
         value: `**PL/SQL ${localDefinition.type.toLowerCase()}** \`${localDefinition.name}\``,
@@ -329,6 +342,7 @@ export async function provideHover(
         }
 
         return {
+      targetKind: "table",
           contents: {
             kind: MarkupKind.Markdown,
             value: markdownLines.join("\n"),
@@ -386,6 +400,7 @@ export async function provideHover(
     }
 
     return {
+      targetKind: "column",
       contents: {
         kind: MarkupKind.Markdown,
         value: markdownLines.join("\n"),
@@ -404,6 +419,7 @@ export async function provideHover(
     const markdownLines = [`**column** \`${hoverWord}\``];
     markdownLines.push(`Source: ${source.type} \`${source.name}\``);
     return {
+      targetKind: "column",
       contents: {
         kind: MarkupKind.Markdown,
         value: markdownLines.join("\n"),
@@ -466,6 +482,7 @@ export async function provideHover(
       appendColumnDescriptionLine(markdownLines, matchedColumn.description);
 
       return {
+      targetKind: "column",
         contents: {
           kind: MarkupKind.Markdown,
           value: markdownLines.join("\n"),
@@ -527,6 +544,7 @@ export async function provideHover(
         markdownLines.push(colLines.join("\n"));
       }
       return {
+      targetKind: "table",
         contents: {
           kind: MarkupKind.Markdown,
           value: markdownLines.join("\n"),
@@ -536,4 +554,17 @@ export async function provideHover(
   }
 
   return null;
+}
+
+/** Original LSP response; authoring target metadata stays inside production APIs. */
+export async function provideHover(
+  document: TextDocument,
+  params: { position: Position },
+  deps: HoverDependencies,
+  metadataBridge: MetadataBridge,
+): Promise<Hover | null> {
+  const result = await provideHoverWithTarget(document, params, deps, metadataBridge);
+  if (!result) return null;
+  const { targetKind: _targetKind, ...hover } = result;
+  return hover;
 }
