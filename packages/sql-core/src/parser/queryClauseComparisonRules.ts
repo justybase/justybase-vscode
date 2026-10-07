@@ -163,6 +163,17 @@ export function registerQueryClauseComparisonRules(parser: object, tokens: Query
         });
     });
 
+    // Standalone OFFSET without LIMIT (accepted by Netezza and most engines).
+    // The optional ROWS/ROW suffix keeps `OFFSET n ROWS` working.
+    p.RULE('offsetClause', () => {
+        p.CONSUME(Offset);
+        p.CONSUME(NumberLiteral);
+        p.OPTION(() => p.OR([
+            { ALT: () => p.CONSUME(Rows) },
+            { ALT: () => p.CONSUME(Row) }
+        ]));
+    });
+
     p.RULE('fetchFirstClause', () => {
         p.CONSUME(Fetch);
         p.CONSUME(First);

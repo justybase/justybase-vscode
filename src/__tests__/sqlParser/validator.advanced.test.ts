@@ -1226,8 +1226,8 @@ JOIN TESTDB..EMPLOYEES X ON X.EMPLOYEE_ID = X.EMPLOYEE_ID`,
       expectWarningCode("SELECT 1;;SELECT 22", "PARW001");
     });
 
-    it("should validate complex multi-statement script", () => {
-      expectValid(`
+    it("should reject a complex multi-statement script with DROP IF EXISTS", () => {
+      expectSyntaxError(`
                 CREATE TEMP TABLE tmp_data (id INT, val FLOAT);
                 INSERT INTO tmp_data VALUES (1, 3.14);
                 INSERT INTO tmp_data VALUES (2, 2.71);
@@ -1450,33 +1450,33 @@ JOIN CTE_2 D ON C.COL1 - D.COL_B;`,
   // ==========================================================================
   // FETCH FIRST N ROWS ONLY
   // ==========================================================================
-  describe("FETCH FIRST — row limiting", () => {
-    it("should accept FETCH FIRST n ROWS ONLY", () => {
-      expectValid("SELECT * FROM EMPLOYEES FETCH FIRST 10 ROWS ONLY;");
+  describe("FETCH FIRST — rejected by the audited Netezza profile", () => {
+    it("should reject FETCH FIRST n ROWS ONLY", () => {
+      expectSyntaxError("SELECT * FROM EMPLOYEES FETCH FIRST 10 ROWS ONLY;");
     });
 
-    it("should accept FETCH FIRST 1 ROW ONLY", () => {
-      expectValid("SELECT * FROM EMPLOYEES FETCH FIRST 1 ROW ONLY;");
+    it("should reject FETCH FIRST 1 ROW ONLY", () => {
+      expectSyntaxError("SELECT * FROM EMPLOYEES FETCH FIRST 1 ROW ONLY;");
     });
 
-    it("should accept FETCH FIRST without count (defaults to 1)", () => {
-      expectValid("SELECT * FROM EMPLOYEES FETCH FIRST ROW ONLY;");
+    it("should reject FETCH FIRST without count", () => {
+      expectSyntaxError("SELECT * FROM EMPLOYEES FETCH FIRST ROW ONLY;");
     });
 
-    it("should accept FETCH FIRST after ORDER BY", () => {
-      expectValid(
+    it("should reject FETCH FIRST after ORDER BY", () => {
+      expectSyntaxError(
         "SELECT * FROM EMPLOYEES ORDER BY SALARY DESC FETCH FIRST 5 ROWS ONLY;",
       );
     });
 
-    it("should accept FETCH FIRST after LIMIT", () => {
-      expectValid(
+    it("should reject FETCH FIRST after LIMIT", () => {
+      expectSyntaxError(
         "SELECT * FROM EMPLOYEES LIMIT 100 FETCH FIRST 10 ROWS ONLY;",
       );
     });
 
-    it("should accept FETCH FIRST with OFFSET", () => {
-      expectValid(
+    it("should reject FETCH FIRST with OFFSET", () => {
+      expectSyntaxError(
         "SELECT * FROM EMPLOYEES ORDER BY SALARY LIMIT 100 OFFSET 10 FETCH FIRST 5 ROWS ONLY;",
       );
     });

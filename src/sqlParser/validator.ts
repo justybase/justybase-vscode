@@ -22,6 +22,7 @@ import {
   getAvailableTokenLocation,
   getTokenLocationOr,
 } from "@justybase/sql-core/validation/tokenLocation";
+import { detectNetezzaSyntaxRestrictions } from "@justybase/sql-core/validation";
 import type {
   DocumentParseRequest,
   DocumentParseSession,
@@ -842,6 +843,13 @@ export class SqlValidator implements SqlValidationService {
     }
 
     errors.push(...this.detectKeywordTyposInTokens(lexResult.tokens));
+    if (this.validationProfile.databaseKind === "netezza") {
+      errors.push(
+        ...(detectNetezzaSyntaxRestrictions(
+          lexResult.tokens,
+        ) as ValidationError[]),
+      );
+    }
 
     return {
       errors,

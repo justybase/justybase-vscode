@@ -13,6 +13,7 @@ export {
   type StatementBoundary,
 } from "./validation/semanticValidator";
 export { NETEZZA_SQL_VALIDATION_PROFILE } from "./validation/netezzaProfile";
+export { detectNetezzaSyntaxRestrictions } from "./validation/netezzaSyntaxRestrictions";
 export type {
   ColumnInfo,
   CteInfo,

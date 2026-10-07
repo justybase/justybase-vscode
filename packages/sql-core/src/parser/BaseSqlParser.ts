@@ -104,6 +104,7 @@ export class BaseSqlParser extends CstParser {
   orderByItem!: AnyRule;
   limitClause!: AnyRule;
   fetchFirstClause!: AnyRule;
+  offsetClause!: AnyRule;
   offsetFetchClause!: AnyRule;
   parenthesizedSetStatement!: AnyRule;
   comparisonRhs!: AnyRule;
@@ -230,6 +231,10 @@ export class BaseSqlParser extends CstParser {
   }
 
   protected supportsDropIfExistsBeforeTarget(): boolean {
+    return false;
+  }
+
+  protected supportsStandaloneOffsetClause(): boolean {
     return false;
   }
 
@@ -1240,6 +1245,10 @@ export class BaseSqlParser extends CstParser {
       this.OPTION4(() => this.SUBRULE(this.orderByClause));
       this.OPTION5(() => this.SUBRULE(this.limitClause));
       this.OPTION6(() => this.SUBRULE(this.fetchFirstClause));
+      this.OPTION7({
+        GATE: () => this.supportsStandaloneOffsetClause(),
+        DEF: () => this.SUBRULE(this.offsetClause),
+      });
       this.MANY(() => {
         this.SUBRULE(this.setOperation);
         this.OR7([

@@ -496,8 +496,8 @@ FROM TESTDB..EMPLOYEES;`);
       );
     });
 
-    it("should validate INSERT INTO ... VALUES with multiple rows", () => {
-      expectValid(
+    it("should reject INSERT INTO ... VALUES with multiple rows", () => {
+      expectSyntaxError(
         "INSERT INTO TESTDB..FILMS (CODE, TITLE) VALUES ('A', 'Film A'), ('B', 'Film B'), ('C', 'Film C');",
       );
     });
@@ -2244,8 +2244,8 @@ JOIN JUST_DATA.ADMIN.DEPARTMENT B`;
   // Additional INSERT patterns
   // ========================================================================
   describe("INSERT — additional valid patterns", () => {
-    it("should validate INSERT with multiple rows in VALUES", () => {
-      expectValid(
+    it("should reject INSERT with multiple rows in VALUES", () => {
+      expectSyntaxError(
         "INSERT INTO TESTDB..FILMS (CODE, TITLE) VALUES (1, 'Film A'), (2, 'Film B'), (3, 'Film C');",
       );
     });

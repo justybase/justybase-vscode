@@ -7,6 +7,7 @@ import {
 import { getNetezzaTypeSpec, supportsProcedureAnySizeArgument } from "./dataTypes";
 
 export const NETEZZA_SQL_VALIDATION_PROFILE: DatabaseSqlValidationProfile = {
+  databaseKind: "netezza",
   builtinFunctions: NETEZZA_BUILTIN_FUNCTIONS,
   systemColumns: NETEZZA_SYSTEM_COLUMNS,
   specialBuiltinValues: NETEZZA_SPECIAL_BUILTIN_VALUES,

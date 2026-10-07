@@ -214,9 +214,18 @@ export function updateStatement(
         | IToken
         | undefined;
       if (asToken) {
-        host.addError(
+        const startLine = asToken.startLine ?? 1;
+        const startColumn = asToken.startColumn ?? 1;
+        const tokenLength = asToken.image?.length ?? 2;
+        host.addErrorAtPosition(
           'Netezza UPDATE statements do not support "AS" for table aliases. Use "UPDATE table alias" instead.',
-          asToken,
+          {
+            startLine,
+            startColumn,
+            endLine: startLine,
+            endColumn: startColumn + tokenLength,
+            offset: asToken.startOffset ?? 0,
+          },
           "error",
           "SQL046",
         );

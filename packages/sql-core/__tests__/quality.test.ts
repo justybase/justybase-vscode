@@ -31,6 +31,34 @@ describe("Netezza sql-core quality", () => {
     expect(engine.analyzeQualityRulesOnly('SELECT "MixedCase" FROM t').issues.some((issue) => issue.ruleId === "NZ017")).toBe(true);
   });
 
+  it("reports equality-to-NULL and empty IN list with the contract severity and fix", () => {
+    const engine = new QualityEngineCore(
+      new NetezzaSqlSemanticValidator(),
+      netezzaSqlQualityRules,
+    );
+
+    const nullComparison = engine.analyzeQualityRulesOnly(
+      "SELECT ID FROM T WHERE EMAIL = NULL",
+    ).issues.find((issue) => issue.ruleId === "NZL006");
+    expect(nullComparison?.severity).toBe(1);
+    expect(nullComparison?.suggestedFix).toBe("IS NULL");
+
+    const emptyIn = engine.analyzeQualityRulesOnly(
+      "SELECT ID FROM T WHERE ID IN ()",
+    ).issues.find((issue) => issue.ruleId === "NZL008");
+    expect(emptyIn?.severity).toBe(0);
+  });
+
+  it("keeps the SQL046 diagnostic range on the complete AS token", () => {
+    const sql = "UPDATE T AS A SET A.ID = 1";
+    const issue = new QualityEngineCore(new NetezzaSqlSemanticValidator())
+      .analyze(sql)
+      .issues.find((candidate) => candidate.ruleId === "SQL046");
+
+    expect(issue).toBeDefined();
+    expect(sql.slice(issue!.startOffset, issue!.endOffset)).toBe("AS");
+  });
+
   it("does not scan DECLARE values as SQL quality rules", () => {
     const validator = new NetezzaSqlSemanticValidator();
     const engine = new QualityEngineCore(validator, netezzaSqlQualityRules);
