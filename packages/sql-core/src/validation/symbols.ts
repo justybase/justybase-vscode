@@ -509,7 +509,8 @@ class SqlSymbolCollector {
         const unresolved = this.unresolvedAliasQualifiers[this.unresolvedAliasQualifiers.length - 1]
         if (aliasScope && unresolved) {
             unresolved.forEach(token => {
-                const match = aliasScope.get(this.normalizeIdentifier(token).toUpperCase())
+                const name = this.normalizeIdentifier(token);
+                const match = this.resolveAlias(name) ?? this.resolveCte(name)
                 if (match) {
                     this.addReference(match, token)
                 }
@@ -746,18 +747,14 @@ class SqlSymbolCollector {
     private registerQualifierReference(qualifierToken: IToken): void {
         const qualifierName = this.normalizeIdentifier(qualifierToken)
 
-        const aliasSymbol = this.resolveAlias(qualifierName)
+        const aliasSymbol = this.getCurrentAliasScope()?.get(qualifierName.toUpperCase())
         if (aliasSymbol) {
             this.addReference(aliasSymbol, qualifierToken)
             return
         }
 
-        const cteSymbol = this.resolveCte(qualifierName)
-        if (cteSymbol) {
-            this.addReference(cteSymbol, qualifierToken)
-            return
-        }
-
+        // FROM declarations may occur later in a SELECT. Delay parent/CTE
+        // lookup until this scope has collected all local aliases.
         const unresolvedScope = this.unresolvedAliasQualifiers[this.unresolvedAliasQualifiers.length - 1]
         if (unresolvedScope) {
             unresolvedScope.push(qualifierToken)

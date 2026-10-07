@@ -95,6 +95,11 @@ function aliasBindings(
 }
 
 describe("LSP hoverEngine — regression guard", () => {
+  it("shows production function signature hover", async () => {
+    const hover = await provideHover(makeDocument("SELECT COUNT(id) FROM t"), { position: makePosition(0, 9) }, makeDeps(), makeBridge());
+    expect(getMarkdown(hover)).toContain("COUNT(expression)");
+  });
+
   it("shows hover for an Oracle PL/SQL local variable", async () => {
     const sql = `CREATE OR REPLACE FUNCTION F(P_AMOUNT IN NUMBER)
 RETURN NUMBER IS

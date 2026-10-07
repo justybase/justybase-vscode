@@ -151,7 +151,11 @@ function parseCTEs(text: string, definitions: LocalDefinition[]): void {
                     break;
                 }
             } else {
-                break; // Failed to parse
+                // During typing the declaration remains visible before its
+                // closing parenthesis; its inferred columns may still be empty.
+                definitions.push({ name: cteName, type: 'CTE', columns: explicitColumnList
+                    ? extractExplicitCteColumnNames(explicitColumnList) : [] });
+                break;
             }
         }
     }
