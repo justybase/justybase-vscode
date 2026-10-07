@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { randomUUID } from 'node:crypto';
+import { getQueryExecutionCoordinator } from '../commands/query/queryExecutionGate';
+import type { RunQueryRawOptions } from '../core/singleQueryExecutor';
 import { encode } from '@msgpack/msgpack';
 import type {
     ResultPanelOutboundMessage,
@@ -170,6 +173,7 @@ function getTraceSourceUri(
 }
 
 export class ResultPanelView implements vscode.WebviewViewProvider {
+    private readonly workspaceRenderedIds = new Map<string, (string | undefined)[]>();
     private sqlQueueJson = '[]';
 
     private _prepareQueueLogs(): string {
@@ -183,8 +187,20 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 remaining -= bounded.length;
                 return { sourceUri: source, rows: bounded };
             });
-            return { ...lane, sources, archive };
+            return { ...lane, sources, archive, workspace: this._stateManager.isWorkspace(lane.sourceUri) };
         }));
+    }
+
+    public getSelectedExecutionSource(documentUri: string): string | undefined {
+        return this._stateManager.getSelectedExecutionSource(documentUri);
+    }
+
+    public registerExecutionSource(documentUri: string, executionUri: string): void {
+        this._stateManager.registerExecutionSource(documentUri, executionUri);
+    }
+
+    public beginWorkspaceExecution(documentUri: string, executionUri: string, preserve: boolean): void {
+        this._stateManager.beginWorkspaceExecution(documentUri, executionUri, preserve);
     }
 
     public getExecutionGroupSources(sourceUri: string): string[] {
@@ -252,7 +268,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._connectionManager = connectionManager;
         this._extensionUri = context ? context.extensionUri : contextOrExtensionUri as vscode.Uri;
         this._stateManager = new ResultStateManager();
-        this._exportManager = new ExportManager(this._stateManager.resultsMap);
+        this._exportManager = new ExportManager(this._stateManager.resultsMap, source => this._stateManager.getWorkspaceResults(source));
         this._duckDbResultBridge = connectionManager
             ? new DuckDbResultBridge(this._stateManager.resultsMap, connectionManager)
             : undefined;
@@ -387,7 +403,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
         const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
         const sql = (resultSet?.refreshSql || resultSet?.sql || '').trim();
-        const connectionName = this._connectionManager.getConnectionForExecution(sourceUri);
+        const connectionName = this._connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri));
         if (!sql || !connectionName) {
             vscode.window.showErrorMessage('This result does not have a reusable SQL query or active connection.');
             return;
@@ -629,6 +645,42 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             } else if (inboundMessage.command === 'webviewBlurred') {
                 this._clearResultsFocusContexts();
             }
+            if ('sourceUri' in inboundMessage && typeof inboundMessage.sourceUri === 'string' && this._stateManager.isWorkspace(inboundMessage.sourceUri)) {
+                if (inboundMessage.command === 'cancelQuery') {
+                    const sourceUri = this._stateManager.getSelectedExecutionSource(inboundMessage.sourceUri);
+                    if (!sourceUri) return;
+                    // Workspace preview row counts cannot truncate an execution's backing result store.
+                    this._messageHandler.handleMessage({ ...inboundMessage, sourceUri, currentRowCounts: undefined });
+                    return;
+                }
+                if (inboundMessage.command === 'closeAllResults' || inboundMessage.command === 'clearLogs' || inboundMessage.command === 'moveAllToDisk') {
+                    for (const source of this._stateManager.getWorkspaceSources(inboundMessage.sourceUri)) this._messageHandler.handleMessage({ ...inboundMessage, sourceUri: source });
+                    return;
+                }
+                if ('resultSetIndex' in inboundMessage && typeof inboundMessage.resultSetIndex === 'number') {
+                    const renderedId = 'resultSetId' in inboundMessage && typeof inboundMessage.resultSetId === 'string'
+                        ? inboundMessage.resultSetId : this.workspaceRenderedIds.get(inboundMessage.sourceUri)?.[inboundMessage.resultSetIndex];
+                    const entries = this._stateManager.getWorkspaceEntries(inboundMessage.sourceUri);
+                    const resolved = renderedId ? entries.find(entry => entry.result.resultSetId === renderedId)
+                        : entries[inboundMessage.resultSetIndex];
+                    if (!resolved) return;
+                    if (inboundMessage.command === 'switchResultSet') {
+                        this._stateManager.setActiveResultSetIndex(inboundMessage.sourceUri, entries.indexOf(resolved));
+                        return;
+                    }
+                    if (inboundMessage.command === 'closeResult' && resolved.result.isLog) {
+                        for (const source of this._stateManager.getWorkspaceSources(inboundMessage.sourceUri)) {
+                            const index = this._stateManager.resultsMap.get(source)?.findIndex(result => result.isLog) ?? -1;
+                            if (index >= 0) this._stateManager.closeResult(source, index);
+                        }
+                        this._forceHydrate();
+                        return;
+                    }
+                    if (!resolved) return;
+                    this._messageHandler.handleMessage({ ...inboundMessage, ...resolved });
+                    return;
+                }
+            }
             this._messageHandler.handleMessage(inboundMessage);
         });
         this._trackViewDisposable(receiveMessageDisposable);
@@ -701,6 +753,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     public setActiveSource(sourceUri: string, uxTraceId?: string) {
+        sourceUri = this._stateManager.getDocumentUri(sourceUri);
         if (uxTraceId) {
             this._pendingUxTraceId = uxTraceId;
         }
@@ -747,9 +800,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 command: 'setActiveSource',
                 sourceUri,
                 activeResultSetIndex: this._stateManager.getActiveResultSetIndex(sourceUri) ?? 0,
-                executingSourcesJson: JSON.stringify(Array.from(this._stateManager.executingSources)),
-                sourcesJson: JSON.stringify(Array.from(this._stateManager.resultsMap.keys())),
-                pinnedSourcesJson: JSON.stringify(Array.from(this._stateManager.pinnedSources)),
+                executingSourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.executingSources).map(source => this._stateManager.getDocumentUri(source)))]),
+                sourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.resultsMap.keys()).map(source => this._stateManager.getDocumentUri(source)))]),
+                pinnedSourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.pinnedSources).map(source => this._stateManager.getDocumentUri(source)))]),
                 streamingCompletedSourcesJson: JSON.stringify(Array.from(this._stateManager.streamingCompletedSources)),
                 diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
                 formatSettings: this._formattingStore?.getPayloadForSource(sourceUri),
@@ -804,6 +857,13 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     public closeSource(sourceUri: string) {
+        for (const source of this._stateManager.isWorkspace(sourceUri) ? this._stateManager.getWorkspaceSources(sourceUri) : [sourceUri]) {
+            this.workspaceRenderedIds.delete(source);
+            this._pendingResultSyncSources.delete(source);
+            this._streamingResultSets.delete(source);
+            this._streamingTransportSequence.delete(source);
+        }
+        this.workspaceRenderedIds.delete(sourceUri);
         this._pendingResultSyncSources.delete(sourceUri);
         this._streamingResultSets.delete(sourceUri);
         this._streamingTransportSequence.delete(sourceUri);
@@ -906,7 +966,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
      * Get results for a source URI
      */
     public getResultsForSource(sourceUri: string) {
-        return this._stateManager.resultsMap.get(sourceUri);
+        return this._stateManager.isWorkspace(sourceUri) ? this._stateManager.getWorkspaceResults(sourceUri) : this._stateManager.resultsMap.get(sourceUri);
     }
 
     /** Return the bounded diagnostic trace collected for a controlled regression run. */
@@ -1179,6 +1239,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     public finalizeExecution(sourceUri: string) {
+        const documentUri = this._stateManager.getDocumentUri(sourceUri);
+        if (documentUri !== sourceUri) this._stateManager.markStale(documentUri);
         this._streamingResultSets.delete(sourceUri);
         this._streamingTransportSequence.delete(sourceUri);
         this._stateManager.finalizeExecution(sourceUri);
@@ -1198,16 +1260,16 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._syncActiveSourceWithFocusedEditor();
         this._stateManager.updateResults(results, sourceUri, append);
 
-        if (this._stateManager.activeSourceUri === sourceUri) {
+        if (this._stateManager.activeSourceUri === this._stateManager.getDocumentUri(sourceUri)) {
             this._revealViewForExecution();
         }
 
         if (this._view) {
             this._updateWebview();
-            if (this._stateManager.activeSourceUri === sourceUri) {
+            if (this._stateManager.activeSourceUri === this._stateManager.getDocumentUri(sourceUri)) {
                 this._view.show?.(true);
             }
-        } else if (this._stateManager.activeSourceUri === sourceUri) {
+        } else if (this._stateManager.activeSourceUri === this._stateManager.getDocumentUri(sourceUri)) {
             vscode.window.showInformationMessage(
                 'Query completed. Open the "Query Results" panel from the bottom activity bar to view data.'
             );
@@ -1280,28 +1342,26 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 cancellable: true,
             },
             async (progress, cancellationToken) => {
-                await ensurePersistentConnectionReadyForQuery(
-                    this._connectionManager!,
-                    request.sourceUri,
-                    connectionName,
-                );
-                const { connection } = await getConnectionForDocument(
-                    this._connectionManager!,
-                    connectionName,
-                    true,
-                    request.sourceUri,
-                );
-                await exportQueryToStreamFile({
-                    connection,
-                    query,
-                    filePath: outputPath,
-                    format: exportFormat.format,
-                    columnIndices,
-                    sql: query,
-                    timeoutSeconds: vscode.workspace.getConfiguration('justybase.query').get<number>('executionTimeout', 1800),
-                    cancellationToken,
-                    progress: message => progress.report({ message }),
-                });
+                const documentUri = this._stateManager.getDocumentUri(request.sourceUri);
+                const independent = this._needsIndependentResultConnection(request.sourceUri);
+                if (!independent) await ensurePersistentConnectionReadyForQuery(this._connectionManager!, documentUri, connectionName);
+                const { connection, shouldCloseConnection } = await getConnectionForDocument(
+                    this._connectionManager!, connectionName, !independent, documentUri);
+                try {
+                    await exportQueryToStreamFile({
+                        connection,
+                        query,
+                        filePath: outputPath,
+                        format: exportFormat.format,
+                        columnIndices,
+                        sql: query,
+                        timeoutSeconds: vscode.workspace.getConfiguration('justybase.query').get<number>('executionTimeout', 1800),
+                        cancellationToken,
+                        progress: message => progress.report({ message }),
+                    });
+                } finally {
+                    if (shouldCloseConnection) await connection.close();
+                }
             },
             );
 
@@ -1392,7 +1452,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             : baseRefreshSql;
 
         const connectionName =
-            this._connectionManager.getConnectionForExecution(sourceUri)
+            this._connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
             || this._connectionManager.getActiveConnectionName()
             || undefined;
         if (!connectionName) {
@@ -1413,13 +1473,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._stateManager.clearResultSetRefreshFailure(sourceUri, resultSetIndex);
 
         try {
-            await ensurePersistentConnectionReadyForQuery(
-                this._connectionManager,
-                sourceUri,
-                connectionName,
-            );
+            if (!this._needsIndependentResultConnection(sourceUri)) {
+                await ensurePersistentConnectionReadyForQuery(this._connectionManager, sourceUri, connectionName);
+            }
 
-            const refreshed = await runQueryRaw({
+            const refreshed = await this._runResultQuery(sourceUri, {
                 context: this._context,
                 query: sqlToExecute,
                 silent: true,
@@ -1502,9 +1560,35 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         return replaceTrailingLimitValue(refreshSql, normalizedLimit);
     }
 
+    private _needsIndependentResultConnection(sourceUri: string): boolean {
+        const documentUri = this._stateManager.getDocumentUri(sourceUri);
+        return this._stateManager.isWorkspace(documentUri) || getQueryExecutionCoordinator().getSnapshot()
+            .some(lane => lane.sourceUri === documentUri && lane.recoveryRequired);
+    }
+
+    private async _runResultQuery(sourceUri: string, options: RunQueryRawOptions) {
+        const documentUri = this._stateManager.getDocumentUri(sourceUri);
+        if (!this._needsIndependentResultConnection(sourceUri) || !this._connectionManager) return runQueryRaw(options);
+        // Result ownership is a storage identity. Resolve database overrides
+        // through the editor and give this auxiliary operation its own socket.
+        const executionUri = `${documentUri}#result-${randomUUID()}`;
+        const ownerResults = this._stateManager.resultsMap.get(sourceUri);
+        const connection = await this._connectionManager.createTransientConnectionForDocument(documentUri, options.connectionName);
+        try {
+            return await runQueryRaw({ ...options, documentUri, executionUri, connectionOverride: connection,
+                isExecutionCurrent: () => this._stateManager.resultsMap.get(sourceUri) === ownerResults });
+        } finally {
+            try { await connection.close(); }
+            finally {
+                streamingManager.clearAborted(executionUri);
+                await this._connectionManager.clearDocumentConnection(executionUri);
+            }
+        }
+    }
+
     private _resolveConnectionForSource(sourceUri: string): string {
         const connectionName =
-            this._connectionManager?.getConnectionForExecution(sourceUri)
+            this._connectionManager?.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
             || this._connectionManager?.getActiveConnectionName()
             || undefined;
         if (!connectionName) {
@@ -1545,7 +1629,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             columnIndex,
             querySpec ?? resultSet.databaseFilterSpec,
         );
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: sql,
             silent: true,
@@ -1588,7 +1672,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             : undefined;
         const sqlToExecute = buildDatabaseFilteredSql(baseRefreshSql, resultSet.columns, nextFilterSpec);
         const connectionName = this._resolveConnectionForSource(sourceUri);
-        const refreshed = await runQueryRaw({
+        const refreshed = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: sqlToExecute,
             silent: true,
@@ -1692,7 +1776,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             { databaseKind: this._connectionManager.getConnectionDatabaseKind(connectionName) },
         );
 
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: built.sql,
             silent: true,
@@ -1796,7 +1880,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             databaseKind,
         );
 
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: built.sql,
             silent: true,
@@ -1850,7 +1934,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         );
         const built = buildExplorePivotSql(resultSql, resultSet.columns, pivot, resolvedPivotValues, databaseKind);
 
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: built.sql,
             silent: true,
@@ -1908,7 +1992,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             pivot.filters,
             databaseKind,
         );
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: distinctSql,
             silent: true,
@@ -1975,7 +2059,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         const databaseKind = this._resolveExploreConnectionKind(sourceUri);
         const built = buildComposerSql(resultSql, resultSet.columns, composer, databaseKind);
 
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: built.sql,
             silent: true,
@@ -2067,14 +2151,14 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             querySpec ?? resultSet.databaseFilterSpec,
         );
         const connectionName =
-            this._connectionManager.getConnectionForExecution(sourceUri)
+            this._connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
             || this._connectionManager.getActiveConnectionName()
             || undefined;
         if (!connectionName) {
             throw new Error('No database connection. Please connect first.');
         }
 
-        const queryResult = await runQueryRaw({
+        const queryResult = await this._runResultQuery(sourceUri, {
             context: this._context,
             query: built.sql,
             silent: true,
@@ -2131,6 +2215,55 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         refreshSql?: string,
     ) {
         this._syncActiveSourceWithFocusedEditor();
+        const documentUri = this._stateManager.getDocumentUri(sourceUri);
+        if (documentUri !== sourceUri) {
+            const update = this._stateManager.appendStreamingChunk(sourceUri, chunk, sql, refreshSql);
+            const results = this._stateManager.resultsMap.get(sourceUri) ?? [];
+            const resultIndex = update.type === 'ignore' ? results.length - 1 : update.props.resultSetIndex;
+            const result = results[resultIndex];
+            if (chunk.isFirstChunk) {
+                this._streamingResultSets.set(sourceUri, chunk.columns.length > 0 && update.type !== 'ignore' ? result : null);
+            }
+            const trackedResultSet = this._streamingResultSets.get(sourceUri);
+            const completedResultSet = chunk.isLastChunk && trackedResultSet && results.includes(trackedResultSet)
+                ? trackedResultSet : undefined;
+            if (chunk.isLastChunk) {
+                this._streamingResultSets.delete(sourceUri);
+                if (completedResultSet) this._stateManager.markStreamingCompleted(sourceUri);
+            }
+            if (this._stateManager.activeSourceUri !== documentUri) return;
+            const workspaceResults = this._stateManager.getWorkspaceResults(documentUri);
+            const workspaceIndex = workspaceResults.indexOf(result);
+            if (chunk.isFirstChunk || chunk.isLastChunk || update.type === 'diskBackedActivate') {
+                // Structural changes need a workspace manifest. Other chunks retain
+                // incremental transport and address their own stable result identity.
+                this._stateManager.markStale(documentUri);
+                this._updateWebview();
+            } else if (update.type === 'incremental' && workspaceIndex >= 0) {
+                this._postMessageToWebview({ ...update.props, sourceUri: documentUri, resultSetIndex: workspaceIndex,
+                    rows: encode(this._encoder.sanitizeForMessagePack(chunk.rows)), resultSetId: result.resultSetId,
+                    workspace: true,
+                    fromRow: Math.max(0, chunk.totalRowsSoFar - chunk.rows.length),
+                    diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled() });
+                this._stateManager.setSentDataVersion(documentUri, this._stateManager.getDataVersion(documentUri));
+            } else if (update.type === 'rowCountUpdate' && workspaceIndex >= 0) {
+                this._postMessageToWebview({ ...update.props, sourceUri: documentUri, resultSetIndex: workspaceIndex });
+                this._stateManager.setSentDataVersion(documentUri, this._stateManager.getDataVersion(documentUri));
+            }
+            const completedWorkspaceIndex = completedResultSet ? workspaceResults.indexOf(completedResultSet) : -1;
+            if (completedResultSet?.resultSetId && completedWorkspaceIndex >= 0) {
+                this._postMessageToWebview({
+                    command: 'streamingComplete',
+                    sourceUri: documentUri,
+                    resultSetIndex: completedWorkspaceIndex,
+                    resultSetId: completedResultSet.resultSetId,
+                    totalRows: chunk.totalRowsSoFar,
+                    limitReached: completedResultSet.limitReached === true || chunk.limitReached,
+                    workspace: true,
+                });
+            }
+            return;
+        }
         const isActiveSource = this._stateManager.activeSourceUri === sourceUri;
         const resultSetIndex = this._resolveStreamingResultSetIndex(sourceUri, chunk);
 
@@ -2453,6 +2586,18 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _postMessageToWebview(message: ResultPanelOutboundMessage): Thenable<boolean> | undefined {
+        if ('sourceUri' in message && typeof message.sourceUri === 'string') {
+            const owner = this._stateManager.getDocumentUri(message.sourceUri);
+            if (owner !== message.sourceUri) {
+                const sourceUri = message.sourceUri;
+                if ('resultSetIndex' in message && typeof message.resultSetIndex === 'number') {
+                    const result = this._stateManager.resultsMap.get(sourceUri)?.[message.resultSetIndex];
+                    const index = result?.isLog ? 0 : this._stateManager.getWorkspaceResults(owner).indexOf(result!);
+                    if (index < 0) return undefined;
+                    message = { ...message, sourceUri: owner, resultSetIndex: index };
+                } else message = { ...message, sourceUri: owner };
+            }
+        }
         const messageRecord = message as unknown as Record<string, unknown>;
         const sourceUri = getTraceSourceUri(messageRecord, this._stateManager.activeSourceUri);
         const resultSetIndex = typeof messageRecord.resultSetIndex === 'number'
@@ -2530,6 +2675,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _postLogUpdate(message: Extract<ResultPanelOutboundMessage, { command: 'appendRows' }>): void {
+        if (message.sourceUri && this._stateManager.isWorkspace(this._stateManager.getDocumentUri(message.sourceUri))) {
+            this._stateManager.markStale(this._stateManager.getDocumentUri(message.sourceUri));
+            this._updateWebview();
+            return;
+        }
         const sourceUri = message.sourceUri;
         if (!sourceUri || message.isLog !== true) {
             return;
@@ -2850,17 +3000,15 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _postLightweightActiveSourceUpdate(sourceUri: string): void {
-        const pinnedResults = Array.from(this._stateManager.pinnedResults.entries()).map(([id, info]) => ({
-            id,
-            ...info
-        }));
+        sourceUri = this._stateManager.getDocumentUri(sourceUri);
+        const pinnedResults = this._stateManager.getWorkspacePinnedResults();
         this._postMessageToWebview({
             command: 'setActiveSource',
             sourceUri,
             activeResultSetIndex: this._stateManager.getActiveResultSetIndex(sourceUri) ?? 0,
-            executingSourcesJson: JSON.stringify(Array.from(this._stateManager.executingSources)),
-            sourcesJson: JSON.stringify(Array.from(this._stateManager.resultsMap.keys())),
-            pinnedSourcesJson: JSON.stringify(Array.from(this._stateManager.pinnedSources)),
+            executingSourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.executingSources).map(source => this._stateManager.getDocumentUri(source)))]),
+            sourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.resultsMap.keys()).map(source => this._stateManager.getDocumentUri(source)))]),
+            pinnedSourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.pinnedSources).map(source => this._stateManager.getDocumentUri(source)))]),
             pinnedResultsJson: JSON.stringify(pinnedResults),
             streamingCompletedSourcesJson: JSON.stringify(Array.from(this._stateManager.streamingCompletedSources)),
             diskBackedStreamCapEnabled: this._isDiskBackedStreamCapEnabled(),
@@ -2958,12 +3106,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     private _prepareViewData(): { viewData: ResultPanelViewData; metrics: HydratePayloadMetrics } {
-        const sources = Array.from(this._stateManager.resultsMap.keys());
-        const pinnedSources = Array.from(this._stateManager.pinnedSources);
-        const pinnedResults = Array.from(this._stateManager.pinnedResults.entries()).map(([id, info]) => ({
-            id,
-            ...info
-        }));
+        const sources = [...new Set(Array.from(this._stateManager.resultsMap.keys()).map(source => this._stateManager.getDocumentUri(source)))];
+        const pinnedSources = [...new Set(Array.from(this._stateManager.pinnedSources).map(source => this._stateManager.getDocumentUri(source)))];
+        const pinnedResults = this._stateManager.getWorkspacePinnedResults();
         const activeSource =
             this._stateManager.activeSourceUri && this._stateManager.resultsMap.has(this._stateManager.activeSourceUri)
                 ? this._stateManager.activeSourceUri
@@ -2971,8 +3116,22 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     ? sources[0]
                     : null;
         const activeResultSets = activeSource
-            ? this._prepareResultSetsForWebview(this._stateManager.resultsMap.get(activeSource) || [])
+            ? this._prepareResultSetsForWebview(this._stateManager.getWorkspaceResults(activeSource))
             : [];
+
+        if (activeSource && this._stateManager.isWorkspace(activeSource)) {
+            const completionByResultId = new Map<string, boolean>();
+            for (const entry of this._stateManager.getWorkspaceEntries(activeSource)) {
+                if (!entry.result.isLog && entry.result.resultSetId) {
+                    completionByResultId.set(entry.result.resultSetId, this._stateManager.isStreamingCompleted(entry.sourceUri));
+                }
+            }
+            for (const result of activeResultSets) {
+                if (result.resultSetId && completionByResultId.has(result.resultSetId)) {
+                    result.isStreamingComplete = completionByResultId.get(result.resultSetId);
+                }
+            }
+        }
 
         if (activeSource && activeResultSets.length === 0) {
             const timestamp = new Date().toLocaleTimeString();
@@ -3015,6 +3174,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             }
         }
 
+        if (activeSource && this._stateManager.isWorkspace(activeSource)) this.workspaceRenderedIds.set(activeSource, activeResultSets.map(result => result.resultSetId));
         const resultSetsMsgPack = encode(this._encoder.sanitizeForMessagePack(activeResultSets));
         const totalRowCount = activeResultSets.reduce(
             (sum, resultSet) => sum + this._getWebviewRowCount(resultSet),
@@ -3030,7 +3190,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 activeSourceJson: JSON.stringify(activeSource),
                 resultSetsMsgPack,
                 activeResultSetIndex: activeResultSetIndex,
-                executingSourcesJson: JSON.stringify(Array.from(this._stateManager.executingSources)),
+                executingSourcesJson: JSON.stringify([...new Set(Array.from(this._stateManager.executingSources).map(source => this._stateManager.getDocumentUri(source)))]),
                 streamingCompletedSourcesJson: JSON.stringify(Array.from(this._stateManager.streamingCompletedSources)),
                 formatSettings: activeSource && this._formattingStore
                     ? this._formattingStore.getPayloadForSource(activeSource)
@@ -3191,7 +3351,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         const rs = resultSets[resultSetIndex];
 
         try {
-            const connectionName = connectionManager.getConnectionForExecution(sourceUri);
+            const connectionName = connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri));
             if (!connectionName) {
                 return { success: false, message: 'No connection found for this source.' };
             }

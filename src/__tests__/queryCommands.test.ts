@@ -663,6 +663,8 @@ describe('commands/queryCommands', () => {
             expect(calls[0][3]).toMatch(/^file:\/\/\/test.sql#query-/);
             for (const call of calls) expect(call[call.length - 1]).toEqual(expect.objectContaining({ sourceDocumentUri: 'file:///test.sql', keepConnectionOpenOverride: false }));
             finish(); await Promise.all([first, second]);
+            expect(mockResultPanelProvider.setActiveSource).toHaveBeenCalledWith('file:///test.sql');
+            expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(expect.stringContaining('SQL execution completed'), 'Switch to SQL Document', 'Show Results');
             expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalledWith(calls[0][3]);
             expect(mockResultPanelProvider.finalizeExecution).toHaveBeenCalledWith(calls[1][3]);
         });

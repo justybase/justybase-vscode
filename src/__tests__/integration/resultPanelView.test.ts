@@ -727,3 +727,33 @@ describe('ResultPanelView Integration', () => {
         });
     });
 });
+
+test('workspace refresh operations resolve editor context and close their independently owned socket', async () => {
+    const source = 'file:///owned-results.sql', execution = `${source}#query-one`;
+    const connection = { close: jest.fn<() => Promise<void>>().mockResolvedValue(undefined) };
+    const manager = {
+        createTransientConnectionForDocument: jest.fn<(documentUri: string, connectionName?: string) => Promise<unknown>>().mockResolvedValue(connection),
+        clearDocumentConnection: jest.fn<(documentUri: string) => Promise<void>>().mockResolvedValue(undefined),
+    };
+    const view = new ResultPanelView({ toString: () => 'extension-uri' } as vscode.Uri);
+    const privateView = view as unknown as {
+        _connectionManager: typeof manager;
+        _stateManager: import('../../state/resultStateManager').ResultStateManager;
+        _runResultQuery: (sourceUri: string, options: import('../../core/singleQueryExecutor').RunQueryRawOptions) => Promise<QueryResult>;
+    };
+    privateView._connectionManager = manager;
+    view.registerExecutionSource(source, execution);
+    privateView._stateManager.resultsMap.set(execution, [{ columns: [{ name: 'n' }], data: [[1]] }]);
+    const runner = jest.requireMock('../../core/queryRunner') as { runQueryRaw: jest.MockedFunction<typeof RunQueryRaw> };
+    runner.runQueryRaw.mockReset().mockResolvedValue({ columns: [{ name: 'n' }], data: [[2]] });
+    try {
+        await privateView._runResultQuery(execution, { context: {} as vscode.ExtensionContext, query: 'SELECT 2', connectionName: 'connection-one' });
+        expect(manager.createTransientConnectionForDocument).toHaveBeenCalledWith(source, 'connection-one');
+        expect(runner.runQueryRaw).toHaveBeenCalledWith(expect.objectContaining({ documentUri: source, executionUri: expect.stringMatching(/^file:\/\/\/owned-results.sql#result-/), connectionOverride: connection }));
+        expect(connection.close).toHaveBeenCalledTimes(1);
+        expect(manager.clearDocumentConnection).toHaveBeenCalledWith(expect.stringMatching(/#result-/));
+        runner.runQueryRaw.mockRejectedValueOnce(new Error('query failed'));
+        await expect(privateView._runResultQuery(execution, { context: {} as vscode.ExtensionContext, query: 'SELECT 2', connectionName: 'connection-one' })).rejects.toThrow('query failed');
+        expect(connection.close).toHaveBeenCalledTimes(2);
+    } finally { view.dispose(); }
+});

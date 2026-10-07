@@ -42,6 +42,13 @@ describe('queryExecutionRecovery', () => {
         }
     });
 
+    it('requires strict close success before reporting isolation', async () => {
+        const close = jest.fn().mockRejectedValue(new Error('socket close failed'));
+        const recovery = createQueryExecutionRecovery({ closeDocumentPersistentConnection: close } as unknown as ConnectionManager, 'file:///query.sql');
+        expect(await recovery.resetConnection!()).toBe(false);
+        expect(close).toHaveBeenCalledWith('file:///query.sql', true);
+    });
+
     it('drops through a separate control connection without reconnecting the stuck tab', async () => {
         const connectionManager = {} as ConnectionManager;
         const recovery = createQueryExecutionRecovery(

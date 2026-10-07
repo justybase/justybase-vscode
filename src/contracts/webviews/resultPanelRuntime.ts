@@ -76,7 +76,7 @@ const rowsPayload = all(indexField('resultSetIndex'), message => hasRows(message
 
 const webviewRules: Record<string, FieldRule> = {
     ready: noPayload,
-    sqlQueueAction: all(stringField('sourceKey'), oneOfField('action', ['cancel', 'remove', 'pause', 'resume', 'clear']), optional('jobId', stringField('jobId'))),
+    sqlQueueAction: all(stringField('sourceKey'), oneOfField('action', ['cancel', 'remove', 'pause', 'resume', 'clear', 'recover']), optional('jobId', stringField('jobId'))),
     migrateResult: all(stringSource, resultIndex),
     logRowsApplied: all(stringSource, numberField('executionTimestamp'), indexField('totalRows')),
     requestLogSync: all(stringSource, indexField('currentRows'), optional('executionTimestamp', numberField('executionTimestamp'))),
@@ -120,11 +120,11 @@ const webviewRules: Record<string, FieldRule> = {
     export: all(oneOfField('format', ['csv', 'csv.gz', 'csv.zst', 'json', 'xml', 'sql', 'markdown', 'parquet']), stringSource, resultIndex),
     switchSource: stringSource,
     togglePin: stringSource,
-    toggleResultPin: all(stringSource, resultIndex),
+    toggleResultPin: all(stringSource, resultIndex, optional('resultSetId', stringField('resultSetId'))),
     switchToPinnedResult: stringField('resultId'),
     unpinResult: stringField('resultId'),
     closeSource: stringSource,
-    closeResult: all(stringSource, resultIndex),
+    closeResult: all(stringSource, resultIndex, optional('resultSetId', stringField('resultSetId'))),
     refreshResult: all(stringSource, resultIndex),
     clearRefreshFailure: all(stringSource, resultIndex),
     requestDatabaseAggregations: all(stringSource, resultIndex, requestIndex, arrayField('aggregations')),
@@ -139,7 +139,7 @@ const webviewRules: Record<string, FieldRule> = {
     focusView: noPayload,
     setContext: all(stringField('key'), message => message.value !== undefined),
     clearLogs: stringSource,
-    switchResultSet: all(stringSource, resultIndex),
+    switchResultSet: all(stringSource, resultIndex, optional('resultSetId', stringField('resultSetId'))),
     selectionStatsChanged: message => message.stats === null || isRecord(message.stats),
     insertCellContent: all(
         stringValueField('text'),
@@ -189,6 +189,7 @@ const hostRules: Record<string, FieldRule> = {
         optional('resultSetId', stringField('resultSetId')),
         optional('chunkSequence', indexField('chunkSequence')),
         optional('fromRow', indexField('fromRow')),
+        optional('workspace', booleanField('workspace')),
     ),
     streamingComplete: all(
         stringSource,
@@ -197,6 +198,7 @@ const hostRules: Record<string, FieldRule> = {
         booleanField('limitReached'),
         optional('resultSetId', stringField('resultSetId')),
         optional('lastChunkSequence', indexField('lastChunkSequence')),
+        optional('workspace', booleanField('workspace')),
     ),
     switchToResultSet: resultIndex,
     resultFormattingState: message => message.data !== undefined,

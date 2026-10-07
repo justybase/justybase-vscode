@@ -732,6 +732,90 @@ describe('handleHydrate executingSources dedup', () => {
         expect(inferExecutionState()).toBe('loading');
     });
 
+    it('keeps completion scoped to one result while a sibling workspace result streams', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }], data: [], executionTimestamp: 1, isLog: true,
+        }, {
+            columns: [{ name: 'id', type: 'int' }], data: [[1]], executionTimestamp: 2,
+            resultSetId: 'workspace-result-a', isStreamingComplete: false,
+        }];
+        win.activeSource = sourceUri;
+        win.executingSources = new Set([sourceUri]);
+        win.streamingCompletedSources = new Set<string>();
+        const { handleAppendRows, handleStreamingComplete, inferExecutionState } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            handleStreamingComplete: (message: Record<string, unknown>) => void;
+            inferExecutionState: () => string;
+        };
+        handleStreamingComplete({
+            command: 'streamingComplete', sourceUri, resultSetIndex: 1, totalRows: 1,
+            limitReached: true, resultSetId: 'workspace-result-a', workspace: true,
+        });
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(false);
+
+        handleAppendRows({
+            command: 'appendRows', sourceUri, resultSetIndex: 2, rows: [[2]], totalRows: 1,
+            isFirstChunk: true, isLastChunk: false, limitReached: false, workspace: true,
+            resultSetId: 'workspace-result-b', columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 2', executionTimestamp: 3,
+        });
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.resultSets[2].isStreamingComplete).toBe(false);
+        expect(inferExecutionState()).toBe('loading');
+
+        handleStreamingComplete({
+            command: 'streamingComplete', sourceUri, resultSetIndex: 2, totalRows: 1,
+            limitReached: false, resultSetId: 'workspace-result-b', workspace: true,
+        });
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.resultSets[2].isStreamingComplete).toBe(true);
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(false);
+    });
+
+    it('keeps completion scoped to one result while a sibling workspace result streams', () => {
+        const win = window as any;
+        win.resultSets = [{
+            columns: [{ name: 'Time' }, { name: 'Message' }], data: [], executionTimestamp: 1, isLog: true,
+        }, {
+            columns: [{ name: 'id', type: 'int' }], data: [[1]], executionTimestamp: 2,
+            resultSetId: 'workspace-result-a', isStreamingComplete: false,
+        }];
+        win.activeSource = sourceUri;
+        win.executingSources = new Set([sourceUri]);
+        win.streamingCompletedSources = new Set<string>();
+        const { handleAppendRows, handleStreamingComplete, inferExecutionState } = require('../../media/resultPanel/messages.js') as {
+            handleAppendRows: (message: Record<string, unknown>) => void;
+            handleStreamingComplete: (message: Record<string, unknown>) => void;
+            inferExecutionState: () => string;
+        };
+        handleStreamingComplete({
+            command: 'streamingComplete', sourceUri, resultSetIndex: 1, totalRows: 1,
+            limitReached: true, resultSetId: 'workspace-result-a', workspace: true,
+        });
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(false);
+
+        handleAppendRows({
+            command: 'appendRows', sourceUri, resultSetIndex: 2, rows: [[2]], totalRows: 1,
+            isFirstChunk: true, isLastChunk: false, limitReached: false, workspace: true,
+            resultSetId: 'workspace-result-b', columns: [{ name: 'id', type: 'int' }],
+            sql: 'SELECT 2', executionTimestamp: 3,
+        });
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.resultSets[2].isStreamingComplete).toBe(false);
+        expect(inferExecutionState()).toBe('loading');
+
+        handleStreamingComplete({
+            command: 'streamingComplete', sourceUri, resultSetIndex: 2, totalRows: 1,
+            limitReached: false, resultSetId: 'workspace-result-b', workspace: true,
+        });
+        expect(win.resultSets[1].isStreamingComplete).toBe(true);
+        expect(win.resultSets[2].isStreamingComplete).toBe(true);
+        expect(win.streamingCompletedSources.has(sourceUri)).toBe(false);
+    });
+
     it('accepts identity-only completion after legacy append messages', () => {
         const win = window as any;
         win.resultSets = [{

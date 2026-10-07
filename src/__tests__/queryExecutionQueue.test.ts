@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { QueryExecutionCoordinator, type QueryExecutionLease, type QueryQueueOutcome } from '../commands/query/queryExecutionGate';
+import { QueryExecutionCoordinator, type QueryExecutionLease, type QueryQueueOutcome, clampQueryParallelLimit } from '../commands/query/queryExecutionGate';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -94,18 +94,21 @@ describe('per-document execution queue', () => {
         expect(run).not.toHaveBeenCalled();
     });
 
-    it('advances to the next queued request when a request fails', async () => {
+    it('automatically runs corrected SQL behind a syntax failure without replaying the failed request', async () => {
         const doc = document();
-        const a = enqueue('bad SQL', doc, async () => 'failed');
+        const failedRun = jest.fn(async (): Promise<QueryQueueOutcome> => 'failed');
+        const a = enqueue('SELECT 1,,2;', doc, failedRun);
         const next = deferred<QueryQueueOutcome>();
         const run = jest.fn(() => next.promise);
-        const b = enqueue('B', doc, run);
+        const b = enqueue('SELECT 1,2;', doc, run);
         expect(await a).toBe('failed');
         await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
         const lane = coordinator.getSnapshot()[0];
         expect(lane.paused).toBe(false);
         expect(lane.last?.status).toBe('failed');
-        expect(lane.last?.sql).toBe('bad SQL');
+        expect(lane.last?.sql).toBe('SELECT 1,,2;');
+        expect(lane.last?.sessionState).toBe('reusable');
+        expect(failedRun).toHaveBeenCalledTimes(1);
         next.resolve('completed');
         expect(await b).toBe('completed');
         expect(run).toHaveBeenCalledTimes(1);
@@ -131,24 +134,27 @@ describe('per-document execution queue', () => {
         expect(run).toHaveBeenCalledTimes(1);
     });
 
-    it('advances after cancellation even when the session could not be reset', async () => {
+    it('holds unsafe persistent requests after settlement and Resume cannot bypass recovery', async () => {
         const doc = document();
         const finish = deferred<QueryQueueOutcome>();
-        const a = enqueue('A', doc, () => finish.promise, { resetConnection: async () => false });
-        const next = deferred<QueryQueueOutcome>();
-        const run = jest.fn(() => next.promise);
+        const reset = jest.fn().mockResolvedValue(false);
+        const a = enqueue('A', doc, () => finish.promise, { resetConnection: reset });
+        const run = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
         const b = enqueue('B', doc, run);
         await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
         finish.resolve('cancelled');
         expect(await a).toBe('cancelled');
-        await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
         const lane = coordinator.getSnapshot()[0];
-        expect(lane.paused).toBe(false);
-        expect(lane.last?.status).toBe('cancelled');
-        expect(lane.last?.error).toContain('could not be reset');
-        next.resolve('completed');
+        expect(lane.recoveryRequired).toBe(true);
+        expect(lane.last?.sessionState).toBe('unknown');
+        coordinator.setPaused(lane.sourceKey, false);
+        expect(run).not.toHaveBeenCalled();
+        reset.mockResolvedValue(true);
+        jest.spyOn(vscode.window, 'showWarningMessage').mockResolvedValueOnce('Reset connection' as never);
+        await coordinator.recoverRunning(lane.sourceKey, { getActiveSource: () => undefined, log: jest.fn() });
         expect(await b).toBe('completed');
         expect(run).toHaveBeenCalledTimes(1);
+        expect(coordinator.getSnapshot()[0].recoveryRequired).toBe(false);
     });
 
     it('discards pending jobs on close and isolates reused untitled identities from stale completions', async () => {
@@ -288,7 +294,7 @@ describe('per-document execution queue', () => {
         expect(coordinator.getSnapshot()[0].paused).toBe(false);
     });
 
-    it('advances after a failed request even when session isolation cannot be verified', async () => {
+    it('retains a recovery blocker after failed session isolation', async () => {
         const doc = document();
         const a = enqueue('A', doc, async lease => { lease.requireSessionIsolation(); return 'failed'; },
             { resetConnection: async () => false });
@@ -300,7 +306,7 @@ describe('per-document execution queue', () => {
         expect(lane.last?.error).toContain('could not be reset');
     });
 
-    it('does not attach the reset warning to a completed request', async () => {
+    it('protects an uncertain session even when SQL completed', async () => {
         const doc = document();
         const a = enqueue('A', doc, async lease => { lease.requireSessionIsolation(); return 'completed'; },
             { resetConnection: async () => false });
@@ -308,13 +314,14 @@ describe('per-document execution queue', () => {
         const lane = coordinator.getSnapshot()[0];
         expect(lane.paused).toBe(false);
         expect(lane.last?.status).toBe('completed');
-        expect(lane.last?.error).toBeUndefined();
+        expect(lane.last?.sessionState).toBe('unknown');
+        expect(lane.recoveryRequired).toBe(true);
     });
 
-    it('does not park the lane when the cancellation request fails', async () => {
+    it('waits for verified cleanup when the cancellation request fails', async () => {
         const doc = document();
         const finish = deferred<QueryQueueOutcome>();
-        const a = enqueue('A', doc, () => finish.promise, { requestCancel: async () => { throw new Error('cancel failed'); } });
+        const a = enqueue('A', doc, () => finish.promise, { requestCancel: async () => { throw new Error('cancel failed'); }, resetConnection: async () => true });
         const run = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
         const b = enqueue('B', doc, run);
         await until(coordinator, () => !!coordinator.getSnapshot()[0]?.running);
@@ -328,8 +335,9 @@ describe('per-document execution queue', () => {
 });
 
 describe('independent sessions in one SQL tab', () => {
-    it('starts at most 20 independent requests and admits queued jobs FIFO as slots settle', async () => {
+    it('supports configured limits of 20 independent requests and admits queued jobs FIFO as slots settle', async () => {
         const coordinator = new QueryExecutionCoordinator();
+        coordinator.configureParallelLimits(20, 20);
         const doc = document();
         const completions = Array.from({ length: 25 }, () => deferred<QueryQueueOutcome>());
         const order: number[] = [];
@@ -371,7 +379,7 @@ describe('independent sessions in one SQL tab', () => {
         finishB.resolve('completed'); expect(await b).toBe('completed'); coordinator.dispose();
     });
     it('pauses slot admission and document close discards pending jobs and retires every session', async () => {
-        const coordinator = new QueryExecutionCoordinator(); const doc = document();
+        const coordinator = new QueryExecutionCoordinator(); coordinator.configureParallelLimits(20, 20); const doc = document();
         const pending = deferred<QueryQueueOutcome>(); const cancelled = jest.fn();
         const jobs = Array.from({ length: 23 }, (_, i) => coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: `${i}` }, { document: doc, independentConnection: true, recovery: { requestCancel: cancelled } }, async () => () => pending.promise));
         await until(coordinator, () => coordinator.getSnapshot()[0]?.runningExecutions.length === 20);
@@ -381,4 +389,104 @@ describe('independent sessions in one SQL tab', () => {
         expect(cancelled).toHaveBeenCalledTimes(20); expect(coordinator.getSnapshot()).toEqual([]);
         pending.resolve('completed'); coordinator.dispose();
     });
+});
+
+
+describe('parallel admission budget', () => {
+    it('clamps finite values and falls back for invalid configuration', () => {
+        expect(clampQueryParallelLimit(0, 4)).toBe(1);
+        expect(clampQueryParallelLimit(1000, 4)).toBe(100);
+        expect(clampQueryParallelLimit(3.9, 4)).toBe(3);
+        for (const invalid of [NaN, Infinity, undefined, '8']) expect(clampQueryParallelLimit(invalid, 4)).toBe(4);
+    });
+
+    it('enforces global slots across documents and wakes the oldest eligible submission', async () => {
+        const coordinator = new QueryExecutionCoordinator();
+        coordinator.configureParallelLimits(1, 1);
+        const finish = deferred<QueryQueueOutcome>();
+        const order: string[] = [];
+        const submit = (sql: string, doc: vscode.TextDocument) => coordinator.enqueue({ sourceUri: doc.uri.toString(), sql },
+            { document: doc, independentConnection: true }, async () => async lease => {
+                order.push(sql); lease.markRunning(); return sql === 'A' ? finish.promise : 'completed';
+            });
+        const a = submit('A', document('file:///a.sql'));
+        const b = submit('B', document('file:///b.sql'));
+        const c = submit('C', document('file:///c.sql'));
+        await until(coordinator, () => order.length === 1);
+        expect(order).toEqual(['A']);
+        finish.resolve('failed');
+        expect(await Promise.all([a, b, c])).toEqual(['failed', 'completed', 'completed']);
+        expect(order).toEqual(['A', 'B', 'C']);
+        coordinator.dispose();
+    });
+
+    it('allows transient siblings past an unsafe persistent session without reusing it', async () => {
+        const coordinator = new QueryExecutionCoordinator(); const doc = document();
+        const a = coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: 'unsafe' }, { document: doc, recovery: { resetConnection: async () => false } },
+            async () => async lease => { lease.requireSessionIsolation(); return 'failed'; });
+        expect(await a).toBe('failed');
+        const run = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
+        const b = coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: 'persistent' }, { document: doc }, async () => run);
+        const c = coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: 'transient' }, { document: doc, independentConnection: true }, async () => async () => 'completed');
+        expect(await c).toBe('completed'); expect(run).not.toHaveBeenCalled();
+        coordinator.dispose(); expect(await b).toBe('cancelled');
+    });
+});
+
+test('defaults to four independent requests per document and admits the remaining SQL FIFO', async () => {
+    const coordinator = new QueryExecutionCoordinator(); const doc = document();
+    const finish = deferred<QueryQueueOutcome>(); const order: number[] = [];
+    const jobs = Array.from({ length: 6 }, (_, index) => coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: `SELECT ${index}` },
+        { document: doc, independentConnection: true }, async () => async lease => { order.push(index); lease.markRunning(); return finish.promise; }));
+    await until(coordinator, () => order.length === 4);
+    expect(coordinator.getSnapshot()[0].maxConcurrency).toBe(4);
+    expect(order).toEqual([0, 1, 2, 3]);
+    finish.resolve('completed'); await Promise.all(jobs);
+    expect(order).toEqual([0, 1, 2, 3, 4, 5]); coordinator.dispose();
+});
+
+test('changed parallel limits wake queued requests without cancelling admitted sessions', async () => {
+    const coordinator = new QueryExecutionCoordinator(); const doc = document();
+    coordinator.configureParallelLimits(1, 1);
+    const finish = [deferred<QueryQueueOutcome>(), deferred<QueryQueueOutcome>(), deferred<QueryQueueOutcome>()];
+    const order: number[] = [];
+    const jobs = finish.map((done, index) => coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: String(index) },
+        { document: doc, independentConnection: true }, async () => async lease => { order.push(index); lease.markRunning(); return done.promise; }));
+    await until(coordinator, () => order.length === 1);
+    coordinator.configureParallelLimits(2, 2);
+    await until(coordinator, () => order.length === 2);
+    coordinator.configureParallelLimits(1, 1);
+    finish[0].resolve('completed'); await jobs[0];
+    expect(order).toEqual([0, 1]);
+    finish[1].resolve('completed'); await jobs[1];
+    await until(coordinator, () => order.length === 3);
+    finish[2].resolve('completed'); await jobs[2]; coordinator.dispose();
+});
+
+test('settlement uses the lease recovery callbacks most recently supplied by the executor', async () => {
+    const coordinator = new QueryExecutionCoordinator(); const doc = document();
+    const originalReset = jest.fn(async () => false), actualReset = jest.fn(async () => true);
+    const result = await coordinator.enqueue({ sourceUri: doc.uri.toString(), sql: 'SELECT 1' },
+        { document: doc, recovery: { resetConnection: originalReset } }, async () => async lease => {
+            lease.setRecovery({ resetConnection: actualReset }); lease.requireSessionIsolation(); return 'cancelled';
+        });
+    expect(result).toBe('cancelled'); expect(actualReset).toHaveBeenCalledTimes(1); expect(originalReset).not.toHaveBeenCalled();
+    expect(coordinator.getSnapshot()[0].last?.sessionState).toBe('closed'); coordinator.dispose();
+});
+
+test('an independent database failure does not block a sibling or the next admission', async () => {
+    const coordinator = new QueryExecutionCoordinator(); coordinator.configureParallelLimits(2, 2);
+    const doc = document(), failed = deferred<QueryQueueOutcome>(), sibling = deferred<QueryQueueOutcome>();
+    const submitted = (sql: string, run: () => Promise<QueryQueueOutcome>) => coordinator.enqueue(
+        { sourceUri: doc.uri.toString(), sql }, { document: doc, independentConnection: true }, async () => run);
+    const a = submitted('SELECT 1,,2;', () => failed.promise);
+    const b = submitted('SELECT 2;', () => sibling.promise);
+    const corrected = jest.fn(async (): Promise<QueryQueueOutcome> => 'completed');
+    const c = submitted('SELECT 1,2;', corrected);
+    await until(coordinator, () => coordinator.getSnapshot()[0]?.runningExecutions.length === 2);
+    failed.resolve('failed'); expect(await a).toBe('failed');
+    expect(await c).toBe('completed'); expect(corrected).toHaveBeenCalledTimes(1);
+    expect(coordinator.getSnapshot()[0].recoveryRequired).toBe(false);
+    expect(coordinator.getSnapshot()[0].runningExecutions[0].sql).toBe('SELECT 2;');
+    sibling.resolve('completed'); expect(await b).toBe('completed'); coordinator.dispose();
 });

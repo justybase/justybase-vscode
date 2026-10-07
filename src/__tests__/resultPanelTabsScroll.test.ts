@@ -94,6 +94,7 @@ jest.mock('../../media/resultPanel/filter.js', () => ({
 function createMockWrapper(scrollTop = 0, isConsole = false) {
     const consoleView = { scrollTop: 0, scrollLeft: 0, scrollHeight: 999 };
     const wrapper = {
+        setAttribute: jest.fn(),
         scrollTop,
         scrollLeft: 0,
         dataset: { index: '' },
@@ -173,7 +174,7 @@ describe('tabs.js switchToResultSet scroll restoration', () => {
                 }),
                 querySelectorAll: jest.fn((sel: string) => {
                     if (sel === '.grid-wrapper') return mockWrappers;
-                    if (sel === '.result-set-tab') return [{ classList: { add: jest.fn(), remove: jest.fn() } }, { classList: { add: jest.fn(), remove: jest.fn() } }];
+                    if (sel === '.result-set-tab') return [{ querySelector: jest.fn(() => null), classList: { add: jest.fn(), remove: jest.fn() } }, { querySelector: jest.fn(() => null), classList: { add: jest.fn(), remove: jest.fn() } }];
                     return [];
                 }),
                 getElementById: jest.fn(() => null),

@@ -1438,3 +1438,68 @@ describe('ResultStateManager', () => {
         });
     });
 });
+
+describe('document Results workspace', () => {
+    const documentUri = 'file:///query.sql';
+    const a = `${documentUri}#query-a`, b = `${documentUri}#query-b`;
+    const result = (value: number): ResultSet => ({ columns: [{ name: 'value' }], data: [[value]] });
+
+    it('projects sibling results in submission order and keeps a selected result across reverse completion', () => {
+        const state = new ResultStateManager();
+        state.registerExecutionSource(documentUri, a); state.registerExecutionSource(documentUri, b);
+        state.setActiveSource(b);
+        state.beginWorkspaceExecution(documentUri, a, false); state.startExecution(a);
+        state.beginWorkspaceExecution(documentUri, b, true); state.startExecution(b);
+        state.updateResults([result(2)], b); state.finalizeExecution(b);
+        const selected = state.getWorkspaceResults(documentUri).findIndex(rs => !rs.isLog);
+        state.setActiveResultSetIndex(documentUri, selected);
+        const selectedId = state.getWorkspaceResults(documentUri)[selected].resultSetId;
+        state.updateResults([result(1)], a); state.finalizeExecution(a);
+        expect(state.activeSourceUri).toBe(documentUri);
+        expect(state.getWorkspaceResults(documentUri).filter(rs => !rs.isLog).map(rs => rs.data[0][0])).toEqual([1, 2]);
+        expect(state.getWorkspaceResults(documentUri)[state.getActiveResultSetIndex(documentUri)!].resultSetId).toBe(selectedId);
+        expect(state.resolveWorkspaceResult(documentUri, 2)?.sourceUri).toBe(b);
+        state.closeSource(documentUri);
+        expect(state.resultsMap.size).toBe(0);
+        expect(state.getDocumentUri(a)).toBe(a);
+    });
+
+    it('preserves overlap without promoting pins and clears unpinned sibling results after idle', () => {
+        const state = new ResultStateManager();
+        state.registerExecutionSource(documentUri, a); state.registerExecutionSource(documentUri, b);
+        state.startExecution(a); state.updateResults([result(1)], a); state.finalizeExecution(a);
+        state.beginWorkspaceExecution(documentUri, b, true); state.startExecution(b);
+        state.updateResults([result(2)], b); state.finalizeExecution(b);
+        expect(state.getWorkspaceResults(documentUri).filter(rs => !rs.isLog)).toHaveLength(2);
+        expect(state.pinnedResults.size).toBe(0);
+        state.toggleResultPin(a, 1);
+        state.beginWorkspaceExecution(documentUri, `${documentUri}#query-c`, false);
+        expect(state.getWorkspaceResults(documentUri).filter(rs => !rs.isLog).map(rs => rs.data[0][0])).toEqual([1]);
+    });
+
+    it('keeps streaming siblings isolated and preserves explicit Logs selection', () => {
+        const state = new ResultStateManager();
+        state.registerExecutionSource(documentUri, a); state.registerExecutionSource(documentUri, b);
+        state.startExecution(a); state.startExecution(b);
+        state.setActiveResultSetIndex(documentUri, 0);
+        const chunk = (value: number, first: boolean) => ({ columns: [{ name: 'value' }], rows: [[value]], isFirstChunk: first, isLastChunk: false, totalRowsSoFar: first ? 1 : 2, limitReached: false });
+        state.appendStreamingChunk(a, chunk(1, true), 'SELECT 1');
+        state.appendStreamingChunk(b, chunk(2, true), 'SELECT 2');
+        state.appendStreamingChunk(a, chunk(3, false), 'SELECT 1');
+        expect(state.getWorkspaceResults(documentUri).filter(rs => !rs.isLog).map(rs => rs.data)).toEqual([[[1], [3]], [[2]]]);
+        expect(state.getActiveResultSetIndex(documentUri)).toBe(0);
+    });
+});
+
+
+test('workspace activation resumes after an idle execution clears the selected unpinned result', () => {
+    const state = new ResultStateManager();
+    const uri = 'file:///activation.sql';
+    state.registerExecutionSource(uri, `${uri}#query-old`);
+    state.beginWorkspaceExecution(uri, uri, false); state.startExecution(uri);
+    state.updateResults([{ columns: [{ name: 'n' }], data: [[1]] }], uri); state.finalizeExecution(uri);
+    state.setActiveResultSetIndex(uri, 1);
+    state.beginWorkspaceExecution(uri, uri, false); state.startExecution(uri);
+    state.updateResults([{ columns: [{ name: 'n' }], data: [[2]] }], uri); state.finalizeExecution(uri);
+    expect(state.getActiveResultSetIndex(uri)).toBe(1);
+});

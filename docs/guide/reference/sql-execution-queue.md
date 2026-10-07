@@ -16,10 +16,12 @@ with **Keep Connection Open** runs at most one request at a time on its shared
 session. Additional requests run in submission order; other tabs remain independent.
 
 With **Keep Connection Open disabled**, requests own separate transient sessions
-and may run concurrently, up to **20 active requests per SQL tab**. Each request
+and may run concurrently, by default up to **4 active requests per SQL tab**
+and **12 across the extension host**. Configure `justybase.query.maxParallelPerTab`
+and `justybase.query.maxParallelGlobal` (integers from 1 to 100). Each request
 opens its own connection and closes it after execution. Further requests wait
 for a slot and start in submission order; completion order may differ. The queue
-shows every active request separately and displays the running count / 20.
+shows every active request separately and displays the running count / configured tab limit.
 Connection ownership is captured when submitting, so changing the setting does
 not move an already submitted request onto another request's session.
 
@@ -68,11 +70,14 @@ automatically replayed by the queue.
 
 Each executed request uses normal result streaming, row limits, Logs, timing,
 and query history. Removing a request before execution does not create an
-executed history entry. Results retain the existing result-panel pinning rules.
+executed history entry. One SQL document owns one Results workspace, including
+all concurrent executions and one combined Logs tab. Overlapping submissions
+preserve earlier result tabs without creating manual pins. A fresh run after the
+queue becomes idle clears unpinned results; manually pinned results remain.
 
 ## Errors, cancellation, and lifecycle
 
-Errors do not block the queue. A request that fails is terminal: it shows its
+Normal database and syntax errors on reusable sessions do not block the queue. A request that fails is terminal: it shows its
 error result and the next queued request starts automatically. A failed request
 is never retried or replayed. Continue on Error applies to statements within its
 single request only.
@@ -80,10 +85,12 @@ single request only.
 Cancellation acknowledgement does not advance the lane; the request must first
 settle and clean up. Persistent sessions are reset before advancing after
 cancellation or uncertain cleanup; confirmed closed transient sessions advance
-directly. If the session cannot be reset, the queue still advances: the next
-request runs and the database reports an error if the previous command is still
-busy. Recovery remains available for a request that never settles. A reset can
-discard session-local state such as temporary tables.
+directly. If the shared session cannot be verified safe, persistent requests wait
+behind a **Recovery required** blocker. **Recover connection…** offers reset,
+fresh connection, and DROP SESSION where supported. Resume cannot bypass this
+blocker. Independent transient requests remain isolated and eligible. Recovery
+is also available for requests that never settle. A reset can discard
+session-local state such as temporary tables.
 
 Closing the document discards pending SQL and retires/cancels running work using
 the existing document and connection cleanup. A reopened untitled URI receives
@@ -94,7 +101,7 @@ Queues are held only in memory and are never restored after restarting VS Code.
 
 The result panel's **Logs** tab shows the document's running requests and queued
 SQL above the execution transcript. Independent sessions display a count such as
-**3 running / 20**, and each running request has its own **Cancel** action.
+**3 running / 4**, and each running request has its own **Cancel** action.
 **Remove** discards one waiting request. **Clear queued** discards waiting requests
 without cancelling active sessions. **Pause queue** prevents new starts; it does
 not interrupt running SQL. **Resume queue** continues admission after a pause.

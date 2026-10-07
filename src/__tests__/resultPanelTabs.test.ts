@@ -41,6 +41,7 @@ describe('result panel result-set tabs', () => {
         const element = {
             tagName,
             className: '',
+            dataset: {} as Record<string, string>,
             textContent: '',
             title: '',
             style: {} as Record<string, string>,

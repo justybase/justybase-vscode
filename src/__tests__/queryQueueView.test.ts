@@ -91,9 +91,9 @@ it('lists every independent running request and displays its per-tab concurrency
         });
     });
     const root = view.getChildren()[0];
-    expect(view.getTreeItem(root).description).toContain('2 running / 20');
+    expect(view.getTreeItem(root).description).toContain('2 running / 4');
     expect(view.getChildren(root).filter(row => row.action === 'cancel')).toHaveLength(2);
     const status = (vscode.window.createStatusBarItem as jest.Mock).mock.results.slice(-1)[0].value;
-    expect(status.text).toContain('2 running / 20');
+    expect(status.text).toContain('2 running / 4');
     finish(); await Promise.all(jobs); view.dispose(); coordinator.dispose();
 });

@@ -19,6 +19,21 @@ test.describe('Table rendering', () => {
         );
     });
 
+    test('result tabs and close controls remain accessible at narrow and desktop widths', async ({ page }) => {
+        for (const width of [320, 1280]) {
+            await page.setViewportSize({ width, height: 720 });
+            await expect(page.getByRole('tablist', { name: 'Query results' })).toBeVisible();
+            const tab = page.getByRole('tab').first();
+            await tab.focus();
+            await expect(tab).toBeFocused();
+            await expect(tab).toHaveAttribute('aria-selected', 'true');
+            await tab.press('End');
+            await expect(page.getByRole('tab').last()).toBeFocused();
+            await expect(page.locator('button.result-set-close-btn').first()).toHaveAccessibleName(/Close/);
+            await expect(page.locator('button.pin-icon').first()).toHaveAttribute('aria-pressed', /true|false/);
+        }
+    });
+
     test('renders the grid container with table element', async ({ page }) => {
         const gridContainer = page.locator('#gridContainer');
         await expect(gridContainer).toBeVisible({ timeout: 10000 });

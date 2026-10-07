@@ -96,7 +96,7 @@ describe('result panel row limit helpers', () => {
         expect(appendedChildren.some(node => node.className === 'row-limit-warning')).toBe(true);
     });
 
-    it('removes the streaming suffix once a disk-backed result is complete', () => {
+    it('uses per-result completion when a document still has an active sibling execution', () => {
         const textNodes: string[] = [];
         const container = {
             innerHTML: '',
@@ -133,6 +133,7 @@ describe('result panel row limit helpers', () => {
                 queryRowLimit: 200000,
                 activeSource: sourceUri,
                 executingSources: new Set([sourceUri]),
+                streamingCompletedSources: new Set<string>(),
                 resultSets: [resultSet],
             }
         });

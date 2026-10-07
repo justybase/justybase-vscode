@@ -51,7 +51,7 @@ export function createQueryExecutionRecovery(
                 return Promise.resolve(false);
             }
             return completesWithin(
-                connectionManager.closeDocumentPersistentConnection(sourceUri),
+                connectionManager.closeDocumentPersistentConnection(sourceUri, true),
                 CONNECTION_RESET_TIMEOUT_MS,
             );
         },

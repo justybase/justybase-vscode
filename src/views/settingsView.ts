@@ -66,6 +66,8 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     streamingChunkSize: { min: 1000, max: 50000 },
     'query.rowLimit': { min: 1, max: 10000000 },
     'query.executionTimeout': { min: 1, max: 7200 },
+    'query.maxParallelPerTab': { min: 1, max: 100 },
+    'query.maxParallelGlobal': { min: 1, max: 100 },
     'ddl.maxTablesForContext': { min: 1, max: 100 },
     'ddl.cacheTTL': { min: 60000, max: 86400000 },
     'results.maxDataResults': { min: 10, max: 500 },
@@ -560,6 +562,22 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'streamingChunkSize',
                 defaultValue: 5000
+            },
+            {
+                id: 'query-parallel-per-tab',
+                label: 'Parallel SQL Requests per Tab',
+                description: 'Independent requests admitted per editor when Keep Connection Open is disabled (1–100)',
+                type: 'number',
+                configKey: 'query.maxParallelPerTab',
+                defaultValue: 4
+            },
+            {
+                id: 'query-parallel-global',
+                label: 'Parallel SQL Requests across Tabs',
+                description: 'Independent requests admitted across this extension host (1–100)',
+                type: 'number',
+                configKey: 'query.maxParallelGlobal',
+                defaultValue: 12
             },
             {
                 id: 'query-row-limit',

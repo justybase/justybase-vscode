@@ -4081,6 +4081,14 @@
           "default": "Explain what this Netezza SQL query does:",
           "description": "Prompt used for explaining SQL queries."
         },
+        "justybase.query.maxParallelPerTab": {
+          "type": "integer", "default": 4, "minimum": 1, "maximum": 100,
+          "description": "Maximum independent SQL executions per editor tab when Keep Connection Open is disabled."
+        },
+        "justybase.query.maxParallelGlobal": {
+          "type": "integer", "default": 12, "minimum": 1, "maximum": 100,
+          "description": "Maximum independent SQL executions across editor tabs in this extension host."
+        },
         "justybase.query.rowLimit": {
           "type": "number",
           "default": 200000,

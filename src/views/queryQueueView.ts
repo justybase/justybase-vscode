@@ -18,7 +18,7 @@ export class QueryQueueView implements vscode.TreeDataProvider<QueueNode>, vscod
         const refresh = () => {
             this.emitter.fire(undefined);
             panel.updateSqlQueue?.(JSON.stringify(coordinator.getSnapshot().map(lane => ({
-                sourceKey: lane.sourceKey, sourceUri: lane.sourceUri, lastExecutionUri: lane.last?.executionUri, paused: lane.paused, maxConcurrency: lane.maxConcurrency,
+                sourceKey: lane.sourceKey, sourceUri: lane.sourceUri, lastExecutionUri: lane.last?.executionUri, paused: lane.paused, recoveryRequired: lane.recoveryRequired, maxConcurrency: lane.maxConcurrency,
                 running: lane.runningExecutions.map(job => ({ id: job.id, executionUri: job.executionUri,
                     sql: job.sql.slice(0, 4000), status: job.status, database: job.database })),
                 queued: lane.queued.map(job => ({ id: job.id, sql: job.sql.slice(0, 4000),
@@ -31,7 +31,7 @@ export class QueryQueueView implements vscode.TreeDataProvider<QueueNode>, vscod
                 this.status.hide();
                 return;
             }
-            this.status.text = `$(list-ordered) ${lane.paused ? 'Queue paused | ' : ''}${lane.runningExecutions.length ? `${lane.runningExecutions.length} running${lane.maxConcurrency > 1 ? ' / 20' : ''}` : 'Preparing'} | ${lane.queued.length} queued`;
+            this.status.text = `$(list-ordered) ${lane.paused ? 'Queue paused | ' : ''}${lane.runningExecutions.length ? `${lane.runningExecutions.length} running${lane.maxConcurrency > 1 ? ` / ${lane.maxConcurrency}` : ''}` : 'Preparing'} | ${lane.queued.length} queued`;
             this.status.show();
         };
         this.disposables.push(view, this.status, this.emitter,
@@ -45,7 +45,7 @@ export class QueryQueueView implements vscode.TreeDataProvider<QueueNode>, vscod
                 const jobId = 'lane' in input ? input.job?.id : input.jobId;
                 const job = [...lane.runningExecutions, ...lane.queued].find(item => item.id === jobId);
                 const node: QueueNode = { lane, job, action: input.action };
-                if (['cancel', 'remove', 'recover'].includes(node.action ?? '') && !job) return;
+                if (['cancel', 'remove'].includes(node.action ?? '') && !job) return;
                 const key = lane.sourceKey;
                 switch (node.action) {
                     case 'remove': coordinator.removeQueued(key, node.job!.id); break;
@@ -67,6 +67,7 @@ export class QueryQueueView implements vscode.TreeDataProvider<QueueNode>, vscod
         return [
             ...lane.runningExecutions.flatMap(job => [{ lane, job, action: 'cancel' }, { lane, job, action: 'recover' }]),
             ...lane.queued.map(job => ({ lane, job, action: 'remove' })),
+            ...(lane.recoveryRequired ? [{ lane, action: 'recover' }] : []),
             ...(lane.last ? [{ lane, job: lane.last }] : []),
             { lane, action: lane.paused ? 'resume' : 'pause' },
             { lane, action: 'clear' },
@@ -78,7 +79,7 @@ export class QueryQueueView implements vscode.TreeDataProvider<QueueNode>, vscod
         if (!job && !action) {
             const item = new vscode.TreeItem(lane.sourceUri.split(/[\\/]/).pop() ?? lane.sourceUri, vscode.TreeItemCollapsibleState.Expanded);
             item.id = lane.sourceKey;
-            item.description = `${lane.paused ? 'Paused | ' : ''}${lane.runningExecutions.length ? `${lane.runningExecutions.length} running${lane.maxConcurrency > 1 ? ' / 20' : ''}` : 'Idle'} | ${lane.queued.length} queued`;
+            item.description = `${lane.recoveryRequired ? 'Recovery required | ' : lane.paused ? 'Paused | ' : ''}${lane.runningExecutions.length ? `${lane.runningExecutions.length} running${lane.maxConcurrency > 1 ? ` / ${lane.maxConcurrency}` : ''}` : 'Idle'} | ${lane.queued.length} queued`;
             item.tooltip = lane.sourceUri;
             return item;
         }

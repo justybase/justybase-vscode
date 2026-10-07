@@ -86,9 +86,8 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         : (typeof rs.totalRowCount === 'number' ? rs.totalRowCount : loadedRows);
     const activeSource = getActiveSourceUri();
     const streamingCompletionKnown = getResultPanelWindow().streamingCompletedSources instanceof Set;
-    const streamingComplete = streamingCompletionKnown
-        ? getResultPanelWindow().streamingCompletedSources?.has(activeSource ?? '') === true
-        : rs.isStreamingComplete === true;
+    const streamingComplete = rs.isStreamingComplete === true || (streamingCompletionKnown
+        && getResultPanelWindow().streamingCompletedSources?.has(activeSource ?? '') === true);
     const activeStreaming = isActiveSourceExecuting() && !streamingComplete;
     const isStreamingPreview = !isDiskBacked
         && typeof rs.totalRowCount === 'number'

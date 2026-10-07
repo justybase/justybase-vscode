@@ -57,6 +57,7 @@ jest.mock('../../media/resultPanel/diskGrouping.js', () => ({
 
 function createDataWrapper(rsIndex: number, scrollTop = 0) {
     return {
+        setAttribute: jest.fn(),
         scrollTop,
         scrollLeft: 0,
         scrollHeight: 10_000,
@@ -76,6 +77,7 @@ function createDataWrapper(rsIndex: number, scrollTop = 0) {
 
 function createConsoleWrapper(rsIndex: number, scrollTop = 0) {
     const consoleView = {
+        setAttribute: jest.fn(),
         scrollTop,
         scrollLeft: 0,
         scrollHeight: 8000,
@@ -84,6 +86,7 @@ function createConsoleWrapper(rsIndex: number, scrollTop = 0) {
         classList: { contains: jest.fn(() => false) },
     };
     return {
+        setAttribute: jest.fn(),
         scrollTop: 0,
         scrollLeft: 0,
         dataset: { index: String(rsIndex) },
@@ -179,7 +182,7 @@ describe('Result ↔ Logs tab scroll integration', () => {
                 }),
                 querySelectorAll: jest.fn((sel: string) => {
                     if (sel === '.grid-wrapper') return [dataWrapper, logsWrapper];
-                    if (sel === '.result-set-tab') return [{ classList: { add: jest.fn(), remove: jest.fn() } }, { classList: { add: jest.fn(), remove: jest.fn() } }];
+                    if (sel === '.result-set-tab') return [{ querySelector: jest.fn(() => null), classList: { add: jest.fn(), remove: jest.fn() } }, { querySelector: jest.fn(() => null), classList: { add: jest.fn(), remove: jest.fn() } }];
                     return [];
                 }),
                 getElementById: jest.fn(() => null),
