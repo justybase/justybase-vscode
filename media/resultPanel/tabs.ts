@@ -266,11 +266,12 @@ export function createResultSetTab(rs: ResultSet, index: number): HTMLDivElement
     closeSpan.className = 'result-set-close-btn';
     closeSpan.textContent = '×';
     closeSpan.title = 'Close this result';
-    closeSpan.style.marginLeft = '8px';
+    closeSpan.style.marginLeft = '4px';
     closeSpan.style.cursor = 'pointer';
     closeSpan.style.opacity = '0.6';
     closeSpan.style.fontWeight = 'bold';
-    closeSpan.style.fontSize = '16px';
+    closeSpan.style.fontSize = '13px';
+    closeSpan.style.lineHeight = '1';
     closeSpan.onmouseover = () => closeSpan.style.opacity = '1';
     closeSpan.onmouseout = () => closeSpan.style.opacity = '0.6';
 

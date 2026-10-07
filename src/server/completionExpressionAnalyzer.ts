@@ -73,7 +73,7 @@ function predicateKeywords(statementPrefix: string): readonly string[] {
     if (["Where", "On", "Having", "And", "Or"].includes(tokens[index].tokenType.name)) boundary = index;
   }
   const expression = tokens.slice(boundary + 1);
-  const last = expression.at(-1)?.tokenType.name;
+  const last = expression[expression.length - 1]?.tokenType.name;
   const comparison = expression.some(token => ["Equals", "NotEquals", "LessThan", "LessThanEquals", "GreaterThan", "GreaterThanEquals", "In", "Between", "Like", "Is"].includes(token.tokenType.name));
   if (last && isExpressionEndingToken(last)) {
     return comparison ? ["AND", "OR"] : ["IN", "BETWEEN", "NOT", "LIKE", "IS", "AND", "OR"];
