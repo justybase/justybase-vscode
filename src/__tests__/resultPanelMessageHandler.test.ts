@@ -633,6 +633,7 @@ describe('ResultPanelMessageHandler', () => {
         it('should clear logs and update webview', () => {
             const sourceUri = 'file:///test.sql';
             stateManager.startExecution(sourceUri);
+            stateManager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
             stateManager.log(sourceUri, 'Test message');
             webviewUpdates = 0; // Reset after setup
 

@@ -1260,16 +1260,23 @@ describe('ResultPanelView Scroll Preservation', () => {
     });
 
     describe('log messages', () => {
-        it('should log messages and update webview incrementally', () => {
+        it('should buffer pre-statement logs and flush them with the statement start', () => {
             const sourceUri = 'file:///test.sql';
             provider.startExecution(sourceUri);
             postedMessages = [];
 
             provider.log(sourceUri, 'Test message');
 
-            // Should trigger incremental webview update
+            // Buffered lead-in rows produce no incremental update on their own...
+            expect(postedMessages.filter(m => m.command === 'appendRows')).toHaveLength(0);
+
+            provider.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+
+            // ...until the first statement claims them for its card.
             const appendMessages = postedMessages.filter(m => m.command === 'appendRows');
             expect(appendMessages.length).toBeGreaterThan(0);
+            const lastAppend = appendMessages[appendMessages.length - 1] as { rows?: unknown[][] };
+            expect(lastAppend.rows).toHaveLength(2);
         });
 
         it('should not push log rows to webview for inactive source', () => {

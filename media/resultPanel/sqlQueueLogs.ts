@@ -37,9 +37,16 @@ export function renderSqlQueueLogs(wrapper: HTMLElement): void {
     const overview = document.createElement('section');
     overview.className = 'sql-queue-overview';
     overview.setAttribute('aria-label', 'SQL execution queue');
-    const title = document.createElement('strong');
-    title.textContent = `${lane.running.length} running${lane.maxConcurrency > 1 ? ` / ${lane.maxConcurrency}` : ''} · ${lane.queued.length} queued${lane.recoveryRequired ? ' · Recovery required' : lane.paused ? ' · Paused' : ''}`;
-    overview.append(title);
+    // The per-statement log-run card below already shows the RUNNING status,
+    // so the queue counter + Pause controls only render when there is actual
+    // queue pressure (queued work, pause, recovery, or parallel lanes).
+    const hasQueuePressure =
+        lane.queued.length > 0 || lane.paused || lane.recoveryRequired || lane.maxConcurrency > 1;
+    if (hasQueuePressure) {
+        const title = document.createElement('strong');
+        title.textContent = `${lane.running.length} running${lane.maxConcurrency > 1 ? ` / ${lane.maxConcurrency}` : ''} · ${lane.queued.length} queued${lane.recoveryRequired ? ' · Recovery required' : lane.paused ? ' · Paused' : ''}`;
+        overview.append(title);
+    }
     const action = (label: string, command: string, job?: QueueJob) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -55,10 +62,12 @@ export function renderSqlQueueLogs(wrapper: HTMLElement): void {
     };
     const controls = document.createElement('div');
     controls.className = 'sql-queue-controls';
-    controls.append(action(lane.paused ? 'Resume queue' : 'Pause queue', lane.paused ? 'resume' : 'pause'));
-    if (lane.recoveryRequired) controls.append(action('Recover connection…', 'recover'));
-    if (lane.queued.length) controls.append(action('Clear queued', 'clear'));
-    overview.append(controls);
+    if (hasQueuePressure) {
+        controls.append(action(lane.paused ? 'Resume queue' : 'Pause queue', lane.paused ? 'resume' : 'pause'));
+        if (lane.recoveryRequired) controls.append(action('Recover connection…', 'recover'));
+        if (lane.queued.length) controls.append(action('Clear queued', 'clear'));
+        overview.append(controls);
+    }
     const list = document.createElement('div');
     list.className = 'sql-queue-jobs';
     [...lane.running, ...lane.queued].forEach((job, index) => {
