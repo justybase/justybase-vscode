@@ -77,6 +77,7 @@ function createAdapter(typeIssueMessages: string[] = []): jest.Mocked<DatabaseIm
 function createImporter(rows: string[][] | Promise<string[][]>): jest.Mocked<TabularDataImporter> {
     return {
         getSampleRows: jest.fn(() => rows),
+        getDecimalDelimiter: jest.fn(() => '.'),
     } as unknown as jest.Mocked<TabularDataImporter>;
 }
 

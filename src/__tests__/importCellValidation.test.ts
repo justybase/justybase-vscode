@@ -16,8 +16,15 @@ describe('importCellValidation', () => {
     it('validates numeric types with dot or comma decimals', () => {
         expect(validateImportCellValue('12.5', 'NUMERIC(10,2)')).toBeNull();
         expect(validateImportCellValue('12,5', 'DECIMAL(10,2)')).toBeNull();
-        expect(validateImportCellValue('1e3', 'FLOAT')).toBe('Expected a numeric value.');
-        expect(validateImportCellValue('$12', 'MONEY')).toBe('Expected a numeric value.');
+        // Scientific notation is accepted by design: parseFormattedImportNumber
+        // expands exponents (bounded by MAX_IMPORT_EXPONENT), the SQL validator
+        // accepts `SELECT 1.5e10`, and Excel pastes routinely produce `1E3`.
+        expect(validateImportCellValue('1e3', 'FLOAT')).toBeNull();
+        expect(validateImportCellValue('1E3', 'NUMERIC(10,2)')).toBeNull();
+        // Currency-prefixed cells are accepted by design: the parser strips
+        // `$`/wrapping-paren edges (wasCurrency) before digit validation.
+        expect(validateImportCellValue('$12', 'MONEY')).toBeNull();
+        expect(validateImportCellValue('abc', 'MONEY')).toBe('Expected a numeric value.');
     });
 
     it('validates boolean types', () => {
