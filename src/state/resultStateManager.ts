@@ -184,10 +184,13 @@ export class ResultStateManager {
     private _panelVisible = true;
     private _lastAccessedAt = new Map<string, number>();
     private _idleSpillTimer: ReturnType<typeof setInterval> | null = null;
+    private _disposed = false;
 
     constructor() {
         this._idleSpillTimer = setInterval(() => {
-            this._runIdleSpillCheck();
+            if (!this._disposed) {
+                this._runIdleSpillCheck();
+            }
         }, 60_000);
         // Do not keep the process (or test workers) alive on account of the
         // background idle-spill timer; dispose() still clears it explicitly.
@@ -195,6 +198,9 @@ export class ResultStateManager {
     }
 
     public dispose(): void {
+        // Idempotent: owned timers are cancelled and nothing is rescheduled afterwards.
+        this._disposed = true;
+        this._lastAccessedAt.clear();
         this._manualLogsGroups.clear();
         this._executionGroups.clear();
         this.executionDocuments.clear();
@@ -212,6 +218,9 @@ export class ResultStateManager {
     }
 
     public setPanelVisible(visible: boolean): void {
+        if (this._disposed) {
+            return;
+        }
         const wasVisible = this._panelVisible;
         this._panelVisible = visible;
         if (wasVisible && !visible) {
@@ -220,10 +229,16 @@ export class ResultStateManager {
     }
 
     public touchResultSetAccess(sourceUri: string, resultSetIndex: number): void {
+        if (this._disposed) {
+            return;
+        }
         this._lastAccessedAt.set(this._resultAccessKey(sourceUri, resultSetIndex), Date.now());
     }
 
     private _runIdleSpillCheck(options: { panelHidden?: boolean } = {}): void {
+        if (this._disposed) {
+            return;
+        }
         const settings = getDiskBackedResultsSettings();
         if (!isDiskBackedResultsAvailable(settings) || settings.idleSpillMinutes <= 0) {
             return;

@@ -51,6 +51,13 @@ jest.mock(
     { virtual: true }
 );
 
+// Managers created by standalone tests are tracked so their idle-spill timers are always disposed.
+const created: ResultStateManager[] = [];
+class ResultStateManagerTracked extends ResultStateManager {
+    constructor() { super(); created.push(this); }
+}
+afterEach(() => { created.splice(0).forEach(m => m.dispose()); });
+
 describe('ResultStateManager', () => {
     let manager: ResultStateManager;
 
@@ -1440,12 +1447,13 @@ describe('ResultStateManager', () => {
 });
 
 describe('document Results workspace', () => {
+
     const documentUri = 'file:///query.sql';
     const a = `${documentUri}#query-a`, b = `${documentUri}#query-b`;
     const result = (value: number): ResultSet => ({ columns: [{ name: 'value' }], data: [[value]] });
 
     it('projects sibling results in submission order and keeps a selected result across reverse completion', () => {
-        const state = new ResultStateManager();
+        const state = new ResultStateManagerTracked();
         state.registerExecutionSource(documentUri, a); state.registerExecutionSource(documentUri, b);
         state.setActiveSource(b);
         state.beginWorkspaceExecution(documentUri, a, false); state.startExecution(a);
@@ -1465,7 +1473,7 @@ describe('document Results workspace', () => {
     });
 
     it('preserves overlap without promoting pins and clears unpinned sibling results after idle', () => {
-        const state = new ResultStateManager();
+        const state = new ResultStateManagerTracked();
         state.registerExecutionSource(documentUri, a); state.registerExecutionSource(documentUri, b);
         state.startExecution(a); state.updateResults([result(1)], a); state.finalizeExecution(a);
         state.beginWorkspaceExecution(documentUri, b, true); state.startExecution(b);
@@ -1478,7 +1486,7 @@ describe('document Results workspace', () => {
     });
 
     it('keeps streaming siblings isolated and preserves explicit Logs selection', () => {
-        const state = new ResultStateManager();
+        const state = new ResultStateManagerTracked();
         state.registerExecutionSource(documentUri, a); state.registerExecutionSource(documentUri, b);
         state.startExecution(a); state.startExecution(b);
         state.setActiveResultSetIndex(documentUri, 0);
@@ -1493,7 +1501,7 @@ describe('document Results workspace', () => {
 
 
 test('workspace activation resumes after an idle execution clears the selected unpinned result', () => {
-    const state = new ResultStateManager();
+    const state = new ResultStateManagerTracked();
     const uri = 'file:///activation.sql';
     state.registerExecutionSource(uri, `${uri}#query-old`);
     state.beginWorkspaceExecution(uri, uri, false); state.startExecution(uri);
@@ -1502,4 +1510,41 @@ test('workspace activation resumes after an idle execution clears the selected u
     state.beginWorkspaceExecution(uri, uri, false); state.startExecution(uri);
     state.updateResults([{ columns: [{ name: 'n' }], data: [[2]] }], uri); state.finalizeExecution(uri);
     expect(state.getActiveResultSetIndex(uri)).toBe(1);
+});
+
+describe('ResultStateManager idle spill lifecycle', () => {
+    beforeEach(() => { jest.useFakeTimers(); });
+    afterEach(() => { jest.useRealTimers(); });
+
+    it('schedules one idle-spill timer on construction and clears it on dispose', () => {
+        const state = new ResultStateManager();
+        expect(jest.getTimerCount()).toBe(1);
+        state.dispose();
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('is idempotent on repeated dispose', () => {
+        const state = new ResultStateManager();
+        state.dispose();
+        expect(() => state.dispose()).not.toThrow();
+        expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('never runs idle-spill work after dispose', () => {
+        const state = new ResultStateManager();
+        const check = jest.spyOn(state as unknown as { _runIdleSpillCheck: () => void }, '_runIdleSpillCheck');
+        state.dispose();
+        jest.advanceTimersByTime(10 * 60_000);
+        state.setPanelVisible(false);
+        state.touchResultSetAccess('file:///a.sql', 0);
+        expect(check).not.toHaveBeenCalled();
+    });
+
+    it('runs the idle-spill check on the interval while alive', () => {
+        const state = new ResultStateManager();
+        const check = jest.spyOn(state as unknown as { _runIdleSpillCheck: () => void }, '_runIdleSpillCheck');
+        jest.advanceTimersByTime(60_000);
+        expect(check).toHaveBeenCalledTimes(1);
+        state.dispose();
+    });
 });
