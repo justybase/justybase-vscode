@@ -18,6 +18,7 @@ export interface SqlRenameResolution {
     name: string
     target: SqlRenameOccurrence
     occurrences: SqlRenameOccurrence[]
+    otherDefinitionNames?: string[]
 }
 
 export interface SqlSymbolUsage {
@@ -233,6 +234,13 @@ class SqlSymbolCollector {
     private visitSelectStatement(node: CstNode): void {
         this.pushAliasScope()
         try {
+            const bindAliases = (current: CstNode): void => {
+                if (current !== node && ['selectStatement', 'withStatement', 'withAnyStatement'].includes(current.name)) return
+                if (current.name === 'tableSource') this.bindTableSource(current, false)
+                for (const children of Object.values(current.children ?? {}))
+                    for (const child of children) if (isCstNode(child)) bindAliases(child)
+            }
+            bindAliases(node)
             this.visitChildren(node)
         } finally {
             this.popAliasScope()
@@ -314,8 +322,9 @@ class SqlSymbolCollector {
 
     private visitCreateTableStatement(node: CstNode): void {
         const tableQName = this.getChildNodes(node, 'qualifiedName')[0]
-        this.registerCreatedTableDefinition(tableQName)
         this.visitChildren(node)
+        // The CTAS source sees the preceding environment, not its new target.
+        this.registerCreatedTableDefinition(tableQName)
     }
 
     private visitUpdateStatement(node: CstNode): void {
@@ -392,6 +401,9 @@ class SqlSymbolCollector {
             this.getChildNodes(dropTargetListNode, 'dropTarget').forEach(dropTargetNode => {
                 const qualifiedNameNode = this.getChildNodes(dropTargetNode, 'qualifiedName')[0]
                 this.registerCreatedTableReferenceByQualifiedName(qualifiedNameNode)
+                const identifiers = this.getQualifiedNameIdentifierTokensFromQualifiedNameNode(qualifiedNameNode)
+                const target = identifiers[identifiers.length - 1]
+                if (target) this.createdTables.delete(this.createdRelationKey(identifiers))
             })
         })
         this.visitChildren(node)
@@ -404,14 +416,23 @@ class SqlSymbolCollector {
     }
 
     private visitTableSource(node: CstNode): void {
-        const tableNameNode = this.getChildNodes(node, 'tableName')[0]
-        this.registerTableNameReference(tableNameNode)
-        this.registerTableNameAsCteReference(tableNameNode)
+        this.bindTableSource(node, true)
+        this.visitChildren(node)
+    }
 
+    private bindTableSource(node: CstNode, includeReference: boolean): void {
+        const tableNameNode = this.getChildNodes(node, 'tableName')[0]
         const aliasOptional = this.getChildNodes(node, 'aliasOptional')[0]
         this.registerAliasDefinition(aliasOptional)
-
-        this.visitChildren(node)
+        if (!tableNameNode) return
+        const identifiers = this.getQualifiedNameIdentifierTokens(tableNameNode)
+        const token = identifiers[identifiers.length - 1]
+        if (!token) return
+        const name = this.normalizeIdentifier(token)
+        const symbol = (identifiers.length === 1 ? this.resolveCte(name) : undefined) ?? this.resolveCreatedTable(this.createdRelationKey(identifiers))
+        if (!symbol) return
+        if (includeReference) this.addReference(symbol, token)
+        if (!this.getAliasToken(aliasOptional)) this.getCurrentAliasScope()?.set(name.toUpperCase(), symbol)
     }
 
     private visitColumnReference(node: CstNode): void {
@@ -440,7 +461,7 @@ class SqlSymbolCollector {
     private normalizeIdentifier(token: IToken): string {
         const text = token.image
         if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
-            return text.slice(1, -1)
+            return text.slice(1, -1).replace(/""/g, '"')
         }
         if (text.length >= 2 && text.startsWith('[') && text.endsWith(']')) {
             return text.slice(1, -1).replace(/\]\]/g, ']')
@@ -579,6 +600,10 @@ class SqlSymbolCollector {
         return this.createdTables.get(name.toUpperCase())
     }
 
+    private createdRelationKey(tokens: IToken[]): string {
+        return tokens.map(token => this.normalizeIdentifier(token).toUpperCase()).join('\u0000')
+    }
+
     private getChildNodes(node: CstNode, key: string): CstNode[] {
         const value = node.children?.[key]
         if (!Array.isArray(value)) {
@@ -703,7 +728,7 @@ class SqlSymbolCollector {
 
         const relationToken = identifierTokens[identifierTokens.length - 1]
         const symbol = this.createDefinition('table', relationToken)
-        this.createdTables.set(symbol.normalizedName, symbol)
+        this.createdTables.set(this.createdRelationKey(identifierTokens), symbol)
     }
 
     private registerCreatedTableReferenceByQualifiedName(qualifiedNameNode: CstNode | undefined): void {
@@ -713,7 +738,7 @@ class SqlSymbolCollector {
         }
 
         const relationToken = identifierTokens[identifierTokens.length - 1]
-        const symbol = this.resolveCreatedTable(this.normalizeIdentifier(relationToken))
+        const symbol = this.resolveCreatedTable(this.createdRelationKey(identifierTokens))
         if (symbol) {
             this.addReference(symbol, relationToken)
         }
@@ -725,23 +750,6 @@ class SqlSymbolCollector {
         }
         const qualifiedNameNode = this.getChildNodes(tableNameNode, 'qualifiedName')[0]
         this.registerCreatedTableReferenceByQualifiedName(qualifiedNameNode)
-    }
-
-    private registerTableNameAsCteReference(tableNameNode: CstNode | undefined): void {
-        if (!tableNameNode) {
-            return
-        }
-
-        const identifierTokens = this.getQualifiedNameIdentifierTokens(tableNameNode)
-        if (identifierTokens.length !== 1) {
-            return
-        }
-
-        const relationToken = identifierTokens[0]
-        const cteSymbol = this.resolveCte(this.normalizeIdentifier(relationToken))
-        if (cteSymbol) {
-            this.addReference(cteSymbol, relationToken)
-        }
     }
 
     private registerQualifierReference(qualifierToken: IToken): void {
@@ -775,7 +783,7 @@ class SqlSymbolCollector {
 
     private registerMergeTableReference(relationToken: IToken, identifierCount: number): void {
         const relationName = this.normalizeIdentifier(relationToken)
-        const createdTable = this.resolveCreatedTable(relationName)
+        const createdTable = identifierCount === 1 ? this.resolveCreatedTable(relationName) : undefined
         if (createdTable) {
             this.addReference(createdTable, relationToken)
             return
@@ -927,7 +935,7 @@ export function collectSqlSymbolUsages(sql: string): SqlSymbolUsage[] {
 export function resolveSqlRenameSymbol(
     sql: string,
     offset: number,
-    parseResult?: NetezzaSqlParseResult
+    parseResult?: Pick<NetezzaSqlParseResult, 'cst' | 'lexResult' | 'actionableParserErrors'>
 ): SqlRenameResolution | undefined {
     if (offset < 0 || offset > sql.length) {
         return undefined
@@ -964,6 +972,7 @@ export function resolveSqlRenameSymbol(
         kind: target.kind,
         name: collector.getSymbolDisplayName(target.symbolId) ?? target.text,
         target: toExternalOccurrence(target),
-        occurrences: symbolOccurrences.map(toExternalOccurrence)
+        occurrences: symbolOccurrences.map(toExternalOccurrence),
+        otherDefinitionNames: collector.getDefinitions().filter(definition => definition.id !== target.symbolId).map(definition => definition.displayName)
     }
 }

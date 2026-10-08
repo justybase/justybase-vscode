@@ -168,13 +168,18 @@ JOIN JUST_DATA..DIMDATE D ON D.DATEKEY = O.ACCOUNTKEY`;
   });
 
   it("resolveSqlRenameSymbolWithSession reuses cached parse", () => {
-    const sql = "SELECT a.__JB__ FROM JUST_DATA..DIMACCOUNT a";
-    const offset = sql.indexOf("__JB__");
+    const sql = "SELECT a.ID FROM JUST_DATA..DIMACCOUNT a WHERE a.ID=1";
+    const offset = sql.indexOf("a.ID");
     const request = createRequest(sql, { cursorOffset: offset });
 
-    resolveSqlRenameSymbolWithSession(session, request, offset);
-    resolveSqlRenameSymbolWithSession(session, request, offset + 1);
+    for (let index = 0; index < 30; index += 1) {
+      const symbol = resolveSqlRenameSymbolWithSession(session, request, offset);
+      expect(symbol?.occurrences).toHaveLength(3);
+    }
 
     expect(parseSpy).toHaveBeenCalledTimes(1);
+    const edited = createRequest(sql.replace(/a\./g, 'b.').replace('a WHERE', 'b WHERE'), { documentVersion: 2 });
+    expect(resolveSqlRenameSymbolWithSession(session, edited, offset)?.name).toBe('b');
+    expect(parseSpy).toHaveBeenCalledTimes(2);
   });
 });
