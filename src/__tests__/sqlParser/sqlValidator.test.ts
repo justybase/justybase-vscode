@@ -1781,7 +1781,14 @@ FROM (
       expectValid("SELECT DATE '2023-01-01';");
       expectValid("SELECT TIME '12:00:00';");
       expectValid("SELECT INTERVAL '1 day';");
-      expectValid("SELECT TIMESTAMPTZ '2023-01-01 12:00:00 UTC';");
+    });
+
+    it("should reject TIMESTAMPTZ literals (NZS008, live-verified)", () => {
+      // Live Netezza 2026-10-08 read-only probe:
+      // SELECT TIMESTAMPTZ '2023-01-01 12:00:00 UTC'
+      // -> ERROR: parser_typecast_constant: error reading type 'TIMESTAMPTZ'.
+      // Netezza has no TIMESTAMPTZ type; use TIMESTAMP.
+      expectErrorCode("SELECT TIMESTAMPTZ '2023-01-01 12:00:00 UTC';", "NZS008");
     });
 
     it("should validate expression with multiple parentheses levels", () => {
