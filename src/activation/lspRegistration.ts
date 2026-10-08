@@ -39,6 +39,7 @@ import {
   getRelatedColumnRole,
   normalizeRelatedColumnName,
 } from "../utils/relatedColumnNames";
+import { computeJoinTargetCandidates } from "../server/joinTargetMatcher";
 import { normalizeJoinCompletionSettings } from "../lsp/joinCompletionSettings";
 
 interface LanguageClientLike {
@@ -984,107 +985,24 @@ async function getCachedJoinTargetsAsync(
     return [];
   }
 
-  const targets = new Map<string, MetadataObjectItem>();
-  const defaultSchema = metadataCache.getDefaultSchema(connectionName, database);
-  for (const source of resolvedSources) {
-    const sourceSchema = source.schema;
-    const sourceTable = tableIndex.find((entry) =>
-      entry.name.toUpperCase() === source.table.toUpperCase() &&
-      entry.schema.toUpperCase() === sourceSchema.toUpperCase(),
-    );
-    if (!sourceTable?.columns.length) {
-      continue;
-    }
-
-    for (const candidate of tableIndex) {
-      const isSameSchema = candidate.schema.toUpperCase() === sourceSchema.toUpperCase();
-      if (isSameSchema && candidate.name.toUpperCase() === sourceTable.name.toUpperCase()) {
-        continue;
-      }
-
-      const matches: NonNullable<MetadataObjectItem["joinMatches"]> = [];
-      // Exact catalog FK pairs take precedence over the fallback name/key matcher.
-      for (const sourceColumn of sourceTable.columns) {
-        for (const reference of sourceColumn.joinReferences ?? []) {
-          if (
-            reference.toTable.toUpperCase() !== candidate.name.toUpperCase() ||
-            reference.toSchema.toUpperCase() !== candidate.schema.toUpperCase() ||
-            (reference.toDatabase && reference.toDatabase.toUpperCase() !== database.toUpperCase())
-          ) continue;
-          matches.push({
-            sourceTable: sourceTable.name,
-            sourceSchema: sourceTable.schema || undefined,
-            sourceColumn: sourceColumn.name,
-            targetColumn: reference.toColumn,
-            relationType: "foreignKey",
-            constraintName: reference.constraintName,
-            ordinalPosition: reference.ordinalPosition,
-          });
-        }
-      }
-      // Keep relationships in both directions. Two tables can have separate
-      // foreign keys pointing at each other; the resolver groups each constraint.
-      for (const targetColumn of candidate.columns) {
-        for (const reference of targetColumn.joinReferences ?? []) {
-          if (
-            reference.toTable.toUpperCase() !== sourceTable.name.toUpperCase() ||
-            reference.toSchema.toUpperCase() !== sourceTable.schema.toUpperCase() ||
-            (reference.toDatabase && reference.toDatabase.toUpperCase() !== database.toUpperCase())
-          ) continue;
-          matches.push({
-            sourceTable: sourceTable.name,
-            sourceSchema: sourceTable.schema || undefined,
-            sourceColumn: reference.toColumn,
-            targetColumn: targetColumn.name,
-            relationType: "foreignKey",
-            constraintName: reference.constraintName,
-            ordinalPosition: reference.ordinalPosition,
-          });
-        }
-      }
-      if (matches.length === 0 && isSameSchema) {
-        for (const sourceColumn of sourceTable.columns) {
-          for (const targetColumn of candidate.columns) {
-            if (
-              sourceColumn.normalizedName !== targetColumn.normalizedName ||
-              (!sourceColumn.isKey && !targetColumn.isKey)
-            ) {
-              continue;
-            }
-            matches.push({
-              sourceTable: sourceTable.name,
-              sourceSchema: sourceTable.schema || undefined,
-              sourceColumn: sourceColumn.name,
-              targetColumn: targetColumn.name,
-              relationType: "heuristic",
-            });
-          }
-        }
-      }
-      if (matches.length === 0) {
-        continue;
-      }
-
-      const item = mapTableMetadata(candidate.item, database);
-      if (item) {
-        const key = `${item.schema ?? ""}.${item.name}`.toUpperCase();
-        const existing = targets.get(key);
-        targets.set(key, {
-          ...(existing ?? item),
-          joinUsesDefaultSchema: Boolean(
-            defaultSchema &&
-            candidate.schema.toUpperCase() === defaultSchema.toUpperCase(),
-          ),
-          joinMatches: [
-            ...(existing?.joinMatches ?? []),
-            ...matches,
-          ],
-        });
-      }
+  const candidates = computeJoinTargetCandidates(
+    database,
+    metadataCache.getDefaultSchema(connectionName, database),
+    resolvedSources.map((source) => ({ schema: source.schema, table: source.table })),
+    tableIndex,
+  );
+  const targets: MetadataObjectItem[] = [];
+  for (const candidate of candidates) {
+    const item = mapTableMetadata(candidate.table.item, database);
+    if (item) {
+      targets.push({
+        ...item,
+        joinUsesDefaultSchema: candidate.joinUsesDefaultSchema,
+        joinMatches: candidate.matches,
+      });
     }
   }
-
-  return [...targets.values()];
+  return targets;
 }
 
 async function getCachedJoinTableIndex(
