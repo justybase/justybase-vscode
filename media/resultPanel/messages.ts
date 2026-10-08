@@ -433,18 +433,22 @@ export function updateExecutionStatusBanner(): void {
         resetRunningUiDelay();
     }
 
+    // Execution-status banner counts use a pinned locale so the text is
+    // identical on every OS/runner locale (bare toLocaleString follows the
+    // runtime locale and renders e.g. narrow no-break spaces elsewhere).
+    const formatBannerCount = (value: number): string => value.toLocaleString('en-US');
     const messages: Record<ResultPanelExecutionState, string> = {
         loading: `${sourceLabel}: running...`,
-        finalizing: `${sourceLabel}: ${totalRowCount.toLocaleString()} rows received; finalizing database session...`,
+        finalizing: `${sourceLabel}: ${formatBannerCount(totalRowCount)} rows received; finalizing database session...`,
         retrying: `${sourceLabel}: retrying after a connection interruption...`,
         cancelled: totalRowCount > 0
-            ? `${sourceLabel}: cancelled. Partial results retained: ${totalRowCount.toLocaleString()} rows in ${nonLogResultCount} result set(s).`
+            ? `${sourceLabel}: cancelled. Partial results retained: ${formatBannerCount(totalRowCount)} rows in ${nonLogResultCount} result set(s).`
             : `${sourceLabel}: cancelled. No tabular rows were retained.`,
         error: totalRowCount > 0
-            ? `${sourceLabel}: completed with errors. Partial results remain available: ${totalRowCount.toLocaleString()} rows in ${nonLogResultCount} result set(s).`
+            ? `${sourceLabel}: completed with errors. Partial results remain available: ${formatBannerCount(totalRowCount)} rows in ${nonLogResultCount} result set(s).`
             : `${sourceLabel}: failed. Review the error result or execution logs for details.`,
         success: totalRowCount > 0
-            ? `${sourceLabel}: ${totalRowCount.toLocaleString()} rows ready in ${nonLogResultCount} result set(s).`
+            ? `${sourceLabel}: ${formatBannerCount(totalRowCount)} rows ready in ${nonLogResultCount} result set(s).`
             : `${sourceLabel}: no rows returned.`,
         idle: ''
     };
@@ -814,7 +818,9 @@ export function handleSetActiveSource(message: Record<string, unknown>): void {
         && panel.streamingCompletedSources instanceof Set
         && !panel.streamingCompletedSources.has(sourceUri)
     ) {
-        resetStreamingCompletionMarkers(getResultSets(), true);
+        // A new execution is running and streaming has not completed:
+        // stale completion markers from the previous run must not survive.
+        resetStreamingCompletionMarkers(getResultSets());
     }
     const cached = !isExecutingSource
         ? getCachedSource(sourceUri) as { resultSets?: ResultSet[]; activeGridIndex?: number } | undefined
