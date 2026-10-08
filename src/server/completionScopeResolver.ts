@@ -27,7 +27,7 @@ import {
   buildExpressionSpecialValueItems,
   resolveExpressionClauseContext,
 } from "./completionExpressionAnalyzer";
-import { dedupeCompletionItems } from "./completionRanker";
+import { dedupeCompletionItems, getCompletionMatchRank } from "./completionRanker";
 import {
   isIdentifierToken,
 } from "./completionCstUtils";
@@ -678,6 +678,15 @@ export class CompletionScopeResolver {
       ...clauseKeywordItems,
       ...contextualKeywordItems,
     ]);
+    if (typedPrefix) {
+      // Match quality precedes item kind: a direct function prefix beats an
+      // unrelated column fragment; equal matches keep the existing kind order.
+      for (const item of items) {
+        const rank = getCompletionMatchRank(item.label, typedPrefix) ?? 9;
+        item.sortText = `${rank}_${item.sortText ?? item.label}`;
+      }
+      items.sort((left, right) => (left.sortText ?? left.label).localeCompare(right.sortText ?? right.label));
+    }
     return items.length > 0 ? items : undefined;
   }
 

@@ -23,6 +23,5 @@ describe('live-backed authoring syntax', () => {
   });
 
   test.each(['SELECT DATABASE FROM _V_DATABASE LIMIT 1', 'ALTER TABLE t MODIFY COLUMN NAME VARCHAR(80)',
-    'CREATE MATERIALIZED VIEW v AS (SELECT id FROM t)'])
-    ('accepts %s', sql => expect(parseNetezzaSqlStatements({ sql }).parserErrors).toHaveLength(0));
+    'CREATE MATERIALIZED VIEW v AS (SELECT id FROM t)'])('accepts %s', sql => expect(parseNetezzaSqlStatements({ sql }).parserErrors).toHaveLength(0));
 });

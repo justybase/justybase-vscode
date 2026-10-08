@@ -683,6 +683,7 @@ describe('ConnectionManager', () => {
                     await reader.close();
                 }
             } finally {
+                await manager.closeDocumentPersistentConnection(documentUri);
                 fs.rmSync(databasePath, { force: true });
             }
         });

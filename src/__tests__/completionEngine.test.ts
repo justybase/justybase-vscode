@@ -1690,6 +1690,14 @@ FROM (
       );
     });
 
+    it("ranks a direct function prefix before a column fragment", async () => {
+      const items = await complete("SELECT CO| FROM JUST_DATA..DIMACCOUNT");
+      expect(items[0].kind).toBe(CompletionItemKind.Function);
+      const column = items.find(item => item.label === "ACCOUNTCODEALTERNATEKEY");
+      expect(column).toBeDefined();
+      expect(items[0].sortText! < column!.sortText!).toBe(true);
+    });
+
     it("returns SQL functions in expression context", async () => {
       const items = await complete("SELECT CO|");
       expect(labels(items)).toContain("COALESCE");

@@ -354,8 +354,10 @@ describe('import/dataImporter', () => {
 
         it('aborts the CSV data stream when the cancellation check is true', async () => {
             const csvPath = writeTempFile('cancel.csv', 'A,B\n1,2\n3,4\n5,6\n');
-            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { isCancelled: () => true });
+            let cancelled = false;
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { isCancelled: () => cancelled });
             await importer.analyzeDataTypes();
+            cancelled = true;
 
             const stream = await importer.createDataStream();
             const errorPromise = once(stream, 'error');
@@ -384,8 +386,10 @@ describe('import/dataImporter', () => {
 
         it('stops iterateRows when the cancellation check is true', async () => {
             const csvPath = writeTempFile('iterate-cancel.csv', 'id\n1\n2\n');
-            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { isCancelled: () => true });
+            let cancelled = false;
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE', undefined, { isCancelled: () => cancelled });
             await importer.analyzeDataTypes();
+            cancelled = true;
 
             await expect(importer.iterateRows().next()).rejects.toThrow(/cancelled/i);
         });

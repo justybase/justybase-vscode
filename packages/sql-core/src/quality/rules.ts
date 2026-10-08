@@ -838,8 +838,8 @@ const ruleNZP012 = procedureRule(
   "Use ELSIF (not ELSEIF or ELSE IF) in NZPLSQL",
   0,
   (sql) => {
-    const procedure = procedureBodyOrEmpty(sql);
-    if (!procedure) return [];
+    // ELSEIF is also actionable in an unfinished procedural fragment.
+    const procedure = procedureBodyOrEmpty(sql) ?? { body: sql, startOffset: 0 };
     return findMatches(procedure.body, /\b(ELSEIF|ELSE\s+IF)\b/gi)
       .map((match) => procedureIssue("NZP012", "Use ELSIF instead of " + match[0] + " in NZPLSQL", 0, procedure.startOffset + match.index, procedure.startOffset + match.index + match[0].length));
   },

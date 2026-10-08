@@ -39,8 +39,8 @@ describe('portable result analysis tables', () => {
       rows: [['A', 'X', '1.00']],
       totalGroups: 10_000,
     };
-    expect(createGroupAnalysisTable(response).summary).toBe('First 1 of 10,000 groups');
-    expect(createPivotAnalysisTable(columns, response, 0, 1, 1).summary).toContain('first 1 of 10,000 groups');
+    expect(createGroupAnalysisTable(response).summary).toBe(`First 1 of ${(10_000).toLocaleString()} groups`);
+    expect(createPivotAnalysisTable(columns, response, 0, 1, 1).summary).toContain(`first 1 of ${(10_000).toLocaleString()} groups`);
 
     const wide: QueryGroupResponse = {
       columns: [{ name: 'ROW' }, { name: 'PIVOT' }, { name: 'SUM(V)', type: 'DECIMAL' }],

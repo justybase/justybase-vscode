@@ -96,7 +96,7 @@ export class QualityEngineCore<
     const includeProcedureRules = /\bCREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b/i.test(sql);
     const qualityIssues = this.rules
       .filter((rule) => !parserOwnedNetezzaQualityRuleIds.has(rule.id))
-      .filter((rule) => includeProcedureRules || !rule.id.startsWith("NZP"))
+      .filter((rule) => includeProcedureRules || rule.id === "NZP012" || !rule.id.startsWith("NZP"))
       .filter((rule) => options.includeOnDemandRules || !rule.onDemandOnly)
       .flatMap((rule) => {
         const configured = options.rulesConfig?.[rule.id];
