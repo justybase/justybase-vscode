@@ -231,6 +231,339 @@ export function parseVisibleLocalDefinitionsWithParser(
     .visibleLocalDefinitions;
 }
 
+export type SemanticScopeRelationKind =
+  | "table"
+  | "cte"
+  | "derived_table"
+  | "script_local_table";
+
+export interface SemanticScopeRelation {
+  name: string;
+  alias: string;
+  kind: SemanticScopeRelationKind;
+}
+
+export interface SemanticScopeAtCursor {
+  visibleRelations: SemanticScopeRelation[];
+  visibleCtes: string[];
+  visibleAliases: string[];
+}
+
+/**
+ * Direct semantic scope primitive for editor contracts: the relations,
+ * CTEs and reference names visible at one cursor offset. This is the
+ * production source of truth for scope-aware completion; it deliberately
+ * exposes no scope ids, parents, depths, AST nodes or shadowing data.
+ */
+export function resolveSemanticScopeAtCursor(
+  sql: string,
+  cursorOffset: number,
+  databaseKind?: DatabaseKind,
+): SemanticScopeAtCursor {
+  const statements = splitTopLevelStatements(sql, databaseKind);
+  if (statements.length > 1) {
+    const target =
+      statements.find(
+        (statement) =>
+          cursorOffset >= statement.start && cursorOffset <= statement.contentEnd,
+      ) ??
+      [...statements].reverse().find((statement) => statement.start <= cursorOffset) ??
+      statements[statements.length - 1];
+    const scriptLocalNames = collectScriptLocalTableNames(
+      sql,
+      statements,
+      cursorOffset,
+      databaseKind,
+    );
+    const inner = resolveSingleStatementScope(
+      sql.slice(target.start, target.contentEnd),
+      cursorOffset - target.start,
+      databaseKind,
+    );
+    return applyScriptLocalRelations(inner, scriptLocalNames);
+  }
+  const scriptLocalNames = collectScriptLocalTableNames(
+    sql,
+    statements,
+    cursorOffset,
+    databaseKind,
+  );
+  return applyScriptLocalRelations(
+    resolveSingleStatementScope(sql, cursorOffset, databaseKind),
+    scriptLocalNames,
+  );
+}
+
+interface TopLevelStatement {
+  start: number;
+  contentEnd: number;
+  terminatedAt: number;
+}
+
+function splitTopLevelStatements(
+  sql: string,
+  databaseKind?: DatabaseKind,
+): TopLevelStatement[] {
+  const lexResult = resolveSqlParsingRuntime({ databaseKind }).SqlLexer.tokenize(sql);
+  const statements: TopLevelStatement[] = [];
+  let start = 0;
+  let depth = 0;
+  for (const token of lexResult.tokens) {
+    const tokenName = token.tokenType.name;
+    if (tokenName === "LParen") {
+      depth += 1;
+    } else if (tokenName === "RParen") {
+      depth = Math.max(0, depth - 1);
+    } else if (tokenName === "Semicolon" && depth === 0) {
+      statements.push({
+        start,
+        contentEnd: token.startOffset,
+        terminatedAt: token.startOffset + token.image.length,
+      });
+      start = token.startOffset + token.image.length;
+    }
+  }
+  if (start < sql.length || statements.length === 0) {
+    statements.push({ start, contentEnd: sql.length, terminatedAt: sql.length });
+  }
+  return statements;
+}
+
+function isIdentifierTokenName(tokenName: string): boolean {
+  return tokenName === "Identifier" || tokenName === "QuotedIdentifier";
+}
+
+function collectScriptLocalTableNames(
+  sql: string,
+  statements: TopLevelStatement[],
+  cursorOffset: number,
+  databaseKind?: DatabaseKind,
+): Set<string> {
+  const names = new Set<string>();
+  if (statements.length === 0) {
+    return names;
+  }
+  const lexResult = resolveSqlParsingRuntime({ databaseKind }).SqlLexer.tokenize(sql);
+  const tokens = lexResult.tokens;
+  const statementEndFor = (offset: number): number =>
+    statements.find(
+      (statement) => offset >= statement.start && offset < statement.terminatedAt,
+    )?.terminatedAt ?? sql.length;
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.startOffset > cursorOffset) {
+      break;
+    }
+    const tokenName = token.tokenType.name;
+    if (tokenName === "Create") {
+      let next = index + 1;
+      let isTemp = false;
+      if (
+        tokens[next]?.tokenType.name === "Global" ||
+        tokens[next]?.image.toUpperCase() === "LOCAL"
+      ) {
+        next += 1;
+      }
+      if (
+        tokens[next]?.tokenType.name === "Temp" ||
+        tokens[next]?.tokenType.name === "Temporary"
+      ) {
+        isTemp = true;
+        next += 1;
+      }
+      if (tokens[next]?.tokenType.name !== "Table") {
+        continue;
+      }
+      next += 1;
+      if (tokens[next]?.tokenType.name === "If") {
+        next += 1;
+        if (tokens[next]?.tokenType.name === "Not") {
+          next += 1;
+        }
+        if (tokens[next]?.tokenType.name === "Exists") {
+          next += 1;
+        }
+      }
+      const target = tokens[next];
+      if (!target || !isIdentifierTokenName(target.tokenType.name)) {
+        continue;
+      }
+      if (statementEndFor(token.startOffset) > cursorOffset) {
+        continue;
+      }
+      const tableName = stripIdentifierQuotes(target.image).toUpperCase();
+      if (isTemp) {
+        names.add(tableName);
+        continue;
+      }
+      for (let scan = next + 1; scan < tokens.length; scan++) {
+        const scanName = tokens[scan].tokenType.name;
+        if (scanName === "As") {
+          const after = tokens[scan + 1];
+          if (after && (after.tokenType.name === "Select" || after.tokenType.name === "With")) {
+            names.add(tableName);
+          }
+          break;
+        }
+        if (scanName === "Semicolon" || scanName === "Select" || scanName === "With") {
+          break;
+        }
+      }
+    } else if (tokenName === "Drop") {
+      let next = index + 1;
+      if (tokens[next]?.tokenType.name !== "Table") {
+        continue;
+      }
+      next += 1;
+      if (tokens[next]?.tokenType.name === "If") {
+        next += 1;
+        if (tokens[next]?.tokenType.name === "Exists") {
+          next += 1;
+        }
+      }
+      const target = tokens[next];
+      if (!target || !isIdentifierTokenName(target.tokenType.name)) {
+        continue;
+      }
+      if (statementEndFor(token.startOffset) > cursorOffset) {
+        continue;
+      }
+      names.delete(stripIdentifierQuotes(target.image).toUpperCase());
+    }
+  }
+  return names;
+}
+
+function applyScriptLocalRelations(
+  result: SemanticScopeAtCursor,
+  scriptLocalNames: Set<string>,
+): SemanticScopeAtCursor {
+  if (scriptLocalNames.size === 0) {
+    return result;
+  }
+  const relations: SemanticScopeRelation[] = [];
+  const seen = new Set<string>();
+  for (const relation of result.visibleRelations) {
+    const normalized = stripIdentifierQuotes(relation.name).toUpperCase();
+    const kind: SemanticScopeRelationKind = scriptLocalNames.has(normalized)
+      ? "script_local_table"
+      : relation.kind;
+    const key = `${relation.alias.toUpperCase()}|${normalized}|${kind}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    relations.push({ name: relation.name, alias: relation.alias, kind });
+  }
+  return {
+    visibleRelations: relations,
+    visibleCtes: result.visibleCtes,
+    visibleAliases: relations.map((relation) => relation.alias),
+  };
+}
+
+function stripIdentifierQuotes(identifier: string): string {
+  if (identifier.length >= 2 && identifier.startsWith('"') && identifier.endsWith('"')) {
+    return identifier.slice(1, -1).replace(/""/g, '"');
+  }
+  if (identifier.length >= 2 && identifier.startsWith("[") && identifier.endsWith("]")) {
+    return identifier.slice(1, -1).replace(/\]\]/g, "]");
+  }
+  return identifier;
+}
+
+function resolveSingleStatementScope(
+  sql: string,
+  cursorOffset: number,
+  databaseKind?: DatabaseKind,
+): SemanticScopeAtCursor {
+  const scope = parseSemanticScopeWithParser(sql, cursorOffset, databaseKind);
+  const visibleCtes = scope.visibleLocalDefinitions
+    .filter((definition) => definition.type === "CTE")
+    .map((definition) => definition.name);
+  const visibleCteNames = new Set(visibleCtes.map((name) => name.toUpperCase()));
+  const visibleRelations: SemanticScopeRelation[] = [];
+  const seen = new Set<string>();
+  const pushRelation = (relation: SemanticScopeRelation): void => {
+    const key = `${relation.alias.toUpperCase()}|${relation.name.toUpperCase()}|${relation.kind}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    visibleRelations.push(relation);
+  };
+  const aliasEntries = [...scope.preferredAliasBindings.entries()];
+  const explicitTableRefs = new Set(
+    aliasEntries
+      .filter(
+        ([alias, binding]) =>
+          alias.toUpperCase() !== (binding.table ?? "").toUpperCase(),
+      )
+      .map(
+        ([, binding]) =>
+          `${binding.db ?? ""}|${binding.schema ?? ""}|${binding.table ?? ""}`,
+      ),
+  );
+  const derivedAliasNames = new Set(
+    scope.visibleLocalDefinitions
+      .filter((definition) => definition.type === "Subquery")
+      .map((definition) => definition.name.toUpperCase()),
+  );
+  for (const [alias, binding] of aliasEntries) {
+    const table = binding.table ?? "";
+    if (derivedAliasNames.has(alias.toUpperCase())) {
+      continue;
+    }
+    if (
+      table &&
+      alias.toUpperCase() === table.toUpperCase() &&
+      explicitTableRefs.has(
+        `${binding.db ?? ""}|${binding.schema ?? ""}|${binding.table ?? ""}`,
+      )
+    ) {
+      continue;
+    }
+    const kind: SemanticScopeRelationKind = visibleCteNames.has(table.toUpperCase())
+      ? "cte"
+      : table
+        ? "table"
+        : "derived_table";
+    pushRelation({ name: table || alias, alias, kind });
+  }
+  const hasRelationNamed = (name: string): boolean =>
+    visibleRelations.some(
+      (relation) => relation.name.toUpperCase() === name.toUpperCase(),
+    );
+  for (const definition of scope.visibleLocalDefinitions) {
+    if (definition.type === "CTE") {
+      if (hasRelationNamed(definition.name)) {
+        continue;
+      }
+      pushRelation({ name: definition.name, alias: definition.name, kind: "cte" });
+    } else if (definition.type === "Temp Table") {
+      if (hasRelationNamed(definition.name)) {
+        continue;
+      }
+      pushRelation({
+        name: definition.name,
+        alias: definition.name,
+        kind: "script_local_table",
+      });
+    } else if (definition.type === "Subquery") {
+      pushRelation({
+        name: definition.name,
+        alias: definition.name,
+        kind: "derived_table",
+      });
+    }
+  }
+  return {
+    visibleRelations,
+    visibleCtes,
+    visibleAliases: visibleRelations.map((relation) => relation.alias),
+  };
+}
+
 function resolveVisibleCteNamesAtOffset(
   sql: string,
   offset: number,
