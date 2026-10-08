@@ -1,4 +1,4 @@
-import { appendRunLogRows } from '../logRunGroups.js';
+import { appendRunLogRows, parseRunMessage } from '../logRunGroups.js';
 import { renderSqlQueueLogs } from '../sqlQueueLogs.js';
 import { postHostMessage } from '../protocol.js';
 import { shouldRightAlignCell } from '../utils.js';
@@ -121,57 +121,83 @@ export function createLogLineElement(row: LogRow): HTMLDivElement {
     const messageText = String(row[1] ?? '');
 
     if (messageText === '') {
+        line.classList.add('console-line--empty');
         line.innerHTML = '&nbsp;';
-    } else if (messageText.startsWith('---')) {
+        return line;
+    }
+    if (messageText.startsWith('---')) {
         line.className += ' separator';
-        line.textContent = `${timeText} ${messageText}`;
-    } else if (/^[▶✓✗⊘]\s/.test(messageText)) {
-        // Enhanced log entry with status indicator
         const timeSpan = document.createElement('span');
         timeSpan.className = 'console-time';
-        timeSpan.textContent = `[${timeText}] `;
-
-        const msgSpan = document.createElement('span');
-        msgSpan.className = 'console-msg';
-
-        // Parse status from message
-        const statusMatch = messageText.match(/^([▶✓✗⊘])\s+(\w+):/);
-        if (statusMatch) {
-            const statusIcon = statusMatch[1];
-            const status = statusMatch[2].toLowerCase();
-
-            // Add status class
-            line.className += ` status-${status}`;
-
-            // Create status indicator span
-            const statusSpan = document.createElement('span');
-            statusSpan.className = `console-status status-${status}`;
-            statusSpan.textContent = statusIcon + ' ' + status + ':';
-
-            msgSpan.appendChild(statusSpan);
-
-            // Add the rest of the message after the status
-            const restOfMessage = messageText.substring(statusMatch[0].length);
-            const restText = document.createTextNode(' ' + restOfMessage);
-            msgSpan.appendChild(restText);
-        } else {
-            msgSpan.textContent = messageText;
-        }
-
-        line.appendChild(timeSpan);
-        line.appendChild(msgSpan);
-    } else {
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'console-time';
-        timeSpan.textContent = `[${timeText}] `;
-
+        timeSpan.textContent = timeText;
         const msgSpan = document.createElement('span');
         msgSpan.className = 'console-msg';
         msgSpan.textContent = messageText;
-
-        line.appendChild(timeSpan);
-        line.appendChild(msgSpan);
+        line.append(timeSpan, msgSpan);
+        return line;
     }
+    const parsed = parseRunMessage(messageText);
+    if (parsed.status) {
+        // Timeline copy of a statement row (grouped cards render the rich
+        // header via logRunGroups; this keeps legacy/plain rows readable).
+        const status = parsed.status;
+        line.className += ` status-${status}`;
+        const statusIcons: Record<string, string> = {
+            running: '▶',
+            success: '✓',
+            error: '✗',
+            cancelled: '⊘',
+            retrying: '↻',
+        };
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'console-time';
+        timeSpan.textContent = timeText;
+
+        const badge = document.createElement('span');
+        badge.className = `log-status log-status--${status}`;
+        const icon = document.createElement('span');
+        icon.className = 'log-status-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = statusIcons[status] ?? '';
+        const label = document.createElement('span');
+        label.textContent = status.toUpperCase();
+        badge.append(icon, label);
+
+        const msgSpan = document.createElement('span');
+        msgSpan.className = 'console-msg';
+        if (parsed.sqlPreview) {
+            const sql = document.createElement('span');
+            sql.className = 'log-line-sql';
+            sql.textContent = parsed.sqlPreview;
+            msgSpan.appendChild(sql);
+        }
+        const meta = [parsed.connection, parsed.duration, parsed.rowCount].filter((part): part is string => !!part);
+        if (meta.length > 0) {
+            const metaSpan = document.createElement('span');
+            metaSpan.className = 'log-meta-inline';
+            metaSpan.textContent = meta.join(' · ');
+            msgSpan.appendChild(metaSpan);
+        }
+        if (parsed.errorText) {
+            const errorSpan = document.createElement('span');
+            errorSpan.className = 'log-error-hint';
+            errorSpan.textContent = parsed.errorText;
+            msgSpan.appendChild(errorSpan);
+        }
+
+        line.append(timeSpan, badge, msgSpan);
+        return line;
+    }
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'console-time';
+    timeSpan.textContent = timeText;
+
+    const msgSpan = document.createElement('span');
+    msgSpan.className = 'console-msg';
+    msgSpan.textContent = messageText;
+
+    line.append(timeSpan, msgSpan);
     return line;
 }
 

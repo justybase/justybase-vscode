@@ -424,15 +424,38 @@ describe('ResultStateManager', () => {
     });
 
     describe('log', () => {
-        it('should append message to log result set', () => {
+        it('should buffer pre-statement messages until the first statement claims them', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);
             const initialLength = manager.resultsMap.get(sourceUri)![0].data.length;
 
-            manager.log(sourceUri, 'Test message');
-            const newLength = manager.resultsMap.get(sourceUri)![0].data.length;
+            // Lead-in rows (Preparing/Connected/...) must not render loose:
+            // they stay buffered until the first statement starts.
+            const buffered = manager.log(sourceUri, 'Test message');
+            expect(buffered).toBeUndefined();
+            expect(manager.resultsMap.get(sourceUri)![0].data.length).toBe(initialLength);
 
-            expect(newLength).toBe(initialLength + 1);
+            const { incrementalUpdate } = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+            const rows = manager.resultsMap.get(sourceUri)![0].data;
+            expect(rows.length).toBe(initialLength + 2);
+            // Buffered row and start row share the new statement card.
+            expect((rows[initialLength][2] as { executionId: string }).executionId).toBe(
+                (rows[initialLength + 1][2] as { executionId: string }).executionId,
+            );
+            expect(incrementalUpdate?.rows).toHaveLength(2);
+        });
+
+        it('should attach messages directly while a statement is running', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            const { id } = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+            const before = manager.resultsMap.get(sourceUri)![0].data.length;
+
+            const update = manager.log(sourceUri, 'progress');
+            const rows = manager.resultsMap.get(sourceUri)![0].data;
+            expect(rows.length).toBe(before + 1);
+            expect((rows[rows.length - 1][2] as { executionId: string }).executionId).toBe(id);
+            expect(update?.rows).toHaveLength(1);
         });
 
         it('should do nothing if no results exist', () => {
@@ -440,6 +463,48 @@ describe('ResultStateManager', () => {
             // No startExecution called
 
             expect(() => manager.log(sourceUri, 'Test')).not.toThrow();
+        });
+
+        it('should not attach inter-statement messages to the previous terminal card', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            const first = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+            manager.logExecutionEnd(first.id, 1, 'success');
+
+            // Gap between statements: buffered for the next card, not the previous one.
+            expect(manager.log(sourceUri, 'Preparing query 2/2...')).toBeUndefined();
+            const second = manager.logExecutionStart(sourceUri, 'SELECT 2', 'conn1');
+            expect(second.id).not.toBe(first.id);
+            const rows = manager.resultsMap.get(sourceUri)![0].data as [string, string, { executionId: string }][];
+            const gap = rows.find(row => row[1] === 'Preparing query 2/2...');
+            expect((gap?.[2] as { executionId: string }).executionId).toBe(second.id);
+        });
+
+        it('should flush buffered rows on finalize when no statement ever started', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            manager.log(sourceUri, 'Preparing SQL execution...');
+            manager.finalizeExecution(sourceUri);
+            const messages = (manager.resultsMap.get(sourceUri)![0].data as [string, string][]).map(
+                row => row[1] as string,
+            );
+            expect(messages).toContain('Preparing SQL execution...');
+        });
+
+        it('should not attach a new batch lead-in to the previous batch card', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+            const first = manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
+            manager.logExecutionEnd(first.id, 1, 'success');
+            manager.finalizeExecution(sourceUri);
+
+            manager.startExecution(sourceUri);
+            expect(manager.log(sourceUri, 'Preparing SQL execution...')).toBeUndefined();
+            const second = manager.logExecutionStart(sourceUri, 'SELECT 2', 'conn1');
+            const rows = manager.resultsMap.get(sourceUri)![0].data as [string, string, { executionId: string }][];
+            const leadIn = rows.filter(row => row[1] === 'Preparing SQL execution...').slice(-1)[0];
+            expect((leadIn?.[2] as { executionId: string }).executionId).toBe(second.id);
+            expect((leadIn?.[2] as { executionId: string }).executionId).not.toBe(first.id);
         });
     });
 
@@ -845,10 +910,13 @@ describe('ResultStateManager', () => {
         it('should track data versions per source', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);
+            // Pre-statement rows are buffered (no version bump yet)...
             const initialVersion = manager.getDataVersion(sourceUri);
-
             manager.log(sourceUri, 'Test');
+            expect(manager.getDataVersion(sourceUri)).toBe(initialVersion);
 
+            // ...until the first statement flushes them into its card.
+            manager.logExecutionStart(sourceUri, 'SELECT 1', 'conn1');
             expect(manager.getDataVersion(sourceUri)).toBeGreaterThan(initialVersion);
         });
 

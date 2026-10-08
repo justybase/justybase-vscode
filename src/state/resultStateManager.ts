@@ -158,6 +158,17 @@ export class ResultStateManager {
 
     // Execution logs tracking
     private _executionLogs: Map<string, ExecutionLogEntry[]> = new Map(); // sourceUri -> logs
+    /**
+     * Plain `log()` rows emitted while no statement is running (e.g.
+     * `Preparing SQL execution...`, `Connected...`, `Preparing query...`).
+     * Buffered per source until the next `logExecutionStart()` assigns them
+     * to a statement card, so the first run never renders loose lines above
+     * its SUCCESS card and inter-statement lines never leak into the
+     * previous terminal card.
+     */
+    private _pendingPreStatementLogs: Map<string, Array<{ timestamp: string; message: string }>> = new Map();
+    /** `_executionLogs` length at the last `startExecution()` per source. */
+    private _executionLogBatchStart: Map<string, number> = new Map();
 
     // Versioning for efficient updates
     private _dataVersions: Map<string, number> = new Map(); // Increment on metadata/data changes
@@ -203,6 +214,8 @@ export class ResultStateManager {
         this._lastAccessedAt.clear();
         this._manualLogsGroups.clear();
         this._executionGroups.clear();
+        this._pendingPreStatementLogs.clear();
+        this._executionLogBatchStart.clear();
         this.executionDocuments.clear();
         this.workspaceDocuments.clear();
         this.workspaceSelection.clear();
@@ -577,6 +590,10 @@ export class ResultStateManager {
         this._executingSources.add(sourceUri);
         this._cancelledSources.delete(sourceUri);
         this._streamingCompletedSources.delete(sourceUri); // Fresh execution, no streaming yet
+        // Anchor plain-log attribution to this batch: `log()` must not reuse
+        // the previous batch's terminal card. Pre-statement rows stay buffered
+        // until the first `logExecutionStart()` claims them.
+        this._executionLogBatchStart.set(sourceUri, this._executionLogs.get(sourceUri)?.length ?? 0);
 
         // Generate a monotonic execution identity even when two executions
         // start in the same millisecond.
@@ -667,6 +684,15 @@ export class ResultStateManager {
             ensureResultSetId(logResultSet);
             logResultSet.message = 'Execution started...';
             logResultSet.executionTimestamp = Date.now();
+            // Drop the initial empty-state seed once a real execution starts:
+            // without an executionId it would render as a loose line above the
+            // first statement card.
+            if (Array.isArray(logResultSet.data)) {
+                logResultSet.data = logResultSet.data.filter(
+                    row =>
+                        !(row?.[1] === 'No results yet' && !(row?.[2] as ExecutionLogDetails | undefined)?.executionId),
+                );
+            }
 
             // Move log to front if it's not already
             if (existingLogIndex !== 0) {
@@ -794,7 +820,22 @@ export class ResultStateManager {
         if (logResultSetIndex !== -1) {
             const logResultSet = results[logResultSetIndex];
             const timestamp = new Date().toLocaleTimeString();
-            const lastExecution = this._executionLogs.get(sourceUri)?.slice(-1)[0];
+            const logs = this._executionLogs.get(sourceUri);
+            const batchStart = this._executionLogBatchStart.get(sourceUri) ?? 0;
+            const lastExecution =
+                logs && logs.length > batchStart ? logs[logs.length - 1] : undefined;
+            const hasRunningStatement =
+                lastExecution?.status === 'running' || lastExecution?.status === 'retrying';
+            if (!hasRunningStatement && this._executingSources.has(sourceUri)) {
+                // No statement owns this row yet (batch lead-in or gap between
+                // statements). Buffer it so the next `logExecutionStart()`
+                // can claim it for the correct card instead of rendering it
+                // loose above the first card or inside the previous one.
+                const pending = this._pendingPreStatementLogs.get(sourceUri) ?? [];
+                pending.push({ timestamp, message });
+                this._pendingPreStatementLogs.set(sourceUri, pending);
+                return undefined;
+            }
             const row: [string, string, ExecutionLogDetails?] = lastExecution ? [timestamp, message, { executionId: lastExecution.id, event: 'message' }] : [timestamp, message];
             const fromRow = logResultSet.data.length;
 
@@ -870,10 +911,20 @@ export class ResultStateManager {
                 const timestamp = new Date().toLocaleTimeString();
                 // Format: [time] ▶ RUNNING: [sql truncated] | [connection]
                 const logMessage = `▶ RUNNING: ${truncatedSql} | ${connectionName}`;
-                const row: [string, string, ExecutionLogDetails] = [timestamp, logMessage, { executionId, event: 'start', status: 'running', sql: sql.slice(0, 64_000), connectionName }];
                 const fromRow = logResultSet.data.length;
+                // Claim buffered lead-in rows (Preparing/Connected/...) for
+                // this statement so they render inside its card timeline.
+                const pending = this._pendingPreStatementLogs.get(sourceUri) ?? [];
+                this._pendingPreStatementLogs.delete(sourceUri);
+                const rows: [string, string, ExecutionLogDetails][] = pending.map(item => [
+                    item.timestamp,
+                    item.message,
+                    { executionId, event: 'message' as const },
+                ]);
+                const row: [string, string, ExecutionLogDetails] = [timestamp, logMessage, { executionId, event: 'start', status: 'running', sql: sql.slice(0, 64_000), connectionName }];
+                rows.push(row);
 
-                logResultSet.data.push(row);
+                logResultSet.data.push(...rows);
                 this._incrementDataVersion(sourceUri);
                 this._syncResultCoreAfterMutation(sourceUri);
 
@@ -881,7 +932,7 @@ export class ResultStateManager {
                     command: 'appendRows',
                     sourceUri,
                     resultSetIndex: logResultSetIndex,
-                    rows: [row],
+                    rows,
                     totalRows: logResultSet.data.length,
                     fromRow,
                     logExecutionTimestamp: logResultSet.executionTimestamp ?? 0,
@@ -1051,6 +1102,43 @@ export class ResultStateManager {
      */
     public clearExecutionLogs(sourceUri: string): void {
         this._executionLogs.delete(sourceUri);
+        this._pendingPreStatementLogs.delete(sourceUri);
+        this._executionLogBatchStart.delete(sourceUri);
+    }
+
+    /**
+     * Flush buffered pre-statement rows when an execution settles without a
+     * statement claiming them. Attaches to the last card of the current batch
+     * when one exists, otherwise keeps them as loose lines so failures before
+     * the first `statement-started` stay visible. Relies on the state-change
+     * hydrate (no incremental update) because finalization has no log channel.
+     */
+    private _flushPendingPreStatementLogs(sourceUri: string): void {
+        const pending = this._pendingPreStatementLogs.get(sourceUri);
+        if (!pending || pending.length === 0) {
+            this._pendingPreStatementLogs.delete(sourceUri);
+            return;
+        }
+        this._pendingPreStatementLogs.delete(sourceUri);
+        const results = this._resultsMap.get(sourceUri);
+        const logResultSet = results?.find(r => r.isLog);
+        if (!logResultSet || !Array.isArray(logResultSet.data)) return;
+        const logs = this._executionLogs.get(sourceUri);
+        const batchStart = this._executionLogBatchStart.get(sourceUri) ?? 0;
+        const lastExecution = logs && logs.length > batchStart ? logs[logs.length - 1] : undefined;
+        if (lastExecution) {
+            for (const item of pending) {
+                logResultSet.data.push([
+                    item.timestamp,
+                    item.message,
+                    { executionId: lastExecution.id, event: 'message' },
+                ]);
+            }
+        } else {
+            for (const item of pending) {
+                logResultSet.data.push([item.timestamp, item.message]);
+            }
+        }
     }
 
     public isCancelled(sourceUri: string): boolean {
@@ -1102,6 +1190,10 @@ export class ResultStateManager {
             executionId: this._coreExecutionId(sourceUri),
         });
         this._executingSources.delete(sourceUri);
+        // Flush lead-in rows when no statement ever started (e.g. connection
+        // failed before `statement-started`): keep them visible rather than
+        // dropping. Prefer the last card of this batch when one exists.
+        this._flushPendingPreStatementLogs(sourceUri);
 
         const results = this._resultsMap.get(sourceUri);
         if (results) {
@@ -2165,6 +2257,8 @@ export class ResultStateManager {
     }
 
     public clearLogs(sourceUri: string) {
+        // Explicit user clear drops buffered lead-in rows as well.
+        this._pendingPreStatementLogs.delete(sourceUri);
         const results = this._resultsMap.get(sourceUri);
         if (results) {
             const logResultSet = results.find(r => r.isLog);

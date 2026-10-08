@@ -16,26 +16,39 @@ export function injectStyles(): void {
     .console-view {
         display: flex;
         flex-direction: column;
+        gap: 2px;
     }
     .console-line {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
         line-height: 1.5;
         white-space: pre-wrap;
-        border-bottom: 1px solid var(--vscode-panel-border);
+        padding: 3px 8px;
+        border-radius: 4px;
     }
     .console-line.separator {
-        color: var(--vscode-textLink-foreground);
-        font-weight: bold;
-        margin-top: 10px;
-        margin-bottom: 5px;
-        border-bottom: 1px solid var(--vscode-textLink-foreground);
+        color: var(--vscode-descriptionForeground);
+        font-style: italic;
+        font-weight: 400;
+        margin-top: 8px;
+        margin-bottom: 2px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        border-radius: 0;
     }
     .console-time {
         color: var(--vscode-descriptionForeground);
-        margin-right: 8px;
+        opacity: 0.85;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        flex-shrink: 0;
         user-select: none;
     }
     .console-msg {
         color: var(--vscode-editor-foreground);
+        min-width: 0;
     }
     .error-wrapper {
         padding: 20px;

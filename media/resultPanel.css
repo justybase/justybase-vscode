@@ -4108,10 +4108,13 @@ tfoot .aggregation-row td.pinned-cell {
 }
 
 .console-view {
-    padding: 8px 12px;
+    padding: 0 0 4px;
     overflow-y: auto;
     height: 100%;
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
     font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
     font-size: 12px;
     line-height: 1.5;
@@ -4119,77 +4122,140 @@ tfoot .aggregation-row td.pinned-cell {
     color: var(--vscode-editor-foreground);
 }
 
-/* Console line */
+/* Console line — plain lifecycle rows (no card chrome, hover only) */
 .console-line {
-    padding: 2px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 1px 6px;
+    border-radius: 2px;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.console-line.separator {
-    color: var(--vscode-editorLineNumber-foreground, #858585);
-    font-style: italic;
-    margin: 4px 0;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    padding-bottom: 4px;
+.console-line:hover {
+    background: var(--vscode-list-hoverBackground);
 }
 
-/* Console timestamp */
+.console-line.separator {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+    margin: 8px 0 2px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    border-radius: 0;
+}
+
+.console-line.separator:hover {
+    background: transparent;
+}
+
+/* Console timestamp — quiet, tabular, without brackets */
 .console-time {
-    color: var(--vscode-editorLineNumber-foreground, #858585);
-    margin-right: 8px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.85;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     flex-shrink: 0;
+    min-width: 74px;
+    user-select: none;
 }
 
 /* Console message */
 .console-msg {
     color: var(--vscode-editor-foreground);
+    min-width: 0;
 }
 
-/* Status indicators for execution logs */
+/* Status badge — the only colored element on a row (pill, VS Code theme aware) */
+.log-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    line-height: 1.6;
+    padding: 0 8px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-panel-border);
+    color: var(--vscode-descriptionForeground);
+    background: var(--vscode-badge-background);
+    user-select: none;
+}
+
+.log-status-icon {
+    font-size: 10px;
+    line-height: 1;
+}
+
+.log-status--running {
+    color: var(--vscode-progressBar-background, #3794ff);
+    border-color: var(--vscode-progressBar-background, #3794ff);
+    background: transparent;
+}
+
+.log-status--success {
+    color: var(--vscode-testing-iconPassed, #4ec94e);
+    border-color: var(--vscode-testing-iconPassed, #4ec94e);
+    background: transparent;
+}
+
+.log-status--error {
+    color: var(--vscode-errorForeground, #f14c4c);
+    border-color: var(--vscode-errorForeground, #f14c4c);
+    background: transparent;
+}
+
+.log-status--cancelled {
+    color: var(--vscode-descriptionForeground);
+    border-color: var(--vscode-panel-border);
+    background: transparent;
+}
+
+.log-status--retrying {
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    border-color: var(--vscode-editorWarning-foreground, #cca700);
+    background: transparent;
+}
+
+/* Legacy hook kept for compatibility: color lives on the badge now, not the row. */
 .console-status {
     font-weight: 600;
     margin-right: 4px;
 }
 
-/* Status: RUNNING - Yellow */
 .console-line.status-running,
-.status-running .console-status {
-    color: #cca700;
-}
-
-.console-line.status-running {
-    background-color: rgba(204, 167, 0, 0.1);
-}
-
-/* Status: SUCCESS - Green */
 .console-line.status-success,
-.status-success .console-status {
-    color: #4ec94e;
-}
-
-.console-line.status-success {
-    background-color: rgba(78, 201, 78, 0.05);
-}
-
-/* Status: ERROR - Red */
 .console-line.status-error,
-.status-error .console-status {
-    color: #f14c4c;
-}
-
-.console-line.status-error {
-    background-color: rgba(241, 76, 76, 0.08);
-}
-
-/* Status: CANCELLED - Gray */
-.console-line.status-cancelled,
-.status-cancelled .console-status {
-    color: #808080;
-}
-
 .console-line.status-cancelled {
-    background-color: rgba(128, 128, 128, 0.05);
+    background: transparent;
+}
+
+/* Inline statement text inside a plain timeline row */
+.log-line-sql {
+    color: var(--vscode-editor-foreground);
+}
+
+.log-meta-inline {
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.log-meta-inline::before {
+    content: '· ';
+}
+
+.log-error-hint {
+    display: block;
+    color: var(--vscode-errorForeground, #f14c4c);
+    font-size: 12px;
+    margin-top: 2px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* ============================================
@@ -4820,9 +4886,9 @@ body.sidebar-layout .main-split-view {
 /* Queue overview and transcript have independent scrolling. */
 .console-wrapper[style*="display: block"]:has(.sql-queue-overview) { display: flex !important; flex-direction: column; }
 .console-wrapper:has(.sql-queue-overview) .console-view { height: auto; flex: 1; min-height: 0; }
-.sql-queue-overview { box-sizing: border-box; max-height: 45%; flex-shrink: 0; padding: 10px 14px; overflow: auto; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-foreground); }
-.sql-queue-controls { display: flex; gap: 8px; margin: 8px 0; }
-.sql-queue-job { display: grid; grid-template-columns: 115px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 0; }
+.sql-queue-overview { box-sizing: border-box; max-height: 45%; flex-shrink: 0; padding: 6px 0; overflow: auto; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-foreground); }
+.sql-queue-controls { display: flex; gap: 6px; margin: 4px 0; }
+.sql-queue-job { display: grid; grid-template-columns: 115px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 3px 0; }
 .sql-queue-job code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family); }
 .sql-queue-job-status { font-size: 11px; color: var(--vscode-descriptionForeground); }
 .sql-queue-overview button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid transparent; cursor: pointer; padding: 4px 8px; }
@@ -4830,27 +4896,42 @@ body.sidebar-layout .main-split-view {
 .sql-queue-overview button:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 .sql-queue-overview > strong { display: block; font-size: 13px; font-weight: 600; letter-spacing: .2px; }
 .sql-queue-job { border-top: 1px solid var(--vscode-panel-border); }
-.sql-queue-job-status { display: inline-block; width: fit-content; padding: 3px 6px; border-radius: 4px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.sql-queue-job-status { display: inline-block; width: fit-content; padding: 3px 6px; border-radius: 3px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .sql-queue-job[data-status="running"] .sql-queue-job-status { color: var(--vscode-progressBar-background); background: var(--vscode-editor-background); border: 1px solid var(--vscode-progressBar-background); }
 .sql-queue-job[data-status="cancelling"] .sql-queue-job-status { color: var(--vscode-editorWarning-foreground); }
 .sql-queue-overview button:disabled { opacity: .55; cursor: default; }
-@media (max-width: 550px) { .sql-queue-job { grid-template-columns: 95px minmax(0, 1fr) auto; gap: 6px; } .sql-queue-overview { padding: 8px; } }
+@media (max-width: 550px) { .sql-queue-job { grid-template-columns: 95px minmax(0, 1fr) auto; gap: 6px; } .sql-queue-overview { padding: 6px; } }
 .sql-queue-job { display: block; padding: 0; }
-.sql-queue-job-summary { display: grid; grid-template-columns: 115px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 0; cursor: pointer; }
+.sql-queue-job-summary { display: grid; grid-template-columns: 115px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
 .sql-queue-job-summary::marker { color: var(--vscode-descriptionForeground); }
-.sql-queue-job-detail, .log-run-sql { margin: 8px 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); border-radius: 4px; }
-.log-run { border: 1px solid var(--vscode-panel-border); border-radius: 5px; margin-bottom: 8px; background: var(--vscode-editor-background); }
-.log-run-summary { padding: 9px 12px; cursor: pointer; overflow-wrap: anywhere; color: var(--vscode-foreground); }
-.log-run[data-status="success"] .log-run-summary { color: var(--vscode-testing-iconPassed); }
-.log-run[data-status="error"] .log-run-summary { color: var(--vscode-errorForeground); }
-.log-run[data-status="running"] .log-run-summary { color: var(--vscode-progressBar-background); }
-.log-run-body { padding: 0 12px 10px; border-top: 1px solid var(--vscode-panel-border); }
-.log-run-summary:focus-visible, .sql-queue-job-summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.sql-queue-job-detail, .log-run-sql { margin: 0 0 4px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); font-size: 12px; background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-panel-border); border-radius: 3px; max-height: 240px; overflow: auto; }
+/* Statement card — neutral surface, status carried by the badge + left rail. */
+.log-run { border: 1px solid var(--vscode-panel-border); border-left-width: 3px; border-radius: 3px; margin: 2px 0; background: var(--vscode-editor-background); overflow: hidden; }
+.console-view > details.log-run:first-of-type { margin-top: 0; }
+.log-run[data-status="success"] { border-left-color: var(--vscode-testing-iconPassed, #4ec94e); }
+.log-run[data-status="error"] { border-left-color: var(--vscode-errorForeground, #f14c4c); }
+.log-run[data-status="running"] { border-left-color: var(--vscode-progressBar-background, #3794ff); }
+.log-run[data-status="cancelled"] { border-left-color: var(--vscode-descriptionForeground); }
+.log-run[data-status="retrying"] { border-left-color: var(--vscode-editorWarning-foreground, #cca700); }
+.log-run-summary { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 8px; padding: 4px 8px; cursor: pointer; color: var(--vscode-foreground); list-style: none; }
+.log-run-summary::-webkit-details-marker { display: none; }
+.log-run-summary::marker { content: ''; }
+.log-run-summary .log-status { margin-top: 1px; }
+.log-summary-main { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.log-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.log-meta .log-time { min-width: 0; }
+.log-chip { display: inline-flex; align-items: center; padding: 0 7px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; font-size: 11px; line-height: 1.6; color: var(--vscode-descriptionForeground); background: transparent; white-space: nowrap; }
+.log-chip--empty { opacity: 0.75; }
+.log-sql-preview { display: block; overflow: hidden; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; line-height: 1.5; font-weight: 400; color: var(--vscode-editor-foreground); opacity: 0.92; white-space: nowrap; text-overflow: ellipsis; word-break: break-word; }
+.log-run-body { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px 6px; border-top: 1px solid var(--vscode-panel-border); }
+.log-run-body .console-line { padding: 1px 6px; font-size: 12px; }
+.log-run-archive { display: flex; flex-direction: column; gap: 3px; margin-bottom: 3px; }
+.log-error-line { align-items: flex-start; }
+.log-run-summary:focus-visible, .sql-queue-job-summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+@media (max-width: 550px) { .log-run-body { padding-left: 8px; } .console-time { min-width: 0; } }
 @media (max-width: 550px) { .sql-queue-job-summary { grid-template-columns: 95px minmax(0, 1fr) auto; gap: 6px; } }
-.sql-queue-job-summary { grid-template-columns: 12px 115px minmax(0, 1fr) auto; }
-.sql-queue-job-summary::before { content: '▸'; color: var(--vscode-descriptionForeground); }
-.sql-queue-job[open] > .sql-queue-job-summary::before { content: '▾'; }
-@media (max-width: 550px) { .sql-queue-job-summary { grid-template-columns: 12px 95px minmax(0, 1fr) auto; } }
+.sql-queue-job-summary { grid-template-columns: 115px minmax(0, 1fr) auto; }
+@media (max-width: 550px) { .sql-queue-job-summary { grid-template-columns: 95px minmax(0, 1fr) auto; } }
 
 /* Native result-tab controls retain the compact tab appearance. */
 .result-tab-control, .result-set-tab button.result-set-close-btn {
