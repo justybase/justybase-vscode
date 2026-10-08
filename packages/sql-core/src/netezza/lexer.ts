@@ -107,7 +107,7 @@ export const Create = createToken({ name: 'Create', pattern: /CREATE/i, longer_a
 export const Materialized = createToken({ name: 'Materialized', pattern: /MATERIALIZED/i, longer_alt: Identifier })
 export const Table = createToken({ name: 'Table', pattern: /TABLE/i, longer_alt: Identifier })
 export const Temporary = createToken({ name: 'Temporary', pattern: /TEMPORARY/i, longer_alt: Identifier })
-export const Temp = createToken({ name: 'Temp', pattern: /TEMP/i, longer_alt: Temporary })
+export const Temp = createToken({ name: 'Temp', pattern: /TEMP/i, longer_alt: [Temporary, Identifier] })
 export const Drop = createToken({ name: 'Drop', pattern: /DROP/i, longer_alt: Identifier })
 export const Truncate = createToken({ name: 'Truncate', pattern: /TRUNCATE/i, longer_alt: Identifier })
 export const Explain = createToken({ name: 'Explain', pattern: /EXPLAIN/i, longer_alt: Identifier })
@@ -298,7 +298,7 @@ export const Parameter = createToken({
 // Identifier is already defined above for longer_alt to work
 export const QuotedIdentifier = createToken({
     name: 'QuotedIdentifier',
-    pattern: /"[^"]*"/
+    pattern: /"(?:[^"]|"")*"/
 })
 
 export const DollarNumber = createToken({

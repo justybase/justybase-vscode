@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { formatSqlRenameReplacement } from '../sqlParser'
+import { buildSqlRenameEdits } from '../sqlParser'
 import { resolveExtensionSqlRenameSymbol } from '../core/extensionDocumentParseSession'
 
 export class NetezzaRenameProvider implements vscode.RenameProvider {
@@ -35,10 +35,12 @@ export class NetezzaRenameProvider implements vscode.RenameProvider {
             return undefined
         }
 
+        const edits = buildSqlRenameEdits(document.getText(), symbol, trimmedName)
+        if (!edits) return undefined
         const edit = new vscode.WorkspaceEdit()
-        symbol.occurrences.forEach(occurrence => {
+        edits.forEach(occurrence => {
             const range = this.toDocumentRange(document, occurrence.startOffset, occurrence.endOffset)
-            edit.replace(document.uri, range, formatSqlRenameReplacement(occurrence.text, trimmedName))
+            edit.replace(document.uri, range, occurrence.newText)
         })
 
         return edit

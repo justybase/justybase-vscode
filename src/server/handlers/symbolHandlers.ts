@@ -7,7 +7,7 @@ import {
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { TextDocuments } from "vscode-languageserver/node";
 import {
-  formatSqlRenameReplacement,
+  buildSqlRenameEdits,
   type DocumentParseSession,
 } from "../../sqlParser";
 import type { MetadataBridge } from "../metadataBridge";
@@ -232,18 +232,17 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
             return null;
           }
 
+          const edits = buildSqlRenameEdits(document.getText(), symbol, trimmedName);
+          if (!edits || isCancellationRequested()) return null;
           return {
             changes: {
-              [document.uri]: symbol.occurrences.map((occurrence) => ({
+              [document.uri]: edits.map((occurrence) => ({
                 range: offsetRangeToRange(
                   document,
                   occurrence.startOffset,
                   occurrence.endOffset,
                 ),
-                newText: formatSqlRenameReplacement(
-                  occurrence.text,
-                  trimmedName,
-                ),
+                newText: occurrence.newText,
               })),
             },
           };
