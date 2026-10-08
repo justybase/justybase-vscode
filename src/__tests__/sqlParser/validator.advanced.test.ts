@@ -1642,7 +1642,18 @@ WHERE EMPLOYEE_ID = ANY (
     });
 
     it("should accept special built-in in expressions", () => {
-      expectValid("SELECT CURRENT_TIMESTAMP + INTERVAL '1' DAY FROM TESTDB..EMPLOYEES;");
+      expectValid("SELECT CURRENT_TIMESTAMP + INTERVAL '1 day' FROM TESTDB..EMPLOYEES;");
+    });
+
+    it("should reject interval units outside the literal (NZS007, live-verified)", () => {
+      // Live Netezza 2026-10-08 read-only probe:
+      // SELECT CURRENT_TIMESTAMP + INTERVAL '1' DAY
+      // -> ERROR: Bad interval external representation '1'.
+      // Units belong inside the interval literal in Netezza.
+      expectErrorCode(
+        "SELECT CURRENT_TIMESTAMP + INTERVAL '1' DAY FROM TESTDB..EMPLOYEES;",
+        "NZS007",
+      );
     });
   });
 
