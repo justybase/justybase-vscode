@@ -4903,7 +4903,7 @@
     "@justybase/netezza-driver": "^3.4.3",
     "@justybase/spreadsheet-tasks": "^2.2.0",
     "adm-zip": "^0.6.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@msgpack/msgpack": "^3.1.3",
     "@xyflow/react": "^12.11.2",
     "chevrotain": "^13.2.0",

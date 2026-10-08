@@ -95,6 +95,18 @@ export function formatSqlWithProfile(
   const keywordCase = options.keywordCase ?? "upper";
   const linesBetweenQueries = Math.max(1, options.linesBetweenQueries ?? 2);
   const tokens = tokenizeLossless(sql);
+  const compactProjection = tokens[0]?.upper === "SELECT"
+    && tokens.length >= 2 && tokens.length <= 3
+    && ["number", "string", "quotedIdentifier", "word"].includes(tokens[1].kind)
+    && (tokens.length === 2 || tokens[2].kind === "semicolon");
+  if (compactProjection) {
+    const select = keywordCase === "lower" ? "select" : keywordCase === "preserve" ? tokens[0].text : "SELECT";
+    const projection = tokens[1];
+    const value = projection.upper && SQL_KEYWORDS.has(projection.upper)
+      ? keywordCase === "lower" ? projection.text.toLowerCase() : keywordCase === "upper" ? projection.upper : projection.text
+      : projection.text;
+    return `${select} ${value}${tokens[2]?.text ?? ""}`;
+  }
 
   let result = "";
   let lineStart = true;
