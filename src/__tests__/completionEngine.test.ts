@@ -2968,6 +2968,30 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       );
     });
 
+    it("offers related targets ahead of the ordinary list on explicit invoke after JOIN", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [{
+          sourceTable: "users",
+          sourceSchema: "public",
+          sourceColumn: "owner_id",
+          targetColumn: "id",
+          relationType: "foreignKey",
+        }],
+      }]);
+
+      const items = await complete("SELECT * FROM users u JOIN |");
+      const ordered = [...items].sort((left, right) =>
+        (left.sortText ?? left.label) < (right.sortText ?? right.label) ? -1 : 1,
+      );
+
+      expect(ordered[0].label).toBe("public.orders O ON u.owner_id = O.id");
+    });
+
     it("ranks declared FK targets above cached name heuristics", async () => {
       metadataProvider.setCachedJoinTargets([
         {

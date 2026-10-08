@@ -69,6 +69,35 @@ export class LspCompletionEngine {
     position: Position,
     triggerKind: CompletionTriggerKind = CompletionTriggerKind.Invoked,
   ): Promise<CompletionItem[]> {
+    const items = await this.provideBaseCompletionItems(document, position, triggerKind);
+    const prefixText = document.getText().slice(0, document.offsetAt(position));
+    const isInvoked = triggerKind === CompletionTriggerKind.Invoked;
+    const endsWithJoin = /JOIN\s+$/i.test(prefixText);
+    if (!isInvoked || !endsWithJoin) {
+      return items;
+    }
+    // An explicit invoke right after JOIN offers the same relationship-aware
+    // targets as the automatic trigger, ahead of the ordinary relation list.
+    const joinTargets = await this.scopeResolver.getJoinTargetCompletions(
+      await this.requestContextBuilder.build(document, position),
+    );
+    if (!joinTargets?.length) {
+      return items;
+    }
+    const seen = new Set(joinTargets.map((item) => item.label));
+    return [
+      ...joinTargets,
+      ...items
+        .filter((item) => !seen.has(item.label))
+        .map((item) => ({ ...item, sortText: `1_${item.sortText ?? item.label}` })),
+    ];
+  }
+
+  private async provideBaseCompletionItems(
+    document: TextDocument,
+    position: Position,
+    triggerKind: CompletionTriggerKind,
+  ): Promise<CompletionItem[]> {
     let autoJoinConditionTrigger = false;
     if (triggerKind === CompletionTriggerKind.TriggerCharacter) {
       const cursorOffset = document.offsetAt(position);
