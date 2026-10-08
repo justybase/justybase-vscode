@@ -1073,7 +1073,7 @@ export class CompletionScopeResolver {
           kind: CompletionItemKind.Reference,
           detail: "Join condition (configured relationship)",
           insertText: text,
-          sortText: `0_${text.toUpperCase()}`,
+          sortText: `0_0_${text.toUpperCase()}`,
           textEdit: { range: { start: position, end: position }, newText: text },
         });
       }
@@ -1174,7 +1174,7 @@ export class CompletionScopeResolver {
             kind: CompletionItemKind.Reference,
             detail: "Join condition (declared foreign key)",
             insertText: text,
-            sortText: `0_${text.toUpperCase()}`,
+            sortText: `0_0_${text.toUpperCase()}`,
             textEdit: { range: { start: position, end: position }, newText: text },
           });
         }
@@ -1213,7 +1213,8 @@ export class CompletionScopeResolver {
         kind: CompletionItemKind.Reference,
         detail: match.isKeyMatch ? "Join condition (cached key/name match)" : "Join condition (name match)",
         insertText: text,
-        sortText: `${match.isKeyMatch ? "1" : "2"}_${text.toUpperCase()}`,
+        // Join predicates outrank plain columns (2_) and local definitions (1_).
+        sortText: `0_${match.isKeyMatch ? "1" : "2"}_${text.toUpperCase()}`,
         textEdit: {
           range: { start: position, end: position },
           newText: text,

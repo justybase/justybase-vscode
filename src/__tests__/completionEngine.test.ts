@@ -2924,7 +2924,22 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       expect(cachedKeyItem).toBeDefined();
       expect(String(cachedKeyItem?.insertText)).toContain("PK_USER_ID");
       expect(String(cachedKeyItem?.insertText)).toContain("FK_USER_ID");
-      expect(String(cachedKeyItem?.sortText)).toMatch(/^1_/);
+      expect(String(cachedKeyItem?.sortText)).toMatch(/^0_1_/);
+      // Predicates must outrank plain in-scope columns once the editor sorts by sortText.
+      const firstColumn = items.find((item) => item.detail === "Column in scope");
+      expect(firstColumn).toBeDefined();
+      expect(String(cachedKeyItem?.sortText) < String(firstColumn?.sortText)).toBe(true);
+    });
+
+    it("ranks name-match JOIN predicates above plain columns by sortText", async () => {
+      metadataProvider.setRelationColumns("BAZA", "USERS", [{ name: "ID", type: "INTEGER" }, { name: "NAME", type: "VARCHAR" }]);
+      metadataProvider.setRelationColumns("BAZA", "ORDERS", [{ name: "ID", type: "INTEGER" }, { name: "ORDER_NO", type: "INTEGER" }]);
+
+      const items = await complete("SELECT * FROM BAZA..USERS U JOIN BAZA..ORDERS O ON |");
+      const ordered = [...items].sort((left, right) =>
+        (left.sortText ?? left.label) < (right.sortText ?? right.label) ? -1 : 1,
+      );
+      expect(ordered[0].detail).toMatch(/^Join condition/);
     });
 
     it("suggests cache-backed related targets in non-Netezza dialects", async () => {
