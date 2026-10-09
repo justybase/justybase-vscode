@@ -383,6 +383,9 @@ class ColumnIdentityCollector {
 
     private resolveIn(relation: Relation, norm: string, name: string): string | undefined {
         if (relation.physical) {
+            // A source whose name is unknown (an unfinished `FROM db.schema.`)
+            // has no catalog column to point at.
+            if (!relation.physical.table) return undefined
             let columnName = name
             let type: string | undefined
             if (relation.physicalColumns) {
