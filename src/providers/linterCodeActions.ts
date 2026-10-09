@@ -403,7 +403,19 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
             return [{ start, end, newText: replacement, target: diagnostic.range }];
         }
 
-        if (code === 'NZ012' || code === 'SQL046' || code === 'NZ021' || code === 'PAR002') {
+        if (code === 'SQL046') {
+            // Same production edit as the single SQL046 action (also removes the following space).
+            const contract = buildNetezzaQuickFix('SQL046', diagnostic.range, document.getText());
+            const range = contract.edit.range as vscode.Range;
+            return [{
+                start: document.offsetAt(range.start),
+                end: document.offsetAt(range.end),
+                newText: contract.edit.newText,
+                target: range,
+            }];
+        }
+
+        if (code === 'NZ012' || code === 'NZ021' || code === 'PAR002') {
             return [{ start, end, newText: '', target: diagnostic.range }];
         }
 
