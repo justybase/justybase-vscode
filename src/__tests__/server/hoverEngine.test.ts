@@ -125,6 +125,16 @@ describe("LSP hoverEngine — regression guard", () => {
       expect(getTableInfo).toHaveBeenCalledTimes(1);
     });
 
+    it("answers a column hover without computing statement scope", async () => {
+      const deps = makeDeps({ resolveColumnIdentity: jest.fn(async () => identity) });
+      const hover = await provideHover(makeDocument("WITH X AS (SELECT 1 AS CID) SELECT X.CID FROM X"),
+        { position: makePosition(0, 38) }, deps, makeBridge());
+      expect(getMarkdown(hover)).toContain("**column** `CID`");
+      expect(deps.getStatementAtPosition).not.toHaveBeenCalled();
+      expect(deps.getAliasBindings).not.toHaveBeenCalled();
+      expect(deps.getCompletionLocalDefinitions).not.toHaveBeenCalled();
+    });
+
     it("omits origin and type that cannot be proven", async () => {
       const computed = { ...identity, name: "NEXT_ID", origin: undefined };
       const getTableInfo = jest.fn();
