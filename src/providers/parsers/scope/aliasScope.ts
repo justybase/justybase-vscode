@@ -64,29 +64,19 @@ export class ParserSqlContextCollector {
       return allBindings;
     }
 
-    // Find the most specific scope containing the cursor offset
-    let bestScope: AliasScope | null = null;
-    for (const scope of this._scopes) {
-      if (cursorOffset >= scope.start && cursorOffset <= scope.end) {
-        if (
-          !bestScope ||
-          scope.end - scope.start < bestScope.end - bestScope.start
-        ) {
-          bestScope = scope;
-        }
-      }
-    }
-
-    // Merge bindings from all scopes containing the cursor (parent scope inheritance)
+    // Merge bindings from all scopes containing the cursor (parent scope
+    // inheritance). The innermost scope wins, so an alias redeclared in a
+    // nested query shadows the outer one.
+    const containing = this._scopes
+      .filter((scope) => cursorOffset >= scope.start && cursorOffset <= scope.end)
+      .sort((left, right) => (left.end - left.start) - (right.end - right.start));
     const mergedBindings = new Map<string, AliasInfo>();
-    for (const scope of this._scopes) {
-      if (cursorOffset >= scope.start && cursorOffset <= scope.end) {
-        scope.bindings.forEach((val, key) => {
-          if (!mergedBindings.has(key)) {
-            mergedBindings.set(key, val);
-          }
-        });
-      }
+    for (const scope of containing) {
+      scope.bindings.forEach((val, key) => {
+        if (!mergedBindings.has(key)) {
+          mergedBindings.set(key, val);
+        }
+      });
     }
     return mergedBindings;
   }
