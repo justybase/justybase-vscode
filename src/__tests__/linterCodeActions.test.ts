@@ -940,6 +940,18 @@ describe('providers/linterCodeActions', () => {
             expect(edit?.replace).toHaveBeenCalledWith(expect.anything(), comma.range, '');
         });
 
+        it('uses the single SQL046 action edit, including the following space', () => {
+            const sql = 'UPDATE t AS a SET id = 1';
+            const offset = sql.indexOf('AS');
+            const removeAs = makeDiagnostic('SQL046', 'SQL046: Remove AS', offset, offset + 2);
+            const { edit } = fixAllFor(sql, [removeAs]);
+            expect(edit?.replace).toHaveBeenCalledWith(
+                expect.anything(),
+                { start: { line: 0, character: offset }, end: { line: 0, character: offset + 3 } },
+                ''
+            );
+        });
+
         it('keeps NZL006 and PAR004 explicit-only', () => {
             const sql = 'SELECT 1 WHERR x = NULL';
             const typo = makeDiagnostic('PAR004', "PAR004: Did you mean 'WHERE'?", 9, 14);
