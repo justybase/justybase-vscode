@@ -1324,7 +1324,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
     private createDistributeOnRandomFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
         const action = new vscode.CodeAction('Add DISTRIBUTE ON RANDOM', vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
-        action.isPreferred = true;
+        action.isPreferred = false; // review-required: not preferred
 
         // Find where the statement ends to insert the clause
         const offset = document.offsetAt(diagnostic.range.start);
@@ -1500,7 +1500,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
     ): vscode.CodeAction | undefined {
         const action = new vscode.CodeAction(ERROR_CODE_ACTIONS[code].title, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
-        action.isPreferred = true;
+        action.isPreferred = false; // review-required: not preferred
 
         const statementBoundary = this.getStatementBoundary(document, diagnostic);
         if (!statementBoundary) {
@@ -1580,7 +1580,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
 
         const action = new vscode.CodeAction(ERROR_CODE_ACTIONS['NZ004'].title, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
-        action.isPreferred = true;
+        action.isPreferred = false; // review-required: not preferred
         action.edit = new vscode.WorkspaceEdit();
         action.edit.replace(
             document.uri,
@@ -1948,7 +1948,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
     private createUnionAllFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction {
         const action = new vscode.CodeAction(ERROR_CODE_ACTIONS['NZ013'].title, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
-        action.isPreferred = true;
+        action.isPreferred = false; // review-required: not preferred
         action.edit = new vscode.WorkspaceEdit();
         action.edit.replace(document.uri, diagnostic.range, ERROR_CODE_ACTIONS['NZ013'].fix);
         return action;
@@ -2126,7 +2126,7 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
     private createRemoveUnusedAliasFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
         const action = new vscode.CodeAction('Remove unused alias', vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
-        action.isPreferred = true;
+        action.isPreferred = false; // review-required: not preferred
 
         // For unused aliases, we just highlight the issue - removing might break the query
         // Instead, offer to comment it

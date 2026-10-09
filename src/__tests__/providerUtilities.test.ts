@@ -448,11 +448,13 @@ WHEN MATCHED THEN UPDATE SET T.ACCOUNTNAME = S.CALENDARQUARTER`;
             const preferredTitles = actions.filter(action => action.isPreferred).map(action => action.title);
             expect(preferredTitles).toEqual(
                 expect.arrayContaining([
-                    'Add DISTRIBUTE ON RANDOM',
                     'Convert to DB..TABLE format (Netezza syntax)',
                     'Add VARCHAR length (e.g., VARCHAR(100))'
                 ])
             );
+            // NZ011 (DISTRIBUTE ON RANDOM) is review-required, so it is offered but not preferred.
+            expect(actions.map(action => action.title)).toContain('Add DISTRIBUTE ON RANDOM');
+            expect(preferredTitles).not.toContain('Add DISTRIBUTE ON RANDOM');
         });
 
         it('skips NZ011 fix when parser cannot find statement', () => {
