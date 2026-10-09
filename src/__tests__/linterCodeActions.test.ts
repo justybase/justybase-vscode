@@ -441,7 +441,8 @@ describe('providers/linterCodeActions', () => {
 
         const crossJoinFix = actions.find(action => action.title === 'Replace CROSS JOIN with explicit INNER JOIN');
         expect(crossJoinFix).toBeDefined();
-        expect(crossJoinFix?.isPreferred).toBe(true);
+        // NZ004 is review-required in the quick-fix matrix, so it is not preferred.
+        expect(crossJoinFix?.isPreferred).toBe(false);
         const workspaceEdit = crossJoinFix?.edit as unknown as MockWorkspaceEdit;
         expect(workspaceEdit.replace).toHaveBeenCalledWith(
             document.uri,

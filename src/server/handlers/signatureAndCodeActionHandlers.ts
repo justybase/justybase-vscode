@@ -215,7 +215,7 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
                   title: "Replace CROSS JOIN with explicit INNER JOIN",
                   kind: CodeActionKind.QuickFix,
                   diagnostics: [diagnostic],
-                  isPreferred: true,
+                  isPreferred: false,
                   edit: {
                     changes: {
                       [document.uri]: edits,
@@ -252,7 +252,7 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
                   title: `Add missing table alias '${aliasFix.aliasName}'${aliasFix.referenceRanges.length > 0 ? " and update references" : ""}`,
                   kind: CodeActionKind.QuickFix,
                   diagnostics: [diagnostic],
-                  isPreferred: true,
+                  isPreferred: false,
                   edit: { changes: { [document.uri]: changes } },
                 } satisfies CodeAction);
               }
@@ -338,7 +338,7 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
                 title: "Remove unused alias",
                 kind: CodeActionKind.QuickFix,
                 diagnostics: [diagnostic],
-                isPreferred: true,
+                isPreferred: false,
                 edit: {
                   changes: {
                     [document.uri]: [{ range, newText: "" }],
