@@ -13,6 +13,9 @@ export function buildSqlRenameEdits(sql: string, symbol: SqlRenameResolution, ne
         logical = body.replace(/""/g, '"')
     }
     if (!logical || symbol.otherDefinitionNames?.some(name => name.toUpperCase() === logical.toUpperCase())) return undefined
+    // Renaming to the exposed name of an unaliased physical relation would
+    // capture that relation's qualified references.
+    if (symbol.exposedRelationNames?.some(name => name.toUpperCase() === logical.toUpperCase())) return undefined
     return symbol.occurrences.map(occurrence => ({
         startOffset: occurrence.startOffset, endOffset: occurrence.endOffset,
         newText: formatSqlRenameReplacement(sql.slice(occurrence.startOffset, occurrence.endOffset), trimmed),
