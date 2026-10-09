@@ -178,6 +178,10 @@ const EXTERNAL_TABLE_OPTION_NAMES = new globalThis.Set([
   "AZLOGLEVEL",
 ]);
 
+
+/** Reserved words that the lexer only recognizes inside combined `... BY` tokens. */
+const NETEZZA_RESERVED_ALIAS_WORDS: readonly string[] = ['ORDER', 'GROUP', 'PARTITION'];
+
 export class NetezzaSqlParser extends BaseSqlParser {
   /** Token immediately following `<<identifier>>`, if input starts with a label. */
   private tokenTypeAfterProcedureLabel(): typeof Begin | undefined {
@@ -361,8 +365,14 @@ export class NetezzaSqlParser extends BaseSqlParser {
     // Only a narrower keyword subset is accepted in alias/column positions.
     // Keeping this override local preserves long-standing Netezza behavior
     // without making the shared parser permissive for every dialect.
+    // ORDER, GROUP and PARTITION lex as identifiers on their own (the lexer
+    // only knows them inside `... BY`), but live Netezza rejects them as
+    // unquoted aliases ("expecting an identifier found a keyword").
     this.OVERRIDE_RULE('alias', () => {
-      this.SUBRULE(this.netezzaRelaxedName);
+      this.OR([{
+        GATE: () => !NETEZZA_RESERVED_ALIAS_WORDS.includes(this.LA(1).image.toUpperCase()),
+        ALT: () => this.SUBRULE(this.netezzaRelaxedName),
+      }]);
     });
 
     this.OVERRIDE_RULE('columnReference', () => {
