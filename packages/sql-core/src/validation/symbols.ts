@@ -19,6 +19,8 @@ export interface SqlRenameResolution {
     target: SqlRenameOccurrence
     occurrences: SqlRenameOccurrence[]
     otherDefinitionNames?: string[]
+    /** Exposed names of unaliased physical relations; they bind qualifiers too. */
+    exposedRelationNames?: string[]
 }
 
 export interface SqlSymbolUsage {
@@ -46,6 +48,7 @@ class SqlSymbolCollector {
     private readonly unresolvedAliasQualifiers: IToken[][] = []
     private readonly definitions = new Map<string, SqlSymbolDefinition>()
     private readonly occurrences: SqlRenameOccurrenceInternal[] = []
+    readonly exposedRelationNames = new Set<string>()
     private nextSymbolId = 1
 
     collect(root: CstNode): void {
@@ -430,7 +433,11 @@ class SqlSymbolCollector {
         if (!token) return
         const name = this.normalizeIdentifier(token)
         const symbol = (identifiers.length === 1 ? this.resolveCte(name) : undefined) ?? this.resolveCreatedTable(this.createdRelationKey(identifiers))
-        if (!symbol) return
+        if (!symbol) {
+            // An unaliased physical relation exposes its table name as a qualifier.
+            if (!this.getAliasToken(aliasOptional)) this.exposedRelationNames.add(name)
+            return
+        }
         if (includeReference) this.addReference(symbol, token)
         if (!this.getAliasToken(aliasOptional)) this.getCurrentAliasScope()?.set(name.toUpperCase(), symbol)
     }
@@ -973,6 +980,7 @@ export function resolveSqlRenameSymbol(
         name: collector.getSymbolDisplayName(target.symbolId) ?? target.text,
         target: toExternalOccurrence(target),
         occurrences: symbolOccurrences.map(toExternalOccurrence),
-        otherDefinitionNames: collector.getDefinitions().filter(definition => definition.id !== target.symbolId).map(definition => definition.displayName)
+        otherDefinitionNames: collector.getDefinitions().filter(definition => definition.id !== target.symbolId).map(definition => definition.displayName),
+        exposedRelationNames: Array.from(collector.exposedRelationNames)
     }
 }
