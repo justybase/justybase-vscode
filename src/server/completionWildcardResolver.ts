@@ -625,6 +625,27 @@ export class CompletionWildcardResolver {
         }
       }
 
+      // A derived table `( query ) alias` defines its columns like a CTE.
+      if (current.name === "tableSource") {
+        const aliasToken = getAliasTokenFromAliasOptional(
+          getChildNodes(current, "aliasOptional")[0],
+        );
+        const subqueryNode = getChildNodes(current, "subquery")[0];
+        if (subqueryNode && aliasToken && stripQuotes(aliasToken.image).toUpperCase() === targetName) {
+          const queryNode =
+            getChildNodes(subqueryNode, "withStatement")[0] ??
+            getChildNodes(subqueryNode, "selectStatement")[0];
+          if (queryNode) {
+            const queryRange = getNodeTextRange(queryNode);
+            return {
+              queryNode,
+              hasExplicitColumnList: false,
+              scopeOffset: queryRange?.start ?? aliasToken.startOffset,
+            };
+          }
+        }
+      }
+
       const children = current.children ?? {};
       for (const value of Object.values(children)) {
         if (!Array.isArray(value)) {
