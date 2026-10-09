@@ -4,6 +4,7 @@ import {
   Location,
   WorkspaceEdit,
 } from "vscode-languageserver/node";
+import type { CstNode } from "chevrotain";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { TextDocuments } from "vscode-languageserver/node";
 import {
@@ -30,6 +31,7 @@ import {
 import type { MetadataBridge } from "../metadataBridge";
 import { runWithRequestBoundary } from "../requestBoundary";
 import { resolveSqlRenameSymbolFromSession } from "../parseSessionUtils";
+import { toDocumentParseRequest } from "../documentParseRequest";
 import { offsetRangeToRange } from "./hoverHandler";
 
 const DEFINITION_REQUEST_BUDGET_MS = 1000;
@@ -41,6 +43,32 @@ const RENAME_SLOW_LOG_MS = 150;
 
 /** Upper bound on tables whose metadata one column navigation request may load. */
 const COLUMN_IDENTITY_MAX_TABLES = 32;
+
+/**
+ * The document's current Netezza CST from the shared parse session, when the
+ * session parsed it without any error. Column identity then reuses it instead
+ * of parsing again; anything else (other dialects, any parser error) keeps the
+ * column identity's own parse and authoring recovery.
+ */
+export function columnParseFromSession(
+  documentParseSession: DocumentParseSession,
+  document: TextDocument,
+  databaseKind: MetadataContextResponse["databaseKind"],
+): { cst: CstNode } | undefined {
+  if (databaseKind && databaseKind !== "netezza") {
+    return undefined;
+  }
+  try {
+    const parsed = documentParseSession.getParseResult(
+      toDocumentParseRequest(document, document.getText(), databaseKind),
+    );
+    return parsed.runtime.id === "netezza" && parsed.cst && parsed.parserErrors.length === 0
+      ? { cst: parsed.cst }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface ColumnIdentityWithMetadata {
   analysis: SqlColumnIdentityAnalysis;
@@ -59,12 +87,13 @@ export async function analyzeColumnIdentitiesWithMetadata(
   metadataBridge: Pick<MetadataBridge, "getTableInfo">,
   context: Pick<MetadataContextResponse, "databaseKind" | "effectiveDatabase">,
   isCancellationRequested: () => boolean = () => false,
+  parseResult?: { cst: CstNode },
 ): Promise<ColumnIdentityWithMetadata | undefined> {
   if (context.databaseKind && context.databaseKind !== "netezza") {
     return undefined;
   }
   const sql = document.getText();
-  const structure = SqlColumnIdentityAnalysis.analyze(sql);
+  const structure = SqlColumnIdentityAnalysis.analyze(sql, undefined, parseResult);
   if (!structure) {
     return undefined;
   }
@@ -107,8 +136,10 @@ export async function resolveColumnIdentityWithMetadata(
   metadataBridge: Pick<MetadataBridge, "getTableInfo">,
   context: Pick<MetadataContextResponse, "databaseKind" | "effectiveDatabase">,
   isCancellationRequested: () => boolean = () => false,
+  parseResult?: { cst: CstNode },
 ): Promise<SqlColumnIdentity | undefined> {
-  const columns = await analyzeColumnIdentitiesWithMetadata(document, metadataBridge, context, isCancellationRequested);
+  const columns = await analyzeColumnIdentitiesWithMetadata(
+    document, metadataBridge, context, isCancellationRequested, parseResult);
   return columns?.analysis.identityAt(offset);
 }
 
@@ -122,8 +153,10 @@ export async function resolveColumnCatalogTargetWithMetadata(
   metadataBridge: Pick<MetadataBridge, "getTableInfo">,
   context: Pick<MetadataContextResponse, "databaseKind" | "effectiveDatabase">,
   isCancellationRequested: () => boolean = () => false,
+  parseResult?: { cst: CstNode },
 ): Promise<SqlColumnCatalogTarget | undefined> {
-  const identity = await resolveColumnIdentityWithMetadata(document, offset, metadataBridge, context, isCancellationRequested);
+  const identity = await resolveColumnIdentityWithMetadata(
+    document, offset, metadataBridge, context, isCancellationRequested, parseResult);
   return resolveSqlColumnCatalogTarget(identity);
 }
 
@@ -191,6 +224,7 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
           metadataBridge,
           context,
           isCancellationRequested,
+          columnParseFromSession(documentParseSession, document, context.databaseKind),
         );
         if (column?.definition) {
           return Location.create(
@@ -243,6 +277,7 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
             metadataBridge,
             context,
             isCancellationRequested,
+            columnParseFromSession(documentParseSession, document, context.databaseKind),
           );
           if (!column || column.status !== "resolved") {
             return null;
@@ -317,6 +352,7 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
             metadataBridge,
             context,
             isCancellationRequested,
+            columnParseFromSession(documentParseSession, document, context.databaseKind),
           );
           const target = columns && prepareSqlColumnRename(columns.analysis, document.getText(), offset);
           if (!target || isCancellationRequested()) {
@@ -385,6 +421,7 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
               metadataBridge,
               context,
               isCancellationRequested,
+              columnParseFromSession(documentParseSession, document, context.databaseKind),
             );
             const columnEdits = columns && buildSqlColumnRenameEdits(document.getText(), offset, trimmedName, columns.lookup);
             if (!columnEdits || isCancellationRequested()) return null;
@@ -445,6 +482,7 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
             metadataBridge,
             context,
             isCancellationRequested,
+            columnParseFromSession(documentParseSession, document, context.databaseKind),
           );
           return target ?? null;
         },

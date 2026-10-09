@@ -133,26 +133,32 @@ export async function provideHoverWithTarget(
   }
 
   const symbol = deps.resolveSqlRenameSymbol(sql, offset, context.databaseKind);
-  const statement = deps.getStatementAtPosition(sql, offset);
-  const statementSql = statement?.sql ?? sql;
-  const statementOffset = statement
-    ? Math.max(0, offset - statement.start)
-    : offset;
-  const aliasBindings = deps.getAliasBindings(
-    statementSql,
-    statementOffset,
-    context.databaseKind,
-  );
-  const localDefinitions = deps.getCompletionLocalDefinitions(
-    sql,
-    statementSql,
-    statementOffset,
-    context.databaseKind,
-    offset,
-  );
+  // The statement, alias bindings and local definitions are only needed by the
+  // relation-symbol and metadata hovers, so a column hover skips them.
+  let scope: { aliasBindings: Map<string, AliasInfo>; localDefinitions: ReturnType<HoverDependencies["getCompletionLocalDefinitions"]> } | undefined;
+  const statementScope = () => {
+    if (scope) return scope;
+    const statement = deps.getStatementAtPosition(sql, offset);
+    const statementSql = statement?.sql ?? sql;
+    const statementOffset = statement
+      ? Math.max(0, offset - statement.start)
+      : offset;
+    scope = {
+      aliasBindings: deps.getAliasBindings(statementSql, statementOffset, context.databaseKind),
+      localDefinitions: deps.getCompletionLocalDefinitions(
+        sql,
+        statementSql,
+        statementOffset,
+        context.databaseKind,
+        offset,
+      ),
+    };
+    return scope;
+  };
   const effectiveDatabase = context.effectiveDatabase;
 
   if (symbol) {
+    const { aliasBindings, localDefinitions } = statementScope();
     const markdownLines = [
       `**${symbol.kind.replace("_", " ")}** \`${symbol.name}\``,
     ];
@@ -303,6 +309,8 @@ export async function provideHoverWithTarget(
       contents: { kind: MarkupKind.Markdown, value: formatColumnHover(info, description) },
     };
   }
+
+  const { aliasBindings, localDefinitions } = statementScope();
 
   // Manual hover: resolve table or column at cursor
   const fullLineText = document.getText({

@@ -1,9 +1,11 @@
 import { TextDocument } from "vscode-languageserver-textdocument";
 jest.unmock("chevrotain");
 import {
+  columnParseFromSession,
   resolveColumnCatalogTargetWithMetadata,
   resolveColumnIdentityWithMetadata,
 } from "../../server/handlers/symbolHandlers";
+import { DocumentParseSession } from "../../sqlParser/documentParseSession";
 
 function bridge(tables: Record<string, string[]>) {
   const getTableInfo = jest.fn(async (_uri: string, database: string, table: string, schema?: string) => {
@@ -71,5 +73,38 @@ describe("resolveColumnIdentityWithMetadata", () => {
       .resolves.toEqual({ database: "SHOP", schema: "SALES", relation: "CUSTOMERS", column: "CUSTOMER_ID", via: "origin" });
     await expect(resolveColumnCatalogTargetWithMetadata(document, text.indexOf("WITH"), metadata, context))
       .resolves.toBeUndefined();
+  });
+
+  it("reuses the parse session CST only for an error-free Netezza parse", async () => {
+    const session = new DocumentParseSession();
+    const text = "WITH X AS (SELECT CUSTOMER_ID AS CID FROM SALES.CUSTOMERS) SELECT X.CID FROM X";
+    const document = TextDocument.create("file:///g.sql", "sql", 1, text);
+    const parse = columnParseFromSession(session, document, "netezza");
+    expect(parse?.cst).toBeDefined();
+    // A second request for the same version reuses the cached session parse.
+    const before = session.getParseCacheStats().hits;
+    expect(columnParseFromSession(session, document, "netezza")?.cst).toBe(parse?.cst);
+    expect(session.getParseCacheStats().hits).toBe(before + 1);
+
+    const metadata = bridge({ CUSTOMERS: ["CUSTOMER_ID"] });
+    const context = { databaseKind: "netezza" as const, effectiveDatabase: "SHOP" };
+    const offset = text.lastIndexOf("CID");
+    expect(await resolveColumnIdentityWithMetadata(document, offset, metadata, context, () => false, parse))
+      .toEqual(await resolveColumnIdentityWithMetadata(document, offset, metadata, context));
+
+    const incomplete = TextDocument.create("file:///h.sql", "sql", 1, "SELECT C.CUSTOMER_ID,\nFROM SALES.CUSTOMERS C");
+    expect(columnParseFromSession(session, incomplete, "netezza")).toBeUndefined();
+    expect(columnParseFromSession(session, document, "postgresql" as never)).toBeUndefined();
+  });
+
+  it("keeps recovery for incomplete SQL when the session has no clean CST", async () => {
+    const session = new DocumentParseSession();
+    const text = "SELECT C.CUSTOMER_ID,\nFROM SALES.CUSTOMERS C\nWHERE C.CUSTOMER_ID > 0";
+    const document = TextDocument.create("file:///i.sql", "sql", 1, text);
+    const identity = await resolveColumnIdentityWithMetadata(
+      document, text.lastIndexOf("CUSTOMER_ID"), bridge({ CUSTOMERS: ["CUSTOMER_ID"] }),
+      { databaseKind: "netezza", effectiveDatabase: "SHOP" }, () => false,
+      columnParseFromSession(session, document, "netezza"));
+    expect(identity?.occurrences).toHaveLength(2);
   });
 });

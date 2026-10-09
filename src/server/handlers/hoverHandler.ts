@@ -14,7 +14,7 @@ import type { MetadataBridge } from "../metadataBridge";
 import { toDocumentParseRequest } from "../documentParseRequest";
 import { runWithRequestBoundary } from "../requestBoundary";
 import { resolveSqlRenameSymbolFromSession } from "../parseSessionUtils";
-import { resolveColumnIdentityWithMetadata } from "./symbolHandlers";
+import { columnParseFromSession, resolveColumnIdentityWithMetadata } from "./symbolHandlers";
 
 const HOVER_REQUEST_BUDGET_MS = 1000;
 const HOVER_SLOW_LOG_MS = 150;
@@ -26,6 +26,67 @@ export interface HoverHandlerDeps {
   documentParseSession: DocumentParseSession;
 }
 
+/** The hover dependencies the LSP uses for one document, backed by its parse session. */
+export function createLspHoverDependencies(
+  document: TextDocument,
+  documentParseSession: DocumentParseSession,
+  metadataBridge: MetadataBridge,
+  isCancellationRequested: () => boolean,
+): HoverDependencies {
+  return {
+    resolveSqlRenameSymbol: (_sql, offset, databaseKind) =>
+      resolveSqlRenameSymbolFromSession(
+        documentParseSession,
+        document,
+        offset,
+        databaseKind,
+      ),
+    getStatementAtPosition: (sql, offset) =>
+      SqlParser.getStatementAtPosition(sql, offset, {
+        documentId: document.uri,
+        version: document.version,
+      }),
+    getAliasBindings: (statementSql, statementOffset, databaseKind) =>
+      getSessionAliasBindings(
+        documentParseSession,
+        document,
+        statementSql,
+        statementOffset,
+        databaseKind,
+      ),
+    getCompletionLocalDefinitions: (
+      fullSql,
+      statementSql,
+      statementOffset,
+      databaseKind,
+      cursorOffset,
+    ) =>
+      getSessionCompletionLocalDefinitions(
+        documentParseSession,
+        document,
+        fullSql,
+        statementSql,
+        statementOffset,
+        databaseKind,
+        cursorOffset,
+      ),
+    findLocalDefinition,
+    formatObjectPath,
+    isCancellationRequested,
+    resolveColumnIdentity: async (offset) => {
+      const context = await metadataBridge.getContext(document.uri);
+      return resolveColumnIdentityWithMetadata(
+        document,
+        offset,
+        metadataBridge,
+        context,
+        isCancellationRequested,
+        columnParseFromSession(documentParseSession, document, context.databaseKind),
+      );
+    },
+  };
+}
+
 export function registerHoverHandler(deps: HoverHandlerDeps): void {
   const { connection, documents, metadataBridge, documentParseSession } = deps;
 
@@ -35,55 +96,12 @@ export function registerHoverHandler(deps: HoverHandlerDeps): void {
       return null;
     }
 
-    const hoverDeps: HoverDependencies = {
-      resolveSqlRenameSymbol: (_sql, offset, databaseKind) =>
-        resolveSqlRenameSymbolFromSession(
-          documentParseSession,
-          document,
-          offset,
-          databaseKind,
-        ),
-      getStatementAtPosition: (sql, offset) =>
-        SqlParser.getStatementAtPosition(sql, offset, {
-          documentId: document.uri,
-          version: document.version,
-        }),
-      getAliasBindings: (statementSql, statementOffset, databaseKind) =>
-        getSessionAliasBindings(
-          documentParseSession,
-          document,
-          statementSql,
-          statementOffset,
-          databaseKind,
-        ),
-      getCompletionLocalDefinitions: (
-        fullSql,
-        statementSql,
-        statementOffset,
-        databaseKind,
-        cursorOffset,
-      ) =>
-        getSessionCompletionLocalDefinitions(
-          documentParseSession,
-          document,
-          fullSql,
-          statementSql,
-          statementOffset,
-          databaseKind,
-          cursorOffset,
-        ),
-      findLocalDefinition,
-      formatObjectPath,
-      isCancellationRequested: () => token.isCancellationRequested,
-      resolveColumnIdentity: async (offset) =>
-        resolveColumnIdentityWithMetadata(
-          document,
-          offset,
-          metadataBridge,
-          await metadataBridge.getContext(document.uri),
-          () => token.isCancellationRequested,
-        ),
-    };
+    const hoverDeps = createLspHoverDependencies(
+      document,
+      documentParseSession,
+      metadataBridge,
+      () => token.isCancellationRequested,
+    );
 
     if (token.isCancellationRequested) {
       return null;
