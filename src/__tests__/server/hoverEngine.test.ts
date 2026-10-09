@@ -95,6 +95,57 @@ function aliasBindings(
 }
 
 describe("LSP hoverEngine — regression guard", () => {
+  describe("column hover from column identity", () => {
+    const identity = {
+      name: "CID",
+      status: "resolved" as const,
+      relationKind: "cte" as const,
+      relation: "X",
+      definition: { startOffset: 33, endOffset: 36, isDefinition: true },
+      origin: { database: "JUST_DATA", schema: "SALES", relation: "CUSTOMERS", column: "CUSTOMER_ID", type: "INTEGER" },
+      candidates: [],
+      occurrences: [],
+    };
+
+    it("shows relation, origin and type from the same identity as navigation", async () => {
+      const sql = "WITH X AS (SELECT CUSTOMER_ID AS CID FROM JUST_DATA.SALES.CUSTOMERS) SELECT X.CID FROM X";
+      const resolveColumnIdentity = jest.fn(async () => identity);
+      const getTableInfo = jest.fn(() => Promise.resolve({
+        exists: true, table: "CUSTOMERS", database: "JUST_DATA", schema: "SALES",
+        columns: [{ name: "CUSTOMER_ID", type: "INTEGER", description: "Customer key" }],
+      }));
+      const hover = await provideHover(makeDocument(sql), { position: makePosition(0, 80) },
+        makeDeps({ resolveColumnIdentity }), makeBridge({ getTableInfo }));
+      const markdown = getMarkdown(hover);
+      expect(markdown).toContain("**column** `CID`");
+      expect(markdown).toContain("CTE: `X`");
+      expect(markdown).toContain("origin: `JUST_DATA.SALES.CUSTOMERS.CUSTOMER_ID`");
+      expect(markdown).toContain("type: `INTEGER`");
+      expect(markdown).toContain("Description: Customer key");
+      expect(getTableInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it("omits origin and type that cannot be proven", async () => {
+      const computed = { ...identity, name: "NEXT_ID", origin: undefined };
+      const getTableInfo = jest.fn();
+      const hover = await provideHover(makeDocument("WITH X AS (SELECT 1 AS NEXT_ID) SELECT X.NEXT_ID FROM X"),
+        { position: makePosition(0, 42) }, makeDeps({ resolveColumnIdentity: jest.fn(async () => computed) }),
+        makeBridge({ getTableInfo }));
+      const markdown = getMarkdown(hover) ?? "";
+      expect(markdown).toContain("CTE: `X`");
+      expect(markdown).not.toContain("origin:");
+      expect(markdown).not.toContain("type:");
+      expect(getTableInfo).not.toHaveBeenCalled();
+    });
+
+    it("lists candidates for an ambiguous column instead of choosing one", async () => {
+      const ambiguous = { name: "CUSTOMER_ID", status: "ambiguous" as const, candidates: ["CUSTOMERS", "ORDERS"], occurrences: [] };
+      const hover = await provideHover(makeDocument("SELECT CUSTOMER_ID FROM A JOIN B ON 1=1"),
+        { position: makePosition(0, 9) }, makeDeps({ resolveColumnIdentity: jest.fn(async () => ambiguous) }), makeBridge());
+      expect(getMarkdown(hover)).toContain("ambiguous: `CUSTOMERS`, `ORDERS`");
+    });
+  });
+
   it("shows production function signature hover", async () => {
     const hover = await provideHover(makeDocument("SELECT COUNT(id) FROM t"), { position: makePosition(0, 9) }, makeDeps(), makeBridge());
     expect(getMarkdown(hover)).toContain("COUNT(expression)");

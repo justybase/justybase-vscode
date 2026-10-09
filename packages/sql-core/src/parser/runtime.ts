@@ -1,9 +1,9 @@
-import type { CstNode, IRecognitionException } from "chevrotain";
+import { createTokenInstance, EOF, type CstNode, type IRecognitionException, type IToken } from "chevrotain";
 import {
   createSqlParserInstance,
   getSqlParserInstance,
 } from "../netezza/parser";
-import { SqlLexer } from "../netezza/lexer";
+import { Identifier, SqlLexer } from "../netezza/lexer";
 
 export type NetezzaSqlLexResult = ReturnType<typeof SqlLexer.tokenize>;
 
@@ -485,4 +485,58 @@ export function parseNetezzaSqlStatements(
     usedIsolatedParser,
     macroReferenceRanges: sanitizedMacroSyntax.macroReferenceRanges,
   };
+}
+
+/** Upper bound on placeholder repairs for one authoring recovery parse. */
+const AUTHORING_RECOVERY_MAX_REPAIRS = 4;
+
+/** True for the zero-width identifier inserted by {@link parseNetezzaSqlForAuthoringRecovery}. */
+export function isAuthoringRecoveryPlaceholder(token: IToken): boolean {
+  return token.image === "" && token.tokenType === Identifier;
+}
+
+/**
+ * Authoring-only CST for temporarily incomplete SQL, built by the same
+ * parser. When the document does not parse, a zero-width identifier
+ * placeholder is inserted into the token stream where the parser reported
+ * the first error (a missing select item, alias, operand or column after a
+ * qualifier) and the tokens are parsed again, at most a few times. Offsets of
+ * real tokens are unchanged; placeholders have an empty image so consumers can
+ * skip them. Diagnostics must keep using {@link parseNetezzaSqlStatements}:
+ * this never makes invalid SQL valid. Returns undefined when no bounded repair
+ * yields a CST.
+ */
+export function parseNetezzaSqlForAuthoringRecovery(sql: string): CstNode | undefined {
+  const lexResult = SqlLexer.tokenize(sanitizeSqlMacroSyntaxWithMetadata(sql).sql);
+  if (lexResult.errors.length > 0) return undefined;
+  const tokens = [...lexResult.tokens];
+  let lastInsertion = -1;
+  for (let repairs = 0; repairs <= AUTHORING_RECOVERY_MAX_REPAIRS; repairs++) {
+    activeParserSessions += 1;
+    let cst: CstNode | undefined;
+    let errors: IRecognitionException[];
+    try {
+      const parser = activeParserSessions > 1 ? createSqlParserInstance() : getSqlParserInstance();
+      parser.input = tokens;
+      parser.errors = [];
+      cst = parser.statements();
+      errors = [...parser.errors];
+    } finally {
+      activeParserSessions -= 1;
+    }
+    if (errors.length === 0) return cst;
+    const failed = errors[0].token;
+    // The end-of-input token reports a negative offset.
+    const index = failed.tokenType !== EOF && failed.startOffset >= 0
+      ? tokens.findIndex((token) => token.startOffset >= failed.startOffset)
+      : tokens.length;
+    const insertion = index < 0 ? tokens.length : index;
+    if (insertion <= lastInsertion) return undefined;
+    lastInsertion = insertion;
+    const offset = insertion < tokens.length
+      ? tokens[insertion].startOffset
+      : tokens.length > 0 ? (tokens[tokens.length - 1].endOffset ?? 0) + 1 : 0;
+    tokens.splice(insertion, 0, createTokenInstance(Identifier, "", offset, offset - 1, NaN, NaN, NaN, NaN));
+  }
+  return undefined;
 }

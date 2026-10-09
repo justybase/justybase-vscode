@@ -1,12 +1,15 @@
 import { TextDocument } from "vscode-languageserver-textdocument";
 jest.unmock("chevrotain");
-import { resolveColumnIdentityWithMetadata } from "../../server/handlers/symbolHandlers";
+import {
+  resolveColumnCatalogTargetWithMetadata,
+  resolveColumnIdentityWithMetadata,
+} from "../../server/handlers/symbolHandlers";
 
 function bridge(tables: Record<string, string[]>) {
   const getTableInfo = jest.fn(async (_uri: string, database: string, table: string, schema?: string) => {
     const columns = tables[table.toUpperCase()];
     return columns
-      ? { exists: true, table: table.toUpperCase(), database, schema, columns: columns.map(name => ({ name })) }
+      ? { exists: true, table: table.toUpperCase(), database, schema, columns: columns.map(name => ({ name, type: name.endsWith("_ID") ? "INTEGER" : undefined })) }
       : undefined;
   });
   return { getTableInfo } as unknown as Parameters<typeof resolveColumnIdentityWithMetadata>[2] & { getTableInfo: jest.Mock };
@@ -20,7 +23,7 @@ describe("resolveColumnIdentityWithMetadata", () => {
     const metadata = bridge({ CUSTOMERS: ["CUSTOMER_ID"], ORDERS: ["ORDER_ID", "CUSTOMER_ID"], OTHER: ["X"] });
     const identity = await resolveColumnIdentityWithMetadata(
       document, sql.indexOf("CUSTOMER_ID"), metadata, { databaseKind: "netezza", effectiveDatabase: "SHOP" });
-    expect(identity?.catalog).toEqual({ database: "SHOP", schema: "SALES", relation: "CUSTOMERS", column: "CUSTOMER_ID" });
+    expect(identity?.catalog).toEqual({ database: "SHOP", schema: "SALES", relation: "CUSTOMERS", column: "CUSTOMER_ID", type: "INTEGER" });
     const requested = metadata.getTableInfo.mock.calls.map(call => call[2]).sort();
     expect(requested).toEqual(["CUSTOMERS", "ORDERS"]);
   });
@@ -49,5 +52,24 @@ describe("resolveColumnIdentityWithMetadata", () => {
       document, text.indexOf("CUSTOMER_ID"), metadata, { databaseKind: "netezza", effectiveDatabase: "SHOP" });
     expect(identity?.occurrences).toHaveLength(501);
     expect(metadata.getTableInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the metadata type to the physical origin of a local projection", async () => {
+    const text = "WITH X AS (SELECT CUSTOMER_ID AS CID FROM SALES.CUSTOMERS) SELECT X.CID FROM X";
+    const document = TextDocument.create("file:///e.sql", "sql", 1, text);
+    const identity = await resolveColumnIdentityWithMetadata(
+      document, text.lastIndexOf("CID"), bridge({ CUSTOMERS: ["CUSTOMER_ID"] }), { databaseKind: "netezza", effectiveDatabase: "SHOP" });
+    expect(identity?.origin).toEqual({ database: "SHOP", schema: "SALES", relation: "CUSTOMERS", column: "CUSTOMER_ID", type: "INTEGER" });
+  });
+
+  it("exposes a catalog target for physical navigation without a document range", async () => {
+    const text = "WITH X AS (SELECT CUSTOMER_ID AS CID FROM SALES.CUSTOMERS) SELECT X.CID FROM X";
+    const document = TextDocument.create("file:///f.sql", "sql", 1, text);
+    const metadata = bridge({ CUSTOMERS: ["CUSTOMER_ID"] });
+    const context = { databaseKind: "netezza" as const, effectiveDatabase: "SHOP" };
+    await expect(resolveColumnCatalogTargetWithMetadata(document, text.lastIndexOf("CID"), metadata, context))
+      .resolves.toEqual({ database: "SHOP", schema: "SALES", relation: "CUSTOMERS", column: "CUSTOMER_ID", via: "origin" });
+    await expect(resolveColumnCatalogTargetWithMetadata(document, text.indexOf("WITH"), metadata, context))
+      .resolves.toBeUndefined();
   });
 });

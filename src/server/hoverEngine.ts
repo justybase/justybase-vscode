@@ -7,6 +7,11 @@ import {
 } from "vscode-languageserver/node";
 import type { MetadataBridge } from "./metadataBridge";
 import type { AliasInfo } from "../providers/types";
+import type { SqlColumnIdentity } from "@justybase/sql-core/validation/columnIdentity";
+import {
+  describeSqlColumnForHover,
+  type SqlColumnHoverInfo,
+} from "@justybase/sql-core/validation/columnAuthoring";
 
 function getUniqueAliasTableBindings(
   aliasBindings: Map<string, AliasInfo>,
@@ -35,6 +40,43 @@ function appendColumnDescriptionLine(
   const truncated =
     trimmed.length > 500 ? trimmed.substring(0, 500) + "…" : trimmed;
   markdownLines.push("", `Description: ${truncated}`);
+}
+
+const COLUMN_RELATION_LABELS: Record<string, string> = {
+  table: "table",
+  cte: "CTE",
+  derived_table: "derived table",
+  script_local_table: "script table",
+  output_alias: "output alias",
+};
+
+function catalogPath(column: { database: string | null; schema: string | null; relation: string; column: string }): string {
+  return [column.database, column.schema, column.relation, column.column]
+    .filter((part): part is string => !!part)
+    .join(".");
+}
+
+/** Column hover from the same identity that drives Definition and References. */
+function formatColumnHover(info: SqlColumnHoverInfo, description?: string): string {
+  const lines = [`**column** \`${info.name}\``];
+  if (info.status === "ambiguous") {
+    lines.push(`ambiguous: ${info.candidates.map((candidate) => `\`${candidate}\``).join(", ")}`);
+    return lines.join("\n");
+  }
+  const label = info.relationKind ? COLUMN_RELATION_LABELS[info.relationKind] : undefined;
+  if (label && info.relation) {
+    lines.push(`${label}: \`${info.relation}\``);
+  } else if (label) {
+    lines.push(label);
+  }
+  if (info.origin) {
+    lines.push(`origin: \`${catalogPath(info.origin)}\``);
+  }
+  if (info.type) {
+    lines.push(`type: \`${info.type}\``);
+  }
+  appendColumnDescriptionLine(lines, description);
+  return lines.join("\n");
 }
 
 export interface HoverDependencies {
@@ -69,6 +111,8 @@ export interface HoverDependencies {
     tableName: string,
   ) => string;
   isCancellationRequested: () => boolean;
+  /** Column identity at the offset with referenced-table metadata; omitted where unsupported. */
+  resolveColumnIdentity?: (offset: number) => Promise<SqlColumnIdentity | undefined>;
 }
 
 export async function provideHoverWithTarget(
@@ -76,7 +120,7 @@ export async function provideHoverWithTarget(
   params: { position: Position },
   deps: HoverDependencies,
   metadataBridge: MetadataBridge,
-): Promise<(Hover & { targetKind: string }) | null> {
+): Promise<(Hover & { targetKind: string; column?: SqlColumnHoverInfo }) | null> {
   if (deps.isCancellationRequested()) {
     return null;
   }
@@ -227,6 +271,36 @@ export async function provideHoverWithTarget(
         kind: MarkupKind.Markdown,
         value: markdownLines.join("\n"),
       },
+    };
+  }
+
+  // Columns: the semantic identity, never a spelling guess. Unresolved
+  // references keep the metadata hover below.
+  const column = await deps.resolveColumnIdentity?.(offset);
+  if (deps.isCancellationRequested()) {
+    return null;
+  }
+  if (column && column.status !== "unresolved") {
+    const info = describeSqlColumnForHover(column);
+    let description: string | undefined;
+    const originDatabase = info.origin?.database ?? effectiveDatabase;
+    if (info.origin && originDatabase) {
+      const tableInfo = await metadataBridge.getTableInfo(
+        document.uri,
+        originDatabase,
+        info.origin.relation,
+        info.origin.schema ?? undefined,
+      );
+      if (deps.isCancellationRequested()) {
+        return null;
+      }
+      const originColumn = info.origin.column.toUpperCase();
+      description = tableInfo?.columns.find((candidate) => candidate.name.toUpperCase() === originColumn)?.description;
+    }
+    return {
+      targetKind: "column",
+      column: info,
+      contents: { kind: MarkupKind.Markdown, value: formatColumnHover(info, description) },
     };
   }
 
@@ -565,6 +639,5 @@ export async function provideHover(
 ): Promise<Hover | null> {
   const result = await provideHoverWithTarget(document, params, deps, metadataBridge);
   if (!result) return null;
-  const { targetKind: _targetKind, ...hover } = result;
-  return hover;
+  return result.range ? { contents: result.contents, range: result.range } : { contents: result.contents };
 }

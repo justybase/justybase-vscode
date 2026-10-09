@@ -20,6 +20,8 @@ import {
 import { getLogger } from "../utils/logger";
 import { SQL_AUTHORING_LANGUAGE_IDS } from "../utils/sqlLanguage";
 import {
+  NETEZZA_COLUMN_CATALOG_TARGET_REQUEST,
+  type ColumnCatalogTargetResponse,
   NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION,
   NETEZZA_GET_METADATA_REQUEST,
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
@@ -43,6 +45,7 @@ import { computeJoinTargetCandidates } from "../server/joinTargetMatcher";
 import { normalizeJoinCompletionSettings } from "../lsp/joinCompletionSettings";
 
 interface LanguageClientLike {
+  sendRequest?(method: string, params: unknown): Promise<unknown>;
   onRequest(
     method: string,
     handler: (params: MetadataRequestParams) => Promise<MetadataResponse>,
@@ -136,6 +139,30 @@ function sendNotificationSafely(
   } catch {
     // Client is stopped or in a failed state; the extension host re-syncs
     // context once the language server is reachable again.
+  }
+}
+
+/**
+ * The catalog column (database, schema, relation, column) the SQL column at
+ * `position` resolves to, from the language server's column identity.
+ * Undefined when the server is not ready or the position has no physical
+ * column; physical columns never get a document location.
+ */
+export async function requestSqlColumnCatalogTarget(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): Promise<ColumnCatalogTargetResponse | undefined> {
+  if (!sqlLanguageClient?.sendRequest || !isSqlLanguageClientReadyForDocument(document)) {
+    return undefined;
+  }
+  try {
+    const target = (await sqlLanguageClient.sendRequest(NETEZZA_COLUMN_CATALOG_TARGET_REQUEST, {
+      textDocument: { uri: document.uri.toString() },
+      position: { line: position.line, character: position.character },
+    })) as ColumnCatalogTargetResponse;
+    return target ?? undefined;
+  } catch {
+    return undefined;
   }
 }
 

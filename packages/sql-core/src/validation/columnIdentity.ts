@@ -1,6 +1,6 @@
 import type { CstNode, IToken } from 'chevrotain'
 import { isCstNode, isToken } from './referenceTokenCollector'
-import { parseNetezzaSqlStatements, type NetezzaSqlParseResult } from '../parser/runtime'
+import { parseNetezzaSqlForAuthoringRecovery, type NetezzaSqlParseResult } from '../parser/runtime'
 
 /**
  * Column semantic identity for editor navigation.
@@ -17,6 +17,9 @@ import { parseNetezzaSqlStatements, type NetezzaSqlParseResult } from '../parser
  * - CTE, derived-table and script-local CTAS projections and `*` expansions
  *   get local document definitions and keep the physical origin of plain
  *   column references.
+ *
+ * Temporarily incomplete SQL is resolved from the authoring recovery CST of
+ * the same parser; its zero-width placeholders never become occurrences.
  */
 export type SqlColumnResolutionStatus = 'resolved' | 'ambiguous' | 'unresolved'
 export type SqlColumnRelationKind = 'table' | 'cte' | 'derived_table' | 'script_local_table' | 'output_alias'
@@ -26,6 +29,8 @@ export interface SqlCatalogColumn {
     schema: string | null
     relation: string
     column: string
+    /** Metadata data type; absent when metadata does not know it. */
+    type?: string
 }
 
 /** Half-open UTF-16 offsets. */
@@ -56,6 +61,8 @@ export interface SqlColumnCatalogTable {
     name: string
     /** Column names; an empty list means the columns are unknown. */
     columns: string[]
+    /** Metadata data types aligned with `columns`; entries may be absent. */
+    columnTypes?: ReadonlyArray<string | undefined>
 }
 
 /** Synchronous metadata lookup supplied by the host; return undefined when unknown. */
@@ -105,6 +112,7 @@ interface Relation {
     local?: Array<Projected | undefined>
     physical?: { database: string | null; schema: string | null; table: string }
     physicalColumns?: string[]
+    physicalTypes?: ReadonlyArray<string | undefined>
 }
 
 class Frame {
@@ -188,7 +196,8 @@ class ColumnIdentityCollector {
         return childNodes(list, 'identifier')
             .map(identifier => tokensOf(identifier)[0])
             .filter((token): token is IToken => token !== undefined)
-            .map((token, position) => {
+            .map((token, position): Projected | undefined => {
+                if (token.image === '') return undefined
                 const norm = normalizeToken(token)
                 return {
                     name: unquote(token.image),
@@ -221,8 +230,10 @@ class ColumnIdentityCollector {
         const selectList = selectClause ? childNodes(selectClause, 'selectList')[0] : undefined
         if (selectList) {
             for (const item of orderedChildNodes(selectList)) {
-                if (item.name === 'starExpression') {
-                    projection.push(...this.expandStar(item, frame))
+                // The grammar nests `*` and `T.*` inside a select item.
+                const star = item.name === 'starExpression' ? item : childNodes(item, 'starExpression')[0]
+                if (star) {
+                    projection.push(...this.expandStar(star, frame))
                 } else if (item.name === 'selectItem') {
                     projection.push(this.projectItem(item, frame))
                 } else {
@@ -268,7 +279,7 @@ class ColumnIdentityCollector {
         const tableName = childNodes(source, 'tableName')[0]
         const parts = identifierTokens(tableName ? childNodes(tableName, 'qualifiedName')[0] ?? tableName : undefined)
         const nameToken = parts[parts.length - 1]
-        if (!nameToken) {
+        if (!nameToken || nameToken.image === '') {
             frame.sources.push({ name: alias ? unquote(alias.image) : '', exposed: alias ? normalizeToken(alias) : '', kind: 'table', physical: { database: null, schema: null, table: '' } })
             return
         }
@@ -301,6 +312,7 @@ class ColumnIdentityCollector {
                 table: entry?.name ?? table,
             },
             physicalColumns: entry && entry.columns.length > 0 ? entry.columns : undefined,
+            physicalTypes: entry && entry.columns.length > 0 ? entry.columnTypes : undefined,
         })
     }
 
@@ -328,7 +340,7 @@ class ColumnIdentityCollector {
             .filter((token): token is IToken => token !== undefined)
             .sort((left, right) => left.startOffset - right.startOffset)
         const nameToken = parts[parts.length - 1]
-        if (!nameToken) return undefined
+        if (!nameToken || nameToken.image === '') return undefined
         const name = unquote(nameToken.image)
         const norm = normalizeToken(nameToken)
         const start = nameToken.startOffset
@@ -372,13 +384,16 @@ class ColumnIdentityCollector {
     private resolveIn(relation: Relation, norm: string, name: string): string | undefined {
         if (relation.physical) {
             let columnName = name
+            let type: string | undefined
             if (relation.physicalColumns) {
-                const match = relation.physicalColumns.find(column => column.toUpperCase() === norm)
-                if (match === undefined) return undefined
-                columnName = match
+                const index = relation.physicalColumns.findIndex(column => column.toUpperCase() === norm)
+                if (index < 0) return undefined
+                columnName = relation.physicalColumns[index]
+                type = relation.physicalTypes?.[index]
             }
             const catalog: SqlCatalogColumn = { ...relation.physical, relation: relation.physical.table, column: columnName }
             delete (catalog as { table?: string }).table
+            if (type) catalog.type = type
             const key = physicalKey(catalog)
             if (!this.identities.has(key))
                 this.identities.set(key, { name: columnName, status: 'resolved', relationKind: 'table', relation: relation.physical.table, catalog, candidates: [] })
@@ -393,6 +408,7 @@ class ColumnIdentityCollector {
         const info = key ? this.identities.get(key) : undefined
         const origin = info ? info.catalog ?? info.origin : undefined
         const alias = aliasToken(childNodes(item, 'aliasOptional')[0])
+        if (alias?.image === '') return undefined
         if (alias) {
             const norm = normalizeToken(alias)
             const projected: Projected = {
@@ -415,7 +431,7 @@ class ColumnIdentityCollector {
         const parts = childNodes(reference, 'netezzaRelaxedName').map(part => tokensOf(part)[0]).filter((token): token is IToken => token !== undefined)
             .sort((left, right) => left.startOffset - right.startOffset)
         const nameToken = parts[parts.length - 1]
-        if (!nameToken) return undefined
+        if (!nameToken || nameToken.image === '') return undefined
         const norm = normalizeToken(nameToken)
         return {
             name: unquote(nameToken.image), norm, key: localKey(nameToken.startOffset, norm),
@@ -436,12 +452,12 @@ class ColumnIdentityCollector {
         for (const relation of frame.sources) {
             if (qualifier && relation.exposed !== qualifier) continue
             if (relation.physical) {
-                for (const column of relation.physicalColumns ?? []) {
+                const types = relation.physicalTypes
+                for (const [index, column] of (relation.physicalColumns ?? []).entries()) {
                     const norm = column.toUpperCase()
-                    projection.push({
-                        name: column, norm, key: `L|${start}|${relation.exposed}|${norm}`, start, end,
-                        origin: { database: relation.physical.database, schema: relation.physical.schema, relation: relation.physical.table, column },
-                    })
+                    const origin: SqlCatalogColumn = { database: relation.physical.database, schema: relation.physical.schema, relation: relation.physical.table, column }
+                    if (types?.[index]) origin.type = types[index]
+                    projection.push({ name: column, norm, key: `L|${start}|${relation.exposed}|${norm}`, start, end, origin })
                 }
                 continue
             }
@@ -579,20 +595,131 @@ function physicalKey(column: SqlCatalogColumn): string {
     return ['P', column.database ?? '', column.schema ?? '', column.relation, column.column].map(part => part.toUpperCase()).join('|')
 }
 
-function collect(sql: string, lookup: SqlColumnCatalogLookup | undefined, parseResult?: Pick<NetezzaSqlParseResult, 'cst'>): ColumnIdentityCollector | undefined {
-    const cst = parseResult?.cst ?? parseNetezzaSqlStatements({ sql }).cst
+function collect(sql: string, lookup: SqlColumnCatalogLookup | undefined, parseResult?: Pick<NetezzaSqlParseResult, 'cst'>): { collector: ColumnIdentityCollector; cst: CstNode } | undefined {
+    const cst = parseResult?.cst ?? parseNetezzaSqlForAuthoringRecovery(sql)
     if (!cst) return undefined
     const collector = new ColumnIdentityCollector(lookup)
     collector.collect(cst)
-    return collector
+    return { collector, cst }
 }
 
 /** Physical tables referenced by the document, so hosts can prefetch metadata. */
 export function collectSqlPhysicalTableReferences(sql: string, parseResult?: Pick<NetezzaSqlParseResult, 'cst'>): SqlPhysicalTableReference[] {
-    try {
-        return collect(sql, undefined, parseResult)?.physicalTables ?? []
-    } catch {
-        return []
+    return SqlColumnIdentityAnalysis.analyze(sql, undefined, parseResult)?.physicalTables ?? []
+}
+
+/**
+ * Column identities of one document text. Built once, it answers any number
+ * of offsets for Definition, References, Hover, catalog targets and Rename
+ * without parsing again; it is immutable and owned by the caller.
+ */
+export class SqlColumnIdentityAnalysis {
+    private constructor(private readonly collector: ColumnIdentityCollector, private readonly cst: CstNode) {}
+
+    /** Undefined when the text cannot be analyzed, even through authoring recovery. */
+    static analyze(
+        sql: string,
+        lookup?: SqlColumnCatalogLookup,
+        parseResult?: Pick<NetezzaSqlParseResult, 'cst'>,
+    ): SqlColumnIdentityAnalysis | undefined {
+        try {
+            const collected = collect(sql, lookup, parseResult)
+            return collected ? new SqlColumnIdentityAnalysis(collected.collector, collected.cst) : undefined
+        } catch {
+            // Authoring must stay available while SQL is incomplete.
+            return undefined
+        }
+    }
+
+    get physicalTables(): SqlPhysicalTableReference[] {
+        return this.collector.physicalTables
+    }
+
+    /**
+     * The (possibly recovered) parse this analysis read, so the same text can
+     * be resolved again with metadata without parsing it again.
+     */
+    get parseResult(): Pick<NetezzaSqlParseResult, 'cst'> {
+        return { cst: this.cst }
+    }
+
+    /** The identity at a UTF-16 `offset`; undefined when the offset is not on a column. */
+    identityAt(offset: number): SqlColumnIdentity | undefined {
+        const key = this.keyAt(offset)
+        return key === undefined ? undefined : this.identity(key)
+    }
+
+    /** Identity key at an offset, for {@link identity} and rename planning. */
+    keyAt(offset: number): string | undefined {
+        // A projection like `SELECT ID FROM T` is both a reference and a
+        // definition; the reference wins. Among definitions, a relation column
+        // wins over the output-alias view of the same alias.
+        const rank = (occurrence: Occurrence) => (occurrence.isDefinition ? 2 : 0) + (occurrence.key.startsWith('O|') ? 1 : 0)
+        const occurrences = this.collector.occurrences
+        const occurrence = occurrences
+            .filter(candidate => candidate.start <= offset && offset < candidate.end)
+            .sort((left, right) => rank(left) - rank(right))[0]
+            ?? occurrences.filter(candidate => candidate.end === offset).sort((left, right) => rank(left) - rank(right))[0]
+        return occurrence && this.collector.identities.has(occurrence.key) ? occurrence.key : undefined
+    }
+
+    identity(key: string): SqlColumnIdentity | undefined {
+        const info = this.collector.identities.get(key)
+        if (!info) return undefined
+        return {
+            name: info.name,
+            status: info.status,
+            relationKind: info.relationKind,
+            relation: info.relation,
+            definition: info.definition ? { startOffset: info.definition[0], endOffset: info.definition[1], isDefinition: true } : undefined,
+            catalog: info.catalog,
+            origin: info.origin,
+            candidates: info.candidates,
+            occurrences: this.occurrencesOf(key),
+        }
+    }
+
+    /**
+     * True when another identity also occurs at exactly [start, end): as a
+     * reference, or as a definition other than the output-alias view of the
+     * same alias token.
+     */
+    hasOtherOccurrenceAt(key: string, startOffset: number, endOffset: number): boolean {
+        return this.collector.occurrences.some(occurrence => occurrence.key !== key
+            && occurrence.start === startOffset && occurrence.end === endOffset
+            && (!occurrence.isDefinition || !occurrence.key.startsWith('O|')))
+    }
+
+    /**
+     * Identity partition of every column occurrence: one signature per
+     * identity with its status and occurrence ranges mapped by `mapRange`.
+     * Two texts resolve their columns the same way when their partitions match.
+     */
+    partition(mapRange: (startOffset: number, endOffset: number) => [number, number] = (start, end) => [start, end]): string[] {
+        const groups = new Map<string, Set<string>>()
+        for (const occurrence of this.collector.occurrences) {
+            const [start, end] = mapRange(occurrence.start, occurrence.end)
+            let group = groups.get(occurrence.key)
+            if (!group) groups.set(occurrence.key, group = new Set())
+            group.add(`${start}:${end}:${occurrence.isDefinition ? 'd' : 'r'}`)
+        }
+        return [...groups.entries()]
+            .map(([key, ranges]) => `${this.collector.identities.get(key)?.status ?? '?'}|${[...ranges].sort().join(',')}`)
+            .sort()
+    }
+
+    private occurrencesOf(key: string): SqlColumnOccurrence[] {
+        const seen = new Set<string>()
+        return this.collector.occurrences
+            .filter(candidate => candidate.key === key)
+            .sort((left, right) => left.start - right.start || Number(left.isDefinition) - Number(right.isDefinition))
+            .filter(candidate => {
+                const id = `${candidate.start}:${candidate.end}:${candidate.isDefinition}`
+                if (seen.has(id)) return false
+                seen.add(id)
+                return true
+            })
+            .map(candidate => ({ startOffset: candidate.start, endOffset: candidate.end, isDefinition: candidate.isDefinition }))
     }
 }
 
@@ -603,45 +730,5 @@ export function resolveSqlColumnIdentity(
     lookup?: SqlColumnCatalogLookup,
     parseResult?: Pick<NetezzaSqlParseResult, 'cst'>,
 ): SqlColumnIdentity | undefined {
-    let collector: ColumnIdentityCollector | undefined
-    try {
-        collector = collect(sql, lookup, parseResult)
-    } catch {
-        // Authoring must stay available while SQL is incomplete.
-        return undefined
-    }
-    if (!collector) return undefined
-    // A projection like `SELECT ID FROM T` is both a reference and a definition;
-    // the reference wins. Among definitions, a relation column wins over the
-    // output-alias view of the same alias.
-    const rank = (occurrence: Occurrence) => (occurrence.isDefinition ? 2 : 0) + (occurrence.key.startsWith('O|') ? 1 : 0)
-    const occurrence = collector.occurrences
-        .filter(candidate => candidate.start <= offset && offset < candidate.end)
-        .sort((left, right) => rank(left) - rank(right))[0]
-        ?? collector.occurrences.filter(candidate => candidate.end === offset).sort((left, right) => rank(left) - rank(right))[0]
-    if (!occurrence) return undefined
-    const info = collector.identities.get(occurrence.key)
-    if (!info) return undefined
-    const seen = new Set<string>()
-    const occurrences = collector.occurrences
-        .filter(candidate => candidate.key === occurrence.key)
-        .sort((left, right) => left.start - right.start || Number(left.isDefinition) - Number(right.isDefinition))
-        .filter(candidate => {
-            const id = `${candidate.start}:${candidate.end}:${candidate.isDefinition}`
-            if (seen.has(id)) return false
-            seen.add(id)
-            return true
-        })
-        .map(candidate => ({ startOffset: candidate.start, endOffset: candidate.end, isDefinition: candidate.isDefinition }))
-    return {
-        name: info.name,
-        status: info.status,
-        relationKind: info.relationKind,
-        relation: info.relation,
-        definition: info.definition ? { startOffset: info.definition[0], endOffset: info.definition[1], isDefinition: true } : undefined,
-        catalog: info.catalog,
-        origin: info.origin,
-        candidates: info.candidates,
-        occurrences,
-    }
+    return SqlColumnIdentityAnalysis.analyze(sql, lookup, parseResult)?.identityAt(offset)
 }
