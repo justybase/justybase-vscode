@@ -3,6 +3,7 @@ import {
   CodeActionKind,
   Command,
   type Connection,
+  type Diagnostic,
   SignatureHelp,
   type SignatureHelpParams,
 } from "vscode-languageserver/node";
@@ -24,6 +25,7 @@ import {
   getDiagnosticSuggestedFix,
 } from "../tableQualificationCodeActions";
 import { buildFunctionSignatureDocumentation } from "../functionCompletionUtils";
+import { getNetezzaQuickFixSafety, isNetezzaFixAllEligible } from "../quickFixPolicy";
 import {
   findFunctionCall,
   getTextBeforeCursor,
@@ -141,8 +143,6 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
             return null;
           }
 
-          const actions: (Command | CodeAction)[] = [];
-          const text = document.getText();
           const needsDialectAwareJoinFix = params.context.diagnostics.some(
             (diagnostic) => {
               const code =
@@ -161,233 +161,275 @@ export function registerCodeActionHandler(deps: CodeActionHandlerDeps): void {
             databaseKind = context.databaseKind ?? "netezza";
           }
 
-          for (const diagnostic of params.context.diagnostics) {
-            const code =
-              typeof diagnostic.code === "string"
-                ? diagnostic.code
-                : String(diagnostic.code ?? "");
-            const range = diagnostic.range;
-
-            if (code === "SQL004") {
-              const suggestedFix = getDiagnosticSuggestedFix(diagnostic);
-              if (suggestedFix) {
-                actions.push({
-                  title: `Did you mean '${suggestedFix}'?`,
-                  kind: CodeActionKind.QuickFix,
-                  diagnostics: [diagnostic],
-                  isPreferred: true,
-                  edit: {
-                    changes: {
-                      [document.uri]: [{ range, newText: suggestedFix }],
-                    },
-                  },
-                } satisfies CodeAction);
-              }
-            }
-
-            if (code === "SQL051") {
-              const crossJoin = findCrossJoinReplacement(
-                text,
-                document.offsetAt(range.start),
-                databaseKind,
-              );
-              if (crossJoin) {
-                const edits = [{
-                  range: {
-                    start: document.positionAt(crossJoin.startOffset),
-                    end: document.positionAt(crossJoin.joinEndOffset),
-                  },
-                  newText: "INNER JOIN",
-                }];
-                if (!crossJoin.hasCondition) {
-                  const conditionPosition = document.positionAt(
-                    crossJoin.tableSourceEndOffset,
-                  );
-                  edits.push({
-                    range: {
-                      start: conditionPosition,
-                      end: conditionPosition,
-                    },
-                    newText: " ON 1=1",
-                  });
-                }
-                actions.push({
-                  title: "Replace CROSS JOIN with explicit INNER JOIN",
-                  kind: CodeActionKind.QuickFix,
-                  diagnostics: [diagnostic],
-                  isPreferred: false,
-                  edit: {
-                    changes: {
-                      [document.uri]: edits,
-                    },
-                  },
-                } satisfies CodeAction);
-              }
-            }
-
-            if (code === "SQL052") {
-              const aliasFix = findJoinAliasRewrite(
-                text,
-                document.offsetAt(range.start),
-                databaseKind,
-              );
-              if (aliasFix) {
-                const changes = [
-                  {
-                    range: {
-                      start: document.positionAt(aliasFix.insertOffset),
-                      end: document.positionAt(aliasFix.insertOffset),
-                    },
-                    newText: ` ${aliasFix.aliasName}`,
-                  },
-                  ...aliasFix.referenceRanges.map((reference) => ({
-                    range: {
-                      start: document.positionAt(reference.startOffset),
-                      end: document.positionAt(reference.endOffset),
-                    },
-                    newText: aliasFix.aliasName,
-                  })),
-                ];
-                actions.push({
-                  title: `Add missing table alias '${aliasFix.aliasName}'${aliasFix.referenceRanges.length > 0 ? " and update references" : ""}`,
-                  kind: CodeActionKind.QuickFix,
-                  diagnostics: [diagnostic],
-                  isPreferred: false,
-                  edit: { changes: { [document.uri]: changes } },
-                } satisfies CodeAction);
-              }
-            }
-
-            if (code === "SQL007") {
-              const rangeText = text.substring(
-                document.offsetAt(range.start),
-                document.offsetAt(range.end),
-              );
-              const suggestedFix = getDiagnosticSuggestedFix(diagnostic);
-              actions.push(
-                ...(await buildTableQualificationCodeActions(
-                  document.uri,
-                  diagnostic,
-                  range,
-                  rangeText,
-                  metadataBridge,
-                  true,
-                )),
-              );
-
-              const match = rangeText.match(/^(\w+)\.(\w+)$/);
-              if (match) {
-                actions.push({
-                  title: "Convert to DB..TABLE format (Netezza syntax)",
-                  kind: CodeActionKind.QuickFix,
-                  diagnostics: [diagnostic],
-                  isPreferred: !suggestedFix,
-                  edit: {
-                    changes: {
-                      [document.uri]: [
-                        { range, newText: `${match[1]}..${match[2]}` },
-                      ],
-                    },
-                  },
-                } satisfies CodeAction);
-              }
-            }
-
-            if (code === "SQL048") {
-              const rangeText = text.substring(
-                document.offsetAt(range.start),
-                document.offsetAt(range.end),
-              );
-              actions.push(
-                ...(await buildTableQualificationCodeActions(
-                  document.uri,
-                  diagnostic,
-                  range,
-                  rangeText,
-                  metadataBridge,
-                  true,
-                )),
-              );
-            }
-
-            if (code === "SQL012") {
-              const insertPos = {
-                line: range.end.line,
-                character: range.end.character,
-              };
-              actions.push({
-                title: "Add VARCHAR length (e.g., VARCHAR(100))",
-                kind: CodeActionKind.QuickFix,
-                diagnostics: [diagnostic],
-                isPreferred: true,
-                edit: {
-                  changes: {
-                    [document.uri]: [
-                      {
-                        range: { start: insertPos, end: insertPos },
-                        newText: "(100)",
-                      },
-                    ],
-                  },
-                },
-              } satisfies CodeAction);
-            }
-
-            if (code === "SQL019") {
-              actions.push({
-                title: "Remove unused alias",
-                kind: CodeActionKind.QuickFix,
-                diagnostics: [diagnostic],
-                isPreferred: false,
-                edit: {
-                  changes: {
-                    [document.uri]: [{ range, newText: "" }],
-                  },
-                },
-              } satisfies CodeAction);
-            }
-
-            if (code === "PAR003") {
-              actions.push({
-                title: "Remove duplicate keyword",
-                kind: CodeActionKind.QuickFix,
-                diagnostics: [diagnostic],
-                isPreferred: true,
-                edit: {
-                  changes: {
-                    [document.uri]: [{ range, newText: "" }],
-                  },
-                },
-              } satisfies CodeAction);
-            }
-
-            if (code === "PAR004") {
-              const fix = getDiagnosticSuggestedFix(diagnostic);
-              if (fix) {
-                actions.push({
-                  title: `Fix typo: ${fix}`,
-                  kind: CodeActionKind.QuickFix,
-                  diagnostics: [diagnostic],
-                  isPreferred: true,
-                  edit: {
-                    changes: {
-                      [document.uri]: [{ range, newText: fix }],
-                    },
-                  },
-                } satisfies CodeAction);
-              }
-            }
-
-            if (isCancellationRequested()) {
-              return null;
-            }
-          }
-
-          return actions.length > 0 ? actions : null;
+          return buildLspQuickFixActions({
+            document,
+            diagnostics: params.context.diagnostics,
+            databaseKind,
+            metadataBridge,
+            isCancellationRequested,
+          });
         },
       );
     },
   );
+}
+
+export interface LspQuickFixContext {
+  document: TextDocument;
+  diagnostics: readonly Diagnostic[];
+  databaseKind: DatabaseKind;
+  metadataBridge?: MetadataBridge;
+  isCancellationRequested?: () => boolean;
+}
+
+/**
+ * Builds the quick-fix code actions the language server serves for
+ * LSP_SERVED_CODES. Each action carries its production safety and Fix All
+ * eligibility in `data`, from the shared quick-fix policy.
+ */
+export async function buildLspQuickFixActions(
+  context: LspQuickFixContext,
+): Promise<(Command | CodeAction)[] | null> {
+  const { document, diagnostics, databaseKind, metadataBridge } = context;
+  const isCancellationRequested = context.isCancellationRequested ?? (() => false);
+  const actions: (Command | CodeAction)[] = [];
+  const text = document.getText();
+  for (const diagnostic of diagnostics) {
+    const code =
+      typeof diagnostic.code === "string"
+        ? diagnostic.code
+        : String(diagnostic.code ?? "");
+    const range = diagnostic.range;
+
+    if (code === "SQL004") {
+      const suggestedFix = getDiagnosticSuggestedFix(diagnostic);
+      if (suggestedFix) {
+        actions.push({
+          title: `Did you mean '${suggestedFix}'?`,
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          isPreferred: true,
+          edit: {
+            changes: {
+              [document.uri]: [{ range, newText: suggestedFix }],
+            },
+          },
+        } satisfies CodeAction);
+      }
+    }
+
+    if (code === "SQL051") {
+      const crossJoin = findCrossJoinReplacement(
+        text,
+        document.offsetAt(range.start),
+        databaseKind,
+      );
+      if (crossJoin) {
+        const edits = [{
+          range: {
+            start: document.positionAt(crossJoin.startOffset),
+            end: document.positionAt(crossJoin.joinEndOffset),
+          },
+          newText: "INNER JOIN",
+        }];
+        if (!crossJoin.hasCondition) {
+          const conditionPosition = document.positionAt(
+            crossJoin.tableSourceEndOffset,
+          );
+          edits.push({
+            range: {
+              start: conditionPosition,
+              end: conditionPosition,
+            },
+            newText: " ON 1=1",
+          });
+        }
+        actions.push({
+          title: "Replace CROSS JOIN with explicit INNER JOIN",
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          isPreferred: false,
+          edit: {
+            changes: {
+              [document.uri]: edits,
+            },
+          },
+        } satisfies CodeAction);
+      }
+    }
+
+    if (code === "SQL052") {
+      const aliasFix = findJoinAliasRewrite(
+        text,
+        document.offsetAt(range.start),
+        databaseKind,
+      );
+      if (aliasFix) {
+        const changes = [
+          {
+            range: {
+              start: document.positionAt(aliasFix.insertOffset),
+              end: document.positionAt(aliasFix.insertOffset),
+            },
+            newText: ` ${aliasFix.aliasName}`,
+          },
+          ...aliasFix.referenceRanges.map((reference) => ({
+            range: {
+              start: document.positionAt(reference.startOffset),
+              end: document.positionAt(reference.endOffset),
+            },
+            newText: aliasFix.aliasName,
+          })),
+        ];
+        actions.push({
+          title: `Add missing table alias '${aliasFix.aliasName}'${aliasFix.referenceRanges.length > 0 ? " and update references" : ""}`,
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          isPreferred: false,
+          edit: { changes: { [document.uri]: changes } },
+        } satisfies CodeAction);
+      }
+    }
+
+    if (code === "SQL007") {
+      const rangeText = text.substring(
+        document.offsetAt(range.start),
+        document.offsetAt(range.end),
+      );
+      const suggestedFix = getDiagnosticSuggestedFix(diagnostic);
+      actions.push(
+        ...(await buildTableQualificationCodeActions(
+          document.uri,
+          diagnostic,
+          range,
+          rangeText,
+          metadataBridge,
+          true,
+        )),
+      );
+
+      const match = rangeText.match(/^(\w+)\.(\w+)$/);
+      if (match) {
+        actions.push({
+          title: "Convert to DB..TABLE format (Netezza syntax)",
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          isPreferred: !suggestedFix,
+          edit: {
+            changes: {
+              [document.uri]: [
+                { range, newText: `${match[1]}..${match[2]}` },
+              ],
+            },
+          },
+        } satisfies CodeAction);
+      }
+    }
+
+    if (code === "SQL048") {
+      const rangeText = text.substring(
+        document.offsetAt(range.start),
+        document.offsetAt(range.end),
+      );
+      actions.push(
+        ...(await buildTableQualificationCodeActions(
+          document.uri,
+          diagnostic,
+          range,
+          rangeText,
+          metadataBridge,
+          true,
+        )),
+      );
+    }
+
+    if (code === "SQL012") {
+      const insertPos = {
+        line: range.end.line,
+        character: range.end.character,
+      };
+      actions.push({
+        title: "Add VARCHAR length (e.g., VARCHAR(100))",
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        isPreferred: true,
+        edit: {
+          changes: {
+            [document.uri]: [
+              {
+                range: { start: insertPos, end: insertPos },
+                newText: "(100)",
+              },
+            ],
+          },
+        },
+      } satisfies CodeAction);
+    }
+
+    if (code === "SQL019") {
+      actions.push({
+        title: "Remove unused alias",
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        isPreferred: false,
+        edit: {
+          changes: {
+            [document.uri]: [{ range, newText: "" }],
+          },
+        },
+      } satisfies CodeAction);
+    }
+
+    if (code === "PAR003") {
+      actions.push({
+        title: "Remove duplicate keyword",
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        isPreferred: true,
+        edit: {
+          changes: {
+            [document.uri]: [{ range, newText: "" }],
+          },
+        },
+      } satisfies CodeAction);
+    }
+
+    if (code === "PAR004") {
+      const fix = getDiagnosticSuggestedFix(diagnostic);
+      if (fix) {
+        actions.push({
+          title: `Fix typo: ${fix}`,
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          isPreferred: true,
+          edit: {
+            changes: {
+              [document.uri]: [{ range, newText: fix }],
+            },
+          },
+        } satisfies CodeAction);
+      }
+    }
+
+    if (isCancellationRequested()) {
+      return null;
+    }
+  }
+
+
+  for (const action of actions) {
+    if (!("diagnostics" in action) || action.data !== undefined) {
+      continue;
+    }
+    const diagnosticCode = action.diagnostics?.[0]?.code;
+    const code = typeof diagnosticCode === "string" ? diagnosticCode : String(diagnosticCode ?? "");
+    const safety = getNetezzaQuickFixSafety(code);
+    if (safety !== undefined) {
+      action.data = { safety, fixAllEligible: isNetezzaFixAllEligible(code) };
+    }
+  }
+
+  return actions.length > 0 ? actions : null;
 }
 
 function findCrossJoinReplacement(

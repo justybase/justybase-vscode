@@ -20,361 +20,51 @@ import { SqlLexer, type Scope, type TableInfo } from '../sqlParser';
 import { parseSqlStatements } from '../sqlParser/parsingRuntime';
 import { createSqlValidatorForDocument } from '../commands/validationCommands';
 import { parseSemanticScopeWithParser } from './parsers/parserSqlContext';
+import { buildNetezzaQuickFix } from '../server/netezzaQuickFixes';
 import {
-    buildNetezzaQuickFix,
-    EQUALS_NULL_QUICK_FIX,
-    UPDATE_ALIAS_AS_QUICK_FIX,
-} from '../server/netezzaQuickFixes';
+    ERROR_CODE_ACTIONS,
+    LSP_SERVED_CODES,
+    SAFE_FIX_ALL_CODES,
+} from '../server/quickFixPolicy';
+
+export { getNetezzaQuickFixSafety, isNetezzaFixAllEligible } from '../server/quickFixPolicy';
 
 type DatabaseKindResolver = (documentUri: string) => DatabaseKind | undefined;
 
-type QuickFixSafety = 'safe' | 'review-required' | 'unsafe';
-
-interface QuickFixMatrixEntry {
-    code: string;
-    title: string;
-    safety: QuickFixSafety;
-    fixAllEligible: boolean;
-    rationale: string;
-}
 
 const SOURCE_FIX_ALL_KIND: vscode.CodeActionKind =
     ((vscode.CodeActionKind as unknown as { SourceFixAll?: vscode.CodeActionKind }).SourceFixAll
         ?? vscode.CodeActionKind.QuickFix);
 
-/**
- * Error code to quick fix mapping
- */
-const ERROR_CODE_ACTIONS: Record<string, { title: string; fix: string }> = {
-    'SQL007': {
-        title: "Convert to DB..TABLE format (Netezza syntax)",
-        fix: '..'
-    },
-    'SQL012': {
-        title: "Add VARCHAR length (e.g., VARCHAR(100))",
-        fix: '(100)'
-    },
-    'SQL004': {
-        title: 'Use suggested column name',
-        fix: ''
-    },
-    'PAR101': {
-        title: 'Insert missing AS in CTE definition',
-        fix: ' AS '
-    },
-    'NZ002': {
-        title: 'Add safe WHERE guard (WHERE 1 = 0)',
-        fix: ' WHERE 1 = 0'
-    },
-    'SQL043': {
-        title: 'Add safe WHERE guard (WHERE 1 = 0)',
-        fix: ' WHERE 1 = 0'
-    },
-    'NZ003': {
-        title: 'Add safe WHERE guard (WHERE 1 = 0)',
-        fix: ' WHERE 1 = 0'
-    },
-    'SQL044': {
-        title: 'Add safe WHERE guard (WHERE 1 = 0)',
-        fix: ' WHERE 1 = 0'
-    },
-    'NZ006': {
-        title: 'Add FETCH FIRST 100 ROWS ONLY',
-        fix: ' FETCH FIRST 100 ROWS ONLY'
-    },
-    'NZ007': {
-        title: 'Normalize keyword casing',
-        fix: ''
-    },
-    'NZ001': {
-        title: 'Expand SELECT * to explicit columns',
-        fix: ''
-    },
-    'NZ004': {
-        title: 'Replace CROSS JOIN with explicit INNER JOIN',
-        fix: 'INNER JOIN'
-    },
-    'SQL008': {
-        title: 'Qualify ambiguous column',
-        fix: ''
-    },
-    'SQL048': {
-        title: 'Qualify table name',
-        fix: ''
-    },
-    'NZ010': {
-        title: 'Add missing table alias',
-        fix: ''
-    },
-    'NZ012': {
-        title: 'Remove AS in UPDATE alias',
-        fix: ''
-    },
-    'SQL046': {
-        title: UPDATE_ALIAS_AS_QUICK_FIX.title,
-        fix: ''
-    },
-    'NZL006': {
-        title: EQUALS_NULL_QUICK_FIX.title,
-        fix: EQUALS_NULL_QUICK_FIX.newText
-    },
-    'NZ013': {
-        title: 'Replace UNION with UNION ALL',
-        fix: 'UNION ALL'
-    },
-    'NZP012': {
-        title: 'Replace ELSEIF/ELSE IF with ELSIF',
-        fix: 'ELSIF'
-    },
-    'SQL018': {
-        title: 'Remove unused CTE',
-        fix: ''
-    },
-    'SQL019': {
-        title: 'Remove unused table alias',
-        fix: ''
-    },
-    'SQL020': {
-        title: 'Add subquery alias',
-        fix: ''
-    },
-    'NZ021': {
-        title: 'Remove extra comma (,, → ,)',
-        fix: ','
-    },
-    'PAR002': {
-        title: 'Remove extra comma (,, → ,)',
-        fix: ','
-    }
-};
 
-const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
-    SQL007: {
-        code: 'SQL007',
-        title: ERROR_CODE_ACTIONS.SQL007.title,
-        safety: 'safe',
-        fixAllEligible: true,
-        rationale: 'Deterministic syntax normalization DB.TABLE -> DB..TABLE.'
-    },
-    SQL004: {
-        code: 'SQL004',
-        title: ERROR_CODE_ACTIONS.SQL004.title,
-        safety: 'safe',
-        fixAllEligible: false,
-        rationale: 'Uses the single visible-column suggestion carried by the diagnostic.'
-    },
-    SQL051: {
-        code: 'SQL051',
-        title: ERROR_CODE_ACTIONS.NZ004.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'The replacement supplies only a tautological predicate; review the intended join semantics.'
-    },
-    SQL052: {
-        code: 'SQL052',
-        title: ERROR_CODE_ACTIONS.NZ010.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Alias insertion also rewrites visible table references and is offered only for an unambiguous JOIN.'
-    },
-    SQL053: {
-        code: 'SQL053',
-        title: 'Review JOIN literal type',
-        safety: 'unsafe',
-        fixAllEligible: false,
-        rationale: 'The correct typed value or CAST target cannot be inferred safely while typing.'
-    },
-    SQL012: {
-        code: 'SQL012',
-        title: ERROR_CODE_ACTIONS.SQL012.title,
-        safety: 'safe',
-        fixAllEligible: true,
-        rationale: 'Deterministic parser-compliance rewrite for VARCHAR length.'
-    },
-    PAR101: {
-        code: 'PAR101',
-        title: ERROR_CODE_ACTIONS.PAR101.title,
-        safety: 'safe',
-        fixAllEligible: false,
-        rationale: 'Deterministic insertion of the required AS keyword in a CTE definition.'
-    },
-    PAR004: {
-        code: 'PAR004',
-        title: 'Fix keyword typo',
-        safety: 'safe',
-        fixAllEligible: false,
-        rationale: 'Replaces a recognized keyword typo with the parser-provided intended keyword.'
-    },
-    NZ001: {
-        code: 'NZ001',
-        title: ERROR_CODE_ACTIONS.NZ001.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Expands projection and can alter query shape/intent.'
-    },
-    NZ002: {
-        code: 'NZ002',
-        title: ERROR_CODE_ACTIONS.NZ002.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Adds guard clause and intentionally changes DML behavior.'
-    },
-    NZ003: {
-        code: 'NZ003',
-        title: ERROR_CODE_ACTIONS.NZ003.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Adds guard clause and intentionally changes DML behavior.'
-    },
-    SQL043: {
-        code: 'SQL043',
-        title: ERROR_CODE_ACTIONS.SQL043.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Adds guard clause and intentionally changes DML behavior.'
-    },
-    SQL044: {
-        code: 'SQL044',
-        title: ERROR_CODE_ACTIONS.SQL044.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Adds guard clause and intentionally changes DML behavior.'
-    },
-    NZ004: {
-        code: 'NZ004',
-        title: ERROR_CODE_ACTIONS.NZ004.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Makes Cartesian semantics explicit with a tautological predicate; review intent and result cardinality.'
-    },
-    NZ006: {
-        code: 'NZ006',
-        title: ERROR_CODE_ACTIONS.NZ006.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Adds row limiting semantics and may change expected result set size.'
-    },
-    NZ007: {
-        code: 'NZ007',
-        title: ERROR_CODE_ACTIONS.NZ007.title,
-        safety: 'safe',
-        fixAllEligible: true,
-        rationale: 'Deterministic keyword normalization based on linter-selected dominant case.'
-    },
-    NZ010: {
-        code: 'NZ010',
-        title: ERROR_CODE_ACTIONS.NZ010.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Generated alias can affect readability and downstream references.'
-    },
-    NZ011: {
-        code: 'NZ011',
-        title: 'Add DISTRIBUTE ON RANDOM',
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Physical design decision should be reviewed per workload.'
-    },
-    NZ012: {
-        code: 'NZ012',
-        title: ERROR_CODE_ACTIONS.NZ012.title,
-        safety: 'safe',
-        fixAllEligible: true,
-        rationale: 'Netezza syntax normalization; removes unsupported AS keyword.'
-    },
-    SQL045: {
-        code: 'SQL045',
-        title: 'Add DISTRIBUTE ON RANDOM',
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Physical design decision should be reviewed per workload.'
-    },
-    SQL046: {
-        code: 'SQL046',
-        title: UPDATE_ALIAS_AS_QUICK_FIX.title,
-        safety: UPDATE_ALIAS_AS_QUICK_FIX.safety,
-        fixAllEligible: UPDATE_ALIAS_AS_QUICK_FIX.fixAllEligible,
-        rationale: 'Netezza syntax normalization; removes unsupported AS keyword.'
-    },
-    NZL006: {
-        code: 'NZL006',
-        title: EQUALS_NULL_QUICK_FIX.title,
-        safety: EQUALS_NULL_QUICK_FIX.safety,
-        fixAllEligible: EQUALS_NULL_QUICK_FIX.fixAllEligible,
-        rationale: 'Deterministic rewrite of an equality-to-NULL predicate as IS NULL.'
-    },
-    NZ013: {
-        code: 'NZ013',
-        title: ERROR_CODE_ACTIONS.NZ013.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'UNION -> UNION ALL can change duplicate-handling semantics.'
-    },
-    NZP012: {
-        code: 'NZP012',
-        title: ERROR_CODE_ACTIONS.NZP012.title,
-        safety: 'safe',
-        fixAllEligible: true,
-        rationale: 'Deterministic NZPLSQL syntax normalization ELSEIF/ELSE IF -> ELSIF.'
-    },
-    SQL008: {
-        code: 'SQL008',
-        title: ERROR_CODE_ACTIONS.SQL008.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Requires user choice between multiple qualifiers.'
-    },
-    SQL048: {
-        code: 'SQL048',
-        title: ERROR_CODE_ACTIONS.SQL048.title,
-        safety: 'safe',
-        fixAllEligible: false,
-        rationale: 'Uses metadata-backed DB.SCHEMA.TABLE qualification.'
-    },
-    SQL018: {
-        code: 'SQL018',
-        title: ERROR_CODE_ACTIONS.SQL018.title,
-        safety: 'unsafe',
-        fixAllEligible: false,
-        rationale: 'Automated CTE removal can break dependent expressions.'
-    },
-    SQL019: {
-        code: 'SQL019',
-        title: ERROR_CODE_ACTIONS.SQL019.title,
-        safety: 'unsafe',
-        fixAllEligible: false,
-        rationale: 'Alias removal can change query behavior or readability.'
-    },
-    SQL020: {
-        code: 'SQL020',
-        title: ERROR_CODE_ACTIONS.SQL020.title,
-        safety: 'review-required',
-        fixAllEligible: false,
-        rationale: 'Alias naming requires context and naming convention review.'
-    },
-    NZ021: {
-        code: 'NZ021',
-        title: ERROR_CODE_ACTIONS.NZ021.title,
-        safety: 'safe',
-        fixAllEligible: true,
-        rationale: 'Deterministic removal of extra comma in comma-separated list.'
-    }
-};
 
-const SAFE_FIX_ALL_CODES = new Set(
-    Object.values(QUICK_FIX_MATRIX)
-        .filter(entry => entry.fixAllEligible)
-        .map(entry => entry.code)
-);
-
-export function getNetezzaQuickFixSafety(code: string): QuickFixSafety | undefined {
-    return QUICK_FIX_MATRIX[code]?.safety;
+interface SafeFixAllEdit {
+    start: number;
+    end: number;
+    newText: string;
+    /** Host range for replacements, or host position for insertions. */
+    target: vscode.Range | vscode.Position;
 }
 
-const LSP_SERVED_CODES = new Set([
-    'SQL004', 'SQL007', 'SQL012', 'SQL019', 'SQL048', 'SQL051', 'SQL052', 'SQL053',
-    'PAR003', 'PAR004'
-]);
+/** Edits conflict when ranges overlap or two insertions target one offset. */
+function safeFixAllEditsConflict(left: SafeFixAllEdit, right: SafeFixAllEdit): boolean {
+    const leftInsert = left.start === left.end;
+    const rightInsert = right.start === right.end;
+    if (leftInsert && rightInsert) return left.start === right.start;
+    if (leftInsert) return right.start < left.start && left.start < right.end;
+    if (rightInsert) return left.start < right.start && right.start < left.end;
+    return left.start < right.end && right.start < left.end;
+}
+
+function applySafeFixAllEdit(document: vscode.TextDocument, edit: vscode.WorkspaceEdit, fixEdit: SafeFixAllEdit): void {
+    if (fixEdit.start === fixEdit.end) {
+        edit.insert(document.uri, fixEdit.target as vscode.Position, fixEdit.newText);
+    } else {
+        edit.replace(document.uri, fixEdit.target as vscode.Range, fixEdit.newText);
+    }
+}
+
+
 
 export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvider {
     public static readonly providedCodeActionKinds = [
@@ -681,52 +371,53 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         return undefined;
     }
 
-    private applySafeFixToWorkspaceEdit(
+    /**
+     * Returns the offset edits that Fix All Safe would apply for a diagnostic,
+     * or undefined when the code is not Fix All eligible or no edit applies.
+     */
+    private computeSafeFixAllEdits(
         document: vscode.TextDocument,
-        diagnostic: vscode.Diagnostic,
-        edit: vscode.WorkspaceEdit
-    ): boolean {
+        diagnostic: vscode.Diagnostic
+    ): SafeFixAllEdit[] | undefined {
         const code = this.getDiagnosticCode(diagnostic);
         if (!SAFE_FIX_ALL_CODES.has(code)) {
-            return false;
+            return undefined;
         }
+        const start = document.offsetAt(diagnostic.range.start);
+        const end = document.offsetAt(diagnostic.range.end);
 
         if (code === 'SQL007') {
             const text = document.getText(diagnostic.range);
             const match = text.match(/^(\w+)\.(\w+)$/);
-            if (!match) return false;
-            edit.replace(document.uri, diagnostic.range, `${match[1]}..${match[2]}`);
-            return true;
+            if (!match) return undefined;
+            return [{ start, end, newText: `${match[1]}..${match[2]}`, target: diagnostic.range }];
         }
 
         if (code === 'SQL012') {
-            edit.insert(document.uri, diagnostic.range.end, '(100)');
-            return true;
+            return [{ start: end, end, newText: '(100)', target: diagnostic.range.end }];
         }
 
         if (code === 'NZ007') {
             const replacement = this.getKeywordCaseReplacement(document, diagnostic);
-            if (!replacement) return false;
-            edit.replace(document.uri, diagnostic.range, replacement);
-            return true;
+            if (!replacement) return undefined;
+            return [{ start, end, newText: replacement, target: diagnostic.range }];
         }
 
-        if (code === 'NZ012' || code === 'SQL046') {
-            edit.replace(document.uri, diagnostic.range, '');
-            return true;
+        if (code === 'NZ012' || code === 'SQL046' || code === 'NZ021' || code === 'PAR002') {
+            return [{ start, end, newText: '', target: diagnostic.range }];
         }
 
         if (code === 'NZP012') {
-            edit.replace(document.uri, diagnostic.range, ERROR_CODE_ACTIONS.NZP012.fix);
-            return true;
+            return [{ start, end, newText: ERROR_CODE_ACTIONS.NZP012.fix, target: diagnostic.range }];
         }
 
-        if (code === 'NZ021') {
-            edit.replace(document.uri, diagnostic.range, '');
-            return true;
+        if (code === 'PAR101') {
+            const insertAt = this.findMissingAsInCteInsertDocumentOffset(document, diagnostic);
+            if (insertAt === undefined) return undefined;
+            return [{ start: insertAt, end: insertAt, newText: ERROR_CODE_ACTIONS['PAR101'].fix, target: document.positionAt(insertAt) }];
         }
 
-        return false;
+        return undefined;
     }
 
     private getKeywordCaseReplacement(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): string | undefined {
@@ -757,17 +448,31 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
             .slice()
             .sort((left, right) => document.offsetAt(right.range.start) - document.offsetAt(left.range.start));
 
-        let appliedCount = 0;
+        // A fix whose edits overlap an already selected edit, or insert at the
+        // same offset, is skipped so the WorkspaceEdit stays valid and the result
+        // does not depend on diagnostic order.
+        const selected: SafeFixAllEdit[] = [];
         for (const diagnostic of orderedDiagnostics) {
-            if (this.applySafeFixToWorkspaceEdit(document, diagnostic, edit)) {
-                appliedCount++;
+            const fixEdits = this.computeSafeFixAllEdits(document, diagnostic);
+            if (!fixEdits || fixEdits.length === 0) {
+                continue;
             }
+            const conflicts = fixEdits.some((candidate, index) =>
+                fixEdits.slice(index + 1).some(other => safeFixAllEditsConflict(candidate, other))
+                || selected.some(existing => safeFixAllEditsConflict(candidate, existing)));
+            if (conflicts) {
+                continue;
+            }
+            selected.push(...fixEdits);
         }
 
-        if (appliedCount === 0) {
+        if (selected.length === 0) {
             return undefined;
         }
 
+        for (const fixEdit of selected) {
+            applySafeFixAllEdit(document, edit, fixEdit);
+        }
         action.edit = edit;
         return action;
     }
@@ -859,7 +564,8 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
 
         let appliedCount = 0;
         for (const diagnostic of orderedDiagnostics) {
-            if (this.applySafeFixToWorkspaceEdit(document, diagnostic, edit)) {
+            for (const fixEdit of this.computeSafeFixAllEdits(document, diagnostic) ?? []) {
+                applySafeFixAllEdit(document, edit, fixEdit);
                 appliedCount++;
             }
         }
@@ -1401,6 +1107,20 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         action.edit = new vscode.WorkspaceEdit();
         action.edit.insert(document.uri, document.positionAt(statementBoundary.startOffset + insertOffset), ERROR_CODE_ACTIONS['PAR101'].fix);
         return action;
+    }
+
+    private findMissingAsInCteInsertDocumentOffset(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): number | undefined {
+        const statementBoundary = this.getStatementBoundary(document, diagnostic);
+        if (!statementBoundary) {
+            return undefined;
+        }
+        const lexResult = SqlLexer.tokenize(statementBoundary.sql);
+        if (lexResult.errors.length > 0) {
+            return undefined;
+        }
+        const diagnosticOffsetInStatement = document.offsetAt(diagnostic.range.start) - statementBoundary.startOffset;
+        const insertOffset = this.findMissingAsInCteInsertOffset(lexResult.tokens, diagnosticOffsetInStatement);
+        return insertOffset === undefined ? undefined : statementBoundary.startOffset + insertOffset;
     }
 
     private findMissingAsInCteInsertOffset(tokens: IToken[], diagnosticOffsetInStatement: number): number | undefined {

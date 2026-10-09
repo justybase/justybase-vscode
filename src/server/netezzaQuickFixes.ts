@@ -12,7 +12,7 @@ export interface NetezzaQuickFixDescriptor {
   code: "SQL046" | "NZL006";
   title: string;
   safety: "safe";
-  fixAllEligible: true;
+  fixAllEligible: boolean;
   edit: {
     range: QuickFixRange;
     newText: string;
@@ -31,7 +31,7 @@ export const EQUALS_NULL_QUICK_FIX = {
   code: "NZL006",
   title: "Replace = NULL with IS NULL",
   safety: "safe",
-  fixAllEligible: true,
+  fixAllEligible: false, // changes the result set; explicit-only
   newText: "IS NULL",
 } as const;
 

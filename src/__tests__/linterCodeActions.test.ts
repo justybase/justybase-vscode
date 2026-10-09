@@ -891,6 +891,64 @@ describe('providers/linterCodeActions', () => {
         );
     });
 
+    describe('Fix All Safe contract', () => {
+        const fixAllFor = (statementSql: string, diagnostics: vscode.Diagnostic[]) => {
+            const document = makeDocument(statementSql);
+            (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
+                sql: statementSql,
+                start: 0,
+                end: statementSql.length
+            });
+            const actions = provider.provideCodeActions(
+                document as vscode.TextDocument,
+                {
+                    start: { line: 0, character: 0 },
+                    end: { line: 0, character: statementSql.length }
+                } as unknown as vscode.Range,
+                { diagnostics } as unknown as vscode.CodeActionContext,
+                {} as vscode.CancellationToken
+            );
+            const action = actions.find(item => item.title === 'Fix all safe issues in file');
+            return { document, action, edit: action?.edit as unknown as MockWorkspaceEdit | undefined };
+        };
+
+        it('skips a fix whose range overlaps an already selected fix', () => {
+            const sql = 'select from dual';
+            const later = makeDiagnostic('NZ007', "NZ007: Keyword 'ect from' should be UPPERCASE", 3, 11);
+            const earlier = makeDiagnostic('NZ007', "NZ007: Keyword 'select' should be UPPERCASE", 0, 6);
+            const { edit } = fixAllFor(sql, [earlier, later]);
+            expect(edit?.replace).toHaveBeenCalledTimes(1);
+            expect(edit?.replace).toHaveBeenCalledWith(expect.anything(), later.range, 'ECT FROM');
+        });
+
+        it('applies only one of two insertions at the same offset', () => {
+            const sql = 'CREATE TABLE t (name VARCHAR)';
+            const offset = sql.indexOf('VARCHAR');
+            const first = makeDiagnostic('SQL012', 'SQL012: VARCHAR without length', offset, offset + 'VARCHAR'.length);
+            const second = makeDiagnostic('SQL012', 'SQL012: VARCHAR without length (duplicate source)', offset, offset + 'VARCHAR'.length);
+            second.source = 'other';
+            const { edit } = fixAllFor(sql, [first, second]);
+            expect(edit?.insert).toHaveBeenCalledTimes(1);
+            expect(edit?.insert).toHaveBeenCalledWith(expect.anything(), first.range.end, '(100)');
+        });
+
+        it('includes PAR002 extra-comma removal', () => {
+            const sql = 'SELECT 1,,2';
+            const offset = sql.indexOf(',,') + 1;
+            const comma = makeDiagnostic('PAR002', 'PAR002: Unexpected comma', offset, offset + 1);
+            const { edit } = fixAllFor(sql, [comma]);
+            expect(edit?.replace).toHaveBeenCalledWith(expect.anything(), comma.range, '');
+        });
+
+        it('keeps NZL006 and PAR004 explicit-only', () => {
+            const sql = 'SELECT 1 WHERR x = NULL';
+            const typo = makeDiagnostic('PAR004', "PAR004: Did you mean 'WHERE'?", 9, 14);
+            const equalsNull = makeDiagnostic('NZL006', 'NZL006: Use IS NULL', 17, 18);
+            const { action } = fixAllFor(sql, [typo, equalsNull]);
+            expect(action).toBeUndefined();
+        });
+    });
+
     it('includes NZP012 in safe fix-all rewrites', () => {
         const statementSql = 'ELSEIF amount > 0 THEN';
         const elseifOffset = statementSql.indexOf('ELSEIF');
