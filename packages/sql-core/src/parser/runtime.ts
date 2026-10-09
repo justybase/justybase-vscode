@@ -488,7 +488,7 @@ export function parseNetezzaSqlStatements(
 }
 
 /** Upper bound on placeholder repairs for one authoring recovery parse. */
-const AUTHORING_RECOVERY_MAX_REPAIRS = 4;
+export const AUTHORING_RECOVERY_MAX_REPAIRS = 4;
 
 /** True for the zero-width identifier inserted by {@link parseNetezzaSqlForAuthoringRecovery}. */
 export function isAuthoringRecoveryPlaceholder(token: IToken): boolean {
