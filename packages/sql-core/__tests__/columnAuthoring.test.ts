@@ -172,3 +172,21 @@ describe("analysis reuse", () => {
     }
   });
 });
+
+describe("aliased select item identity", () => {
+  it("is one CTE column for the outer reference and the CTE's own ORDER BY", () => {
+    const sql = "WITH X AS (SELECT CUSTOMER_NAME AS NM FROM SHOP.SALES.CUSTOMERS ORDER BY NM) SELECT X.NM FROM X";
+    const outer = resolveSqlColumnIdentity(sql, sql.lastIndexOf("NM"), lookup)!;
+    const inner = resolveSqlColumnIdentity(sql, sql.indexOf("BY NM") + 3, lookup)!;
+    expect(outer.relationKind).toBe("cte");
+    expect(inner.occurrences).toEqual(outer.occurrences);
+    expect(outer.occurrences.map(occurrence => sql.slice(occurrence.startOffset, occurrence.endOffset))).toEqual(["NM", "NM", "NM"]);
+    expect(rename("WITH X AS (SELECT CUSTOMER_NAME AS NM FROM SHOP.SALES.CUSTOMERS ORDER BY NM) SELECT X.|NM FROM X", "LABEL"))
+      .toBe("WITH X AS (SELECT CUSTOMER_NAME AS LABEL FROM SHOP.SALES.CUSTOMERS ORDER BY LABEL) SELECT X.LABEL FROM X");
+  });
+
+  it("stays an output alias in a top-level select", () => {
+    const sql = "SELECT CUSTOMER_NAME AS NM FROM SHOP.SALES.CUSTOMERS ORDER BY NM";
+    expect(resolveSqlColumnIdentity(sql, sql.lastIndexOf("NM"), lookup)?.relationKind).toBe("output_alias");
+  });
+});

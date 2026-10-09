@@ -13,7 +13,9 @@ import { parseNetezzaSqlForAuthoringRecovery, type NetezzaSqlParseResult } from 
  * - an unqualified reference resolves only when exactly one visible source
  *   provides the column; two or more is ambiguous and unknown metadata leaves
  *   it unresolved instead of guessing;
- * - ORDER BY binds an unqualified name to an explicit output alias first;
+ * - ORDER BY binds an unqualified name to an explicit output alias first; an
+ *   aliased select item has one identity, which is the column of the CTE,
+ *   derived table or CTAS its select defines;
  * - CTE, derived-table and script-local CTAS projections and `*` expansions
  *   get local document definitions and keep the physical origin of plain
  *   column references.
@@ -474,7 +476,17 @@ class ColumnIdentityCollector {
 
     private registerLocal(relation: Relation): void {
         for (const column of relation.local ?? []) {
-            if (!column || this.identities.has(column.key)) continue
+            if (!column) continue
+            const existing = this.identities.get(column.key)
+            if (existing?.relationKind === 'output_alias') {
+                // An aliased select item has one identity: when its select
+                // defines a relation, the alias (and the select's own ORDER BY
+                // references to it) is that relation's column.
+                existing.relationKind = relation.kind
+                existing.relation = relation.name
+                continue
+            }
+            if (existing) continue
             this.identities.set(column.key, {
                 name: column.name, status: 'resolved', relationKind: relation.kind, relation: relation.name,
                 definition: [column.start, column.end], origin: column.origin, candidates: [],
@@ -590,8 +602,9 @@ function localKey(start: number, norm: string): string {
     return `L|${start}|${norm}`
 }
 
+/** An output alias shares the identity of the projected column it names. */
 function outputAliasKey(alias: Projected): string {
-    return `O|${alias.start}|${alias.norm}`
+    return alias.key
 }
 
 function physicalKey(column: SqlCatalogColumn): string {
@@ -655,9 +668,8 @@ export class SqlColumnIdentityAnalysis {
     /** Identity key at an offset, for {@link identity} and rename planning. */
     keyAt(offset: number): string | undefined {
         // A projection like `SELECT ID FROM T` is both a reference and a
-        // definition; the reference wins. Among definitions, a relation column
-        // wins over the output-alias view of the same alias.
-        const rank = (occurrence: Occurrence) => (occurrence.isDefinition ? 2 : 0) + (occurrence.key.startsWith('O|') ? 1 : 0)
+        // definition; the reference wins.
+        const rank = (occurrence: Occurrence) => (occurrence.isDefinition ? 1 : 0)
         const occurrences = this.collector.occurrences
         const occurrence = occurrences
             .filter(candidate => candidate.start <= offset && offset < candidate.end)
@@ -682,15 +694,10 @@ export class SqlColumnIdentityAnalysis {
         }
     }
 
-    /**
-     * True when another identity also occurs at exactly [start, end): as a
-     * reference, or as a definition other than the output-alias view of the
-     * same alias token.
-     */
+    /** True when another identity also occurs at exactly [start, end). */
     hasOtherOccurrenceAt(key: string, startOffset: number, endOffset: number): boolean {
         return this.collector.occurrences.some(occurrence => occurrence.key !== key
-            && occurrence.start === startOffset && occurrence.end === endOffset
-            && (!occurrence.isDefinition || !occurrence.key.startsWith('O|')))
+            && occurrence.start === startOffset && occurrence.end === endOffset)
     }
 
     /**
