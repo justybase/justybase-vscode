@@ -276,13 +276,15 @@ SELECT * FROM ABC`;
             'netezza',
         );
 
+        // Script tables also carry their lifetime (visible after their CREATE).
         expect(definitions).toEqual(
             expect.arrayContaining([
-                { name: 'JUST_DATA..TEST2', type: 'Table', columns: ['id'] },
-                { name: 'JUST_DATA.ADMIN.TEST3', type: 'Table', columns: ['id'] },
-                { name: 'TEST11', type: 'Global Temp Table', columns: ['id'] },
-                { name: 'JUST_DATA.ADMIN.TEST12', type: 'Global Temp Table', columns: ['id'] },
+                expect.objectContaining({ name: 'JUST_DATA..TEST2', type: 'Table', columns: ['id'] }),
+                expect.objectContaining({ name: 'JUST_DATA.ADMIN.TEST3', type: 'Table', columns: ['id'] }),
+                expect.objectContaining({ name: 'TEST11', type: 'Global Temp Table', columns: ['id'] }),
+                expect.objectContaining({ name: 'JUST_DATA.ADMIN.TEST12', type: 'Global Temp Table', columns: ['id'] }),
             ]),
         );
+        expect(definitions.every(definition => definition.scopeStart !== undefined)).toBe(true);
     });
 });

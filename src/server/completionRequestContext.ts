@@ -5,7 +5,7 @@ import type { DatabaseKind } from "../contracts/database";
 import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
 import { normalizeDialectQuotedIdentifiers } from "./completionDialectAdapter";
 import { CompletionContextExtractor } from "./completionContextExtractor";
-import { mergeLocalDefinitions } from "./completionLocalDefinitionUtils";
+import { filterScriptDefinitionsAt, mergeLocalDefinitions } from "./completionLocalDefinitionUtils";
 import type {
   CompletionMetadataProvider,
   CompletionRequestContext,
@@ -61,8 +61,10 @@ export class CompletionRequestContextBuilder {
       ? statement.sql.substring(0, statementOffset)
       : documentText.substring(0, cursorOffset);
     const statementSqlForContext = statement ? statement.sql : documentText;
+    // Script-local tables are visible only between their CREATE and DROP.
+    const scriptLocalDefs = filterScriptDefinitionsAt(parsed.localDefs, cursorOffset);
     const localDefs = this.contextExtractor.getVisibleLocalDefinitionsForFromJoin(
-      parsed.localDefs,
+      scriptLocalDefs,
       statementSqlForContext,
       statementOffset,
       databaseKind,
@@ -70,7 +72,7 @@ export class CompletionRequestContextBuilder {
       document.version,
     );
     const resolutionLocalDefs = mergeLocalDefinitions(
-      parsed.allLocalDefs,
+      filterScriptDefinitionsAt(parsed.allLocalDefs, cursorOffset),
       localDefs,
     );
     const authoring = getDatabaseSqlAuthoring(databaseKind);

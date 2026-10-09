@@ -23,6 +23,29 @@ export function isPersistentDocumentDefinition(
 }
 
 /**
+ * Script-local tables (CTAS / TEMP) are visible from the end of their CREATE
+ * statement until a later DROP TABLE (`scopeStart`..`scopeEnd`). Definitions
+ * without a recorded lifetime stay visible everywhere.
+ */
+export function isScriptDefinitionVisibleAt(
+  definition: LocalDefinition,
+  offset: number,
+): boolean {
+  if (!isPersistentDocumentDefinition(definition) || definition.scopeStart === undefined) {
+    return true;
+  }
+  return offset >= definition.scopeStart
+    && (definition.scopeEnd === undefined || offset < definition.scopeEnd);
+}
+
+export function filterScriptDefinitionsAt(
+  definitions: LocalDefinition[],
+  offset: number,
+): LocalDefinition[] {
+  return definitions.filter((definition) => isScriptDefinitionVisibleAt(definition, offset));
+}
+
+/**
  * Procedure-local variables/parameters (NZPLSQL DECLARE, ALIAS FOR $n). They
  * are surfaced by completion as variable items rather than table candidates.
  */
@@ -130,6 +153,10 @@ export function mergeDefinitionColumns(
 
 function localDefinitionKey(definition: LocalDefinition): string {
   const type = definition.type.toUpperCase();
+  if (isPersistentDocumentDefinition(definition) && definition.scopeStart !== undefined) {
+    // A re-created script table is a separate definition with its own lifetime.
+    return `${type}:${definition.name.toUpperCase()}@${definition.scopeStart}`;
+  }
   if (
     (type === "VARIABLE" || type === "PARAMETER") &&
     definition.scopeStart !== undefined &&

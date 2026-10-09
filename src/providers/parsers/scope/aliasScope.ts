@@ -146,6 +146,10 @@ export class ParserSqlContextCollector {
       case "createTableStatement":
         this.visitCreateTableStatement(node);
         break;
+      case "dropStatement":
+        this.visitDropStatement(node);
+        this.visitChildren(node);
+        break;
       case "selectStatement":
       case "updateStatement":
       case "deleteStatement":
@@ -307,8 +311,42 @@ export class ParserSqlContextCollector {
     const displayName = isTemporaryTable
       ? tableRef.table
       : this.formatQualifiedTableDisplayName(tableRef);
-    this.setLocalDefinition(displayName, type, columns);
+    // The table becomes visible once its CREATE statement ends; a later
+    // DROP TABLE closes the lifetime (see visitDropStatement).
+    const statementRange = getNodeRange(node, this._rangeCache);
+    this.setLocalDefinition(
+      displayName,
+      type,
+      columns,
+      statementRange ? { start: statementRange.end + 1, end: Number.MAX_SAFE_INTEGER } : undefined,
+    );
     this.visitChildren(node);
+  }
+
+  private visitDropStatement(node: CstNode): void {
+    const range = getNodeRange(node, this._rangeCache);
+    if (!range) return;
+    for (const list of getChildNodesByKey(node, "dropTargetList")) {
+      for (const target of getChildNodesByKey(list, "dropTarget")) {
+        const tableRef = this.parseQualifiedTableName(getChildNodesByKey(target, "qualifiedName")[0]);
+        if (!tableRef) continue;
+        const names = new Set([
+          tableRef.table.toUpperCase(),
+          this.formatQualifiedTableDisplayName(tableRef).toUpperCase(),
+        ]);
+        for (const definition of this._localDefinitions.values()) {
+          if (
+            names.has(definition.name.toUpperCase())
+            && definition.scopeStart !== undefined
+            && definition.scopeStart <= range.start
+            && (definition.scopeEnd === undefined || definition.scopeEnd > range.start)
+            && ["TABLE", "TEMP TABLE", "GLOBAL TEMP TABLE"].includes(definition.type.toUpperCase())
+          ) {
+            definition.scopeEnd = range.start;
+          }
+        }
+      }
+    }
   }
 
   private formatQualifiedTableDisplayName(ref: QualifiedTableName): string {
@@ -387,9 +425,12 @@ export class ParserSqlContextCollector {
     scope?: { start: number; end: number },
   ): void {
     const normalizedType = type.toUpperCase();
+    const isScriptTable = ["TABLE", "TEMP TABLE", "GLOBAL TEMP TABLE"].includes(normalizedType);
     const key = normalizedType === "VARIABLE" || normalizedType === "PARAMETER"
       ? `${normalizedType}:${name.toUpperCase()}:${scope?.start ?? -1}:${scope?.end ?? -1}`
-      : name.toUpperCase();
+      : isScriptTable && scope
+        ? `${name.toUpperCase()}@${scope.start}`
+        : name.toUpperCase();
     const existing = this._localDefinitions.get(key);
     const dedupedColumns = this.dedupeColumns(columns);
 
