@@ -39,4 +39,15 @@ describe("resolveColumnIdentityWithMetadata", () => {
       document, sql.indexOf("CUSTOMER_ID"), bridge({}), { databaseKind: "postgresql" } as never);
     expect(identity).toBeUndefined();
   });
+
+  it("requests each referenced table once, not once per column reference", async () => {
+    const text = "SELECT C.CUSTOMER_ID FROM SALES.CUSTOMERS C WHERE "
+      + Array.from({ length: 500 }, () => "C.CUSTOMER_ID = 1").join(" OR ");
+    const document = TextDocument.create("file:///d.sql", "sql", 1, text);
+    const metadata = bridge({ CUSTOMERS: ["CUSTOMER_ID"] });
+    const identity = await resolveColumnIdentityWithMetadata(
+      document, text.indexOf("CUSTOMER_ID"), metadata, { databaseKind: "netezza", effectiveDatabase: "SHOP" });
+    expect(identity?.occurrences).toHaveLength(501);
+    expect(metadata.getTableInfo).toHaveBeenCalledTimes(1);
+  });
 });
