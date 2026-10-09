@@ -12,6 +12,7 @@ import { ResultPanelView } from '../views/resultPanelView';
 import { LoginPanel } from '../views/loginPanel';
 import { SettingsView } from '../views/settingsView';
 import { SqlParser } from '../sql/sqlParser';
+import { requestSqlColumnCatalogTarget } from '../activation/lspRegistration';
 import { EditDataProvider, EditDataItem } from '../views/editDataProvider';
 import { EtlDesignerView } from '../views/etlDesignerView';
 import { EtlProjectManager } from '../etl/etlProjectManager';
@@ -641,6 +642,19 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             const document = editor.document;
             const selection = editor.selection;
             const offset = document.offsetAt(selection.active);
+
+            // A physical column (or the physical origin of a local projection)
+            // reveals its catalog column; relations keep the object reveal.
+            const column = await requestSqlColumnCatalogTarget(document, selection.active);
+            if (column?.database && column.schema) {
+                await vscode.commands.executeCommand('netezza.revealSchemaColumn', {
+                    database: column.database,
+                    schema: column.schema,
+                    table: column.relation,
+                    column: column.column,
+                });
+                return;
+            }
 
             const objectInfo = SqlParser.getObjectAtPosition(document.getText(), offset);
 

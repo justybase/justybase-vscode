@@ -7,6 +7,22 @@ export const NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION =
 export const NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION =
   "netezza/metadataCacheInvalidated";
 export const NETEZZA_UX_PERF_NOTIFICATION = "netezza/uxPerf";
+/** Catalog column a host can reveal for the SQL column at a position. */
+export const NETEZZA_COLUMN_CATALOG_TARGET_REQUEST = "netezza/columnCatalogTarget";
+
+export type ColumnCatalogTargetParams = {
+  textDocument: { uri: string };
+  position: { line: number; character: number };
+};
+
+/** Mirrors the sql-core catalog target; null when the column has none. */
+export type ColumnCatalogTargetResponse = {
+  database: string | null;
+  schema: string | null;
+  relation: string;
+  column: string;
+  via: "catalog" | "origin";
+} | null;
 
 export type UxPerfNotificationParams = {
   op: string;

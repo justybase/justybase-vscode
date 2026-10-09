@@ -39,7 +39,7 @@ export type {
 } from "./parsingRuntime";
 export { SqlVisitor } from "./visitor/sqlVisitor";
 export { ScopeBuilder } from "./visitor/scopeBuilder";
-export { formatSqlRenameReplacement, buildSqlRenameEdits } from "./renameFormatting";
+export { formatSqlRenameReplacement, buildSqlRenameEdits, buildSqlColumnRenameEdits, requestedSqlRenameName } from "./renameFormatting";
 export {
   resolveSqlRenameSymbol,
   collectSqlSymbolUsages,

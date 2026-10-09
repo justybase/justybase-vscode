@@ -7,16 +7,26 @@ import {
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { TextDocuments } from "vscode-languageserver/node";
 import {
+  buildSqlColumnRenameEdits,
   buildSqlRenameEdits,
   type DocumentParseSession,
 } from "../../sqlParser";
 import {
-  collectSqlPhysicalTableReferences,
-  resolveSqlColumnIdentity,
+  SqlColumnIdentityAnalysis,
+  type SqlColumnCatalogLookup,
   type SqlColumnCatalogTable,
   type SqlColumnIdentity,
 } from "@justybase/sql-core/validation/columnIdentity";
-import type { MetadataContextResponse } from "../../lsp/protocol";
+import {
+  prepareSqlColumnRename,
+  resolveSqlColumnCatalogTarget,
+  type SqlColumnCatalogTarget,
+} from "@justybase/sql-core/validation/columnAuthoring";
+import {
+  NETEZZA_COLUMN_CATALOG_TARGET_REQUEST,
+  type ColumnCatalogTargetParams,
+  type MetadataContextResponse,
+} from "../../lsp/protocol";
 import type { MetadataBridge } from "../metadataBridge";
 import { runWithRequestBoundary } from "../requestBoundary";
 import { resolveSqlRenameSymbolFromSession } from "../parseSessionUtils";
@@ -32,26 +42,36 @@ const RENAME_SLOW_LOG_MS = 150;
 /** Upper bound on tables whose metadata one column navigation request may load. */
 const COLUMN_IDENTITY_MAX_TABLES = 32;
 
+export interface ColumnIdentityWithMetadata {
+  analysis: SqlColumnIdentityAnalysis;
+  /** Metadata of the referenced tables, for re-analysis of edited text. */
+  lookup: SqlColumnCatalogLookup;
+}
+
 /**
- * Resolves column identity for Definition/References. Only tables referenced
- * by the document are looked up, through the bridge's per-connection cache,
- * never the whole catalog.
+ * Column identities of the document for Definition, References, Hover,
+ * Rename and catalog targets. Only tables referenced by the document are
+ * looked up, through the bridge's per-connection cache, never the whole
+ * catalog. The analysis is request-local and is discarded with the request.
  */
-export async function resolveColumnIdentityWithMetadata(
+export async function analyzeColumnIdentitiesWithMetadata(
   document: TextDocument,
-  offset: number,
   metadataBridge: Pick<MetadataBridge, "getTableInfo">,
   context: Pick<MetadataContextResponse, "databaseKind" | "effectiveDatabase">,
   isCancellationRequested: () => boolean = () => false,
-): Promise<SqlColumnIdentity | undefined> {
+): Promise<ColumnIdentityWithMetadata | undefined> {
   if (context.databaseKind && context.databaseKind !== "netezza") {
     return undefined;
   }
   const sql = document.getText();
+  const structure = SqlColumnIdentityAnalysis.analyze(sql);
+  if (!structure) {
+    return undefined;
+  }
   const keyOf = (database: string | undefined, schema: string | undefined, table: string) =>
     [database ?? "", schema ?? "", table].map((part) => part.toUpperCase()).join("|");
   const tables = new Map<string, { database?: string; schema?: string; name: string }>();
-  for (const reference of collectSqlPhysicalTableReferences(sql)) {
+  for (const reference of structure.physicalTables) {
     if (tables.size >= COLUMN_IDENTITY_MAX_TABLES) break;
     tables.set(keyOf(reference.database, reference.schema, reference.name), reference);
   }
@@ -67,13 +87,44 @@ export async function resolveColumnIdentityWithMetadata(
         schema: info.schema ?? reference.schema ?? null,
         name: info.table || reference.name,
         columns: info.columns.map((column) => column.name),
+        columnTypes: info.columns.map((column) => column.type || undefined),
       });
     }),
   );
   if (isCancellationRequested()) {
     return undefined;
   }
-  return resolveSqlColumnIdentity(sql, offset, (database, schema, table) => fetched.get(keyOf(database, schema, table)));
+  const lookup: SqlColumnCatalogLookup = (database, schema, table) => fetched.get(keyOf(database, schema, table));
+  // Resolve again with metadata, reusing the parse that found the tables.
+  const analysis = fetched.size > 0 ? SqlColumnIdentityAnalysis.analyze(sql, lookup, structure.parseResult) : structure;
+  return analysis ? { analysis, lookup } : undefined;
+}
+
+/** Resolves the column at `offset`; see {@link analyzeColumnIdentitiesWithMetadata}. */
+export async function resolveColumnIdentityWithMetadata(
+  document: TextDocument,
+  offset: number,
+  metadataBridge: Pick<MetadataBridge, "getTableInfo">,
+  context: Pick<MetadataContextResponse, "databaseKind" | "effectiveDatabase">,
+  isCancellationRequested: () => boolean = () => false,
+): Promise<SqlColumnIdentity | undefined> {
+  const columns = await analyzeColumnIdentitiesWithMetadata(document, metadataBridge, context, isCancellationRequested);
+  return columns?.analysis.identityAt(offset);
+}
+
+/**
+ * The catalog column a host can reveal in its schema browser for the column
+ * at `offset`; physical navigation never invents a document range.
+ */
+export async function resolveColumnCatalogTargetWithMetadata(
+  document: TextDocument,
+  offset: number,
+  metadataBridge: Pick<MetadataBridge, "getTableInfo">,
+  context: Pick<MetadataContextResponse, "databaseKind" | "effectiveDatabase">,
+  isCancellationRequested: () => boolean = () => false,
+): Promise<SqlColumnCatalogTarget | undefined> {
+  const identity = await resolveColumnIdentityWithMetadata(document, offset, metadataBridge, context, isCancellationRequested);
+  return resolveSqlColumnCatalogTarget(identity);
 }
 
 export interface SymbolHandlerDeps {
@@ -260,7 +311,21 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
           context.databaseKind,
         );
         if (!symbol) {
-          return null;
+          // Local columns only: physical catalog columns are never renamed.
+          const columns = await analyzeColumnIdentitiesWithMetadata(
+            document,
+            metadataBridge,
+            context,
+            isCancellationRequested,
+          );
+          const target = columns && prepareSqlColumnRename(columns.analysis, document.getText(), offset);
+          if (!target || isCancellationRequested()) {
+            return null;
+          }
+          return {
+            range: offsetRangeToRange(document, target.startOffset, target.endOffset),
+            placeholder: target.identity.name,
+          };
         }
 
         return {
@@ -315,7 +380,22 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
             context.databaseKind,
           );
           if (!symbol) {
-            return null;
+            const columns = await analyzeColumnIdentitiesWithMetadata(
+              document,
+              metadataBridge,
+              context,
+              isCancellationRequested,
+            );
+            const columnEdits = columns && buildSqlColumnRenameEdits(document.getText(), offset, trimmedName, columns.lookup);
+            if (!columnEdits || isCancellationRequested()) return null;
+            return {
+              changes: {
+                [document.uri]: columnEdits.map((edit) => ({
+                  range: offsetRangeToRange(document, edit.startOffset, edit.endOffset),
+                  newText: edit.newText,
+                })),
+              },
+            };
           }
 
           const edits = buildSqlRenameEdits(document.getText(), symbol, trimmedName);
@@ -332,6 +412,41 @@ export function registerSymbolHandlers(deps: SymbolHandlerDeps): void {
               })),
             },
           };
+        },
+      );
+    },
+  );
+
+  connection.onRequest(
+    NETEZZA_COLUMN_CATALOG_TARGET_REQUEST,
+    async (params: ColumnCatalogTargetParams, token): Promise<SqlColumnCatalogTarget | null> => {
+      const document = documents.get(params.textDocument.uri);
+      if (!document) {
+        return null;
+      }
+      return runWithRequestBoundary(
+        {
+          operation: "columnCatalogTarget",
+          documentUri: document.uri,
+          budgetMs: DEFINITION_REQUEST_BUDGET_MS,
+          slowLogThresholdMs: DEFINITION_SLOW_LOG_MS,
+          fallbackValue: null,
+          logger: connection.console,
+          token,
+        },
+        async ({ isCancellationRequested }) => {
+          const context = await metadataBridge.getContext(document.uri);
+          if (isCancellationRequested()) {
+            return null;
+          }
+          const target = await resolveColumnCatalogTargetWithMetadata(
+            document,
+            document.offsetAt(params.position),
+            metadataBridge,
+            context,
+            isCancellationRequested,
+          );
+          return target ?? null;
         },
       );
     },

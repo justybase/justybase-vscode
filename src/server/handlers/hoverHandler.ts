@@ -14,6 +14,7 @@ import type { MetadataBridge } from "../metadataBridge";
 import { toDocumentParseRequest } from "../documentParseRequest";
 import { runWithRequestBoundary } from "../requestBoundary";
 import { resolveSqlRenameSymbolFromSession } from "../parseSessionUtils";
+import { resolveColumnIdentityWithMetadata } from "./symbolHandlers";
 
 const HOVER_REQUEST_BUDGET_MS = 1000;
 const HOVER_SLOW_LOG_MS = 150;
@@ -74,6 +75,14 @@ export function registerHoverHandler(deps: HoverHandlerDeps): void {
       findLocalDefinition,
       formatObjectPath,
       isCancellationRequested: () => token.isCancellationRequested,
+      resolveColumnIdentity: async (offset) =>
+        resolveColumnIdentityWithMetadata(
+          document,
+          offset,
+          metadataBridge,
+          await metadataBridge.getContext(document.uri),
+          () => token.isCancellationRequested,
+        ),
     };
 
     if (token.isCancellationRequested) {
