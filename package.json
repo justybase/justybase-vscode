@@ -4785,6 +4785,7 @@
     "test:extension-host:designer": "npm run build && node scripts/extensionHost/extensionHost.js --suite=designer --engine=sqlite",
     "test:extension-host:filter-performance": "npm run build && node scripts/extensionHost/extensionHost.js --suite=result-panel-filter-performance --engine=sqlite",
     "test:extension-host:authoring": "npm run build && node scripts/extensionHost/extensionHost.js --suite=authoring --engine=sqlite",
+    "test:lsp:columns": "npm run build && node scripts/lspColumnAuthoringE2E.mjs",
     "test:extension-host:screenshots": "npm run build && node scripts/extensionHost/extensionHost.js --engine=sqlite --screenshots",
     "test:extension-host:authoring:screenshots": "npm run build && node scripts/extensionHost/extensionHost.js --suite=authoring --engine=sqlite --screenshots",
     "test:extension-host:netezza": "npm run build && node scripts/extensionHost/extensionHost.js --engine=netezza",
