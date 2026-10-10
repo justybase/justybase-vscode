@@ -28,6 +28,10 @@ export class MysqlSqlParser extends NetezzaSqlParser {
     return false;
   }
 
+  protected supportsCommentOnColumn(): boolean {
+    return false;
+  }
+
   protected getNetezzaRelaxedNameTokens(): TokenType[] {
     return [...super.getNetezzaRelaxedNameTokens(), mysqlLexer.BacktickIdentifier];
   }

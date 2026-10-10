@@ -32,7 +32,7 @@ import type { MetadataBridge } from "../metadataBridge";
 import { runWithRequestBoundary } from "../requestBoundary";
 import { resolveSqlRenameSymbolFromSession } from "../parseSessionUtils";
 import { toDocumentParseRequest } from "../documentParseRequest";
-import { offsetRangeToRange } from "./hoverHandler";
+import { offsetRangeToRange } from "./offsetRangeToRange";
 
 const DEFINITION_REQUEST_BUDGET_MS = 1000;
 const REFERENCES_REQUEST_BUDGET_MS = 1000;

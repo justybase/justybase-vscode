@@ -57,3 +57,37 @@ describe("shared SQL visitor", () => {
     }
   });
 });
+
+describe("dialect grammar gates on the shared parser", () => {
+  const { SqlValidator } = jest.requireActual<typeof import("../../sqlParser/validator")>(
+    "../../sqlParser/validator",
+  );
+  const mysqlProfile = jest.requireActual<typeof import("../../../extensions/mysql/src/sql/authoring")>(
+    "../../../extensions/mysql/src/sql/authoring",
+  ).mysqlSqlAuthoring.validation;
+  const mssqlProfile = jest.requireActual<typeof import("../../../extensions/mssql/src/sql/authoring")>(
+    "../../../extensions/mssql/src/sql/authoring",
+  ).mssqlSqlAuthoring.validation;
+  const oracleProfile = jest.requireActual<typeof import("../../../extensions/oracle/src/sql/authoring")>(
+    "../../../extensions/oracle/src/sql/authoring",
+  ).oracleSqlAuthoring.validation;
+  const parseErrors = (profile: unknown, sql: string): string[] =>
+    new SqlValidator(undefined, profile as never)
+      .validate(sql)
+      .errors.filter((error: { code?: string }) => error.code === "PAR001")
+      .map((error: { message: string }) => error.message);
+
+  it.each([
+    ["MySQL", mysqlProfile],
+    ["MSSQL", mssqlProfile],
+  ])("rejects COMMENT ON COLUMN in %s, which has no such statement", (_name, profile) => {
+    expect(parseErrors(profile, "COMMENT ON COLUMN t.c IS 'x';").length).toBeGreaterThan(0);
+  });
+
+  it("accepts COMMENT ON COLUMN in Oracle and Netezza", () => {
+    expect(parseErrors(oracleProfile, "COMMENT ON COLUMN t.c IS 'x';")).toEqual([]);
+    expect(
+      parseErrors(undefined, "COMMENT ON COLUMN s.t.c IS 'x';"),
+    ).toEqual([]);
+  });
+});
