@@ -54,13 +54,11 @@ import { SqlParser } from './sql/sqlParser';
 import { runCompatibilityMigrations } from './compatibility/migrationService';
 import { compatibilityStateKeys, getMementoValue, updateMementoValue } from './compatibility/state';
 import {
-    createKeepConnectionStatusBar,
-    createActiveConnectionStatusBar,
-    createActiveDatabaseStatusBar,
-    updateKeepConnectionStatusBar,
     createSelectionStatsStatusBar,
     updateSelectionStatsStatusBar,
 } from './services/statusBarManager';
+import { createConnectionCapsule } from './services/connectionCapsule';
+import { registerConnectionCapsuleCommands } from './commands/connectionCapsuleCommands';
 import {
     createSqlStatementDecoration,
     registerDecorationSubscriptions,
@@ -241,20 +239,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     });
 
     t = performance.now();
-    const keepConnectionStatusBar = createKeepConnectionStatusBar(context, connectionManager);
-    const { updateFn: updateActiveConnectionStatusBar } =
-        createActiveConnectionStatusBar(context, connectionManager);
-    const { updateFn: updateActiveDatabaseStatusBar } =
-        createActiveDatabaseStatusBar(context, connectionManager);
+    const { updateFn: updateConnectionCapsule } = createConnectionCapsule(context, connectionManager);
     const selectionStatsStatusBar = createSelectionStatsStatusBar(context);
 
     resultPanelProvider.setSelectionStatsCallback(stats => {
         updateSelectionStatsStatusBar(selectionStatsStatusBar, stats);
     });
-
-    const updateKeepConnectionStatusBarFn = () => {
-        updateKeepConnectionStatusBar(keepConnectionStatusBar, connectionManager);
-    };
 
     const metadataPrefetchCoordinator = new MetadataPrefetchCoordinator(context, services, logger);
     metadataPrefetchCoordinator.register(context, metadataCacheInit);
@@ -264,18 +254,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         dispose: () => metadataSessionSweeper.dispose(),
     });
 
-    updateActiveConnectionStatusBar();
-    updateActiveDatabaseStatusBar();
-    updateKeepConnectionStatusBarFn();
+    void updateConnectionCapsule();
 
     activateConnectionEvents({
         context,
         connectionManager,
         connectionAccentDecorationProvider,
         statusBarHandlers: {
-            updateActiveConnectionStatusBar,
-            updateActiveDatabaseStatusBar,
-            updateKeepConnectionStatusBar: updateKeepConnectionStatusBarFn,
+            updateConnectionCapsule,
         },
         onPrefetchConnection: (connectionName) => metadataPrefetchCoordinator.triggerForConnection(connectionName),
         onRefreshCurrentSchemaForDocument: (documentUri) =>
@@ -362,9 +348,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         metadataCache,
         schemaProvider,
         resultPanelProvider,
-        keepConnectionStatusBar,
+        refreshConnectionCapsule: updateConnectionCapsule,
         getDatabaseList,
         tableDdlSynchronizer,
+    }));
+    context.subscriptions.push(...registerConnectionCapsuleCommands({
+        context,
+        connectionManager,
+        metadataCache,
+        getDatabaseList,
+        refreshConnectionCapsule: updateConnectionCapsule,
     }));
     context.subscriptions.push(registerNewSqlTabCommand(connectionManager));
     context.subscriptions.push(...registerSqlConsoleCommands({ context, connectionManager }));

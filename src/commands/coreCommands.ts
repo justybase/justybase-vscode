@@ -16,7 +16,6 @@ import { requestSqlColumnCatalogTarget } from '../activation/lspRegistration';
 import { EditDataProvider, EditDataItem } from '../views/editDataProvider';
 import { EtlDesignerView } from '../views/etlDesignerView';
 import { EtlProjectManager } from '../etl/etlProjectManager';
-import { updateKeepConnectionStatusBar } from '../services/statusBarManager';
 import { buildExecCommand } from '../utils/shellUtils';
 import {
     runQueryRaw,
@@ -66,7 +65,7 @@ export interface CoreCommandsContext {
     metadataCache: MetadataCache;
     schemaProvider: SchemaProvider;
     resultPanelProvider: ResultPanelView;
-    keepConnectionStatusBar: vscode.StatusBarItem;
+    refreshConnectionCapsule: () => void | Promise<void>;
     getDatabaseList: (
         context: vscode.ExtensionContext,
         connectionManager: ConnectionManager,
@@ -124,7 +123,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
         metadataCache,
         schemaProvider,
         resultPanelProvider,
-        keepConnectionStatusBar,
+        refreshConnectionCapsule,
         getDatabaseList,
         tableDdlSynchronizer,
     } = ctx;
@@ -303,7 +302,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
             const documentUri = editor.document.uri.toString();
             const newState = connectionManager.toggleDocumentKeepConnectionOpen(documentUri);
-            updateKeepConnectionStatusBar(keepConnectionStatusBar, connectionManager);
+            void refreshConnectionCapsule();
 
             vscode.window.showInformationMessage(
                 newState

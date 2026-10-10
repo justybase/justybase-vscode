@@ -293,13 +293,18 @@ jest.mock('../providers/externalTableTemplates', () => ({
 }));
 
 jest.mock('../services/statusBarManager', () => ({
-    createKeepConnectionStatusBar: jest.fn().mockReturnValue({}),
-    createActiveConnectionStatusBar: jest.fn().mockReturnValue({ updateFn: jest.fn() }),
-    createActiveDatabaseStatusBar: jest.fn().mockReturnValue({ updateFn: jest.fn() }),
-    updateKeepConnectionStatusBar: jest.fn(),
     createSelectionStatsStatusBar: jest.fn().mockReturnValue({}),
     createMetadataRefreshStatusBar: jest.fn().mockReturnValue({}),
     updateMetadataRefreshStatusBar: jest.fn()
+}));
+
+jest.mock('../services/connectionCapsule', () => ({
+    createConnectionCapsule: jest.fn().mockReturnValue({ item: {}, updateFn: jest.fn() }),
+    updateConnectionCapsule: jest.fn()
+}));
+
+jest.mock('../commands/connectionCapsuleCommands', () => ({
+    registerConnectionCapsuleCommands: jest.fn().mockReturnValue([])
 }));
 
 jest.mock('../editors/decorationManager', () => ({
@@ -721,15 +726,22 @@ describe('extension.ts', () => {
     });
 
     describe('Status Bar', () => {
-        it('should create status bar items', async () => {
-            const { createKeepConnectionStatusBar, createActiveConnectionStatusBar, createActiveDatabaseStatusBar } =
-                jest.requireMock('../services/statusBarManager');
+        it('should create the connection capsule', async () => {
+            const { createConnectionCapsule } =
+                jest.requireMock('../services/connectionCapsule');
 
             await activate(mockContext);
 
-            expect(createKeepConnectionStatusBar).toHaveBeenCalled();
-            expect(createActiveConnectionStatusBar).toHaveBeenCalled();
-            expect(createActiveDatabaseStatusBar).toHaveBeenCalled();
+            expect(createConnectionCapsule).toHaveBeenCalled();
+        });
+
+        it('should register the connection capsule commands', async () => {
+            const { registerConnectionCapsuleCommands } =
+                jest.requireMock('../commands/connectionCapsuleCommands');
+
+            await activate(mockContext);
+
+            expect(registerConnectionCapsuleCommands).toHaveBeenCalled();
         });
     });
 

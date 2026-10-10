@@ -4,9 +4,7 @@ import { activateConnectionEvents } from '../activation/activateConnectionEvents
 jest.mock('vscode');
 
 describe('activateConnectionEvents', () => {
-    const updateActiveConnectionStatusBar = jest.fn();
-    const updateActiveDatabaseStatusBar = jest.fn();
-    const updateKeepConnectionStatusBar = jest.fn();
+    const updateConnectionCapsule = jest.fn();
 
     let documentConnectionListener: ((documentUri: string) => void) | undefined;
     let documentDatabaseListener: ((documentUri: string) => void) | undefined;
@@ -67,9 +65,7 @@ describe('activateConnectionEvents', () => {
             connectionManager: mockConnectionManager as never,
             connectionAccentDecorationProvider: mockConnectionAccentDecorationProvider as never,
             statusBarHandlers: {
-                updateActiveConnectionStatusBar,
-                updateActiveDatabaseStatusBar,
-                updateKeepConnectionStatusBar,
+                updateConnectionCapsule,
             },
             onPrefetchConnection: jest.fn(),
         });
@@ -80,40 +76,34 @@ describe('activateConnectionEvents', () => {
         expect(visibleEditorsListener).toBeDefined();
     });
 
-    it('does not refresh status bars for inactive document connection changes', () => {
+    it('does not refresh the capsule for inactive document connection changes', () => {
         documentConnectionListener?.('untitled:Console-other.sql');
 
         expect(mockConnectionAccentDecorationProvider.refresh).toHaveBeenCalled();
-        expect(updateActiveConnectionStatusBar).not.toHaveBeenCalled();
-        expect(updateActiveDatabaseStatusBar).not.toHaveBeenCalled();
-        expect(updateKeepConnectionStatusBar).not.toHaveBeenCalled();
+        expect(updateConnectionCapsule).not.toHaveBeenCalled();
     });
 
-    it('refreshes status bars when the active document connection changes', () => {
+    it('refreshes the capsule when the active document connection changes', () => {
         documentConnectionListener?.('untitled:Console-prod.sql');
 
-        expect(updateActiveConnectionStatusBar).toHaveBeenCalled();
-        expect(updateActiveDatabaseStatusBar).toHaveBeenCalled();
-        expect(updateKeepConnectionStatusBar).toHaveBeenCalled();
+        expect(updateConnectionCapsule).toHaveBeenCalled();
     });
 
-    it('updates database status only for the active document database override', () => {
+    it('updates the capsule only for the active document database override', () => {
         documentDatabaseListener?.('untitled:Console-other.sql');
-        expect(updateActiveDatabaseStatusBar).not.toHaveBeenCalled();
+        expect(updateConnectionCapsule).not.toHaveBeenCalled();
 
         documentDatabaseListener?.('untitled:Console-prod.sql');
-        expect(updateActiveDatabaseStatusBar).toHaveBeenCalledTimes(1);
+        expect(updateConnectionCapsule).toHaveBeenCalledTimes(1);
     });
 
-    it('refreshes status bars when visible editors change', () => {
+    it('refreshes the capsule when visible editors change', () => {
         visibleEditorsListener?.();
 
-        expect(updateActiveConnectionStatusBar).toHaveBeenCalled();
-        expect(updateActiveDatabaseStatusBar).toHaveBeenCalled();
-        expect(updateKeepConnectionStatusBar).toHaveBeenCalled();
+        expect(updateConnectionCapsule).toHaveBeenCalled();
     });
 
-    it('refreshes status bars when a visible document is reopened as SQL', async () => {
+    it('refreshes the capsule when a visible document is reopened as SQL', async () => {
         (vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = [{
             document: {
                 uri: { toString: () => 'untitled:Untitled-1' },
@@ -127,12 +117,10 @@ describe('activateConnectionEvents', () => {
 
         await Promise.resolve();
 
-        expect(updateActiveConnectionStatusBar).toHaveBeenCalled();
-        expect(updateActiveDatabaseStatusBar).toHaveBeenCalled();
-        expect(updateKeepConnectionStatusBar).toHaveBeenCalled();
+        expect(updateConnectionCapsule).toHaveBeenCalled();
     });
 
-    it('does not refresh status bars when a non-SQL document opens in the background', async () => {
+    it('does not refresh the capsule when a non-SQL document opens in the background', async () => {
         (vscode.window as unknown as { visibleTextEditors: vscode.TextEditor[] }).visibleTextEditors = [];
 
         openTextDocumentListener?.({
@@ -142,8 +130,6 @@ describe('activateConnectionEvents', () => {
 
         await Promise.resolve();
 
-        expect(updateActiveConnectionStatusBar).not.toHaveBeenCalled();
-        expect(updateActiveDatabaseStatusBar).not.toHaveBeenCalled();
-        expect(updateKeepConnectionStatusBar).not.toHaveBeenCalled();
+        expect(updateConnectionCapsule).not.toHaveBeenCalled();
     });
 });

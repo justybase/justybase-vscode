@@ -459,6 +459,11 @@
         "icon": "$(server)"
       },
       {
+        "command": "netezza.showConnectionCapsule",
+        "title": "Show Connection Capsule for SQL Tab",
+        "icon": "$(database)"
+      },
+      {
         "command": "netezza.clearAutocompleteCache",
         "title": "JustyBase: Clear Autocomplete Cache",
         "icon": "$(trash)"

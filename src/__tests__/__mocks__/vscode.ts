@@ -163,6 +163,11 @@ export const languages = {
   registerDocumentSemanticTokensProvider: jest.fn(() => ({ dispose: jest.fn() })),
 };
 
+export enum QuickPickItemKind {
+  Separator = -1,
+  Default = 0,
+}
+
 export enum ViewColumn {
   Beside = -2,
   One = 1,

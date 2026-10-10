@@ -134,6 +134,7 @@ describe("registerCoreCommands", () => {
         setActiveConnection: jest.fn(),
         setDocumentConnection: jest.fn(),
         getConnectionDatabaseKind: jest.fn(),
+        toggleDocumentKeepConnectionOpen: jest.fn(),
       } as unknown as CoreCommandsContext["connectionManager"],
       metadataCache: metadataCache as unknown as CoreCommandsContext["metadataCache"],
       schemaProvider: {
@@ -145,7 +146,7 @@ describe("registerCoreCommands", () => {
         getPerformanceStatsReport: jest.fn(),
         clearPerformanceStats: jest.fn(),
       } as unknown as CoreCommandsContext["resultPanelProvider"],
-      keepConnectionStatusBar: {} as vscode.StatusBarItem,
+      refreshConnectionCapsule: jest.fn(),
       getDatabaseList: jest.fn(),
     };
 
@@ -287,8 +288,7 @@ describe("registerCoreCommands", () => {
     expect(ctx.resultPanelProvider.clearPerformanceStats).not.toHaveBeenCalled();
   });
 
-  it("shows connection target and current marker in the global connection picker", async () => {
-    (ctx.connectionManager.getConnections as jest.Mock).mockResolvedValue([
+  it("shows connection target and current marker in the global connection picker", async () => {    (ctx.connectionManager.getConnections as jest.Mock).mockResolvedValue([
       { name: "DEV", host: "db.example.test", port: 5480, database: "ANALYTICS" },
       { name: "LOCAL", host: "", database: ":memory:" },
     ]);
@@ -309,6 +309,25 @@ describe("registerCoreCommands", () => {
         }),
       ],
       { placeHolder: "Select Active Connection" },
+    );
+  });
+
+  it("refreshes the connection capsule when toggling keep connection", async () => {
+    (vscode.window as unknown as { activeTextEditor?: unknown }).activeTextEditor = {
+      document: {
+        languageId: "sql",
+        uri: { toString: () => "file:///tab.sql" },
+      },
+    };
+    (ctx.connectionManager.toggleDocumentKeepConnectionOpen as jest.Mock).mockReturnValue(true);
+
+    const command = getCommand("netezza.toggleKeepConnectionForTab");
+    await command();
+
+    expect(ctx.connectionManager.toggleDocumentKeepConnectionOpen).toHaveBeenCalledWith("file:///tab.sql");
+    expect(ctx.refreshConnectionCapsule).toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Keep connection: ENABLED"),
     );
   });
 });
