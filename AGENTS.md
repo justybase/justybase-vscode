@@ -276,8 +276,8 @@ Optional extensions expose corresponding `package:<dialect>` and `package:<diale
 | Area | Files |
 |------|-------|
 | Lexer / parser | `lexer.ts`, `parser.ts`, `BaseSqlParser.ts`, `parsingRuntime.ts` |
-| Validator | `src/sqlParser/validator.ts`, `src/sqlParser/visitor/sqlVisitor.ts` |
-| Type comparison | `src/sqlParser/visitor/typeComparisonUtils.ts` (SQL025/SQL026) |
+| Validator | `src/sqlParser/validator.ts`, `packages/sql-core/src/validation/visitor/sqlVisitorCore.ts` (the only CST visitor; `src/sqlParser/visitor/sqlVisitor.ts` is the desktop dialect-hook subclass) |
+| Type comparison | `packages/sql-core/src/validation/visitor/typeComparisonUtils.ts` (SQL025/SQL026) |
 | Completion | `src/server/completionEngine.ts`, `completionContextExtractor.ts`, `completionQualifierResolver.ts` |
 | Linter / Problems | `src/providers/sqlLinterProvider.ts`, `src/providers/sqlQualityEngine.ts` |
 | LSP diagnostics | `src/server/main.ts`, `src/server/lspSchemaProvider.ts`, `src/server/metadataBridge.ts` |
@@ -314,7 +314,7 @@ Type-aware warnings **require** metadata with types. Without connection/cache, S
 - Unsupported: `PERFORM`, `EXECUTE IMMEDIATE … USING`, `EXECUTE IMMEDIATE … INTO`, `INSERT … RETURNING … INTO`, `CASE`, `CONTINUE`, `GOTO`, bare `NULL;`, `$$` bodies. `ELSEIF` is accepted as an `ELSIF` synonym.
 - Known parser limitation: qualified function/procedure calls in a `SELECT` list (`SCHEMA.PROC()`) are not parsed by the shared expression grammar; reference the routine unqualified or use `CALL`.
 
-When changing this grammar, update all of: `packages/sql-core/src/netezza/lexer.ts`, `.../parser.ts`, `src/sqlParser/visitor/*`, `procedureScopeBuilder.ts`, `src/dialects/netezza/sql/keywords.ts`, `dialects/netezza/syntaxes/netezza.tmLanguage.json`, and the live matrix corpus.
+When changing this grammar, update all of: `packages/sql-core/src/netezza/lexer.ts`, `.../parser.ts`, `packages/sql-core/src/validation/visitor/*`, `packages/sql-core/src/validation/procedureScopeBuilder.ts`, `src/dialects/netezza/sql/keywords.ts`, `dialects/netezza/syntaxes/netezza.tmLanguage.json`, and the live matrix corpus.
 
 ### Netezza Parser: Keywords as Identifiers
 
@@ -561,7 +561,7 @@ When modifying SQL syntax, update ALL of:
 
 - `src/dialects/netezza/sql/lexer.ts`
 - `src/dialects/netezza/sql/parser.ts`
-- `src/sqlParser/visitor/sqlVisitor.ts`
+- `packages/sql-core/src/validation/visitor/sqlVisitorCore.ts` (every grammar rule needs its visitor method here; Chevrotain `validateVisitor()` throws at startup otherwise, and `sharedSqlVisitor.test.ts` catches it first. Do not add rule methods to the desktop subclass `src/sqlParser/visitor/sqlVisitor.ts`.)
 - `src/dialects/netezza/sql/builtins.ts`
 - `dialects/netezza/syntaxes/netezza.tmLanguage.json`
 - `dialects/netezza/snippets/netezza.code-snippets`

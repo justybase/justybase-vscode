@@ -23,6 +23,11 @@ const entries = [
   ['lexer', 'netezza/lexer'],
   ['identifierPattern', 'netezza/identifierPattern'],
   ['sourceScan', 'sourceScan'],
+  ['sqlVisitorCore', 'validation/visitor/sqlVisitorCore'],
+  ['scopeBuilder', 'validation/visitor/scopeBuilder'],
+  ['typeComparisonUtils', 'validation/visitor/typeComparisonUtils'],
+  ['procedureVisitor', 'validation/visitor/procedureVisitor'],
+  ['procedureScopeBuilder', 'validation/procedureScopeBuilder'],
 ];
 
 // All public entries must share Chevrotain tokens and parser classes. Bundling

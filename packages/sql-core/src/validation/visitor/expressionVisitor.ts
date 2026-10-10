@@ -270,7 +270,7 @@ export function columnReference(
   if (host.getInProcedureContext() && !host.getInProcedureSqlContext()) {
     if (procedureScope && rawTokens.length >= 1) {
       procedureScope.markNameUsed(
-        stripIdentifierQuoting(host.getTokenText(rawTokens[0])),
+        host.stripIdentifierQuoting(host.getTokenText(rawTokens[0])),
       );
     }
     return;
@@ -278,7 +278,7 @@ export function columnReference(
 
   const tokens = rawTokens;
   const normalizeIdentifier = (token: IToken): string =>
-    stripIdentifierQuoting(host.getTokenText(token));
+    host.stripIdentifierQuoting(host.getTokenText(token));
 
   if (tokens.length === 1) {
     const columnName = normalizeIdentifier(tokens[0]);

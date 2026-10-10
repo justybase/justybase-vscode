@@ -285,15 +285,23 @@ class IdentifierRoleCollector {
   private visitCommentStatement(node: CstNode): void {
     const qualifiedNameNode = this.getChildNodes(node, "qualifiedName")[0];
     this.registerQualifiedTableNameTokens(qualifiedNameNode);
-    const columnTokens = this.getTokens(node, "Column");
-    if (columnTokens.length > 0) {
-      const identifierNode = this.getChildNodes(node, "identifier")[0];
-      if (identifierNode) {
-        const columnToken = this.getFirstTokenFromCst(identifierNode);
-        if (columnToken) {
-          this.registerOccurrence(columnToken, "column");
-        }
+    const columnTarget = this.getChildNodes(node, "commentColumnTarget")[0];
+    if (columnTarget) {
+      // [[database.]schema.]table.column: the last segment is the column, the rest name its table.
+      const segments = this.getChildNodes(columnTarget, "identifier")
+        .map((idNode) => this.getFirstTokenFromCst(idNode))
+        .filter((token): token is IToken => !!token);
+      const column = segments.pop();
+      if (column) {
+        this.registerOccurrence(column, "column");
       }
+      const roles = this.rolesForQualifiedTableSegments(
+        segments.length,
+        this.getTokens(columnTarget, "Dot").length - 1,
+      );
+      segments.forEach((token, index) =>
+        this.registerOccurrence(token, roles[index] ?? "table"),
+      );
     }
     this.visitChildren(node);
   }

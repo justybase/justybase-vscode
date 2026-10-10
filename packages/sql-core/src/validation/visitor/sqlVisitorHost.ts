@@ -5,6 +5,13 @@ import type { SchemaProvider } from "../schemaProvider";
 import type { TableInfo, TokenPosition, ValidationError } from "../types";
 import type { ScopeBuilder } from "./scopeBuilder";
 
+/** Qualification rules of the active dialect; sql-core defaults to Netezza. */
+export interface SqlVisitorQualificationTraits {
+  /** `a.b` names SCHEMA.OBJECT, or DATABASE.OBJECT (MySQL). */
+  twoPartNameStyle: "schema-object" | "database-object";
+  supportsThreePartName: boolean;
+}
+
 export interface SqlVisitorHost {
   addError(
     message: string,
@@ -28,6 +35,9 @@ export interface SqlVisitorHost {
   isToken(value: unknown): value is IToken;
   getFirstTokenFromCst(node: CstNode): IToken | undefined;
   getCstText(node: CstNode): string;
+  /** Removes identifier quoting with the active dialect's rules. */
+  stripIdentifierQuoting(text: string): string;
+  getQualificationTraits(): SqlVisitorQualificationTraits;
   findDescendantCstNode(node: CstNode, targetName: string): CstNode | undefined;
   findDescendantCstNodeBounded(
     node: CstNode,
@@ -43,6 +53,8 @@ export interface SqlVisitorHost {
   hasMacroReferenceInCst(node: CstNode): boolean;
   hasMacroReferenceInToken(token: IToken): boolean;
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void;
+  /** True when a quoted relation name differs in case from the catalog entry it resolves to. */
+  isQuotedNameCaseMismatch(table: TableInfo, tableNameNode: CstNode): boolean;
   validateBooleanContext(
     expressionNode: CstNode,
     token: IToken,

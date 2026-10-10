@@ -4,7 +4,6 @@ import {
   getCstNodeTokenSpan,
   getTokenSpanPositionFromEndpoints,
 } from "../tokenSpanUtils";
-import { stripIdentifierQuoting } from "../identifierUtils";
 import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 
@@ -344,7 +343,7 @@ export function tableSource(
         table.schema,
         table.name,
       );
-      if (schemaTable) {
+      if (schemaTable && !host.isQuotedNameCaseMismatch(table, tableNameNode)) {
         table.columns = schemaTable.columns;
       } else {
         const isQualified = !!(table.database || table.schema);
@@ -426,7 +425,10 @@ export function addTableQualificationWarning(
     host.hasMacroReferenceInCst(tableNameNode) ||
     table.isCte ||
     table.isTempTable ||
-    (table.database && table.schema)
+    (table.database && table.schema) ||
+    (host.getQualificationTraits().twoPartNameStyle === "database-object" &&
+      table.database &&
+      !table.schema)
   ) {
     return;
   }
@@ -489,6 +491,9 @@ export function tableName(
       )
     : { name: "" };
   const qualifiedNameNode = ctx.qualifiedName?.[0];
+  if (qualifiedNameNode) {
+    addUnsupportedThreePartNameError(host, qualifiedNameNode);
+  }
 
   return {
     name: qualifiedName.name || "",
@@ -500,6 +505,39 @@ export function tableName(
       !!qualifiedNameNode && host.hasMacroReferenceInCst(qualifiedNameNode),
     columns: [],
   };
+}
+
+function addUnsupportedThreePartNameError(
+  host: SqlVisitorHost,
+  qualifiedNameNode: CstNode,
+): void {
+  if (host.getQualificationTraits().supportsThreePartName) {
+    return;
+  }
+
+  const identifiers =
+    (qualifiedNameNode.children?.identifier as CstNode[] | undefined) ?? [];
+  if (identifiers.length < 3) {
+    return;
+  }
+
+  const span = getCstNodeTokenSpan(qualifiedNameNode);
+  if (!span) {
+    return;
+  }
+
+  const suggestedFix = identifiers
+    .slice(1)
+    .map((identifier) => host.getCstText(identifier))
+    .join(".");
+  const databaseKind = host.getValidationProfile().databaseKind;
+  host.addErrorAtPosition(
+    `${databaseKind === "oracle" ? "Oracle" : "This dialect"} does not support DATABASE.SCHEMA.OBJECT qualification; use SCHEMA.OBJECT`,
+    span,
+    "error",
+    "SQL050",
+    suggestedFix,
+  );
 }
 
 export function qualifiedName(
@@ -520,6 +558,10 @@ export function qualifiedName(
   }
 
   if (identifiers.length === 2) {
+    if (host.getQualificationTraits().twoPartNameStyle === "database-object") {
+      return { database: identifiers[0], name: identifiers[1] };
+    }
+
     let treatAsDatabaseDotDot = false;
 
     if (dotCount === 1) {
@@ -857,7 +899,7 @@ export function starExpression(
     : undefined;
   const qualifierToken = directQualifierToken ?? identifierQualifierToken;
   const qualifier = qualifierToken
-    ? stripIdentifierQuoting(host.getTokenText(qualifierToken))
+    ? host.stripIdentifierQuoting(host.getTokenText(qualifierToken))
     : undefined;
 
   if (qualifier && qualifierToken) {
