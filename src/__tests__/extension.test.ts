@@ -406,7 +406,8 @@ jest.mock('../sql/sqlParser', () => ({
 
 jest.mock('../activation/lspRegistration', () => ({
     startSqlLanguageClient: jest.fn().mockResolvedValue(undefined),
-    stopSqlLanguageClient: jest.fn().mockResolvedValue(undefined)
+    stopSqlLanguageClient: jest.fn().mockResolvedValue(undefined),
+    requestSqlColumnCatalogTarget: jest.fn().mockResolvedValue(undefined)
 }));
 
 jest.mock('../compatibility/migrationService', () => ({
