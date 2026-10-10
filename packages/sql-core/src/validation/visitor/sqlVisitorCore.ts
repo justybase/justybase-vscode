@@ -1,4 +1,5 @@
-import { CstNode, type IToken } from "chevrotain";
+import { collectCstTokens } from "./cstTokens";
+import { CstNode, type IRecognitionException, type IToken } from "chevrotain";
 import { getAvailableTokenLocation, getTokenLocationOr } from "../tokenLocation";
 import type { SqlParser } from "../../netezza/parser";
 import { NETEZZA_SQL_PARSING_RUNTIME } from "../../parser/runtime";
@@ -24,12 +25,17 @@ import * as procedureControlVisitor from "./procedureControlVisitor";
 import { type ProcedureVisitorHost } from "./procedureVisitor";
 import * as queryScopeVisitor from "./queryScopeVisitor";
 import { type TypeComparisonVisitorHost } from "./typeComparisonVisitor";
-import type { SqlVisitorHost } from "./sqlVisitorHost";
+import type {
+  SqlVisitorHost,
+  SqlVisitorQualificationTraits,
+} from "./sqlVisitorHost";
 import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
 import {
   formatQualifiedObjectName,
-  stripIdentifierQuoting,
+  stripIdentifierQuoting as stripNetezzaIdentifierQuoting,
 } from "../identifierUtils";
+import { NETEZZA_DIALECT_TRAITS } from "../dialectTraits";
+import { parseWrappedProcedureStringBody } from "../procedureStringBody";
 import { ProcedureScopeBuilder } from "../procedureScopeBuilder";
 import { NETEZZA_SQL_VALIDATION_PROFILE } from "../netezzaProfile";
 import { getOrderedCstTokens } from "../referenceTokenCollector";
@@ -352,6 +358,29 @@ export class SqlVisitor
     );
   }
 
+  // Dialect hooks. sql-core implements Netezza; product adapters subclass SqlVisitor to serve other
+  // dialects, so grammar rules get their visitor methods in this one class.
+
+  stripIdentifierQuoting(text: string): string {
+    return stripNetezzaIdentifierQuoting(text);
+  }
+
+  getQualificationTraits(): SqlVisitorQualificationTraits {
+    return NETEZZA_DIALECT_TRAITS.qualification;
+  }
+
+  parseProcedureStringBody(decodedBody: string): {
+    beginProcBody?: CstNode;
+    parserErrors: IRecognitionException[];
+  } {
+    return parseWrappedProcedureStringBody(decodedBody);
+  }
+
+  /** Netezza quoted identifiers are case-sensitive, so "dimdate" does not resolve to DIMDATE. */
+  protected quotedIdentifiersAreCaseSensitive(): boolean {
+    return true;
+  }
+
   isDropTargetTableLike(): boolean {
     return this._dropTargetIsTableLike;
   }
@@ -396,7 +425,8 @@ export class SqlVisitor
 
     // SchemaProvider implementations may return "true" when existence is unknown (e.g. cache not loaded).
     if (
-      this.schemaProvider.tableExists(table.database, table.schema, table.name)
+      this.schemaProvider.tableExists(table.database, table.schema, table.name) &&
+      !this.isQuotedNameCaseMismatch(table, tableNameNode)
     ) {
       return;
     }
@@ -409,12 +439,55 @@ export class SqlVisitor
       table.schema,
       table.name,
     );
-    this.addError(
+    // The diagnostic covers the whole object name as written, qualifiers included.
+    this.addErrorAtPosition(
       `Relation '${relationName}' does not exist`,
-      token,
+      this.getCstSpanPosition(tableNameNode, token),
       "error",
       "SQL006",
     );
+  }
+
+  /**
+   * Quoted identifiers are case-sensitive in Netezza: "dimdate" does not name DIMDATE.
+   */
+  isQuotedNameCaseMismatch(
+    table: TableInfo,
+    tableNameNode: CstNode,
+  ): boolean {
+    const nameTokens = collectCstTokens([tableNameNode]).filter(
+      (token) => token.tokenType.name !== "Dot",
+    );
+    const last = nameTokens[nameTokens.length - 1];
+    if (!this.quotedIdentifiersAreCaseSensitive()) return false;
+    if (!last || !last.image.startsWith('"')) return false;
+    const actual = this.schemaProvider?.getTable(
+      table.database,
+      table.schema,
+      table.name,
+    );
+    return actual !== undefined && actual.name !== table.name;
+  }
+
+  /** Position spanning the first to the last token of a CST node. */
+  getCstSpanPosition(node: CstNode, first: IToken): TokenPosition {
+    let last = first;
+    const visit = (current: CstNode): void => {
+      for (const value of Object.values(current.children ?? {})) {
+        if (!Array.isArray(value)) continue;
+        for (const child of value) {
+          if (this.isToken(child)) {
+            if ((child.startOffset ?? 0) > (last.startOffset ?? 0)) last = child;
+          } else if (this.isCstNode(child)) {
+            visit(child);
+          }
+        }
+      }
+    };
+    visit(node);
+    const start = this.getTokenPosition(first);
+    const end = this.getTokenPosition(last);
+    return { ...start, endLine: end.endLine, endColumn: end.endColumn };
   }
 
   // Helper methods
@@ -750,6 +823,8 @@ export class SqlVisitor
       this.visit(ctx.createGroupStatement[0]);
     } else if (ctx.createSequenceStatement) {
       this.visit(ctx.createSequenceStatement[0]);
+    } else if (ctx.createSchemaStatement) {
+      this.visit(ctx.createSchemaStatement[0]);
     } else if (ctx.createExternalTableStatement) {
       this.visit(ctx.createExternalTableStatement[0]);
     } else if (ctx.createTableStatement) {
@@ -784,6 +859,7 @@ export class SqlVisitor
       this.visit(ctx.copyStatement[0]);
     } else if (ctx.lockStatement) {
       this.visit(ctx.lockStatement[0]);
+
     } else if (ctx.mergeStatement) {
       this.visit(ctx.mergeStatement[0]);
     } else if (ctx.reindexStatement) {
@@ -863,6 +939,14 @@ export class SqlVisitor
     commandVisitor.createSequenceStatement(this, ctx);
   }
 
+  createSchemaStatement(ctx: Record<string, CstNode[]>): void {
+    commandVisitor.createSchemaStatement(this, ctx);
+  }
+
+  commentColumnTarget(): void {
+    // Validated by commentStatement, which needs the whole path.
+  }
+
   fromClause(ctx: Record<string, CstNode[]>): void {
     queryScopeVisitor.fromClause(this, ctx);
   }
@@ -892,7 +976,7 @@ export class SqlVisitor
     for (const key in ctx) {
       const tokens = ctx[key];
       if (Array.isArray(tokens) && tokens.length > 0) {
-        return stripIdentifierQuoting(this.getTokenText(tokens[0]));
+        return this.stripIdentifierQuoting(this.getTokenText(tokens[0]));
       }
     }
     return "";
@@ -907,7 +991,7 @@ export class SqlVisitor
 
   alias(ctx: Record<string, CstNode[] | IToken[]>): string {
     if (ctx.identifier) {
-      return stripIdentifierQuoting(
+      return this.stripIdentifierQuoting(
         this.visitAs<string>(ctx.identifier[0] as unknown as CstNode),
       );
     }
@@ -915,12 +999,12 @@ export class SqlVisitor
       ctx.netezzaRelaxedName?.[0] ?? ctx.sqliteRelaxedName?.[0];
     if (relaxedNameNode && this.isCstNode(relaxedNameNode)) {
       const token = this.getFirstTokenFromCst(relaxedNameNode);
-      return stripIdentifierQuoting(this.getTokenText(token));
+      return this.stripIdentifierQuoting(this.getTokenText(token));
     }
     const token =
       (ctx.Identifier?.[0] as unknown as IToken | undefined) ||
       (ctx.QuotedIdentifier?.[0] as unknown as IToken | undefined);
-    return stripIdentifierQuoting(this.getTokenText(token));
+    return this.stripIdentifierQuoting(this.getTokenText(token));
   }
 
   netezzaRelaxedName(): void {
@@ -1570,11 +1654,11 @@ export class SqlVisitor
   }
 
   grantStatement(): void {
-    // Uses commandTail — no deep validation
+    // Uses commandTail; the object-class rule lives in netezzaSyntaxRestrictions.
   }
 
   revokeStatement(): void {
-    // Uses commandTail — no deep validation
+    // Uses commandTail; the object-class rule lives in netezzaSyntaxRestrictions.
   }
 
   createUserStatement(): void {

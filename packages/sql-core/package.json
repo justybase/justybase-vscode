@@ -65,6 +65,31 @@
       "types": "./dist/sourceScan.d.ts",
       "require": "./dist/sourceScan.js",
       "default": "./dist/sourceScan.js"
+    },
+    "./validation/visitor/sqlVisitorCore": {
+      "types": "./dist/validation/visitor/sqlVisitorCore.d.ts",
+      "require": "./dist/validation/visitor/sqlVisitorCore.js",
+      "default": "./dist/validation/visitor/sqlVisitorCore.js"
+    },
+    "./validation/visitor/scopeBuilder": {
+      "types": "./dist/validation/visitor/scopeBuilder.d.ts",
+      "require": "./dist/validation/visitor/scopeBuilder.js",
+      "default": "./dist/validation/visitor/scopeBuilder.js"
+    },
+    "./validation/visitor/typeComparisonUtils": {
+      "types": "./dist/validation/visitor/typeComparisonUtils.d.ts",
+      "require": "./dist/validation/visitor/typeComparisonUtils.js",
+      "default": "./dist/validation/visitor/typeComparisonUtils.js"
+    },
+    "./validation/visitor/procedureVisitor": {
+      "types": "./dist/validation/visitor/procedureVisitor.d.ts",
+      "require": "./dist/validation/visitor/procedureVisitor.js",
+      "default": "./dist/validation/visitor/procedureVisitor.js"
+    },
+    "./validation/procedureScopeBuilder": {
+      "types": "./dist/validation/procedureScopeBuilder.d.ts",
+      "require": "./dist/validation/procedureScopeBuilder.js",
+      "default": "./dist/validation/procedureScopeBuilder.js"
     }
   },
   "scripts": {

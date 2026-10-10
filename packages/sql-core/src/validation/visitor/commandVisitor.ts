@@ -3,6 +3,7 @@ import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 import { addTableQualificationWarningFromQualifiedName } from "./queryScopeVisitor";
 import { getTokenLocationOr } from "../tokenLocation";
+import { collectCstTokens, unquoteIdentifier } from "./cstTokens";
 
 export function visitCommandTail(
   host: SqlVisitorHost,
@@ -39,6 +40,15 @@ export function parenthesizedSetStatement(
 }
 
 export function createSequenceStatement(
+  host: SqlVisitorHost,
+  ctx: Record<string, CstNode[]>,
+): void {
+  if (ctx.qualifiedName) {
+    host.visit(ctx.qualifiedName[0]);
+  }
+}
+
+export function createSchemaStatement(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
@@ -118,6 +128,10 @@ export function commentStatement(
   ctx: Record<string, CstNode[]>,
 ): void {
   const schemaProvider = host.getSchemaProvider();
+  if (ctx.commentColumnTarget) {
+    commentColumnStatement(host, ctx.commentColumnTarget[0]);
+    return;
+  }
   if (
     ctx.qualifiedName &&
     schemaProvider &&
@@ -149,6 +163,64 @@ export function commentStatement(
       };
       host.validateTableExists(table, ctx.qualifiedName[0]);
     }
+  }
+}
+
+/** `COMMENT ON COLUMN [[db.]schema.]table.column IS '...'`: the last path segment is the column. */
+function commentColumnStatement(host: SqlVisitorHost, target: CstNode): void {
+  const schemaProvider = host.getSchemaProvider();
+  if (!schemaProvider) return;
+  const segments: (IToken | undefined)[] = [];
+  let expectSegment = true;
+  for (const token of collectCstTokens([target])) {
+    if (token.tokenType.name === "Dot") {
+      if (expectSegment) segments.push(undefined);
+      expectSegment = true;
+    } else {
+      segments.push(token);
+      expectSegment = false;
+    }
+  }
+  const column = segments[segments.length - 1];
+  const owner = segments.slice(0, -1);
+  if (!column || owner.length === 0 || owner.length > 3) return;
+  const text = (token: IToken | undefined): string | undefined =>
+    token ? unquoteIdentifier(token.image) : undefined;
+  const table: TableInfo = {
+    name: text(owner[owner.length - 1]) ?? "",
+    schema: owner.length >= 2 ? text(owner[owner.length - 2]) : undefined,
+    database: owner.length === 3 ? text(owner[0]) : undefined,
+    isCte: false,
+    isTempTable: false,
+    columns: [],
+  };
+  if (!table.name || !(table.database || table.schema)) return;
+  const ownerTokens = collectCstTokens([target]).filter(
+    (token) => (token.startOffset ?? 0) < (column.startOffset ?? 0),
+  );
+  host.validateTableExists(table, {
+    name: "commentColumnOwner",
+    children: { token: ownerTokens },
+  } as unknown as CstNode);
+  const known = schemaProvider.getTable(
+    table.database,
+    table.schema,
+    table.name,
+  );
+  const columnName = unquoteIdentifier(column.image);
+  if (
+    known &&
+    known.columns.length > 0 &&
+    !known.columns.some(
+      (candidate) => candidate.name.toUpperCase() === columnName.toUpperCase(),
+    )
+  ) {
+    host.addError(
+      `Column '${columnName}' not found in table '${table.name}'`,
+      column,
+      "error",
+      "SQL004",
+    );
   }
 }
 

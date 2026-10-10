@@ -6,6 +6,7 @@ import {
   addTableQualificationWarningFromQualifiedName,
 } from "./queryScopeVisitor";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
+import { collectCstTokens, unquoteIdentifier } from "./cstTokens";
 
 export interface DdlVisitorHost {
   addError(
@@ -225,6 +226,51 @@ export function dropTarget(
   }
 }
 
+/**
+ * `ALTER TABLE t ADD [CONSTRAINT n] PRIMARY KEY|UNIQUE|FOREIGN KEY (cols)`: the key columns must exist on
+ * the altered table. Columns after REFERENCES belong to another table and are not checked.
+ */
+function validateConstraintKeyColumns(
+  host: DdlVisitorHost,
+  ctx: Record<string, CstNode[]>,
+  table: TableInfo | undefined,
+): void {
+  const schemaProvider = host.getSchemaProvider();
+  if (!table || !schemaProvider) return;
+  const known = schemaProvider.getTable(table.database, table.schema, table.name);
+  if (!known || known.columns.length === 0) return;
+  const tokens = collectCstTokens([
+    ...(ctx.alterTableAction ?? []),
+    ...(ctx.commandTail ?? []),
+  ]);
+  const word = (index: number): string =>
+    tokens[index]?.image.toUpperCase() ?? "";
+  if (word(0) !== "ADD") return;
+  let index = 1;
+  if (word(index) === "CONSTRAINT") index += 2;
+  let open: number;
+  if (word(index) === "UNIQUE") open = index + 1;
+  else if (
+    (word(index) === "PRIMARY" || word(index) === "FOREIGN") &&
+    word(index + 1) === "KEY"
+  )
+    open = index + 2;
+  else return;
+  if (tokens[open]?.image !== "(") return;
+  for (let i = open + 1; i < tokens.length && tokens[i].image !== ")"; i++) {
+    if (tokens[i].image === ",") continue;
+    const name = unquoteIdentifier(tokens[i].image);
+    if (!known.columns.some((c) => c.name.toUpperCase() === name.toUpperCase())) {
+      host.addError(
+        `Column '${name}' not found in table '${table.name}'`,
+        tokens[i],
+        "error",
+        "SQL004",
+      );
+    }
+  }
+}
+
 export function alterTableStatement(
   host: DdlVisitorHost,
   ctx: Record<string, CstNode[]>,
@@ -294,6 +340,8 @@ export function alterTableStatement(
       );
     }
   }
+
+  validateConstraintKeyColumns(host, ctx, oldTable);
 
   // Clear pending rename source
   host.setPendingRenameSource(undefined);

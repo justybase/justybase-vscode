@@ -41,6 +41,8 @@ export class BaseSqlParser extends CstParser {
   variableSetStatement!: AnyRule;
   createTableStatement!: AnyRule;
   createSequenceStatement!: AnyRule;
+  createSchemaStatement!: AnyRule;
+  commentColumnTarget!: AnyRule;
   createDatabaseStatement!: AnyRule;
   createGroupStatement!: AnyRule;
   createExternalTableStatement!: AnyRule;
@@ -589,6 +591,7 @@ export class BaseSqlParser extends CstParser {
       this.OR([
         { ALT: () => this.SUBRULE(this.createTableStatement) },
         { ALT: () => this.SUBRULE(this.createSequenceStatement) },
+        { ALT: () => this.SUBRULE(this.createSchemaStatement) },
         { ALT: () => this.SUBRULE(this.createDatabaseStatement) },
         { ALT: () => this.SUBRULE(this.createGroupStatement) },
         ...this.getAdditionalStatementAlternatives(),
@@ -761,6 +764,13 @@ export class BaseSqlParser extends CstParser {
       this.OPTION(() => this.SUBRULE(this.commandTail));
     });
 
+    this.RULE("createSchemaStatement", () => {
+      this.CONSUME(Create);
+      this.CONSUME(Schema);
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION(() => this.SUBRULE(this.commandTail));
+    });
+
     this.RULE("createGroupStatement", () => {
       this.CONSUME(Create);
       this.CONSUME(Group);
@@ -878,14 +888,22 @@ export class BaseSqlParser extends CstParser {
         {
           ALT: () => {
             this.CONSUME(Column);
-            this.SUBRULE2(this.qualifiedName);
-            this.CONSUME(Dot);
-            this.SUBRULE2(this.identifier);
+            this.SUBRULE(this.commentColumnTarget);
             this.CONSUME2(Is);
             this.CONSUME2(StringLiteral);
           },
         },
       ]);
+    });
+
+    // [[database.]schema.]table.column: the last segment is the column, so the path is wider than a
+    // qualifiedName. `database..table.column` yields an empty schema segment.
+    this.RULE("commentColumnTarget", () => {
+      this.SUBRULE(this.identifier);
+      this.AT_LEAST_ONE(() => {
+        this.CONSUME(Dot);
+        this.OPTION(() => this.SUBRULE2(this.identifier));
+      });
     });
 
     this.RULE("alterTableStatement", () => {

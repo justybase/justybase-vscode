@@ -1,4 +1,4 @@
-import { CstNode, type IToken } from "chevrotain";
+import { CstNode, type IRecognitionException, type IToken } from "chevrotain";
 import type { ValidationError } from "../types";
 import {
   ProcedureScopeBuilder,
@@ -7,7 +7,6 @@ import {
 import {
   decodeSqlStringLiteral,
   getStringBodyOffsetShift,
-  parseWrappedProcedureStringBody,
 } from "../procedureStringBody";
 import { unquoteIdentifier } from "../identifierUtils";
 import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
@@ -38,6 +37,11 @@ export interface ProcedureVisitorHost {
   setStringBodyOffsetShift(value: number): void;
   getValidationProfile(): DatabaseSqlValidationProfile;
   getScopeBuilder(): ScopeBuilder;
+  /** Parses a quoted NZPLSQL body with the active dialect's parser. */
+  parseProcedureStringBody(decodedBody: string): {
+    beginProcBody?: CstNode;
+    parserErrors: IRecognitionException[];
+  };
   addScriptCreatedProcedure(name: string): void;
   formatRelationName(
     database: string | undefined,
@@ -83,7 +87,7 @@ function validateStringProcedureBody(
   const decoded = decodeSqlStringLiteral(stringToken.image ?? "");
   const quoteContentStart = getTokenLocationOr(stringToken.startOffset, 0) + 1;
   const offsetShift = getStringBodyOffsetShift(quoteContentStart);
-  const { beginProcBody, parserErrors } = parseWrappedProcedureStringBody(decoded);
+  const { beginProcBody, parserErrors } = host.parseProcedureStringBody(decoded);
 
   if (parserErrors.length > 0) {
     const errorToken = parserErrors[0].token ?? stringToken;
@@ -126,9 +130,9 @@ export function createProcedureStatement(
   const scope = new ProcedureScopeBuilder();
   host.setProcedureScope(scope);
   // Live-verified on Netezza 11.2.2.1: RETURNS without RETURN is legal
-  // (CREATE ok, CALL ok, result NULL). sql-core only serves Netezza, whose
-  // profile carries no databaseKind, so opt out for undefined/'netezza'
-  // and keep the check for any Oracle-shaped profile.
+  // (CREATE ok, CALL ok, result NULL). The Netezza validation profile
+  // carries no databaseKind, so both undefined and 'netezza' opt out here;
+  // Oracle ('oracle') keeps the SQL038 check.
   const databaseKind = host.getValidationProfile().databaseKind;
   if (databaseKind === undefined || databaseKind === "netezza") {
     scope.setMissingReturnCheckEnabled(false);

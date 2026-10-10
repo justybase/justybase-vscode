@@ -103,6 +103,18 @@ all call it directly. `SqlCoreBackedValidator` implements the shared
 the parity oracle for the migration corpus. Desktop compatibility facades
 retain their result shape and incremental cache owner.
 
+The CST visitor is migrated (2026-10-10). `SqlVisitor` in
+`packages/sql-core/src/validation/visitor/sqlVisitorCore.ts` is the only
+implementation; the legacy `SqlValidator` uses it through the desktop subclass
+`src/sqlParser/visitor/sqlVisitor.ts`, which overrides only dialect hooks
+(identifier unquoting, relation-name formatting, qualification traits, the
+procedure-body parser, quoted-name case sensitivity, and Oracle `BEGIN`
+blocks). A new grammar rule therefore needs one visitor method, in sql-core.
+`src/sqlParser/visitor/scopeBuilder.ts`, `typeComparisonUtils.ts` and
+`src/sqlParser/procedure/procedureScopeBuilder.ts` are re-export facades.
+`src/__tests__/sqlParser/sharedSqlVisitor.test.ts` checks rule coverage and
+keeps a second visitor copy from reappearing.
+
 Required checks for this slice are:
 
 - `npm run test:sql-core` for the package boundary;

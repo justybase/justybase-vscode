@@ -13,7 +13,8 @@ import type { ValidationError } from "./types";
  * - FETCH FIRST/NEXT is rejected (use LIMIT); NZS002.
  * - A standalone OUTER JOIN without LEFT/RIGHT/FULL is rejected; NZS003.
  * - DROP ... IF EXISTS is rejected; NZS004.
- * - ALTER TABLE ... DROP <column> requires RESTRICT or CASCADE; NZS005.
+ * - ALTER TABLE ... DROP <column> and DROP CONSTRAINT require RESTRICT or CASCADE; NZS005.
+ * - GRANT/REVOKE ... ON TABLE names the object class, so a relation name there is rejected; PAR003.
  * - Multi-row VALUES is rejected (one INSERT per row); NZS006.
  */
 
@@ -163,17 +164,45 @@ export function detectNetezzaSyntaxRestrictions(
         }
       }
       if (dropIndex !== -1) {
-        const droppedWhat = tokenName(tokens[dropIndex + 1]);
-        const isColumnDrop = droppedWhat !== "Constraint";
-        if (isColumnDrop && !hasBehavior) {
+        if (!hasBehavior) {
+          const what =
+            tokenName(tokens[dropIndex + 1]) === "Constraint"
+              ? "DROP CONSTRAINT"
+              : "DROP COLUMN";
           errors.push(
             errorAt(
               "NZS005",
-              "ALTER TABLE ... DROP COLUMN requires RESTRICT or CASCADE in Netezza.",
+              `ALTER TABLE ... ${what} requires RESTRICT or CASCADE in Netezza.`,
               tokens[dropIndex],
             ),
           );
         }
+      }
+    }
+
+    // GRANT/REVOKE ... ON TABLE <name>: live Netezza accepts `ON TABLE TO u` (object class) only.
+    if (name === "Grant" || name === "Revoke") {
+      const roleClause = name === "Grant" ? "TO" : "FROM";
+      for (let scan = index + 1; scan < tokens.length; scan += 1) {
+        const scanName = tokenName(tokens[scan]);
+        if (scanName === "Semicolon") break;
+        if (tokens[scan].image.toUpperCase() !== "ON") continue;
+        const next = tokens[scan + 2];
+        if (
+          tokenName(tokens[scan + 1]) === "Table" &&
+          next !== undefined &&
+          tokenName(next) !== "Semicolon" &&
+          next.image.toUpperCase() !== roleClause
+        ) {
+          errors.push(
+            errorAt(
+              "PAR003",
+              `Expected ${roleClause} after the object class 'TABLE'.`,
+              next,
+            ),
+          );
+        }
+        break;
       }
     }
 
