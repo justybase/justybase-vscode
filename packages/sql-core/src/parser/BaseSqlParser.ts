@@ -244,6 +244,16 @@ export class BaseSqlParser extends CstParser {
     return false;
   }
 
+  /** `COMMENT ON COLUMN` exists in Netezza, Oracle, DB2 and DuckDB; other dialects reject it. */
+  protected supportsCommentOnColumn(): boolean {
+    return true;
+  }
+
+  /** `CREATE SCHEMA` is not a SQLite statement. */
+  protected supportsCreateSchema(): boolean {
+    return true;
+  }
+
   protected getTokenAlternatives(tokens: TokenType[]): OrAlternative[] {
     return tokens.map(token => ({ ALT: () => this.CONSUME(token) }));
   }
@@ -591,7 +601,10 @@ export class BaseSqlParser extends CstParser {
       this.OR([
         { ALT: () => this.SUBRULE(this.createTableStatement) },
         { ALT: () => this.SUBRULE(this.createSequenceStatement) },
-        { ALT: () => this.SUBRULE(this.createSchemaStatement) },
+        {
+          GATE: () => this.supportsCreateSchema(),
+          ALT: () => this.SUBRULE(this.createSchemaStatement),
+        },
         { ALT: () => this.SUBRULE(this.createDatabaseStatement) },
         { ALT: () => this.SUBRULE(this.createGroupStatement) },
         ...this.getAdditionalStatementAlternatives(),
@@ -886,6 +899,7 @@ export class BaseSqlParser extends CstParser {
           },
         },
         {
+          GATE: () => this.supportsCommentOnColumn(),
           ALT: () => {
             this.CONSUME(Column);
             this.SUBRULE(this.commentColumnTarget);

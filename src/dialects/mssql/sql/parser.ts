@@ -96,6 +96,10 @@ export class MsSqlSqlParser extends NetezzaSqlParser {
 		return false;
 	}
 
+	protected supportsCommentOnColumn(): boolean {
+		return false;
+	}
+
 	protected registerCreateTableDialectClauses(): void {
 		// MSSQL has no Netezza DISTRIBUTE ON / ORGANIZE ON clauses.
 	}

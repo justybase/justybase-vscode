@@ -67,6 +67,10 @@ export class ClickHouseSqlParser extends NetezzaSqlParser {
         ];
     }
 
+    protected supportsCommentOnColumn(): boolean {
+        return false;
+    }
+
     protected getAdditionalStatementAlternatives() {
         return [
             ...super.getAdditionalStatementAlternatives(),

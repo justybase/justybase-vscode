@@ -48,6 +48,14 @@ export class SqliteSqlParser extends BaseSqlParser {
         return false;
     }
 
+    protected supportsCommentOnColumn(): boolean {
+        return false;
+    }
+
+    protected supportsCreateSchema(): boolean {
+        return false;
+    }
+
     private isCreateTarget(target: TokenType): boolean {
         const first = this.LA(2).tokenType;
         if (first === target) {
