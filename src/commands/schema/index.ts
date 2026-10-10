@@ -12,6 +12,7 @@ export * from './ddlCommands';
 export * from './viewCommands';
 export * from './revealCommands';
 export * from './historyCommands';
+export * from './queryHistoryQuickPickCommands';
 export * from './favoritesCommands';
 export * from './editorInsertCommands';
 export * from './utilityCommands';

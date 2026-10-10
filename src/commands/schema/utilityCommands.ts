@@ -17,6 +17,7 @@ import { registerFavoritesCommands } from './favoritesCommands';
 import { registerEditorInsertCommands } from './editorInsertCommands';
 import { registerFilterCommands } from './filterCommands';
 import { registerGoToObjectCommands } from './goToObjectCommands';
+import { registerQueryHistoryQuickPickCommands } from './queryHistoryQuickPickCommands';
 import { registerRefreshMetadataCommands } from './refreshMetadataCommands';
 import { registerAccessCommands } from './accessCommands';
 
@@ -35,6 +36,7 @@ export function registerUtilityCommands(deps: SchemaCommandsDependencies): vscod
         ...registerEditorInsertCommands(deps),
         ...registerFilterCommands(deps),
         ...registerGoToObjectCommands(deps),
+        ...registerQueryHistoryQuickPickCommands(deps),
         ...registerRefreshMetadataCommands(deps),
         ...registerAccessCommands(deps),
     ];
