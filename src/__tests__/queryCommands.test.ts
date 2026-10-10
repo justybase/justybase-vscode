@@ -1223,6 +1223,42 @@ describe('commands/queryCommands', () => {
             expect((vscode.window.activeTextEditor as unknown as { edit: jest.Mock }).edit).toHaveBeenCalled();
             expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('SQL formatted successfully');
         });
+
+        it('should format a statement range when offsets are provided (action hub)', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            };
+            registerQueryCommands(deps);
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.formatSQL'
+            )?.[1];
+
+            const editBuilder = { replace: jest.fn() };
+            const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } };
+            const documentGetText = jest.fn((target?: unknown) => (target ? 'select 1' : 'select 1; select 2'));
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    languageId: 'sql',
+                    getText: documentGetText,
+                    positionAt: jest.fn((offset: number) => ({ line: 0, character: offset }))
+                },
+                selection: { isEmpty: true },
+                edit: jest.fn(async (callback: (builder: typeof editBuilder) => void) => callback(editBuilder))
+            };
+
+            await handler({ startOffset: 0, endOffset: 8 });
+
+            expect(documentGetText).toHaveBeenCalledWith(expect.objectContaining({ start: range.start, end: range.end }));
+            expect(editBuilder.replace).toHaveBeenCalledWith(
+                expect.objectContaining({ start: range.start, end: range.end }),
+                expect.any(String)
+            );
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('SQL formatted successfully');
+        });
     });
 
     describe('tuningAdvisor command handler', () => {
