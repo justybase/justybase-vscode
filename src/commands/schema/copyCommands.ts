@@ -5,9 +5,24 @@
 
 import * as vscode from 'vscode';
 import { runQuery } from '../../core/queryRunner';
+import type { DatabaseKind } from '../../contracts/database';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName, executeWithProgress, getItemObjectName } from './helpers';
 import { buildSchemaItemMetadataComment } from './tableMetadataCommentService';
+
+/**
+ * SELECT wrapper for "top N" preview SQL. MSSQL uses TOP, Oracle uses
+ * FETCH FIRST, everything else uses LIMIT. Exported for unit tests.
+ */
+export function buildTopSelectSql(fullName: string, limit: number, databaseKind?: DatabaseKind): string {
+    if (databaseKind === 'mssql') {
+        return `SELECT TOP (${limit}) * FROM ${fullName};`;
+    }
+    if (databaseKind === 'oracle') {
+        return `SELECT * FROM ${fullName} FETCH FIRST ${limit} ROWS ONLY;`;
+    }
+    return `SELECT * FROM ${fullName} LIMIT ${limit};`;
+}
 
 /**
  * Register copy-related commands
@@ -19,8 +34,11 @@ export function registerCopyCommands(deps: SchemaCommandsDependencies): vscode.D
         // Copy Select All
         vscode.commands.registerCommand('netezza.copySelectAll', async (item: SchemaItemData, options?: { limit?: number }) => {
             if (item && getItemObjectName(item) && item.dbName) {
-                const limit = options?.limit ?? 1000;
-                const sql = `SELECT * FROM ${getFullName(item, connectionManager)} LIMIT ${limit};`;
+                const limit = Number.isInteger(options?.limit) && (options?.limit as number) > 0
+                    ? options?.limit as number
+                    : 1000;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                const sql = buildTopSelectSql(getFullName(item, connectionManager), limit, databaseKind);
 
                 const action = await vscode.window.showQuickPick(
                     [

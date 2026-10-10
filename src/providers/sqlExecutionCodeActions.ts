@@ -169,14 +169,26 @@ export class SqlExecutionCodeActionProvider implements vscode.CodeActionProvider
                 [document.uri, statement.sql],
             ));
             const databaseKind = this.resolveDatabaseKind(document);
-            for (const limit of HUB_PREVIEW_ROW_LIMITS) {
-                const previewSql = buildPreviewSql(statement.sql, limit, databaseKind);
-                if (previewSql) {
-                    actions.push(this.createCommandAction(
-                        `Run Preview: ${limit.toLocaleString('en-US')} rows`,
-                        'netezza.runStatementFromLens',
-                        [document.uri, previewSql],
-                    ));
+            const previews = HUB_PREVIEW_ROW_LIMITS.map((limit) => ({
+                limit,
+                sql: buildPreviewSql(statement.sql, limit, databaseKind),
+            }));
+            // Safety bar: the wrapped preview must parse in the document
+            // dialect or no preview is offered (e.g. WITH...INSERT wrapped as
+            // a subquery). All limits share one wrapper shape, so verifying
+            // the first covers all three. Note: some dialect grammars accept
+            // wrappers the engine still rejects (e.g. MSSQL ORDER BY inside a
+            // derived table) - those surface the database error at execution.
+            const firstPreviewSql = previews[0]?.sql;
+            if (firstPreviewSql && verifyHubSqlParses(firstPreviewSql, databaseKind)) {
+                for (const preview of previews) {
+                    if (preview.sql) {
+                        actions.push(this.createCommandAction(
+                            `Run Preview: ${preview.limit.toLocaleString('en-US')} rows`,
+                            'netezza.runStatementFromLens',
+                            [document.uri, preview.sql],
+                        ));
+                    }
                 }
             }
         }
@@ -200,7 +212,7 @@ export class SqlExecutionCodeActionProvider implements vscode.CodeActionProvider
         actions.push(this.createCommandAction(
             'Format Statement',
             'netezza.formatSQL',
-            [{ startOffset: statement.startOffset, endOffset: statement.endOffset }],
+            [{ uri: document.uri.toString(), startOffset: statement.startOffset, endOffset: statement.endOffset }],
         ));
 
         if (support.canExport && !selectionActive) {
@@ -237,13 +249,25 @@ export class SqlExecutionCodeActionProvider implements vscode.CodeActionProvider
             return actions;
         }
 
-        actions.push(this.createCommandAction(
-            `Show DDL for ${buildHubQualifiedName(ref, databaseKind)}`,
-            'netezza.goToCatalogDdl',
-            [],
-        ));
-
+        // Show DDL snapshots the resolved reference into netezza.createDDL
+        // arguments. The zero-arg netezza.goToCatalogDdl re-resolves at the
+        // live cursor at execution time, so it is only the fallback when the
+        // reference cannot be snapshotted (no database or no connection).
         const connectionName = this.resolveConnectionName(document);
+        if (connectionName && ref.database) {
+            actions.push(this.createCommandAction(
+                `Show DDL for ${buildHubQualifiedName(ref, databaseKind)}`,
+                'netezza.createDDL',
+                [buildHubSchemaItemData(ref, connectionName)],
+            ));
+        } else {
+            actions.push(this.createCommandAction(
+                `Show DDL for ${buildHubQualifiedName(ref, databaseKind)}`,
+                'netezza.goToCatalogDdl',
+                [],
+            ));
+        }
+
         if (!connectionName) {
             return actions;
         }

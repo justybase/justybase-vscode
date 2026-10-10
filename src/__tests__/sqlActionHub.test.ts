@@ -256,7 +256,11 @@ describe('SqlExecutionCodeActionProvider hub', () => {
         const run = actions.find((action) => action.title === 'Run Statement');
         expect(run?.command?.arguments?.[1]).toBe(text);
         const format = actions.find((action) => action.title === 'Format Statement');
-        expect(format?.command?.arguments?.[0]).toEqual({ startOffset: 0, endOffset: text.length });
+        expect(format?.command?.arguments?.[0]).toEqual({
+            uri: 'file:///hub.sql',
+            startOffset: 0,
+            endOffset: text.length,
+        });
     });
 
     it('skips statement Run/Preview/Export when a selection is active', () => {
@@ -329,13 +333,23 @@ describe('SqlExecutionCodeActionProvider hub', () => {
         ) as unknown as TestCodeAction[];
         const commands = commandsOf(actions);
 
-        expect(commands).toContain('netezza.goToCatalogDdl');
+        expect(commands).toContain('netezza.createDDL');
         expect(commands).toContain('netezza.revealInSchema');
         expect(commands).toContain('netezza.copySelectAll');
         expect(commands).toContain('netezza.showDependencies');
         expect(commands).toContain('netezza.showUsedBy');
         expect(commands).toContain('netezza.impactAnalysis');
         expect(commands).toContain('netezza.refreshSchemaSelection');
+
+        const ddl = actions.find((action) => action.command?.command === 'netezza.createDDL');
+        expect(ddl?.command?.arguments?.[0]).toEqual({
+            label: 'CUSTOMER',
+            rawLabel: 'CUSTOMER',
+            dbName: 'DEVDB',
+            schema: 'PUBLIC',
+            objType: 'TABLE',
+            connectionName: 'dev',
+        });
 
         const reveal = actions.find((action) => action.command?.command === 'netezza.revealInSchema');
         expect(reveal?.command?.arguments?.[0]).toEqual({
@@ -351,6 +365,20 @@ describe('SqlExecutionCodeActionProvider hub', () => {
         expect(refresh?.command?.arguments?.[0]).toMatchObject({ contextValue: 'netezza:table' });
     });
 
+    it('falls back to cursor-resolved DDL when the reference cannot be snapshotted', () => {
+        const text = 'SELECT * FROM DEVDB.PUBLIC.CUSTOMER';
+        const provider = new SqlExecutionCodeActionProvider();
+        const actions = provider.provideCodeActions(
+            createMockDocument(text),
+            cursorAt(text, 'CUSTOMER'),
+            emptyContext,
+            cancellationToken,
+        ) as unknown as TestCodeAction[];
+        const commands = commandsOf(actions);
+        expect(commands).not.toContain('netezza.createDDL');
+        expect(commands).toContain('netezza.goToCatalogDdl');
+    });
+
     it('omits object refresh when the reference has no schema', () => {
         const text = 'SELECT * FROM PUBLIC.CUSTOMER';
         const provider = new SqlExecutionCodeActionProvider({
@@ -363,7 +391,7 @@ describe('SqlExecutionCodeActionProvider hub', () => {
             cancellationToken,
         ) as unknown as TestCodeAction[];
         const commands = commandsOf(actions);
-        expect(commands).toContain('netezza.goToCatalogDdl');
+        expect(commands).toContain('netezza.createDDL');
         expect(commands).toContain('netezza.copySelectAll');
         expect(commands).not.toContain('netezza.refreshSchemaSelection');
     });
@@ -380,7 +408,7 @@ describe('SqlExecutionCodeActionProvider hub', () => {
             cancellationToken,
         ) as unknown as TestCodeAction[];
         const commands = commandsOf(actions);
-        expect(commands).toContain('netezza.goToCatalogDdl');
+        expect(commands).toContain('netezza.createDDL');
         expect(commands).toContain('netezza.revealInSchema');
         expect(commands).not.toContain('netezza.showDependencies');
         expect(commands).not.toContain('netezza.showUsedBy');
@@ -399,6 +427,7 @@ describe('SqlExecutionCodeActionProvider hub', () => {
             cancellationToken,
         ) as unknown as TestCodeAction[];
         const commands = commandsOf(actions);
+        expect(commands).not.toContain('netezza.createDDL');
         expect(commands).not.toContain('netezza.goToCatalogDdl');
         expect(commands).not.toContain('netezza.revealInSchema');
     });
@@ -426,6 +455,63 @@ describe('SqlExecutionCodeActionProvider hub', () => {
             'C.',
         );
         expect(titles).toContain('Add ID to GROUP BY');
+    });
+
+    it('skips qualify when the column could belong to another table', () => {
+        const mixed = 'SELECT ID FROM A X JOIN B ON X.ID = B.ID';
+        const provider = new SqlExecutionCodeActionProvider({
+            connectionManager: createConnectionManager('netezza'),
+        });
+        const actions = provider.provideCodeActions(
+            createMockDocument(mixed),
+            cursorAt(mixed, 'ID'),
+            emptyContext,
+            cancellationToken,
+        ) as unknown as TestCodeAction[];
+        const titles = actions.map((action) => action.title);
+        expect(titles).toContain('Show Column Information for ID');
+        expect(titles.find((title) => title.startsWith('Qualify'))).toBeUndefined();
+    });
+
+    it('resolves a column with the cursor directly after its last character', () => {
+        const text = 'SELECT ID FROM CUSTOMER C';
+        const position = new vscode.Position(0, text.indexOf('ID') + 2);
+        const provider = new SqlExecutionCodeActionProvider({
+            connectionManager: createConnectionManager('netezza'),
+        });
+        const actions = provider.provideCodeActions(
+            createMockDocument(text),
+            new vscode.Range(position, position),
+            emptyContext,
+            cancellationToken,
+        ) as unknown as TestCodeAction[];
+        expect(actions.map((action) => action.title)).toContain('Find References of ID');
+    });
+
+    it('offers GROUP BY when the list only contains a similarly named column', () => {
+        const sql = 'SELECT ID FROM T GROUP BY HIDE';
+        const edit = buildAddToGroupByEdit(sql, findHubStatement(sql, 8)!, 'ID');
+        expect(applyHubTextEdit(sql, edit!)).toBe('SELECT ID FROM T GROUP BY HIDE, ID');
+    });
+
+    it('inserts GROUP BY before ORDER BY with extra whitespace', () => {
+        const sql = 'SELECT ID FROM T ORDER  BY ID';
+        const edit = buildAddToGroupByEdit(sql, findHubStatement(sql, 8)!, 'ID');
+        expect(applyHubTextEdit(sql, edit!)).toBe('SELECT ID FROM T GROUP BY ID ORDER  BY ID');
+    });
+
+    it('omits previews when the wrapped preview does not parse', () => {
+        const text = 'WITH X AS (SELECT 1) INSERT INTO T SELECT * FROM X';
+        const provider = new SqlExecutionCodeActionProvider({
+            connectionManager: createConnectionManager('netezza'),
+        });
+        const actions = provider.provideCodeActions(
+            createMockDocument(text),
+            emptyRangeAt(0),
+            emptyContext,
+            cancellationToken,
+        ) as unknown as TestCodeAction[];
+        expect(actions.map((action) => action.title).find((title) => title.startsWith('Run Preview:'))).toBeUndefined();
     });
 
     it('skips qualify when the column is already qualified or ambiguous', () => {
@@ -465,6 +551,7 @@ describe('SqlExecutionCodeActionProvider hub', () => {
         ) as unknown as TestCodeAction[];
         const commands = commandsOf(actions);
         expect(commands).toContain('netezza.runStatementFromLens');
+        expect(commands).not.toContain('netezza.createDDL');
         expect(commands).not.toContain('netezza.goToCatalogDdl');
     });
 });

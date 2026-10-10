@@ -479,8 +479,18 @@ export function registerQueryCommands(
         }),
 
         // Format SQL
-        vscode.commands.registerCommand('netezza.formatSQL', async (options?: { startOffset?: number; endOffset?: number }) => {
-            const editor = vscode.window.activeTextEditor;
+        vscode.commands.registerCommand('netezza.formatSQL', async (options?: { uri?: string; startOffset?: number; endOffset?: number }) => {
+            let editor = vscode.window.activeTextEditor;
+            if (options?.uri && (!editor || editor.document.uri.toString() !== options.uri)) {
+                const target = vscode.workspace.textDocuments?.find(
+                    (candidate) => candidate.uri.toString() === options.uri,
+                );
+                if (!target) {
+                    vscode.window.showErrorMessage('The SQL document is no longer open');
+                    return;
+                }
+                editor = await vscode.window.showTextDocument(target);
+            }
             if (!editor) {
                 vscode.window.showErrorMessage('No active editor');
                 return;
@@ -505,21 +515,24 @@ export function registerQueryCommands(
 
             // Optional statement range (used by the Ctrl+. action hub).
             // Falls back to the previous selection-or-document behavior.
+            // Range resolution lives inside try: positionAt throws for stale
+            // offsets instead of escaping unhandled.
             const hasRange = typeof options?.startOffset === 'number'
                 && typeof options?.endOffset === 'number'
                 && (options.endOffset as number) > (options.startOffset as number);
-            const range = hasRange
-                ? new vscode.Range(
-                    editor.document.positionAt(options.startOffset as number),
-                    editor.document.positionAt(options.endOffset as number),
-                )
-                : undefined;
-            const selection = range ?? editor.selection;
-            const text = selection.isEmpty
-                ? editor.document.getText()
-                : editor.document.getText(selection);
 
             try {
+                const range = hasRange
+                    ? new vscode.Range(
+                        editor.document.positionAt(options.startOffset as number),
+                        editor.document.positionAt(options.endOffset as number),
+                    )
+                    : undefined;
+                const selection = range ?? editor.selection;
+                const text = selection.isEmpty
+                    ? editor.document.getText()
+                    : editor.document.getText(selection);
+
                 const documentUri = editor.document.uri?.toString();
                 const databaseKind = documentUri
                     ? connectionManager.getExecutionDatabaseKind?.(documentUri)

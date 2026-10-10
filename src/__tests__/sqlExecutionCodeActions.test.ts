@@ -82,7 +82,10 @@ describe('SqlExecutionCodeActionProvider', () => {
 
         const titles = actions.map((action) => action.title);
         expect(titles).toContain('Run Statement');
-        expect(actions.filter((action) => action.title.startsWith('Run Preview:'))).toHaveLength(3);
+        // The mocked parser cannot validate the wrapped preview SQL, so the
+        // preview safety gate correctly omits previews here. Real-parser
+        // coverage asserts all three previews (see sqlActionHub.test.ts).
+        expect(actions.filter((action) => action.title.startsWith('Run Preview:'))).toHaveLength(0);
         expect(titles).toContain('Explain Statement');
         expect(titles).toContain('Visualize Query Flow');
         expect(titles).toContain('Format Statement');

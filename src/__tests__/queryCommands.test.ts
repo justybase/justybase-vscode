@@ -1259,6 +1259,92 @@ describe('commands/queryCommands', () => {
             );
             expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('SQL formatted successfully');
         });
+
+        it('should resolve the target document by uri when provided (action hub)', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            };
+            registerQueryCommands(deps);
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.formatSQL'
+            )?.[1];
+
+            const targetEditBuilder = { replace: jest.fn() };
+            const targetDoc = {
+                uri: { toString: () => 'file:///b.sql' },
+                languageId: 'sql',
+                getText: jest.fn(() => 'select 1'),
+                positionAt: jest.fn((offset: number) => ({ line: 0, character: offset }))
+            };
+            const targetEditor = {
+                document: targetDoc,
+                selection: { isEmpty: true },
+                edit: jest.fn(async (callback: (builder: typeof targetEditBuilder) => void) => callback(targetEditBuilder))
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    languageId: 'sql',
+                    uri: { toString: () => 'file:///a.sql' },
+                    getText: jest.fn(),
+                    positionAt: jest.fn()
+                },
+                selection: { isEmpty: true },
+                edit: jest.fn()
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.workspace as any).textDocuments = [targetDoc];
+            (vscode.window.showTextDocument as jest.Mock).mockResolvedValue(targetEditor);
+
+            try {
+                await handler({ uri: 'file:///b.sql', startOffset: 0, endOffset: 8 });
+
+                expect(vscode.window.showTextDocument).toHaveBeenCalledWith(targetDoc);
+                expect(targetEditor.edit).toHaveBeenCalled();
+            } finally {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                delete (vscode.workspace as any).textDocuments;
+            }
+        });
+
+        it('should error when the uri document is no longer open', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                resultPanelProvider: mockResultPanelProvider
+            };
+            registerQueryCommands(deps);
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.formatSQL'
+            )?.[1];
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document: {
+                    languageId: 'sql',
+                    uri: { toString: () => 'file:///a.sql' },
+                    getText: jest.fn(),
+                    positionAt: jest.fn()
+                },
+                selection: { isEmpty: true },
+                edit: jest.fn()
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.workspace as any).textDocuments = [];
+
+            try {
+                await handler({ uri: 'file:///gone.sql', startOffset: 0, endOffset: 8 });
+
+                expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('The SQL document is no longer open');
+            } finally {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                delete (vscode.workspace as any).textDocuments;
+            }
+        });
     });
 
     describe('tuningAdvisor command handler', () => {
