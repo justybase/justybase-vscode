@@ -5,9 +5,7 @@ import { normalizeUriKey } from '../core/queryRunnerUtils';
 import { isSqlAuthoringLanguageId } from '../utils/sqlLanguage';
 
 export interface ConnectionStatusBarHandlers {
-    updateActiveConnectionStatusBar: () => void;
-    updateActiveDatabaseStatusBar: () => void;
-    updateKeepConnectionStatusBar: () => void;
+    updateConnectionCapsule: () => void | Promise<void>;
 }
 
 export interface ActivateConnectionEventsParams {
@@ -28,15 +26,7 @@ function isActiveDocumentUri(documentUri: string): boolean {
 }
 
 function refreshStatusBars(statusBarHandlers: ConnectionStatusBarHandlers): void {
-    const {
-        updateActiveConnectionStatusBar,
-        updateActiveDatabaseStatusBar,
-        updateKeepConnectionStatusBar,
-    } = statusBarHandlers;
-
-    updateActiveConnectionStatusBar();
-    void updateActiveDatabaseStatusBar();
-    updateKeepConnectionStatusBar();
+    void statusBarHandlers.updateConnectionCapsule();
 }
 
 function refreshStatusBarsForOpenedSqlDocument(
@@ -73,8 +63,7 @@ export function activateConnectionEvents(params: ActivateConnectionEventsParams)
     } = params;
 
     const {
-        updateActiveConnectionStatusBar,
-        updateActiveDatabaseStatusBar,
+        updateConnectionCapsule,
     } = statusBarHandlers;
 
     connectionManager.onDidChangeActiveConnection(connectionName => {
@@ -84,7 +73,7 @@ export function activateConnectionEvents(params: ActivateConnectionEventsParams)
     });
     connectionManager.onDidChangeConnections(() => {
         connectionAccentDecorationProvider.refresh();
-        updateActiveConnectionStatusBar();
+        void updateConnectionCapsule();
         onPrefetchConnection(connectionManager.getActiveConnectionName() ?? undefined);
     });
     connectionManager.onDidChangeDocumentConnection((documentUri: string) => {
@@ -97,7 +86,7 @@ export function activateConnectionEvents(params: ActivateConnectionEventsParams)
     connectionManager.onDidChangeDocumentDatabase((documentUri: string) => {
         onRefreshCurrentSchemaForDocument?.(documentUri);
         if (isActiveDocumentUri(documentUri)) {
-            updateActiveDatabaseStatusBar();
+            void updateConnectionCapsule();
         }
     });
 

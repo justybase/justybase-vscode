@@ -1292,6 +1292,15 @@ export class ConnectionManager {
     }
 
     /**
+     * Read-only check whether a live persistent session exists for a document.
+     * Used by the connection capsule to render Connected / Not connected
+     * without opening a connection as a side effect.
+     */
+    hasDocumentPersistentConnection(documentUri: string): boolean {
+        return this._documentPersistentConnections.has(normalizeUriKey(documentUri));
+    }
+
+    /**
      * Recreate File SQL sessions after the profile's physical file list changes.
      * File SQL registers its configured files when the DuckDB connection opens.
      */
