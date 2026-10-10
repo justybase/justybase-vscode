@@ -479,7 +479,7 @@ export function registerQueryCommands(
         }),
 
         // Format SQL
-        vscode.commands.registerCommand('netezza.formatSQL', async () => {
+        vscode.commands.registerCommand('netezza.formatSQL', async (options?: { startOffset?: number; endOffset?: number }) => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage('No active editor');
@@ -503,7 +503,18 @@ export function registerQueryCommands(
                 'upper'
             );
 
-            const selection = editor.selection;
+            // Optional statement range (used by the Ctrl+. action hub).
+            // Falls back to the previous selection-or-document behavior.
+            const hasRange = typeof options?.startOffset === 'number'
+                && typeof options?.endOffset === 'number'
+                && (options.endOffset as number) > (options.startOffset as number);
+            const range = hasRange
+                ? new vscode.Range(
+                    editor.document.positionAt(options.startOffset as number),
+                    editor.document.positionAt(options.endOffset as number),
+                )
+                : undefined;
+            const selection = range ?? editor.selection;
             const text = selection.isEmpty
                 ? editor.document.getText()
                 : editor.document.getText(selection);

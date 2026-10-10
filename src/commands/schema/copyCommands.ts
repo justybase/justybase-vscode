@@ -17,9 +17,10 @@ export function registerCopyCommands(deps: SchemaCommandsDependencies): vscode.D
 
     return [
         // Copy Select All
-        vscode.commands.registerCommand('netezza.copySelectAll', async (item: SchemaItemData) => {
+        vscode.commands.registerCommand('netezza.copySelectAll', async (item: SchemaItemData, options?: { limit?: number }) => {
             if (item && getItemObjectName(item) && item.dbName) {
-                const sql = `SELECT * FROM ${getFullName(item, connectionManager)} LIMIT 1000;`;
+                const limit = options?.limit ?? 1000;
+                const sql = `SELECT * FROM ${getFullName(item, connectionManager)} LIMIT ${limit};`;
 
                 const action = await vscode.window.showQuickPick(
                     [

@@ -23,7 +23,7 @@ import {
     type ViewHeader,
 } from '../sqlParser/procedure/procedureCodeLens';
 
-const RUNNABLE_STATEMENT_TOKENS = new Set([
+export const RUNNABLE_STATEMENT_TOKENS = new Set([
     'Select',
     'With',
     'Insert',
@@ -53,11 +53,11 @@ const RUNNABLE_STATEMENT_TOKENS = new Set([
     'AtSet',
     'Explain'
 ]);
-const EXPLAINABLE_STATEMENT_TOKENS = new Set(['Select', 'With', 'Insert', 'Update', 'Delete', 'Merge']);
-const EXPORTABLE_STATEMENT_TOKENS = new Set(['Select', 'With']);
-const QUERY_FLOW_STATEMENT_TOKENS = new Set(['With', 'Select', 'Insert', 'Update', 'Delete']);
+export const EXPLAINABLE_STATEMENT_TOKENS = new Set(['Select', 'With', 'Insert', 'Update', 'Delete', 'Merge']);
+export const EXPORTABLE_STATEMENT_TOKENS = new Set(['Select', 'With']);
+export const QUERY_FLOW_STATEMENT_TOKENS = new Set(['With', 'Select', 'Insert', 'Update', 'Delete']);
 
-interface StatementLensSupport {
+export interface StatementLensSupport {
     canRun: boolean;
     canExplain: boolean;
     canExport: boolean;

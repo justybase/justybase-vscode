@@ -167,7 +167,7 @@ export function registerSqlLanguageFeatures(params: SqlLanguageRegistrationParam
     context.subscriptions.push(
         vscode.languages.registerCodeActionsProvider(
             sqlAuthoringSelector,
-            new SqlExecutionCodeActionProvider(),
+            new SqlExecutionCodeActionProvider({ connectionManager }),
             { providedCodeActionKinds: SqlExecutionCodeActionProvider.providedCodeActionKinds },
         ),
     );

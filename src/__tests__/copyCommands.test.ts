@@ -252,6 +252,29 @@ describe('commands/schema/copyCommands', () => {
             expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
             expect(vscode.env.clipboard.writeText).not.toHaveBeenCalled();
         });
+
+        it('should honor an explicit row limit (action hub Top 100)', async () => {
+            registerCopyCommands(createDeps());
+            const handler = registeredCommands.get('netezza.copySelectAll')!;
+
+            const item: SchemaItemData = {
+                label: 'testtable',
+                dbName: 'testdb',
+                schema: 'testschema'
+            };
+
+            const mockDoc = { uri: {} as vscode.Uri };
+            (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(mockDoc);
+            (vscode.window.showTextDocument as jest.Mock).mockResolvedValue(undefined);
+            (vscode.window.showQuickPick as jest.Mock).mockResolvedValue({ value: 'editor' });
+
+            await handler(item, { limit: 100 });
+
+            expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({
+                content: 'SELECT * FROM testdb.testschema.testtable LIMIT 100;',
+                language: 'sql'
+            });
+        });
     });
 
     describe('netezza.copyDrop command handler', () => {
