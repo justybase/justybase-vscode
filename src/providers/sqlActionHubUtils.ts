@@ -208,7 +208,7 @@ export function resolveHubColumn(
         if (
             occurrence.role === 'column'
             && occurrence.startOffset <= offset
-            && offset < occurrence.endOffset
+            && offset <= occurrence.endOffset
         ) {
             hit = occurrence;
             break;
@@ -224,12 +224,18 @@ export function resolveHubColumn(
         try {
             const scope = parseSemanticScopeWithParser(sql, offset, databaseKind);
             // Alias bindings also carry an implicit self-mapping (table name
-            // -> itself). Only an explicit alias (alias != table) counts, and
-            // only when exactly one is visible is qualification unambiguous.
-            const explicit = [...scope.aliasBindings.entries()]
+            // -> itself). Qualification is only unambiguous for a single
+            // underlying table reached through a single explicit alias:
+            // with two tables (even when only one is aliased) the column
+            // could belong to either side, and a re-parse cannot catch that.
+            const entries = [...scope.aliasBindings.entries()];
+            const distinctTables = new Set(
+                entries.map(([, info]) => info.table.toUpperCase()),
+            );
+            const explicit = entries
                 .filter(([alias, info]) => alias.toUpperCase() !== info.table.toUpperCase())
                 .map(([alias]) => alias);
-            if (explicit.length === 1) {
+            if (distinctTables.size === 1 && explicit.length === 1) {
                 singleAlias = explicit[0];
             }
         } catch {
@@ -277,6 +283,9 @@ export function buildQualifyColumnEdit(column: HubColumn): HubTextEdit | undefin
 function isClauseImage(image: string, keyword: 'GROUP BY' | 'HAVING' | 'ORDER BY' | 'LIMIT'): boolean {
     if (keyword === 'GROUP BY') {
         return /^GROUP\s+BY$/i.test(image);
+    }
+    if (keyword === 'ORDER BY') {
+        return /^ORDER\s+BY$/i.test(image);
     }
     return image.toUpperCase() === keyword;
 }
@@ -348,7 +357,7 @@ export function buildAddToGroupByEdit(
     if (groupByEnd !== undefined) {
         const end = listEnd ?? trimStatementEnd(sql, statement.endOffset);
         const listText = sql.slice(groupByEnd, end);
-        if (listText.toUpperCase().includes(columnRef.toUpperCase())) {
+        if (splitTopLevelListItems(listText).includes(columnRef.toUpperCase())) {
             return undefined;
         }
         return {
@@ -373,6 +382,34 @@ function trimStatementEnd(sql: string, endOffset: number): number {
         end -= 1;
     }
     return end;
+}
+
+/**
+ * Split a GROUP BY list on top-level commas so `ID` does not match `HIDE`
+ * and commas inside function calls do not split. Comparison is exact per
+ * item (case-insensitive); `C.ID` and `ID` are treated as different items.
+ */
+export function splitTopLevelListItems(listText: string): string[] {
+    const items: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const char of listText) {
+        if (char === '(') {
+            depth += 1;
+        } else if (char === ')') {
+            depth = Math.max(0, depth - 1);
+        }
+        if (char === ',' && depth === 0) {
+            items.push(current.trim().toUpperCase());
+            current = '';
+            continue;
+        }
+        current += char;
+    }
+    if (current.trim() !== '') {
+        items.push(current.trim().toUpperCase());
+    }
+    return items;
 }
 
 /** Apply a HubTextEdit to full document text (for verification + tests). */

@@ -275,6 +275,44 @@ describe('commands/schema/copyCommands', () => {
                 language: 'sql'
             });
         });
+
+        it('should fall back to 1000 for invalid limits', async () => {
+            registerCopyCommands(createDeps());
+            const handler = registeredCommands.get('netezza.copySelectAll')!;
+
+            const item: SchemaItemData = {
+                label: 'testtable',
+                dbName: 'testdb',
+                schema: 'testschema'
+            };
+
+            const mockDoc = { uri: {} as vscode.Uri };
+            (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(mockDoc);
+            (vscode.window.showTextDocument as jest.Mock).mockResolvedValue(undefined);
+            (vscode.window.showQuickPick as jest.Mock).mockResolvedValue({ value: 'editor' });
+
+            await handler(item, { limit: -5 });
+            await handler(item, { limit: 'lots' });
+
+            expect(vscode.workspace.openTextDocument).toHaveBeenNthCalledWith(1, {
+                content: 'SELECT * FROM testdb.testschema.testtable LIMIT 1000;',
+                language: 'sql'
+            });
+            expect(vscode.workspace.openTextDocument).toHaveBeenNthCalledWith(2, {
+                content: 'SELECT * FROM testdb.testschema.testtable LIMIT 1000;',
+                language: 'sql'
+            });
+        });
+    });
+
+    describe('buildTopSelectSql', () => {
+        it('uses TOP for MSSQL and FETCH FIRST for Oracle', async () => {
+            const { buildTopSelectSql } = await import('../commands/schema/copyCommands');
+            expect(buildTopSelectSql('dbo.T', 100, 'mssql')).toBe('SELECT TOP (100) * FROM dbo.T;');
+            expect(buildTopSelectSql('S.T', 100, 'oracle')).toBe('SELECT * FROM S.T FETCH FIRST 100 ROWS ONLY;');
+            expect(buildTopSelectSql('DB.S.T', 100, 'netezza')).toBe('SELECT * FROM DB.S.T LIMIT 100;');
+            expect(buildTopSelectSql('T', 100)).toBe('SELECT * FROM T LIMIT 100;');
+        });
     });
 
     describe('netezza.copyDrop command handler', () => {
