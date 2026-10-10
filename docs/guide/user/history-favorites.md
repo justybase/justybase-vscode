@@ -28,6 +28,28 @@ Before rerunning a statement:
 
 History is a convenience record, not a secret store. Do not put passwords or tokens in SQL literals. Its retention and location follow the VS Code extension's local storage behavior.
 
+## Search Query History (keyboard-first)
+
+Press `Ctrl+Alt+R` (`Cmd+Alt+R` on macOS) in a SQL editor — or run **JustyBase: Search Query History…** from the Command Palette — for a terminal-style reverse search over query history (active entries plus archive, newest first).
+
+- Typing filters fuzzily across SQL text, connection, database, schema, tags, and description; favorites are boosted and marked with `$(star-full)`.
+- Each row shows timestamp, connection/database, and an SQL preview.
+- Pressing `Enter` inserts the SQL at the cursor. It is **never executed automatically**. Macro variables (`${VAR}`/`$VAR`/`&VAR`) resolve through the standard parameter prompt; QuickRerun-style `:name`/`@name` placeholders insert verbatim.
+
+### Optional Ctrl+R binding
+
+`Ctrl+R` is VS Code's native **Open Recent** shortcut, so the extension does not claim it by default. To opt in for SQL editors only, add to your `keybindings.json`:
+
+```json
+{
+  "key": "ctrl+r",
+  "command": "netezza.searchQueryHistory",
+  "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+}
+```
+
+Outside SQL editors, `Ctrl+R` keeps opening recent items.
+
 ## Favorites
 
 <figure class="figure-wide">

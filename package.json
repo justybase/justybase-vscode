@@ -238,6 +238,11 @@
         "icon": "$(history)"
       },
       {
+        "command": "netezza.searchQueryHistory",
+        "title": "JustyBase: Search Query History…",
+        "icon": "$(history)"
+      },
+      {
         "command": "netezza.openSqlConsole",
         "title": "JustyBase: Open SQL Console",
         "icon": "$(terminal)"
@@ -4535,6 +4540,12 @@
         "key": "ctrl+alt+h",
         "mac": "cmd+alt+h",
         "when": "!notebookEditorFocused"
+      },
+      {
+        "command": "netezza.searchQueryHistory",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
       },
       {
         "command": "netezza.schema.goToObject",
