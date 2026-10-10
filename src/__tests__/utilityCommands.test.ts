@@ -293,6 +293,7 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealInSchema', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealSchemaColumn', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.showQueryHistory', expect.any(Function));
+            expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.searchQueryHistory', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.clearQueryHistory', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.toggleSchemaFavorite', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.favorites.addFolder', expect.any(Function));
@@ -309,13 +310,13 @@ describe('commands/schema/utilityCommands', () => {
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.revealAccessFile', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.filter', expect.any(Function));
             expect(mockedRegisterCommand).toHaveBeenCalledWith('netezza.schema.clearFilter', expect.any(Function));
-            expect(disposables).toHaveLength(21);
+            expect(disposables).toHaveLength(22);
         });
 
         it('should return disposables for cleanup', () => {
             const disposables = registerUtilityCommands(mockDeps);
 
-            expect(disposables).toHaveLength(21);
+            expect(disposables).toHaveLength(22);
             expect(disposables[0].dispose).toBeDefined();
             expect(disposables[1].dispose).toBeDefined();
             expect(disposables[2].dispose).toBeDefined();
