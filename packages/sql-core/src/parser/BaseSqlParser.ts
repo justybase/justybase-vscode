@@ -722,7 +722,8 @@ export class BaseSqlParser extends CstParser {
       this.SUBRULE(this.qualifiedName); // table name (can be database.schema.table)
       this.registerCreateTableNameDialectClauses();
 
-      // CREATE TABLE can be either CTAS or DDL with column definitions.
+      // CREATE TABLE can be CTAS (optionally with an explicit output column
+      // name list, accepted by live Netezza) or DDL with column definitions.
       this.OR([
         {
           ALT: () => {
@@ -747,6 +748,28 @@ export class BaseSqlParser extends CstParser {
                   ]);
                 },
               },
+            ]);
+          },
+        },
+        {
+          // CTAS with an explicit output column name list:
+          // CREATE [TEMP] TABLE t (a, b) AS SELECT ...
+          // A bare `(name, ...)` list is an identifier followed by a comma
+          // or closing paren; `(name type, ...)` stays a definition list.
+          GATE: () => {
+            const second = this.LA(2).tokenType;
+            const third = this.LA(3).tokenType;
+            return (
+              (second === Identifier || second === QuotedIdentifier) &&
+              (third === Comma || third === RParen)
+            );
+          },
+          ALT: () => {
+            this.SUBRULE(this.columnList);
+            this.CONSUME1(As);
+            this.OR4([
+              { ALT: () => this.SUBRULE2(this.withStatement) },
+              { ALT: () => this.SUBRULE2(this.selectStatement) },
             ]);
           },
         },

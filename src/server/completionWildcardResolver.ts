@@ -254,17 +254,23 @@ export class CompletionWildcardResolver {
 
     for (const qualifier of qualifiers) {
       if (qualifier === "*") {
-        sourceBindings.forEach((binding) => {
-          sources.push(
-            ...this.expandBindingToWildcardSources(
-              binding,
-              fullSql,
-              seenQueries,
-              databaseKind,
-              documentUri,
-              documentVersion,
-            ),
+        sourceBindings.forEach((binding, bindingKey) => {
+          const expanded = this.expandBindingToWildcardSources(
+            binding,
+            fullSql,
+            seenQueries,
+            databaseKind,
+            documentUri,
+            documentVersion,
           );
+          if (expanded.length === 0 && binding.subquery) {
+            // Star over a derived source whose query has no star of its own
+            // (e.g. `SELECT * FROM (SELECT a FROM t) d`): resolve through the
+            // derived alias's own projected columns downstream.
+            sources.push({ table: bindingKey });
+            return;
+          }
+          sources.push(...expanded);
         });
         if (sourceBindings.size === 0) {
           aliasBindings.forEach((binding) => {

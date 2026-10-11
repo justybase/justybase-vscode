@@ -3447,6 +3447,55 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       );
     });
 
+    it("offers SELECT output aliases in bare HAVING scope (live Netezza)", async () => {
+      const items = await complete(
+        "SELECT ID, COUNT(*) AS N FROM BAZA..USERS GROUP BY ID HAVING |",
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["N", "ID"]),
+      );
+    });
+
+    it("keeps quoted SELECT alias spelling case-sensitive (live Netezza)", async () => {
+      const items = await complete(
+        'WITH X AS (SELECT 1 AS "MixedCase") SELECT X.| FROM X',
+      );
+      expect(labels(items)).toContain("MixedCase");
+      expect(labels(items)).not.toContain("MIXEDCASE");
+    });
+
+    it("offers only common columns inside JOIN USING parens (live Netezza)", async () => {
+      metadataProvider.setColumns("JUST_DATA", "CUSTOMERS", ["CUSTOMER_ID", "EMAIL"], "SALES");
+      metadataProvider.setColumns("JUST_DATA", "ORDERS", ["ORDER_ID", "CUSTOMER_ID", "ORDER_DATE"], "SALES");
+      const items = await complete(
+        "SELECT * FROM JUST_DATA.SALES.CUSTOMERS C JOIN JUST_DATA.SALES.ORDERS O USING (|)",
+      );
+      expect(labels(items)).toContain("CUSTOMER_ID");
+      expect(labels(items)).not.toContain("EMAIL");
+      expect(labels(items)).not.toContain("ORDER_ID");
+    });
+
+    it("prefers CTAS explicit output column names over the query projection (live Netezza)", async () => {
+      const items = await complete(
+        "CREATE TEMP TABLE T1 (K, Q) AS SELECT DATEKEY, CALENDARQUARTER FROM JUST_DATA..DIMDATE;\nSELECT T1.| FROM T1",
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["K", "Q"]),
+      );
+      expect(labels(items)).not.toContain("DATEKEY");
+    });
+
+    it("expands star through two nested derived-table levels", async () => {
+      metadataProvider.setColumns("JUST_DATA", "CUSTOMERS", ["CUSTOMER_ID", "EMAIL"], "SALES");
+      const items = await complete(
+        "SELECT E.| FROM (SELECT * FROM (SELECT CUSTOMER_ID FROM JUST_DATA.SALES.CUSTOMERS) D) E",
+      );
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["CUSTOMER_ID"]),
+      );
+      expect(labels(items)).not.toContain("EMAIL");
+    });
+
     it("includes LIMIT, OFFSET, and UNION among keywords after FROM alias + Ctrl+Space", async () => {
       const items = await complete(
         "SELECT * FROM JUST_DATA..DIMACCOUNT A |",

@@ -79,6 +79,149 @@ function normalizeRelationColumnName(name: string): string {
   return normalizeJoinColumnName(name);
 }
 
+/**
+ * Output aliases of the top-level SELECT list of the current statement.
+ * Live Netezza (Release 11.2.2.1, verified 2026-10-11) resolves SELECT
+ * aliases in HAVING (`HAVING N > 0` over `COUNT(*) AS N`). Token-based so
+ * it also works on the incomplete statement prefix at the cursor.
+ */
+function extractSelectOutputAliases(statementPrefix: string): string[] {
+  const tokens = SqlLexer.tokenize(statementPrefix).tokens;
+  let selectIndex = -1;
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const name = tokens[i].tokenType.name;
+    if (name === "LParen") {
+      depth += 1;
+      continue;
+    }
+    if (name === "RParen") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0 && name === "Select") {
+      selectIndex = i;
+      break;
+    }
+  }
+  if (selectIndex < 0) {
+    return [];
+  }
+
+  let fromIndex = -1;
+  depth = 0;
+  for (let i = selectIndex + 1; i < tokens.length; i++) {
+    const name = tokens[i].tokenType.name;
+    if (name === "LParen") {
+      depth += 1;
+      continue;
+    }
+    if (name === "RParen") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth > 0) {
+      continue;
+    }
+    if (name === "From") {
+      fromIndex = i;
+      break;
+    }
+  }
+  const end = fromIndex >= 0 ? fromIndex : tokens.length;
+
+  // Split the top-level select list on commas.
+  const items: { start: number; end: number }[] = [];
+  let itemStart = selectIndex + 1;
+  // Skip DISTINCT / ALL.
+  if (
+    itemStart < end &&
+    (tokens[itemStart].tokenType.name === "Distinct" ||
+      tokens[itemStart].tokenType.name === "All")
+  ) {
+    itemStart += 1;
+  }
+  depth = 0;
+  for (let i = itemStart; i < end; i++) {
+    const name = tokens[i].tokenType.name;
+    if (name === "LParen") {
+      depth += 1;
+      continue;
+    }
+    if (name === "RParen") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0 && name === "Comma") {
+      items.push({ start: itemStart, end: i });
+      itemStart = i + 1;
+    }
+  }
+  if (itemStart < end) {
+    items.push({ start: itemStart, end });
+  }
+
+  const aliases: string[] = [];
+  for (const item of items) {
+    // Depth-0 tokens of this select item plus whether it holds a parenthesized
+    // expression (function call or scalar subquery).
+    const top: typeof tokens = [];
+    let hadParens = false;
+    let itemDepth = 0;
+    for (let i = item.start; i < item.end; i++) {
+      const name = tokens[i].tokenType.name;
+      if (name === "LParen") {
+        itemDepth += 1;
+        hadParens = true;
+        continue;
+      }
+      if (name === "RParen") {
+        itemDepth = Math.max(0, itemDepth - 1);
+        continue;
+      }
+      if (itemDepth === 0) {
+        top.push(tokens[i]);
+      }
+    }
+    if (top.length === 0) {
+      continue;
+    }
+    // `*` and `T.*` contribute no alias.
+    if (
+      top.length === 1 &&
+      top[0].tokenType.name === "Multiply"
+    ) {
+      continue;
+    }
+    if (
+      top.length === 3 &&
+      top[1].image === "." &&
+      top[2].tokenType.name === "Multiply"
+    ) {
+      continue;
+    }
+    const last = top[top.length - 1];
+    if (!isIdentifierToken(last)) {
+      continue;
+    }
+    const prev = top.length >= 2 ? top[top.length - 2] : undefined;
+    const prevName = prev?.tokenType.name;
+    // `expr AS alias`, bare `expr alias` (`CUSTOMER_ID CID`, `COUNT(*) N`),
+    // or `(scalar subquery) alias`.
+    if (
+      prevName === "As" ||
+      (top.length >= 2 &&
+        (isIdentifierToken(prev) || hadParens))
+    ) {
+      const alias = stripQuotes(last.image.trim());
+      if (alias && alias !== "*" && !aliases.some((a) => a.toUpperCase() === alias.toUpperCase())) {
+        aliases.push(alias);
+      }
+    }
+  }
+  return aliases;
+}
+
 export interface QualifierCompletionRequest {
   qualifier: string;
   statement: StatementBoundary | null;
@@ -574,6 +717,23 @@ export class CompletionScopeResolver {
       return [];
     }
     if (clause === "from") {
+      // Live Netezza (Release 11.2.2.1, verified 2026-10-11) accepts
+      // `JOIN ... USING (col)`; only columns present on both sides of the
+      // current join are valid inside the parentheses.
+      const usingColumns = await this.buildUsingCommonColumnItems(
+        statementPrefix,
+        typedPrefix,
+        position,
+        localDefs,
+        documentUri,
+        effectiveDb,
+        effectiveSchema,
+        databaseKind,
+        netezzaSchemasEnabled,
+      );
+      if (usingColumns) {
+        return usingColumns;
+      }
       return buildContextualKeywordItems(
         statementPrefix,
         typedPrefix,
@@ -626,6 +786,21 @@ export class CompletionScopeResolver {
       databaseKind,
       netezzaSchemasEnabled,
     );
+
+    if (clause === "having") {
+      // Live Netezza resolves SELECT output aliases in HAVING; the table
+      // scope above does not include them.
+      for (const alias of extractSelectOutputAliases(statementPrefix)) {
+        if (
+          !scopedColumns.some(
+            (candidate) =>
+              candidate.column.toUpperCase() === alias.toUpperCase(),
+          )
+        ) {
+          scopedColumns.push({ column: alias, qualifiers: [] });
+        }
+      }
+    }
 
     const columnItems = toScopedColumnItems(scopedColumns, typedPrefix, position);
     const joinConditionItems = clause === "on" && typedPrefix === ""
@@ -1269,6 +1444,61 @@ export class CompletionScopeResolver {
       index = Math.max(index, alias.nextIndex - 1);
     }
     return sources;
+  }
+
+  private async buildUsingCommonColumnItems(
+    statementPrefix: string,
+    typedPrefix: string,
+    position: Position,
+    localDefs: LocalDefinition[],
+    documentUri: string,
+    effectiveDb: string | undefined,
+    effectiveSchema: string | undefined,
+    databaseKind?: DatabaseKind,
+    netezzaSchemasEnabled?: boolean,
+  ): Promise<CompletionItem[] | undefined> {
+    if (!/\bUSING\s*\([^()]*$/i.test(statementPrefix)) {
+      return undefined;
+    }
+    // The USING clause belongs to the last join pair: the final FROM/JOIN
+    // source plus the one before it.
+    const sources = this.extractDirectJoinSources(statementPrefix, databaseKind);
+    if (sources.length < 2) {
+      return undefined;
+    }
+    const pair = sources.slice(-2);
+    const columnsBySource: string[][] = [];
+    for (const source of pair) {
+      const localDefinition = findLocalDefinition(localDefs, source.table);
+      if (localDefinition && localDefinition.columns.length > 0) {
+        columnsBySource.push(localDefinition.columns.map((c) => stripQuotes(c.trim())).filter((c) => !!c && c !== "*"));
+        continue;
+      }
+      const metadataColumns = await this.metadataResolver.getMetadataColumnsForSource(
+        documentUri,
+        source,
+        effectiveDb,
+        effectiveSchema,
+        databaseKind,
+        this.buildMetadataColumnOptions(netezzaSchemasEnabled),
+      );
+      columnsBySource.push(
+        metadataColumns.map((c) => stripQuotes(c.name.trim())).filter((c) => !!c && c !== "*"),
+      );
+    }
+    const [first, second] = columnsBySource;
+    const secondKeys = new Set(second.map((c) => c.toUpperCase()));
+    const seen = new Set<string>();
+    const common: ScopedColumnCandidate[] = [];
+    for (const column of first) {
+      const key = column.toUpperCase();
+      if (seen.has(key) || !secondKeys.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      common.push({ column, qualifiers: [] });
+    }
+    return toScopedColumnItems(common, typedPrefix, position);
   }
 
   private async collectScopedColumns(
