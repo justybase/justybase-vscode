@@ -2,7 +2,7 @@
   "name": "justybaselite-netezza",
   "displayName": "JustyBase SQL Editor (Netezza)",
   "description": "Netezza-first SQL workspace for VS Code: connect without ODBC drivers, write and validate SQL, explore results, browse schemas, and manage warehouse workflows.",
-  "version": "3.18.6",
+  "version": "3.18.7",
   "workspaces": [
     "packages/*"
   ],
@@ -4092,11 +4092,17 @@
           "description": "Prompt used for explaining SQL queries."
         },
         "justybase.query.maxParallelPerTab": {
-          "type": "integer", "default": 4, "minimum": 1, "maximum": 100,
+          "type": "integer",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 100,
           "description": "Maximum independent SQL executions per editor tab when Keep Connection Open is disabled."
         },
         "justybase.query.maxParallelGlobal": {
-          "type": "integer", "default": 12, "minimum": 1, "maximum": 100,
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 100,
           "description": "Maximum independent SQL executions across editor tabs in this extension host."
         },
         "justybase.query.rowLimit": {
