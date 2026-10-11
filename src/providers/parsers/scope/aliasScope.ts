@@ -292,11 +292,19 @@ export class ParserSqlContextCollector {
     const columnsFromDefinition = this.extractColumnsFromColumnDefinitionList(
       getChildNodesByKey(node, "columnDefinitionList")[0],
     );
+    // CTAS with an explicit output column name list, e.g.
+    // CREATE TEMP TABLE t (a, b) AS SELECT ... (accepted by live Netezza):
+    // the name list wins over the query projection.
+    const columnsFromNameList = this.extractColumnsFromCteColumnList(
+      getChildNodesByKey(node, "columnList")[0],
+    );
     const columnsFromQuery = this.extractColumnsFromQueryNode(queryNode);
     const columns =
-      columnsFromDefinition.length > 0
-        ? columnsFromDefinition
-        : columnsFromQuery;
+      columnsFromNameList.length > 0
+        ? columnsFromNameList
+        : columnsFromDefinition.length > 0
+          ? columnsFromDefinition
+          : columnsFromQuery;
 
     const displayName = isTemporaryTable
       ? tableRef.table
