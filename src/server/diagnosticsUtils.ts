@@ -7,6 +7,7 @@ import {
 import type { ValidationError } from "../sqlParser";
 import type { DatabaseKind } from "../contracts/database";
 import { getDatabaseDialectTraits } from "../core/dialectTraits";
+import { buildSqlSourceScanIndex } from "@justybase/sql-core/sourceScan";
 
 export interface TableReference {
   database?: string;
@@ -18,6 +19,7 @@ export function extractTableReferences(
   sql: string,
   databaseKind?: DatabaseKind,
 ): TableReference[] {
+  if (databaseKind === 'postgresql') return extractPostgresqlTableReferences(sql);
   const pattern =
     /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TRUNCATE\s+TABLE|GROOM\s+TABLE|COMMENT\s+ON\s+(?:TABLE|VIEW|PROCEDURE)|DROP\s+TABLE|ALTER\s+TABLE|LOCK\s+TABLE)\s+((?:`(?:``|[^`])*`|[A-Za-z0-9_."$])+)/gi;
   const references = new Map<string, TableReference>();
@@ -33,6 +35,20 @@ export function extractTableReferences(
   return Array.from(references.values());
 }
 
+function extractPostgresqlTableReferences(sql: string): TableReference[] {
+  const scan = buildSqlSourceScanIndex(sql, 'postgresql');
+  const source = sql.split('').map((char, index) => scan.isInComment(index) || scan.isInSingleQuotedString(index) ? ' ' : char).join('');
+  const name = '(?:"(?:[^"]|"")*"|[\\p{L}_][\\p{L}\\p{N}_$]*)';
+  const pattern = new RegExp('\\b(?:FROM|JOIN|UPDATE|INTO|USING|ALTER\\s+TABLE|DROP\\s+TABLE)\\s+(' + name + '(?:\\s*\\.\\s*' + name + ')*)', 'giu');
+  const references = new Map<string, TableReference>();
+  for (const match of source.matchAll(pattern)) {
+    if (/^\s*\(/.test(source.slice((match.index ?? 0) + match[0].length))) continue;
+    const reference = parseQualifiedReference(match[1], 'postgresql');
+    if (reference) references.set(JSON.stringify(reference), reference);
+  }
+  return [...references.values()];
+}
+
 export function parseQualifiedReference(
   rawValue: string | undefined,
   databaseKind?: DatabaseKind,
@@ -42,6 +58,12 @@ export function parseQualifiedReference(
   }
 
   const sanitized = rawValue.replace(/[;,)]*$/, "").trim();
+  if (databaseKind === 'postgresql') {
+    const parts = sanitized.match(/"(?:[^"]|"")*"|[\p{L}_][\p{L}\p{N}_$]*/gu)?.map(part =>
+      part.startsWith('"') ? part.slice(1, -1).replace(/""/g, '"') : part.toLowerCase());
+    if (!parts || parts.length === 0 || parts.length > 2) return undefined;
+    return parts.length === 1 ? { table: parts[0] } : { schema: parts[0], table: parts[1] };
+  }
   if (!sanitized || sanitized.startsWith("(")) {
     return undefined;
   }

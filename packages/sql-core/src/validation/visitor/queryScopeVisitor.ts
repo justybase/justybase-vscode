@@ -80,6 +80,12 @@ export function selectStatement(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): ColumnInfo[] {
+  const duckdbWhereAndSampleNode = ctx.duckdbWhereAndSampleClause?.[0];
+  const whereClause =
+    ctx.whereClause ??
+    (duckdbWhereAndSampleNode?.children?.whereClause as
+      | CstNode[]
+      | undefined);
   const scopeBuilder = host.getScopeBuilder();
   scopeBuilder.enterScope();
   host.pushSelectOutputAliases(new Set());
@@ -89,14 +95,15 @@ export function selectStatement(
     detectMissingFromClause(host, ctx.selectClause[0]);
   }
   if (
+    host.getValidationProfile().databaseKind !== 'postgresql' &&
     !ctx.fromClause &&
-    ctx.whereClause &&
+    whereClause &&
     host.getEmbeddedSelectDepth() === 0
   ) {
     const whereToken =
-      (ctx.whereClause[0].children?.Where?.[0] as unknown as
+      (whereClause[0].children?.Where?.[0] as unknown as
         | IToken
-        | undefined) ?? host.getFirstTokenFromCst(ctx.whereClause[0]);
+        | undefined) ?? host.getFirstTokenFromCst(whereClause[0]);
     if (whereToken) {
       host.addError(
         "WHERE clause used without FROM clause. SELECT statements with WHERE require a FROM clause.",
@@ -131,7 +138,9 @@ export function selectStatement(
 
   host.setCanReferenceSelectAliases(true);
 
-  if (ctx.whereClause) {
+  if (duckdbWhereAndSampleNode) {
+    host.visit(duckdbWhereAndSampleNode);
+  } else if (ctx.whereClause) {
     host.visit(ctx.whereClause[0]);
   }
 
@@ -141,6 +150,11 @@ export function selectStatement(
 
   if (ctx.havingClause) {
     host.visit(ctx.havingClause[0]);
+  }
+
+  if (ctx.postgresqlWindowClause) host.visit(ctx.postgresqlWindowClause[0]);
+  if (ctx.duckdbWindowAndQualifyClause) {
+    host.visit(ctx.duckdbWindowAndQualifyClause[0]);
   }
 
   if (ctx.orderByClause) {
@@ -364,7 +378,7 @@ export function tableSource(
     addTableQualificationWarning(host, table, tableNameNode);
   } else if (ctx.subquery) {
     table = host.visitAs<TableInfo>(ctx.subquery[0]);
-    if (!alias) {
+    if (!alias && host.getValidationProfile().databaseKind !== 'postgresql') {
       const token = host.getFirstTokenFromCst(ctx.subquery[0]);
       if (token) {
         host.addError(
@@ -375,6 +389,12 @@ export function tableSource(
         );
       }
     }
+  } else if (ctx.functionCall) {
+    host.visit(ctx.functionCall[0]);
+    table = { name: alias ?? 'function', isCte: false, isTempTable: false, columns: [] };
+  } else if (ctx.postgresqlJsonTable) {
+    table = { name: alias ?? 'json_table', isCte: false, isTempTable: false,
+      columns: host.visitAs<ColumnInfo[]>(ctx.postgresqlJsonTable[0]) };
   } else if (ctx.Final && ctx.qualifiedName) {
     const functionSource = host.visitAs<{
       name: string;
@@ -393,6 +413,10 @@ export function tableSource(
 
   if (!table) return;
 
+  if (ctx.cteColumnList) {
+    const columns = host.visitAs<string[]>(ctx.cteColumnList[0]);
+    table.columns = columns.map((name, index) => ({ ...table!.columns[index], name }));
+  }
   if (alias) {
     table.alias = alias;
   }
@@ -564,7 +588,10 @@ export function qualifiedName(
 
     let treatAsDatabaseDotDot = false;
 
-    if (dotCount === 1) {
+    if (
+      dotCount === 1 &&
+      host.getValidationProfile().databaseKind === "netezza"
+    ) {
       const databases = host.getSchemaProvider()?.getDatabases?.();
       const first = identifiers[0]?.toUpperCase();
       if (
@@ -1617,6 +1644,13 @@ function groupByContainsGroupingExtension(
     return true;
   }
   const normalizedGroupBy = host.getCstText(groupByClause).toUpperCase();
+  const databaseKind = host.getValidationProfile().databaseKind;
+  if (
+    (databaseKind === "duckdb" || databaseKind === "file") &&
+    /\bGROUP\s+BY\s+ALL\b/.test(normalizedGroupBy)
+  ) {
+    return true;
+  }
   if (
     /\bROLLUP\s*\(/.test(normalizedGroupBy) ||
     /\bCUBE\s*\(/.test(normalizedGroupBy)

@@ -1,4 +1,5 @@
 import { getDatabaseSqlAuthoring } from "../core/sqlAuthoringRegistry";
+import { normalizePostgresqlIdentifier } from "@justybase/sql-core/postgresqlLexical";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   Hover,
@@ -128,6 +129,8 @@ export async function provideHoverWithTarget(
   const sql = document.getText();
   const offset = document.offsetAt(params.position);
   const context = await metadataBridge.getContext(document.uri);
+  const referenceKey = (name: string): string => context.databaseKind === 'postgresql'
+    ? normalizePostgresqlIdentifier(name) : name.toUpperCase();
   if (deps.isCancellationRequested()) {
     return null;
   }
@@ -164,8 +167,8 @@ export async function provideHoverWithTarget(
     ];
 
     const aliasReference =
-      aliasBindings.get(symbol.name.toUpperCase()) ??
-      aliasBindings.get(symbol.target.text.toUpperCase());
+      aliasBindings.get(referenceKey(symbol.name)) ??
+      aliasBindings.get(referenceKey(symbol.target.text));
 
     let resolvedReference:
       | { database?: string; schema?: string; table: string }
@@ -439,12 +442,12 @@ export async function provideHoverWithTarget(
 
   // Qualified column: qualifier.columnName
   const qualifierMatch = beforeWord.match(
-    /([A-Za-z_][A-Za-z0-9_$]*)\s*\.\s*$/,
+    /("(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)\s*\.\s*$/,
   );
 
   if (qualifierMatch) {
     const qualifier = qualifierMatch[1];
-    const aliasRef = aliasBindings.get(qualifier.toUpperCase());
+    const aliasRef = aliasBindings.get(referenceKey(qualifier));
     if (!aliasRef) {
       return null;
     }
@@ -465,7 +468,8 @@ export async function provideHoverWithTarget(
     }
 
     const matchedColumn = tableInfo?.columns.find(
-      (c) => c.name.toUpperCase() === hoverWord.toUpperCase(),
+      (c) => context.databaseKind === 'postgresql'
+        ? c.name === referenceKey(hoverWord) : c.name.toUpperCase() === hoverWord.toUpperCase(),
     );
 
     const markdownLines = [`**column** \`${hoverWord}\``];

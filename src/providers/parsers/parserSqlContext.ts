@@ -1,4 +1,5 @@
 import { CstNode } from "chevrotain";
+import { splitSqlStatements } from "@justybase/sql-core/statements";
 import type { DatabaseKind } from "../../contracts/database";
 import { isIgnorableTrailingDotParserError } from "../../sqlParser/parserErrorUtils";
 import {
@@ -304,6 +305,12 @@ function splitTopLevelStatements(
   sql: string,
   databaseKind?: DatabaseKind,
 ): TopLevelStatement[] {
+  if (databaseKind === 'postgresql') {
+    return splitSqlStatements(sql, databaseKind).map(statement => ({
+      start: statement.startOffset, contentEnd: statement.endOffset,
+      terminatedAt: statement.endOffset + (sql[statement.endOffset] === ';' ? 1 : 0),
+    }));
+  }
   const lexResult = resolveSqlParsingRuntime({ databaseKind }).SqlLexer.tokenize(sql);
   const statements: TopLevelStatement[] = [];
   let start = 0;

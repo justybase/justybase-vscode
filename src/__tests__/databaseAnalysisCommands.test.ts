@@ -59,6 +59,13 @@ describe('analysis command integration',()=>{
         await handlers.get('netezza.showDependencies')!({label:'REFRESH(INT)',objType:'PROCEDURE',dbName:'DB',schema:'PUBLIC'});
         expect(service.dependencies).toHaveBeenLastCalledWith('NZ',expect.objectContaining({name:'REFRESH',type:'PROCEDURE'}),'outgoing',2,expect.anything(),undefined,undefined);
     });
+    test('unresolved object schema asks for qualification instead of Schema Browser selection',async()=>{
+        const {handlers,service}=setup();
+        await handlers.get('netezza.showUsedBy')!({label:'DIMDATE',objType:'TABLE',dbName:'JUST_DATA',connectionName:'NZ'});
+        expect(service.dependencies).not.toHaveBeenCalled();
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Qualify DIMDATE as DATABASE.SCHEMA.OBJECT'));
+        expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(expect.stringContaining('Select a database object'));
+    });
     test('unsupported connections and cancelled impact create no background work',async()=>{
         const {handlers,manager,service}=setup();manager.getConnectionDatabaseKind=()=> 'sqlite';
         await handlers.get('netezza.showDependencies')!({label:'CUSTOMER',dbName:'DB',schema:'PUBLIC'});expect(service.dependencies).not.toHaveBeenCalled();

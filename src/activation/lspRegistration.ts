@@ -582,6 +582,7 @@ async function resolveMetadataContext(
   // handle unqualified table references appropriately based on database kind.
   // For schema-object dialects (PostgreSQL, Vertica, Snowflake, etc.),
   // the actual search_path/current_schema should be used, not a hardcoded default.
+  const authoringContext = await connectionManager.getDocumentSqlAuthoringContext?.(documentUri);
   const effectiveSchema = await connectionManager.getEffectiveSchema?.(documentUri) || undefined;
 
   let netezzaSchemasEnabled: boolean | undefined;
@@ -598,6 +599,7 @@ async function resolveMetadataContext(
     connectionName,
     effectiveDatabase,
     effectiveSchema,
+    ...authoringContext,
     databaseKind,
     netezzaSchemasEnabled,
   };

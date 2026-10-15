@@ -242,9 +242,10 @@ export function fetchRowsFromHost(
     resultSetIndex: number,
     offset: number,
     limit: number,
+    unfiltered = false,
 ): Promise<unknown[][]> {
     const spec = getDiskQuerySpec(resultSetIndex);
-    if (diskQuerySpecIsActive(spec)) {
+    if (!unfiltered && diskQuerySpecIsActive(spec)) {
         return new Promise((resolve, reject) => {
             const requestId = postDiskQuery(resultSetIndex, 'window', { offset, limit }, {
                 type: 'fetch',

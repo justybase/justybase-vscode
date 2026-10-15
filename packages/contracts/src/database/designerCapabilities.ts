@@ -711,11 +711,11 @@ export const DATABASE_DESIGNER_CAPABILITY_MANIFESTS: Readonly<Record<string, Dat
 
   duckdb: createManifest('duckdb', {
     table: supported(TABLE_OPERATIONS),
-    alterTable: supported(FULL_OPERATIONS),
+    alterTable: limited(FULL_OPERATIONS, 'DuckDB supports a subset of ALTER TABLE; adding or dropping constraints is not available through ALTER TABLE.'),
     indexes: supported(FULL_OPERATIONS),
     partitions: unsupported('DuckDB has no generic user-managed table partition tree.'),
-    foreignKeys: supported(FULL_OPERATIONS),
-    checks: supported(FULL_OPERATIONS),
+    foreignKeys: limited(['read', 'create', 'replace'], 'Declare foreign keys when creating or replacing a table; DuckDB does not support adding them with ALTER TABLE.', { enforced: true }),
+    checks: limited(['read', 'create', 'replace'], 'Declare CHECK constraints when creating or replacing a table; DuckDB does not support adding them with ALTER TABLE.', { enforced: true }),
     triggers: unsupported('DuckDB has no SQL trigger surface.'),
     views: supported(FULL_OPERATIONS, { view: CREATE_OR_REPLACE_VIEW }),
     materializedViews: unsupported('DuckDB has no native materialized view object.'),

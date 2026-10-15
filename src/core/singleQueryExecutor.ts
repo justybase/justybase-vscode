@@ -216,7 +216,7 @@ export async function runQueryRaw(
   let promptValues: Record<string, string>;
 
   try {
-    const macroFileContext = createMacroFileReadContext(documentUri);
+    const macroFileContext = createMacroFileReadContext(documentUri, connManager.getExecutionDatabaseKind?.(documentUri));
     promptValues = await collectQueryVariableValues(
       query,
       silent,
@@ -683,7 +683,7 @@ async function executeRawQueryOnce(
           ),
           (message) => logOutput(logger, message),
         ),
-        ...createMacroFileReadContext(documentUri),
+        ...createMacroFileReadContext(documentUri, connManager.getExecutionDatabaseKind?.(documentUri)),
         onExecutableMacro: () => {
           executedExternalMacro = true;
         },

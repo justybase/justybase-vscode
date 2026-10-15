@@ -53,12 +53,12 @@ export const duckdbDialect: DatabaseDialect = {
             {
                 key: 'database',
                 label: 'Database Path',
-                type: 'text',
+                type: 'file',
                 storage: 'topLevel',
                 required: true,
-                placeholder: 'Existing or new DuckDB file (for example C:\\data\\analytics.duckdb)',
+                placeholder: 'Select or enter a DuckDB database file path',
                 description:
-                    'Existing or new DuckDB database file path. When Mode is set to In-memory, this field is auto-filled with :memory:.',
+                    'Select an existing database file or enter a path for a new file. When Mode is set to In-memory, this field is auto-filled with :memory:.',
                 layout: 'full'
             },
             {

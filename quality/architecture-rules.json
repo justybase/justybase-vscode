@@ -25,7 +25,7 @@
       "packages/contracts"
     ],
     "packages/access-file": [],
-    "packages/result-core": [],
+    "packages/result-core": ["packages/contracts"],
     "packages/database-utils": [
       "packages/contracts"
     ],

@@ -286,11 +286,15 @@ export class LoginPanel {
                         return;
                     case 'browseFile': {
                         try {
+                            const isDuckDbDatabase = message.dialectKind === 'duckdb' && message.fieldKey === 'database';
                             const result = await vscode.window.showOpenDialog({
                                 canSelectMany: false,
                                 canSelectFolders: false,
-                                openLabel: 'Select File',
-                                filters: {
+                                openLabel: isDuckDbDatabase ? 'Select DuckDB Database' : 'Select File',
+                                filters: isDuckDbDatabase ? {
+                                    'DuckDB databases': ['duckdb', 'db', 'ddb'],
+                                    'All files': ['*'],
+                                } : {
                                     'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro'],
                                     'Access databases': ['mdb', 'accdb'],
                                     'All files': ['*'],
@@ -1180,10 +1184,10 @@ export class LoginPanel {
                             + '"'
                             + placeholder
                             + valueAttribute
-                            + ' readonly>'
+                            + '>'
                             + '<button type="button" class="file-browse-btn" data-field-key="'
                             + escapeHtml(field.key)
-                            + '" title="Browse for a data file">Browse…</button>'
+                            + '" title="Browse for a file">Browse…</button>'
                             + '</div>';
                     } else {
                         const inputType = field.type === 'number' ? 'number' : field.type;
@@ -1424,7 +1428,11 @@ export class LoginPanel {
                         if (!button) {
                             return;
                         }
-                        vscode.postMessage({ command: 'browseFile', fieldKey: button.dataset.fieldKey });
+                        vscode.postMessage({
+                            command: 'browseFile',
+                            fieldKey: button.dataset.fieldKey,
+                            dialectKind: getSelectedDialect().kind
+                        });
                     });
                 }
 

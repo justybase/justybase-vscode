@@ -16,6 +16,7 @@ export const DUCKDB_BUILTIN_FUNCTIONS = mergeStringSets(
     'ARRAY_LENGTH',
     'ARRAY_SLICE',
     'CONCAT_WS',
+    'COLUMNS',
     'DATE_PART',
     'DATE_TRUNC',
     'EPOCH',

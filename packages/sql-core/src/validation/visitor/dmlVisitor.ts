@@ -2,6 +2,7 @@ import { CstNode, type IToken } from "chevrotain";
 import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 import { addTableQualificationWarning } from "./queryScopeVisitor";
+import { normalizePostgresqlIdentifier } from "../../postgresqlLexical";
 
 export function callStatement(
   host: SqlVisitorHost,
@@ -20,15 +21,26 @@ export function insertStatement(
   ctx: Record<string, CstNode[]>,
 ): void {
   const schemaProvider = host.getSchemaProvider();
+  const postgres = host.getValidationProfile().databaseKind === 'postgresql';
+  const scope = host.getScopeBuilder();
+  const columnTokens = [...(ctx.Identifier ?? []), ...(postgres ? ctx.QuotedIdentifier ?? [] : [])] as unknown as IToken[];
+  columnTokens.sort((left, right) => left.startOffset - right.startOffset);
+  if (postgres) scope.enterScope();
+  try {
   if (ctx.tableName) {
     const table = host.visitAs<TableInfo>(ctx.tableName[0]);
     table.isDynamicMacro =
       table.isDynamicMacro || host.hasMacroReferenceInCst(ctx.tableName[0]);
     addTableQualificationWarning(host, table, ctx.tableName[0]);
+    if (postgres) {
+      table.columns = schemaProvider?.getTable(table.database, table.schema, table.name)?.columns ?? table.columns;
+      if (ctx.aliasOptional) table.alias = host.visitAs<string>(ctx.aliasOptional[0]);
+      scope.addTable(table);
+    }
 
     const isQualified = !!(table.database || table.schema);
     if (
-      isQualified &&
+      (isQualified || postgres) &&
       !table.isDynamicMacro &&
       !table.isTempTable &&
       !table.isCte &&
@@ -36,7 +48,7 @@ export function insertStatement(
     ) {
       host.validateTableExists(table, ctx.tableName[0]);
 
-      if (ctx.Identifier && ctx.Identifier.length > 0) {
+      if (columnTokens.length > 0) {
         const schemaTable = schemaProvider.getTable(
           table.database,
           table.schema,
@@ -44,12 +56,11 @@ export function insertStatement(
         );
         if (schemaTable && schemaTable.columns.length > 0) {
           const tableColNames = new Set(
-            schemaTable.columns.map((c) => c.name.toUpperCase()),
+            schemaTable.columns.map((c) => postgres ? c.name : c.name.toUpperCase()),
           );
-          for (const colNode of ctx.Identifier) {
-            const colToken = colNode as unknown as IToken;
+          for (const colToken of columnTokens) {
             const colName = host.getTokenText(colToken);
-            if (!tableColNames.has(colName.toUpperCase())) {
+            if (!tableColNames.has(postgres ? normalizePostgresqlIdentifier(colName) : colName.toUpperCase())) {
               host.addError(
                 `Column '${colName}' not found in table '${table.name}'`,
                 colToken,
@@ -65,10 +76,10 @@ export function insertStatement(
 
   if (ctx.valuesClause) {
     host.visit(ctx.valuesClause[0]);
-    if (ctx.Identifier && ctx.Identifier.length > 0) {
+    if (columnTokens.length > 0) {
       validateInsertColumnValueCounts(
         host,
-        ctx.Identifier as unknown as IToken[],
+        columnTokens,
         ctx.valuesClause[0],
       );
     }
@@ -76,6 +87,11 @@ export function insertStatement(
     host.visit(ctx.selectStatement[0]);
   } else if (ctx.insertWithClause) {
     host.visit(ctx.insertWithClause[0]);
+  }
+  if (ctx.postgresqlOnConflict) host.visit(ctx.postgresqlOnConflict[0]);
+  if (ctx.postgresqlReturning) host.visit(ctx.postgresqlReturning[0]);
+  } finally {
+    if (postgres) scope.exitScope();
   }
 }
 
@@ -96,6 +112,8 @@ export function insertWithClause(
     host.visit(ctx.selectStatement[0]);
   }
 
+  if (ctx.postgresqlUsingClause) host.visit(ctx.postgresqlUsingClause[0]);
+  if (ctx.postgresqlReturning) host.visit(ctx.postgresqlReturning[0]);
   scopeBuilder.exitScope();
 }
 
@@ -213,7 +231,7 @@ export function updateStatement(
       const asToken = ctx.aliasOptional[0].children?.As?.[0] as unknown as
         | IToken
         | undefined;
-      if (asToken) {
+      if (asToken && host.getValidationProfile().databaseKind === 'netezza') {
         const startLine = asToken.startLine ?? 1;
         const startColumn = asToken.startColumn ?? 1;
         const tokenLength = asToken.image?.length ?? 2;
@@ -250,10 +268,12 @@ export function updateStatement(
     });
   }
 
+  if (ctx.postgresqlUsingClause) host.visit(ctx.postgresqlUsingClause[0]);
   if (ctx.whereClause) {
     host.visit(ctx.whereClause[0]);
   }
 
+  if (ctx.postgresqlReturning) host.visit(ctx.postgresqlReturning[0]);
   scopeBuilder.exitScope();
 }
 
@@ -335,10 +355,12 @@ export function deleteStatement(
     addTableQualificationWarning(host, table, tableNameNode);
   }
 
+  if (ctx.postgresqlUsingClause) host.visit(ctx.postgresqlUsingClause[0]);
   if (ctx.whereClause) {
     host.visit(ctx.whereClause[0]);
   }
 
+  if (ctx.postgresqlReturning) host.visit(ctx.postgresqlReturning[0]);
   scopeBuilder.exitScope();
 }
 

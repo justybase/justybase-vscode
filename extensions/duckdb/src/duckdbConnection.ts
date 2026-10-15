@@ -121,6 +121,8 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
     protected _instance?: DuckDbInstance;
     protected _connection?: DuckDbRuntimeConnection;
     protected _session?: DuckDbSession;
+    private _connecting?: Promise<void>;
+    private _closing?: Promise<void>;
     private _currentCatalog = '';
     private _currentSchema = 'main';
     private readonly _sessionId = `duckdb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -141,12 +143,20 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
     }
 
     public async connect(): Promise<void> {
+        if (this._closing) await this._closing;
+        if (this._connecting) return this._connecting;
         if (this._connected) return;
+        this._connecting = this.open().finally(() => { this._connecting = undefined; });
+        return this._connecting;
+    }
+
+    private async open(): Promise<void> {
         const session = new DuckDbSession({
             databasePath: this._databaseLocation.databasePath,
             instanceOwnership: this._databaseLocation.useCache ? 'cached-file' : 'owned-memory',
             resolver: _duckdbResolver,
         });
+        this._session = session;
         try {
             await session.connect();
             this._session = session;
@@ -168,6 +178,16 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
     }
 
     public async close(): Promise<void> {
+        if (this._closing) return this._closing;
+        this._closing = this.closeSession().finally(() => { this._closing = undefined; });
+        return this._closing;
+    }
+
+    private async closeSession(): Promise<void> {
+        if (this._connecting) {
+            this._session?.interrupt();
+            await this._connecting.catch(() => undefined);
+        }
         const session = this._session;
         // Invalidate first so executions racing close() fail requireSession()
         // instead of registering after the drain snapshot.
@@ -182,10 +202,15 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
                 // Preserve the close path; cancellation failure must not skip draining.
             }
             const drain = Promise.allSettled([...this._executing.keys()]);
-            await Promise.race([
-                drain,
-                new Promise<void>(resolve => setTimeout(resolve, CLOSE_DRAIN_TIMEOUT_MS)),
-            ]);
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            try {
+                await Promise.race([
+                    drain,
+                    new Promise<void>(resolve => { timeout = setTimeout(resolve, CLOSE_DRAIN_TIMEOUT_MS); }),
+                ]);
+            } finally {
+                if (timeout) clearTimeout(timeout);
+            }
         }
         this._session = undefined;
         this._connection = undefined;
@@ -244,7 +269,7 @@ export class DuckDbConnection extends EventEmitter implements DatabaseConnection
 
     protected requireConnection(): DuckDbRuntimeConnection { return this.requireSession().nativeConnection; }
     protected requireSession(): DuckDbSession {
-        if (!this._session || !this._connected) throw new Error('DuckDB connection is not open.');
+        if (!this._session || !this._connected || this._closing) throw new Error('DuckDB connection is not open.');
         return this._session;
     }
     protected async initializeAfterConnect(): Promise<void> { return undefined; }

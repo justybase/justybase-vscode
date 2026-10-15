@@ -1,3 +1,4 @@
+import type { ExploreValue } from '@justybase/contracts';
 // Filter bar UI: chips for active explore filters + undo/redo/clear +
 // SQL preview / open-in-editor actions.
 
@@ -9,10 +10,11 @@ import { showSqlPreviewModal } from './previewModal.js';
 import type { ExploreFilterState } from './filterState.js';
 
 export interface FilterBarCallbacks {
+    onAddFilter?: () => void;
     onUndo: () => void;
     onRedo: () => void;
     onClear: () => void;
-    onRemoveChip: (kind: 'dimension' | 'date' | 'measure', columnIndex: number, value?: string) => void;
+    onRemoveChip: (kind: 'dimension' | 'date' | 'measure', columnIndex: number, value?: ExploreValue, missing?: 'null' | 'empty') => void;
     onEditChip: (kind: 'dimension' | 'date' | 'measure', columnIndex: number) => void;
 }
 
@@ -33,18 +35,18 @@ export function renderFilterBar(
     const columnName = (index: number): string => columns[index]?.name ?? `Col ${index + 1}`;
 
     for (const dimension of filters.dimensions) {
-        for (const value of dimension.values) {
-            chips.appendChild(buildChip(
-                'dimension',
-                dimension.columnIndex,
-                `${columnName(dimension.columnIndex)} = ${value}`,
-                () => callbacks.onRemoveChip('dimension', dimension.columnIndex, value),
-                () => callbacks.onEditChip('dimension', dimension.columnIndex),
-            ));
-        }
+        const add = (label: string, value?: ExploreValue, missing?: 'null' | 'empty') => chips.appendChild(buildChip(
+            'dimension', dimension.columnIndex,
+            `${columnName(dimension.columnIndex)} ${dimension.mode === 'exclude' ? 'excludes' : 'includes'} ${label}`,
+            () => callbacks.onRemoveChip('dimension', dimension.columnIndex, value, missing),
+            () => callbacks.onEditChip('dimension', dimension.columnIndex),
+        ));
+        dimension.values.forEach(value => add(JSON.stringify(value), value));
+        if (dimension.includeNull) add('NULL', undefined, 'null');
+        if (dimension.includeEmpty) add('(Empty string)', undefined, 'empty');
     }
     for (const date of filters.dates) {
-        const label = `${columnName(date.columnIndex)} ${date.grain}${date.from ? ` ≥ ${date.from}` : ''}${date.to ? ` ≤ ${date.to}` : ''}`;
+        const label = `${columnName(date.columnIndex)} ${date.grain}${date.from ? ` ≥ ${date.from}` : ''}${date.to ? ` ${date.toExclusive ? '<' : '≤'} ${date.to}` : ''}`;
         chips.appendChild(buildChip(
             'date',
             date.columnIndex,
@@ -54,7 +56,7 @@ export function renderFilterBar(
         ));
     }
     for (const measure of filters.measures) {
-        const label = `${columnName(measure.columnIndex)} ${measure.min !== undefined ? ` ≥ ${measure.min}` : ''}${measure.max !== undefined ? ` ≤ ${measure.max}` : ''}`.trim();
+        const label = `${columnName(measure.columnIndex)} ${measure.min !== undefined ? ` ≥ ${measure.min}` : ''}${measure.max !== undefined ? ` ${measure.maxExclusive ? '<' : '≤'} ${measure.max}` : ''}`.trim();
         chips.appendChild(buildChip(
             'measure',
             measure.columnIndex,
@@ -76,6 +78,7 @@ export function renderFilterBar(
     const actions = document.createElement('div');
     actions.className = 'explore-filter-actions';
 
+    actions.appendChild(buildActionButton('Add filter', true, () => callbacks.onAddFilter?.(), 'Explore filters are independent of Data Grid filters'));
     actions.appendChild(buildActionButton('↩ Undo', state.canUndo, callbacks.onUndo, 'Undo last filter change'));
     actions.appendChild(buildActionButton('↪ Redo', state.canRedo, callbacks.onRedo, 'Redo filter change'));
     actions.appendChild(buildActionButton('✕ Clear', state.historyDepth > 0 || filters.dimensions.length + filters.dates.length + filters.measures.length > 0, callbacks.onClear, 'Clear all filters'));
@@ -107,6 +110,11 @@ function buildChip(
     labelSpan.className = 'explore-filter-chip-label';
     labelSpan.textContent = label;
     labelSpan.title = 'Edit filter';
+    labelSpan.tabIndex = 0;
+    labelSpan.setAttribute('role', 'button');
+    labelSpan.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onEdit(); }
+    });
     labelSpan.addEventListener('click', onEdit);
     chip.appendChild(labelSpan);
 

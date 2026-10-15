@@ -19,6 +19,12 @@ import { stripIdentifierQuoting } from "../identifierUtils";
 import type { TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
 
+function matchesColumnIdentifier(host: SqlVisitorHost, name: string | undefined, column: string, token: IToken): boolean {
+  if (name === undefined) return false;
+  if (host.getValidationProfile().databaseKind !== 'postgresql') return name.toUpperCase() === column.toUpperCase();
+  return name === (token.image.startsWith('"') ? column : column.toLowerCase());
+}
+
 const BOOLEAN_LITERAL_IDENTIFIERS = new Set(["TRUE", "FALSE"]);
 
 const AGGREGATE_FUNCTIONS = new Set([
@@ -189,6 +195,7 @@ export function castExpression(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
+  if (ctx.postgresqlJsonExpression) host.visit(ctx.postgresqlJsonExpression[0]);
   if (ctx.primaryExpression) {
     host.visit(ctx.primaryExpression[0]);
   }
@@ -202,7 +209,10 @@ export function primaryExpression(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
-  if (ctx.columnReference) {
+  if (ctx.arrayExpression) { host.visit(ctx.arrayExpression[0]); }
+  else if (ctx.duckdbListLiteral) {
+    host.visit(ctx.duckdbListLiteral[0]);
+  } else if (ctx.columnReference) {
     host.visit(ctx.columnReference[0]);
   } else if (ctx.sequenceValueExpression) {
     host.visit(ctx.sequenceValueExpression[0]);
@@ -277,8 +287,11 @@ export function columnReference(
   }
 
   const tokens = rawTokens;
-  const normalizeIdentifier = (token: IToken): string =>
-    host.stripIdentifierQuoting(host.getTokenText(token));
+  const normalizeIdentifier = (token: IToken): string => {
+    const text = host.getTokenText(token);
+    return host.getValidationProfile().databaseKind === 'postgresql' && !text.startsWith('"')
+      ? text.toLowerCase() : host.stripIdentifierQuoting(text);
+  };
 
   if (tokens.length === 1) {
     const columnName = normalizeIdentifier(tokens[0]);
@@ -345,8 +358,8 @@ export function columnReference(
     const currentMatches = currentScopeWithColumns.filter((table) =>
       table.columns.some(
         (c) =>
-          c.name.toUpperCase() === upperColumn ||
-          c.alias?.toUpperCase() === upperColumn,
+          matchesColumnIdentifier(host, c.name, columnName, tokens[0]) ||
+          matchesColumnIdentifier(host, c.alias, columnName, tokens[0]),
       ),
     );
 
@@ -366,8 +379,8 @@ export function columnReference(
     const matches = tablesWithKnownColumns.filter((table) =>
       table.columns.some(
         (c) =>
-          c.name.toUpperCase() === upperColumn ||
-          c.alias?.toUpperCase() === upperColumn,
+          matchesColumnIdentifier(host, c.name, columnName, tokens[0]) ||
+          matchesColumnIdentifier(host, c.alias, columnName, tokens[0]),
       ),
     );
 
@@ -523,7 +536,9 @@ export function functionCall(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[] | IToken[]>,
 ): void {
-  const identifierTokens = (ctx.Identifier as unknown as IToken[] | undefined) ?? [];
+  const identifierTokens = ctx.identifier
+    ? (ctx.identifier as CstNode[]).map(node => host.getFirstTokenFromCst(node)).filter((token): token is IToken => !!token)
+    : (ctx.Identifier as unknown as IToken[] | undefined) ?? [];
   const fnToken =
     (ctx.OracleQualifiedFunction?.[0] as unknown as IToken | undefined) ||
     (identifierTokens[0] as IToken | undefined) ||
@@ -557,6 +572,7 @@ export function functionCall(
     }
 
     if (
+      host.getValidationProfile().databaseKind !== 'postgresql' &&
       !host.getInPerformContext() &&
       upper !== "ROLLUP" &&
       upper !== "CUBE" &&
@@ -607,6 +623,8 @@ export function functionCall(
     if (
       fnToken &&
       WINDOW_FUNCTIONS_REQUIRING_ORDER_BY.has(upper) &&
+      host.getValidationProfile().databaseKind !== "duckdb" &&
+      host.getValidationProfile().databaseKind !== "file" &&
       !overNode.children?.orderByClause
     ) {
       host.addError(
@@ -641,12 +659,17 @@ export function functionArguments(
       host.visit(expr);
     });
   }
+  if (ctx.orderByClause) host.visit(ctx.orderByClause[0]);
+  if (ctx.duckdbNamedArgument) {
+    ctx.duckdbNamedArgument.forEach((argument) => host.visit(argument));
+  }
 }
 
 export function overClause(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[]>,
 ): void {
+  if (ctx.postgresqlWindowSpec) host.visit(ctx.postgresqlWindowSpec[0]);
   if (ctx.partitionByClause) {
     host.visit(ctx.partitionByClause[0]);
   }
@@ -949,6 +972,11 @@ function validateColumnExists(
   token: IToken,
 ): void {
   const upperColumnName = columnName.toUpperCase();
+  const matches = (name: string | undefined): boolean => {
+    if (name === undefined) return false;
+    if (host.getValidationProfile().databaseKind !== 'postgresql') return name.toUpperCase() === upperColumnName;
+    return name === (token.image.startsWith('"') ? columnName : columnName.toLowerCase());
+  };
 
   if (table.isDynamicMacro) {
     return;
@@ -960,8 +988,7 @@ function validateColumnExists(
 
   const columnExists = table.columns.some(
     (col) =>
-      col.name.toUpperCase() === upperColumnName ||
-      col.alias?.toUpperCase() === upperColumnName,
+      matches(col.name) || matches(col.alias),
   );
 
   if (columnExists) {
@@ -977,7 +1004,7 @@ function validateColumnExists(
     );
     if (schemaTable) {
       const schemaColumnExists = schemaTable.columns.some(
-        (col) => col.name.toUpperCase() === upperColumnName,
+        (col) => matches(col.name),
       );
       if (!schemaColumnExists) {
         host.addError(

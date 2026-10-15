@@ -469,6 +469,11 @@
         "icon": "$(database)"
       },
       {
+        "command": "netezza.disconnectConnection",
+        "title": "Disconnect Connection (All SQL Tabs)",
+        "icon": "$(debug-disconnect)"
+      },
+      {
         "command": "netezza.clearAutocompleteCache",
         "title": "JustyBase: Clear Autocomplete Cache",
         "icon": "$(trash)"
@@ -2299,6 +2304,11 @@
       ],
       "view/item/context": [
         {
+          "command": "netezza.disconnectConnection",
+          "when": "view == netezza.schema && viewItem == serverInstance",
+          "group": "0_connection@1"
+        },
+        {
           "command": "netezza.migrateData",
           "when": "view == netezza.schema && (viewItem =~ /^netezza:(TABLE|VIEW|EXTERNAL TABLE)$/ || viewItem =~ /^favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)$/)",
           "group": "1_data@1"
@@ -2385,7 +2395,7 @@
         },
         {
           "command": "netezza.grantPermissions",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "2_permissions"
         },
         {
@@ -2410,7 +2420,7 @@
         },
         {
           "command": "netezza.vacuumTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
           "group": "3_maintenance"
         },
         {
@@ -2455,7 +2465,7 @@
         },
         {
           "command": "netezza.addPrimaryKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "5_schema@1"
         },
         {
@@ -2470,12 +2480,12 @@
         },
         {
           "command": "netezza.addForeignKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != netezza && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != netezza && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "5_schema@2"
         },
         {
           "command": "netezza.addUniqueConstraint",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "5_schema@3"
         },
         {
@@ -2535,7 +2545,7 @@
         },
         {
           "command": "netezza.changeOwner",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "3_maintenance"
         },
         {
@@ -2600,12 +2610,12 @@
         },
         {
           "command": "netezza.batchExportDDL",
-          "when": "view == netezza.schema && viewItem == database",
+          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "7_export"
         },
         {
           "command": "netezza.batchExportDDL",
-          "when": "view == netezza.schema && viewItem =~ /typeGroup:(TABLE|VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT|WAREHOUSE)/",
+          "when": "view == netezza.schema && viewItem =~ /typeGroup:(TABLE|VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT|WAREHOUSE)/ && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
           "group": "7_export"
         },
         {
@@ -4679,7 +4689,7 @@
     "build:runtime": "npm run build:designer-core && npm run build:netezza-runtime && npm run build --workspace @justybase/database-runtime",
     "build:sqlite-runtime": "npm run build:contracts && npm run build --workspace @justybase/sqlite-runtime",
     "build:duckdb-runtime": "npm run build:contracts && npm run build --workspace @justybase/duckdb-runtime",
-    "build:result-core": "npm run build --workspace @justybase/result-core",
+    "build:result-core": "npm run build:contracts && npm run build --workspace @justybase/result-core",
     "build:ui-core": "npm run build:contracts && npm run build --workspace @justybase/ui-core",
     "build:ui-react": "npm run build:ui-core && npm run build --workspace @justybase/ui-react",
     "build:netezza-runtime": "npm run build:contracts && npm run build --workspace @justybase/netezza-runtime",
@@ -4815,7 +4825,7 @@
     "test:result-panel:extension-host": "npm run test:extension-host",
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
     "test:quickfix-regression": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"linterCodeActions.test.ts\"",
-    "test:parser-perf": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand --testPathPatterns=\"mssqlParserPerf.test.ts|oracleParserPerf.test.ts\"",
+    "test:parser-perf": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand --testPathPatterns=\"mssqlParserPerf.test.ts|oracleParserPerf.test.ts|postgresqlConformance.test.ts\"",
     "test:quality-tools": "node --test scripts/quality-tools.test.mjs scripts/architecture-check.test.mjs scripts/access-index-codes.test.cjs",
     "test:metadata-core": "npm run test --workspace @justybase/metadata-core",
     "test:sql-core": "npm run build:metadata-core && npm run build:sql-core && node --test scripts/sql-core-exports.test.cjs && npm run test --workspace @justybase/sql-core",
@@ -4844,7 +4854,7 @@
     "verify:pr": "npm run check:architecture && npm run check-types && npm run check-types:shared && npm run lint && npm run lint:extended:check && npm run test:quality-tools && npm run test:metadata-core && npm run test:designer-core && npm run test:result-core && npm run test:ui-core && npm run test:ui-react && npm run test:sql-core && npm run test:sqlite-runtime && npm run test:duckdb-runtime && npm run test:netezza-runtime && npm run test:coverage && npm run test:coverage:ui && npm run test:coverage:changed && npm run build",
     "check-types": "npm run build:access-file && npm run check-types:metadata-core && npm run check-types:result-core && npm run check-types:ui-core && npm run check-types:ui-react && npm run check-types:sql-core && npm run check-types:database-utils && npm run check-types:file-runtime && npm run check-types:tabular-import-runtime && npm run check-types:dialect-utils && npm run check-types:vscode-companion-adapter && npm run build:duckdb-runtime && npm run build:netezza-runtime && npm run build:sqlite-runtime && npm run build:database-runtime && tsc --noEmit && tsc --project tsconfig.media.json --noEmit",
     "check-types:metadata-core": "npm run check-types --workspace @justybase/metadata-core",
-    "check-types:result-core": "npm run check-types --workspace @justybase/result-core",
+    "check-types:result-core": "npm run build:contracts && npm run check-types --workspace @justybase/result-core",
     "check-types:ui-core": "npm run build:contracts && npm run check-types --workspace @justybase/ui-core",
     "check-types:ui-react": "npm run build:ui-core && npm run check-types --workspace @justybase/ui-react",
     "check-types:sql-core": "npm run build:contracts && npm run check-types --workspace @justybase/sql-core",
@@ -4903,7 +4913,12 @@
     "version:minor": "node scripts/version-sync.js bump minor",
     "version:major": "node scripts/version-sync.js bump major",
     "prepare": "husky",
-    "check-types:shared": "npm run build:metadata-core && npm run build:designer-core && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run check-types --workspace @justybase/duckdb-runtime && npm run build:duckdb-runtime && npm run check-types --workspace @justybase/netezza-runtime && npm run build:netezza-runtime && npm run build:runtime && npm run build:sqlite-runtime && npm run check-types --workspace @justybase/sqlite-runtime"
+    "check-types:shared": "npm run build:metadata-core && npm run build:designer-core && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run check-types --workspace @justybase/duckdb-runtime && npm run build:duckdb-runtime && npm run check-types --workspace @justybase/netezza-runtime && npm run build:netezza-runtime && npm run build:runtime && npm run build:sqlite-runtime && npm run check-types --workspace @justybase/sqlite-runtime",
+    "test:postgresql:authoring": "cross-env NODE_ENV=test jest --runInBand --testPathPatterns=postgresql",
+    "test:postgresql:conformance:live": "cross-env NODE_ENV=test jest --config jest.live.config.js --runInBand src/__tests__/integration/postgresqlConformance.live.integration.test.ts",
+    "conformance:postgresql:sync": "node scripts/sync-postgresql-conformance.cjs",
+    "conformance:postgresql:check": "node scripts/sync-postgresql-conformance.cjs --check",
+    "test:lsp:postgresql": "npm run build && node scripts/postgresqlLspSmoke.mjs"
   },
   "lint-staged": {
     "!(media|packages)/**/*.{ts,tsx}": [

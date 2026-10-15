@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { runExtensionHostFilterPerformance } from '../activation/resultPanelFilterPerformance';
-import { buildReport, registerResultPanelRegressionCommand } from '../activation/resultPanelRegression';
+import { buildReport, registerResultPanelRegressionCommand, runExploreRegression } from '../activation/resultPanelRegression';
 
 jest.mock('vscode');
 jest.mock('../activation/resultPanelFilterPerformance', () => ({
@@ -154,5 +154,26 @@ describe('result panel regression command registration', () => {
 
         expect(registerResultPanelRegressionCommand({} as never, {} as never)).toBeUndefined();
         expect(vscode.commands.registerCommand).not.toHaveBeenCalled();
+    });
+});
+
+
+describe('Explore Extension Host gate assertions', () => {
+    it('runs memory and disk workflows through production bridge actions', async () => {
+        const bridge = jest.fn(async () => ({ rankedCount: 1, rowCount: 4 }));
+        await runExploreRegression({ runResultPanelTestBridge: bridge } as never, 3);
+        expect(bridge.mock.calls).toHaveLength(5);
+        expect(bridge).toHaveBeenNthCalledWith(1, 'switchResultSet', { resultSetIndex: 3 });
+    });
+    it.each([
+        ['memory', 0, 4], ['memory', 1, 0], ['disk', 0, 4], ['disk', 1, 0],
+    ])('rejects incorrect %s ranking/detail counts (%s, %s)', async (stage, rankedCount, rowCount) => {
+        let workflows = 0;
+        const bridge = jest.fn(async (action: string) => {
+            if (action !== 'exploreWorkflow') return {};
+            workflows++;
+            return workflows === (stage === 'memory' ? 1 : 2) ? { rankedCount, rowCount } : { rankedCount: 1, rowCount: 4 };
+        });
+        await expect(runExploreRegression({ runResultPanelTestBridge: bridge } as never, 0)).rejects.toThrow(String(stage));
     });
 });

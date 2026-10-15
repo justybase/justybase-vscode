@@ -1,6 +1,12 @@
 import * as vscode from 'vscode';
 import type { ConnectionManager } from '../core/connectionManager';
+import {
+    proposeTableQualification,
+    type QualificationProposal,
+    type TableQualificationResolverDeps,
+} from '../core/tableQualificationResolver';
 import type { DatabaseKind } from '../contracts/database';
+import type { CatalogObjectRef } from '../server/catalogNavigation';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import {
     createSelectionExecutionCodeActions,
@@ -37,6 +43,8 @@ export interface SqlExecutionCodeActionHubDeps {
         | 'getExecutionDatabaseKind'
         | 'supportsCapability'
     >;
+    /** Cache-only qualification resolver shared with the linter's "Qualify as" fix. */
+    tableQualification?: TableQualificationResolverDeps;
 }
 
 /**
@@ -226,6 +234,47 @@ export class SqlExecutionCodeActionProvider implements vscode.CodeActionProvider
         return actions;
     }
 
+    /**
+     * Dependency actions need a resolved database and schema. A fully qualified
+     * reference passes through unchanged. Otherwise the cache-only resolver used
+     * by the linter's "Qualify as" fix supplies candidates: a single candidate or
+     * a preferred one (configured schema) wins, and an ambiguous name yields one
+     * target per candidate. No candidates means no dependency actions.
+     */
+    private resolveDependencyTargets(
+        document: vscode.TextDocument,
+        ref: CatalogObjectRef,
+        databaseKind: DatabaseKind | undefined,
+    ): CatalogObjectRef[] {
+        if (ref.database && ref.schema) {
+            return [ref];
+        }
+        const resolver = this.hubDeps?.tableQualification;
+        if (!resolver) {
+            return [];
+        }
+        let proposals: QualificationProposal[];
+        try {
+            proposals = proposeTableQualification(resolver, {
+                name: ref.name,
+                database: ref.database,
+                schema: ref.schema,
+                documentUri: document.uri.toString(),
+                databaseKind,
+            });
+        } catch {
+            return [];
+        }
+        const preferred = proposals.filter((proposal) => proposal.isPreferred);
+        const chosen = proposals.length > 1 && preferred.length === 1 ? preferred : proposals;
+        return chosen.map((proposal) => ({
+            ...ref,
+            database: proposal.database,
+            schema: proposal.schema,
+            name: proposal.name,
+        }));
+    }
+
     private createTableActions(
         document: vscode.TextDocument,
         text: string,
@@ -293,21 +342,26 @@ export class SqlExecutionCodeActionProvider implements vscode.CodeActionProvider
         }
 
         if (databaseKind === 'netezza') {
-            actions.push(this.createCommandAction(
-                `Show Dependencies of ${ref.name}`,
-                'netezza.showDependencies',
-                [item],
-            ));
-            actions.push(this.createCommandAction(
-                `Show Used By of ${ref.name}`,
-                'netezza.showUsedBy',
-                [item],
-            ));
-            actions.push(this.createCommandAction(
-                `Impact Analysis for ${ref.name}`,
-                'netezza.impactAnalysis',
-                [item],
-            ));
+            for (const target of this.resolveDependencyTargets(document, ref, databaseKind)) {
+                const targetItem = buildHubSchemaItemData(target, connectionName);
+                // Fully qualified references keep their bare name; resolved ones show where the object was found.
+                const label = ref.database && ref.schema ? ref.name : buildHubQualifiedName(target, databaseKind);
+                actions.push(this.createCommandAction(
+                    `Show Dependencies of ${label}`,
+                    'netezza.showDependencies',
+                    [targetItem],
+                ));
+                actions.push(this.createCommandAction(
+                    `Show Used By of ${label}`,
+                    'netezza.showUsedBy',
+                    [targetItem],
+                ));
+                actions.push(this.createCommandAction(
+                    `Impact Analysis for ${label}`,
+                    'netezza.impactAnalysis',
+                    [targetItem],
+                ));
+            }
         }
 
         if (ref.database && ref.schema) {

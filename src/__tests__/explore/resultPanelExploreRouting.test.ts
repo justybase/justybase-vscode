@@ -33,6 +33,21 @@ describe('ResultPanelMessageHandler explore routing', () => {
         stateManager.dispose();
     });
 
+    it('routes typed Explore operations and cancellation, preserving owner identity', async () => {
+        callbacks.onExploreOperation = jest.fn().mockResolvedValue({ rows: [['A', 1]], sql: 'SELECT details', scope: 'database', computedAt: 1, truncated: false, filters: { dimensions: [], dates: [], measures: [] } });
+        const request: import('../../contracts/webviews').ResultPanelInboundMessage = { command: 'requestExploreOperation', sourceUri: 'file:///a.sql', resultSetIndex: 0, resultSetId: 'stable', requestId: 42,
+            operation: { kind: 'rows', filters: { dimensions: [], dates: [], measures: [] } } };
+        handler.handleMessage(request);
+        await Promise.resolve(); await Promise.resolve();
+        expect(postedMessages).toContainEqual(expect.objectContaining({ command: 'exploreOperationResult', requestId: 42, resultSetId: 'stable', result: expect.objectContaining({ rows: [['A', 1]] }) }));
+        callbacks.onCancelExploreOperation = jest.fn(); handler.handleMessage({ command: 'cancelExploreOperation', requestId: 42 });
+        expect(callbacks.onCancelExploreOperation).toHaveBeenCalledWith(42);
+        callbacks.onExploreOperation = jest.fn().mockRejectedValue('Operation failed'); handler.handleMessage(request);
+        await Promise.resolve(); await Promise.resolve(); expect(postedMessages).toContainEqual(expect.objectContaining({ error: 'Operation failed' }));
+        callbacks.onExploreOperation = undefined; handler.handleMessage(request);
+        await Promise.resolve(); await Promise.resolve(); expect(postedMessages).toContainEqual(expect.objectContaining({ error: expect.stringContaining('unavailable') }));
+    });
+
     it('routes requestExploreFullStats through the callback', async () => {
         const callback = jest.fn().mockResolvedValue({
             values: { count: 10, sum: 100 },

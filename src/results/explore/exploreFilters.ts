@@ -5,31 +5,9 @@
 
 import type { ColumnDefinition } from '../../types';
 
-export type ExploreDateGrain = 'day' | 'week' | 'month' | 'quarter' | 'year';
-
-export interface ExploreDimensionFilter {
-    columnIndex: number;
-    values: string[];
-}
-
-export interface ExploreDateFilter {
-    columnIndex: number;
-    grain: ExploreDateGrain;
-    from?: string;
-    to?: string;
-}
-
-export interface ExploreMeasureFilter {
-    columnIndex: number;
-    min?: number;
-    max?: number;
-}
-
-export interface ExploreFilterModel {
-    dimensions: ExploreDimensionFilter[];
-    dates: ExploreDateFilter[];
-    measures: ExploreMeasureFilter[];
-}
+export type { ExploreDateGrain, ExploreDimensionFilter, ExploreDateFilter, ExploreMeasureFilter, ExploreFilterModel } from '@justybase/contracts';
+import type { ExploreFilterModel, ExploreValue } from '@justybase/contracts';
+import { compareExploreNumbers } from '@justybase/result-core';
 
 export const EMPTY_EXPLORE_FILTERS: ExploreFilterModel = {
     dimensions: [],
@@ -58,11 +36,26 @@ export function escapeSqlLiteral(value: string): string {
     return `'${value.replace(/'/g, "''")}'`;
 }
 
-export function formatNumberLiteral(value: number): string {
-    if (Number.isInteger(value)) {
-        return String(value);
-    }
+export function formatNumberLiteral(value: number | string): string {
+    if (compareExploreNumbers(value, value) === undefined) throw new Error('Invalid numeric filter value.');
     return String(value);
+}
+
+const NUMERIC_TYPE = /^(?:bigint|smallint|integer|int\d*|tinyint|number|numeric|decimal|float|double|real)\b/i;
+/** Types whose values never equal an empty string; `col = ''` is a type error on most engines. */
+const NON_TEXT_TYPE = /^(?:bigint|smallint|integer|int\d*|tinyint|byteint|number|numeric|decimal|float|double|real|money|smallmoney|bool|boolean|bit|date|time|timestamp|datetime|interval|uuid|uniqueidentifier)\b/i;
+
+function columnAcceptsEmptyString(type?: string): boolean {
+    return !NON_TEXT_TYPE.test(type?.trim() ?? '');
+}
+
+/** Preserve numeric identifiers without passing them through Number. */
+export function exploreValueSql(value: ExploreValue, type?: string, databaseKind?: string): string {
+    if (typeof value === 'boolean') return databaseKind === 'mssql' || databaseKind === 'oracle' ? (value ? '1' : '0') : value ? 'TRUE' : 'FALSE';
+    if (typeof value === 'number' || NUMERIC_TYPE.test(type?.trim() ?? '')) {
+        return formatNumberLiteral(String(value));
+    }
+    return escapeSqlLiteral(String(value));
 }
 
 /**
@@ -83,19 +76,32 @@ export function buildExploreWhereSql(
 
     for (const dimension of filters.dimensions) {
         const column = columns[dimension.columnIndex];
-        if (!column || !column.name) {
+        if (!column?.name) continue;
+        const quoted = `t.${quoteIdentifier(column.name, databaseKind)}`;
+        if (!dimension.values.length && !dimension.includeNull && !dimension.includeEmpty) continue;
+        // An empty string only matches a text column; on numeric/date/boolean
+        // columns it matches no row (and `col = ''` would be a type error).
+        const includeEmpty = (!!dimension.includeEmpty || dimension.values.includes('')) && columnAcceptsEmptyString(column.type);
+        const values = dimension.values.filter(value => value !== '');
+        const selected: string[] = [];
+        if (values.length) {
+            const literals = values.map(value => exploreValueSql(value, column.type, databaseKind));
+            selected.push(literals.length === 1 ? `${quoted} = ${literals[0]}` : `${quoted} IN (${literals.join(', ')})`);
+        }
+        if (dimension.includeNull) selected.push(`${quoted} IS NULL`);
+        if (includeEmpty && databaseKind !== 'oracle') selected.push(`${quoted} = ''`);
+        if (includeEmpty && databaseKind === 'oracle') selected.push(`${quoted} IS NULL`);
+        if (!selected.length) {
+            // Every selected value is unmatchable: include keeps no row, exclude removes none.
+            if (dimension.mode !== 'exclude') parts.push('1 = 0');
             continue;
         }
-        if (dimension.values.length === 0) {
-            continue;
-        }
-        const quoted = quoteIdentifier(column.name, databaseKind);
-        if (dimension.values.length === 1) {
-            parts.push(`t.${quoted} = ${escapeSqlLiteral(dimension.values[0])}`);
-        } else {
-            const list = dimension.values.map(value => escapeSqlLiteral(value)).join(', ');
-            parts.push(`t.${quoted} IN (${list})`);
-        }
+        const expression = selected.length === 1 ? selected[0] : `(${selected.join(' OR ')})`;
+        parts.push(dimension.mode === 'exclude'
+            ? dimension.includeNull || (includeEmpty && databaseKind === 'oracle')
+                ? `(${quoted} IS NOT NULL AND NOT (${expression}))`
+                : `(${quoted} IS NULL OR NOT (${expression}))`
+            : expression);
     }
 
     for (const date of filters.dates) {
@@ -104,11 +110,12 @@ export function buildExploreWhereSql(
             continue;
         }
         const quoted = quoteIdentifier(column.name, databaseKind);
+        const dateSql = databaseKind === 'sqlite' ? `REPLACE(CAST(t.${quoted} AS TEXT), 'T', ' ')` : `t.${quoted}`;
         if (date.from) {
-            parts.push(`t.${quoted} >= ${escapeSqlLiteral(date.from)}`);
+            parts.push(`${dateSql} >= ${escapeSqlLiteral(date.from.replace('T', ' '))}`);
         }
         if (date.to) {
-            parts.push(`t.${quoted} <= ${escapeSqlLiteral(date.to)}`);
+            parts.push(`${dateSql} ${date.toExclusive ? '<' : '<='} ${escapeSqlLiteral(date.to.replace('T', ' '))}`);
         }
     }
 
@@ -118,11 +125,11 @@ export function buildExploreWhereSql(
             continue;
         }
         const quoted = quoteIdentifier(column.name, databaseKind);
-        if (measure.min !== undefined && Number.isFinite(measure.min)) {
+        if (measure.min !== undefined) {
             parts.push(`t.${quoted} >= ${formatNumberLiteral(measure.min)}`);
         }
-        if (measure.max !== undefined && Number.isFinite(measure.max)) {
-            parts.push(`t.${quoted} <= ${formatNumberLiteral(measure.max)}`);
+        if (measure.max !== undefined) {
+            parts.push(`t.${quoted} ${measure.maxExclusive ? '<' : '<='} ${formatNumberLiteral(measure.max)}`);
         }
     }
 

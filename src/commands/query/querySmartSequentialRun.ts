@@ -41,6 +41,7 @@ export interface SmartSequentialRunOptions {
 function resolveSmartSequentialQueries(
     editor: vscode.TextEditor,
     wholeDocument = false,
+    databaseKind?: string,
 ): { queries: string[]; sourceUri: string } | null {
     const document = editor.document;
 
@@ -59,7 +60,7 @@ function resolveSmartSequentialQueries(
             vscode.window.showWarningMessage('No SQL query to execute');
             return null;
         }
-        queries = SqlParser.splitStatements(sql).filter(q => q.trim().length > 0);
+        queries = SqlParser.splitStatements(sql, databaseKind).filter(q => q.trim().length > 0);
         if (!queries.length) queries = [sql];
     } else if (!selection.isEmpty) {
         const selectedText = document.getText(selection);
@@ -70,11 +71,11 @@ function resolveSmartSequentialQueries(
         if (/^\s*CREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\b/i.test(selectedText)) {
             queries = [selectedText];
         } else {
-            queries = SqlParser.splitStatements(selectedText).filter(q => q.trim().length > 0);
+            queries = SqlParser.splitStatements(selectedText, databaseKind).filter(q => q.trim().length > 0);
         }
     } else {
         const offset = document.offsetAt(selection.active);
-        const statement = SqlParser.getStatementAtPosition(text, offset);
+        const statement = SqlParser.getStatementAtPosition(text, offset, undefined, databaseKind);
 
         if (statement) {
             queries = [statement.sql];
@@ -130,7 +131,7 @@ export async function runSmartSequentialQuery(
         ? connectionManager.getConnectionDatabaseKind(connectionName)
         : undefined;
 
-    const resolved = resolveSmartSequentialQueries(editor, options.wholeDocument);
+    const resolved = resolveSmartSequentialQueries(editor, options.wholeDocument, connectionManager.getExecutionDatabaseKind(editor.document.uri.toString()));
     if (!resolved) return;
     const queries = resolved.queries;
     const sourceRange = new vscode.Range(editor.selection.start, editor.selection.end);

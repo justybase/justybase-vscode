@@ -26,6 +26,7 @@ export async function prepareQueuedQuery(
     const files = new Map<string, Promise<{ path: string; content: string }>>();
     let sealed = false;
     const macroFileContext: MacroPreprocessorContext = {
+        databaseKind: manager.getExecutionDatabaseKind?.(sourceUri),
         sourceName: fileContext.sourceName,
         readFile: (path, fromSource) => {
             const key = JSON.stringify([path, fromSource]);

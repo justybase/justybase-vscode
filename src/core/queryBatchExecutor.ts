@@ -364,11 +364,13 @@ export async function prepareQueryForExecutionWithMetadata(
 
 export function createMacroFileReadContext(
     documentUri?: string,
-): Pick<MacroPreprocessorContext, "readFile" | "sourceName"> {
+    databaseKind?: string,
+): Pick<MacroPreprocessorContext, "readFile" | "sourceName" | "databaseKind"> {
     const sourceName = documentUri ? uriToFsPath(documentUri) ?? documentUri : undefined;
 
     return {
         sourceName,
+        databaseKind,
         readFile: async (includePath: string, fromSource?: string) => {
             const resolvedPath = resolveMacroIncludePath(includePath, fromSource, sourceName);
             const content = await readMacroIncludeFile(resolvedPath);

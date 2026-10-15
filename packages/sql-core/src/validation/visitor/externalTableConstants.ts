@@ -71,6 +71,7 @@ export const EXTERNAL_OPTION_SPECS = new Map<string, ExternalOptionSpec>([
   ],
   ["DATETIMEDELIM", { type: "single_byte_string" }],
   ["DECIMALDELIM", { type: "enum", enumValues: new Set([",", "."]) }],
+  ["DELIM", { type: "single_byte_string" }],
   ["DELIMITER", { type: "single_byte_string" }],
   [
     "ENCODING",

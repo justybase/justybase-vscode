@@ -507,6 +507,13 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
         // Add Primary Key
         vscode.commands.registerCommand('netezza.addPrimaryKey', async (item: SchemaItemData) => {
             if (item && item.label && item.dbName && item.schema && item.objType === 'TABLE') {
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                if (databaseKind === 'duckdb' || databaseKind === 'file') {
+                    vscode.window.showErrorMessage(
+                        'DuckDB and File SQL cannot add a key constraint to an existing table with ALTER TABLE. Define it when creating the table.',
+                    );
+                    return;
+                }
                 const fullName = getFullName(item, connectionManager);
 
                 const constraintName = await vscode.window.showInputBox({
@@ -583,7 +590,7 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             }
             const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
             try {
-                assertDesignerOperation(databaseKind, 'foreignKeys', 'create');
+                assertDesignerOperation(databaseKind, 'foreignKeys', 'alter');
             } catch (error: unknown) {
                 vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Foreign keys are not available for this connection.');
                 return;
@@ -690,6 +697,13 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
         // Add Unique Constraint
         vscode.commands.registerCommand('netezza.addUniqueConstraint', async (item: SchemaItemData) => {
             if (item && item.label && item.dbName && item.schema && item.objType === 'TABLE') {
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                if (databaseKind === 'duckdb' || databaseKind === 'file') {
+                    vscode.window.showErrorMessage(
+                        'DuckDB and File SQL cannot add a key constraint to an existing table with ALTER TABLE. Define it when creating the table.',
+                    );
+                    return;
+                }
                 const fullName = getFullName(item, connectionManager);
 
                 const constraintName = await vscode.window.showInputBox({

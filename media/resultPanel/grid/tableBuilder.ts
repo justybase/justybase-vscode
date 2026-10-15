@@ -1734,10 +1734,17 @@ export function createResultSetGrid(
             }
         }
 
+        panel.classList.toggle('has-grouping', grouping.length > 0);
+
         if (grouping.length === 0) {
-            panel.innerHTML = '<span style="opacity: 0.5;">Drag headers here to group</span>';
+            panel.innerHTML = '<span class="grouping-panel-hint">Drop a column header here to group</span>';
             return;
         }
+
+        const label = document.createElement('span');
+        label.className = 'grouping-panel-label';
+        label.textContent = 'Group by';
+        panel.appendChild(label);
 
         grouping.forEach((colId: string, index: number) => {
             const chip = createGroupChip(colId, index, rs, tanTable);

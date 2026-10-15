@@ -13,6 +13,7 @@ module.exports = {
   },
   transformIgnorePatterns: ['/node_modules/(?!@tanstack/(?:table-core|store)/)'],
   moduleNameMapper: {
+    '^(.*/media/.+)\\.js$': '$1',
     '^@justybase/contracts$': '<rootDir>/packages/contracts/src/index.ts',
     '^@justybase/result-core$': '<rootDir>/packages/result-core/src/index.ts',
     '^@justybase/result-core/(.*)$': '<rootDir>/packages/result-core/src/$1',
@@ -22,6 +23,10 @@ module.exports = {
     '^@justybase/ui-react/(.*)$': '<rootDir>/packages/ui-react/src/$1',
   },
   collectCoverageFrom: [
+    'media/resultPanel/explore/**/*.ts',
+    'media/resultPanel/analysis.ts',
+    'media/resultPanel/diskBackedGrid.ts',
+    'media/resultPanel/testBridge.ts',
     'media/resultPanel/sharedView.tsx',
     'media/resultPanel/editValue.ts',
     'media/resultPanel/state.ts',

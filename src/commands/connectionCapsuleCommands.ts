@@ -31,7 +31,7 @@ export interface ConnectionCapsuleCommandsContext {
     refreshConnectionCapsule: () => void | Promise<void>;
 }
 
-type CapsuleAction = 'change-connection' | 'change-database' | 'toggle-keep' | 'reconnect' | 'connect' | 'manage';
+type CapsuleAction = 'change-connection' | 'change-database' | 'toggle-keep' | 'reconnect' | 'disconnect' | 'connect' | 'manage';
 
 export interface CapsuleMenuItem extends vscode.QuickPickItem {
     action?: CapsuleAction;
@@ -87,6 +87,7 @@ export function buildConnectionCapsuleMenu(snapshot: ConnectionCapsuleSnapshot):
         },
         { label: 'Actions', kind: separator },
         { label: '$(plug) Connect...', action: 'connect' },
+        { label: '$(debug-disconnect) Disconnect', description: 'close the session for this SQL tab', action: 'disconnect' },
         { label: '$(gear) Manage connections...', action: 'manage' },
     ];
 }
@@ -243,6 +244,16 @@ export function registerConnectionCapsuleCommands(ctx: ConnectionCapsuleCommands
             case 'reconnect':
                 await reconnectTabSession(documentUri);
                 break;
+            case 'disconnect':
+                try {
+                    await connectionManager.closeDocumentPersistentConnection(documentUri, true);
+                    void vscode.window.showInformationMessage('Disconnected this SQL tab session.');
+                } catch (error: unknown) {
+                    void vscode.window.showErrorMessage(`Failed to disconnect: ${error instanceof Error ? error.message : String(error)}`);
+                } finally {
+                    refresh();
+                }
+                break;
             case 'connect':
             case 'manage':
                 await vscode.commands.executeCommand('netezza.openLogin');
@@ -250,5 +261,26 @@ export function registerConnectionCapsuleCommands(ctx: ConnectionCapsuleCommands
         }
     };
 
-    return [vscode.commands.registerCommand(SHOW_CONNECTION_CAPSULE_COMMAND, showCapsule)];
+    return [
+        vscode.commands.registerCommand(SHOW_CONNECTION_CAPSULE_COMMAND, showCapsule),
+        vscode.commands.registerCommand('netezza.disconnectConnection', async (target?: unknown) => {
+            const connectionName = typeof target === 'string'
+                ? target
+                : target && typeof target === 'object' && 'connectionName' in target && typeof target.connectionName === 'string'
+                    ? target.connectionName
+                    : connectionManager.getActiveConnectionName();
+            if (!connectionName) {
+                void vscode.window.showWarningMessage('No connection selected.');
+                return;
+            }
+            try {
+                await connectionManager.disconnectConnection(connectionName);
+                void vscode.window.showInformationMessage(`Disconnected all SQL tab sessions: ${connectionName}`);
+            } catch (error: unknown) {
+                void vscode.window.showErrorMessage(`Failed to disconnect ${connectionName}: ${error instanceof Error ? error.message : String(error)}`);
+            } finally {
+                refresh();
+            }
+        }),
+    ];
 }

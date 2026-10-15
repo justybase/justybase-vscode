@@ -112,7 +112,9 @@ export function createDiagnosticsHandler(
       diagnosticsGeneration,
       document.uri,
     );
+    const initialContext = await metadataBridge.getContext(document.uri);
     const preparedForWarmup = prepareIncrementalValidation({
+      databaseKind: initialContext.databaseKind,
       documentUri: document.uri,
       sql,
       validationSession: documentValidationSession,
@@ -180,7 +182,7 @@ export function createDiagnosticsHandler(
       const validator: SqlValidationService =
         !context.databaseKind || context.databaseKind === "netezza"
           ? new SqlCoreBackedValidator(schemaProvider, authoring.validation)
-          : new SqlValidator(schemaProvider, authoring.validation);
+          : new SqlValidator(schemaProvider, authoring.validation, { serverVersionNum: context.serverVersionNum });
       const pipelineResult = await runValidationPipeline({
         sql,
         documentUri: document.uri,

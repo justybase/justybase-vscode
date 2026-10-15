@@ -172,6 +172,7 @@ export interface ResultSet {
     isTextContent?: boolean;
     isEditable?: boolean;
     editSource?: unknown;
+    editDisabledReason?: string;
     executionTimestamp?: number;
     sql?: string;
     refreshSql?: string;

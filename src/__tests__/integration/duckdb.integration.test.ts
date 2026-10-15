@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { DuckDbRuntime, createDuckDbModuleResolver } from '@justybase/duckdb-runtime';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import * as vscode from 'vscode';
 import type { DatabaseDataReader, DatabaseMaintenanceServices, DatabaseMaintenanceTarget } from '../../contracts/database';
@@ -29,6 +31,9 @@ import {
 } from './connectionLifecycleHelpers';
 
 const extensionRequire = createRequire(path.join(process.cwd(), 'extensions', 'duckdb', 'package.json'));
+
+// The native module is installed for the companion extension, not the shared package.
+const duckDbResolver = () => createDuckDbModuleResolver({ resolveFrom: path.join(process.cwd(), 'extensions', 'duckdb', 'package.json') });
 
 function hasDuckDbRuntime(): boolean {
     try {
@@ -87,6 +92,120 @@ describeIfInstalled('duckdb integration', () => {
 
     afterAll(() => {
         fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('shares a file across sessions and releases its lock after the last close', async () => {
+        const filePath = path.join(tempDir, 'file_lifecycle.duckdb');
+        const details = { host: '', user: '', database: filePath, options: { mode: 'file' } };
+        const first = new DuckDbConnection(details);
+        const second = new DuckDbConnection(details);
+        const probe = (): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ['-e', `
+            (async () => {
+                const { DuckDBInstance } = require(process.argv[1]);
+                const instance = await DuckDBInstance.create(process.argv[2]);
+                try {
+                    const connection = await instance.connect();
+                    try {
+                        const reader = await connection.runAndReadAll('SELECT COUNT(*) FROM fixture');
+                        process.stdout.write(String(reader.getRowsJS()[0][0]));
+                    } finally { connection.disconnectSync(); }
+                } finally { instance.closeSync(); }
+            })().catch(error => { console.error(error.message); process.exitCode = 1; });
+        `, extensionRequire.resolve('@duckdb/node-api'), filePath], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+
+        try {
+            await Promise.all([first.connect(), first.connect(), second.connect()]);
+            await first.createCommand('CREATE TABLE fixture (id INTEGER)').execute();
+            await first.createCommand('INSERT INTO fixture VALUES (1), (2)').execute();
+            await readScalar(first, 'SELECT COUNT(*) FROM fixture');
+            await first.close();
+            expect(Number(await readScalar(second, 'SELECT COUNT(*) FROM fixture'))).toBe(2);
+
+            const ddl = await duckdbDdlProvider.generateDDL(
+                { ...details, name: 'file-lifecycle', dbType: 'duckdb' }, filePath, 'main', 'fixture', 'TABLE',
+            );
+            expect(ddl.success).toBe(true);
+            const locked = probe();
+            expect(locked.error).toBeUndefined();
+            expect(locked.status).toBe(1);
+            expect(String(locked.stderr)).toMatch(/lock|already open|used by another process|używany przez inny proces/i);
+
+            await second.close();
+            const released = probe();
+            expect(released.error).toBeUndefined();
+            expect({ status: released.status, stderr: released.stderr }).toEqual({ status: 0, stderr: '' });
+            expect(released.stdout).toBe('2');
+
+            fs.renameSync(filePath, `${filePath}.moved`);
+            fs.renameSync(`${filePath}.moved`, filePath);
+            const reopened = new DuckDbConnection(details);
+            try {
+                await reopened.connect();
+                expect(Number(await readScalar(reopened, 'SELECT COUNT(*) FROM fixture'))).toBe(2);
+            } finally {
+                await reopened.close();
+            }
+            expect(probe().status).toBe(0);
+
+            const openingConnection = new DuckDbConnection(details);
+            const closingDuringOpen = await Promise.allSettled([openingConnection.connect(), openingConnection.close()]);
+            expect(closingDuringOpen[1].status).toBe('fulfilled');
+            expect(openingConnection._connected).toBe(false);
+            expect(probe().status).toBe(0);
+
+            const runtime = new DuckDbRuntime({ resolver: duckDbResolver(), isReadOnlySql: () => true });
+            const target = { connectionId: 'bounded-file-lifecycle', databasePath: filePath };
+            const readLimited = () => runtime.execute(
+                target, 'SELECT fixture.id FROM fixture CROSS JOIN range(100000)',
+                { maxRows: 1, timeoutSeconds: 15 },
+                { onCommand: () => undefined, onColumns: () => undefined, onRows: () => undefined },
+            );
+            try {
+                const result = await readLimited();
+                expect(result.limitReached).toBe(true);
+                await runtime.closeConnection(target.connectionId);
+                const afterLimit = probe();
+                expect({ status: afterLimit.status, stderr: afterLimit.stderr }).toEqual({ status: 0, stderr: '' });
+
+                await readLimited();
+                const subsequentRows: unknown[][] = [];
+                await runtime.execute(
+                    target,
+                    'SELECT COUNT(*) FROM fixture',
+                    { maxRows: 10, timeoutSeconds: 15 },
+                    { onCommand: () => undefined, onColumns: () => undefined, onRows: rows => subsequentRows.push(...rows) },
+                );
+                expect(Number(subsequentRows[0][0])).toBe(2);
+            } finally {
+                await runtime.closeAll();
+            }
+            const afterStream = probe();
+            expect({ status: afterStream.status, stderr: afterStream.stderr }).toEqual({ status: 0, stderr: '' });
+        } finally {
+            await Promise.all([first.close(), second.close()]);
+        }
+    }, 120000);
+
+    it('keeps an explicit transaction usable after a row-limited read', async () => {
+        const runtime = new DuckDbRuntime({ resolver: duckDbResolver(), isReadOnlySql: sql => /^\s*SELECT\b/i.test(sql) });
+        const target = { connectionId: 'bounded-transaction', databasePath: path.join(tempDir, 'bounded_transaction.duckdb') };
+        const run = (sql: string, rows: unknown[][] = []) => runtime.execute(
+            target, sql, { maxRows: 10, timeoutSeconds: 15 },
+            { onCommand: () => undefined, onColumns: () => undefined, onRows: values => rows.push(...values) },
+        );
+        try {
+            await run('CREATE TABLE tx_fixture (id INTEGER)');
+            await run('BEGIN TRANSACTION');
+            await run('INSERT INTO tx_fixture VALUES (1)');
+            expect((await run('SELECT * FROM range(1000000)')).limitReached).toBe(true);
+            await run('INSERT INTO tx_fixture VALUES (2)');
+            await run('COMMIT');
+            const count: unknown[][] = [];
+            await run('SELECT COUNT(*) FROM tx_fixture', count);
+            expect(Number(count[0][0])).toBe(2);
+        } finally {
+            await runtime.closeAll();
+        }
     });
 
     it('connects, creates schema objects, and executes round-trip SQL against a local DuckDB file', async () => {

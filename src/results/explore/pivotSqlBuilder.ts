@@ -11,21 +11,15 @@ import {
     quoteIdentifier,
     type ExploreFilterModel,
 } from './exploreFilters';
-import { removeTrailingLimitClause } from '../refreshSqlLimit';
+import { exploreSourceSql } from './operationSql';
 
 export type ExplorePivotAggregate = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'countDistinct';
 
 export const EXPLORE_PIVOT_MAX_COLUMN_VALUES = 100;
 export const EXPLORE_PIVOT_MAX_ROWS = 5000;
 
-export interface ExplorePivotConfig {
-    rowColumnIndexes: number[];
-    columnColumnIndex: number;
-    valueColumnIndex: number;
-    aggFn: ExplorePivotAggregate;
-    filters?: ExploreFilterModel;
-    limit?: number;
-}
+export type { ExplorePivotConfig } from '@justybase/contracts';
+import type { ExplorePivotConfig } from '@justybase/contracts';
 
 export interface ExplorePivotDistinctRequest {
     columnIndex: number;
@@ -43,7 +37,7 @@ export function buildDistinctValuesSql(
     if (!column || !column.name?.trim()) {
         throw new Error('Pivot column requires a stable name.');
     }
-    const withoutLimit = removeTrailingLimitClause(refreshSql).trim().replace(/;\s*$/, '').trim();
+    const withoutLimit = exploreSourceSql(refreshSql, databaseKind);
     if (!withoutLimit) {
         throw new Error('This result set does not have SQL that can be pivoted.');
     }
@@ -52,7 +46,7 @@ export function buildDistinctValuesSql(
     const selectClause = databaseKind === 'mssql'
         ? `SELECT DISTINCT TOP ${limit} t.${quoted} AS ${quoteIdentifier('PIVOT_VALUE', databaseKind)}`
         : `SELECT DISTINCT t.${quoted} AS ${quoteIdentifier('PIVOT_VALUE', databaseKind)}`;
-    const limitClause = databaseKind === 'mssql' ? '' : `LIMIT ${limit}`;
+    const limitClause = databaseKind === 'mssql' ? '' : databaseKind === 'oracle' || databaseKind === 'db2' ? `FETCH FIRST ${limit} ROWS ONLY` : `LIMIT ${limit}`;
     return [
         selectClause,
         'FROM (',
@@ -120,7 +114,7 @@ export function buildExplorePivotSql(
         throw new Error('Pivot and value columns require stable names.');
     }
 
-    const withoutLimit = removeTrailingLimitClause(refreshSql).trim().replace(/;\s*$/, '').trim();
+    const withoutLimit = exploreSourceSql(refreshSql, databaseKind);
     if (!withoutLimit) {
         throw new Error('This result set does not have SQL that can be pivoted.');
     }
@@ -148,11 +142,11 @@ export function buildExplorePivotSql(
     }
 
     const where = buildExploreWhereSql(config.filters, columns, databaseKind);
-    const limit = config.limit ?? EXPLORE_PIVOT_MAX_ROWS;
+    const limit = config.limit ?? (EXPLORE_PIVOT_MAX_ROWS + 1);
     const selectClause = databaseKind === 'mssql'
         ? `SELECT TOP ${limit} ${selectParts.join(', ')}`
         : `SELECT ${selectParts.join(', ')}`;
-    const limitClause = databaseKind === 'mssql' ? '' : `LIMIT ${limit}`;
+    const limitClause = databaseKind === 'mssql' ? '' : databaseKind === 'oracle' || databaseKind === 'db2' ? `FETCH FIRST ${limit} ROWS ONLY` : `LIMIT ${limit}`;
 
     return {
         sql: [

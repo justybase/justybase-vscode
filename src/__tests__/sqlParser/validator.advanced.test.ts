@@ -1226,8 +1226,8 @@ JOIN TESTDB..EMPLOYEES X ON X.EMPLOYEE_ID = X.EMPLOYEE_ID`,
       expectWarningCode("SELECT 1;;SELECT 22", "PARW001");
     });
 
-    it("should reject a complex multi-statement script with DROP IF EXISTS", () => {
-      expectSyntaxError(`
+    it("should validate a complex multi-statement script with a trailing DROP TABLE IF EXISTS", () => {
+      expectValid(`
                 CREATE TEMP TABLE tmp_data (id INT, val FLOAT);
                 INSERT INTO tmp_data VALUES (1, 3.14);
                 INSERT INTO tmp_data VALUES (2, 2.71);

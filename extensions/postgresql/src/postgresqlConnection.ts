@@ -542,6 +542,11 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
     private _client?: Client;
     private _backendPid?: number;
     private _currentSchema?: string;
+    private _serverVersionNum?: number;
+    private _searchPath?: readonly string[];
+    private _authoringContextGeneration = 0;
+    private _authoringContextReadGeneration = -1;
+    private _authoringContextRead?: Promise<void>;
     private _activeCommand?: PostgreSqlCommand;
     private readonly _clientConfig: ClientConfig;
 
@@ -576,6 +581,10 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
             this._client = undefined;
             this._backendPid = undefined;
             this._currentSchema = undefined;
+            this._serverVersionNum = undefined;
+            this._searchPath = undefined;
+            this._authoringContextGeneration++;
+            this._authoringContextReadGeneration = -1;
             this.emit('end', undefined);
         });
 
@@ -586,6 +595,7 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
             await this.applySessionOptions();
             this._currentSchema = await this.readCurrentSchema();
             this._backendPid = await this.readBackendPid();
+            await this.refreshSqlAuthoringContext();
         } catch (error) {
             try {
                 await client.end();
@@ -596,6 +606,10 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
             this._connected = false;
             this._backendPid = undefined;
             this._currentSchema = undefined;
+            this._serverVersionNum = undefined;
+            this._searchPath = undefined;
+            this._authoringContextGeneration++;
+            this._authoringContextReadGeneration = -1;
             throw new Error(`Failed to connect to PostgreSQL: ${getErrorMessage(error)}`, {
                 cause: error
             });
@@ -607,6 +621,10 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
         this._client = undefined;
         this._backendPid = undefined;
         this._currentSchema = undefined;
+        this._serverVersionNum = undefined;
+        this._searchPath = undefined;
+        this._authoringContextGeneration++;
+        this._authoringContextReadGeneration = -1;
         this._activeCommand = undefined;
         this._connected = false;
 
@@ -665,6 +683,36 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
         return this._client;
     }
 
+    public async getSqlAuthoringContext(): Promise<{ serverVersionNum?: number; searchPath?: readonly string[] }> {
+        if (!this._client || this._activeCommand) return { serverVersionNum: this._serverVersionNum };
+        if (this._authoringContextReadGeneration !== this._authoringContextGeneration) {
+            this._authoringContextRead ??= this.refreshSqlAuthoringContext().catch(() => {
+                // An aborted user transaction cannot service a catalog read.
+                this._searchPath = undefined;
+            }).finally(() => { this._authoringContextRead = undefined; });
+            await this._authoringContextRead;
+        }
+        return {
+            serverVersionNum: this._serverVersionNum,
+            searchPath: this._authoringContextReadGeneration === this._authoringContextGeneration && this._searchPath
+                ? [...this._searchPath] : undefined,
+        };
+    }
+
+    private async refreshSqlAuthoringContext(): Promise<void> {
+        const client = this.getClient();
+        const generation = this._authoringContextGeneration;
+        const result = await client.query("SELECT current_setting('server_version_num') AS version_num, current_schemas(true)::text[] AS search_path, current_schema() AS current_schema");
+        if (client !== this._client || generation !== this._authoringContextGeneration) return;
+        const normalized = Array.isArray(result) ? result[0] : result;
+        const row = normalized.rows[0] as { version_num?: unknown; search_path?: unknown; current_schema?: unknown } | undefined;
+        const version = Number(row?.version_num);
+        this._serverVersionNum = Number.isInteger(version) && version > 0 ? version : undefined;
+        this._searchPath = Array.isArray(row?.search_path) ? row.search_path.filter((name): name is string => typeof name === 'string') : undefined;
+        this._currentSchema = typeof row?.current_schema === 'string' ? row.current_schema : undefined;
+        this._authoringContextReadGeneration = generation;
+    }
+
     public getCurrentDatabaseName(): string {
         return this.config.database;
     }
@@ -693,6 +741,8 @@ export class PostgreSqlConnection extends EventEmitter implements DatabaseConnec
     public endCommand(command: PostgreSqlCommand): void {
         if (this._activeCommand === command) {
             this._activeCommand = undefined;
+            // SELECT set_config(), transaction boundaries and DDL can all change search_path visibility.
+            this._authoringContextGeneration++;
         }
     }
 

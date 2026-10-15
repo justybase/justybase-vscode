@@ -189,3 +189,18 @@ describe.each(OPTIONAL_DIALECT_CASES)(
         });
     },
 );
+
+describe('DuckDB connection forms', () => {
+    it('uses a local database file form in both the built-in stub and companion dialect', () => {
+        const stubForm = allAvailableDialects.find((dialect) => dialect.kind === 'duckdb')?.connectionForm;
+        const companionForm = duckdbDialect.connectionForm;
+
+        for (const form of [stubForm, companionForm]) {
+            expect(form?.fields.map((field) => field.key)).toEqual(['mode', 'database', 'schema']);
+            expect(form?.fields.find((field) => field.key === 'database')?.type).toBe('file');
+            expect(form?.fields.map((field) => field.key)).not.toEqual(
+                expect.arrayContaining(['host', 'port', 'user', 'password']),
+            );
+        }
+    });
+});

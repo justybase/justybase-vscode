@@ -19,13 +19,18 @@ env:
 
 jobs:
   postgres-integration:
-    name: PostgreSQL Live Integration (Linux)
+    name: PostgreSQL ${{ matrix.postgres }} (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['16', '17', '18']
+
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_DB: justybase
           POSTGRES_USER: justybase
@@ -68,3 +73,20 @@ jobs:
 
       - name: Run PostgreSQL live integration tests
         run: npm run test:postgres:integration
+
+      - name: Run PostgreSQL authoring regressions
+        run: npm run test:postgresql:authoring
+
+      - name: Verify SQL corpus against PostgreSQL
+        run: npm run test:postgresql:conformance:live
+
+      - name: Exercise the built PostgreSQL language server
+        run: npm run test:lsp:postgresql
+
+      - name: Upload sanitized conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-${{ matrix.postgres }}-conformance
+          path: artifacts/postgresql/
+          if-no-files-found: warn

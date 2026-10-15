@@ -176,3 +176,9 @@ export type {
   WebUser,
 } from './webApi';
 export { MAX_QUERY_FILE_IMPORT_BYTES, MAX_QUERY_GROUP_LIMIT } from './webApi';
+export type {
+  ExploreDateGrain, ExploreValue, ExploreDimensionFilter, ExploreDateFilter,
+  ExploreMeasureFilter, ExploreFilterModel, ExploreRankingConfig,
+  ExploreOperation, ExploreRequest, ExploreResponse,
+  ExplorePivotConfig, ExploreComposerConfig,
+} from './explore';

@@ -75,6 +75,8 @@ const requestIndex = indexField('requestId');
 const rowsPayload = all(indexField('resultSetIndex'), message => hasRows(message));
 
 const webviewRules: Record<string, FieldRule> = {
+    requestExploreOperation: all(stringSource, resultIndex, requestIndex, objectField('operation'), optional('resultSetId', stringField('resultSetId'))),
+    cancelExploreOperation: requestIndex,
     ready: noPayload,
     sqlQueueAction: all(stringField('sourceKey'), oneOfField('action', ['cancel', 'remove', 'pause', 'resume', 'clear', 'recover']), optional('jobId', stringField('jobId'))),
     migrateResult: all(stringSource, resultIndex),
@@ -170,6 +172,7 @@ const webviewRules: Record<string, FieldRule> = {
 };
 
 const hostRules: Record<string, FieldRule> = {
+    exploreOperationResult: all(requestIndex, optional('result', objectField('result')), optional('error', stringValueField('error'))),
     sqlQueueState: stringField('lanesJson'),
     hydrate: objectField('data'),
     testBridge: all(stringField('requestId'), stringField('action')),

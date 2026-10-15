@@ -29,10 +29,18 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     ).not.toContain("NZS003");
   });
 
-  it("rejects DROP IF EXISTS and permits ordinary DROP", () => {
-    expect(preParseCodes("DROP TABLE T IF EXISTS")).toContain("NZS004");
+  it("accepts a trailing DROP TABLE IF EXISTS and rejects every other position", () => {
+    expect(preParseCodes("DROP TABLE T IF EXISTS")).not.toContain("NZS004");
+    expect(preParseCodes("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS")).not.toContain("NZS004");
+    expect(preParseCodes("DROP TABLE A, B IF EXISTS")).not.toContain("NZS004");
+    expect(preParseCodes("DROP TABLE JUST_DATA..T IF EXISTS")).not.toContain("NZS004");
+    for (const keywordName of ["VALUE", "COMMENT", "TYPE", "KEY", "OWNER", "ACTION"]) {
+      expect(preParseCodes(`DROP TABLE ${keywordName} IF EXISTS`)).not.toContain("NZS004");
+    }
     expect(preParseCodes("DROP TABLE IF EXISTS T")).toContain("NZS004");
     expect(preParseCodes("DROP TABLE T")).not.toContain("NZS004");
+    expect(preParseCodes("DROP VIEW V IF EXISTS")).toContain("NZS004");
+    expect(preParseCodes("DROP SEQUENCE S IF EXISTS")).toContain("NZS004");
   });
 
   it("requires RESTRICT or CASCADE on ALTER TABLE column drops", () => {

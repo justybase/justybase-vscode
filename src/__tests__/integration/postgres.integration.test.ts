@@ -51,7 +51,7 @@ function buildConfig(): DatabaseConnectionConfig | undefined {
     const password = readEnv(['POSTGRES_LIVE_TEST_PASSWORD', 'PG_LIVE_TEST_PASSWORD']);
 
     if (!host || !database || !user || !password) {
-        return undefined;
+        throw new Error('PostgreSQL live tests require HOST, DATABASE, USER and PASSWORD in POSTGRES_LIVE_TEST_* (or PG_LIVE_TEST_*).');
     }
 
     return {
@@ -291,6 +291,26 @@ describeIfConfigured('postgres integration', () => {
         await connection.close();
     });
 
+    it('refreshes authoring context across SET LOCAL, rollback and close', async () => {
+        const session = new PostgreSqlConnection(config!);
+        await session.connect();
+        try {
+            const initial = await session.getSqlAuthoringContext();
+            expect(initial.serverVersionNum).toBeGreaterThanOrEqual(160000);
+            expect(initial.searchPath?.length).toBeGreaterThan(0);
+            await session.createCommand('BEGIN').execute();
+            await session.createCommand('SET LOCAL search_path TO pg_catalog').execute();
+            const contexts = await Promise.all([session.getSqlAuthoringContext(), session.getSqlAuthoringContext()]);
+            expect(contexts[0].searchPath).toEqual(['pg_catalog']);
+            expect(contexts[1]).toEqual(contexts[0]);
+            await session.createCommand('ROLLBACK').execute();
+            expect(await session.getSqlAuthoringContext()).toEqual(initial);
+        } finally {
+            await session.close();
+        }
+        expect(await session.getSqlAuthoringContext()).toEqual({ serverVersionNum: undefined });
+    });
+
     it('completes an exact composite FK JOIN from live PostgreSQL catalog rows', async () => {
         const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toLowerCase();
         const parentTable = `jbl_join_parent_${suffix}`;
@@ -458,11 +478,6 @@ describeIfConfigured('postgres integration', () => {
             expect(completionProvider.lookupRequests).toEqual([
                 {
                     database: config!.database,
-                    table: tableName.toUpperCase(),
-                    schema: 'PUBLIC',
-                },
-                {
-                    database: config!.database.toLowerCase(),
                     table: tableName,
                     schema: 'public',
                 },

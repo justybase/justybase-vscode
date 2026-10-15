@@ -595,6 +595,7 @@ export function setupStreamingMessageHandler(): void {
                     error?: string;
                 });
                 break;
+            case 'exploreOperationResult':
             case 'exploreFullStatsResult':
             case 'explorePivotResult':
             case 'explorePivotPreviewResult':
@@ -1400,6 +1401,7 @@ export function handleAppendRows(message: Record<string, unknown>): void {
                 limitReached: limitReached === true,
                 isEditable: message.isEditable === true,
                 editSource: message.editSource as ResultSet['editSource'],
+                editDisabledReason: typeof message.editDisabledReason === 'string' ? message.editDisabledReason : undefined,
             };
             const nextResultSets = [...resultSets];
             if (resultSetIndex > nextResultSets.length) {

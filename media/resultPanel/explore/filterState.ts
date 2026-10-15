@@ -1,5 +1,6 @@
 // Explore filter model + undo/redo history (client-side, pure).
 
+import type { ExploreValue } from '@justybase/contracts';
 import type { ExploreDateGrain, ExploreFilterModel } from './types.js';
 
 export type { ExploreDateGrain, ExploreFilterModel };
@@ -53,6 +54,7 @@ export class ExploreFilterState {
     }
 
     private commit(next: ExploreFilterModel): void {
+        if (JSON.stringify(next) === JSON.stringify(this._filters)) return;
         this._history.push(cloneFilters(this._filters));
         if (this._history.length > EXPLORE_FILTER_HISTORY_LIMIT) {
             this._history.shift();
@@ -61,6 +63,8 @@ export class ExploreFilterState {
         this._filters = cloneFilters(next);
         this._onChange(this.filters);
     }
+
+    replace(filters: ExploreFilterModel): void { this.commit(cloneFilters(filters)); }
 
     undo(): ExploreFilterModel | null {
         const previous = this._history.pop();
@@ -92,7 +96,7 @@ export class ExploreFilterState {
         return this.filters;
     }
 
-    toggleDimensionValue(columnIndex: number, value: string): ExploreFilterModel {
+    toggleDimensionValue(columnIndex: number, value: ExploreValue): ExploreFilterModel {
         const next = cloneFilters(this._filters);
         const existing = next.dimensions.find(dimension => dimension.columnIndex === columnIndex);
         if (!existing) {
@@ -109,7 +113,7 @@ export class ExploreFilterState {
         return this.filters;
     }
 
-    setDimensionValues(columnIndex: number, values: string[]): ExploreFilterModel {
+    setDimensionValues(columnIndex: number, values: ExploreValue[]): ExploreFilterModel {
         const next = cloneFilters(this._filters);
         if (values.length === 0) {
             next.dimensions = next.dimensions.filter(dimension => dimension.columnIndex !== columnIndex);
@@ -142,7 +146,7 @@ export class ExploreFilterState {
         return this.filters;
     }
 
-    setMeasureRange(columnIndex: number, min?: number, max?: number): ExploreFilterModel {
+    setMeasureRange(columnIndex: number, min?: number | string, max?: number | string): ExploreFilterModel {
         const next = cloneFilters(this._filters);
         const existing = next.measures.find(measure => measure.columnIndex === columnIndex);
         if (existing) {
@@ -162,7 +166,7 @@ export class ExploreFilterState {
     get activeCount(): number {
         let count = 0;
         for (const dimension of this._filters.dimensions) {
-            count += dimension.values.length;
+            count += dimension.values.length + Number(!!dimension.includeNull) + Number(!!dimension.includeEmpty);
         }
         for (const date of this._filters.dates) {
             if (date.from) count += 1;

@@ -226,6 +226,33 @@ export function hasKeywordInRange(sql: string, rangeStart: number, rangeEnd: num
   return findPatternMatchesInRange(sql, rangeStart, rangeEnd, pattern).length > 0;
 }
 
+/** Find a keyword at the statement's current parenthesis depth, excluding comments and literals. */
+export function hasTopLevelKeywordInRange(
+  sql: string,
+  rangeStart: number,
+  rangeEnd: number,
+  pattern: RegExp,
+): boolean {
+  const matches = findPatternMatchesInRange(sql, rangeStart, rangeEnd, pattern);
+  if (matches.length === 0) return false;
+
+  const statementDepth = getParenDepthAt(sql, rangeStart);
+  let depth = statementDepth;
+  let cursor = rangeStart;
+
+  for (const match of matches) {
+    while (cursor < match.index) {
+      if (!isInsideStringOrComment(sql, cursor)) {
+        if (sql[cursor] === "(") depth += 1;
+        else if (sql[cursor] === ")") depth = Math.max(statementDepth, depth - 1);
+      }
+      cursor += 1;
+    }
+    if (depth === statementDepth) return true;
+  }
+  return false;
+}
+
 export function findFirstKeywordInRange(
   sql: string,
   rangeStart: number,

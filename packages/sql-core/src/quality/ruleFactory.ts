@@ -9,6 +9,7 @@
 
 import { findPatternMatches } from './portable';
 import type { LintIssue, LintRule, LintSeverity } from './portable';
+import { hasTopLevelKeywordInRange } from './sourceScan';
 
 // ---------------------------------------------------------------------------
 // Statement-end scanner
@@ -221,7 +222,7 @@ export function createDeleteWithoutWhereRule(options: DeleteUpdateRuleOptions): 
 			const issues: LintIssue[] = [];
 			for (const match of findPatternMatches(sql, targetPattern)) {
 				const end = statementEnd(sql, match.index);
-				if (!/\bWHERE\b/i.test(sql.slice(match.index + match[0].length, end))) {
+				if (!hasTopLevelKeywordInRange(sql, match.index + match[0].length, end, /\bWHERE\b/i)) {
 					issues.push(issue(this, match.index, match.index + 6));
 				}
 			}
@@ -241,7 +242,7 @@ export function createUpdateWithoutWhereRule(options: DeleteUpdateRuleOptions): 
 			const issues: LintIssue[] = [];
 			for (const match of findPatternMatches(sql, targetPattern)) {
 				const end = statementEnd(sql, match.index);
-				if (!/\bWHERE\b/i.test(sql.slice(match.index + match[0].length, end))) {
+				if (!hasTopLevelKeywordInRange(sql, match.index + match[0].length, end, /\bWHERE\b/i)) {
 					issues.push(issue(this, match.index, match.index + 6));
 				}
 			}

@@ -4,8 +4,12 @@ export class ScopeBuilder {
     private currentScope: Scope
     private scopeStack: Scope[] = []
 
-    constructor() {
+    constructor(private readonly caseSensitive = false) {
         this.currentScope = this.createScope()
+    }
+
+    private key(name: string): string {
+        return this.caseSensitive ? name : name.toUpperCase()
     }
 
     private createScope(parent?: Scope): Scope {
@@ -41,7 +45,7 @@ export class ScopeBuilder {
      * @returns The existing table if a table with the same key already exists, undefined otherwise
      */
     addTable(table: TableInfo): TableInfo | undefined {
-        const key = (table.alias || table.name).toUpperCase()
+        const key = this.key(table.alias || table.name)
         const existing = this.currentScope.tables.get(key)
         if (existing) {
             return existing
@@ -57,7 +61,7 @@ export class ScopeBuilder {
             root = root.parent
         }
 
-        const key = (table.alias || table.name).toUpperCase()
+        const key = this.key(table.alias || table.name)
         const existing = root.tables.get(key)
         if (existing) {
             return existing
@@ -67,7 +71,7 @@ export class ScopeBuilder {
     }
 
     removeTable(table: TableInfo): void {
-        const key = (table.alias || table.name).toUpperCase()
+        const key = this.key(table.alias || table.name)
         const known = this.currentScope.tables.get(key)
         if (!known) return
 
@@ -84,11 +88,11 @@ export class ScopeBuilder {
     }
 
     addCte(cte: CteInfo): void {
-        this.currentScope.ctes.set(cte.name.toUpperCase(), cte)
+        this.currentScope.ctes.set(this.key(cte.name), cte)
     }
 
     findTable(name: string): TableInfo | undefined {
-        const upperName = name.toUpperCase()
+        const upperName = this.key(name)
 
         // First, look in current scope tables
         let table = this.currentScope.tables.get(upperName)
@@ -140,10 +144,10 @@ export class ScopeBuilder {
         const table = this.findTable(tableName)
         if (!table) return undefined
 
-        const upperColumn = columnName.toUpperCase()
+        const upperColumn = this.key(columnName)
         return table.columns.find(col =>
-            col.name.toUpperCase() === upperColumn ||
-            col.alias?.toUpperCase() === upperColumn
+            this.key(col.name) === upperColumn ||
+            (col.alias !== undefined && this.key(col.alias) === upperColumn)
         )
     }
 

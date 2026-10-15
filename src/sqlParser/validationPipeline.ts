@@ -27,6 +27,7 @@ export interface PrepareIncrementalValidationInput {
   sql: string;
   validationSession: DocumentValidationSession;
   metadataEpoch?: number;
+  databaseKind?: string;
   /** LSP path: widen dirty indices for CREATE/DROP script scope. */
   expandScriptContext?: boolean;
   /** LSP path: require cached diagnostics for all clean statements. */
@@ -118,6 +119,7 @@ export function prepareIncrementalValidation(
   const validationState = input.validationSession.prepareDocument(
     input.documentUri,
     input.sql,
+    input.databaseKind,
   );
   const dirtyIndices =
     input.expandScriptContext && validationState.previousIndex
@@ -187,6 +189,7 @@ export async function runValidationPipeline(
       ? prepareIncrementalValidation({
           documentUri: input.documentUri,
           sql: input.sql,
+          databaseKind: input.parseRequest?.databaseKind,
           validationSession: input.validationSession,
           metadataEpoch: incrementalOptions.metadataEpoch,
           expandScriptContext: incrementalOptions.expandScriptContext,

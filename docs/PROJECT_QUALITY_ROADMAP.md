@@ -338,3 +338,13 @@ free of `vscode` imports.
   out of source control.
 - Re-audit the complete roadmap after a major architecture or product-scope
   change and at least once per release cycle.
+
+## PostgreSQL authoring hardening — 2026-10-14
+
+Status: in-progress; parser, lexical/execution protection, neutral corpus, session
+context and built LSP gates implemented. Local server evidence: PostgreSQL 16.13.
+The [validation contract](POSTGRESQL_AUTHORING_VALIDATION.md) records the test layers
+and commands. The CI workflow now defines PostgreSQL 16/17/18 jobs. Acceptance
+requires their successful runs and changed-code coverage evidence; a local 16
+run does not close the 17/18 oracle work. The host metadata cache migration for
+quoted catalog objects differing only by case remains open.

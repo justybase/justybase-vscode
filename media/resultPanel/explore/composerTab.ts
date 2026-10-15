@@ -1,3 +1,5 @@
+import type { ExploreSelection } from './selectionActions.js';
+import { button, element, valueLabel } from './ui.js';
 // Explore composer tab: Plot <measure agg> by <dimension> over <time grain>
 // [split by <dimension>] [vs previous period] rendered with ECharts.
 
@@ -10,6 +12,8 @@ import {
     LegendComponent,
     DataZoomComponent,
     TitleComponent,
+    BrushComponent,
+    ToolboxComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getElementById } from '../dom.js';
@@ -18,6 +22,8 @@ import {
     requestExploreComposer,
     previewExploreComposer,
     openExploreSqlInEditor,
+    cancelExploreRequests,
+    type ExploreComposerResultPayload,
 } from './hostBridge.js';
 import { showSqlPreviewModal } from './previewModal.js';
 import type {
@@ -36,6 +42,8 @@ echarts.use([
     LegendComponent,
     DataZoomComponent,
     TitleComponent,
+    BrushComponent,
+    ToolboxComponent,
     CanvasRenderer,
 ]);
 
@@ -55,10 +63,15 @@ const GRAIN_LABELS: Record<ExploreDateGrain, string> = {
     year: 'Year',
 };
 
+export interface ComposerTabCache { result?: ExploreComposerResultPayload; config?: ExploreComposerConfig; computedAt?: number }
+
 export interface ComposerTabOptions {
+    cache?: ComposerTabCache;
     columns: readonly ExploreColumnMeta[];
     filters: ExploreFilterModel;
     config?: ExploreComposerConfig;
+    getFilters?: () => ExploreFilterModel;
+    onSelect?: (selection: ExploreSelection) => void;
     onConfigChange: (config: ExploreComposerConfig) => void;
 }
 
@@ -164,15 +177,25 @@ export function renderComposerTab(
                 measureColumnIndex,
                 aggFn: (getElementById<HTMLSelectElement>('exploreComposerAgg')?.value as ExploreComposerAggregate) ?? 'sum',
                 splitByColumnIndex: splitValue >= 0 ? splitValue : undefined,
-                splitValues: splitColumn?.exploreTopValues,
+                splitValues: splitValue === current?.splitByColumnIndex ? current.splitValues ?? splitColumn?.exploreTopValues : splitColumn?.exploreTopValues,
                 includeOther: true,
                 comparePrevious: (getElementById<HTMLInputElement>('exploreComposerCompare')?.checked) ?? false,
-                filters,
+                filters: options.getFilters?.() ?? filters,
             },
         };
     };
 
+    const cache = options.cache ?? {};
+    const drawPrevious = () => {
+        const chart = getElementById('exploreComposerChart');
+        if (chart && cache.result && cache.config) {
+            renderComposerChart(chart, cache.result.rows, cache.result.columnIndexes, cache.config, cache.result.sql, options.onSelect);
+            if (JSON.stringify(readConfig().config) !== JSON.stringify(cache.config)) chart.querySelectorAll('.explore-database-status').forEach(node => { node.textContent = 'Out of date · Press Run to apply current filters and settings'; });
+        }
+    };
+    let running = false;
     const run = async () => {
+        if (running) return;
         const { config, error } = readConfig();
         const chart = getElementById('exploreComposerChart');
         if (!chart) return;
@@ -180,14 +203,18 @@ export function renderComposerTab(
             chart.innerHTML = `<div class="explore-error">${escapeHtml(error)}</div>`;
             return;
         }
-        chart.innerHTML = '<div class="explore-loading">Running composer…</div>';
+        running = true;
+        const status = element('p', 'Running time series…'); chart.prepend(status);
         try {
             const result = await requestExploreComposer(config);
+            if (!chart.isConnected) return;
+            cache.result = result; cache.config = config; cache.computedAt = Date.now();
             onConfigChange(config);
-            renderComposerChart(chart, result.rows, result.columnIndexes, config, result.sql);
+            renderComposerChart(chart, result.rows, result.columnIndexes, config, result.sql, options.onSelect);
         } catch (err) {
-            chart.innerHTML = `<div class="explore-error">${escapeHtml(err instanceof Error ? err.message : String(err))}</div>`;
-        }
+            status.textContent = err instanceof Error ? err.message : String(err);
+            status.append(button('Retry', () => void run()));
+        } finally { running = false; }
     };
 
     const preview = async () => {
@@ -199,7 +226,7 @@ export function renderComposerTab(
         try {
             const sql = await previewExploreComposer(config);
             showSqlPreviewModal({
-                title: 'Composer SQL',
+                title: 'Time series SQL',
                 sql,
                 onOpenInEditor: sqlText => openExploreSqlInEditor(sqlText, 'Explore composer query'),
             });
@@ -208,6 +235,13 @@ export function renderComposerTab(
         }
     };
 
+    root.querySelector('.explore-config-actions')?.append(button('Cancel', cancelExploreRequests));
+    root.querySelector('.explore-tab-config')?.addEventListener('change', () => {
+        const next = readConfig();
+        if (!next.error) onConfigChange(next.config);
+        root.querySelectorAll('.explore-database-status').forEach(node => { node.textContent = 'Out of date · Press Run to apply current filters and settings'; });
+    });
+    drawPrevious();
     getElementById('exploreComposerRun')?.addEventListener('click', () => void run());
     getElementById('exploreComposerPreview')?.addEventListener('click', () => void preview());
 }
@@ -216,13 +250,16 @@ interface ComposerColumnIndexes {
     bucket: number;
     dimension: number | undefined;
     split: number | undefined;
+    splitOther?: number;
     measure: number;
     previous: number | undefined;
 }
 
 let composerChartInstance: EChartsType | null = null;
+let composerResizeObserver: ResizeObserver | undefined;
 
 export function disposeComposerChart(): void {
+    composerResizeObserver?.disconnect(); composerResizeObserver = undefined;
     if (composerChartInstance) {
         composerChartInstance.dispose();
         composerChartInstance = null;
@@ -253,18 +290,40 @@ function renderComposerChart(
     indexes: ComposerColumnIndexes,
     config: ExploreComposerConfig,
     sql: string,
+    onSelect?: (selection: ExploreSelection) => void,
 ): void {
     if (!rows || rows.length === 0) {
-        root.innerHTML = '<div class="explore-empty">Composer returned no rows.</div>';
+        root.innerHTML = '<div class="explore-empty">Time series returned no rows.</div>';
         return;
     }
 
     disposeComposerChart();
     root.innerHTML = '';
 
+    const selectRow = (row: unknown[]) => {
+        const filters = structuredClone(config.filters ?? { dimensions: [], dates: [], measures: [] });
+        const start = String(row[indexes.bucket]).slice(0, 10);
+        const end = new Date(`${start}T00:00:00Z`);
+        if (!Number.isFinite(end.getTime())) return;
+        if (config.grain === 'day' || config.grain === 'week') end.setUTCDate(end.getUTCDate() + (config.grain === 'day' ? 1 : 7));
+        else if (config.grain === 'year') end.setUTCFullYear(end.getUTCFullYear() + 1);
+        else end.setUTCMonth(end.getUTCMonth() + (config.grain === 'quarter' ? 3 : 1));
+        filters.dates.push({ columnIndex: config.dateColumnIndex, grain: config.grain, from: start, to: end.toISOString().slice(0, 10), toExclusive: true });
+        if (indexes.dimension !== undefined && config.dimensionColumnIndex !== undefined) {
+            const value = row[indexes.dimension];
+            filters.dimensions.push({ columnIndex: config.dimensionColumnIndex, values: value == null ? [] : [String(value)], includeNull: value == null });
+        }
+        if (indexes.split !== undefined && config.splitByColumnIndex !== undefined) {
+            const value = row[indexes.split];
+            filters.dimensions.push(indexes.splitOther !== undefined && Number(row[indexes.splitOther]) === 1 && config.splitValues?.length
+                ? { columnIndex: config.splitByColumnIndex, mode: 'exclude', values: config.splitValues }
+                : { columnIndex: config.splitByColumnIndex, values: value == null ? [] : [String(value)], includeNull: value == null });
+        }
+        onSelect?.({ label: start, filters, scope: 'database' });
+    };
     const summary = document.createElement('div');
     summary.className = 'explore-composer-summary';
-    summary.innerHTML = `<span>${rows.length.toLocaleString()} buckets</span>`;
+    summary.innerHTML = `<span class="explore-database-status">Database · ${rows.length.toLocaleString()} buckets · ${new Date().toLocaleTimeString()} · Original SQL limits preserved</span>`;
     const sqlButton = document.createElement('button');
     sqlButton.className = 'explore-sql-link';
     sqlButton.textContent = 'SQL';
@@ -278,12 +337,12 @@ function renderComposerChart(
     root.appendChild(chartDiv);
 
     const splitColumn = indexes.split !== undefined ? config.splitByColumnIndex : undefined;
-    const seriesMap = new Map<string, Array<{ bucket: string; value: number | null; prev: number | null }>>();
+    const seriesMap = new Map<string, Array<{ bucket: string; value: number | null; prev: number | null; row: unknown[] }>>();
     const buckets: string[] = [];
 
     for (const row of rows) {
         const bucket = formatAxisLabel(row[indexes.bucket]);
-        const splitKey = splitColumn !== undefined ? formatAxisLabel(row[indexes.split ?? 0]) : (config.dimensionColumnIndex !== undefined ? formatAxisLabel(row[indexes.dimension ?? 0]) : '__all__');
+        const splitKey = [indexes.dimension !== undefined ? valueLabel(row[indexes.dimension]) : '', splitColumn !== undefined ? indexes.splitOther !== undefined && Number(row[indexes.splitOther]) === 1 ? 'Other (remaining categories)' : valueLabel(row[indexes.split ?? 0]) : ''].filter(Boolean).join(' / ') || '__all__';
         if (!buckets.includes(bucket)) {
             buckets.push(bucket);
         }
@@ -295,6 +354,7 @@ function renderComposerChart(
             bucket,
             value: parseCell(row[indexes.measure]),
             prev: prevValue,
+            row,
         });
     }
 
@@ -309,6 +369,7 @@ function renderComposerChart(
 
     const series: Array<Record<string, unknown>> = [];
     let seriesIndex = 0;
+    const selectionRows: Array<Array<unknown[] | undefined>> = [];
     for (const [key, points] of seriesMap) {
         const isOther = key === 'Other';
         const data = buckets.map(bucket => {
@@ -324,6 +385,7 @@ function renderComposerChart(
             itemStyle: isOther ? { opacity: 0.55 } : undefined,
             color: colors[seriesIndex % colors.length],
         });
+        selectionRows.push(buckets.map(bucket => points.find(item => item.bucket === bucket)?.row));
         seriesIndex += 1;
         if (config.comparePrevious && indexes.previous !== undefined) {
             series.push({
@@ -338,13 +400,41 @@ function renderComposerChart(
                 itemStyle: { opacity: 0.6 },
                 color: colors[seriesIndex % colors.length],
             });
+            selectionRows.push([]);
             seriesIndex += 1;
         }
     }
 
     composerChartInstance = echarts.init(chartDiv, undefined, { renderer: 'canvas' });
+    if (typeof ResizeObserver !== 'undefined') {
+        composerResizeObserver = new ResizeObserver(() => composerChartInstance?.resize());
+        composerResizeObserver.observe(chartDiv);
+    }
+    composerChartInstance.on('click', event => {
+        const row = selectionRows[event.seriesIndex ?? -1]?.[event.dataIndex];
+        if (row) selectRow(row);
+    });
+    composerChartInstance.on('brushEnd', (payload: unknown) => {
+        const event = payload as { areas?: Array<{ coordRange?: number[] }> };
+        const range = event.areas?.[0]?.coordRange;
+        if (!range || !onSelect) return;
+        const first = rows.find(row => formatAxisLabel(row[indexes.bucket]) === buckets[Math.max(0, Math.ceil(range[0]))]);
+        const last = rows.find(row => formatAxisLabel(row[indexes.bucket]) === buckets[Math.min(buckets.length - 1, Math.floor(range[1]))]);
+        if (!first || !last) return;
+        const filters = structuredClone(config.filters ?? { dimensions: [], dates: [], measures: [] });
+        const from = String(first[indexes.bucket]).slice(0, 10);
+        const date = new Date(`${String(last[indexes.bucket]).slice(0, 10)}T00:00:00Z`);
+        if (!Number.isFinite(date.getTime())) return;
+        if (config.grain === 'day' || config.grain === 'week') date.setUTCDate(date.getUTCDate() + (config.grain === 'day' ? 1 : 7));
+        else if (config.grain === 'year') date.setUTCFullYear(date.getUTCFullYear() + 1);
+        else date.setUTCMonth(date.getUTCMonth() + (config.grain === 'quarter' ? 3 : 1));
+        filters.dates.push({ columnIndex: config.dateColumnIndex, grain: config.grain, from, to: date.toISOString().slice(0, 10), toExclusive: true });
+        onSelect({ label: 'Filter to selected range', filters, scope: 'database' });
+    });
     composerChartInstance.setOption({
         tooltip: { trigger: 'axis' },
+        toolbox: { feature: { brush: { type: ['lineX', 'clear'], title: { lineX: 'Select time range', clear: 'Clear selection' } } } },
+        brush: { xAxisIndex: 0, brushMode: 'single', brushType: 'lineX' },
         legend: { type: 'scroll', top: 0, textStyle: { color: chartTheme.getPropertyValue('--vscode-foreground').trim() || '#cccccc' } },
         grid: { left: 48, right: 16, top: 40, bottom: 40 },
         dataZoom: buckets.length > 24 ? [{ type: 'inside' }, { type: 'slider', height: 16 }] : [],
@@ -356,4 +446,14 @@ function renderComposerChart(
         yAxis: { type: 'value', axisLabel: { color: chartTheme.getPropertyValue('--vscode-descriptionForeground').trim() || '#888888' } },
         series,
     });
+    const details = element('details'); details.append(element('summary', 'Chart data'));
+    const table = element('table', undefined, 'explore-table');
+    const body = element('tbody');
+    for (const row of rows) {
+        const tr = element('tr');
+        tr.append(element('td', valueLabel(row[indexes.bucket])), element('td', valueLabel(row[indexes.measure])));
+        const td = element('td'); td.append(button('Explore selection', () => selectRow(row))); tr.append(td); body.append(tr);
+    }
+    table.append(body); details.append(table); root.append(details);
+
 }

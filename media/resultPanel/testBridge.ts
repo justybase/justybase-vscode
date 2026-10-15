@@ -1,3 +1,4 @@
+import { setActiveResultViewMode } from './analysis.js';
 import { applyDatabaseFilter, queryDatabaseFilterValues } from './databaseFilters.js';
 import { queryDatabaseAggregations } from './databaseAggregations.js';
 import {
@@ -492,6 +493,46 @@ async function diskAction(): Promise<Record<string, unknown>> {
     };
 }
 
+/** Production Explore UI and protocol, exercised only through the gated test bridge. */
+async function exploreWorkflow(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const categoryIndex = asNumber(args.columnIndex, 1);
+    const selectedValue = asString(args.value, 'Alpha');
+    const resultIndex = getActiveGridIndex();
+    const click = (text: string, root: ParentNode = document.getElementById('analysisContainer') ?? document) => {
+        const target = Array.from(root.querySelectorAll('button')).find(button => button.textContent === text);
+        if (!target) throw new Error(`Missing Explore action: ${text}`);
+        target.click();
+    };
+    setActiveResultViewMode('explore');
+    await waitFor('Explore sample', () => document.getElementById('exploreSubtitle')?.textContent?.includes('loaded rows') === true);
+    click('Add filter');
+    const editor = document.querySelector('.explore-filter-editor');
+    if (!editor) throw new Error('Explore filter editor did not open.');
+    const column = editor.querySelector('select') as HTMLSelectElement;
+    column.value = String(categoryIndex); column.dispatchEvent(new Event('change'));
+    const input = Array.from(editor.querySelectorAll('input')).find(item => item.getAttribute('aria-label') === selectedValue);
+    if (!input) throw new Error('Explore sample category was not found.');
+    input.checked = true; input.dispatchEvent(new Event('change')); click('Apply', editor);
+    click('Charts');
+    const category = document.querySelector('select[aria-label="Category"]') as HTMLSelectElement;
+    category.value = String(categoryIndex); category.dispatchEvent(new Event('change'));
+    click('Run');
+    await waitFor('Explore database ranking', () => document.querySelector('.explore-database-status')?.textContent?.startsWith('Database') === true);
+    const rankedCount = document.querySelectorAll('#exploreTabContent tbody tr').length;
+    click('Explore selection'); click('Show rows'); click('Load rows');
+    await waitFor('Explore detail rows', () => document.querySelectorAll('#exploreSelection tbody tr').length > 0);
+    const rowCount = document.querySelectorAll('#exploreSelection tbody tr').length;
+    const logIndex = getResultSets().findIndex(result => result.isLog);
+    if (logIndex >= 0) {
+        switchToResultSet(logIndex);
+        switchToResultSet(resultIndex);
+        await waitFor('Explore state restored', () => document.getElementById('exploreFilterBar')?.textContent?.includes(selectedValue) === true);
+    }
+    click('✕ Clear');
+    setActiveResultViewMode('table');
+    return { rankedCount, rowCount, filtersRestored: true };
+}
+
 async function dispatchAction(action: string, argsValue: unknown): Promise<unknown> {
     const args = asRecord(argsValue);
     switch (action) {
@@ -513,6 +554,8 @@ async function dispatchAction(action: string, argsValue: unknown): Promise<unkno
             return databaseFilterValues(args);
         case 'applyDatabaseFilter':
             return applyDatabaseFilterAction(args);
+        case 'exploreWorkflow':
+            return exploreWorkflow(args);
         case 'databaseAggregations':
             return databaseAggregationsAction(args);
         case 'openGroupingPanel':

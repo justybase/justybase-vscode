@@ -92,6 +92,7 @@ export class CompletionQualifierResolver {
   ): Promise<CompletionItem[] | undefined> {
     const qualifierContext = this.contextExtractor.extractQualifierColumnContext(
       requestContext.linePrefix,
+      requestContext.databaseKind,
     );
     if (!qualifierContext) {
       return undefined;

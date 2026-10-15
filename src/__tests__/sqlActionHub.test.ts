@@ -2,6 +2,7 @@ jest.unmock('chevrotain');
 
 import * as vscode from 'vscode';
 import { SqlExecutionCodeActionProvider } from '../providers/sqlExecutionCodeActions';
+import type { TableQualificationResolverDeps } from '../core/tableQualificationResolver';
 import {
     applyHubTextEdit,
     buildAddToGroupByEdit,
@@ -164,6 +165,26 @@ const cancellationToken = {
     isCancellationRequested: false,
     onCancellationRequested: () => ({ dispose: () => {} }),
 } as unknown as vscode.CancellationToken;
+
+/** Cache-only qualification deps: objects are `database.schema.name` triples; `preferredSchema` mirrors the connection's configured schema. */
+function createTableQualification(
+    objects: Array<{ database: string; schema: string; name: string }>,
+    preferredSchema?: string,
+): TableQualificationResolverDeps {
+    const connectionManager = {
+        ...createConnectionManager('netezza'),
+        getDocumentDatabase: jest.fn(() => undefined),
+        getConnectionMetadata: jest.fn(() => ({ database: 'JUST_DATA', schema: preferredSchema })),
+    };
+    const metadataCache = {
+        getObjectsWithSchema: jest.fn((_connection: string, database: string) => objects
+            .filter((object) => object.database === database)
+            .map((object) => ({ schema: object.schema, item: { OBJNAME: object.name } }))),
+        getCurrentSchema: jest.fn(() => undefined),
+        getDatabases: jest.fn(() => [...new Set(objects.map((object) => object.database))].map((DATABASE) => ({ DATABASE }))),
+    };
+    return { connectionManager, metadataCache } as unknown as TableQualificationResolverDeps;
+}
 
 function commandsOf(actions: TestCodeAction[]): string[] {
     return actions.map((action) => action.command?.command ?? '(edit)');
@@ -363,6 +384,100 @@ describe('SqlExecutionCodeActionProvider hub', () => {
         expect(top?.command?.arguments?.[1]).toEqual({ limit: 100 });
         const refresh = actions.find((action) => action.command?.command === 'netezza.refreshSchemaSelection');
         expect(refresh?.command?.arguments?.[0]).toMatchObject({ contextValue: 'netezza:table' });
+    });
+
+    describe('unqualified Netezza table dependency actions', () => {
+        // No document database override: the database must come from the connection's cache, not the editor text.
+        const unqualifiedManager = () => ({ ...createConnectionManager('netezza'), getDocumentDatabase: () => undefined });
+        const dependencyTitles = (actions: TestCodeAction[], command: string) =>
+            actions.filter((action) => action.command?.command === command).map((action) => action.title);
+
+        it('uses the single cached match for Used By, Impact and Dependencies', () => {
+            const text = 'SELECT * FROM DIMDATE';
+            const provider = new SqlExecutionCodeActionProvider({
+                connectionManager: unqualifiedManager(),
+                tableQualification: createTableQualification([{ database: 'JUST_DATA', schema: 'ADMIN', name: 'DIMDATE' }]),
+            });
+            const actions = provider.provideCodeActions(
+                createMockDocument(text),
+                cursorAt(text, 'DIMDATE'),
+                emptyContext,
+                cancellationToken,
+            ) as unknown as TestCodeAction[];
+
+            expect(dependencyTitles(actions, 'netezza.showUsedBy')).toEqual(['Show Used By of JUST_DATA.ADMIN.DIMDATE']);
+            expect(dependencyTitles(actions, 'netezza.showDependencies')).toEqual(['Show Dependencies of JUST_DATA.ADMIN.DIMDATE']);
+            expect(dependencyTitles(actions, 'netezza.impactAnalysis')).toEqual(['Impact Analysis for JUST_DATA.ADMIN.DIMDATE']);
+            const usedBy = actions.find((action) => action.command?.command === 'netezza.showUsedBy');
+            expect(usedBy?.command?.arguments?.[0]).toEqual({
+                label: 'DIMDATE',
+                rawLabel: 'DIMDATE',
+                dbName: 'JUST_DATA',
+                schema: 'ADMIN',
+                objType: 'TABLE',
+                connectionName: 'dev',
+            });
+        });
+
+        it('offers one dependency set per candidate when the name is ambiguous', () => {
+            const text = 'SELECT * FROM DIMDATE';
+            const provider = new SqlExecutionCodeActionProvider({
+                connectionManager: unqualifiedManager(),
+                tableQualification: createTableQualification([
+                    { database: 'JUST_DATA', schema: 'PUBLIC', name: 'DIMDATE' },
+                    { database: 'JUST_DATA', schema: 'SALES', name: 'DIMDATE' },
+                ]),
+            });
+            const actions = provider.provideCodeActions(
+                createMockDocument(text),
+                cursorAt(text, 'DIMDATE'),
+                emptyContext,
+                cancellationToken,
+            ) as unknown as TestCodeAction[];
+
+            expect(dependencyTitles(actions, 'netezza.showUsedBy')).toEqual([
+                'Show Used By of JUST_DATA.PUBLIC.DIMDATE',
+                'Show Used By of JUST_DATA.SALES.DIMDATE',
+            ]);
+        });
+
+        it('narrows an ambiguous name to the configured schema when it is among the candidates', () => {
+            const text = 'SELECT * FROM DIMDATE';
+            const provider = new SqlExecutionCodeActionProvider({
+                connectionManager: unqualifiedManager(),
+                tableQualification: createTableQualification([
+                    { database: 'JUST_DATA', schema: 'PUBLIC', name: 'DIMDATE' },
+                    { database: 'JUST_DATA', schema: 'SALES', name: 'DIMDATE' },
+                ], 'SALES'),
+            });
+            const actions = provider.provideCodeActions(
+                createMockDocument(text),
+                cursorAt(text, 'DIMDATE'),
+                emptyContext,
+                cancellationToken,
+            ) as unknown as TestCodeAction[];
+
+            expect(dependencyTitles(actions, 'netezza.showUsedBy')).toEqual(['Show Used By of JUST_DATA.SALES.DIMDATE']);
+        });
+
+        it('omits dependency actions when the name is not in the metadata cache', () => {
+            const text = 'SELECT * FROM DIMDATE';
+            const provider = new SqlExecutionCodeActionProvider({
+                connectionManager: unqualifiedManager(),
+                tableQualification: createTableQualification([]),
+            });
+            const actions = provider.provideCodeActions(
+                createMockDocument(text),
+                cursorAt(text, 'DIMDATE'),
+                emptyContext,
+                cancellationToken,
+            ) as unknown as TestCodeAction[];
+            const commands = commandsOf(actions);
+
+            expect(commands).not.toContain('netezza.showDependencies');
+            expect(commands).not.toContain('netezza.showUsedBy');
+            expect(commands).not.toContain('netezza.impactAnalysis');
+        });
     });
 
     it('falls back to cursor-resolved DDL when the reference cannot be snapshotted', () => {

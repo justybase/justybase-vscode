@@ -374,6 +374,21 @@ export function buildReport(
     };
 }
 
+/** Memory and disk-backed Explore gate; all reports contain counters only. */
+export async function runExploreRegression(provider: Pick<ResultPanelView, 'runResultPanelTestBridge'>, resultSetIndex: number): Promise<void> {
+    await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex });
+    const memory = asRecord(await provider.runResultPanelTestBridge('exploreWorkflow', { columnIndex: 1, value: 'Alpha' }));
+    if (asNumber(memory.rankedCount, 0) !== 1 || asNumber(memory.rowCount, 0) !== 4) {
+        throw new Error('Explore memory ranking/detail workflow returned unexpected counts.');
+    }
+    await provider.runResultPanelTestBridge('diskMove');
+    await provider.runResultPanelTestBridge('diskQuery');
+    const disk = asRecord(await provider.runResultPanelTestBridge('exploreWorkflow', { columnIndex: 1, value: 'Alpha' }));
+    if (asNumber(disk.rankedCount, 0) !== 1 || asNumber(disk.rowCount, 0) !== 4) {
+        throw new Error('Explore disk ranking/detail workflow returned unexpected counts.');
+    }
+}
+
 async function runRawFixtureQuery(
     context: vscode.ExtensionContext,
     connectionManager: ConnectionManager,
@@ -673,9 +688,8 @@ async function runExtensionHostScenario(
             throw new Error('The deterministic saved-fixture query did not return 12 rows.');
         }
 
-        await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: allResultIndex });
-        await provider.runResultPanelTestBridge('diskMove');
-        await provider.runResultPanelTestBridge('diskQuery');
+        await runExploreRegression(provider, allResultIndex);
+
         await requestExtensionHostScreenshot('02-result-grid');
 
         /* istanbul ignore next -- exercised by the real Extension Host harness. */

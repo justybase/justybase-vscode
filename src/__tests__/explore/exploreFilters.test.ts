@@ -37,6 +37,23 @@ describe('exploreFilters (host)', () => {
         expect(sql).toBe('t."REGION" = \'O\'\'Brien\'');
     });
 
+    it('never compares numeric or date columns with an empty string', () => {
+        const filters = (columnIndex: number, mode?: 'include' | 'exclude') => ({
+            dimensions: [{ columnIndex, values: [''], includeEmpty: true, mode }],
+            dates: [],
+            measures: [],
+        });
+        expect(buildExploreWhereSql(filters(1), COLUMNS, 'postgresql')).toBe('1 = 0');
+        expect(buildExploreWhereSql(filters(2), COLUMNS, 'netezza')).toBe('1 = 0');
+        expect(buildExploreWhereSql(filters(1, 'exclude'), COLUMNS, 'db2')).toBe('');
+        expect(buildExploreWhereSql({
+            dimensions: [{ columnIndex: 1, values: ['', '10.5'], includeNull: true }],
+            dates: [],
+            measures: [],
+        }, COLUMNS)).toBe('(t."AMOUNT" = 10.5 OR t."AMOUNT" IS NULL)');
+        expect(buildExploreWhereSql(filters(0), COLUMNS)).toBe('t."REGION" = \'\'');
+    });
+
     it('builds range predicates for dates', () => {
         const sql = buildExploreWhereSql({
             dimensions: [],

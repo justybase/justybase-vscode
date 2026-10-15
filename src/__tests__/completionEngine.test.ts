@@ -4807,16 +4807,10 @@ SELECT M.| FROM MIXED M`);
         1,
         expect.any(String),
         "appdb",
-        "ORDERS",
-        "PUBLIC",
-      );
-      expect(strictProvider.getColumns).toHaveBeenNthCalledWith(
-        2,
-        expect.any(String),
-        "appdb",
         "orders",
         "public",
       );
+      expect(strictProvider.getColumns).toHaveBeenCalledTimes(1);
     });
 
     it("falls back to uppercase catalog names for Snowflake unquoted aliases", async () => {

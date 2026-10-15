@@ -23,6 +23,8 @@
  * procedure-body and regex-based analysis.
  */
 
+import { findPostgresqlQuotedRegion } from './postgresqlLexical';
+
 export const enum SqlSourceRegion {
   Code = 0,
   LineComment = 1,
@@ -42,6 +44,7 @@ export interface SqlSourceScanIndex {
 }
 
 let lastScanIndex: SqlSourceScanIndex | undefined;
+let lastScanDialect: string | undefined;
 
 function isCommentRegion(region: number): boolean {
   return (
@@ -92,8 +95,8 @@ export function findNestedBlockCommentEnd(
   return undefined;
 }
 
-export function buildSqlSourceScanIndex(sql: string): SqlSourceScanIndex {
-  if (lastScanIndex?.sql === sql) {
+export function buildSqlSourceScanIndex(sql: string, databaseKind?: string): SqlSourceScanIndex {
+  if (lastScanIndex?.sql === sql && lastScanDialect === databaseKind) {
     return lastScanIndex;
   }
 
@@ -107,6 +110,18 @@ export function buildSqlSourceScanIndex(sql: string): SqlSourceScanIndex {
   for (let i = 0; i < sql.length; i++) {
     const char = sql[i];
     const nextChar = i + 1 < sql.length ? sql[i + 1] : "";
+
+    if (databaseKind === 'postgresql' && !inSingleQuote && !inDoubleQuote && !inLineComment && blockCommentDepth === 0) {
+      const quoted = findPostgresqlQuotedRegion(sql, i);
+      if (quoted) {
+        for (let j = i; j < quoted.end; j++) {
+          region[j] = SqlSourceRegion.SingleQuoted;
+          if (sql[j] !== '\n' && sql[j] !== '\r') sanitizedChars[j] = ' ';
+        }
+        i = quoted.end - 1;
+        continue;
+      }
+    }
 
     if (inLineComment) {
       region[i] = SqlSourceRegion.LineComment;
@@ -195,6 +210,7 @@ export function buildSqlSourceScanIndex(sql: string): SqlSourceScanIndex {
     }
   }
 
+  lastScanDialect = databaseKind;
   lastScanIndex = {
     sql,
     region,

@@ -53,6 +53,7 @@ export class CompletionRequestContextBuilder {
       cursorOffset,
       document.uri,
       document.version,
+      databaseKind,
     );
     const statementOffset = statement
       ? cursorOffset - statement.start

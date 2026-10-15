@@ -1,4 +1,5 @@
 import type { StatementBoundary } from "./validation/types";
+import { buildSqlSourceScanIndex } from './sourceScan';
 
 /** Compatibility name for the shared validation statement boundary. */
 export type CoreStatementBoundary = StatementBoundary;
@@ -10,7 +11,8 @@ export interface StatementAtPosition {
 }
 
 /** Split a Netezza script without treating comments, literals or procedure bodies as boundaries. */
-export function splitSqlStatements(sql: string): StatementBoundary[] {
+export function splitSqlStatements(sql: string, databaseKind?: string): StatementBoundary[] {
+  if (databaseKind === 'postgresql') return splitPostgresqlStatements(sql);
   const statements: StatementBoundary[] = [];
   let statementStart = 0;
   let index = 0;
@@ -114,6 +116,33 @@ export function splitSqlStatements(sql: string): StatementBoundary[] {
       });
     }
   }
+  return statements;
+}
+
+/** Split PostgreSQL scripts using the same literal regions as diagnostics. */
+function splitPostgresqlStatements(sql: string): StatementBoundary[] {
+  const code = buildSqlSourceScanIndex(sql, 'postgresql').sanitized;
+  const statements: StatementBoundary[] = [];
+  let start = 0;
+  let atomicDepth = 0;
+  const add = (end: number): void => {
+    const segment = sql.slice(start, end);
+    const leading = segment.search(/\S/);
+    if (leading >= 0 && /\S/.test(code.slice(start, end))) {
+      const content = segment.trim();
+      statements.push({ index: statements.length, startOffset: start + leading, endOffset: start + leading + content.length, sql: content });
+    }
+    start = end + 1;
+  };
+  const tokens = /BEGIN\s+ATOMIC\b|\bCASE\b|\bEND\b|;/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tokens.exec(code))) {
+    if (/^BEGIN/i.test(match[0])) atomicDepth++;
+    else if (/^CASE$/i.test(match[0]) && atomicDepth > 0) atomicDepth++;
+    else if (/^END$/i.test(match[0]) && atomicDepth > 0) atomicDepth--;
+    else if (match[0] === ';' && atomicDepth === 0) add(match.index);
+  }
+  add(sql.length);
   return statements;
 }
 

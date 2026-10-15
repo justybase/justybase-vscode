@@ -191,6 +191,7 @@ async function runBatchWithSharedOrchestrator(
         params.queries,
         params.context,
         params.documentUri,
+          createMacroFileReadContext(params.documentUri, connManager.getExecutionDatabaseKind?.(params.documentUri)),
     );
     const details = await connManager.getConnection(resolvedConnectionName);
     if (!details) throw new Error(`Connection '${resolvedConnectionName}' not found`);
@@ -256,7 +257,7 @@ async function runBatchWithSharedOrchestrator(
                     sessionId,
                     connManager,
                 ),
-                params.batchOptions.macroFileContext ?? createMacroFileReadContext(params.documentUri),
+                params.batchOptions.macroFileContext ?? createMacroFileReadContext(params.documentUri, connManager.getExecutionDatabaseKind?.(params.documentUri)),
             );
             assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
             if (prepared.sql.trim().length === 0) {

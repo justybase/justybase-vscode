@@ -606,7 +606,23 @@ export function clearGroupDropTargets(): void {
 }
 
 if (typeof document !== 'undefined') {
-    document.addEventListener('dragend', clearGroupDropTargets);
+    // Reveal the (otherwise collapsed) grouping panel while a column is being dragged.
+    document.addEventListener('dragstart', () => {
+        // Changing layout synchronously inside dragstart makes Chromium cancel the drag,
+        // so reveal the panel on a later tick. Drag state is set by the element's own handler.
+        setTimeout(() => {
+            const state = getGlobalDragState();
+            if (state.isDragging && (state.dragType === 'column' || state.dragType === 'groupChip')) {
+                document.body.classList.add('group-dragging');
+            }
+        }, 0);
+    });
+    const endGroupDragging = (): void => {
+        document.body.classList.remove('group-dragging');
+        clearGroupDropTargets();
+    };
+    document.addEventListener('dragend', endGroupDragging);
+    document.addEventListener('drop', () => document.body.classList.remove('group-dragging'));
 }
 
 export function onDragOverGroup(event: DragEvent): void {

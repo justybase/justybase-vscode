@@ -62,6 +62,7 @@ export class CompletionContextExtractor {
             normalizedCursorOffset,
             document.uri,
             document.version,
+            databaseKind,
           )
         : null;
 
@@ -254,12 +255,13 @@ export class CompletionContextExtractor {
     offset: number,
     documentUri?: string,
     documentVersion?: number,
+    databaseKind?: DatabaseKind,
   ): StatementBoundary | null {
     if (documentUri !== undefined && documentVersion !== undefined) {
-      const cacheKey = `${documentUri}:${documentVersion}:${simpleHash(text)}`;
+      const cacheKey = `${documentUri}:${documentVersion}:${databaseKind}:${simpleHash(text)}`;
       let cached = this.statementCache.get(cacheKey);
       if (!cached) {
-        cached = SqlParser.splitStatementsWithPositions(text).map(
+        cached = SqlParser.splitStatementsWithPositions(text, databaseKind).map(
           (statement) => ({
             sql: statement.sql,
             start: statement.startOffset,
@@ -290,8 +292,8 @@ export class CompletionContextExtractor {
         ? SqlParser.getStatementAtPosition(text, offset, {
             documentId: documentUri,
             version: documentVersion,
-          })
-        : SqlParser.getStatementAtPosition(text, offset);
+          }, databaseKind)
+        : SqlParser.getStatementAtPosition(text, offset, undefined, databaseKind);
     if (!statement) {
       return null;
     }
@@ -659,7 +661,12 @@ export class CompletionContextExtractor {
 
   public extractQualifierColumnContext(
     linePrefix: string,
+    databaseKind?: DatabaseKind,
   ): { qualifier: string; columnPrefix: string } | undefined {
+    if (databaseKind === 'postgresql') {
+      const match = linePrefix.match(/("(?:[^"]|"")*"|[\p{L}_][\p{L}\p{N}_$]*)\.([\p{L}\p{N}_$]*|"(?:[^"]|"")*)$/u);
+      return match ? { qualifier: match[1], columnPrefix: stripQuotes(match[2]) } : undefined;
+    }
     const partialMatch = linePrefix.match(
       /(\[[^\]\r\n]+\]|"[^"\r\n]+"|[#A-Za-z_][A-Za-z0-9_$"]*)\.([A-Za-z_][A-Za-z0-9_$"]*)$/,
     );

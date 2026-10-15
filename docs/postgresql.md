@@ -97,3 +97,10 @@ for both targets under test:
 ```bash
 npm run test:database:tunnel:live
 ```
+
+## SQL authoring scope and verification
+
+The implemented grammar targets PostgreSQL 16–18. Known older connections receive
+PG001 warnings for recognized newer syntax; disconnected editing uses the union.
+PL/pgSQL bodies remain opaque. See [Authoring validation](POSTGRESQL_AUTHORING_VALIDATION.md)
+for supported forms, limitations, corpus ownership, live-test hygiene and commands.

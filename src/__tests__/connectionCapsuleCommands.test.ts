@@ -3,6 +3,8 @@
  */
 
 import * as vscode from 'vscode';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
     buildConnectionCapsuleMenu,
     registerConnectionCapsuleCommands,
@@ -54,6 +56,7 @@ function createManagerMock(overrides: Record<string, unknown> = {}): ConnectionM
         getDocumentKeepConnectionOpen: jest.fn().mockReturnValue(true),
         toggleDocumentKeepConnectionOpen: jest.fn().mockReturnValue(false),
         closeDocumentPersistentConnection: jest.fn().mockResolvedValue(undefined),
+        disconnectConnection: jest.fn().mockResolvedValue(undefined),
         getDocumentPersistentConnection: jest.fn().mockResolvedValue({}),
         isConnectionAvailable: jest.fn().mockReturnValue(true),
         getConnectionMetadata: jest.fn().mockReturnValue({
@@ -97,6 +100,17 @@ describe('connectionCapsuleCommands', () => {
     });
 
     describe('buildConnectionCapsuleMenu', () => {
+        it('contributes the disconnect command to connection roots in Schema', () => {
+            const manifest = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8')) as {
+                contributes: { commands: Array<{ command: string }>; menus: Record<string, Array<{ command: string; when: string }>> };
+            };
+            expect(manifest.contributes.commands).toContainEqual(expect.objectContaining({ command: 'netezza.disconnectConnection' }));
+            expect(manifest.contributes.menus['view/item/context']).toContainEqual(expect.objectContaining({
+                command: 'netezza.disconnectConnection',
+                when: 'view == netezza.schema && viewItem == serverInstance',
+            }));
+        });
+
         it('lays out connection, database, schema, session and action sections', () => {
             const items = buildConnectionCapsuleMenu(snapshot);
             const labels = items.map((item) => String(item.label));
@@ -114,6 +128,7 @@ describe('connectionCapsuleCommands', () => {
                 '$(refresh) Reconnect...',
                 'Actions',
                 '$(plug) Connect...',
+                '$(debug-disconnect) Disconnect',
                 '$(gear) Manage connections...',
             ]);
         });
@@ -128,6 +143,65 @@ describe('connectionCapsuleCommands', () => {
     });
 
     describe('netezza.showConnectionCapsule', () => {
+        it('disconnects the selected SQL tab and refreshes its status', async () => {
+            const manager = createManagerMock();
+            const ctx = createContext(manager);
+            registerConnectionCapsuleCommands(ctx);
+            (vscode.window.showQuickPick as jest.Mock).mockResolvedValueOnce({ action: 'disconnect' });
+
+            await getShowCapsuleHandler()();
+
+            expect(manager.closeDocumentPersistentConnection).toHaveBeenCalledWith('file:///test.sql', true);
+            expect(manager.getDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(ctx.refreshConnectionCapsule).toHaveBeenCalled();
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Disconnected this SQL tab session.');
+        });
+
+        it('reports a failed tab disconnect without showing success', async () => {
+            const manager = createManagerMock({
+                closeDocumentPersistentConnection: jest.fn().mockRejectedValue(new Error('close failed')),
+            });
+            const ctx = createContext(manager);
+            registerConnectionCapsuleCommands(ctx);
+            (vscode.window.showQuickPick as jest.Mock).mockResolvedValueOnce({ action: 'disconnect' });
+
+            await getShowCapsuleHandler()();
+
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Failed to disconnect: close failed');
+            expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+            expect(ctx.refreshConnectionCapsule).toHaveBeenCalled();
+        });
+
+        it('disconnects the Schema root target without requiring an active SQL editor', async () => {
+            const manager = createManagerMock();
+            const ctx = createContext(manager);
+            registerConnectionCapsuleCommands(ctx);
+            (vscode.window as unknown as { activeTextEditor?: unknown }).activeTextEditor = undefined;
+            const call = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                (entry: unknown[]) => entry[0] === 'netezza.disconnectConnection',
+            );
+            expect(call).toBeDefined();
+            await call![1]({ contextValue: 'serverInstance', connectionName: 'PROD' });
+
+            expect(manager.disconnectConnection).toHaveBeenCalledWith('PROD');
+            expect(manager.closeDocumentPersistentConnection).not.toHaveBeenCalled();
+            expect(ctx.refreshConnectionCapsule).toHaveBeenCalled();
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Disconnected all SQL tab sessions: PROD');
+        });
+
+        it('reports a Schema disconnect failure without showing success', async () => {
+            const manager = createManagerMock({
+                disconnectConnection: jest.fn().mockRejectedValue(new Error('close failed')),
+            });
+            registerConnectionCapsuleCommands(createContext(manager));
+            const call = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                (entry: unknown[]) => entry[0] === 'netezza.disconnectConnection',
+            );
+            await call![1]({ connectionName: 'PROD' });
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Failed to disconnect PROD: close failed');
+            expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+        });
+
         it('registers the capsule command', () => {
             registerConnectionCapsuleCommands(createContext(createManagerMock()));
 

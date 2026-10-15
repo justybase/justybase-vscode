@@ -1,3 +1,5 @@
+import type { ExploreOperation, ExploreResponse } from '@justybase/contracts';
+import { getResultSetAt } from '../types.js';
 // Host bridge for Explore server-side operations (full stats, pivot, composer,
 // SQL previews). Mirrors the pending-request pattern of databaseGrouping.ts.
 
@@ -17,7 +19,7 @@ interface PendingRequest<T> {
 }
 
 const pendingRequests = new Map<number, PendingRequest<unknown>>();
-let requestIdCounter = 0;
+let requestIdCounter = Date.now() * 1000;
 
 function waitForRequest<T>(command: string, payload: Record<string, unknown>, timeoutSeconds: number): Promise<T> {
     const requestId = ++requestIdCounter;
@@ -26,6 +28,7 @@ function waitForRequest<T>(command: string, payload: Record<string, unknown>, ti
             const pending = pendingRequests.get(requestId);
             if (!pending) return;
             pendingRequests.delete(requestId);
+            postHostMessage({ command: 'cancelExploreOperation', requestId });
             pending.reject(new Error(`${command} timed out after ${timeoutSeconds}s`));
         }, timeoutSeconds * 1000 + 2000);
         pendingRequests.set(requestId, {
@@ -63,6 +66,9 @@ export function handleExploreHostMessage(message: { command: string; requestId?:
         return;
     }
     switch (message.command) {
+        case 'exploreOperationResult':
+            settlePending(requestId, message.error, message.result);
+            break;
         case 'exploreFullStatsResult':
             settlePending(requestId, message.error, {
                 columnIndex: message.columnIndex,
@@ -120,14 +126,9 @@ export function requestExploreFullStats(
     filters?: ExploreFilterModel,
     timeoutSeconds = 120,
 ): Promise<FullStatisticsPayload> {
-    const { sourceUri, resultSetIndex } = sourceAndIndex();
-    return waitForRequest<FullStatisticsPayload>('requestExploreFullStats', {
-        sourceUri,
-        resultSetIndex,
-        columnIndex,
-        filters,
-        timeoutSeconds,
-    }, timeoutSeconds);
+    return requestExploreOperation({ kind: 'fullStats', columnIndex, filters }, false, timeoutSeconds).then(result => ({ columnIndex,
+        values: result.values ?? {}, percentilesUnavailable: result.percentilesUnavailable ?? false,
+        stddevUnavailable: result.stddevUnavailable ?? false, sql: result.sql }));
 }
 
 export interface ExplorePivotResultPayload {
@@ -140,23 +141,12 @@ export interface ExplorePivotResultPayload {
 }
 
 export function requestExplorePivot(pivot: ExplorePivotConfig, timeoutSeconds = 300): Promise<ExplorePivotResultPayload> {
-    const { sourceUri, resultSetIndex } = sourceAndIndex();
-    return waitForRequest<ExplorePivotResultPayload>('requestExplorePivot', {
-        sourceUri,
-        resultSetIndex,
-        pivot,
-        timeoutSeconds,
-    }, timeoutSeconds);
+    return requestExploreOperation({ kind: 'pivot', config: pivot }, false, timeoutSeconds).then(result => ({ columns: result.columns ?? [], rows: result.rows,
+        totalRows: result.rows.length, pivotValues: result.pivotValues ?? [], truncated: result.truncated, sql: result.sql }));
 }
 
 export function previewExplorePivot(pivot: ExplorePivotConfig, pivotValues: string[]): Promise<string> {
-    const { sourceUri, resultSetIndex } = sourceAndIndex();
-    return waitForRequest<string>('previewExplorePivot', {
-        sourceUri,
-        resultSetIndex,
-        pivot,
-        pivotValues,
-    }, 30);
+    return requestExploreOperation({ kind: 'pivot', config: pivot, pivotValues }, true).then(result => result.sql);
 }
 
 export interface ExploreComposerResultPayload {
@@ -164,6 +154,7 @@ export interface ExploreComposerResultPayload {
         bucket: number;
         dimension: number | undefined;
         split: number | undefined;
+    splitOther?: number;
         measure: number;
         previous: number | undefined;
     };
@@ -172,22 +163,14 @@ export interface ExploreComposerResultPayload {
 }
 
 export function requestExploreComposer(composer: ExploreComposerConfig, timeoutSeconds = 300): Promise<ExploreComposerResultPayload> {
-    const { sourceUri, resultSetIndex } = sourceAndIndex();
-    return waitForRequest<ExploreComposerResultPayload>('requestExploreComposer', {
-        sourceUri,
-        resultSetIndex,
-        composer,
-        timeoutSeconds,
-    }, timeoutSeconds);
+    return requestExploreOperation({ kind: 'composer', config: composer }, false, timeoutSeconds).then(result => {
+        if (!result.columnIndexes) throw new Error('Missing time-series column metadata.');
+        return { columnIndexes: result.columnIndexes, rows: result.rows, sql: result.sql };
+    });
 }
 
 export function previewExploreComposer(composer: ExploreComposerConfig): Promise<string> {
-    const { sourceUri, resultSetIndex } = sourceAndIndex();
-    return waitForRequest<string>('previewExploreComposer', {
-        sourceUri,
-        resultSetIndex,
-        composer,
-    }, 30);
+    return requestExploreOperation({ kind: 'composer', config: composer }, true).then(result => result.sql);
 }
 
 export function previewExploreFilteredSql(filters: ExploreFilterModel): Promise<string> {
@@ -201,4 +184,20 @@ export function previewExploreFilteredSql(filters: ExploreFilterModel): Promise<
 
 export function openExploreSqlInEditor(sql: string, label?: string): void {
     postHostMessage({ command: 'openExploreSqlInEditor', sql, label } as never);
+}
+
+export function requestExploreOperation(operation: ExploreOperation, preview = false, timeoutSeconds = operation.kind === 'values' || operation.kind === 'fullStats' ? 120 : 300): Promise<ExploreResponse> {
+    const scope = sourceAndIndex();
+    return waitForRequest<ExploreResponse>('requestExploreOperation', { ...scope,
+        resultSetId: getResultSetAt(scope.resultSetIndex)?.resultSetId, operation, preview, timeoutSeconds }, preview ? 30 : timeoutSeconds);
+}
+
+/** Reject pending work on view replacement; the host cancels only its owned executions. */
+export function cancelExploreRequests(): void {
+    for (const [requestId, pending] of pendingRequests) {
+        postHostMessage({ command: 'cancelExploreOperation', requestId });
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.reject(new Error('Cancelled'));
+    }
+    pendingRequests.clear();
 }

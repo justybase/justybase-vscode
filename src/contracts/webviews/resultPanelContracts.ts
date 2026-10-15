@@ -1,3 +1,4 @@
+import type { ExploreRequest, ExploreResponse } from '@justybase/contracts';
 import type { ExcelExportMetadata, ExportMetadata } from '../../export/exportManager';
 import type { ResultFormattingPayload, ResultFormattingUpdateRequest } from '../../results/resultFormattingTypes';
 import type {
@@ -364,6 +365,8 @@ export type ResultPanelWebviewToHostMessage =
         requestId: number;
         filters: ExploreFilterModel;
     }
+    | ({ command: 'requestExploreOperation' } & ExploreRequest)
+    | { command: 'cancelExploreOperation'; requestId: number }
     | {
         command: 'openExploreSqlInEditor';
         sql: string;
@@ -371,6 +374,7 @@ export type ResultPanelWebviewToHostMessage =
     };
 
 export type ResultPanelHostToWebviewMessage =
+    | { command: 'exploreOperationResult'; requestId: number; resultSetId?: string; result?: ExploreResponse; error?: string }
   | { command: 'sqlQueueState'; lanesJson: string }
   | { command: 'hydrate'; data: ResultPanelViewData; uxTraceId?: string }
   | ResultPanelTestBridgeRequest
@@ -654,10 +658,12 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['sqlQueueAction', 'openRel
   'requestExploreComposer',
   'previewExploreComposer',
   'previewExploreFilteredSql',
+  'requestExploreOperation',
+  'cancelExploreOperation',
   'openExploreSqlInEditor'
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
-export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['sqlQueueState',
+export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['exploreOperationResult','sqlQueueState',
   'hydrate',
   'testBridge',
   'setActiveSource',

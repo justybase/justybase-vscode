@@ -1,9 +1,10 @@
+import { button, element } from './ui.js';
 // Explore pivot tab: configuration (rows / columns / values) + results grid
 // with row and column totals.
 
 import { getElementById } from '../dom.js';
 import { postHostMessage } from '../protocol.js';
-import { requestExplorePivot, previewExplorePivot, openExploreSqlInEditor } from './hostBridge.js';
+import { requestExplorePivot, previewExplorePivot, openExploreSqlInEditor, cancelExploreRequests, type ExplorePivotResultPayload } from './hostBridge.js';
 import { showSqlPreviewModal } from './previewModal.js';
 import type {
     ExploreColumnMeta,
@@ -26,9 +27,13 @@ export interface PivotTabState {
     pivotValues: string[];
 }
 
+export interface PivotTabCache { result?: ExplorePivotResultPayload; config?: ExplorePivotConfig }
+
 export interface PivotTabOptions {
+    cache?: PivotTabCache;
     columns: readonly ExploreColumnMeta[];
     filters: ExploreFilterModel;
+    getFilters?: () => ExploreFilterModel;
     state?: PivotTabState;
     onStateChange: (state: PivotTabState) => void;
 }
@@ -117,7 +122,7 @@ export function renderPivotTab(
                 columnColumnIndex: columnIndex,
                 valueColumnIndex: valueIndex,
                 aggFn: (aggSelect?.value as ExplorePivotAggregate) ?? 'sum',
-                filters,
+                filters: options.getFilters?.() ?? filters,
             },
         };
     };
@@ -126,7 +131,10 @@ export function renderPivotTab(
         onStateChange({ config, pivotValues });
     };
 
+    const cache = options.cache ?? {};
+    let running = false;
     const run = async () => {
+        if (running) return;
         const { config, error } = readConfig();
         const results = getElementById('explorePivotResults');
         if (!results) return;
@@ -136,14 +144,18 @@ export function renderPivotTab(
         }
         const pivotColumn = columns[config.columnColumnIndex];
         const values = pivotColumn ? (pivotColumnValues(pivotColumn) ?? []) : [];
-        results.innerHTML = '<div class="explore-loading">Running pivot…</div>';
+        running = true;
+        const status = element('p', 'Running pivot…'); results.prepend(status);
         try {
             const result = await requestExplorePivot(config);
+            if (!results.isConnected) return;
+            cache.result = result; cache.config = config;
             persist(config, result.pivotValues ?? values);
             renderPivotResults(results, result.rows, result.columns, result.sql, result.truncated);
         } catch (err) {
-            results.innerHTML = `<div class="explore-error">${escapeHtml(err instanceof Error ? err.message : String(err))}</div>`;
-        }
+            status.textContent = err instanceof Error ? err.message : String(err);
+            status.append(button('Retry', () => void run()));
+        } finally { running = false; }
     };
 
     const preview = async () => {
@@ -166,6 +178,17 @@ export function renderPivotTab(
         }
     };
 
+    root.querySelector('.explore-config-actions')?.append(button('Cancel', cancelExploreRequests));
+    root.querySelector('.explore-tab-config')?.addEventListener('change', () => {
+        const next = readConfig();
+        if (!next.error) persist(next.config, cache.result?.pivotValues ?? []);
+        root.querySelectorAll('.explore-database-status').forEach(node => { node.textContent = 'Out of date · Press Run to apply current filters and settings'; });
+    });
+    const previous = getElementById('explorePivotResults');
+    if (previous && cache.result) {
+        renderPivotResults(previous, cache.result.rows, cache.result.columns, cache.result.sql, cache.result.truncated);
+        if (JSON.stringify(readConfig().config) !== JSON.stringify(cache.config)) previous.querySelectorAll('.explore-database-status').forEach(node => { node.textContent = 'Out of date · Press Run to apply current filters and settings'; });
+    }
     getElementById('explorePivotRun')?.addEventListener('click', () => void run());
     getElementById('explorePivotPreview')?.addEventListener('click', () => void preview());
 }
@@ -242,9 +265,10 @@ function renderPivotResults(
         return `<td class="explore-pivot-total">${(total ?? 0).toLocaleString()}</td>`;
     }).join('');
 
+    const status = `Database · ${rows.length.toLocaleString()} rows · ${new Date().toLocaleTimeString()} · Original SQL limits preserved`;
     root.innerHTML = `
         <div class="explore-pivot-summary">
-            <span>${rows.length.toLocaleString()} rows</span>
+            <span class="explore-database-status">${status}</span>
             <button class="explore-sql-link" id="explorePivotOpenSql" title="Open pivot SQL in the editor">SQL</button>
         </div>
         ${truncatedNote}
