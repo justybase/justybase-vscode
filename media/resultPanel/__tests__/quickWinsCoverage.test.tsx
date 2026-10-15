@@ -44,6 +44,10 @@ import type { GridHandle, ResultSet, DiskQuerySpec, TanStackColumn } from '../ty
 
 const resultPanelTableCore = { constructTable, webviewFeatures } as unknown as TableCoreModuleLike;
 
+jest.mock('../protocol.js', () => {
+    const actual = jest.requireActual('../protocol.js') as Record<string, unknown>;
+    return { __esModule: true, ...actual, postHostMessage: jest.fn() };
+});
 jest.mock('../rangeChart.js', () => ({ canCreateRangeChart: jest.fn(() => false) }));
 jest.mock('../databaseFilters.js', () => ({
     applyDatabaseFilter: jest.fn(async () => undefined),
@@ -1247,24 +1251,19 @@ describe('SQL editor result panel quick-win coverage', () => {
             historySource, 0, undefined,
         );
 
-        const confirmation = jest.fn((message: string) => {
-            void message;
-            return false;
-        });
-        Object.assign(window, { confirm: confirmation });
+        const postSpy = panelProtocol.postHostMessage as jest.Mock;
         for (let index = 0; index < 14; index += 1) {
             addPendingEdit(index, 0, index === 0 ? null : `old-${index}`, index === 1 ? '' : `new-${index}`);
         }
         addPendingEdit(15, 0, 'old', 'x'.repeat(130));
         markRowForDelete(16);
+        postSpy.mockClear();
         panel.saveEdits?.();
-        const calls = confirmation.mock.calls;
-        const summary = calls[calls.length - 1]?.[0] as string;
-        expect(summary).toContain('empty string');
-        expect(summary).toContain('and 1 row deletion');
-        expect(summary).toContain('more cell change');
-        confirmation.mockReturnValue(true);
-        panel.saveEdits?.();
-        expect(confirmation).toHaveBeenCalledTimes(2);
+        // Confirmation is performed by the host (modal); the webview only posts the pending changes.
+        const saveMessage = postSpy.mock.calls
+            .map(([message]) => message as { command: string; edits?: unknown[]; deleteRowIndices?: number[] })
+            .find(message => message.command === 'saveEdits');
+        expect(saveMessage?.edits).toHaveLength(15);
+        expect(saveMessage?.deleteRowIndices).toEqual([16]);
     });
 });
