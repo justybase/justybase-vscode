@@ -604,7 +604,7 @@ describe('commands/queryCommands', () => {
 
             await handler();
 
-            expect(SqlParser.splitStatements).toHaveBeenCalledWith('SELECT 1; SELECT 2;');
+            expect(SqlParser.splitStatements).toHaveBeenCalledWith('SELECT 1; SELECT 2;', 'netezza');
             expect(runQueriesWithStreaming).toHaveBeenCalledWith(
                 mockContext,
                 ['SELECT 1', 'SELECT 2'],
