@@ -7,6 +7,7 @@ import { clearResultPanelTrace } from '../../views/resultPanelTrace';
 import type { QueryResult, ResultSet } from '../../types';
 import type { runQueryRaw as RunQueryRaw } from '../../core/queryRunner';
 import { openRelatedRowsFromCell } from '../../results/relatedRowsNavigation';
+import { formatEditValue } from '../../results/editStatements';
 
 jest.mock('../../core/queryRunner', () => ({
     runQueryRaw: jest.fn(),
@@ -351,7 +352,6 @@ describe('ResultPanelView Integration', () => {
             };
             _stateManager: { resultsMap: Map<string, ResultSet[]> };
             _handleApplyDatabaseFilter: (uri: string, index: number, spec?: { globalSearch?: string }) => Promise<void>;
-            _formatEditValue: (value: unknown, dataType?: string) => string;
         };
         privateProvider._context = {} as vscode.ExtensionContext;
         privateProvider._connectionManager = {
@@ -374,9 +374,9 @@ describe('ResultPanelView Integration', () => {
             refreshSql: original.refreshSql,
             name: original.name,
         });
-        expect(privateProvider._formatEditValue('1e3', 'INTEGER')).toBe('1e3');
-        expect(privateProvider._formatEditValue('.5E-2', 'DECIMAL(12,4)')).toBe('.5E-2');
-        expect(privateProvider._formatEditValue('1e3', 'VARCHAR')).toBe("'1e3'");
+        expect(formatEditValue('1e3', 'INTEGER')).toBe('1e3');
+        expect(formatEditValue('.5E-2', 'DECIMAL(12,4)')).toBe('.5E-2');
+        expect(formatEditValue('1e3', 'VARCHAR')).toBe("'1e3'");
     });
 
     test('executes database aggregation SQL with filtered-count and alias fallbacks', async () => {

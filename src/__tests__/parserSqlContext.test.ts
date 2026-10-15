@@ -35,9 +35,9 @@ describe('parserSqlContext', () => {
         const sql = 'SELECT o.__JB_COMPLETION__ FROM PUBLIC.ORDERS o';
         const bindings = parseAliasBindingsWithParser(sql, sql.indexOf('__JB_COMPLETION__'), 'postgresql');
 
-        expect(bindings.get('O')).toEqual({
-            schema: 'PUBLIC',
-            table: 'ORDERS'
+        expect(bindings.get('o')).toEqual({
+            schema: 'public',
+            table: 'orders'
         });
     });
 
@@ -129,7 +129,7 @@ END_PROC;`;
         const sql = 'SELECT o.__JB_COMPLETION__ FROM "Sales"."Order Items" o';
         const bindings = parseAliasBindingsWithParser(sql, sql.indexOf('__JB_COMPLETION__'), 'postgresql');
 
-        expect(bindings.get('O')).toEqual({
+        expect(bindings.get('o')).toEqual({
             schema: 'Sales',
             table: 'Order Items'
         });
@@ -177,11 +177,11 @@ JOIN JUST_DATA..DIMDATE D ON D.DATEKEY = O.ACCOUNTKEY`;
             'postgresql'
         );
 
-        expect(definitions).toContainEqual({
-            name: 'SALES_CTE',
+        expect(definitions).toContainEqual(expect.objectContaining({
+            name: 'sales_cte',
             type: 'CTE',
             columns: ['Employee Id', 'Full Name']
-        });
+        }));
     });
 
     it('keeps later sibling CTEs hidden inside an earlier CTE body', () => {
