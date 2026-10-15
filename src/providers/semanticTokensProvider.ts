@@ -661,7 +661,7 @@ export class NetezzaSemanticTokensProvider
     let previousTokenWasAlias = false;
     // Build comment/string index once — do not call isOffsetInSqlComment per token
     // (even with module cache, concurrent scans can invalidate mid-loop).
-    const scanIndex = buildSqlSourceScanIndex(text);
+    const scanIndex = buildSqlSourceScanIndex(text, databaseKind);
 
     for (let tokenIndex = 0; tokenIndex < lexResult.tokens.length; tokenIndex++) {
       if (

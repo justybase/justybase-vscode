@@ -1,3 +1,4 @@
+import type { ExploreRequest, ExploreResponse } from '@justybase/contracts';
 /**
  * Webview-local Result Panel protocol contracts.
  *
@@ -275,6 +276,8 @@ interface ResultPanelWebviewToHostMessageMap {
     };
     cancelDatabaseGrouping: { sourceUri: string; resultSetIndex: number; requestId: number };
     previewDatabaseGrouping: { sourceUri: string; resultSetIndex: number; requestId: number; grouping: unknown };
+    requestExploreOperation: ExploreRequest;
+    cancelExploreOperation: { requestId: number };
     requestExploreFullStats: {
         sourceUri: string;
         resultSetIndex: number;
@@ -464,6 +467,7 @@ interface ResultPanelHostToWebviewMessageMap {
         error?: string;
     };
     exploreComposerPreviewResult: { requestId: number; sql?: string; error?: string };
+    exploreOperationResult: { requestId: number; resultSetId?: string; result?: ExploreResponse; error?: string };
     exploreFilteredSqlPreviewResult: { requestId: number; sql?: string; error?: string };
 }
 
@@ -491,7 +495,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['sqlQueueAction', 'openRel
     'insertCellContent', 'updateResultFormatting', 'saveEdits', 'webviewFocused', 'webviewBlurred',
     'updateGridFontFamily', 'updateGridFontSize', 'saveChartImage', 'requestRows', 'diskQuery',
     'moveToDisk', 'moveAllToDisk', 'requestDatabaseGrouping', 'cancelDatabaseGrouping',
-    'previewDatabaseGrouping', 'requestExploreFullStats', 'requestExplorePivot', 'previewExplorePivot',
+    'previewDatabaseGrouping', 'requestExploreOperation', 'cancelExploreOperation', 'requestExploreFullStats', 'requestExplorePivot', 'previewExplorePivot',
     'requestExploreComposer', 'previewExploreComposer', 'previewExploreFilteredSql', 'openExploreSqlInEditor',
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
@@ -502,7 +506,7 @@ export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['sqlQueueState',
     'rowWindow', 'diskQueryResult', 'databaseAggregationResult', 'databaseFilterValuesResult',
     'databaseFilterApplyResult', 'databaseGroupingResult', 'databaseGroupingPreviewResult',
     'exploreFullStatsResult', 'explorePivotResult', 'explorePivotPreviewResult', 'exploreComposerResult',
-    'exploreComposerPreviewResult', 'exploreFilteredSqlPreviewResult',
+    'exploreComposerPreviewResult', 'exploreOperationResult', 'exploreFilteredSqlPreviewResult',
 ] as const satisfies readonly ResultPanelHostToWebviewMessage['command'][];
 
 export const RESULT_PANEL_INBOUND_COMMANDS = RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS;

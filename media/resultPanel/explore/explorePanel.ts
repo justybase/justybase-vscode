@@ -1,3 +1,4 @@
+import { renderFullStatsCard, type FullStatsSnapshot } from './fullStatsCard.js';
 // Explore view orchestrator: column cards, quality banner, filter bar with
 // undo/redo, pivot tab and time composer tab. State persists per result set
 // in the webview host state (_exploreStates).
@@ -10,12 +11,15 @@ import { classifyColumnRole } from './columnClassification.js';
 import { computeColumnOverviews } from './columnOverview.js';
 import { filterExploreRows, columnsMetaForRows } from './filtering.js';
 import { computeQualityAlerts, computeMeasureCorrelations } from './quality.js';
-import { computeColumnStatistics } from './statistics.js';
+import { renderFilterEditor } from './filterEditor.js';
+import { showSelectionActions, type ExploreSelection } from './selectionActions.js';
+import { renderRankingTab, disposeRankingView, type RankingViewState } from './rankingTab.js';
+import { select, field, applyDatabaseAvailability } from './ui.js';
 import { ExploreFilterState } from './filterState.js';
 import { renderFilterBar } from './filterBar.js';
-import { renderPivotTab, type PivotTabState } from './pivotTab.js';
-import { renderComposerTab, disposeComposerChart } from './composerTab.js';
-import { requestExploreFullStats, openExploreSqlInEditor } from './hostBridge.js';
+import { renderPivotTab, type PivotTabState, type PivotTabCache } from './pivotTab.js';
+import { renderComposerTab, disposeComposerChart, type ComposerTabCache } from './composerTab.js';
+import { cancelExploreRequests } from './hostBridge.js';
 import { wireExplorePreviewGlobal } from './previewModal.js';
 import {
     EXPLORE_SAMPLE_ROWS,
@@ -46,6 +50,7 @@ interface ExploreData {
     sampledRows: number;
     truncated: boolean;
     sampleMode: 'memory' | 'disk';
+    databaseReason?: string;
 }
 
 interface ExploreViewState {
@@ -53,10 +58,45 @@ interface ExploreViewState {
     filterState: ExploreFilterState | null;
     activeTab: ExploreTab;
     persisted: ExplorePersistedState;
+    ranking: RankingViewState;
+    composer: ComposerTabCache;
+    pivot: PivotTabCache;
+    fullStats: Map<number, FullStatsSnapshot>;
+    dataRevision?: string;
+    /** Filtered sample memo; one filter change filters the sample once. */
+    filteredSample?: FilteredSample;
+}
+
+interface FilteredSample {
+    readonly source: readonly unknown[][];
+    readonly key: string;
+    readonly rows: unknown[][];
+    overviews?: ReturnType<typeof computeColumnOverviews>;
+}
+
+/**
+ * The scope line, quality banner and cards all need the filtered sample (up
+ * to EXPLORE_SAMPLE_ROWS rows); compute it and its overviews once per filter
+ * state instead of once per consumer. Filters are mutated in place, so the
+ * memo is keyed by their serialized content.
+ */
+function getFilteredSample(view: ExploreViewState, data: ExploreData, filters: ExploreFilterModel): FilteredSample {
+    const key = JSON.stringify(filters);
+    const cached = view.filteredSample;
+    if (cached && cached.source === data.sampleRows && cached.key === key) return cached;
+    view.filteredSample = { source: data.sampleRows, key, rows: filterExploreRows(data.sampleRows, filters) };
+    return view.filteredSample;
+}
+
+function getFilteredOverviews(view: ExploreViewState, data: ExploreData, filters: ExploreFilterModel): ReturnType<typeof computeColumnOverviews> {
+    const sample = getFilteredSample(view, data, filters);
+    sample.overviews ??= computeColumnOverviews(data.columnsMeta, sample.rows, sample.rows.length);
+    return sample.overviews;
 }
 
 const viewStates = new Map<string, ExploreViewState>();
 let activeViewKey: string | null = null;
+let renderGeneration = 0;
 
 function escapeHtml(value: unknown): string {
     return String(value)
@@ -116,7 +156,7 @@ async function loadSampleRows(rsIndex: number): Promise<{ rows: unknown[][]; sam
         if (!sourceUri) {
             return { rows: [], sampleMode: 'disk' };
         }
-        const rows = await fetchRowsFromHost(sourceUri, rsIndex, 0, EXPLORE_SAMPLE_ROWS);
+        const rows = await fetchRowsFromHost(sourceUri, rsIndex, 0, EXPLORE_SAMPLE_ROWS, true);
         return { rows, sampleMode: 'disk' };
     }
     const data = Array.isArray(resultSet.data) ? resultSet.data : [];
@@ -157,7 +197,7 @@ interface HostExploreStateHolder {
 function loadPersistedState(key: string): ExplorePersistedState {
     const hostState = getHostState() as HostExploreStateHolder | null;
     const saved = hostState?._exploreStates?.[key];
-    if (saved) {
+    if (saved?.version === 2) {
         return saved;
     }
     return {
@@ -173,7 +213,12 @@ function savePersistedState(key: string, state: ExplorePersistedState): void {
     if (!hostState._exploreStates) {
         hostState._exploreStates = {};
     }
+    state.version = 2;
     hostState._exploreStates[key] = state;
+    for (const oldKey of Object.keys(hostState._exploreStates)) {
+        if (Object.keys(hostState._exploreStates).length <= 50) break;
+        if (oldKey !== key) delete hostState._exploreStates[oldKey];
+    }
     setHostState(hostState);
 }
 
@@ -255,13 +300,13 @@ function buildCard(
         actions.className = 'explore-card-actions';
         actions.appendChild(buildCardButton('Σ Full stats', () => onRequestFullStats(overview.index, card)));
         actions.appendChild(buildCardButton('Filter…', () => {
-            toggleCardInlineForm(card, 'measure');
+            card.dispatchEvent(new CustomEvent('exploreEditFilter', { bubbles: true }));
         }));
         card.appendChild(actions);
     } else if (overview.role === 'date') {
         const actions = document.createElement('div');
         actions.className = 'explore-card-actions';
-        actions.appendChild(buildCardButton('Filter…', () => toggleCardInlineForm(card, 'date')));
+        actions.appendChild(buildCardButton('Filter…', () => card.dispatchEvent(new CustomEvent('exploreEditFilter', { bubbles: true }))));
         card.appendChild(actions);
     } else {
         const top = overview.topValues ?? [];
@@ -274,7 +319,10 @@ function buildCard(
             top.slice(0, EXPLORE_TOP_VALUES).forEach(item => {
                 const row = document.createElement('div');
                 row.className = 'explore-top-row' + (activeValues.has(item.value) ? ' is-active' : '');
-                row.title = `Click to ${activeValues.has(item.value) ? 'remove from' : 'add to'} filter`;
+                row.title = 'Explore this value';
+                row.tabIndex = 0;
+                row.setAttribute('role', 'button');
+                row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggleDimension(overview.index, item.value); } });
                 row.innerHTML = `
                     <span class="explore-top-value">${escapeHtml(item.value)}</span>
                     <span class="explore-top-bar"><span style="width:${Math.max(2, (item.count / maxCount) * 100).toFixed(1)}%"></span></span>
@@ -285,6 +333,7 @@ function buildCard(
             });
             card.appendChild(topList);
         }
+        card.appendChild(buildCardButton('Filter…', () => card.dispatchEvent(new CustomEvent('exploreEditFilter', { bubbles: true }))));
     }
 
     return card;
@@ -298,80 +347,38 @@ function buildCardButton(label: string, onClick: () => void): HTMLButtonElement 
     return button;
 }
 
-function toggleCardInlineForm(card: HTMLElement, kind: 'date' | 'measure'): void {
-    const existing = card.querySelector('.explore-card-inline-form');
-    if (existing) {
-        existing.remove();
-        return;
-    }
-    const form = document.createElement('div');
-    form.className = 'explore-card-inline-form';
-    if (kind === 'date') {
-        form.innerHTML = `
-            <input type="text" class="explore-inline-input explore-inline-date-from" placeholder="From (YYYY-MM-DD)">
-            <input type="text" class="explore-inline-input explore-inline-date-to" placeholder="To (YYYY-MM-DD)">
-            <button class="explore-inline-apply">Apply</button>
-            <button class="explore-inline-clear">Clear</button>
-        `;
-        const apply = form.querySelector('.explore-inline-apply');
-        apply?.addEventListener('click', () => {
-            const from = (form.querySelector('.explore-inline-date-from') as HTMLInputElement)?.value ?? '';
-            const to = (form.querySelector('.explore-inline-date-to') as HTMLInputElement)?.value ?? '';
-            const index = Number(card.dataset.columnIndex);
-            const onApply = card.__exploreApplyDateFilter;
-            if (onApply && !Number.isNaN(index)) {
-                onApply(index, 'day', from, to);
-            }
-            form.remove();
-        });
-        const clear = form.querySelector('.explore-inline-clear');
-        clear?.addEventListener('click', () => {
-            const index = Number(card.dataset.columnIndex);
-            const onClear = card.__exploreClearDateFilter;
-            if (onClear && !Number.isNaN(index)) {
-                onClear(index);
-            }
-            form.remove();
-        });
-    } else {
-        form.innerHTML = `
-            <input type="number" class="explore-inline-input explore-inline-measure-min" placeholder="min">
-            <input type="number" class="explore-inline-input explore-inline-measure-max" placeholder="max">
-            <button class="explore-inline-apply">Apply</button>
-            <button class="explore-inline-clear">Clear</button>
-        `;
-        const apply = form.querySelector('.explore-inline-apply');
-        apply?.addEventListener('click', () => {
-            const minInput = form.querySelector('.explore-inline-measure-min') as HTMLInputElement;
-            const maxInput = form.querySelector('.explore-inline-measure-max') as HTMLInputElement;
-            const min = minInput?.value !== '' ? Number(minInput?.value) : undefined;
-            const max = maxInput?.value !== '' ? Number(maxInput?.value) : undefined;
-            const index = Number(card.dataset.columnIndex);
-            const onApply = card.__exploreApplyMeasureFilter;
-            if (onApply && !Number.isNaN(index)) {
-                onApply(index, min, max);
-            }
-            form.remove();
-        });
-        const clear = form.querySelector('.explore-inline-clear');
-        clear?.addEventListener('click', () => {
-            const index = Number(card.dataset.columnIndex);
-            const onApply = card.__exploreApplyMeasureFilter;
-            if (onApply && !Number.isNaN(index)) {
-                onApply(index, undefined, undefined);
-            }
-            form.remove();
-        });
-    }
-    card.appendChild(form);
+function editFilter(view: ExploreViewState, columnIndex?: number): void {
+    const root = getElementById('exploreFilterEditor');
+    if (!root || !view.data || !view.filterState) return;
+    renderFilterEditor(root, view.data.columnsMeta, view.data.sampleRows, view.filterState.filters,
+        filters => view.filterState?.replace(filters), columnIndex, view.data.databaseReason);
 }
 
-declare global {
-    interface HTMLElement {
-        __exploreApplyDateFilter?: (columnIndex: number, grain: string, from: string, to: string) => void;
-        __exploreClearDateFilter?: (columnIndex: number) => void;
-        __exploreApplyMeasureFilter?: (columnIndex: number, min: number | undefined, max: number | undefined) => void;
-    }
+function selectRows(view: ExploreViewState, selection: ExploreSelection): void {
+    const root = getElementById('exploreSelection');
+    if (root && view.data && view.filterState) showSelectionActions(root, selection, view.data.columns, view.data.sampleRows,
+        filters => view.filterState?.replace(filters), view.data.databaseReason);
+}
+
+function selectCategory(view: ExploreViewState, columnIndex: number, value: string): void {
+    if (!view.filterState) return;
+    const filters = view.filterState.filters;
+    filters.dimensions = filters.dimensions.filter(item => item.columnIndex !== columnIndex);
+    filters.dimensions.push({ columnIndex, values: [value] });
+    selectRows(view, { label: value, filters, scope: 'sample' });
+}
+
+function updateScope(view: ExploreViewState): void {
+    const root = getElementById('exploreSubtitle');
+    const data = view.data;
+    if (!root || !data || !view.filterState) return;
+    const matched = getFilteredSample(view, data, view.filterState.filters).rows.length;
+    root.textContent = `${data.truncated ? 'Sample' : 'All loaded rows'} · First ${data.sampledRows.toLocaleString()} of ${data.totalRows.toLocaleString()} loaded rows · ${matched.toLocaleString()} matching rows in the sample · First rows; not a random sample`;
+    const result = getResultSetAt(Number(document.getElementById('exploreTabContent')?.dataset.resultIndex ?? '-1'));
+    if (data.databaseReason) root.textContent += ` · ${data.databaseReason}`;
+    if (result?.limitReached) root.textContent += ' · Row limit reached';
+    if (result?.isCancelled) root.textContent += ' · Partial result';
+    if (result && result.isStreamingComplete === false) root.textContent += ' · Streaming';
 }
 
 function renderCardsView(view: ExploreViewState): void {
@@ -385,8 +392,7 @@ function renderCardsView(view: ExploreViewState): void {
     }
 
     const filters = filterState.filters;
-    const filteredRows = filterExploreRows(data.sampleRows, filters);
-    const filteredOverviews = computeColumnOverviews(data.columnsMeta, filteredRows, filteredRows.length);
+    const filteredOverviews = getFilteredOverviews(view, data, filters);
 
     content.innerHTML = '';
     const grid = document.createElement('div');
@@ -402,82 +408,34 @@ function renderCardsView(view: ExploreViewState): void {
         const card = buildCard(
             overview,
             filters,
-            (columnIndex, value) => filterState.toggleDimensionValue(columnIndex, value),
+            (columnIndex, value) => selectCategory(view, columnIndex, value),
             (columnIndex, cardElement) => {
-                void loadFullStatsIntoCard(columnIndex, cardElement, filters);
+                renderFullStatsCard(cardElement, columnIndex, filters, view.fullStats, true);
             },
         );
-        card.__exploreApplyDateFilter = (columnIndex, _grain, from, to) => filterState.setDateFilter(columnIndex, 'day', from, to);
-        card.__exploreClearDateFilter = columnIndex => filterState.setDateFilter(columnIndex, 'day', undefined, undefined);
-        card.__exploreApplyMeasureFilter = (columnIndex, min, max) => filterState.setMeasureRange(columnIndex, min, max);
+        card.addEventListener('exploreEditFilter', () => editFilter(view, overview.index));
+        if (overview.histogram) {
+            const bins = overview.histogram;
+            const choose = (index: number) => {
+                const bin = bins[index];
+                if (!bin) return;
+                const selected = filterState.filters;
+                selected.measures = selected.measures.filter(item => item.columnIndex !== overview.index);
+                selected.measures.push({ columnIndex: overview.index, min: bin.min, max: bin.max, maxExclusive: index < bins.length - 1 });
+                selectRows(view, { label: `${overview.name}: ${bin.min} – ${bin.max}`, filters: selected, scope: 'sample' });
+            };
+            card.querySelectorAll('svg rect').forEach((rect, index) => rect.addEventListener('click', () => choose(index)));
+            const details = document.createElement('details');
+            const summary = document.createElement('summary'); summary.textContent = 'Distribution ranges'; details.append(summary);
+            bins.forEach((bin, index) => details.append(buildCardButton(`${formatNumber(bin.min)} – ${formatNumber(bin.max)} (${bin.count})`, () => choose(index))));
+            card.append(details);
+        }
+        if (view.fullStats.has(overview.index)) renderFullStatsCard(card, overview.index, filters, view.fullStats);
+        applyDatabaseAvailability(card, data.databaseReason);
         grid.appendChild(card);
     }
 
     content.appendChild(grid);
-}
-
-async function loadFullStatsIntoCard(
-    columnIndex: number,
-    card: HTMLElement,
-    filters: ExploreFilterModel,
-): Promise<void> {
-    const existing = card.querySelector('.explore-full-stats');
-    if (existing) {
-        existing.remove();
-        return;
-    }
-    const statsDiv = document.createElement('div');
-    statsDiv.className = 'explore-full-stats';
-    statsDiv.textContent = 'Computing full statistics…';
-    card.appendChild(statsDiv);
-    try {
-        const result = await requestExploreFullStats(columnIndex, filters);
-        const v = result.values;
-        const cells = [
-            ['Count', v.count],
-            ['Distinct', v.distinct],
-            ['Sum', v.sum],
-            ['Avg', v.avg],
-            ['Min', v.min],
-            ['Max', v.max],
-            ['StdDev', v.stddev],
-            ['p25', v.p25],
-            ['Median', v.p50],
-            ['p75', v.p75],
-        ] as const;
-        const unavailable = result.percentilesUnavailable;
-        const noStddev = result.stddevUnavailable;
-        statsDiv.innerHTML = `
-            <div class="explore-full-stats-grid">
-                ${cells.filter(([label]) => !(unavailable && (label === 'p25' || label === 'Median' || label === 'p75')) && !(noStddev && label === 'StdDev')).map(([label, value]) => `
-                    <div class="explore-full-stat"><span class="explore-full-stat-label">${label}</span><span class="explore-full-stat-value">${value === null || value === undefined ? '—' : formatNumber(Number(value))}</span></div>
-                `).join('')}
-            </div>
-            <button class="explore-sql-link" id="exploreFullStatsSql">SQL</button>
-        `;
-        getElementById('exploreFullStatsSql')?.addEventListener('click', () => {
-            openExploreSqlInEditor(result.sql, 'Full statistics query');
-        });
-    } catch {
-        // Fall back to sample-based statistics when the host path is
-        // unavailable (e.g. a result without refresh SQL).
-        const view = activeViewKey ? viewStates.get(activeViewKey) : undefined;
-        const rows = view?.data?.sampleRows ?? [];
-        const stats = computeColumnStatistics(rows, columnIndex);
-        statsDiv.innerHTML = `
-            <div class="explore-full-stats-grid">
-                <div class="explore-full-stat"><span class="explore-full-stat-label">Sample</span><span class="explore-full-stat-value">${rows.length.toLocaleString()} rows</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">Count</span><span class="explore-full-stat-value">${stats.count.toLocaleString()}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">Distinct</span><span class="explore-full-stat-value">${stats.distinct.toLocaleString()}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">Sum</span><span class="explore-full-stat-value">${formatNumber(stats.sum)}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">Avg</span><span class="explore-full-stat-value">${formatNumber(stats.avg)}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">Median</span><span class="explore-full-stat-value">${formatNumber(stats.median)}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">StdDev</span><span class="explore-full-stat-value">${formatNumber(stats.stddev)}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">p25</span><span class="explore-full-stat-value">${formatNumber(stats.p25)}</span></div>
-                <div class="explore-full-stat"><span class="explore-full-stat-label">p75</span><span class="explore-full-stat-value">${formatNumber(stats.p75)}</span></div>
-            </div>
-        `;
-    }
 }
 
 function renderQualityBanner(view: ExploreViewState): void {
@@ -486,8 +444,11 @@ function renderQualityBanner(view: ExploreViewState): void {
         return;
     }
     banner.innerHTML = '';
-    const alerts = computeQualityAlerts(view.data.columnsMeta, view.data.overviews);
-    const correlations = computeMeasureCorrelations(view.data.columnsMeta, view.data.sampleRows);
+    const filters = view.filterState?.filters ?? { dimensions: [], dates: [], measures: [] };
+    const rows = getFilteredSample(view, view.data, filters).rows;
+    const overviews = getFilteredOverviews(view, view.data, filters);
+    const alerts = computeQualityAlerts(view.data.columnsMeta, overviews);
+    const correlations = computeMeasureCorrelations(view.data.columnsMeta, rows);
 
     const alertCount = alerts.length;
     if (alertCount === 0 && correlations.length === 0) {
@@ -522,6 +483,7 @@ function renderActiveTab(view: ExploreViewState): void {
         return;
     }
     disposeComposerChart();
+    disposeRankingView();
     const { data, filterState, activeTab, persisted } = view;
     if (!data || !filterState) {
         content.innerHTML = '';
@@ -542,25 +504,49 @@ function renderActiveTab(view: ExploreViewState): void {
             columns: data.columnsMeta,
             filters: filterState.filters,
             state,
+            cache: view.pivot,
+            getFilters: () => filterState.filters,
             onStateChange: next => {
                 view.persisted.pivotConfig = next.config;
                 view.persisted.pivotValues = next.pivotValues;
                 savePersistedState(data.key, view.persisted);
             },
         });
+        applyDatabaseAvailability(content, data.databaseReason);
         return;
     }
 
     if (activeTab === 'composer') {
-        renderComposerTab(content, {
+        const mode = select([['time', 'Time series'], ['ranking', 'Category ranking']], persisted.chartMode ?? (persisted.composerConfig ? 'time' : 'ranking'));
+        const chartRoot = document.createElement('div');
+        content.append(field('Chart type', mode), chartRoot);
+        const draw = () => {
+            cancelExploreRequests();
+            disposeComposerChart(); disposeRankingView();
+            persisted.chartMode = mode.value as 'time' | 'ranking';
+            savePersistedState(data.key, persisted);
+            if (mode.value === 'ranking') {
+                renderRankingTab(chartRoot, data.columnsMeta, () => filterState.filters, persisted.rankingConfig, view.ranking,
+                    config => { persisted.rankingConfig = config; savePersistedState(data.key, persisted); }, selection => selectRows(view, selection));
+                applyDatabaseAvailability(chartRoot, data.databaseReason);
+                return;
+            }
+        renderComposerTab(chartRoot, {
             columns: data.columnsMeta,
             filters: filterState.filters,
             config: persisted.composerConfig,
+            cache: view.composer,
+            getFilters: () => filterState.filters,
+            onSelect: selection => selectRows(view, selection),
             onConfigChange: config => {
                 view.persisted.composerConfig = config;
                 savePersistedState(data.key, view.persisted);
             },
         });
+        applyDatabaseAvailability(chartRoot, data.databaseReason);
+        };
+        mode.addEventListener('change', draw);
+        draw();
     }
 }
 
@@ -579,12 +565,18 @@ function renderFilterBarView(view: ExploreViewState): void {
         onClear: () => {
             view.filterState?.clear();
         },
-        onRemoveChip: (kind, columnIndex, value) => {
+        onRemoveChip: (kind, columnIndex, value, missing) => {
             if (!view.filterState) return;
             if (kind === 'dimension') {
                 const current = view.filterState.filters.dimensions.find(item => item.columnIndex === columnIndex);
                 if (current) {
-                    view.filterState.setDimensionValues(columnIndex, current.values.filter(item => item !== value));
+                    const next = view.filterState.filters;
+                    next.dimensions = next.dimensions.map(item => item.columnIndex !== columnIndex ? item : {
+                        ...item, values: missing ? item.values : item.values.filter(entry => entry !== value),
+                        includeNull: missing === 'null' ? false : item.includeNull,
+                        includeEmpty: missing === 'empty' ? false : item.includeEmpty,
+                    }).filter(item => item.values.length || item.includeNull || item.includeEmpty);
+                    view.filterState.replace(next);
                 }
             } else if (kind === 'date') {
                 view.filterState.setDateFilter(columnIndex, 'day', undefined, undefined);
@@ -592,15 +584,17 @@ function renderFilterBarView(view: ExploreViewState): void {
                 view.filterState.setMeasureRange(columnIndex, undefined, undefined);
             }
         },
-        onEditChip: () => {
-            // Inline forms live on the cards; switching to Cards highlights them.
-            setExploreTab(view, 'cards');
-        },
+        onEditChip: (_kind, index) => editFilter(view, index),
+        onAddFilter: () => editFilter(view),
     });
+    applyDatabaseAvailability(root, view.data.databaseReason);
 }
 
 function setExploreTab(view: ExploreViewState, tab: ExploreTab): void {
+    cancelExploreRequests();
     view.activeTab = tab;
+    view.persisted.activeTab = tab;
+    if (view.data) savePersistedState(view.data.key, view.persisted);
     document.querySelectorAll('.explore-tab-btn').forEach(button => {
         const btn = asHtml(button);
         if (!btn) return;
@@ -615,16 +609,32 @@ function setExploreTab(view: ExploreViewState, tab: ExploreTab): void {
 // Main render
 // ---------------------------------------------------------------------------
 
+/** Release live resources without discarding per-result configuration. */
+export function disposeExploreView(): void {
+    renderGeneration++;
+    if (activeViewKey) { const view = viewStates.get(activeViewKey); if (view) view.data = null; }
+    activeViewKey = null;
+    cancelExploreRequests();
+    disposeComposerChart();
+    disposeRankingView();
+}
+
 export function renderExploreView(rsIndex: number): void {
     const container = getElementById('analysisContainer');
     if (!container) {
         return;
     }
     wireExplorePreviewGlobal();
+    cancelExploreRequests();
+    const generation = ++renderGeneration;
     disposeComposerChart();
+    disposeRankingView();
 
     const sourceUri = getActiveSourceUri() || '';
-    const key = `${sourceUri}:${rsIndex}`;
+    if (activeViewKey) { const previous = viewStates.get(activeViewKey); if (previous) previous.data = null; }
+    const owner = getResultSetAt(rsIndex);
+    const schemaKey = JSON.stringify(owner?.columns.map(column => [column.name, column.type]));
+    const key = `${sourceUri}\u001f${owner?.resultSetId ?? `ts:${owner?.executionTimestamp ?? 0}:${rsIndex}`}`;
     activeViewKey = key;
 
     let view = viewStates.get(key);
@@ -632,12 +642,19 @@ export function renderExploreView(rsIndex: number): void {
         view = {
             data: null,
             filterState: null,
-            activeTab: 'cards',
+            activeTab: loadPersistedState(key).activeTab ?? 'cards',
             persisted: loadPersistedState(key),
+            ranking: {}, composer: {}, pivot: {}, fullStats: new Map(),
         };
         viewStates.set(key, view);
     }
 
+    if (view.persisted.schemaKey && view.persisted.schemaKey !== schemaKey) { view.persisted = { filters: { dimensions: [], dates: [], measures: [] } }; view.ranking = {}; view.composer = {}; view.pivot = {}; view.fullStats = new Map(); }
+    const revision = `${owner?.executionTimestamp}:${owner?.sql}:${owner?.storageSessionId}:${owner?.storageMode}`;
+    if (view.dataRevision && view.dataRevision !== revision) { view.ranking = {}; view.composer = {}; view.pivot = {}; view.fullStats = new Map(); view.data = null; }
+    view.dataRevision = revision;
+    view.persisted.schemaKey = schemaKey;
+    while (viewStates.size > 50) { const oldest = viewStates.keys().next().value; if (!oldest || oldest === key) break; viewStates.delete(oldest); }
     container.innerHTML = `
         <div class="analysis-view explore-view">
             <div class="analysis-header">
@@ -646,12 +663,14 @@ export function renderExploreView(rsIndex: number): void {
             </div>
             <div id="exploreQualityBanner" class="explore-quality-banner" style="display:none"></div>
             <div id="exploreFilterBar" class="explore-filter-bar-container"></div>
+            <div id="exploreFilterEditor"></div>
+            <div id="exploreSelection"></div>
             <div class="explore-tabs" role="tablist">
                 <button class="explore-tab-btn active" data-tab="cards" role="tab" aria-pressed="true">Columns</button>
                 <button class="explore-tab-btn" data-tab="pivot" role="tab" aria-pressed="false">Pivot</button>
-                <button class="explore-tab-btn" data-tab="composer" role="tab" aria-pressed="false">Composer</button>
+                <button class="explore-tab-btn" data-tab="composer" role="tab" aria-pressed="false">Charts</button>
             </div>
-            <div id="exploreTabContent"></div>
+            <div id="exploreTabContent" data-result-index="${rsIndex}"></div>
         </div>
     `;
 
@@ -679,7 +698,7 @@ export function renderExploreView(rsIndex: number): void {
 
     loadSampleRows(rsIndex)
         .then(async ({ rows, sampleMode }) => {
-            if (!view || activeViewKey !== key) {
+            if (!view || activeViewKey !== key || generation !== renderGeneration) {
                 return;
             }
             const sourceColumns = getResultSetAt(rsIndex)?.columns ?? [];
@@ -690,7 +709,7 @@ export function renderExploreView(rsIndex: number): void {
                 column.exploreTopValues = overview?.topValues?.map(top => top.value);
             }
             const resultSet = getResultSetAt(rsIndex);
-            const totalRows = resultSet?.totalRowCount ?? (sampleMode === 'memory' ? rows.length : rows.length);
+            const totalRows = resultSet?.totalRowCount ?? (Array.isArray(resultSet?.data) ? resultSet.data.length : rows.length);
             view.data = {
                 key,
                 columns: sourceColumns,
@@ -701,13 +720,8 @@ export function renderExploreView(rsIndex: number): void {
                 sampledRows: rows.length,
                 truncated: totalRows > rows.length,
                 sampleMode,
+                databaseReason: !(resultSet?.sql || resultSet?.refreshSql) ? 'No reusable SQL; sample exploration is available.' : undefined,
             };
-            if (subtitle) {
-                const sampleNote = view.data.truncated
-                    ? `Based on ${rows.length.toLocaleString()} of ${totalRows.toLocaleString()} rows (${sampleMode === 'disk' ? 'disk-backed window' : 'loaded rows'}).`
-                    : `Based on ${totalRows.toLocaleString()} rows.`;
-                subtitle.textContent = sampleNote;
-            }
             const filters = view.persisted.filters ?? { dimensions: [], dates: [], measures: [] };
             view.filterState = new ExploreFilterState(filters, () => {
                 if (!view || !view.data) {
@@ -716,11 +730,16 @@ export function renderExploreView(rsIndex: number): void {
                 view.persisted.filters = view.filterState?.filters ?? view.persisted.filters;
                 savePersistedState(view.data.key, view.persisted);
                 renderFilterBarView(view);
+                updateScope(view);
+                renderQualityBanner(view);
+                document.querySelectorAll('.explore-database-status').forEach(node => { node.textContent = 'Out of date · Press Run to apply current filters'; });
+                getElementById('exploreTabContent')?.querySelectorAll('div').forEach(node => node.dispatchEvent(new Event('exploreFiltersChanged')));
                 if (view.activeTab === 'cards') {
                     renderCardsView(view);
                 }
             });
             renderFilterBarView(view);
+            updateScope(view);
             renderQualityBanner(view);
             setExploreTab(view, view.activeTab);
         })

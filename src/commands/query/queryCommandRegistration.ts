@@ -342,7 +342,7 @@ export function registerQueryCommands(
                     query = document.getText(selection);
                 } else {
                     const offset = document.offsetAt(selection.active);
-                    const statement = SqlParser.getStatementAtPosition(document.getText(), offset);
+                    const statement = SqlParser.getStatementAtPosition(document.getText(), offset, undefined, connectionManager.getExecutionDatabaseKind(documentUri));
                     if (statement) {
                         query = statement.sql;
                     }

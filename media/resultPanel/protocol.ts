@@ -197,6 +197,10 @@ function validateWebviewMessage(message: MessageRecord): boolean {
         case 'previewDatabaseGrouping':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.requestId) && message.grouping !== undefined;
+        case 'cancelExploreOperation':
+            return isIndex(message.requestId);
+        case 'requestExploreOperation':
+            return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex) && isIndex(message.requestId) && isRecord(message.operation);
         case 'cancelDatabaseGrouping':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.requestId);
@@ -292,6 +296,8 @@ function validateHostMessage(message: MessageRecord): boolean {
             return message.data !== undefined;
         case 'saveEdits':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex);
+        case 'exploreOperationResult':
+            return isIndex(message.requestId);
         case 'exploreFullStatsResult':
             return isIndex(message.requestId) && isIndex(message.columnIndex);
         case 'explorePivotResult':

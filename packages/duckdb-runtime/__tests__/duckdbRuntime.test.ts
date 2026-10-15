@@ -3,6 +3,8 @@ import { DuckDbRuntime, type DuckDbModuleResolver } from '../src';
 
 function resolver(): DuckDbModuleResolver {
   const reader = {
+    done: true,
+    readAll: async () => undefined,
     rowsChanged: 0,
     columnCount: 1,
     columnName: () => 'value',
@@ -44,6 +46,45 @@ function callbacks(rows: unknown[][]): DatabaseQueryCallbacks {
 describe('DuckDbRuntime', () => {
   const target = { connectionId: 'memory' };
   const options = { maxRows: 1, timeoutSeconds: 1 };
+
+  it.each([false, true])('terminates an incomplete native stream before releasing the session (callback failure: %s)', async (callbackFails) => {
+    const moduleResolver = resolver();
+    const module = await moduleResolver.load();
+    const instance = await module.DuckDBInstance.create();
+    const native = await instance.connect();
+    const interrupt = jest.spyOn(native, 'interrupt');
+    const readAll = jest.fn(async () => { throw new Error('Interrupted Error: Interrupted!'); });
+    const reader = await native.streamAndReadUntil('SELECT 1', 2);
+    let transactionId = 0;
+    jest.spyOn(native, 'runAndReadAll').mockImplementation(async () => ({ ...reader, getRowsJS: () => [[++transactionId]] }));
+    jest.spyOn(native, 'streamAndReadUntil').mockResolvedValue({ ...reader, done: false, readAll });
+    const runtime = new DuckDbRuntime({ resolver: moduleResolver, isReadOnlySql: () => true });
+    const execution = runtime.execute(target, 'SELECT 1', options, {
+      ...callbacks([]), onRows: () => { if (callbackFails) throw new Error('callback failed'); },
+    });
+    if (callbackFails) await expect(execution).rejects.toThrow('callback failed');
+    else await expect(execution).resolves.toMatchObject({ totalRows: 1, limitReached: true });
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(readAll).toHaveBeenCalledTimes(1);
+    await runtime.closeAll();
+  });
+
+  it('never interrupts a truncated stream inside an explicit transaction', async () => {
+    const moduleResolver = resolver();
+    const module = await moduleResolver.load();
+    const instance = await module.DuckDBInstance.create();
+    const native = await instance.connect();
+    const interrupt = jest.spyOn(native, 'interrupt');
+    const readAll = jest.fn(async () => undefined);
+    const reader = await native.streamAndReadUntil('SELECT 1', 2);
+    // The default mock returns the same transaction id for every probe.
+    jest.spyOn(native, 'streamAndReadUntil').mockResolvedValue({ ...reader, done: false, readAll });
+    const runtime = new DuckDbRuntime({ resolver: moduleResolver, isReadOnlySql: () => true });
+    await expect(runtime.execute(target, 'SELECT 1', options, callbacks([]))).resolves.toMatchObject({ limitReached: true });
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(readAll).not.toHaveBeenCalled();
+    await runtime.closeAll();
+  });
 
   it('cleans up after a throwing command callback', async () => {
     const runtime = new DuckDbRuntime({ resolver: resolver(), isReadOnlySql: () => true });

@@ -1,3 +1,7 @@
+import type { ExploreRequest, ExploreResponse } from '@justybase/contracts';
+import { buildExploreOperationSql, validateExploreFilters } from '../results/explore/operationSql';
+import { cancelQueryByUri } from '../core/queryCancellation';
+import { normalizeUriKey } from '../core/queryRunnerUtils';
 import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
@@ -29,7 +33,8 @@ import {
 import { ResultsHtmlGenerator, ViewScriptUris } from './resultsHtmlGenerator';
 import { DuckDbResultBridge } from '../services/duckdbResultBridge';
 import { ResultSet } from '../types';
-import { detectEditSource } from '../results/editSourceDetector';
+import { analyzeEditSource } from '../results/editSourceDetector';
+import { buildEditStatements } from '../results/editStatements';
 import { MessagePackEncoder } from '../core/streaming';
 import { streamingManager } from '../core/queryCancellation';
 import { diskBackedStoreRegistry } from '../core/resultDataProvider/diskBackedStoreRegistry';
@@ -147,6 +152,14 @@ interface PendingResultPanelTestBridgeRequest {
 const DEFAULT_RESULTS_GRID_FONT_FAMILY = "Menlo, Monaco, Consolas, 'Courier New', monospace";
 const RESULT_PANEL_REGRESSION_TIMEOUT_MS = 15_000;
 const RESULT_PANEL_REGRESSION_POLL_MS = 25;
+
+/**
+ * True when a DML statement touched rows, or when the driver did not report a count
+ * (-1/undefined). Only an explicit 0 means the WHERE clause matched nothing.
+ */
+function affectedRowsOrUnknown(recordsAffected: number | undefined): boolean {
+    return recordsAffected === undefined || recordsAffected !== 0;
+}
 
 function getTraceSourceUri(
     message: Record<string, unknown>,
@@ -322,6 +335,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 this._handleDatabaseGrouping(sourceUri, resultSetIndex, grouping, timeoutSeconds),
             onPreviewDatabaseGrouping: (sourceUri, resultSetIndex, grouping) =>
                 this._previewDatabaseGrouping(sourceUri, resultSetIndex, grouping),
+            onExploreOperation: request => this._handleExploreOperation(request),
+            onCancelExploreOperation: requestId => this._cancelExploreOperation(requestId),
             onRequestExploreFullStats: (sourceUri, resultSetIndex, columnIndex, filters, timeoutSeconds) =>
                 this._handleExploreFullStats(sourceUri, resultSetIndex, columnIndex, filters, timeoutSeconds),
             onRequestExplorePivot: (sourceUri, resultSetIndex, pivot, timeoutSeconds) =>
@@ -693,6 +708,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 ready: this._isViewReady,
             });
             if (this._view === webviewView) {
+                for (const id of this._exploreOperations.keys()) this._cancelExploreOperation(id);
                 this._clearAllLogSyncRetryTimers();
                 this._pendingResultSyncSources.clear();
                 this._clearPendingTestBridgeRequests('Result-panel webview disposed.');
@@ -708,6 +724,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
     }
 
     public dispose(): void {
+        for (const id of this._exploreOperations.keys()) this._cancelExploreOperation(id);
         this._disposeViewDisposables();
         this._stateChangeDisposable?.dispose();
         this._stateChangeDisposable = undefined;
@@ -1824,6 +1841,95 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
      */
     private _resolveGroupingResultSql(resultSet: ResultSet | undefined): string {
         return (resultSet?.sql || resultSet?.refreshSql || '').trim();
+    }
+
+    private readonly _exploreOperations = new Map<number, { uri: string; cancelled: boolean }>();
+
+    private _cancelExploreOperation(requestId: number): void {
+        const operation = this._exploreOperations.get(requestId);
+        if (!operation) return;
+        operation.cancelled = true;
+        void cancelQueryByUri(operation.uri).catch(() => undefined);
+    }
+
+    private async _handleExploreOperation(request: ExploreRequest): Promise<ExploreResponse> {
+        if (!this._context || !this._connectionManager) throw new Error('Database exploration is unavailable in this view.');
+        const sourceUri = normalizeUriKey(request.sourceUri);
+        const results = this._stateManager.resultsMap.get(sourceUri);
+        const resultSet = request.resultSetId ? results?.find(item => item.resultSetId === request.resultSetId) : results?.[request.resultSetIndex];
+        if (!resultSet || resultSet.isLog || resultSet.isError) throw new Error('The result is no longer available.');
+        const sourceSql = this._resolveGroupingResultSql(resultSet);
+        const executionTimestamp = resultSet.executionTimestamp;
+        const connectionName = this._resolveConnectionForSource(sourceUri);
+        const kind = this._resolveExploreConnectionKind(sourceUri);
+        const op = request.operation;
+        const filters = ('config' in op ? op.config.filters : op.filters) ?? { dimensions: [], dates: [], measures: [] };
+        validateExploreFilters(filters, resultSet.columns);
+        let fullStats: ReturnType<typeof buildFullStatisticsSql> | undefined;
+        let composer: ReturnType<typeof buildComposerSql> | undefined;
+        let pivot: ReturnType<typeof buildExplorePivotSql> | undefined;
+        let sql: string;
+        if (op.kind === 'fullStats') { fullStats = buildFullStatisticsSql(sourceSql, resultSet.columns, op, filters, kind); sql = fullStats.sql; }
+        else if (op.kind === 'composer') { composer = buildComposerSql(sourceSql, resultSet.columns, op.config, kind); sql = composer.sql; }
+        else if (op.kind === 'pivot') { pivot = buildExplorePivotSql(sourceSql, resultSet.columns, op.config, op.pivotValues ?? [], kind); sql = pivot.sql; }
+        else sql = buildExploreOperationSql(sourceSql, resultSet.columns, op, kind);
+        const metadata: ExploreResponse = { rows: [], sql, truncated: false, computedAt: Date.now(), scope: 'database', filters };
+        if (request.preview) return metadata;
+        const documentUri = this._stateManager.getDocumentUri(sourceUri);
+        const operation = { uri: `${documentUri}#explore-${randomUUID()}`, cancelled: false };
+        this._exploreOperations.set(request.requestId, operation);
+        let connection: Awaited<ReturnType<ConnectionManager['createTransientConnectionForDocument']>> | undefined;
+        let shouldCloseConnection = true;
+        try {
+            // Reuse the tab session (TEMP tables, SET/USE state) unless this
+            // result needs its own socket; the explore URI keeps cancel scoped.
+            const independent = this._needsIndependentResultConnection(sourceUri)
+                || !this._connectionManager.getDocumentKeepConnectionOpen(documentUri);
+            if (!independent) await ensurePersistentConnectionReadyForQuery(this._connectionManager, documentUri, connectionName);
+            ({ connection, shouldCloseConnection } = await getConnectionForDocument(
+                this._connectionManager, connectionName, !independent, documentUri));
+            const isCurrent = () => {
+                const sourceIsCurrent = this._resolveGroupingResultSql(resultSet) === sourceSql;
+                const resultIsAttached = this._stateManager.resultsMap.get(sourceUri)?.includes(resultSet) === true;
+                return !operation.cancelled && resultSet.executionTimestamp === executionTimestamp && sourceIsCurrent && resultIsAttached;
+            };
+            if (!isCurrent()) throw new Error('Cancelled');
+            const run = (query: string, maxRows: number) => runQueryRaw({ context: this._context!, query, silent: true,
+                connectionManager: this._connectionManager!, connectionName,
+                documentUri, executionUri: operation.uri, connectionOverride: connection,
+                isUserQuery: false, maxRows, timeoutSeconds: this._exploreTimeoutSeconds(request.timeoutSeconds, op.kind === 'values' || op.kind === 'fullStats' ? 120 : 300), isExecutionCurrent: isCurrent });
+            if (op.kind === 'pivot') {
+                const valuesResult = await run(buildDistinctValuesSql(sourceSql, resultSet.columns, { columnIndex: op.config.columnColumnIndex }, filters, kind), 100);
+                if (!isCurrent()) throw new Error('Cancelled');
+                const values = valuesResult.data.filter(row => row[0] != null).map(row => String(row[0]));
+                pivot = buildExplorePivotSql(sourceSql, resultSet.columns, op.config, values, kind);
+                sql = pivot.sql;
+            }
+            const result = await run(sql, op.kind === 'values' ? 101 : op.kind === 'pivot' || op.kind === 'composer' ? 5001 : 1001);
+            if (!isCurrent()) throw new Error('Cancelled');
+            const cap = op.kind === 'values' ? 100 : op.kind === 'rows' ? 1000 : op.kind === 'pivot' || op.kind === 'composer' ? 5000 : 101;
+            const response: ExploreResponse = { ...metadata, sql, rows: result.data.slice(0, cap), truncated: result.data.length > cap, computedAt: Date.now() };
+            if (fullStats) {
+                response.values = mapFullStatisticsRow(result.data[0], fullStats.aliases);
+                response.percentilesUnavailable = fullStats.percentilesUnavailable;
+                response.stddevUnavailable = fullStats.stddevUnavailable;
+            }
+            if (composer) response.columnIndexes = composer.columnIndexes;
+            if (pivot && op.kind === 'pivot') {
+                response.pivotValues = pivot.pivotColumnNames;
+                response.columns = [
+                    ...op.config.rowColumnIndexes.map((_, index) => ({ name: result.columns[index]?.name ?? `Row${index}`, type: result.columns[index]?.type, kind: 'row' as const })),
+                    ...pivot.pivotColumnNames.map(name => ({ name, kind: 'value' as const })),
+                ];
+            }
+            return response;
+        } finally {
+            this._exploreOperations.delete(request.requestId);
+            try { if (shouldCloseConnection) await connection?.close(); } finally {
+                streamingManager.clearAborted(operation.uri);
+                await this._connectionManager.clearDocumentConnection(operation.uri);
+            }
+        }
     }
 
     private _resolveExploreResultSet(sourceUri: string, resultSetIndex: number): ResultSet {
@@ -3161,16 +3267,21 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             if (!rs) {
                 continue;
             }
-            if (rs.storageMode === 'sqlite') {
-                rs.isEditable = false;
+            if (rs.isLog || rs.isError) {
                 continue;
             }
-            if (rs.sql && !rs.isLog && !rs.isError) {
-                const editSource = detectEditSource(rs.sql);
-                if (editSource) {
-                    rs.isEditable = true;
-                    rs.editSource = editSource;
-                }
+            if (rs.storageMode === 'sqlite') {
+                rs.isEditable = false;
+                rs.editDisabledReason = 'Editing is not available for results stored on disk.';
+                continue;
+            }
+            const analysis = analyzeEditSource(rs.sql ?? '');
+            if (analysis.source) {
+                rs.isEditable = true;
+                rs.editSource = analysis.source;
+            } else {
+                rs.isEditable = false;
+                rs.editDisabledReason = analysis.reason;
             }
         }
 
@@ -3336,19 +3447,15 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             return { success: false, message: 'No edits to save.' };
         }
 
-        // Build the full table name
-        const tableParts: string[] = [];
-        if (editSource.db) tableParts.push(editSource.db);
-        if (editSource.schema) tableParts.push(editSource.schema);
-        tableParts.push(editSource.table);
-        const fullTableName = tableParts.map(p => `"${p.replace(/"/g, '""')}"`).join('.');
-
         // Get the result set data to look up original values
         const resultSets = this._stateManager.resultsMap.get(sourceUri);
         if (!resultSets || !resultSets[resultSetIndex]) {
             return { success: false, message: 'Result set not found.' };
         }
         const rs = resultSets[resultSetIndex];
+
+        // Same statements the user reviewed in the confirmation dialog (deletes first, then updates).
+        const statements = buildEditStatements(rs, editSource, edits, deleteRowIndices);
 
         try {
             const connectionName = connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri));
@@ -3361,79 +3468,21 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             );
 
             try {
-                // Handle deletes first
                 let deletedCount = 0;
-                if (deleteRowIndices && deleteRowIndices.length > 0) {
-                    for (const delRowIdx of deleteRowIndices) {
-                        const origRow = rs.data[delRowIdx];
-                        if (!origRow) continue;
-                        const whereClausesDel: string[] = [];
-                        for (let ci = 0; ci < rs.columns.length; ci++) {
-                            const colDef = rs.columns[ci];
-                            const origVal = origRow[ci];
-                            if (origVal === null || origVal === undefined) continue;
-                            const colName = `"${colDef.name.replace(/"/g, '""')}"`;
-                            whereClausesDel.push(`${colName} = ${this._formatEditValue(origVal, colDef.type)}`);
-                        }
-                        if (whereClausesDel.length === 0) continue;
-                        const delSql = `DELETE FROM ${fullTableName} WHERE ${whereClausesDel.join(' AND ')}`;
-                        const delCmd = connection.createCommand(delSql);
-                        const delReader = await delCmd.executeReader();
-                        while (await delReader.read()) { /* consume */ }
-                        await delReader.close();
-                        if (delCmd._recordsAffected > 0) {
-                            deletedCount++;
-                        }
-                    }
-                }
-
-                // Group edits by rowIndex
                 let updatedRowCount = 0;
-                const editsByRow = new Map<number, { columnIndex: number; newValue: unknown }[]>();
-                for (const edit of edits) {
-                    const existing = editsByRow.get(edit.rowIndex) || [];
-                    existing.push({ columnIndex: edit.columnIndex, newValue: edit.newValue });
-                    editsByRow.set(edit.rowIndex, existing);
-                }
-
-                for (const [rowIndex, rowEdits] of editsByRow) {
-                    const originalRow = rs.data[rowIndex];
-                    if (!originalRow) continue;
-
-                    // Build SET clause for each edited column
-                    const setClauses: string[] = [];
-                    for (const edit of rowEdits) {
-                        const colDef = rs.columns[edit.columnIndex];
-                        if (!colDef) continue;
-                        const colName = `"${colDef.name.replace(/"/g, '""')}"`;
-                        const formattedVal = this._formatEditValue(edit.newValue, colDef.type);
-                        setClauses.push(`${colName} = ${formattedVal}`);
-                    }
-
-                    if (setClauses.length === 0) continue;
-
-                    // Build WHERE clause using original non-null column values.
-                    // NULL values are skipped (col IS NULL is too broad and risky).
-                    // Row identification relies on non-null columns only.
-                    const whereClauses: string[] = [];
-                    for (let ci = 0; ci < rs.columns.length; ci++) {
-                        const colDef = rs.columns[ci];
-                        const origVal = originalRow[ci];
-                        if (origVal === null || origVal === undefined) continue;
-                        const colName = `"${colDef.name.replace(/"/g, '""')}"`;
-                        const formattedVal = this._formatEditValue(origVal, colDef.type);
-                        whereClauses.push(`${colName} = ${formattedVal}`);
-                    }
-
-                    // Safety check: if no WHERE clause could be built, skip this row
-                    if (whereClauses.length === 0) continue;
-
-                    const sql = `UPDATE ${fullTableName} SET ${setClauses.join(', ')} WHERE ${whereClauses.join(' AND ')}`;
-                    const cmd = connection.createCommand(sql);
+                let unmatchedCount = 0;
+                for (const statement of statements) {
+                    const cmd = connection.createCommand(statement.sql);
                     const reader = await cmd.executeReader();
                     while (await reader.read()) { /* consume */ }
                     await reader.close();
-                    if (cmd._recordsAffected > 0) {
+                    // A WHERE that matches no row is counted as unmatched; the driver may report -1/undefined
+                    // for "unknown", which is treated as applied.
+                    if (!affectedRowsOrUnknown(cmd._recordsAffected)) {
+                        unmatchedCount++;
+                    } else if (statement.kind === 'delete') {
+                        deletedCount++;
+                    } else {
                         updatedRowCount++;
                     }
                 }
@@ -3444,7 +3493,11 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 if (parts.length === 0) {
                     return { success: false, message: 'No rows were updated or deleted. The original row data may no longer match the database values.' };
                 }
-                return { success: true, message: parts.join(', ') + '.' };
+                let message = parts.join(', ') + '.';
+                if (unmatchedCount > 0) {
+                    message += ` ${unmatchedCount} row(s) matched nothing in the database and were skipped.`;
+                }
+                return { success: true, message };
             } finally {
                 if (shouldCloseConnection) {
                     await connection.close();
@@ -3454,37 +3507,5 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             const msg = err instanceof Error ? err.message : String(err);
             return { success: false, message: `Failed to save edits: ${msg}` };
         }
-    }
-
-    private _formatEditValue(value: unknown, dataType?: string): string {
-        if (value === null || value === undefined) return 'NULL';
-        if (typeof value === 'number') return String(value);
-        if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-
-        // Handle Date objects for timestamp/date columns.
-        // Netezza driver returns Date objects in UTC; use UTC methods so the
-        // formatted literal matches the database's stored value exactly.
-        if (value instanceof Date) {
-            const y = value.getUTCFullYear();
-            const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-            const d = String(value.getUTCDate()).padStart(2, '0');
-            const hh = String(value.getUTCHours()).padStart(2, '0');
-            const mm = String(value.getUTCMinutes()).padStart(2, '0');
-            const ss = String(value.getUTCSeconds()).padStart(2, '0');
-            const dt = dataType?.toLowerCase() ?? '';
-            if (dt.includes('date') && !dt.includes('timestamp') && !dt.includes('time')) {
-                return `'${y}-${m}-${d}'`;
-            }
-            return `'${y}-${m}-${d} ${hh}:${mm}:${ss}'`;
-        }
-
-        const str = String(value);
-        // Check if it's a numeric string
-        if (dataType && /\b(?:tinyint|smallint|mediumint|bigint|hugeint|integer|int(?:2|4|8|16|32|64)?|u(?:tinyint|smallint|integer|bigint|hugeint|int(?:8|16|32|64)?)|byteint|serial|smallserial|bigserial|numeric|decimal|number|float|double|real|money|smallmoney|decfloat|single)\b/i.test(dataType)) {
-            const cleanNum = str.replace(/[\s\u00A0,]/g, '');
-            if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(cleanNum)) return cleanNum;
-        }
-        // Escape single quotes for string values
-        return `'${str.replace(/'/g, "''")}'`;
     }
 }

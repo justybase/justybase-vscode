@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 
 export interface DuckDbResultReader {
+  readonly done: boolean;
+  readAll(): Promise<void>;
   readonly rowsChanged?: number;
   readonly columnCount: number;
   columnName(index: number): string;

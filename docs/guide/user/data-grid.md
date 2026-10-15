@@ -119,6 +119,53 @@ Disk-backed filtering sees every row fetched into the SQLite spill, without a se
 
 Visible-scope aggregation uses the currently filtered grid/spill. Database-scope aggregation uses the unlimited subquery used by **All rows + LIMIT**. Available operations include `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `COUNT DISTINCT`, `STDDEV`, and `MEDIAN` where the selected database supports the operation and the column type is suitable. Pin aggregations to compare columns while changing filters.
 
+## Explore
+
+Open **Explore** to inspect column profiles, distributions, quality alerts,
+pivots, and charts. Profiles examine the **first 50,000 loaded rows**, or all
+loaded rows when fewer are available. This is a first-row sample, not a random
+sample. The scope banner shows examined, loaded, and matching sample row counts;
+these counts do not describe rows that have not been fetched.
+
+**Add filter** supports category inclusion/exclusion, multiple values, NULL,
+empty strings, dates, and numeric ranges. Changes are drafts until **Apply**;
+**Cancel** discards them. **Undo**, **Redo**, and individual filter chips let you
+revise the analysis. Explore filters are independent of the main grid's filters.
+Value search is local until you explicitly select **Search database**, which can
+find values outside the sample and returns up to 100 values per search.
+
+Under **Charts**, choose **Category ranking** for Top/Bottom N without a date
+column, or **Time series** for a date-based chart. Rankings support Count rows,
+Sum, Average, Minimum, Maximum, and Count distinct. **Show share** uses the full
+filtered population, including categories outside Top N. It is available for
+Count rows and non-negative Sum category totals with a positive total.
+**Include Other** combines remaining categories for Count rows and Sum only.
+A real category named `Other` remains separate from this synthetic group.
+
+Database computations require **Run**. Changing filters or chart settings marks
+the previous computation **Out of date**; it does not automatically query the
+database. Original user-authored LIMIT, TOP, and FETCH clauses are preserved.
+Database computations read current database data, which may have changed since
+the original result was fetched. Pivots and time series display up to 5,000 rows.
+
+Select a category, histogram range, or current time-series point to access
+**Filter to selection**, **Show rows**, and **Open SQL**. The selection uses the
+filters of the displayed computation, including when it is out of date. Chart
+data and distribution ranges provide equivalent keyboard actions. The time
+series selection tool can select an interval without changing normal zoom.
+
+**Show rows** opens a separate preview inside Explore. Sample previews are
+local; database previews require **Load rows**. Previews show up to 1,000 rows,
+100 per page, and page changes do not execute more queries. **Open SQL** opens a
+bounded details query without executing it. For results without reusable SQL,
+local sample exploration remains available. Access database exploration and
+SQL Server sources beginning with a CTE are currently unavailable.
+
+Filters and chart settings belong to a stable result identity and survive
+navigation through Logs and other results. New executions do not inherit an
+unrelated result's filters. Unsupported database operations report their
+limitation rather than silently substituting sample statistics.
+
 ## Multiple result sets and partial results
 
 Batch statements appear as separate tabs. Pinning protects a result from normal pruning; the current defaults are 50 data result sets per SQL file and 10 manually pinned sets. Empty, cancelled, partial, and error result sets keep their state and message so the user can distinguish “zero rows” from “query did not complete.”

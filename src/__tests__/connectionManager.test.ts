@@ -169,6 +169,78 @@ describe('ConnectionManager', () => {
     });
 
     describe('Connection CRUD Operations', () => {
+        it('disconnects every tab of a profile and preserves other profiles and assignments', async () => {
+            const other = { ...sampleConnection, name: 'OtherConnection' };
+            await manager.saveConnection(sampleConnection);
+            await manager.saveConnection(other);
+            const firstUri = 'file:///disconnect-first.sql';
+            const secondUri = 'file:///disconnect-second.sql';
+            const otherUri = 'file:///disconnect-other.sql';
+            await manager.setDocumentConnection(firstUri, sampleConnection.name);
+            await manager.setDocumentConnection(secondUri, sampleConnection.name);
+            await manager.setDocumentConnection(otherUri, other.name);
+            const first = await manager.getDocumentPersistentConnection(firstUri);
+            const second = await manager.getDocumentPersistentConnection(secondUri);
+            const unrelated = await manager.getDocumentPersistentConnection(otherUri);
+            const firstClose = jest.spyOn(first, 'close');
+            const secondClose = jest.spyOn(second, 'close');
+            const unrelatedClose = jest.spyOn(unrelated, 'close');
+            const selectionChanged = jest.fn();
+            manager.onDidChangeDocumentConnection(selectionChanged);
+
+            await manager.disconnectConnection(sampleConnection.name);
+
+            expect(firstClose).toHaveBeenCalledTimes(1);
+            expect(secondClose).toHaveBeenCalledTimes(1);
+            expect(unrelatedClose).not.toHaveBeenCalled();
+            expect(selectionChanged).not.toHaveBeenCalled();
+            expect(manager.hasDocumentPersistentConnection(firstUri)).toBe(false);
+            expect(manager.hasDocumentPersistentConnection(secondUri)).toBe(false);
+            expect(manager.hasDocumentPersistentConnection(otherUri)).toBe(true);
+            expect(manager.getDocumentConnection(firstUri)).toBe(sampleConnection.name);
+            expect(await manager.getConnection(sampleConnection.name)).toBeDefined();
+            await manager.disconnectConnection(sampleConnection.name);
+            expect(firstClose).toHaveBeenCalledTimes(1);
+        });
+
+        it('disconnects all matching sessions even when one close fails', async () => {
+            await manager.saveConnection(sampleConnection);
+            const first = await manager.getDocumentPersistentConnection('file:///close-fails.sql', sampleConnection.name);
+            const second = await manager.getDocumentPersistentConnection('file:///close-succeeds.sql', sampleConnection.name);
+            jest.spyOn(first, 'close').mockRejectedValueOnce(new Error('close failed'));
+            const secondClose = jest.spyOn(second, 'close');
+            await expect(manager.disconnectConnection(sampleConnection.name)).rejects.toThrow('Failed to disconnect');
+            expect(secondClose).toHaveBeenCalledTimes(1);
+            expect(manager.hasDocumentPersistentConnection('file:///close-succeeds.sql')).toBe(false);
+            expect(manager.hasDocumentPersistentConnection('file:///close-fails.sql')).toBe(true);
+        });
+
+        it('waits for a pending open to release its connection before disconnect resolves', async () => {
+            await manager.saveConnection(sampleConnection);
+            const uri = 'file:///pending-disconnect.sql';
+            await manager.setDocumentConnection(uri, sampleConnection.name);
+            const connection = new MockNzConnection();
+            let release!: () => void;
+            let started!: () => void;
+            const ready = new Promise<void>(resolve => { started = resolve; });
+            const pending = new Promise<void>(resolve => { release = resolve; });
+            connection.connect = async () => { started(); await pending; connection._connected = true; };
+            const close = jest.spyOn(connection, 'close');
+            mockNzConnectionConstructor.mockReturnValueOnce(connection);
+            const opening = manager.getDocumentPersistentConnection(uri);
+            const rejected = expect(opening).rejects.toThrow('selection changed');
+            await ready;
+            let disconnected = false;
+            const closing = manager.disconnectConnection(sampleConnection.name).then(() => { disconnected = true; });
+            await Promise.resolve();
+            expect(disconnected).toBe(false);
+            release();
+            await rejected;
+            await closing;
+            expect(close).toHaveBeenCalledTimes(1);
+            expect(manager.hasDocumentPersistentConnection(uri)).toBe(false);
+        });
+
         it('should save a new connection', async () => {
             await manager.saveConnection(sampleConnection);
 

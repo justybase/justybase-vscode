@@ -6,6 +6,16 @@ import {
 } from '../../../media/resultPanel/explore/filterState.js';
 
 describe('explore filterState', () => {
+    it('does not create undo steps for unchanged drafts and counts missing-value selections', () => {
+        const state = new ExploreFilterState();
+        state.replace(state.filters);
+        expect(state.historyDepth).toBe(0);
+        state.replace({ dimensions: [{ columnIndex: 0, values: [], includeNull: true, includeEmpty: true }], dates: [], measures: [] });
+        expect(state.activeCount).toBe(2);
+        state.replace(state.filters);
+        expect(state.historyDepth).toBe(1);
+        state.clear(); state.undo(); expect(state.activeCount).toBe(2);
+    });
     it('starts empty', () => {
         const state = new ExploreFilterState();
         expect(exploreFiltersAreEmpty(state.filters)).toBe(true);

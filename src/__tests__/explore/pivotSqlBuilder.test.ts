@@ -22,7 +22,7 @@ describe('pivotSqlBuilder', () => {
         );
         expect(sql).toContain('SELECT DISTINCT t."CATEGORY" AS "PIVOT_VALUE"');
         expect(sql).toContain('LIMIT 50');
-        expect(sql).not.toContain('SELECT * FROM SALES LIMIT 100');
+        expect(sql).toContain('SELECT * FROM SALES LIMIT 100');
     });
 
     it('builds CASE-based pivot columns with grouping', () => {
@@ -42,7 +42,7 @@ describe('pivotSqlBuilder', () => {
         expect(built.sql).toContain('SUM(CASE WHEN t."CATEGORY" = \'A\' THEN t."AMOUNT" END) AS "V: A"');
         expect(built.sql).toContain('SUM(CASE WHEN t."CATEGORY" = \'B\'\'s\' THEN t."AMOUNT" END)');
         expect(built.sql).toContain('GROUP BY t."REGION"');
-        expect(built.sql).toContain('LIMIT 5000');
+        expect(built.sql).toContain('LIMIT 5001');
         expect(built.pivotColumnNames).toEqual(['A', "B's"]);
     });
 
@@ -104,7 +104,7 @@ describe('pivotSqlBuilder', () => {
             'mssql',
         );
         expect(built.sql).toContain('GROUP BY t.[REGION], t.[CATEGORY]');
-        expect(built.sql).toContain('SELECT TOP 5000 ');
+        expect(built.sql).toContain('SELECT TOP 5001 ');
         expect(built.sql).not.toContain('LIMIT');
     });
 

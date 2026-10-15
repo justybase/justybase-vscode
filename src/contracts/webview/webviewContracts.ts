@@ -312,7 +312,7 @@ export type LoginPanelInboundMessage =
     }
     | { command: 'delete'; name: string }
     | { command: 'loadConnections' }
-    | { command: 'browseFile'; fieldKey: string };
+    | { command: 'browseFile'; fieldKey: string; dialectKind?: string };
 
 // ============================================================================
 // Login Panel — Outbound (Extension Host → Webview)

@@ -1,3 +1,4 @@
+import type { ExploreRequest, ExploreResponse } from '@justybase/contracts';
 
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import * as vscode from 'vscode';
@@ -160,6 +161,91 @@ describe('ResultPanelView Integration', () => {
 
     afterEach(() => {
         provider.dispose();
+    });
+
+    function exploreFixture() {
+        const sourceUri = 'file:///explore-owner.sql';
+        const result: ResultSet = { resultSetId: 'explore-stable', columns: [{ name: 'CATEGORY', type: 'VARCHAR' }, { name: 'AMOUNT', type: 'DECIMAL' }], data: [['A', 1]], sql: 'SELECT CATEGORY, AMOUNT FROM SALES LIMIT 100' };
+        const connection = { close: jest.fn(async () => undefined) };
+        const sessionConnection = { close: jest.fn(async () => undefined) };
+        const manager = {
+            getConnectionForExecution: jest.fn(() => 'explore-connection'), getActiveConnectionName: jest.fn(),
+            getConnectionDatabaseKind: jest.fn(() => 'sqlite'),
+            createTransientConnectionForDocument: jest.fn(async () => connection), clearDocumentConnection: jest.fn(async () => undefined),
+            getDocumentKeepConnectionOpen: jest.fn(() => false),
+            getDocumentPersistentConnection: jest.fn(async () => sessionConnection),
+        };
+        const internal = provider as unknown as {
+            _context: vscode.ExtensionContext; _connectionManager: unknown;
+            _stateManager: { resultsMap: Map<string, ResultSet[]> };
+            _handleExploreOperation: (request: ExploreRequest) => Promise<ExploreResponse>;
+            _cancelExploreOperation: (id: number) => void;
+            _exploreOperations: Map<number, unknown>;
+        };
+        internal._context = {} as vscode.ExtensionContext; internal._connectionManager = manager;
+        internal._stateManager.resultsMap.set(sourceUri, [result]);
+        const request: ExploreRequest = { sourceUri, resultSetIndex: 99, resultSetId: result.resultSetId, requestId: 123, operation: { kind: 'rows', filters: { dimensions: [], dates: [], measures: [] } } };
+        const runner = jest.mocked((jest.requireMock('../../core/queryRunner') as { runQueryRaw: typeof RunQueryRaw }).runQueryRaw);
+        runner.mockReset();
+        return { sourceUri, result, connection, sessionConnection, manager, internal, request, runner };
+    }
+
+    test('Explore preview resolves the stable result and performs no database I/O', async () => {
+        const fixture = exploreFixture();
+        const result = await fixture.internal._handleExploreOperation({ ...fixture.request, preview: true });
+        expect(result.sql).toContain('FROM SALES LIMIT 100'); expect(result.sql).toContain('LIMIT 1001');
+        expect(fixture.manager.createTransientConnectionForDocument).not.toHaveBeenCalled(); expect(fixture.runner).not.toHaveBeenCalled();
+    });
+
+    test('Explore uses an independent operation URI, bounds rows and releases its connection', async () => {
+        const fixture = exploreFixture();
+        fixture.runner.mockResolvedValue({ columns: fixture.result.columns, data: Array.from({ length: 1001 }, () => ['A', 1]) });
+        const result = await fixture.internal._handleExploreOperation(fixture.request);
+        expect(result.rows).toHaveLength(1000); expect(result.truncated).toBe(true);
+        expect(fixture.runner).toHaveBeenCalledWith(expect.objectContaining({ documentUri: fixture.sourceUri, executionUri: expect.stringContaining('#explore-'), connectionOverride: fixture.connection, isUserQuery: false }));
+        expect(fixture.connection.close).toHaveBeenCalledTimes(1); expect(fixture.manager.clearDocumentConnection).toHaveBeenCalledTimes(1);
+        expect(fixture.internal._exploreOperations.size).toBe(0);
+    });
+
+    test('Explore reuses the persistent tab session so TEMP tables and SET state stay visible', async () => {
+        const fixture = exploreFixture();
+        fixture.manager.getDocumentKeepConnectionOpen.mockReturnValue(true);
+        fixture.runner.mockResolvedValue({ columns: fixture.result.columns, data: [['A', 1]] });
+        await fixture.internal._handleExploreOperation(fixture.request);
+        expect(fixture.manager.createTransientConnectionForDocument).not.toHaveBeenCalled();
+        expect(fixture.runner).toHaveBeenCalledWith(expect.objectContaining({ executionUri: expect.stringContaining('#explore-'), connectionOverride: fixture.sessionConnection }));
+        expect(fixture.sessionConnection.close).not.toHaveBeenCalled();
+        expect(fixture.internal._exploreOperations.size).toBe(0);
+    });
+
+    test('Explore computes statistics, resolves pivot values, and reports time-series metadata', async () => {
+        const fixture = exploreFixture();
+        fixture.runner.mockResolvedValue({ columns: fixture.result.columns, data: [[2, 2, 30, 15, 10, 20]] });
+        const stats = await fixture.internal._handleExploreOperation({ ...fixture.request, operation: { kind: 'fullStats', columnIndex: 1 } });
+        expect(stats.values).toMatchObject({ count: 2, sum: 30 }); expect(stats.percentilesUnavailable).toBe(true);
+        fixture.result.columns.push({ name: 'REGION', type: 'VARCHAR' });
+        fixture.runner.mockReset().mockResolvedValueOnce({ columns: [{ name: 'CATEGORY' }], data: [['A']] }).mockResolvedValueOnce({ columns: fixture.result.columns, data: [['A', 10]] });
+        const pivot = await fixture.internal._handleExploreOperation({ ...fixture.request, operation: { kind: 'pivot', config: { rowColumnIndexes: [2], columnColumnIndex: 0, valueColumnIndex: 1, aggFn: 'sum' } } });
+        expect(pivot.pivotValues).toHaveLength(1); expect(pivot.columns).toHaveLength(2);
+        fixture.result.columns.push({ name: 'DAY', type: 'DATE' });
+        fixture.runner.mockResolvedValue({ columns: fixture.result.columns, data: [['2026-01-01', 30]] });
+        const series = await fixture.internal._handleExploreOperation({ ...fixture.request, operation: { kind: 'composer', config: { dateColumnIndex: 3, measureColumnIndex: 1, aggFn: 'sum', grain: 'month', comparePrevious: false } } });
+        expect(series.columnIndexes).toMatchObject({ bucket: 0, measure: 1 });
+    });
+
+    test('Explore cleans up acquisition failures and rejects results after cancellation', async () => {
+        const fixture = exploreFixture();
+        fixture.manager.createTransientConnectionForDocument.mockRejectedValueOnce(new Error('Connect failed'));
+        await expect(fixture.internal._handleExploreOperation(fixture.request)).rejects.toThrow('Connect failed');
+        expect(fixture.internal._exploreOperations.size).toBe(0);
+        let finish!: (value: QueryResult) => void;
+        fixture.runner.mockReturnValue(new Promise<QueryResult>(resolve => { finish = resolve; }));
+        const pending = fixture.internal._handleExploreOperation(fixture.request);
+        await Promise.resolve();
+        fixture.internal._cancelExploreOperation(fixture.request.requestId);
+        finish({ columns: fixture.result.columns, data: [['A', 1]] });
+        await expect(pending).rejects.toThrow('Cancelled');
+        expect(fixture.connection.close).toHaveBeenCalledTimes(1);
     });
 
     test('should switch content when active source changes', () => {

@@ -70,6 +70,8 @@ export interface MetadataRequestParams {
 }
 
 export interface MetadataContextResponse {
+  serverVersionNum?: number;
+  searchPath?: readonly string[];
   connectionName?: string;
   effectiveDatabase?: string;
   effectiveSchema?: string;

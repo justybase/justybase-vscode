@@ -2967,13 +2967,18 @@ function updateEditButtonsState(): void {
   const saveBtn = getElementById('saveEditsBtn');
   const discardBtn = getElementById('discardEditsBtn');
   const rs = getResultSetAt(getActiveGridIndex());
-  const isEditable = rs && rs.isEditable;
+  const isEditable = !!(rs && rs.isEditable);
   const inEdit = getIsEditMode();
+  // Keep Edit visible for data results so a disabled state can explain itself on hover/click.
+  const showEdit = !!(rs && !rs.isLog && !rs.isError);
 
   if (editBtn) {
-    editBtn.style.display = isEditable ? 'inline-flex' : 'none';
+    editBtn.style.display = showEdit ? 'inline-flex' : 'none';
+    editBtn.style.opacity = isEditable ? '' : '0.5';
     editBtn.textContent = (inEdit ? '✕ ' : '✎ ') + 'Edit';
-    editBtn.title = inEdit ? 'Exit edit mode' : 'Toggle edit mode';
+    editBtn.title = isEditable
+      ? (inEdit ? 'Exit edit mode' : 'Toggle edit mode')
+      : (rs?.editDisabledReason || 'Inline editing is not available for this result.');
   }
   if (saveBtn) {
     saveBtn.style.display = (isEditable && inEdit) ? 'inline-flex' : 'none';
@@ -3280,7 +3285,11 @@ function setupWindowFunctions(): void {
   };
   panel.toggleEditMode = function () {
     const rs = getResultSetAt(getActiveGridIndex());
-    if (!rs || !rs.isEditable) return;
+    if (!rs) return;
+    if (!rs.isEditable) {
+      vscode.postMessage({ command: 'info', text: rs.editDisabledReason || 'Inline editing is not available for this result.' });
+      return;
+    }
     const newMode = !getIsEditMode();
     setIsEditMode(newMode);
     clearPendingEdits();
@@ -3291,29 +3300,18 @@ function setupWindowFunctions(): void {
   };
   panel.saveEdits = function () {
     const rs = getResultSetAt(getActiveGridIndex());
-    if (!rs || !rs.isEditable) return;
+    if (!rs) return;
+    if (!rs.isEditable) {
+      vscode.postMessage({ command: 'info', text: rs.editDisabledReason || 'Inline editing is not available for this result.' });
+      return;
+    }
     const edits = getPendingEdits();
     const deletes = Array.from(getPendingDeletes());
     if (edits.length === 0 && deletes.length === 0) {
       vscode.postMessage({ command: 'info', text: 'No pending changes to save.' });
       return;
     }
-    const previewValue = (value: unknown): string => {
-      if (value === null || value === undefined) return 'NULL';
-      if (typeof value === 'string' && value.length === 0) return '"" (empty string)';
-      const text = typeof value === 'string' ? JSON.stringify(value) : String(value);
-      return text.length > 100 ? `${text.slice(0, 97)}...` : text;
-    };
-    const previewLines = edits.slice(0, 12).map((edit) => {
-      const column = rs.columns[edit.columnIndex]?.name ?? `Column ${edit.columnIndex + 1}`;
-      return `${column}: ${previewValue(edit.oldValue)} → ${previewValue(edit.newValue)}`;
-    });
-    if (edits.length > previewLines.length) {
-      previewLines.push(`…and ${edits.length - previewLines.length} more cell change(s)`);
-    }
-    if (deletes.length > 0) previewLines.push(`Delete ${deletes.length} row(s)`);
-    const summary = `Review ${edits.length} cell change(s)${deletes.length ? ` and ${deletes.length} row deletion(s)` : ''}:\n\n${previewLines.join('\n')}\n\nSave these changes?`;
-    if (!window.confirm(summary)) return;
+    // Confirmation happens on the host (modal); window.confirm() is blocked in the webview sandbox.
     vscode.postMessage({
       command: 'saveEdits',
       sourceUri: requireActiveSourceUri(),

@@ -1,0 +1,2342 @@
+[
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-1.06a666b710",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT DISTINCT ON (id) id FROM public.items ORDER BY id",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #1",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #1",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-1.06a666b710"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-1.d4381c9f2b",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P2",
+    "sql": "CREATE TABLE public.items (id integer) DISTRIBUTE ON (id)",
+    "expect": {
+      "valid": false
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #1",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #1",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-1.d4381c9f2b"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-2.9845c8b0f1",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT * FROM public.items i CROSS JOIN LATERAL (SELECT i.id) x",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #2",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #2",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-2.9845c8b0f1"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-3.553c49fb56",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "WITH RECURSIVE tree AS (SELECT id FROM public.items UNION ALL SELECT id FROM tree) SELECT * FROM tree",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #3",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #3",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-3.553c49fb56"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-4.4568eef5e7",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "INSERT INTO public.items (id, payload) VALUES (1, '{}') ON CONFLICT (id) DO NOTHING RETURNING id",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #4",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #4",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-4.4568eef5e7"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-5.8c11e5b4e1",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "INSERT INTO public.items (id, payload) VALUES (1, '{}') ON CONFLICT (id) DO UPDATE SET payload = '{}' RETURNING id",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #5",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #5",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-5.8c11e5b4e1"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-6.ef9dad7f2c",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "UPDATE public.items SET payload = '{}' WHERE id = 1 RETURNING id",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #6",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #6",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-6.ef9dad7f2c"
+    }
+  },
+  {
+    "id": "parser.postgresql.postgresqlparser-test-ts-7.69a8074675",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "DELETE FROM public.items WHERE id = 1 RETURNING id",
+    "expect": {
+      "valid": true
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.NetezzaSql",
+        "path": "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+        "test": "postgresqlParser.test.ts  #7",
+        "revision": "2bf7e6f"
+      },
+      {
+        "repository": "justybase-vscode",
+        "path": "src/__tests__/sqlParser/postgresqlParser.test.ts",
+        "test": "postgresqlParser.test.ts  #7",
+        "revision": "justybase/justybase-vscode@539f5a9fe72bf865b1d7fd23aa3e152cf67bbf80"
+      }
+    ],
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#parser.postgresql.postgresqlparser-test-ts-7.69a8074675"
+    }
+  },
+  {
+    "id": "postgresql.parser.aggregate.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT string_agg(v, ',' ORDER BY v) FILTER (WHERE v IS NOT NULL) FROM (VALUES ('b'), ('a')) t(v)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.aggregate.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.array-index.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT (ARRAY[1,2])[1]",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.array-index.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.atomic-body.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1; END",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.atomic-body.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-body.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql AS $x$missing",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-body.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-conflict.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "INSERT INTO items(id) VALUES(1) ON CONFLICT DO UPDATE SET id=2",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-conflict.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-enum.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TYPE mood AS ENUM ('sad',, 'happy')",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-createtype.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-enum.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-explain-empty.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN () SELECT 1",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-explain-empty.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-explain-format.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN (FORMAT INVALID) SELECT 1",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 22023."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-explain-format.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-explain-option.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN (MADE_UP true) SELECT 1",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-explain-option.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-generated.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TABLE t(id int GENERATED ALWAYS AS ())",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-generated.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-index.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE INDEX idx ON items()",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-index.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-json-table.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT * FROM JSON_TABLE('{}', '$' COLUMNS()) jt",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-json-table.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-merge-matched-by-source.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items i USING other o ON i.id=o.id WHEN MATCHED BY SOURCE THEN DELETE",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/17/sql-merge.html",
+        "revision": "17"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-merge-matched-by-source.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-merge-matched-insert.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items i USING other o ON i.id=o.id WHEN MATCHED THEN INSERT(id) VALUES(o.id)",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/17/sql-merge.html",
+        "revision": "17"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-merge-matched-insert.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-merge-unmatched-update.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items i USING other o ON i.id=o.id WHEN NOT MATCHED THEN UPDATE SET id=o.id",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/17/sql-merge.html",
+        "revision": "17"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-merge-unmatched-update.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.bad-merge.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items USING other ON items.id=other.id",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.bad-merge.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.cte-values.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "WITH x(id) AS (VALUES (1)) SELECT * FROM x",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.cte-values.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.delete-using.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "DELETE FROM items i USING other o WHERE i.id=o.id RETURNING i.*",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.delete-using.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.distribute.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TABLE items(id int) DISTRIBUTE ON(id)",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.distribute.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.do-body.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "DO $$ BEGIN RAISE NOTICE 'hello'; END $$",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.do-body.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.dollar-quoted.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT $tag$a;b$tag$ AS body",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.dollar-quoted.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.domain.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE DOMAIN positive AS integer CHECK (VALUE > 0)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.domain.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.drop-index.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "DROP INDEX IF EXISTS idx CASCADE",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.drop-index.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.drop-synonym.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "DROP SYNONYM s",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.drop-synonym.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.empty-array-index.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT (ARRAY[1,2])[]",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.empty-array-index.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.empty-enum.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TYPE mood AS ENUM ()",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-createtype.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.empty-enum.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.empty-quoted-name.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 AS \"\"",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-syntax-lexical.html",
+        "revision": "16"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.enum.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TYPE mood AS ENUM ('sad','happy')",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.enum.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.escaped-string.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT E'a\\'b' AS value",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.escaped-string.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.explain-analyze.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN ANALYZE VERBOSE SELECT 1",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.explain-analyze.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.explain-json.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN (FORMAT JSON) SELECT * FROM items",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.explain-json.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.explain-merge.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN MERGE INTO items i USING other o ON i.id=o.id WHEN MATCHED THEN DELETE",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.explain-merge.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.explain-options.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN (ANALYZE false, BUFFERS true, COSTS off, VERBOSE, FORMAT YAML) SELECT * FROM items",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-explain.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.explain-options.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.groom.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "GROOM TABLE items",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.groom.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.identity.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TABLE t(id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.identity.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.index.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE UNIQUE INDEX idx ON items(id DESC NULLS LAST) INCLUDE(payload) WHERE id > 0",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.index.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.insert-default.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "INSERT INTO items DEFAULT VALUES RETURNING *",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.insert-default.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.json-cast.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT '{\"a\":1}'::jsonb ->> 'a'",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.json-cast.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.json-exists-any.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT '{}'::jsonb ?| ARRAY['x']",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.json-exists-any.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.json-exists.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT '{}'::jsonb ? 'x'",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.json-exists.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.json-table.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT * FROM JSON_TABLE('[{\"id\":1}]', '$[*]' COLUMNS(id integer PATH '$.id')) AS jt",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/17/sql.html",
+        "revision": "16-18"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.materialized-cte.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "WITH x AS NOT MATERIALIZED (SELECT 1 AS id) SELECT * FROM x",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.materialized-cte.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.merge-by-source.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items i USING other o ON i.id=o.id WHEN NOT MATCHED BY SOURCE THEN DELETE",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/17/sql.html",
+        "revision": "16-18"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.merge-returning.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items i USING other o ON i.id=o.id WHEN MATCHED THEN DELETE RETURNING i.id",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/17/sql.html",
+        "revision": "16-18"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.merge.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "MERGE INTO items i USING other o ON i.id=o.id WHEN MATCHED THEN UPDATE SET payload=o.payload WHEN NOT MATCHED THEN INSERT(id,payload) VALUES(o.id,o.payload)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.merge.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.minus.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 MINUS SELECT 2",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.minus.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.named-window.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT row_number() OVER w FROM (VALUES (1)) AS t(id) WINDOW w AS (ORDER BY id)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.named-window.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.on-constraint.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "INSERT INTO items(id) VALUES (1) ON CONFLICT ON CONSTRAINT items_pkey DO NOTHING",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.on-constraint.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.ordinality.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT * FROM unnest(ARRAY[1,2]) WITH ORDINALITY AS t(id,n)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.ordinality.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.ordinary-name.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 AS groom",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.ordinary-name.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.parameter.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT $1::integer AS value",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.parameter.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.plangraph.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "EXPLAIN PLANGRAPH SELECT 1",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.plangraph.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.procedure-dollar.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE PROCEDURE public.do_work() LANGUAGE plpgsql AS $body$ BEGIN NULL; END $body$",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.procedure-dollar.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.qualified-function.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT pg_catalog.abs(-1)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.qualified-function.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.quoted-escaped-name.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 AS \"a\"\"b\"",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-syntax-lexical.html",
+        "revision": "16"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.quoted-insert-columns.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "INSERT INTO items(\"id\") VALUES(2) RETURNING \"id\"",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-insert.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.quoted-insert-columns.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.returning-alias.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "UPDATE items SET id=1 RETURNING id AS item_id",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.returning-alias.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.returning-old-new.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "UPDATE items SET id=1 RETURNING WITH (OLD AS o, NEW AS n) o.id, n.id",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/18/sql.html",
+        "revision": "16-18"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.routine-dollar.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE FUNCTION public.add_one(x integer) RETURNS integer LANGUAGE sql AS $$ SELECT x + 1; $$",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.routine-dollar.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.set-intersect-all.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 INTERSECT ALL SELECT 1",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.set-intersect-all.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.statistics.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "GENERATE STATISTICS ON t",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.statistics.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.stored.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TABLE t(id integer, doubled integer GENERATED ALWAYS AS (id * 2) STORED)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.stored.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.synonym.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE SYNONYM s FOR t",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.synonym.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.table-function.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT * FROM generate_series(1,2) AS g(id)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.table-function.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.unicode-dollar.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT $żółć$a;b$żółć$",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql-syntax-lexical.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.unicode-dollar.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.unicode.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 AS żółć",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16-18"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.unicode.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.unterminated-dollar.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT $tag$x",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.unterminated-dollar.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.unterminated-escape.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT E'a\\'",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Rejected on PostgreSQL 16.13 with SQLSTATE 42601."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.unterminated-escape.001"
+    }
+  },
+  {
+    "id": "postgresql.parser.virtual.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "CREATE TABLE t(id integer, doubled integer GENERATED ALWAYS AS (id * 2) VIRTUAL)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "source-backed"
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/18/sql.html",
+        "revision": "16-18"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.where-no-from.001",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P0",
+    "sql": "SELECT 1 WHERE true",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified",
+      "notes": "Accepted on PostgreSQL 16.13."
+    },
+    "sources": [
+      {
+        "repository": "PostgreSQL",
+        "path": "https://www.postgresql.org/docs/16/sql.html",
+        "revision": "16"
+      }
+    ],
+    "oracle": {
+      "engine": "PostgreSQL",
+      "version": "16.13",
+      "method": "Transactional fixture conformance; EXPLAIN for queries",
+      "verifiedAt": "2026-10-14",
+      "evidence": "reports/postgresql/2026-10-14-server-16.13.jsonl#postgresql.parser.where-no-from.001"
+    }
+  }
+]

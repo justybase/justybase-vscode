@@ -65,6 +65,8 @@ export interface QueryResult {
   name?: string;
   isEditable?: boolean;
   editSource?: EditSource;
+  /** Why inline editing is unavailable for this result (shown to the user on Edit). */
+  editDisabledReason?: string;
 }
 
 export type ResultSetStorageMode = 'memory' | 'sqlite';

@@ -1,3 +1,4 @@
+import type { ExploreRequest, ExploreResponse } from '@justybase/contracts';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
@@ -40,6 +41,8 @@ import { getUxPerfSession } from '../services/perf/uxPerfSession';
 import type { ResultSet } from '../types';
 import { getLogger } from '../utils/logger';
 import { findTrailingLimitClause } from '../results/refreshSqlLimit';
+import { buildEditStatements } from '../results/editStatements';
+import { reviewEditStatements } from './editReviewPanel';
 
 export interface EditChange {
     rowIndex: number;
@@ -73,6 +76,8 @@ export interface TestExportRequest {
 }
 
 export interface MessageHandlerCallbacks {
+    onExploreOperation?: (request: ExploreRequest) => Promise<ExploreResponse>;
+    onCancelExploreOperation?: (requestId: number) => void;
     onUpdateWebview: () => void;
     onPostMessage: (message: ResultPanelOutboundMessage) => void;
     onForceHydrate: () => void;
@@ -339,6 +344,12 @@ export class ResultPanelMessageHandler {
                 );
                 return;
 
+            case 'requestExploreOperation':
+                void this._handleExploreOperation(message);
+                break;
+            case 'cancelExploreOperation':
+                this._callbacks.onCancelExploreOperation?.(message.requestId);
+                break;
             case 'requestExploreFullStats':
                 void this._handleRequestExploreFullStats(
                     message.sourceUri,
@@ -1141,6 +1152,22 @@ export class ResultPanelMessageHandler {
             vscode.window.showErrorMessage('Edit saving is not available in this context.');
             return;
         }
+
+        // Confirm on the host: confirm() inside the webview is blocked by the sandbox and returns false silently.
+        // The user reviews the exact statements that will run (same builder as the executor).
+        const statements = resultSet
+            ? buildEditStatements(resultSet, message.editSource, message.edits, message.deleteRowIndices)
+            : [];
+        if (statements.length > 0) {
+            const targetLabel = [message.editSource.db, message.editSource.schema, message.editSource.table]
+                .filter(Boolean)
+                .join('.');
+            const choice = await reviewEditStatements(statements, targetLabel);
+            if (choice !== 'save') {
+                return;
+            }
+        }
+
         try {
             const result = await this._callbacks.onSaveEdits({
                 sourceUri: message.sourceUri,
@@ -1267,6 +1294,18 @@ export class ResultPanelMessageHandler {
                 command: 'switchToResultSet',
                 resultSetIndex: resultSetIndex
             });
+        }
+    }
+
+    private async _handleExploreOperation(request: ExploreRequest): Promise<void> {
+        try {
+            if (!this._callbacks.onExploreOperation) throw new Error('Database exploration is unavailable in this view.');
+            const result = await this._callbacks.onExploreOperation(request);
+            this._callbacks.onPostMessage({ command: 'exploreOperationResult', requestId: request.requestId,
+                resultSetId: request.resultSetId, result: { ...result, rows: this._encoder.sanitizeForMessagePack(result.rows) as unknown[][] } });
+        } catch (error) {
+            this._callbacks.onPostMessage({ command: 'exploreOperationResult', requestId: request.requestId,
+                resultSetId: request.resultSetId, error: error instanceof Error ? error.message : String(error) });
         }
     }
 

@@ -10,6 +10,7 @@ import {
 } from "../dialects/netezza/sql/parser";
 import { SqlLexer as netezzaSqlLexer } from "../dialects/netezza/sql/lexer";
 import type { CstNode, IRecognitionException } from "chevrotain";
+import { buildSqlSourceScanIndex } from '@justybase/sql-core/sourceScan';
 import {
   createSqlParserInstance as createBaseSqlParserInstance,
   getSqlParserInstance as getBaseSqlParserInstance,
@@ -570,12 +571,19 @@ interface SanitizedSqlMacroSyntax {
   macroReferenceRanges: MacroReferenceRange[];
 }
 
-function sanitizeSqlMacroSyntaxWithMetadata(sql: string): SanitizedSqlMacroSyntax {
+function sanitizeSqlMacroSyntaxWithMetadata(sql: string, databaseKind?: string): SanitizedSqlMacroSyntax {
   let sanitized = sanitizeMacroQueryFunctions(sanitizeMacroDirectives(sql));
+  const protectedRegions = databaseKind === 'postgresql' ? buildSqlSourceScanIndex(sql, databaseKind) : undefined;
+  if (protectedRegions) {
+    const characters = sanitized.split('');
+    for (let j = 0; j < sql.length; j++) if (protectedRegions.isInStringOrComment(j)) characters[j] = sql[j];
+    sanitized = characters.join('');
+  }
   const macroReferenceRanges: MacroReferenceRange[] = [];
   let i = 0;
 
   while (i < sanitized.length) {
+    if (protectedRegions?.isInStringOrComment(i)) { i++; continue; }
     if (sanitized[i] === "-" && sanitized[i + 1] === "-") {
       i += 2;
       while (i < sanitized.length && sanitized[i] !== "\n") {
@@ -909,7 +917,7 @@ export function parseSqlStatements(
   options: SqlStatementsParseOptions,
 ): SqlStatementsParseResult {
   const runtime = options.runtime ?? resolveSqlParsingRuntime(options);
-  const sanitizedMacroSyntax = sanitizeSqlMacroSyntaxWithMetadata(options.sql);
+  const sanitizedMacroSyntax = sanitizeSqlMacroSyntaxWithMetadata(options.sql, runtime.id);
   const sqlForParsing = sanitizedMacroSyntax.sql;
   const lexResult = runtime.SqlLexer.tokenize(sqlForParsing);
   if (lexResult.errors.length > 0) {

@@ -21,7 +21,7 @@ describe('fullStatisticsSql', () => {
         expect(built.sql).toContain('PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY t."AMOUNT") AS "stat_p25"');
         expect(built.sql).toContain('FROM (');
         expect(built.sql).toContain('SELECT * FROM SALES');
-        expect(built.sql).not.toContain('LIMIT 100');
+        expect(built.sql).toContain('LIMIT 100');
         expect(built.sql).not.toContain('WHERE');
     });
 
@@ -67,10 +67,10 @@ describe('fullStatisticsSql', () => {
             'SELECT * FROM SALES',
             COLUMNS,
             { columnIndex: 0 },
-            { dimensions: [{ columnIndex: 0, values: ['A'] }], dates: [], measures: [] },
+            { dimensions: [{ columnIndex: 0, values: ['10.25'] }], dates: [], measures: [] },
             'netezza',
         );
-        expect(built.sql).toContain('WHERE t."AMOUNT" = \'A\'');
+        expect(built.sql).toContain('WHERE t."AMOUNT" = 10.25');
     });
 
     it('throws for unstable column names', () => {

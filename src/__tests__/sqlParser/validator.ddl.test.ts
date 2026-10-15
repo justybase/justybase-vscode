@@ -323,18 +323,22 @@ FROM TESTDB..EMPLOYEES d;`);
       expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES;");
     });
 
-    it("should reject DROP TABLE IF EXISTS", () => {
-      expectSyntaxError("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
+    it("should validate DROP TABLE with trailing IF EXISTS", () => {
+      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
     });
 
     it("should not require a cached qualified relation with trailing IF EXISTS", () => {
-      expectSyntaxError("DROP TABLE TESTDB.PUBLIC.MISSING_TABLE IF EXISTS;");
+      expectValid("DROP TABLE TESTDB.PUBLIC.MISSING_TABLE IF EXISTS;");
     });
 
-    it("should validate DROP TABLE with multiple targets", () => {
-      expectSyntaxError(
+    it("should validate DROP TABLE with multiple targets and trailing IF EXISTS", () => {
+      expectValid(
         "DROP TABLE TESTDB.PUBLIC.EMPLOYEES, TESTDB.PUBLIC.DEPARTMENTS IF EXISTS;",
       );
+    });
+
+    it("should reject the leading DROP TABLE IF EXISTS form", () => {
+      expectSyntaxError("DROP TABLE IF EXISTS TESTDB.PUBLIC.EMPLOYEES;");
     });
 
     it("should validate DROP VIEW", () => {
@@ -558,8 +562,8 @@ FROM TESTDB..EMPLOYEES d;`);
       expectValid("DROP VIEW TESTDB..EMP_VIEW;");
     });
 
-    it("should reject DROP TABLE IF EXISTS with schema", () => {
-      expectSyntaxError("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
+    it("should validate DROP TABLE IF EXISTS with schema", () => {
+      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
     });
 
     it("should validate CREATE SEQUENCE", () => {
@@ -893,8 +897,8 @@ USING (
   // DROP variants — valid syntax
   // ====================================================================
   describe("DROP variants — valid syntax", () => {
-    it("should reject DROP TABLE IF EXISTS", () => {
-      expectSyntaxError("DROP TABLE my_table IF EXISTS");
+    it("should validate DROP TABLE with trailing IF EXISTS", () => {
+      expectValid("DROP TABLE my_table IF EXISTS");
     });
 
     it("should validate DROP TABLE multiple", () => {

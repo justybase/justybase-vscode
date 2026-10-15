@@ -16,6 +16,7 @@ import {
 export interface StubDialectOptions {
     traitsOverrides?: DatabaseDialectTraitsOverrides;
     connectionFormOptions?: StandardConnectionFieldOptions;
+    connectionFormFields?: readonly DatabaseConnectionFieldSchema[];
     extensionDisplayName?: string;
     supportsRawTcpTunnel?: boolean;
     additionalConnectionFields?: readonly DatabaseConnectionFieldSchema[];
@@ -43,8 +44,11 @@ export function createStubDialect(
         designerCapabilities: getDatabaseDesignerCapabilities(kind),
         connectionForm: {
             fields: [
-                ...createStandardConnectionForm(connectionFormOptions).fields,
-                ...(options.additionalConnectionFields ?? []),
+                ...(options.connectionFormFields
+                    ?? [
+                        ...createStandardConnectionForm(connectionFormOptions).fields,
+                        ...(options.additionalConnectionFields ?? []),
+                    ]),
             ],
         },
         traits: createDatabaseDialectTraits(options.traitsOverrides),

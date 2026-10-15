@@ -6,7 +6,7 @@
 
 import type { ColumnDefinition } from '../../types';
 import { buildExploreWhereSql, quoteIdentifier, type ExploreFilterModel } from './exploreFilters';
-import { removeTrailingLimitClause } from '../refreshSqlLimit';
+import { exploreSourceSql } from './operationSql';
 
 export interface FullStatisticsRequest {
     columnIndex: number;
@@ -77,7 +77,7 @@ export function buildFullStatisticsSql(
         throw new Error('Full statistics require a unique output column name.');
     }
 
-    const withoutLimit = removeTrailingLimitClause(refreshSql).trim().replace(/;\s*$/, '').trim();
+    const withoutLimit = exploreSourceSql(refreshSql, databaseKind);
     if (!withoutLimit) {
         throw new Error('This result set does not have SQL that can be analyzed.');
     }

@@ -1,3 +1,5 @@
+import { findPostgresqlQuotedRegion } from '@justybase/sql-core/postgresqlLexical';
+import { findNestedBlockCommentEnd } from '@justybase/sql-core/sourceScan';
 import {
     normalizeVariableName,
 } from './macroTypes';
@@ -989,7 +991,16 @@ export function escapeRegExp(value: string): string {
 export function readTriviaOrQuotedText(
     text: string,
     offset: number,
+    databaseKind?: string,
 ): { text: string; end: number } | undefined {
+    if (databaseKind === 'postgresql') {
+        const region = findPostgresqlQuotedRegion(text, offset);
+        if (region) return { text: text.slice(offset, region.end), end: region.end };
+        if (text[offset] === '/' && text[offset + 1] === '*') {
+            const end = findNestedBlockCommentEnd(text, offset) ?? text.length;
+            return { text: text.slice(offset, end), end };
+        }
+    }
     if (text[offset] === '-' && text[offset + 1] === '-') {
         let end = offset + 2;
         while (end < text.length && text[end] !== '\n') {

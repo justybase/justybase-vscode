@@ -6,6 +6,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./statements": {
+      "types": "./dist/statements.d.ts",
+      "require": "./dist/statements.js",
+      "default": "./dist/statements.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
@@ -90,6 +95,11 @@
       "types": "./dist/validation/procedureScopeBuilder.d.ts",
       "require": "./dist/validation/procedureScopeBuilder.js",
       "default": "./dist/validation/procedureScopeBuilder.js"
+    },
+    "./postgresqlLexical": {
+      "types": "./dist/postgresqlLexical.d.ts",
+      "require": "./dist/postgresqlLexical.js",
+      "default": "./dist/postgresqlLexical.js"
     }
   },
   "scripts": {

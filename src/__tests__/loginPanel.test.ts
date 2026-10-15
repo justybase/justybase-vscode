@@ -163,6 +163,26 @@ describe('LoginPanel', () => {
             expect(html).toContain('sqlite-dialect.svg');
         });
 
+        it('opens the DuckDB database picker with database file filters', async () => {
+            LoginPanel.createOrShow(mockExtensionUri, mockConnectionManager);
+            (vscode.window.showOpenDialog as jest.Mock).mockResolvedValue([{ fsPath: '/data/analytics.duckdb' }]);
+
+            await messageHandler?.({ command: 'browseFile', fieldKey: 'database', dialectKind: 'duckdb' });
+
+            expect(vscode.window.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({
+                openLabel: 'Select DuckDB Database',
+                filters: {
+                    'DuckDB databases': ['duckdb', 'db', 'ddb'],
+                    'All files': ['*'],
+                },
+            }));
+            expect(mockWebviewPanel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+                command: 'browseFileResult',
+                fieldKey: 'database',
+                path: '/data/analytics.duckdb',
+            }));
+        });
+
         it('should subscribe to connection and active-connection updates', () => {
             LoginPanel.createOrShow(mockExtensionUri, mockConnectionManager);
 

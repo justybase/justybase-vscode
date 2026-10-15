@@ -25,7 +25,7 @@ const nodes = {
   'dialect-utils': { packageName: '@justybase/dialect-utils', dependencies: ['contracts', 'sql-core'] },
   'designer-core': { packageName: '@justybase/designer-core', dependencies: ['contracts', 'dialect-utils'] },
   'metadata-core': { packageName: '@justybase/metadata-core' },
-  'result-core': { packageName: '@justybase/result-core' },
+  'result-core': { packageName: '@justybase/result-core', dependencies: ['contracts'] },
   'ui-core': { packageName: '@justybase/ui-core', dependencies: ['contracts'] },
   'ui-react': { packageName: '@justybase/ui-react', dependencies: ['contracts', 'dialect-utils', 'designer-core', 'ui-core'] },
   'netezza-runtime': { packageName: '@justybase/netezza-runtime', dependencies: ['contracts'] },

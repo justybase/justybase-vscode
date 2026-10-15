@@ -180,6 +180,16 @@ export class MacroPreprocessor {
         let allowChainedDirective = true;
 
         while (offset < script.length) {
+            if (state.context.databaseKind === 'postgresql') {
+                const quoted = readTriviaOrQuotedText(script, offset, 'postgresql');
+                if (quoted) {
+                    remaining += quoted.text;
+                    offset = quoted.end;
+                    allowChainedDirective = false;
+                    for (const char of quoted.text) atLineStart = updateLineStartState(atLineStart, char);
+                    continue;
+                }
+            }
             if (atLineStart || allowChainedDirective) {
                 const directive = readDirectiveAt(script, offset);
                 if (directive) {
@@ -317,7 +327,7 @@ export class MacroPreprocessor {
             // for an earlier reference, even though final substitution runs
             // after directive collection.
             if (!state.replaceVariables) {
-                const trivia = readTriviaOrQuotedText(script, offset);
+                const trivia = readTriviaOrQuotedText(script, offset, state.context.databaseKind);
                 if (trivia) {
                     remaining += trivia.text;
                     offset = trivia.end;
@@ -367,6 +377,16 @@ export class MacroPreprocessor {
         let allowChainedDirective = true;
 
         while (offset < script.length) {
+            if (state.context.databaseKind === 'postgresql') {
+                const quoted = readTriviaOrQuotedText(script, offset, 'postgresql');
+                if (quoted) {
+                    remaining += quoted.text;
+                    offset = quoted.end;
+                    allowChainedDirective = false;
+                    for (const char of quoted.text) atLineStart = updateLineStartState(atLineStart, char);
+                    continue;
+                }
+            }
             if (atLineStart || allowChainedDirective) {
                 const directive = readDirectiveAt(script, offset);
                 if (directive) {
@@ -615,7 +635,7 @@ export class MacroPreprocessor {
             // Keep async scan mode source-ordered for the same reason as the
             // synchronous path above.
             if (!state.replaceVariables) {
-                const trivia = readTriviaOrQuotedText(script, offset);
+                const trivia = readTriviaOrQuotedText(script, offset, state.context.databaseKind);
                 if (trivia) {
                     remaining += trivia.text;
                     offset = trivia.end;
@@ -841,7 +861,7 @@ export class MacroPreprocessor {
         let i = 0;
 
         while (i < text.length) {
-            const skipped = readTriviaOrQuotedText(text, i);
+            const skipped = readTriviaOrQuotedText(text, i, context.databaseKind);
             if (skipped) {
                 result += skipped.text;
                 i = skipped.end;

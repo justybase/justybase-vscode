@@ -1,7 +1,7 @@
 // Shared types for the result-panel Explore view.
 
 /** Number of loaded rows used for client-side column classification and overview stats. */
-export const EXPLORE_SAMPLE_ROWS = 2000;
+export const EXPLORE_SAMPLE_ROWS = 50000;
 
 /** Number of top values collected for dimension columns. */
 export const EXPLORE_TOP_VALUES = 8;
@@ -61,60 +61,19 @@ export interface ExploreOverviewResult {
     sampleMode: 'memory' | 'disk';
 }
 
-export type ExploreDateGrain = 'day' | 'week' | 'month' | 'quarter' | 'year';
-
-export interface ExploreDimensionFilter {
-    columnIndex: number;
-    values: string[];
-}
-
-export interface ExploreDateFilter {
-    columnIndex: number;
-    grain: ExploreDateGrain;
-    from?: string;
-    to?: string;
-}
-
-export interface ExploreMeasureFilter {
-    columnIndex: number;
-    min?: number;
-    max?: number;
-}
-
-export interface ExploreFilterModel {
-    dimensions: ExploreDimensionFilter[];
-    dates: ExploreDateFilter[];
-    measures: ExploreMeasureFilter[];
-}
+export type { ExploreDateGrain, ExploreDimensionFilter, ExploreDateFilter, ExploreMeasureFilter, ExploreFilterModel, ExploreRankingConfig, ExplorePivotConfig, ExploreComposerConfig } from '@justybase/contracts';
+import type { ExploreFilterModel, ExploreRankingConfig, ExplorePivotConfig, ExploreComposerConfig } from '@justybase/contracts';
 
 export type ExplorePivotAggregate = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'countDistinct';
 
-export interface ExplorePivotConfig {
-    rowColumnIndexes: number[];
-    columnColumnIndex: number;
-    valueColumnIndex: number;
-    aggFn: ExplorePivotAggregate;
-    filters?: ExploreFilterModel;
-    limit?: number;
-}
-
 export type ExploreComposerAggregate = 'sum' | 'avg' | 'count' | 'min' | 'max';
 
-export interface ExploreComposerConfig {
-    dateColumnIndex: number;
-    grain: ExploreDateGrain;
-    dimensionColumnIndex?: number;
-    measureColumnIndex: number;
-    aggFn: ExploreComposerAggregate;
-    splitByColumnIndex?: number;
-    splitValues?: string[];
-    includeOther?: boolean;
-    comparePrevious: boolean;
-    filters?: ExploreFilterModel;
-    limit?: number;
-}
-
 export interface ExplorePersistedState {
+    version?: 2;
+    activeTab?: 'cards' | 'pivot' | 'composer';
+    chartMode?: 'time' | 'ranking';
+    rankingConfig?: ExploreRankingConfig;
+    schemaKey?: string;
     filters: ExploreFilterModel;
     pivotConfig?: ExplorePivotConfig;
     pivotValues?: string[];

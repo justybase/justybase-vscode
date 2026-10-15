@@ -1,3 +1,4 @@
+import { EXPLORE_SAMPLE_ROWS } from './types.js';
 // Data-quality alerts and measure correlations for the Explore view.
 
 import { parseNumericValue } from './columnClassification.js';
@@ -100,7 +101,7 @@ const MAX_CORRELATION_PAIRS = 12;
 export function computeMeasureCorrelations(
     columns: readonly ExploreColumnMeta[],
     rows: readonly unknown[][],
-    maxRows = 2000,
+    maxRows = EXPLORE_SAMPLE_ROWS,
 ): MeasureCorrelation[] {
     const measureIndexes = columns
         .filter(column => column.role === 'measure')

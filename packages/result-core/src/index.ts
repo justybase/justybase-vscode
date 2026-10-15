@@ -50,3 +50,4 @@ export type {
   ResultFilterCondition,
   ResultFilterQuery,
 } from './operations';
+export { compareExploreNumbers, exploreValueEqual, matchesExploreFilters } from './explore';

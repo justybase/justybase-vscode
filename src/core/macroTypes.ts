@@ -23,6 +23,8 @@ export type MacroPythonExecutor = (
 ) => Promise<MacroPythonExecutionResult>;
 
 export interface MacroPreprocessorContext {
+    /** SQL dialect for protecting dialect-specific quoted bodies. */
+    databaseKind?: string;
     log?: (message: string) => void | Promise<void>;
     prompt?: (variables: Set<string>) => Promise<Record<string, string>>;
     query?: MacroQueryExecutor;

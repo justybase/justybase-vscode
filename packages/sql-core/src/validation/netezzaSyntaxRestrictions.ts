@@ -12,7 +12,10 @@ import type { ValidationError } from "./types";
  * JustyBase.SqlConformance (`dialects/netezza/live/**`, oracleVerified cases):
  * - FETCH FIRST/NEXT is rejected (use LIMIT); NZS002.
  * - A standalone OUTER JOIN without LEFT/RIGHT/FULL is rejected; NZS003.
- * - DROP ... IF EXISTS is rejected; NZS004.
+ * - DROP ... IF EXISTS before the object name is rejected; NZS004. The
+ *   trailing `DROP TABLE <name>[, <name>] IF EXISTS` form is accepted (also
+ *   for `DB..T` and keyword table names), while a trailing IF EXISTS on
+ *   DROP VIEW / DROP SEQUENCE is rejected (all live-verified).
  * - ALTER TABLE ... DROP <column> and DROP CONSTRAINT require RESTRICT or CASCADE; NZS005.
  * - GRANT/REVOKE ... ON TABLE names the object class, so a relation name there is rejected; PAR003.
  * - Multi-row VALUES is rejected (one INSERT per row); NZS006.
@@ -125,22 +128,47 @@ export function detectNetezzaSyntaxRestrictions(
     }
 
     // DROP ... IF EXISTS
+    //
+    // Netezza accepts IF EXISTS only after the target list of a DROP TABLE:
+    // `DROP TABLE <name> IF EXISTS` (Netezza Performance Server SQL command
+    // reference, DROP TABLE). The leading form `DROP TABLE IF EXISTS <name>`
+    // and a trailing IF EXISTS on any other DROP object class stay invalid.
     if (name === "Drop") {
+      const objectWords: string[] = [];
+      let sawTarget = false;
       for (let scan = index + 1; scan < tokens.length; scan += 1) {
         const scanName = tokenName(tokens[scan]);
-        if (scanName === "Semicolon") break;
-        if (
-          scanName === "If" &&
-          tokenName(tokens[scan + 1]) === "Exists"
-        ) {
-          errors.push(
-            errorAt(
-              "NZS004",
-              "DROP ... IF EXISTS is not valid Netezza syntax.",
-              tokens[scan],
-            ),
-          );
+        if (scanName === undefined || scanName === "Semicolon") break;
+        if (scanName === "If") {
+          if (tokenName(tokens[scan + 1]) !== "Exists") break;
+          const trailingTableIfExists =
+            sawTarget && objectWords.length === 1 && objectWords[0] === "Table";
+          if (!trailingTableIfExists) {
+            errors.push(
+              errorAt(
+                "NZS004",
+                sawTarget
+                  ? "Only DROP TABLE accepts a trailing IF EXISTS in Netezza."
+                  : "Netezza does not accept IF EXISTS before the object name; use DROP TABLE <name> IF EXISTS.",
+                tokens[scan],
+              ),
+            );
+          }
           break;
+        }
+        if (
+          scanName === "Identifier" ||
+          scanName === "QuotedIdentifier" ||
+          scanName === "NumberLiteral" ||
+          // Anything after DROP TABLE names the target, including keyword
+          // names such as VALUE, TYPE or KEY (live-verified accepted).
+          (objectWords.length === 1 && objectWords[0] === "Table")
+        ) {
+          sawTarget = true;
+          continue;
+        }
+        if (!sawTarget && objectWords.length < 2) {
+          objectWords.push(scanName);
         }
       }
     }

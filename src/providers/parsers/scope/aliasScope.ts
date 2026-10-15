@@ -1,3 +1,4 @@
+import { normalizePostgresqlIdentifier } from "@justybase/sql-core/postgresqlLexical";
 import { CstNode, type IToken } from "chevrotain";
 import type { DatabaseKind } from "../../../contracts/database";
 import { getDatabaseDialectTraits } from "../../../core/dialectTraits";
@@ -44,6 +45,14 @@ export class ParserSqlContextCollector {
 
   public constructor(databaseKind?: DatabaseKind) {
     this._databaseKind = databaseKind;
+  }
+
+  private normalizeToken(token: IToken): string {
+    return this._databaseKind === "postgresql" ? normalizePostgresqlIdentifier(token.image) : normalizeTokenText(token);
+  }
+
+  private nameKey(name: string): string {
+    return this._databaseKind === "postgresql" ? name : name.toUpperCase();
   }
 
   public collect(root: CstNode): void {
@@ -212,7 +221,7 @@ export class ParserSqlContextCollector {
     const inferredTableRef =
       this.inferSimpleStarQueryTableRefFromCst(nestedQuery);
     if (inferredTableRef && explicitColumns.length === 0) {
-      const cteName = normalizeTokenText(cteNameToken).toUpperCase();
+      const cteName = this.nameKey(this.normalizeToken(cteNameToken));
       const binding = {
         db: inferredTableRef.database,
         schema: inferredTableRef.schema,
@@ -237,7 +246,7 @@ export class ParserSqlContextCollector {
       explicitColumns.length > 0 ? explicitColumns : inferredColumns;
 
     this.setLocalDefinition(
-      normalizeTokenText(cteNameToken),
+      this.normalizeToken(cteNameToken),
       "CTE",
       columns,
     );
@@ -256,7 +265,7 @@ export class ParserSqlContextCollector {
       getChildNodesByKey(node, "selectStatement")[0];
     const columns = this.extractColumnsFromQueryNode(queryNode);
     this.setLocalDefinition(
-      normalizeTokenText(cteNameToken),
+      this.normalizeToken(cteNameToken),
       "CTE",
       columns,
     );
@@ -329,12 +338,12 @@ export class ParserSqlContextCollector {
         const tableRef = this.parseQualifiedTableName(getChildNodesByKey(target, "qualifiedName")[0]);
         if (!tableRef) continue;
         const names = new Set([
-          tableRef.table.toUpperCase(),
+          this.nameKey(tableRef.table),
           this.formatQualifiedTableDisplayName(tableRef).toUpperCase(),
         ]);
         for (const definition of this._localDefinitions.values()) {
           if (
-            names.has(definition.name.toUpperCase())
+            names.has(this.nameKey(definition.name))
             && definition.scopeStart !== undefined
             && definition.scopeStart <= range.start
             && (definition.scopeEnd === undefined || definition.scopeEnd > range.start)
@@ -386,7 +395,7 @@ export class ParserSqlContextCollector {
     } else {
       const subqueryNode = getChildNodesByKey(node, "subquery")[0];
       if (subqueryNode && aliasToken) {
-        const aliasName = normalizeTokenText(aliasToken);
+        const aliasName = this.normalizeToken(aliasToken);
         const subqueryColumns = this.extractColumnsFromQueryNode(subqueryNode);
         this.setLocalDefinition(aliasName, "Subquery", subqueryColumns);
   
@@ -401,7 +410,7 @@ export class ParserSqlContextCollector {
           : undefined;
         if (inferredTableRef && this._currentScopeBindings) {
           // Register the alias with the inferred table reference
-          this._currentScopeBindings.set(aliasName.toUpperCase(), {
+          this._currentScopeBindings.set(this.nameKey(aliasName), {
             db: inferredTableRef.database,
             schema: inferredTableRef.schema,
             table: inferredTableRef.table,
@@ -410,6 +419,14 @@ export class ParserSqlContextCollector {
       }
     }
   
+    const explicitColumns = getChildNodesByKey(node, "cteColumnList")[0];
+    if (aliasToken && explicitColumns) {
+      const columns = getChildNodesByKey(explicitColumns, "identifier")
+        .map(column => this.getIdentifierToken(column))
+        .filter((token): token is IToken => !!token)
+        .map(token => this.normalizeToken(token));
+      this.setLocalDefinition(this.normalizeToken(aliasToken), "Subquery", columns);
+    }
     this.visitChildren(node);
   }
 
@@ -425,10 +442,10 @@ export class ParserSqlContextCollector {
     const normalizedType = type.toUpperCase();
     const isScriptTable = ["TABLE", "TEMP TABLE", "GLOBAL TEMP TABLE"].includes(normalizedType);
     const key = normalizedType === "VARIABLE" || normalizedType === "PARAMETER"
-      ? `${normalizedType}:${name.toUpperCase()}:${scope?.start ?? -1}:${scope?.end ?? -1}`
+      ? `${normalizedType}:${this.nameKey(name)}:${scope?.start ?? -1}:${scope?.end ?? -1}`
       : isScriptTable && scope
-        ? `${name.toUpperCase()}@${scope.start}`
-        : name.toUpperCase();
+        ? `${this.nameKey(name)}@${scope.start}`
+        : this.nameKey(name);
     const existing = this._localDefinitions.get(key);
     const dedupedColumns = this.dedupeColumns(columns);
 
@@ -475,7 +492,7 @@ export class ParserSqlContextCollector {
       const identifier = this.getIdentifierToken(argumentNode);
       if (identifier) {
         this.setLocalDefinition(
-          normalizeTokenText(identifier),
+          this.normalizeToken(identifier),
           "Parameter",
           [],
           range,
@@ -497,7 +514,7 @@ export class ParserSqlContextCollector {
       this._routineRangeStack[this._routineRangeStack.length - 1] ??
       getNodeRange(node, this._rangeCache);
     this.setLocalDefinition(
-      normalizeTokenText(identifier),
+      this.normalizeToken(identifier),
       "Variable",
       [],
       range,
@@ -518,7 +535,7 @@ export class ParserSqlContextCollector {
       const identifier = this.getIdentifierToken(declaration);
       if (identifier) {
         this.setLocalDefinition(
-          normalizeTokenText(identifier),
+          this.normalizeToken(identifier),
           "Variable",
           [],
           range,
@@ -535,7 +552,7 @@ export class ParserSqlContextCollector {
       if (!trimmed) {
         continue;
       }
-      const key = trimmed.toUpperCase();
+      const key = this.nameKey(trimmed);
       if (seen.has(key)) {
         continue;
       }
@@ -555,7 +572,7 @@ export class ParserSqlContextCollector {
     const identifiers = getChildNodesByKey(cteColumnListNode, "identifier")
       .map((node) => getFirstTokenFromCstNode(node))
       .filter((token): token is IToken => !!token);
-    return identifiers.map((token) => normalizeTokenText(token));
+    return identifiers.map((token) => this.normalizeToken(token));
   }
 
   private extractColumnsFromColumnDefinitionList(
@@ -583,7 +600,7 @@ export class ParserSqlContextCollector {
         )[0];
         const token = getFirstTokenFromCstNode(columnNameNode);
         if (token) {
-          result.push(normalizeTokenText(token));
+          result.push(this.normalizeToken(token));
         }
       });
     return result;
@@ -631,7 +648,7 @@ export class ParserSqlContextCollector {
         getChildNodesByKey(selectItemNode, "aliasOptional")[0],
       );
       if (aliasToken) {
-        columns.push(normalizeTokenText(aliasToken));
+        columns.push(this.normalizeToken(aliasToken));
         return;
       }
 
@@ -671,12 +688,12 @@ export class ParserSqlContextCollector {
       const sortedTokens = getOrderedReferenceTokens(columnReferenceNode);
       const lastToken = sortedTokens[sortedTokens.length - 1];
       if (lastToken) {
-        return normalizeTokenText(lastToken);
+        return this.normalizeToken(lastToken);
       }
     }
 
     const fallbackToken = getFirstTokenFromCstNode(expressionNode);
-    return fallbackToken ? normalizeTokenText(fallbackToken) : undefined;
+    return fallbackToken ? this.normalizeToken(fallbackToken) : undefined;
   }
 
   private parseQualifiedTableName(
@@ -694,7 +711,7 @@ export class ParserSqlContextCollector {
     }
 
     const names = identifierTokens.map((token) =>
-      normalizeTokenText(token),
+      this.normalizeToken(token),
     );
     const dotCount = getTokensByKey(qualifiedNameNode, "Dot").length;
 
@@ -739,7 +756,7 @@ export class ParserSqlContextCollector {
 
     if (aliasToken) {
       this._currentScopeBindings.set(
-        normalizeTokenText(aliasToken).toUpperCase(),
+        this.nameKey(this.normalizeToken(aliasToken)),
         {
           db: tableRef.database,
           schema: tableRef.schema,
@@ -899,7 +916,7 @@ export function parseAliasBindingsFromTokens(
 
   const resolveRef = (ref: QualifiedTableName): QualifiedTableName => {
     if (!ref.database && !ref.schema) {
-      const upper = ref.table.toUpperCase();
+      const upper = databaseKind === "postgresql" ? ref.table : ref.table.toUpperCase();
       if (cteBindings.has(upper)) {
         return cteBindings.get(upper)!;
       }
@@ -923,6 +940,7 @@ export function parseAliasBindingsFromTokens(
           parsed.alias,
           depth,
           () => order++,
+          databaseKind,
         );
         index = parsed.nextIndex - 1;
       }
@@ -935,6 +953,7 @@ export function parseAliasBindingsFromTokens(
           parsed.alias,
           depth,
           () => order++,
+          databaseKind,
         );
         index = parsed.nextIndex - 1;
       }
@@ -951,6 +970,7 @@ export function parseAliasBindingsFromTokens(
           parsed.alias,
           depth,
           () => order++,
+          databaseKind,
         );
         index = parsed.nextIndex - 1;
       }
@@ -963,7 +983,7 @@ export function parseAliasBindingsFromTokens(
         if (!isIdentifierToken(tokens[scanIndex])) {
           break;
         }
-        const cteName = normalizeTokenText(tokens[scanIndex]);
+        const cteName = normalizeAliasToken(tokens[scanIndex], databaseKind);
         scanIndex += 1;
 
         if (tokens[scanIndex]?.tokenType.name === "LParen") {
@@ -995,13 +1015,14 @@ export function parseAliasBindingsFromTokens(
               databaseKind,
             );
             if (inferredTableRef) {
-              cteBindings.set(cteName.toUpperCase(), inferredTableRef);
+              cteBindings.set(databaseKind === "postgresql" ? cteName : cteName.toUpperCase(), inferredTableRef);
               registerAliasBinding(
                 aliasCandidates,
                 inferredTableRef,
                 cteName,
                 depth,
                 () => order++,
+          databaseKind,
               );
             }
             scanIndex = cteBodyEnd.nextIndex;
@@ -1141,7 +1162,7 @@ function parseTableReferenceAndAlias(
       return undefined;
     }
 
-    const alias = normalizeTokenText(tokens[nextIndex]);
+    const alias = normalizeAliasToken(tokens[nextIndex], databaseKind);
     nextIndex += 1;
     const inferredTableRef = inferSimpleStarSubqueryTableRef(
       tokens,
@@ -1172,7 +1193,7 @@ function parseTableReferenceAndAlias(
   }
 
   if (isIdentifierToken(tokens[nextIndex])) {
-    const candidate = normalizeTokenText(tokens[nextIndex]);
+    const candidate = normalizeAliasToken(tokens[nextIndex], databaseKind);
     if (!isAliasBoundaryToken(tokens[nextIndex])) {
       alias = candidate;
       nextIndex += 1;
@@ -1396,7 +1417,7 @@ function parseQualifiedTableNameFromTokens(
     return undefined;
   }
 
-  const names: string[] = [normalizeTokenText(tokens[startIndex])];
+  const names: string[] = [normalizeAliasToken(tokens[startIndex], databaseKind)];
   let dotCount = 0;
   let index = startIndex + 1;
 
@@ -1413,7 +1434,7 @@ function parseQualifiedTableNameFromTokens(
       break;
     }
 
-    names.push(normalizeTokenText(tokens[index]));
+    names.push(normalizeAliasToken(tokens[index], databaseKind));
     index += 1;
   }
 
@@ -1450,6 +1471,7 @@ function registerAliasBinding(
   alias: string | undefined,
   depth: number,
   nextOrder: () => number,
+  databaseKind?: DatabaseKind,
 ): void {
   const value: AliasInfo = {
     db: tableRef.database,
@@ -1458,7 +1480,7 @@ function registerAliasBinding(
   };
 
   const addCandidate = (key: string): void => {
-    const upperKey = key.toUpperCase();
+    const upperKey = databaseKind === "postgresql" ? key : key.toUpperCase();
     const candidates = aliasCandidates.get(upperKey) || [];
     candidates.push({ value, depth, order: nextOrder() });
     aliasCandidates.set(upperKey, candidates);
@@ -1553,4 +1575,8 @@ function isAliasBoundaryToken(token: IToken | undefined): boolean {
   ]);
 
   return boundaryTokenNames.has(token.tokenType.name);
+}
+
+function normalizeAliasToken(token: IToken, databaseKind?: DatabaseKind): string {
+  return databaseKind === "postgresql" ? normalizePostgresqlIdentifier(token.image) : normalizeTokenText(token);
 }

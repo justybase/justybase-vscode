@@ -18,6 +18,9 @@
     "check-types": "tsc -p tsconfig.json --noEmit",
     "test": "jest --runInBand"
   },
+  "dependencies": {
+    "@justybase/contracts": "*"
+  },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",

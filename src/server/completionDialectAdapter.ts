@@ -103,6 +103,7 @@ export function normalizeDialectQuotedIdentifiers(
   sql: string,
   databaseKind?: DatabaseKind,
 ): string {
+  if (databaseKind === 'postgresql') return sql;
   let normalizedSql = sql.replace(/\[([^\]\r\n]*)\]/g, (_match, inner: string) => {
     const safeInner = inner.replace(/"/g, "_");
     return `"${safeInner}"`;

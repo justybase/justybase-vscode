@@ -1214,17 +1214,23 @@ export class ConnectionManager {
         }
 
         const conn = this._documentPersistentConnections.get(normalizedUri);
-        if (!conn) {
+        const pendingOpen = this._documentConnectionPromises.get(normalizedUri)?.promise;
+        if (!conn && !pendingOpen) {
             return;
         }
 
         const closePromise = (async () => {
             try {
-                await conn.close();
+                await conn?.close();
             } catch (e: unknown) {
                 logWithFallback('error', `[ConnectionManager] Error closing document connection for ${documentUri}:`, e);
                 throw e;
             }
+
+            // Generation invalidation makes a pending open close itself rather
+            // than publish a new session. Wait for that cleanup before reporting
+            // a successful disconnect (and before allowing another open).
+            if (pendingOpen) await pendingOpen.catch(() => undefined);
 
             // A new connection may have been created while the old one was
             // closing. Only remove the entry that this call actually closed.
@@ -1286,8 +1292,31 @@ export class ConnectionManager {
      * Close all document persistent connections
      */
     async closeAllDocumentPersistentConnections(): Promise<void> {
-        for (const uri of this._documentPersistentConnections.keys()) {
+        const documentUris = new Set([
+            ...this._documentPersistentConnections.keys(),
+            ...this._documentConnectionPromises.keys(),
+            ...this._documentConnectionClosePromises.keys(),
+        ]);
+        for (const uri of documentUris) {
             await this.closeDocumentPersistentConnection(uri);
+        }
+    }
+
+    /** Close all tab sessions for a saved profile while preserving tab assignments. */
+    async disconnectConnection(connectionName: string): Promise<void> {
+        const documentUris = new Set<string>();
+        for (const [uri, metadata] of this._documentPersistentConnectionMeta) {
+            if (metadata.connectionName === connectionName) documentUris.add(uri);
+        }
+        for (const [uri, pending] of this._documentConnectionPromises) {
+            if (pending.connectionName === connectionName) documentUris.add(uri);
+        }
+        const results = await Promise.allSettled(
+            [...documentUris].map(uri => this.closeDocumentPersistentConnection(uri, true)),
+        );
+        const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failures.length) {
+            throw new AggregateError(failures.map(result => result.reason as unknown), `Failed to disconnect ${connectionName}`);
         }
     }
 
@@ -1296,6 +1325,11 @@ export class ConnectionManager {
      * Used by the connection capsule to render Connected / Not connected
      * without opening a connection as a side effect.
      */
+    /** Read existing session metadata without opening a database connection. */
+    async getDocumentSqlAuthoringContext(documentUri: string): Promise<{ serverVersionNum?: number; searchPath?: readonly string[] } | undefined> {
+        return this._documentPersistentConnections.get(normalizeUriKey(documentUri))?.getSqlAuthoringContext?.();
+    }
+
     hasDocumentPersistentConnection(documentUri: string): boolean {
         return this._documentPersistentConnections.has(normalizeUriKey(documentUri));
     }

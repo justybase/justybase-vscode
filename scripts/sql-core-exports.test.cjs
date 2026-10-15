@@ -36,3 +36,16 @@ test('native ESM named imports retain the same public objects as CommonJS', asyn
   assert.equal(core.SqlLexer, lexer.SqlLexer);
   assert.equal(core.NetezzaSqlSemanticValidator, validation.NetezzaSqlSemanticValidator);
 });
+
+test('PostgreSQL lexical and statement subpaths work in CommonJS and native ESM', async () => {
+  const cjs = require('@justybase/sql-core/statements');
+  const esm = await import('@justybase/sql-core/statements');
+  const lexical = await import('@justybase/sql-core/postgresqlLexical');
+  assert.equal(esm.splitSqlStatements, cjs.splitSqlStatements);
+  assert.equal(lexical.normalizePostgresqlIdentifier('"A""b"'), 'A"b');
+  assert.equal(lexical.normalizePostgresqlIdentifier('ITEMS'), 'items');
+  const sql = 'CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1; $$; SELECT 2;';
+  const statements = esm.splitSqlStatements(sql, 'postgresql');
+  assert.equal(statements.length, 2);
+  assert.equal(sql.slice(statements[0].startOffset, statements[0].endOffset), statements[0].sql);
+});

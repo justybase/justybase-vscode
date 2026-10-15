@@ -74,13 +74,12 @@ export class NetezzaParserHoverProvider implements vscode.HoverProvider {
             documentId: documentUri,
             version: document.version,
         };
-        const statement = SqlParser.getStatementAtPosition(fullSql, offset, documentKey);
+        const databaseKind = this.connectionManager.getExecutionDatabaseKind?.(documentUri);
+        const statement = SqlParser.getStatementAtPosition(fullSql, offset, documentKey, databaseKind);
         const statementSql = statement?.sql ?? fullSql;
         const statementRelativeOffset = statement
             ? Math.max(0, offset - statement.start)
             : offset;
-        const databaseKind = this.connectionManager.getExecutionDatabaseKind?.(documentUri);
-
         const parseRequest = {
             documentUri,
             documentVersion: document.version,

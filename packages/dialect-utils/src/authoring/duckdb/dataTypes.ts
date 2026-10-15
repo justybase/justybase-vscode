@@ -37,16 +37,28 @@ export function getDuckDbTypeSpec(typeName: string): DatabaseSqlTypeSpec | undef
 
   const normalized = typeName.trim().toUpperCase();
   const base = normalized.replace(/\s*\(.*\)$/, '').trim();
-  if (base === 'INT' || base === 'INT4') {
+  if (['INT', 'INT4', 'INT32', 'INTEGER', 'SIGNED'].includes(base)) {
     return DUCKDB_TYPE_SPECS.INTEGER;
   }
-  if (base === 'FLOAT' || base === 'FLOAT4') {
+  if (['INT8', 'INT64', 'LONG'].includes(base)) {
+    return DUCKDB_TYPE_SPECS.BIGINT;
+  }
+  if (['INT2', 'INT16', 'SHORT'].includes(base)) {
+    return DUCKDB_TYPE_SPECS.SMALLINT;
+  }
+  if (base === 'INT1' || base === 'BYTEINT') {
+    return DUCKDB_TYPE_SPECS.TINYINT;
+  }
+  if (base === 'BOOL') {
+    return DUCKDB_TYPE_SPECS.BOOLEAN;
+  }
+  if (base === 'FLOAT' || base === 'FLOAT4' || base === 'FLOAT32') {
     return DUCKDB_TYPE_SPECS.REAL;
   }
-  if (base === 'FLOAT8') {
+  if (base === 'FLOAT8' || base === 'FLOAT64' || base === 'DOUBLE PRECISION') {
     return DUCKDB_TYPE_SPECS.DOUBLE;
   }
-  if (base === 'STRING' || base === 'TEXT') {
+  if (base === 'STRING' || base === 'TEXT' || base === 'CHAR' || base === 'BPCHAR') {
     return DUCKDB_TYPE_SPECS.VARCHAR;
   }
   if (base === 'NUMERIC') {

@@ -520,3 +520,14 @@ test('coverage recognizes static template text but retains embedded call coverag
     assert.match(checkChangedCoverage({ diff: '+++ b/src/__quality_static_template_fixture__.ts\n@@ -4 +4 @@\n', lcov, baseline }).failures[0], /missing from LCOV/);
   } finally { fs.rmSync(fixture, { force: true }); }
 });
+
+test('coverage recognizes static array elements but retains embedded calls', () => {
+  const fixture = path.resolve(process.cwd(), 'src/__quality_array_fixture__.ts');
+  fs.writeFileSync(fixture, "export const commands = [\n  'first',\n  'second',\n  loadCommand(),\n];\n");
+  const baseline = { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } };
+  const lcov = 'SF:src/__quality_array_fixture__.ts\nDA:1,1\nend_of_record\n';
+  try {
+    assert.deepEqual(checkChangedCoverage({ diff: '+++ b/src/__quality_array_fixture__.ts\n@@ -2,2 +2,2 @@\n', lcov, baseline }).failures, []);
+    assert.match(checkChangedCoverage({ diff: '+++ b/src/__quality_array_fixture__.ts\n@@ -4 +4 @@\n', lcov, baseline }).failures[0], /missing from LCOV/);
+  } finally { fs.rmSync(fixture, { force: true }); }
+});

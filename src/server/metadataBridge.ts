@@ -53,6 +53,8 @@ export class MetadataBridge {
 
   private readonly documentListEpoch = new Map<string, number>();
   private readonly documentConnectionNames = new Map<string, string>();
+  private readonly documentAuthoringContexts = new Map<string, MetadataContextResponse>();
+  private readonly authoringContextFingerprints = new Map<string, string>();
   private readonly documentDatabaseKinds = new Map<
     string,
     MetadataContextResponse["databaseKind"] | null
@@ -78,6 +80,12 @@ export class MetadataBridge {
       kind: "context",
     });
     const context = this.asContextResponse(response) ?? {};
+    const fingerprint = JSON.stringify([context.connectionName, context.databaseKind, context.effectiveDatabase, context.effectiveSchema, context.serverVersionNum, context.searchPath]);
+    if (this.authoringContextFingerprints.has(documentUri) && this.authoringContextFingerprints.get(documentUri) !== fingerprint) {
+      const nextEpoch = this.getValidationMetadataEpoch(documentUri) + 1;
+      this.clearDocument(documentUri);
+      this.validationMetadataEpoch.set(documentUri, nextEpoch);
+    }
     if (context.connectionName) {
       this.documentConnectionNames.set(documentUri, context.connectionName);
       this.connectionDatabaseKinds.set(
@@ -85,6 +93,8 @@ export class MetadataBridge {
         context.databaseKind ?? null,
       );
     }
+    this.authoringContextFingerprints.set(documentUri, fingerprint);
+    this.documentAuthoringContexts.set(documentUri, context);
     this.documentDatabaseKinds.set(documentUri, context.databaseKind ?? null);
     return context;
   }
@@ -273,6 +283,15 @@ export class MetadataBridge {
     table: string,
     schema?: string,
   ): Promise<MetadataTableInfoResponse | undefined> {
+    if (!schema && this.documentDatabaseKinds.get(documentUri) === 'postgresql') {
+      const searchPath = this.documentAuthoringContexts.get(documentUri)?.searchPath;
+      if (!searchPath) return undefined;
+      for (const candidate of searchPath) {
+        const info = await this.getTableInfo(documentUri, database, table, candidate);
+        if (!info || info.exists) return info;
+      }
+      return { exists: false, database, table, columns: [], columnsComplete: true };
+    }
     const cached = await this.getCachedTableInfo(
       documentUri,
       database,
@@ -317,6 +336,15 @@ export class MetadataBridge {
     table: string,
     schema?: string,
   ): Promise<MetadataTableInfoResponse | undefined> {
+    if (!schema && this.documentDatabaseKinds.get(documentUri) === 'postgresql') {
+      const searchPath = this.documentAuthoringContexts.get(documentUri)?.searchPath;
+      if (!searchPath) return undefined;
+      for (const candidate of searchPath) {
+        const info = await this.getCachedTableInfo(documentUri, database, table, candidate);
+        if (!info || info.exists) return info;
+      }
+      return { exists: false, database, table, columns: [], columnsComplete: true };
+    }
     const connectionName = await this.resolveConnectionName(documentUri);
     const cacheKey = this.buildTableCacheKey(
       connectionName,
@@ -355,6 +383,15 @@ export class MetadataBridge {
     database?: string,
     schema?: string,
   ): MetadataTableInfoResponse | undefined {
+    if (!schema && this.documentDatabaseKinds.get(documentUri) === 'postgresql') {
+      const searchPath = this.documentAuthoringContexts.get(documentUri)?.searchPath;
+      if (!searchPath) return undefined;
+      for (const candidate of searchPath) {
+        const info = this.findCachedTableInfo(documentUri, table, database, candidate);
+        if (!info || info.exists) return info;
+      }
+      return { exists: false, database, table, columns: [], columnsComplete: true };
+    }
     const connectionName = this.documentConnectionNames.get(documentUri);
     if (connectionName && database) {
       const cacheKey = this.buildTableCacheKey(
@@ -651,6 +688,8 @@ export class MetadataBridge {
   }
 
   clearDocument(documentUri: string): void {
+    this.documentAuthoringContexts.delete(documentUri);
+    this.authoringContextFingerprints.delete(documentUri);
     this.documentConnectionNames.delete(documentUri);
     this.documentDatabaseKinds.delete(documentUri);
     this.validationWarmFingerprint.delete(documentUri);
@@ -686,6 +725,8 @@ export class MetadataBridge {
     this.listFetchInFlight.clear();
     this.documentListEpoch.clear();
     this.documentConnectionNames.clear();
+    this.documentAuthoringContexts.clear();
+    this.authoringContextFingerprints.clear();
     this.documentDatabaseKinds.clear();
     this.connectionDatabaseKinds.clear();
     this.validationWarmFingerprint.clear();
@@ -908,6 +949,7 @@ export class MetadataBridge {
     if (databaseKind === "netezza") {
       return createNetezzaUserIdentifier(value).value;
     }
+    if (databaseKind === 'postgresql') return value;
     return value.toUpperCase();
   }
 

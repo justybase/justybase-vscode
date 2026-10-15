@@ -233,6 +233,10 @@ function isNonExecutableAstLine(file, lineNumber) {
           || ts.isDefaultClause(node)
           || ts.isPropertyAssignment(node)
           || ts.isShorthandPropertyAssignment(node)
+          // Istanbul records a static command-list initializer, not every
+          // literal element on its own line. Calls/spreads stay executable.
+          || ((ts.isStringLiteral(node) || ts.isNumericLiteral(node))
+            && ts.isArrayLiteralExpression(node.parent))
           || (ts.isVariableDeclaration(node) && node.initializer === undefined)
           || (ts.isPropertyDeclaration(node) && node.initializer === undefined)
           || (ts.isFunctionDeclaration(node) && node.body === undefined)

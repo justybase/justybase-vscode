@@ -141,6 +141,7 @@ describe('result panel protocol', () => {
             stats: null,
             errorMessage: 'error',
             sql: 'SELECT 1',
+            operation: { kind: 'rows', filters: { dimensions: [], dates: [], measures: [] } },
             sourceKey: 'lane-1',
             lanesJson: '[]',
             editSource: { table: 'demo' },

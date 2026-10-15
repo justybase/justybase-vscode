@@ -80,6 +80,38 @@ function columnsFromReader(reader: DuckDbResultReader): QueryColumn[] {
   }));
 }
 
+/**
+ * Autocommit statements each get a new transaction id; inside BEGIN … COMMIT
+ * consecutive statements share one. An aborted transaction rejects both
+ * probes, which also counts as "inside a transaction".
+ */
+async function isInExplicitTransaction(session: DuckDbSession): Promise<boolean> {
+  try {
+    const transactionId = async () => String((await session.runAndReadAll('SELECT txid_current()')).getRowsJS()[0]?.[0]);
+    return await transactionId() === await transactionId();
+  } catch {
+    return true;
+  }
+}
+
+async function finishStreamingReader(session: DuckDbSession, reader: DuckDbResultReader, inExplicitTransaction: boolean): Promise<void> {
+  if (reader.done) return;
+  // Inside an explicit transaction an interrupt aborts it, and the following
+  // COMMIT silently rolls back earlier writes (verified on DuckDB 1.5.0).
+  // Leave the partial stream; the next statement on this session replaces it.
+  if (inExplicitTransaction) return;
+  // A partial stream retains the database even after disconnect, and only an
+  // interrupt before the next statement releases it. Node API has no reader
+  // close method: interrupt and fetch its terminal state while we still own
+  // the connection lock, before another query can start.
+  session.interrupt();
+  try {
+    await reader.readAll();
+  } catch (error: unknown) {
+    if (!(error instanceof Error) || !/\binterrupted\b/i.test(error.message)) throw error;
+  }
+}
+
 function sqlLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -183,17 +215,23 @@ export class DuckDbRuntime {
           return { totalRows: 0, limitReached: false, rowsAffected: Number(result.rowsChanged ?? 0) };
         }
         const maxRows = rowLimit(options.maxRows);
+        const inExplicitTransaction = await isInExplicitTransaction(runtimeSession.session);
+        operation.throwIfCancelled();
         const reader = await runtimeSession.session.streamAndReadUntil(executableSql, maxRows + 1);
-        operation.throwIfCancelled();
-        callbacks.onColumns(columnsFromReader(reader));
-        const rawRows = reader.getRowsJS().map(row => row.map(normalize));
-        const selected = rawRows.slice(0, maxRows);
-        for (let offset = 0; offset < selected.length; offset += 200) {
+        try {
           operation.throwIfCancelled();
-          callbacks.onRows(selected.slice(offset, offset + 200), Math.min(offset + 200, selected.length));
+          callbacks.onColumns(columnsFromReader(reader));
+          const rawRows = reader.getRowsJS().map(row => row.map(normalize));
+          const selected = rawRows.slice(0, maxRows);
+          for (let offset = 0; offset < selected.length; offset += 200) {
+            operation.throwIfCancelled();
+            callbacks.onRows(selected.slice(offset, offset + 200), Math.min(offset + 200, selected.length));
+          }
+          operation.throwIfCancelled();
+          return { totalRows: selected.length, limitReached: rawRows.length > maxRows, rowsAffected: reader.rowsChanged === undefined ? undefined : Number(reader.rowsChanged) };
+        } finally {
+          await finishStreamingReader(runtimeSession.session, reader, inExplicitTransaction);
         }
-        operation.throwIfCancelled();
-        return { totalRows: selected.length, limitReached: rawRows.length > maxRows, rowsAffected: reader.rowsChanged === undefined ? undefined : Number(reader.rowsChanged) };
       } finally {
         operation.complete();
       }

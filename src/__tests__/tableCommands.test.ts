@@ -562,6 +562,30 @@ describe("tableCommands", () => {
   });
 
   describe("addPrimaryKey command", () => {
+    it.each(["netezza.addPrimaryKey", "netezza.addUniqueConstraint"])(
+      "blocks %s for DuckDB before prompting",
+      async (command) => {
+        (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("duckdb");
+        registerTableCommands(mockDeps);
+
+        const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+        const registration = calls.find((call: any[]) => call[0] === command);
+        const handler = registration[1] as (item: SchemaItemData) => Promise<void>;
+        await handler({
+          label: "TEST_TABLE",
+          dbName: "memory",
+          schema: "main",
+          objType: "TABLE",
+          connectionName: "duckdb-connection",
+        });
+
+        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+          expect.stringContaining("cannot add a key constraint"),
+        );
+        expect(vscode.window.showInputBox).not.toHaveBeenCalled();
+      },
+    );
+
     it("should prompt for constraint name and columns", async () => {
       registerTableCommands(mockDeps);
 
@@ -625,6 +649,25 @@ describe("tableCommands", () => {
   });
 
   describe("addForeignKey command", () => {
+    it("blocks ALTER-based foreign-key creation for DuckDB", async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("duckdb");
+      registerTableCommands(mockDeps);
+
+      const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+      const registration = calls.find((call: any[]) => call[0] === "netezza.addForeignKey");
+      const handler = registration[1] as (item: SchemaItemData) => Promise<void>;
+      await handler({
+        label: "TEST_TABLE",
+        dbName: "memory",
+        schema: "main",
+        objType: "TABLE",
+        connectionName: "duckdb-connection",
+      });
+
+      expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+      expect(vscode.window.showInputBox).not.toHaveBeenCalled();
+    });
+
     it("should check for foreign key command registration", () => {
       registerTableCommands(mockDeps);
 

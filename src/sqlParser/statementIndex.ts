@@ -16,8 +16,8 @@ export interface StatementIndexDiff {
   affectedFromIndex: number;
 }
 
-export function buildStatementIndex(fullSql: string): StatementIndex {
-  const statements = SqlParser.splitStatementsWithPositions(fullSql).map(
+export function buildStatementIndex(fullSql: string, databaseKind?: string): StatementIndex {
+  const statements = SqlParser.splitStatementsWithPositions(fullSql, databaseKind).map(
     (statement, index) => ({
       index,
       startOffset: statement.startOffset,

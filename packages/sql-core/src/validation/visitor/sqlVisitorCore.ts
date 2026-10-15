@@ -123,7 +123,7 @@ export class SqlVisitor
     macroReferenceRanges: readonly MacroReferenceRange[] = [],
   ) {
     super();
-    this.scopeBuilder = new ScopeBuilder();
+    this.scopeBuilder = new ScopeBuilder(validationProfile.databaseKind === 'postgresql');
     this.schemaProvider = schemaProvider;
     this.validationProfile = validationProfile;
     this.macroReferenceRanges = macroReferenceRanges;
@@ -812,9 +812,18 @@ export class SqlVisitor
   }
 
   statement(ctx: Record<string, CstNode[]>): void {
+    const postgresqlRule = Object.keys(ctx).find(name => name.startsWith('postgresql'));
+    if (postgresqlRule && ctx[postgresqlRule]?.[0]) {
+      this.visit(ctx[postgresqlRule][0]);
+      return;
+    }
     // Delegate to specific statement type
     if (ctx.selectStatement) {
       this.visit(ctx.selectStatement[0]);
+    } else if (ctx.duckdbFromFirstStatement) {
+      this.visit(ctx.duckdbFromFirstStatement[0]);
+    } else if (ctx.duckdbCreateOrReplaceTableStatement) {
+      this.visit(ctx.duckdbCreateOrReplaceTableStatement[0]);
     } else if (ctx.withAnyStatement) {
       this.visit(ctx.withAnyStatement[0]);
     } else if (ctx.createDatabaseStatement) {
@@ -904,7 +913,19 @@ export class SqlVisitor
   }
 
   mergeStatement(ctx: Record<string, CstNode[]>): void {
-    commandVisitor.visitCommandTail(this, ctx);
+    if (this.getValidationProfile().databaseKind === 'postgresql') {
+      const scope = this.getScopeBuilder();
+      scope.enterScope();
+      try {
+        if (ctx.tableName) {
+          const table = this.visitAs<TableInfo>(ctx.tableName[0]);
+          table.columns = this.getSchemaProvider()?.getTable(table.database, table.schema, table.name)?.columns ?? [];
+          if (ctx.aliasOptional) table.alias = this.visitAs<string>(ctx.aliasOptional[0]);
+          scope.addTable(table);
+        }
+        this.visitPostgresqlChildren(ctx);
+      } finally { scope.exitScope(); }
+    } else commandVisitor.visitCommandTail(this, ctx);
   }
 
   reindexStatement(ctx: Record<string, CstNode[]>): void {
@@ -925,6 +946,53 @@ export class SqlVisitor
 
   selectStatement(ctx: Record<string, CstNode[]>): ColumnInfo[] {
     return queryScopeVisitor.selectStatement(this, ctx);
+  }
+
+  duckdbFromFirstStatement(ctx: Record<string, CstNode[]>): ColumnInfo[] {
+    return queryScopeVisitor.selectStatement(this, ctx);
+  }
+
+  duckdbCreateOrReplaceTableStatement(ctx: Record<string, CstNode[]>): void {
+    ddlVisitor.createTableStatement(this, ctx);
+  }
+
+  duckdbWhereAndSampleClause(ctx: Record<string, CstNode[]>): void {
+    if (ctx.whereClause) this.visit(ctx.whereClause[0]);
+    if (ctx.duckdbSampleClause) this.visit(ctx.duckdbSampleClause[0]);
+    if (ctx.duckdbRepeatableClause) this.visit(ctx.duckdbRepeatableClause[0]);
+  }
+
+  duckdbSampleClause(): void {
+    // Sampling syntax contains only sampling parameters and has no schema references.
+  }
+
+  duckdbRepeatableClause(): void {
+    // REPEATABLE accepts a numeric seed only.
+  }
+
+  duckdbWindowAndQualifyClause(ctx: Record<string, CstNode[]>): void {
+    if (ctx.duckdbWindowClause) this.visit(ctx.duckdbWindowClause[0]);
+    if (ctx.duckdbQualifyClause) this.visit(ctx.duckdbQualifyClause[0]);
+  }
+
+  duckdbWindowClause(ctx: Record<string, CstNode[]>): void {
+    for (const ruleName of ["partitionByClause", "orderByClause", "windowFrameClause"]) {
+      for (const node of ctx[ruleName] ?? []) this.visit(node);
+    }
+  }
+
+  duckdbQualifyClause(ctx: Record<string, CstNode[]>): void {
+    if (ctx.expression) this.visit(ctx.expression[0]);
+  }
+
+  duckdbListLiteral(ctx: Record<string, CstNode[]>): void {
+    if (ctx.expression) {
+      ctx.expression.forEach((expression) => this.visit(expression));
+    }
+  }
+
+  duckdbNamedArgument(ctx: Record<string, CstNode[]>): void {
+    if (ctx.expression) this.visit(ctx.expression[0]);
   }
 
   setOperation(): void {
@@ -976,7 +1044,9 @@ export class SqlVisitor
     for (const key in ctx) {
       const tokens = ctx[key];
       if (Array.isArray(tokens) && tokens.length > 0) {
-        return this.stripIdentifierQuoting(this.getTokenText(tokens[0]));
+        const text = this.getTokenText(tokens[0]);
+        return this.getValidationProfile().databaseKind === 'postgresql' && !text.startsWith('"')
+          ? text.toLowerCase() : this.stripIdentifierQuoting(text);
       }
     }
     return "";
@@ -1734,6 +1804,53 @@ export class SqlVisitor
 
   viewColumnAliasList(ctx: Record<string, CstNode[]>): string[] {
     return queryScopeVisitor.viewColumnAliasList(this, ctx);
+  }
+
+
+  /** Visit PostgreSQL nodes through the same column/scope checks as shared SQL. */
+  postgresqlPostfixExpression(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  postgresqlJsonExpression(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  arrayExpression(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  postgresqlReturning(ctx: Record<string, CstNode[]>): void {
+    const scope = this.getScopeBuilder();
+    const target = scope.getCurrentScopeTables()[0];
+    const aliases = target ? (ctx.identifier ?? []).map(node => ({ ...target, alias: this.visitAs<string>(node) })) : [];
+    aliases.forEach(alias => scope.addTable(alias));
+    try { this.visitPostgresqlChildren(ctx); }
+    finally { aliases.forEach(alias => scope.removeTable(alias)); }
+  }
+  postgresqlUsingClause(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  postgresqlWindowClause(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  postgresqlWindowSpec(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  postgresqlValuesQuery(ctx: Record<string, CstNode[]>): ColumnInfo[] { this.visitPostgresqlChildren(ctx); return []; }
+  postgresqlAlterAction(ctx: Record<string, CstNode[]>): void { if (ctx.typeName) this.visit(ctx.typeName[0]); }
+  postgresqlCreateRoutine(): void { /* Procedural bodies remain opaque. */ }
+  postgresqlDoStatement(): void { /* Procedural bodies remain opaque. */ }
+  postgresqlAtomicBody(): void { /* Routine-local scope is not the outer script scope. */ }
+  postgresqlRoutineArgument(): void { /* Signature names are not query columns. */ }
+  postgresqlCreateType(ctx: Record<string, CstNode[]>): void { if (ctx.typeName) this.visit(ctx.typeName[0]); }
+  postgresqlCreateIndex(): void { /* Index expressions are resolved against their target, not outer query scope. */ }
+  postgresqlJsonTable(ctx: Record<string, CstNode[]>): ColumnInfo[] {
+    if (ctx.expression) this.visit(ctx.expression[0]);
+    return (ctx.identifier ?? []).map((node, index) => ({
+      name: this.visitAs<string>(node),
+      dataType: ctx.typeName?.[index] ? this.getCstText(ctx.typeName[index]) : undefined,
+    }));
+  }
+  postgresqlMergeWhen(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
+  postgresqlTransaction(): void { /* Session control has no column scope. */ }
+  postgresqlOnConflict(ctx: Record<string, CstNode[]>): void {
+    const scope = this.getScopeBuilder();
+    const target = scope.getCurrentScopeTables()[0];
+    const excluded = target ? { ...target, alias: 'excluded' } : undefined;
+    if (excluded) scope.addTable(excluded);
+    try { this.visitPostgresqlChildren(ctx); }
+    finally { if (excluded) scope.removeTable(excluded); }
+  }
+  private visitPostgresqlChildren(ctx: Record<string, CstNode[]>): void {
+    for (const children of Object.values(ctx)) for (const child of children) {
+      if (this.isCstNode(child)) this.visit(child);
+    }
   }
 
   insertStatement(ctx: Record<string, CstNode[]>): void {

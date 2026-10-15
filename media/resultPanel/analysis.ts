@@ -3,7 +3,7 @@ import { formatCellValue } from './utils.js';
 import { getHostState, setHostState } from './protocol.js';
 import { getElementById } from './dom.js';
 import { closeRowView } from './rowView.js';
-import { renderExploreView } from './explore/explorePanel.js';
+import { renderExploreView, disposeExploreView } from './explore/explorePanel.js';
 import { disposeComposerChart } from './explore/composerTab.js';
 import {
     callPanelMethod,
@@ -78,7 +78,8 @@ function getResultSet(rsIndex: number = getActiveGridIndex()): ResultSet | null 
 
 function getResultKey(rsIndex: number = getActiveGridIndex()): string {
     const source = getActiveSourceUri() || '';
-    return `${source}:${rsIndex}`;
+    const result = getResultSet(rsIndex);
+    return `${source}:${result?.resultSetId ?? `ts:${result?.executionTimestamp ?? 0}:${rsIndex}`}`;
 }
 
 function normalizeMode(mode: string | undefined | null): ResultViewMode {
@@ -275,6 +276,7 @@ function applyViewMode(mode: string, rsIndex: number = getActiveGridIndex()): vo
 
     const forcedTableMode = !resultSet || resultSet.isLog || resultSet.isError;
     const effectiveMode = forcedTableMode ? 'table' : normalizedMode;
+    if (effectiveMode !== 'explore') disposeExploreView();
 
     if (effectiveMode === 'table') {
         activeDiffTruncated = false;

@@ -48,6 +48,7 @@ export function buildSqlLocalShadowContext(
   const aliasNames = collectDocumentAliasNames(documentScope);
   const statementBoundaries = SqlParser.splitStatementsWithPositions(
     request.sql,
+    request.databaseKind,
   ).map((statement) => ({
     start: statement.startOffset,
     end: statement.endOffset,

@@ -1,4 +1,4 @@
-import { isOffsetInSingleQuotedString, isOffsetInSqlComment } from "@justybase/sql-core/sourceScan";
+import { buildSqlSourceScanIndex } from "@justybase/sql-core/sourceScan";
 import {
   CompletionItem,
   CompletionTriggerKind,
@@ -138,6 +138,12 @@ export class LspCompletionEngine {
       );
     }
 
+    const text = document.getText();
+    const offset = document.offsetAt(position);
+    const scan = buildSqlSourceScanIndex(text, requestContext.databaseKind);
+    const insideLiteralOrComment = offset > 0 && (scan.isInSingleQuotedString(offset - 1) || scan.isInComment(offset - 1));
+    if (requestContext.databaseKind === 'postgresql' && insideLiteralOrComment) return [];
+
     const macroVariableItems = handleMacroVariableCompletion({
       documentText: requestContext.documentText,
       cursorOffset: requestContext.cursorOffset,
@@ -148,12 +154,7 @@ export class LspCompletionEngine {
     if (macroVariableItems !== undefined) {
       return finalizeCompletionItems(macroVariableItems, triggerKind);
     }
-
-    const text = document.getText();
-    const offset = document.offsetAt(position);
-    if (offset > 0 && (isOffsetInSingleQuotedString(text, offset - 1) || isOffsetInSqlComment(text, offset - 1))) {
-      return [];
-    }
+    if (insideLiteralOrComment) return [];
 
     const pathItems = await this.pathResolver.resolveRequestPathCompletions(
       requestContext,

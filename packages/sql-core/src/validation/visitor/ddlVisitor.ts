@@ -2,6 +2,7 @@ import { CstNode, type IToken } from "chevrotain";
 import type { ColumnInfo, TableInfo, ValidationError } from "../types";
 import type { SchemaProvider } from "../schemaProvider";
 import type { ScopeBuilder } from "./scopeBuilder";
+import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
 import {
   addTableQualificationWarningFromQualifiedName,
 } from "./queryScopeVisitor";
@@ -23,6 +24,7 @@ export interface DdlVisitorHost {
   removeScriptCreatedTable(table: TableInfo): void;
   getInProcedureContext(): boolean;
   getSchemaProvider(): SchemaProvider | undefined;
+  getValidationProfile(): DatabaseSqlValidationProfile;
   hasMacroReferenceInCst(node: CstNode): boolean;
   validateTableExists(table: TableInfo, tableNameNode: CstNode): void;
   isDropTargetTableLike(): boolean;
@@ -47,7 +49,12 @@ export function createTableStatement(
   const isTemp =
     !!ctx.tableTypeClause || !!nameInfo?.name.trim().startsWith('#');
 
-  if (isCtas && !isTemp && !ctx.distributeClause) {
+  if (
+    host.getValidationProfile().databaseKind === "netezza" &&
+    isCtas &&
+    !isTemp &&
+    !ctx.distributeClause
+  ) {
     const token =
       (ctx.Create?.[0] as unknown as IToken | undefined) ||
       (ctx.qualifiedName?.[0]

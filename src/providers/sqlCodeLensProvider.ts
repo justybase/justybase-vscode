@@ -343,7 +343,7 @@ export class SqlCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
         text: string,
         procedureBlocks: readonly ProcedureBlock[],
     ): vscode.CodeLens[] {
-        const statements = SqlParser.splitStatementsWithPositions(text);
+        const statements = SqlParser.splitStatementsWithPositions(text, this._connectionManager?.getExecutionDatabaseKind?.(document.uri.toString()));
         const lenses: vscode.CodeLens[] = [];
 
         for (const stmt of statements) {

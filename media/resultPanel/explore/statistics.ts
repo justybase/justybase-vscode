@@ -1,3 +1,4 @@
+import { EXPLORE_SAMPLE_ROWS } from './types.js';
 // Pure descriptive statistics for the Explore view (client-side, sample-based).
 
 import { parseNumericValue } from './columnClassification.js';
@@ -36,7 +37,7 @@ function standardDeviation(values: number[], avg: number): number | undefined {
 export function computeColumnStatistics(
     rows: readonly unknown[][],
     columnIndex: number,
-    maxRows = 2000,
+    maxRows = EXPLORE_SAMPLE_ROWS,
 ): ColumnStatistics {
     const numeric: number[] = [];
     const distinctValues = new Set<number>();

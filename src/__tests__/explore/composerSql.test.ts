@@ -47,7 +47,7 @@ describe('composerSql', () => {
         expect(built.sql).toContain("TRUNC(t.\"ORDER_DATE\", 'MM') AS \"BUCKET\"");
         expect(built.sql).toContain('SUM(t."AMOUNT") AS "MEASURE"');
         expect(built.sql).toContain('GROUP BY');
-        expect(built.sql).toContain('LIMIT 5000');
+        expect(built.sql).toContain('LIMIT 5001');
     });
 
     it('adds dimension and split columns', () => {
@@ -69,9 +69,10 @@ describe('composerSql', () => {
         );
         expect(built.columnIndexes.dimension).toBe(1);
         expect(built.columnIndexes.split).toBe(2);
-        expect(built.columnIndexes.measure).toBe(3);
+        expect(built.columnIndexes.measure).toBe(4);
+        expect(built.columnIndexes.splitOther).toBe(3);
         expect(built.sql).toContain('t."REGION" AS "DIM"');
-        expect(built.sql).toContain("CASE WHEN t.\"CATEGORY\" IN ('A', 'B') THEN t.\"CATEGORY\" ELSE 'Other' END AS \"SPLIT\"");
+        expect(built.sql).toContain("CASE WHEN t.\"CATEGORY\" IN ('A', 'B') THEN t.\"CATEGORY\" ELSE NULL END AS \"SPLIT\"");
         expect(built.sql).toContain('COUNT(*) AS "MEASURE"');
     });
 

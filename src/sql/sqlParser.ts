@@ -1,5 +1,6 @@
 import { IToken } from 'chevrotain';
 import { Dot, Semicolon, SqlLexer } from '../sqlParser/lexer';
+import { splitSqlStatements } from '@justybase/sql-core/statements';
 import {
     createStatementBoundaries,
     findAdjacentStatementAtOffset,
@@ -31,7 +32,8 @@ export class SqlParser {
     /**
      * Splits a SQL script into individual statements, respecting quotes and comments.
      */
-    public static splitStatements(text: string): string[] {
+    public static splitStatements(text: string, databaseKind?: string): string[] {
+        if (databaseKind === 'postgresql') return splitSqlStatements(text, databaseKind).map(statement => statement.sql);
         if (this.shouldUseFastPath(text)) {
             const fastStatements = this.splitStatementsWithPositionsFast(text);
             if (fastStatements) {
@@ -50,7 +52,8 @@ export class SqlParser {
      * Splits a SQL script into individual statements with their character offsets.
      * Used by CodeLens to position links at the correct line.
      */
-    public static splitStatementsWithPositions(text: string): { sql: string; startOffset: number; endOffset: number }[] {
+    public static splitStatementsWithPositions(text: string, databaseKind?: string): { sql: string; startOffset: number; endOffset: number }[] {
+        if (databaseKind === 'postgresql') return splitSqlStatements(text, databaseKind);
         if (this.shouldUseFastPath(text)) {
             const fastStatements = this.splitStatementsWithPositionsFast(text);
             if (fastStatements) {
@@ -101,7 +104,12 @@ export class SqlParser {
         text: string,
         offset: number,
         documentKey?: SqlParserDocumentKey,
+        databaseKind?: string,
     ): { sql: string; start: number; end: number } | null {
+        if (databaseKind === 'postgresql') {
+            const statement = splitSqlStatements(text, databaseKind).find(s => offset >= s.startOffset && offset <= s.endOffset);
+            return statement ? { sql: statement.sql, start: statement.startOffset, end: statement.endOffset } : null;
+        }
         if (documentKey) {
             const cached = getCachedStatementBoundaries(documentKey, text);
             if (cached) {

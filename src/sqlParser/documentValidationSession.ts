@@ -32,9 +32,9 @@ interface DocumentDiagnosticsCache {
 export class DocumentValidationSession {
   private readonly documents = new Map<string, DocumentDiagnosticsCache>();
 
-  prepareDocument(documentUri: string, sql: string): DocumentValidationState {
+  prepareDocument(documentUri: string, sql: string, databaseKind?: string): DocumentValidationState {
     const cache = this.getOrCreateDocumentCache(documentUri);
-    const nextIndex = buildStatementIndex(sql);
+    const nextIndex = buildStatementIndex(sql, databaseKind);
     const diff = diffStatementIndexes(cache.statementIndex, nextIndex);
 
     return {

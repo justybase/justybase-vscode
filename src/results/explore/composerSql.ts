@@ -4,25 +4,14 @@
  */
 
 import type { ColumnDefinition } from '../../types';
-import { buildExploreWhereSql, escapeSqlLiteral, quoteIdentifier, type ExploreFilterModel } from './exploreFilters';
+import { buildExploreWhereSql, exploreValueSql, quoteIdentifier } from './exploreFilters';
 import { bucketDateExpression, EXPLORE_COMPOSER_MAX_ROWS } from './timeBucketingSql';
-import { removeTrailingLimitClause } from '../refreshSqlLimit';
+import { exploreSourceSql } from './operationSql';
 
 export type ExploreComposerAggregate = 'sum' | 'avg' | 'count' | 'min' | 'max';
 
-export interface ExploreComposerConfig {
-    dateColumnIndex: number;
-    grain: 'day' | 'week' | 'month' | 'quarter' | 'year';
-    dimensionColumnIndex?: number;
-    measureColumnIndex: number;
-    aggFn: ExploreComposerAggregate;
-    splitByColumnIndex?: number;
-    splitValues?: string[];
-    includeOther?: boolean;
-    comparePrevious: boolean;
-    filters?: ExploreFilterModel;
-    limit?: number;
-}
+export type { ExploreComposerConfig } from '@justybase/contracts';
+import type { ExploreComposerConfig } from '@justybase/contracts';
 
 export interface ExploreComposerBuildResult {
     sql: string;
@@ -30,6 +19,7 @@ export interface ExploreComposerBuildResult {
         bucket: number;
         dimension: number | undefined;
         split: number | undefined;
+        splitOther?: number;
         measure: number;
         previous: number | undefined;
     };
@@ -53,7 +43,7 @@ export function buildComposerSql(
         throw new Error('Unsupported composer aggregate.');
     }
 
-    const withoutLimit = removeTrailingLimitClause(refreshSql).trim().replace(/;\s*$/, '').trim();
+    const withoutLimit = exploreSourceSql(refreshSql, databaseKind);
     if (!withoutLimit) {
         throw new Error('This result set does not have SQL that can be composed.');
     }
@@ -81,6 +71,8 @@ export function buildComposerSql(
     const groupExpressions: string[] = [];
     let dimensionIndex: number | undefined;
     let splitIndex: number | undefined;
+    let splitOtherIndex: number | undefined;
+    let splitRestriction: string | undefined;
     let previousIndex: number | undefined;
     const splitColumnNames: string[] = [];
 
@@ -97,19 +89,25 @@ export function buildComposerSql(
     if (splitColumn) {
         const values = config.splitValues ?? [];
         const hasSplitValues = values.length > 0;
+        const inList = `t.${quote(splitColumn.name)} IN (${values.map(value => exploreValueSql(value, splitColumn.type, databaseKind)).join(', ')})`;
         const splitSql = hasSplitValues
-            ? `CASE WHEN t.${quote(splitColumn.name)} IN (${values.map(value => escapeSqlLiteral(value)).join(', ')}) THEN t.${quote(splitColumn.name)} ELSE 'Other' END`
+            ? `CASE WHEN ${inList} THEN t.${quote(splitColumn.name)} ELSE NULL END`
             : `t.${quote(splitColumn.name)}`;
         selectParts.push(`${splitSql} AS ${quote('SPLIT')}`);
         groupExpressions.push(splitSql);
         splitIndex = (dimensionIndex ?? 0) + 1;
         if (hasSplitValues) {
+            const flag = `CASE WHEN ${inList} THEN 0 ELSE 1 END`;
+            splitOtherIndex = selectParts.length;
+            selectParts.push(`${flag} AS ${quote('SPLIT_IS_OTHER')}`);
+            groupExpressions.push(flag);
+            if (config.includeOther === false) splitRestriction = inList;
             splitColumnNames.push(...values, config.includeOther !== false ? 'Other' : '');
         }
     }
 
+    const measureIndex = selectParts.length;
     selectParts.push(`${agg()} AS ${quote('MEASURE')}`);
-    const measureIndex = (splitIndex ?? dimensionIndex ?? 0) + 1;
 
     if (config.comparePrevious) {
         const partitionBy = groupExpressions.length > 1 ? `PARTITION BY ${groupExpressions.slice(1).join(', ')}` : '';
@@ -117,12 +115,12 @@ export function buildComposerSql(
         previousIndex = measureIndex + 1;
     }
 
-    const where = buildExploreWhereSql(config.filters, columns, databaseKind);
-    const limit = config.limit ?? EXPLORE_COMPOSER_MAX_ROWS;
+    const where = [buildExploreWhereSql(config.filters, columns, databaseKind), splitRestriction].filter(Boolean).join('\nAND ');
+    const limit = config.limit ?? (EXPLORE_COMPOSER_MAX_ROWS + 1);
     const selectClause = databaseKind === 'mssql'
         ? `SELECT TOP ${limit} ${selectParts.join(', ')}`
         : `SELECT ${selectParts.join(', ')}`;
-    const limitClause = databaseKind === 'mssql' ? '' : `LIMIT ${limit}`;
+    const limitClause = databaseKind === 'mssql' ? '' : databaseKind === 'oracle' || databaseKind === 'db2' ? `FETCH FIRST ${limit} ROWS ONLY` : `LIMIT ${limit}`;
 
     return {
         sql: [
@@ -139,6 +137,7 @@ export function buildComposerSql(
             bucket: 0,
             dimension: dimensionIndex,
             split: splitIndex,
+            splitOther: splitOtherIndex,
             measure: measureIndex,
             previous: previousIndex,
         },

@@ -58,6 +58,8 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
   duckdbWindowAndQualifyClause!: AnyRule;
   duckdbWindowClause!: AnyRule;
   duckdbFromFirstStatement!: AnyRule;
+  duckdbListLiteral!: AnyRule;
+  duckdbNamedArgument!: AnyRule;
 
   public constructor() {
     super(duckdbLexer);
@@ -77,6 +79,15 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
 
   protected getNetezzaRelaxedNameTokens(): TokenType[] {
     return [...super.getNetezzaRelaxedNameTokens(), duckdbLexer.DuckDbBy];
+  }
+
+  protected getAdditionalPrimaryExpressionAlternatives(): OrAlternative[] {
+    return [
+      {
+        GATE: () => this.LA(1).tokenType === baseLexer.LBracket,
+        ALT: () => this.SUBRULE(this.duckdbListLiteral),
+      },
+    ];
   }
 
   protected supportsEmptyQualifiedNameSegment(): boolean {
@@ -210,6 +221,23 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
   }
 
   protected registerDialectExtensions(): void {
+    this.RULE('duckdbListLiteral', () => {
+      this.CONSUME(baseLexer.LBracket);
+      this.OPTION(() => {
+        this.AT_LEAST_ONE_SEP({
+          SEP: baseLexer.Comma,
+          DEF: () => this.SUBRULE(this.expression),
+        });
+      });
+      this.CONSUME(baseLexer.RBracket);
+    });
+
+    this.RULE('duckdbNamedArgument', () => {
+      this.SUBRULE(this.identifier);
+      this.CONSUME(baseLexer.Assign);
+      this.SUBRULE(this.expression);
+    });
+
     this.RULE('duckdbQualifyClause', () => {
       this.CONSUME(duckdbLexer.DuckDbQualify);
       this.SUBRULE(this.expression);
@@ -571,7 +599,28 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
         this.CONSUME(baseLexer.Exists);
       });
       this.SUBRULE(this.qualifiedName);
-      this.OPTION1(() => this.SUBRULE(this.commandTail));
+      this.OR([
+        {
+          ALT: () => {
+            this.CONSUME(baseLexer.As);
+            this.OR1([
+              {
+                GATE: () => this.LA(1).tokenType === baseLexer.With,
+                ALT: () => this.SUBRULE(this.withStatement),
+              },
+              { ALT: () => this.SUBRULE(this.selectStatement) },
+            ]);
+          },
+        },
+        {
+          // CREATE OR REPLACE TABLE t (col type [constraints], ...)
+          ALT: () => {
+            this.CONSUME(baseLexer.LParen);
+            this.SUBRULE(this.columnDefinitionList);
+            this.CONSUME(baseLexer.RParen);
+          },
+        },
+      ]);
     });
 
     this.OVERRIDE_RULE('typeArgument', () => {
@@ -619,7 +668,16 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
             this.AT_LEAST_ONE_SEP({
               SEP: baseLexer.Comma,
               DEF: () => {
-                this.SUBRULE(this.expression);
+                this.OR2([
+                  {
+                    GATE: () =>
+                      (this.LA(1).tokenType === baseLexer.Identifier
+                        || this.LA(1).tokenType === baseLexer.QuotedIdentifier)
+                      && this.LA(2).tokenType === baseLexer.Assign,
+                    ALT: () => this.SUBRULE(this.duckdbNamedArgument),
+                  },
+                  { ALT: () => this.SUBRULE(this.expression) },
+                ]);
                 this.OPTION(() => this.SUBRULE(this.duckdbNullHandlingClause));
               },
             });
@@ -698,6 +756,81 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
         },
         { ALT: () => this.CONSUME(baseLexer.MinusSet) },
       ]);
+    });
+
+    this.OVERRIDE_RULE('groupByClause', () => {
+      this.CONSUME(baseLexer.GroupBy);
+      this.OR([
+        {
+          GATE: () => this.LA(1).tokenType === baseLexer.All,
+          ALT: () => this.CONSUME(baseLexer.All),
+        },
+        {
+          GATE: () => this.LA(1).tokenType !== baseLexer.All,
+          ALT: () => {
+            this.AT_LEAST_ONE_SEP({
+              SEP: baseLexer.Comma,
+              DEF: () => this.SUBRULE(this.groupByElement),
+            });
+          },
+        },
+      ]);
+    });
+
+    this.OVERRIDE_RULE('orderByClause', () => {
+      this.CONSUME(baseLexer.OrderBy);
+      this.OR([
+        {
+          GATE: () => this.LA(1).tokenType === baseLexer.All,
+          ALT: () => this.CONSUME(baseLexer.All),
+        },
+        {
+          GATE: () => this.LA(1).tokenType !== baseLexer.All,
+          ALT: () => {
+            this.AT_LEAST_ONE_SEP({
+              SEP: baseLexer.Comma,
+              DEF: () => this.SUBRULE(this.orderByItem),
+            });
+          },
+        },
+      ]);
+    });
+
+    this.OVERRIDE_RULE('selectList', () => {
+      const listEndTokens = new Set<TokenType>([
+        baseLexer.From,
+        baseLexer.Where,
+        baseLexer.GroupBy,
+        baseLexer.Having,
+        baseLexer.OrderBy,
+        baseLexer.Limit,
+        baseLexer.Fetch,
+        baseLexer.Offset,
+        baseLexer.Union,
+        baseLexer.Intersect,
+        baseLexer.Except,
+        baseLexer.Semicolon,
+        baseLexer.RParen,
+        duckdbLexer.DuckDbQualify,
+        duckdbLexer.DuckDbWindow,
+        duckdbLexer.DuckDbUsingSample,
+      ]);
+
+      this.SUBRULE(this.selectItem);
+      this.MANY({
+        GATE: () =>
+          this.LA(1).tokenType === baseLexer.Comma
+          && !listEndTokens.has(this.LA(2).tokenType)
+          && this.LA(2).tokenType.name !== 'EOF',
+        DEF: () => {
+          this.CONSUME(baseLexer.Comma);
+          this.SUBRULE1(this.selectItem);
+        },
+      });
+      this.OPTION({
+        GATE: () => this.LA(1).tokenType === baseLexer.Comma,
+        DEF: () => this.CONSUME1(baseLexer.Comma),
+      });
     });
 
     this.OVERRIDE_RULE('tableSource', () => {

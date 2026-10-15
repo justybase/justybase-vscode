@@ -1,3 +1,4 @@
+import { normalizePostgresqlIdentifier } from "@justybase/sql-core/postgresqlLexical";
 import {
   CompletionItem,
   CompletionItemKind,
@@ -573,7 +574,7 @@ export class CompletionScopeResolver {
       }
     }
 
-    const aliasBindings = this.resolveAliasBindingsFully(aliasBindingsToUse);
+    const aliasBindings = this.resolveAliasBindingsFully(aliasBindingsToUse, databaseKind);
 
     const qualifiedSource = parseQualifierPathToSource(qualifier, databaseKind);
     if (qualifiedSource && qualifier.includes(".")) {
@@ -606,7 +607,7 @@ export class CompletionScopeResolver {
       }
     }
 
-    const rawAliasBinding = aliasBindingsRaw.get(qualifier.toUpperCase());
+    const rawAliasBinding = aliasBindingsRaw.get(databaseKind === "postgresql" ? normalizePostgresqlIdentifier(qualifier) : qualifier.toUpperCase());
     if (rawAliasBinding) {
       const rawLocalAliasTarget = findLocalDefinition(localDefs, rawAliasBinding.table);
       if (rawLocalAliasTarget) {
@@ -627,7 +628,7 @@ export class CompletionScopeResolver {
       }
     }
 
-    const aliasBinding = aliasBindings.get(qualifier.toUpperCase());
+    const aliasBinding = aliasBindings.get(databaseKind === "postgresql" ? normalizePostgresqlIdentifier(qualifier) : qualifier.toUpperCase());
     if (aliasBinding) {
       const localAliasTarget = findLocalDefinition(localDefs, aliasBinding.table);
       if (localAliasTarget) {
@@ -775,7 +776,7 @@ export class CompletionScopeResolver {
         databaseKind,
       ),
     );
-    const aliasBindings = this.resolveAliasBindingsFully(aliasBindingsRaw);
+    const aliasBindings = this.resolveAliasBindingsFully(aliasBindingsRaw, databaseKind);
     const scopeSources = this.getPreferredScopeSources(aliasBindings);
     const scopedColumns = await this.collectScopedColumns(
       scopeSources,
@@ -951,6 +952,7 @@ export class CompletionScopeResolver {
 
   private resolveAliasBindingsFully(
     aliasBindings: Map<string, AliasInfo>,
+    databaseKind?: DatabaseKind,
   ): Map<string, AliasInfo> {
     const resolved = new Map<string, AliasInfo>();
     const resolve = (key: string, seen: Set<string>): AliasInfo | undefined => {
@@ -962,7 +964,7 @@ export class CompletionScopeResolver {
         return undefined;
       }
       seen.add(key);
-      const targetKey = binding.table.toUpperCase();
+      const targetKey = databaseKind === "postgresql" ? binding.table : binding.table.toUpperCase();
       if (targetKey !== key && aliasBindings.has(targetKey)) {
         const deep = resolve(targetKey, seen);
         if (deep) {

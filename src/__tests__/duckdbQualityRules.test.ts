@@ -21,6 +21,19 @@ describe('DuckDB SQL quality rules', () => {
     expect(issues).toHaveLength(3);
   });
 
+  it('requires an outer WHERE and ignores nested WHERE clauses, comments, and strings', () => {
+    const rules = getDatabaseSqlAuthoring('duckdb').qualityRules;
+    const issues = rules.flatMap((rule) => rule.check([
+      "DELETE FROM orders /* WHERE id = 1 */;",
+      "UPDATE orders SET status = 'WHERE';",
+      'UPDATE orders SET value = (SELECT value FROM history WHERE id = 1);',
+      'DELETE FROM orders WHERE id = 1;',
+      'UPDATE orders SET value = 2 WHERE id = 1;',
+    ].join('\n')));
+
+    expect(issues.map((issue) => issue.ruleId)).toEqual(['DDK002', 'DDK003', 'DDK003']);
+  });
+
   it('warns on File SQL writes but permits generated editable tables', () => {
     const rules = getDatabaseSqlAuthoring('file').qualityRules;
     const issues = rules.flatMap((rule) => rule.check(

@@ -114,7 +114,7 @@ export class ResultsHtmlGenerator {
                             <button type="button" class="layout-switcher__btn" data-layout="sidebar" aria-pressed="false" title="Table with schema sidebar and grouping">Sidebar</button>
                             <button type="button" class="layout-switcher__btn" data-layout="charts" aria-pressed="false" title="Professional range charts (ECharts)">Charts</button>
                             <button type="button" class="layout-switcher__btn" data-layout="diff" aria-pressed="false" title="Compare two result sets">Diff</button>
-                            <button type="button" class="layout-switcher__btn" data-layout="explore" aria-pressed="false" title="Explore columns, pivot and time composer">Explore</button>
+                            <button type="button" class="layout-switcher__btn" data-layout="explore" aria-pressed="false" title="Explore columns, filters, pivot and charts">Explore</button>
                         </div>
                         </div>
                         <div class="toolbar-separator" aria-hidden="true"></div>

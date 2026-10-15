@@ -28,6 +28,7 @@ import type {
   DocumentParseSession,
 } from "./documentParseSession";
 import type { StatementBoundary } from "./statementIndex";
+import { getPostgresqlVersionDiagnostics } from "../dialects/postgresql/versionDiagnostics";
 import type { SqlValidationService } from "./validationService";
 import {
   SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN,
@@ -237,6 +238,7 @@ export class SqlValidator implements SqlValidationService {
     schemaProvider?: SchemaProvider,
     validationProfile: DatabaseSqlValidationProfile = getDatabaseSqlAuthoring()
       .validation,
+    private readonly authoringContext: { serverVersionNum?: number } = {},
   ) {
     this.schemaProvider = schemaProvider;
     this.validationProfile = validationProfile;
@@ -345,7 +347,8 @@ export class SqlValidator implements SqlValidationService {
     const { lexResult, cst, actionableParserErrors } = parseResult;
 
     const errors: ValidationError[] = [];
-    const preParseWarnings: ValidationError[] = [];
+    const preParseWarnings: ValidationError[] = this.validationProfile.databaseKind === 'postgresql'
+      ? getPostgresqlVersionDiagnostics(sql, this.authoringContext.serverVersionNum) : [];
     const symbolWarnings: ValidationError[] = [];
     const useBestEffortSyntaxValidation = this.usesBestEffortSyntaxValidation();
 
@@ -461,6 +464,7 @@ export class SqlValidator implements SqlValidationService {
     const statementValidator = new SqlValidator(
       this.schemaProvider,
       this.validationProfile,
+      this.authoringContext,
     );
     statementValidator.applyScopeSeed(scopeSeed);
     const result = statementValidator.validate(statementSql);

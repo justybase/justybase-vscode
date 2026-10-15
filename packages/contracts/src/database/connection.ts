@@ -28,7 +28,14 @@ export interface DatabaseCommand {
   _recordsAffected: number;
 }
 
+export interface SqlAuthoringConnectionContext {
+  serverVersionNum?: number;
+  searchPath?: readonly string[];
+}
+
 export interface DatabaseConnection {
+  /** Cached, non-secret context; must not open a connection. */
+  getSqlAuthoringContext?(): SqlAuthoringConnectionContext | Promise<SqlAuthoringConnectionContext>;
   connect(): Promise<void>;
   close(): Promise<void>;
   createCommand(sql: string): DatabaseCommand;
