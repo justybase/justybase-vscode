@@ -83,9 +83,7 @@ permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_VERSION: "22"
-  DB2_NAPI_VERSION: "8"
   OVSX_VERSION: "1.1.1"
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
@@ -109,7 +107,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
@@ -247,12 +245,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -289,12 +287,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -358,12 +356,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -410,12 +408,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -431,7 +429,7 @@ jobs:
         run: npm run package -- --out justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
 
       - name: Upload main VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-main
           path: justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
@@ -441,7 +439,7 @@ jobs:
           retention-days: 3
 
   verify-db2-vscode-runtime:
-    name: Verify DB2 runtime in VS Code ${{ matrix.vscode }}
+    name: Verify Db2 in VS Code ${{ matrix.vscode }}
     needs:
       - validate-release
       - quality-gate
@@ -456,69 +454,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            extensions/db2/package-lock.json
-
-      - name: Install root dependencies
-        run: npm ci
-
-      - name: Install DB2 extension dependencies
-        working-directory: extensions/db2
-        run: npm ci
-
-      - name: Build and verify shared N-API runtime
-        working-directory: extensions/db2
-        run: node scripts/rebuild-napi.js && node scripts/verify-napi-runtime.js
-        env:
-          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
-
-      - name: Run Extension Host native-runtime smoke test
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:db2:vscode-runtime
-        env:
-          DB2_VSCODE_TEST_VERSION: ${{ matrix.vscode }}
-
-  build-db2:
-    name: Build DB2 VSIX (${{ matrix.target }})
-    needs:
-      - validate-release
-      - quality-gate
-      - test-gate
-      - integration-gate
-      - verify-db2-vscode-runtime
-    if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-2022
-            target: win32-x64
-            expected_driver: node_modules/ibm_db/installer/clidriver/bin/db2cli64.dll
-          - os: ubuntu-latest
-            target: linux-x64
-            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.so
-          - os: macos-14
-            target: darwin-arm64
-            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.dylib
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -530,86 +471,67 @@ jobs:
         run: npm ci
 
       - name: Build shared workspace packages
-        run: npm run build:designer-core
+        run: npm run build:designer-core && npm run build:shared-workspaces
 
-      - name: Install DB2 extension dependencies
-        working-directory: extensions/db2
+      - name: Install Db2 extension dependencies
+        run: npm run install:db2
+
+      - name: Check and build Db2 extension
+        run: npm run check-types:db2 && npm run build:db2
+
+      - name: Run Db2 Extension Host smoke test
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:db2:vscode-runtime
+        env:
+          DB2_VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+
+  build-db2:
+    name: Build portable Db2 VSIX
+    needs:
+      - validate-release
+      - quality-gate
+      - test-gate
+      - integration-gate
+      - verify-db2-vscode-runtime
+    if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/db2/package-lock.json
+
+      - name: Install root dependencies
         run: npm ci
 
-      - name: Cache ibm_db N-API build
-        id: cache-ibm-db
-        uses: actions/cache@v4
-        with:
-          path: |
-            extensions/db2/node_modules/ibm_db/build
-            extensions/db2/node_modules/ibm_db/installer/clidriver
-          key: ibm-db-napi-${{ env.DB2_NAPI_VERSION }}-${{ matrix.target }}-${{ hashFiles('extensions/db2/package-lock.json') }}
-          restore-keys: |
-            ibm-db-napi-${{ env.DB2_NAPI_VERSION }}-${{ matrix.target }}-
-            ibm-db-napi-${{ env.DB2_NAPI_VERSION }}-
+      - name: Build shared workspace packages
+        run: npm run build:designer-core && npm run build:shared-workspaces
 
-      - name: Build ibm_db as a stable Node-API runtime
-        if: steps.cache-ibm-db.outputs.cache-hit != 'true'
-        working-directory: extensions/db2
-        run: node scripts/rebuild-napi.js
-        env:
-          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+      - name: Install Db2 extension dependencies
+        run: npm run install:db2
 
-      - name: Verify ibm_db native runtime
-        working-directory: extensions/db2
-        run: node scripts/verify-napi-runtime.js
+      - name: Check and build Db2 extension
+        run: npm run check-types:db2 && npm run build:db2
 
-      - name: Build DB2 extension
-        run: npm run build:db2
-
-      - name: Package DB2 VSIX
-        working-directory: extensions/db2
+      - name: Package Db2 VSIX
         run: >
-          npm run package --
-          --target ${{ matrix.target }}
-          --out justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          npm --prefix extensions/db2 run package --
+          --out justybaselite-db2-${{ needs.validate-release.outputs.release_version }}.vsix
 
-      - name: Verify packaged runtime files
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          import zipfile
-
-          vsix_path = 'extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix'
-          expected_driver = '${{ matrix.expected_driver }}'
-
-          with zipfile.ZipFile(vsix_path, 'r') as archive:
-              names = archive.namelist()
-              has_binding = any('node_modules/ibm_db/build/Release/odbc_bindings.node' in name for name in names)
-              has_driver = any(expected_driver in name for name in names)
-              marker_name = next((name for name in names if name.endswith('node_modules/ibm_db/build/Release/.justybase-napi-runtime.json')), None)
-              marker_json = archive.read(marker_name) if marker_name else None
-
-          if not has_binding:
-              raise SystemExit('Missing odbc_bindings.node in packaged VSIX')
-
-          if not has_driver:
-              raise SystemExit(f'Missing expected platform driver file in VSIX: {expected_driver}')
-
-          if not marker_name:
-              raise SystemExit('Missing N-API runtime marker in packaged VSIX')
-
-          marker = json.loads(marker_json)
-          target_platform, target_arch = '${{ matrix.target }}'.split('-', 1)
-          if marker.get('runtime') != 'napi' or marker.get('napiVersion') != 8:
-              raise SystemExit(f'Unexpected N-API runtime marker: {marker}')
-          if marker.get('platform') != target_platform or marker.get('arch') != target_arch:
-              raise SystemExit(f'Packaged runtime marker targets the wrong platform: {marker}')
-
-          print('VSIX runtime asset verification passed')
-          PY
-
-      - name: Upload DB2 VSIX artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Db2 VSIX artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: vsix-db2-${{ matrix.target }}
-          path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
+          name: vsix-db2-universal
+          path: extensions/db2/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}.vsix
           if-no-files-found: error
           retention-days: 3
 
@@ -632,13 +554,13 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             expected_binding_package: '@duckdb/node-bindings-linux-x64'
-          - os: macos-14
+          - os: macos-latest
             target: darwin-arm64
             expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
@@ -647,7 +569,7 @@ jobs:
         run: tools/access-ddl-compare/bootstrap.sh
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -698,7 +620,7 @@ jobs:
           PY
 
       - name: Upload DuckDB VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-duckdb-${{ matrix.target }}
           path: extensions/duckdb/justybaselite-duckdb-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
@@ -724,13 +646,13 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             expected_binding_package: '@duckdb/node-bindings-linux-x64'
-          - os: macos-14
+          - os: macos-latest
             target: darwin-arm64
             expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
 
     steps:
       - name: Checkout release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
@@ -739,7 +661,7 @@ jobs:
         run: tools/access-ddl-compare/bootstrap.sh
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -790,7 +712,7 @@ jobs:
           PY
 
       - name: Upload Access VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-access-${{ matrix.target }}
           path: extensions/access/justybaselite-access-${{ needs.validate-release.outputs.release_version }}-${{ matrix.target }}.vsix
@@ -812,12 +734,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -844,7 +766,7 @@ jobs:
           --out justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
 
       - name: Upload extension VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.id }}
           path: extensions/${{ matrix.id }}/justybaselite-${{ matrix.id }}-${{ needs.validate-release.outputs.release_version }}.vsix
@@ -880,12 +802,12 @@ jobs:
 
     steps:
       - name: Checkout release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -895,7 +817,7 @@ jobs:
         run: npm ci
 
       - name: Download packaged VSIX files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           merge-multiple: true
@@ -905,7 +827,7 @@ jobs:
         run: node scripts/audit-marketplace-vsix.js artifacts marketplace-review
 
       - name: Upload Marketplace review report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marketplace-review
           path: marketplace-review
@@ -944,14 +866,14 @@ jobs:
 
     steps:
       - name: Download packaged VSIX files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           merge-multiple: true
           path: artifacts
 
       - name: Download Marketplace review report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: marketplace-review
           path: marketplace-review
@@ -1028,7 +950,7 @@ jobs:
 
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1036,7 +958,7 @@ jobs:
         run: npm install --global @vscode/vsce@3.9.2
 
       - name: Download packaged VSIX files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           merge-multiple: true
@@ -1110,10 +1032,8 @@ jobs:
             done
           }
 
-          for target in win32-x64 linux-x64 darwin-arm64; do
-            publish_with_retry "DB2 (${target})" \
-              "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}-${target}.vsix"
-          done
+          publish_with_retry "DB2" \
+            "artifacts/justybaselite-db2-${{ needs.validate-release.outputs.release_version }}.vsix"
 
       - name: Publish DuckDB extensions
         if: ${{ needs.validate-release.outputs.publish_duckdb == 'true' }}
@@ -1254,7 +1174,7 @@ jobs:
 
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1262,7 +1182,7 @@ jobs:
         run: npm install --global ovsx@${{ env.OVSX_VERSION }}
 
       - name: Download packaged VSIX files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           merge-multiple: true
@@ -1333,10 +1253,8 @@ jobs:
           fi
 
           if [ "$PUBLISH_DB2" = "true" ]; then
-            for target in win32-x64 linux-x64 darwin-arm64; do
-              publish_with_retry "DB2 (${target})" \
-                "artifacts/justybaselite-db2-${RELEASE_VERSION}-${target}.vsix"
-            done
+            publish_with_retry "DB2" \
+              "artifacts/justybaselite-db2-${RELEASE_VERSION}.vsix"
           fi
 
           if [ "$PUBLISH_DUCKDB" = "true" ]; then
