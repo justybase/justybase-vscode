@@ -19,6 +19,8 @@ import type {
     DiskGroupLevel,
     DiskGroupPathItem,
     DiskGroupQueryResult,
+    DiskGroupStatsRequest,
+    DiskGroupStatsResult,
     DiskQuerySpec,
     ResultSet,
 } from './types.js';
@@ -42,6 +44,7 @@ type PendingDiskQueryRequest =
     | { type: 'distinct'; resolve: (result: { values: DiskDistinctValue[]; truncated: boolean }) => void; reject: (error: Error) => void }
     | { type: 'aggregate'; resolve: (results: DiskAggregationResult[]) => void; reject: (error: Error) => void }
     | { type: 'group'; rsIndex: number; resolve: (result: DiskGroupQueryResult) => void; reject: (error: Error) => void }
+    | { type: 'groupStats'; rsIndex: number; resolve: (result: DiskGroupStatsResult) => void; reject: (error: Error) => void }
     | { type: 'fetch'; resolve: (rows: unknown[][]) => void; reject: (error: Error) => void };
 
 let requestIdCounter = 0;
@@ -81,6 +84,7 @@ function cancelPendingDiskQueriesForResultSet(rsIndex: number): void {
             (pending.type === 'window' && pending.rsIndex === rsIndex)
             || (pending.type === 'count' && pending.rsIndex === rsIndex)
             || (pending.type === 'group' && pending.rsIndex === rsIndex)
+            || (pending.type === 'groupStats' && pending.rsIndex === rsIndex)
         ) {
             pendingDiskQueries.delete(requestId);
         }
@@ -158,9 +162,10 @@ function decodeRows(rows: unknown): unknown[][] {
 
 function postDiskQuery(
     rsIndex: number,
-    action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group',
+    action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats',
     payload: Record<string, unknown>,
     pending: PendingDiskQueryRequest,
+    attachGridSpec = true,
 ): number {
     const sourceUri = getActiveSourceUri();
     if (!sourceUri) {
@@ -168,7 +173,8 @@ function postDiskQuery(
     }
     const requestId = ++requestIdCounter;
     pendingDiskQueries.set(requestId, pending);
-    const spec = getDiskQuerySpec(rsIndex) ?? syncDiskQuerySpecFromGrid(rsIndex);
+    // Analyses over the whole result must not inherit (or overwrite) the main grid's filters and sort.
+    const spec = attachGridSpec ? (getDiskQuerySpec(rsIndex) ?? syncDiskQuerySpecFromGrid(rsIndex)) : undefined;
     postHostMessage({
         command: 'diskQuery',
         sourceUri,
@@ -338,6 +344,21 @@ export function queryDiskGroups(
             resolve,
             reject,
         });
+    });
+}
+
+/**
+ * Exact grouped statistics over the whole spilled result. Grid filters are not applied and the
+ * grid's disk query spec is neither sent nor replaced.
+ */
+export function queryDiskGroupStats(rsIndex: number, request: DiskGroupStatsRequest): Promise<DiskGroupStatsResult> {
+    return new Promise((resolve, reject) => {
+        postDiskQuery(rsIndex, 'groupStats', { groupStats: request }, {
+            type: 'groupStats',
+            rsIndex,
+            resolve,
+            reject,
+        }, false);
     });
 }
 
@@ -559,6 +580,18 @@ export function handleDiskQueryResult(message: Record<string, unknown>): void {
         return;
     }
 
+    if (action === 'groupStats' && pending.type === 'groupStats') {
+        pending.resolve((message.groupStatsResult as DiskGroupStatsResult) ?? {
+            groupColumns: [],
+            totalRows: 0,
+            totalGroups: 0,
+            groups: [],
+            unlistedRows: 0,
+            population: [],
+        });
+        return;
+    }
+
     if (action === 'group' && pending.type === 'group') {
         pending.resolve((message.groupResult as DiskGroupQueryResult) ?? {
             kind: 'groups',
@@ -757,6 +790,8 @@ export function clearDiskBackedPendingRequests(): void {
             pending.reject(new Error('Disk-backed aggregate request cancelled'));
         } else if (pending.type === 'group') {
             pending.reject(new Error('Disk-backed group request cancelled'));
+        } else if (pending.type === 'groupStats') {
+            pending.reject(new Error('Disk-backed group statistics request cancelled'));
         }
     }
     pendingRequests.clear();

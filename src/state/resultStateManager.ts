@@ -8,8 +8,8 @@ import {
     getEffectiveSpillThreshold,
     isDiskBackedResultsAvailable,
 } from '../core/resultDataProvider/diskBackedSettings';
-import { diskBackedStoreRegistry, aggregateDiskBackedRows, countDiskBackedRows, distinctDiskBackedValues, queryDiskBackedGroups, queryDiskBackedRows } from '../core/resultDataProvider/diskBackedStoreRegistry';
-import type { DiskAggregationRequest, DiskAggregationResult, DiskGroupLevel, DiskGroupPathItem, DiskGroupQueryResult, DiskQuerySpec } from '../core/resultDataProvider/types';
+import { diskBackedStoreRegistry, aggregateDiskBackedRows, countDiskBackedRows, distinctDiskBackedValues, queryDiskBackedGroupStats, queryDiskBackedGroups, queryDiskBackedRows } from '../core/resultDataProvider/diskBackedStoreRegistry';
+import type { DiskAggregationRequest, DiskAggregationResult, DiskGroupLevel, DiskGroupPathItem, DiskGroupQueryResult, DiskGroupStatsRequest, DiskGroupStatsResult, DiskQuerySpec } from '../core/resultDataProvider/types';
 import { detectEditSource } from '../results/editSourceDetector';
 import { SqliteResultStore } from '../core/resultDataProvider/sqliteResultStore';
 import { tempFileRegistry } from '../core/tempFileRegistry';
@@ -1781,6 +1781,18 @@ export class ResultStateManager {
         requests: DiskAggregationRequest[],
     ): DiskAggregationResult[] {
         return aggregateDiskBackedRows(storeId, spec, requests) ?? [];
+    }
+
+    /** Exact group statistics over the whole spilled result; an unknown store yields an empty result. */
+    public queryDiskBackedGroupStats(storeId: string, request: DiskGroupStatsRequest): DiskGroupStatsResult {
+        return queryDiskBackedGroupStats(storeId, request) ?? {
+            groupColumns: request.groupColumns,
+            totalRows: 0,
+            totalGroups: 0,
+            groups: [],
+            unlistedRows: 0,
+            population: [],
+        };
     }
 
     public queryDiskBackedGroups(

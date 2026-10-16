@@ -257,6 +257,73 @@ export interface DiskGroupQueryResult {
     aggregations?: DiskAggregationResult[];
 }
 
+/** Mirrors src/core/resultDataProvider/types.ts (webview copy, kept in sync by hand). */
+export interface DiskGroupStatsRequest {
+    groupColumns: number[];
+    statColumns: number[];
+    limit: number;
+    topColumns?: number[];
+    topLimit?: number;
+    rareColumns?: number[];
+    /** Numeric columns whose quartiles are returned per group and for the population (robust mode). */
+    quantileColumns?: number[];
+    /** Dimension columns whose full distribution is returned when at most ANALYTICAL_CATEGORY_MAX_DISTINCT values. */
+    categoryColumns?: number[];
+}
+
+export interface DiskQuartiles {
+    q1: number;
+    median: number;
+    q3: number;
+}
+
+export interface DiskRareValues {
+    total: number;
+    examples: string[];
+}
+
+export interface DiskTopValue {
+    value: unknown;
+    count: number;
+}
+
+export interface DiskColumnGroupStats {
+    columnIndex: number;
+    nonNullCount: number;
+    distinctCount: number;
+    min: unknown;
+    max: unknown;
+    numeric?: { mean: number | null; stddev: number | null; quartiles?: DiskQuartiles };
+    topValues?: DiskTopValue[];
+    /** Full distribution of a dimension column with few distinct values (MIX_SHIFT). */
+    categories?: DiskTopValue[];
+    rare?: DiskRareValues;
+}
+
+export interface DiskGroupStatsRow {
+    values: unknown[];
+    count: number;
+    columns: DiskColumnGroupStats[];
+}
+
+/** Mirrors src/core/resultDataProvider/types.ts: a statistic the store skipped, and why. */
+export interface DiskGroupStatsOmission {
+    columnIndex: number;
+    field: 'topValues' | 'categories' | 'rare' | 'quartiles';
+    reason: 'too-many-distinct' | 'too-many-groups' | 'not-numeric';
+}
+
+export interface DiskGroupStatsResult {
+    groupColumns: number[];
+    totalRows: number;
+    totalGroups: number;
+    groups: DiskGroupStatsRow[];
+    unlistedRows: number;
+    population: DiskColumnGroupStats[];
+    /** Evaluations the store skipped, so the view can report reduced coverage. Absent when nothing was skipped. */
+    omitted?: DiskGroupStatsOmission[];
+}
+
 export interface GridHandle {
     tanTable?: TanStackTable;
     columnWidths?: Map<string, number>;

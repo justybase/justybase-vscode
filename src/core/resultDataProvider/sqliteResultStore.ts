@@ -11,15 +11,42 @@ import { loadNodeSqliteModule } from './sqliteModuleLoader';
 import type {
     DiskAggregationRequest,
     DiskAggregationResult,
+    DiskColumnGroupStats,
     DiskDistinctValue,
     DiskGroupLevel,
     DiskGroupPathItem,
     DiskGroupQueryResult,
     DiskGroupRow,
+    DiskGroupStatsOmission,
+    DiskGroupStatsRequest,
+    DiskGroupStatsResult,
+    DiskGroupStatsRow,
+    DiskQuartiles,
     DiskQuerySpec,
+    DiskTopValue,
     IResultRowSource,
     RowRange,
 } from './types';
+
+/** Group statistics: bounds keep a single SQL pass and its result set small enough for the host. */
+const GROUP_STATS_MAX_GROUP_COLUMNS = 3;
+const GROUP_STATS_MAX_STAT_COLUMNS = 8;
+const GROUP_STATS_MAX_LIMIT = 1_000;
+const GROUP_STATS_DEFAULT_TOP_LIMIT = 8;
+const GROUP_STATS_MAX_TOP_LIMIT = 20;
+/** Per-group top values are a cross-tab; it runs only up to these bounds. */
+const GROUP_TOP_CROSS_TAB_MAX_GROUPS = 5_000;
+const GROUP_TOP_CROSS_TAB_MAX_DISTINCT = 50;
+/** Mirrors ANALYTICAL_CATEGORY_MAX_DISTINCT in the webview; a full distribution is kept only up to this size. */
+const CATEGORY_MAX_DISTINCT = 50;
+/** RARE_VALUE gates and limits, kept in step with the in-memory engine (analytical/types.ts). */
+const RARE_MAX_OCCURRENCES = 3;
+const RARE_MAX_EXAMPLES = 5;
+const RARE_MIN_GROUPS = 3;
+const RARE_MIN_DISTINCT = 3;
+const RARE_MAX_DISTINCT = 10_000;
+const RARE_MIN_NON_NULL = 100;
+const RARE_MAX_DISTINCT_RATIO = 0.5;
 
 type SqlInputValue = import('node:sqlite').SQLInputValue;
 type StatementSync = import('node:sqlite').StatementSync;
@@ -100,6 +127,89 @@ function prepareValueReadStatement(statement: StatementSync): StatementSync {
 
 function isNilGroupValue(value: unknown): boolean {
     return value === null || value === undefined;
+}
+
+/**
+ * Zero-based ranks a type-7 quartile reads for a sample of n values, as SQL. Integer division on
+ * integers is the floor used by the webview's quartileRanks; the pair (rank, rank + 1) covers interpolation.
+ */
+const QUARTILE_RANK_SQL = '(((n - 1) * 1) / 4, ((n - 1) * 1) / 4 + 1, ((n - 1) * 2) / 4, ((n - 1) * 2) / 4 + 1, ((n - 1) * 3) / 4, ((n - 1) * 3) / 4 + 1)';
+
+interface QuartileRankRow {
+    v: unknown;
+    rn: unknown;
+    n: unknown;
+}
+
+/**
+ * Type-7 quartiles from rank rows. Mirrors media/resultPanel/analytical/quantiles.ts (quartilesFromRanks);
+ * analyticalDiskEquivalence.test.ts pins both to the same numbers.
+ */
+function quartilesFromRankRows(rows: readonly QuartileRankRow[]): DiskQuartiles | undefined {
+    if (rows.length === 0) {
+        return undefined;
+    }
+    const n = asNumber(rows[0].n) ?? 0;
+    const byRank = new Map<number, number>();
+    for (const row of rows) {
+        const rank = asNumber(row.rn);
+        const value = asNumber(row.v);
+        if (rank === null || value === null) {
+            return undefined;
+        }
+        byRank.set(rank, value);
+    }
+    if (n <= 0) {
+        return undefined;
+    }
+    const available = ([1, 2, 3] as const).every(quarter => {
+        const numerator = (n - 1) * quarter;
+        const lo = Math.floor(numerator / 4);
+        return byRank.has(lo) && (numerator % 4 === 0 || byRank.has(lo + 1));
+    });
+    if (!available) {
+        return undefined;
+    }
+    const at = (quarter: 1 | 2 | 3): number => {
+        const numerator = (n - 1) * quarter;
+        const lo = Math.floor(numerator / 4);
+        const fraction = (numerator - 4 * lo) / 4;
+        const below = byRank.get(lo) ?? Number.NaN;
+        if (fraction === 0) {
+            return below;
+        }
+        const above = byRank.get(lo + 1) ?? Number.NaN;
+        return below + fraction * (above - below);
+    };
+    return { q1: at(1), median: at(2), q3: at(3) };
+}
+
+function quotedColumn(columnIndex: number): string {
+    return `"${sqliteColumnName(columnIndex)}"`;
+}
+
+/**
+ * SQL for a column with empty strings removed. The in-memory engine treats '' as null-like, so the store
+ * must count, rank and aggregate the same way. NULLIF leaves stored numbers and blobs untouched.
+ */
+function nonNullValue(columnIndex: number): string {
+    return `NULLIF(${quotedColumn(columnIndex)}, '')`;
+}
+
+function asNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) {
+        return min;
+    }
+    return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+/** Same key shape the webview uses, so host and client group identities agree. */
+function groupValuesKey(values: readonly unknown[]): string {
+    return JSON.stringify(values.map(value => (value === null || value === undefined ? null : String(value))));
 }
 
 export class SqliteResultStore implements IResultRowSource {
@@ -471,6 +581,490 @@ export class SqliteResultStore implements IResultRowSource {
             totalCount,
             groups,
         };
+    }
+
+    /**
+     * Exact statistics per group over every spilled row. Population statistics use the same
+     * single-pass moments as the groups, so client-side anomaly rules compare like with like.
+     */
+    public queryGroupStats(request: DiskGroupStatsRequest): DiskGroupStatsResult {
+        this.assertNotDisposed();
+        const groupColumns = this.validColumnList(request.groupColumns, GROUP_STATS_MAX_GROUP_COLUMNS);
+        const statColumns = this.validColumnList(request.statColumns, GROUP_STATS_MAX_STAT_COLUMNS, new Set(groupColumns));
+        const limit = clampInteger(request.limit, 1, GROUP_STATS_MAX_LIMIT);
+        const topLimit = clampInteger(request.topLimit ?? GROUP_STATS_DEFAULT_TOP_LIMIT, 1, GROUP_STATS_MAX_TOP_LIMIT);
+        const requestedTop = this.validColumnList(request.topColumns ?? [], GROUP_STATS_MAX_STAT_COLUMNS)
+            .filter(index => statColumns.includes(index));
+        const topColumns = new Set(requestedTop);
+        const omitted: DiskGroupStatsOmission[] = [];
+
+        const totalRows = this.countAllRows();
+        const population = this.queryPopulationStats(statColumns, topColumns, topLimit);
+        if (groupColumns.length === 0) {
+            return { groupColumns, totalRows, totalGroups: 0, groups: [], unlistedRows: 0, population };
+        }
+
+        const requestedQuantiles = this.validColumnList(request.quantileColumns ?? [], GROUP_STATS_MAX_STAT_COLUMNS)
+            .filter(index => statColumns.includes(index));
+        const quantileColumns = requestedQuantiles.filter(index => this.isNumericColumn(index));
+        for (const columnIndex of requestedQuantiles) {
+            // Numbers stored as text get no quartiles: the robust rules are skipped for the column on disk.
+            if (!this.isNumericColumn(columnIndex)) {
+                omitted.push({ columnIndex, field: 'quartiles', reason: 'not-numeric' });
+            }
+        }
+        const requestedCategories = this.validColumnList(request.categoryColumns ?? [], GROUP_STATS_MAX_STAT_COLUMNS)
+            .filter(index => statColumns.includes(index));
+        const categoryColumns = requestedCategories.filter(index => this.hasFewDistinctValues(index, population));
+        for (const columnIndex of requestedCategories) {
+            if (!this.hasFewDistinctValues(columnIndex, population)) {
+                omitted.push({ columnIndex, field: 'categories', reason: 'too-many-distinct' });
+            }
+        }
+        for (const columnIndex of quantileColumns) {
+            const stats = population.find(column => column.columnIndex === columnIndex);
+            const quartiles = this.queryQuartiles(columnIndex);
+            if (stats?.numeric && quartiles) {
+                stats.numeric.quartiles = quartiles;
+            }
+        }
+        for (const columnIndex of categoryColumns) {
+            const stats = population.find(column => column.columnIndex === columnIndex);
+            if (stats) {
+                stats.categories = this.queryTopValues(columnIndex, CATEGORY_MAX_DISTINCT);
+            }
+        }
+
+        const totalGroups = this.countGroupKeys(groupColumns);
+        const { groups, listedRows } = this.queryGroupStatRows(groupColumns, statColumns, population, limit);
+        if (quantileColumns.length > 0) {
+            this.attachGroupQuartiles(groups, groupColumns, quantileColumns);
+        }
+        const crossTabColumns = [...topColumns].filter(index => {
+            const stats = population.find(column => column.columnIndex === index);
+            return stats !== undefined && stats.distinctCount <= GROUP_TOP_CROSS_TAB_MAX_DISTINCT;
+        });
+        for (const columnIndex of requestedTop) {
+            const stats = population.find(column => column.columnIndex === columnIndex);
+            if (stats !== undefined && stats.distinctCount > GROUP_TOP_CROSS_TAB_MAX_DISTINCT) {
+                omitted.push({ columnIndex, field: 'topValues', reason: 'too-many-distinct' });
+            }
+        }
+        const categoriesAttached = categoryColumns.length > 0 && totalGroups <= GROUP_TOP_CROSS_TAB_MAX_GROUPS;
+        if (categoryColumns.length > 0 && totalGroups > GROUP_TOP_CROSS_TAB_MAX_GROUPS) {
+            for (const columnIndex of categoryColumns) {
+                omitted.push({ columnIndex, field: 'categories', reason: 'too-many-groups' });
+            }
+        }
+        if (categoriesAttached) {
+            this.attachGroupValueCounts(groups, groupColumns, categoryColumns, CATEGORY_MAX_DISTINCT, 'categories');
+        }
+        // A column with a full distribution already has its top values: the same ordering, cut to topLimit.
+        const fromCategories = categoriesAttached ? crossTabColumns.filter(index => categoryColumns.includes(index)) : [];
+        const counted = crossTabColumns.filter(index => !fromCategories.includes(index));
+        for (const columnIndex of fromCategories) {
+            for (const group of groups) {
+                const stats = group.columns.find(column => column.columnIndex === columnIndex);
+                if (stats) stats.topValues = (stats.categories ?? []).slice(0, topLimit);
+            }
+        }
+        if (counted.length > 0) {
+            if (totalGroups <= GROUP_TOP_CROSS_TAB_MAX_GROUPS) {
+                this.attachGroupValueCounts(groups, groupColumns, counted, topLimit, 'topValues');
+            } else {
+                for (const columnIndex of counted) {
+                    omitted.push({ columnIndex, field: 'topValues', reason: 'too-many-groups' });
+                }
+            }
+        }
+        const rareColumns = this.validColumnList(request.rareColumns ?? [], GROUP_STATS_MAX_STAT_COLUMNS)
+            .filter(index => statColumns.includes(index) && this.isRareCandidate(index, population, totalGroups));
+        if (rareColumns.length > 0) {
+            this.attachGroupRareValues(groups, groupColumns, rareColumns);
+        }
+
+        return {
+            groupColumns,
+            totalRows,
+            totalGroups,
+            groups,
+            unlistedRows: Math.max(0, totalRows - listedRows),
+            population,
+            ...(omitted.length > 0 ? { omitted } : {}),
+        };
+    }
+
+    private validColumnList(indexes: readonly number[], max: number, exclude: ReadonlySet<number> = new Set()): number[] {
+        const seen = new Set<number>();
+        const result: number[] = [];
+        for (const index of indexes) {
+            if (!this.isValidColumnIndex(index) || exclude.has(index) || seen.has(index)) {
+                continue;
+            }
+            seen.add(index);
+            result.push(index);
+            if (result.length >= max) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private hasFewDistinctValues(columnIndex: number, population: readonly DiskColumnGroupStats[]): boolean {
+        const stats = population.find(column => column.columnIndex === columnIndex);
+        return stats !== undefined && stats.distinctCount <= CATEGORY_MAX_DISTINCT;
+    }
+
+    private isNumericColumn(columnIndex: number): boolean {
+        const storage = mapColumnTypeToSqlite(this._columnTypes[columnIndex]);
+        return storage === 'INTEGER' || storage === 'REAL';
+    }
+
+    private readRecords(sql: string, params: unknown[]): Array<Record<string, unknown>> {
+        const statement = prepareValueReadStatement(this._database.prepare(sql));
+        return normalizeSqliteRecords(statement.all(...asSqlParams(params)) as Array<Record<string, unknown>>);
+    }
+
+    private countAllRows(): number {
+        const [row] = this.readRecords('SELECT COUNT(*) AS n FROM result_rows', []);
+        return asNumber(row?.n) ?? 0;
+    }
+
+    private countGroupKeys(groupColumns: readonly number[]): number {
+        const cols = groupColumns.map(quotedColumn).join(', ');
+        const [row] = this.readRecords(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM result_rows GROUP BY ${cols})`, []);
+        return asNumber(row?.n) ?? 0;
+    }
+
+    /**
+     * Second moments are taken around a shift (the population mean), not around zero, so the
+     * variance stays accurate for large magnitudes such as ids or epoch timestamps.
+     */
+    private queryPopulationStats(
+        statColumns: readonly number[],
+        topColumns: ReadonlySet<number>,
+        topLimit: number,
+    ): DiskColumnGroupStats[] {
+        if (statColumns.length === 0) {
+            return [];
+        }
+        const parts: string[] = [];
+        statColumns.forEach((columnIndex, j) => {
+            const expr = nonNullValue(columnIndex);
+            parts.push(
+                `COUNT(${expr}) AS nn_${j}`,
+                `COUNT(DISTINCT ${expr}) AS dn_${j}`,
+                `MIN(${expr}) AS mn_${j}`,
+                `MAX(${expr}) AS mx_${j}`,
+            );
+            if (this.isNumericColumn(columnIndex)) {
+                parts.push(`AVG(${expr}) AS av_${j}`);
+            }
+        });
+        const [base = {}] = this.readRecords(`SELECT ${parts.join(', ')} FROM result_rows`, []);
+
+        const shifted = statColumns
+            .map((columnIndex, j) => ({ columnIndex, shift: asNumber(base[`av_${j}`]) }))
+            .filter((item): item is { columnIndex: number; shift: number } => this.isNumericColumn(item.columnIndex) && item.shift !== null);
+        const moments = this.queryShiftedMoments(shifted);
+
+        return statColumns.map((columnIndex, j) => {
+            const stats: DiskColumnGroupStats = {
+                columnIndex,
+                nonNullCount: asNumber(base[`nn_${j}`]) ?? 0,
+                distinctCount: asNumber(base[`dn_${j}`]) ?? 0,
+                min: normalizeSqliteResultValue(base[`mn_${j}`]) ?? null,
+                max: normalizeSqliteResultValue(base[`mx_${j}`]) ?? null,
+            };
+            if (this.isNumericColumn(columnIndex)) {
+                const mean = asNumber(base[`av_${j}`]);
+                const moment = moments.get(columnIndex);
+                stats.numeric = {
+                    mean,
+                    stddev: mean !== null && moment ? Math.sqrt(Math.max(0, moment.sq - moment.dd * moment.dd)) : null,
+                };
+            }
+            if (topColumns.has(columnIndex)) {
+                stats.topValues = this.queryTopValues(columnIndex, topLimit);
+            }
+            return stats;
+        });
+    }
+
+    private queryShiftedMoments(
+        columns: ReadonlyArray<{ columnIndex: number; shift: number }>,
+    ): Map<number, { dd: number; sq: number }> {
+        const moments = new Map<number, { dd: number; sq: number }>();
+        if (columns.length === 0) {
+            return moments;
+        }
+        const parts: string[] = [];
+        const params: unknown[] = [];
+        columns.forEach(({ columnIndex, shift }, k) => {
+            const expr = nonNullValue(columnIndex);
+            parts.push(`AVG(${expr} - ?) AS dd_${k}`, `AVG((${expr} - ?) * (${expr} - ?)) AS sq_${k}`);
+            params.push(shift, shift, shift);
+        });
+        const [row = {}] = this.readRecords(`SELECT ${parts.join(', ')} FROM result_rows`, params);
+        columns.forEach(({ columnIndex }, k) => {
+            const dd = asNumber(row[`dd_${k}`]);
+            const sq = asNumber(row[`sq_${k}`]);
+            if (dd !== null && sq !== null) {
+                moments.set(columnIndex, { dd, sq });
+            }
+        });
+        return moments;
+    }
+
+    /**
+     * Population quartiles from one window pass: ROW_NUMBER orders the numeric values and the outer filter
+     * keeps only the ranks the interpolation reads. Non-numeric storage values are skipped, as in the webview.
+     */
+    private queryQuartiles(columnIndex: number): DiskQuartiles | undefined {
+        const col = quotedColumn(columnIndex);
+        const rows = this.readRecords(
+            `SELECT v, rn, n FROM (
+                SELECT ${col} AS v, ROW_NUMBER() OVER (ORDER BY ${col}) - 1 AS rn, COUNT(*) OVER () AS n
+                FROM result_rows WHERE typeof(${col}) IN ('integer', 'real')
+             ) WHERE rn IN ${QUARTILE_RANK_SQL}`,
+            [],
+        );
+        return quartilesFromRankRows(rows.map(row => ({ v: row.v, rn: row.rn, n: row.n })));
+    }
+
+    /** Per-group quartiles: the same window pass partitioned by the grouping columns. */
+    private attachGroupQuartiles(
+        groups: DiskGroupStatsRow[],
+        groupColumns: readonly number[],
+        quantileColumns: readonly number[],
+    ): void {
+        const groupCols = groupColumns.map(quotedColumn).join(', ');
+        const byKey = new Map<string, DiskGroupStatsRow>();
+        for (const group of groups) {
+            byKey.set(groupValuesKey(group.values), group);
+        }
+        for (const columnIndex of quantileColumns) {
+            const col = quotedColumn(columnIndex);
+            const rows = this.readRecords(
+                `SELECT ${groupCols}, v, rn, n FROM (
+                    SELECT ${groupCols}, ${col} AS v,
+                        ROW_NUMBER() OVER (PARTITION BY ${groupCols} ORDER BY ${col}) - 1 AS rn,
+                        COUNT(*) OVER (PARTITION BY ${groupCols}) AS n
+                    FROM result_rows WHERE typeof(${col}) IN ('integer', 'real')
+                 ) WHERE rn IN ${QUARTILE_RANK_SQL}`,
+                [],
+            );
+            const rowsByKey = new Map<string, QuartileRankRow[]>();
+            for (const row of rows) {
+                const values = groupColumns.map(index => normalizeSqliteResultValue(row[sqliteColumnName(index)]) ?? null);
+                const key = groupValuesKey(values);
+                const bucket = rowsByKey.get(key) ?? [];
+                bucket.push({ v: row.v, rn: row.rn, n: row.n });
+                rowsByKey.set(key, bucket);
+            }
+            for (const [key, bucket] of rowsByKey) {
+                const stats = byKey.get(key)?.columns.find(column => column.columnIndex === columnIndex);
+                const quartiles = quartilesFromRankRows(bucket);
+                if (stats?.numeric && quartiles) {
+                    stats.numeric.quartiles = quartiles;
+                }
+            }
+        }
+    }
+
+    private queryTopValues(columnIndex: number, limit: number): DiskTopValue[] {
+        const col = quotedColumn(columnIndex);
+        const rows = this.readRecords(
+            `SELECT ${col} AS v, COUNT(*) AS cnt FROM result_rows WHERE ${nonNullValue(columnIndex)} IS NOT NULL GROUP BY ${col} ORDER BY cnt DESC, v LIMIT ?`,
+            [limit],
+        );
+        return rows.map(row => ({ value: normalizeSqliteResultValue(row.v), count: asNumber(row.cnt) ?? 0 }));
+    }
+
+    private queryGroupStatRows(
+        groupColumns: readonly number[],
+        statColumns: readonly number[],
+        population: readonly DiskColumnGroupStats[],
+        limit: number,
+    ): { groups: DiskGroupStatsRow[]; listedRows: number } {
+        const groupCols = groupColumns.map(quotedColumn);
+        const parts: string[] = groupCols.map((col, j) => `${col} AS g_${j}`);
+        parts.push('COUNT(*) AS n');
+        const params: unknown[] = [];
+        statColumns.forEach((columnIndex, j) => {
+            const expr = nonNullValue(columnIndex);
+            parts.push(
+                `COUNT(${expr}) AS nn_${j}`,
+                `COUNT(DISTINCT ${expr}) AS dn_${j}`,
+                `MIN(${expr}) AS mn_${j}`,
+                `MAX(${expr}) AS mx_${j}`,
+            );
+            const shift = this.populationMean(population, columnIndex);
+            if (this.isNumericColumn(columnIndex) && shift !== null) {
+                parts.push(`AVG(${expr} - ?) AS dd_${j}`, `AVG((${expr} - ?) * (${expr} - ?)) AS sq_${j}`);
+                params.push(shift, shift, shift);
+            }
+        });
+        params.push(limit);
+
+        const rows = this.readRecords(
+            `SELECT ${parts.join(', ')} FROM result_rows
+             GROUP BY ${groupCols.join(', ')}
+             ORDER BY COUNT(*) DESC, ${groupCols.map(col => `CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END ASC, CAST(${col} AS TEXT) ASC`).join(', ')}
+             LIMIT ?`,
+            params,
+        );
+
+        let listedRows = 0;
+        const groups = rows.map((row): DiskGroupStatsRow => {
+            const count = asNumber(row.n) ?? 0;
+            listedRows += count;
+            return {
+                values: groupColumns.map((_, j) => normalizeSqliteResultValue(row[`g_${j}`]) ?? null),
+                count,
+                columns: statColumns.map((columnIndex, j) => this.groupColumnStats(row, j, columnIndex, population)),
+            };
+        });
+        return { groups, listedRows };
+    }
+
+    private populationMean(population: readonly DiskColumnGroupStats[], columnIndex: number): number | null {
+        return population.find(column => column.columnIndex === columnIndex)?.numeric?.mean ?? null;
+    }
+
+    private groupColumnStats(
+        row: Record<string, unknown>,
+        j: number,
+        columnIndex: number,
+        population: readonly DiskColumnGroupStats[],
+    ): DiskColumnGroupStats {
+        const stats: DiskColumnGroupStats = {
+            columnIndex,
+            nonNullCount: asNumber(row[`nn_${j}`]) ?? 0,
+            distinctCount: asNumber(row[`dn_${j}`]) ?? 0,
+            min: normalizeSqliteResultValue(row[`mn_${j}`]) ?? null,
+            max: normalizeSqliteResultValue(row[`mx_${j}`]) ?? null,
+        };
+        if (this.isNumericColumn(columnIndex)) {
+            const shift = this.populationMean(population, columnIndex);
+            const dd = asNumber(row[`dd_${j}`]);
+            const sq = asNumber(row[`sq_${j}`]);
+            const hasMoments = shift !== null && dd !== null && sq !== null;
+            stats.numeric = hasMoments
+                ? { mean: shift + dd, stddev: Math.sqrt(Math.max(0, sq - dd * dd)) }
+                : { mean: null, stddev: null };
+        }
+        return stats;
+    }
+
+    /** Same gates as the in-memory engine; empty strings count as null-like, as in memory. */
+    private isRareCandidate(columnIndex: number, population: readonly DiskColumnGroupStats[], totalGroups: number): boolean {
+        const stats = population.find(column => column.columnIndex === columnIndex);
+        if (!stats || totalGroups < RARE_MIN_GROUPS) {
+            return false;
+        }
+        return stats.distinctCount >= RARE_MIN_DISTINCT
+            && stats.distinctCount <= RARE_MAX_DISTINCT
+            && stats.nonNullCount >= RARE_MIN_NON_NULL
+            && stats.distinctCount / stats.nonNullCount <= RARE_MAX_DISTINCT_RATIO;
+    }
+
+    /**
+     * A value is rare for a group when exactly one (group, value) pair holds it and it occurs at most
+     * a few times. Rows of unlisted groups are dropped, so a value owned by an unlisted group is not reported.
+     */
+    private attachGroupRareValues(
+        groups: DiskGroupStatsRow[],
+        groupColumns: readonly number[],
+        rareColumns: readonly number[],
+    ): void {
+        const groupCols = groupColumns.map(quotedColumn);
+        const groupList = groupCols.join(', ');
+        const byKey = new Map<string, DiskGroupStatsRow>();
+        for (const group of groups) {
+            byKey.set(groupValuesKey(group.values), group);
+        }
+        for (const columnIndex of rareColumns) {
+            const col = quotedColumn(columnIndex);
+            const rows = this.readRecords(
+                `SELECT ${groupCols.map((c, j) => `MIN(${c}) AS g_${j}`).join(', ')}, ${col} AS v, SUM(cnt) AS total
+                 FROM (
+                    SELECT ${groupList}, ${col}, COUNT(*) AS cnt
+                    FROM result_rows
+                    WHERE ${col} IS NOT NULL AND CAST(${col} AS TEXT) <> ''
+                    GROUP BY ${groupList}, ${col}
+                 )
+                 GROUP BY ${col}
+                 HAVING COUNT(*) = 1 AND SUM(cnt) <= ?`,
+                [RARE_MAX_OCCURRENCES],
+            );
+            for (const row of rows) {
+                const values = groupColumns.map((_, j) => normalizeSqliteResultValue(row[`g_${j}`]) ?? null);
+                const group = byKey.get(groupValuesKey(values));
+                const stats = group?.columns.find(column => column.columnIndex === columnIndex);
+                if (!stats) continue;
+                const rare = stats.rare ?? { total: 0, examples: [] };
+                rare.total += 1;
+                rare.examples.push(String(normalizeSqliteResultValue(row.v) ?? ''));
+                stats.rare = rare;
+            }
+        }
+        for (const group of groups) {
+            for (const stats of group.columns) {
+                if (stats.rare) {
+                    stats.rare.examples = stats.rare.examples.sort().slice(0, RARE_MAX_EXAMPLES);
+                }
+            }
+        }
+    }
+
+    /**
+     * Ranked value counts per group for the given columns. 'topValues' keeps the detail-pane list (every
+     * column is reset, as before); 'categories' is filled only for the requested columns, so an absent
+     * field still means "no complete distribution".
+     */
+    private attachGroupValueCounts(
+        groups: DiskGroupStatsRow[],
+        groupColumns: readonly number[],
+        columns: readonly number[],
+        limit: number,
+        field: 'topValues' | 'categories',
+    ): void {
+        const groupCols = groupColumns.map(quotedColumn).join(', ');
+        const byKey = new Map<string, DiskGroupStatsRow>();
+        for (const group of groups) {
+            byKey.set(groupValuesKey(group.values), group);
+            for (const column of group.columns) {
+                // Only the requested columns are reset; values filled earlier for other columns must survive.
+                if (columns.includes(column.columnIndex)) {
+                    column[field] = [];
+                }
+            }
+        }
+
+        for (const columnIndex of columns) {
+            const col = quotedColumn(columnIndex);
+            const rows = this.readRecords(
+                `SELECT ${groupCols}, v, cnt FROM (
+                    SELECT ${groupCols}, v, cnt,
+                        ROW_NUMBER() OVER (PARTITION BY ${groupCols} ORDER BY cnt DESC, v) AS rn
+                    FROM (
+                        SELECT ${groupCols}, ${col} AS v, COUNT(*) AS cnt
+                        FROM result_rows
+                        WHERE ${nonNullValue(columnIndex)} IS NOT NULL
+                        GROUP BY ${groupCols}, ${col}
+                    )
+                ) WHERE rn <= ?
+                ORDER BY ${groupCols}, rn`,
+                [limit],
+            );
+            for (const row of rows) {
+                const values = groupColumns.map(index => normalizeSqliteResultValue(row[sqliteColumnName(index)]) ?? null);
+                const group = byKey.get(groupValuesKey(values));
+                const stats = group?.columns.find(column => column.columnIndex === columnIndex);
+                stats?.[field]?.push({ value: normalizeSqliteResultValue(row.v), count: asNumber(row.cnt) ?? 0 });
+            }
+        }
     }
 
     public dispose(): void {

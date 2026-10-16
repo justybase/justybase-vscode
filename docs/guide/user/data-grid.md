@@ -119,6 +119,10 @@ Disk-backed filtering sees every row fetched into the SQLite spill, without a se
 
 Visible-scope aggregation uses the currently filtered grid/spill. Database-scope aggregation uses the unlimited subquery used by **All rows + LIMIT**. Available operations include `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `COUNT DISTINCT`, `STDDEV`, and `MEDIAN` where the selected database supports the operation and the column type is suitable. Pin aggregations to compare columns while changing filters.
 
+## Analytical
+
+The **Analytical** view groups the rows by up to three columns and flags groups whose values, nulls, dates or category mix differ from the rest of the result. See [Analytical View](guide/user/analytical-view/) for the detection modes, the rules and their limits.
+
 ## Explore
 
 Open **Explore** to inspect column profiles, distributions, quality alerts,

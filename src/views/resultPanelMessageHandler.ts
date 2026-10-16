@@ -26,6 +26,7 @@ import type {
     DiskDistinctValue,
     DiskGroupLevel,
     DiskGroupPathItem,
+    DiskGroupStatsRequest,
     DiskQuerySpec,
 } from '../core/resultDataProvider/types';
 import type {
@@ -920,7 +921,7 @@ export class ResultPanelMessageHandler {
         sourceUri: string;
         resultSetIndex: number;
         requestId: number;
-        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group';
+        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
         querySpec?: DiskQuerySpec;
         offset?: number;
         limit?: number;
@@ -929,6 +930,7 @@ export class ResultPanelMessageHandler {
         aggregations?: DiskAggregationRequest[];
         grouping?: DiskGroupLevel[];
         groupPath?: DiskGroupPathItem[];
+        groupStats?: DiskGroupStatsRequest;
     }): void {
         const resultSet = this._resolveDiskResultSet(message.sourceUri, message.resultSetIndex);
         if (!resultSet || resultSet.storageMode !== 'sqlite' || !resultSet.diskStoreId) {
@@ -1065,6 +1067,23 @@ export class ResultPanelMessageHandler {
                 aggregations,
                 totalRows,
                 filteredCount,
+            });
+            return;
+        }
+
+        if (message.action === 'groupStats') {
+            // Exact statistics over every spilled row: grid filters and sorting are deliberately not applied.
+            const groupStatsResult = message.groupStats
+                ? this._stateManager.queryDiskBackedGroupStats(storeId, message.groupStats)
+                : undefined;
+            this._callbacks.onPostMessage({
+                command: 'diskQueryResult',
+                sourceUri: message.sourceUri,
+                resultSetIndex: message.resultSetIndex,
+                requestId: message.requestId,
+                action: 'groupStats',
+                groupStatsResult,
+                totalRows,
             });
             return;
         }

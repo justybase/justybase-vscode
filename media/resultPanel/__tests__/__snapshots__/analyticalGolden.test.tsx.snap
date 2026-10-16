@@ -1,0 +1,522 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Analytical whole-result behaviour (characterisation) freezes scoring at high sensitivity 1`] = `
+{
+  "groups": [
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+      ],
+      "key": "["APAC"]",
+      "rowCount": 38,
+      "score": 4,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 3,
+          "message": "Date range ends early compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+      ],
+      "key": "["EMEA"]",
+      "rowCount": 38,
+      "score": 9,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 4,
+          "message": "100% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "high",
+          "strength": 1,
+        },
+        {
+          "columnIndex": 3,
+          "message": "Date range starts late compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["LATAM"]",
+      "rowCount": 38,
+      "score": 42,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+      ],
+      "key": "["US"]",
+      "rowCount": 38,
+      "score": 4,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 2,
+          "message": "OK is 100% of this group vs 66% overall",
+          "rule": "TOP_VALUE_DOMINANCE",
+          "severity": "info",
+          "strength": 0.3395522388,
+        },
+        {
+          "columnIndex": 2,
+          "message": "Every value here is OK; overall there are 3 distinct values",
+          "rule": "CONSTANT_IN_GROUP",
+          "severity": "info",
+          "strength": 0.25,
+        },
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+      ],
+      "key": "["CONST"]",
+      "rowCount": 37,
+      "score": 13,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 2,
+          "message": "ERR is 100% of this group vs 28% overall",
+          "rule": "TOP_VALUE_DOMINANCE",
+          "severity": "high",
+          "strength": 0.7201492537,
+        },
+        {
+          "columnIndex": 3,
+          "message": "Date range ends early compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+        {
+          "columnIndex": 2,
+          "message": "Every value here is ERR; overall there are 3 distinct values",
+          "rule": "CONSTANT_IN_GROUP",
+          "severity": "info",
+          "strength": 0.25,
+        },
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+        {
+          "columnIndex": 1,
+          "message": "Average 5,003.08 vs 2,118.77 overall (0.7 sigma)",
+          "rule": "MEAN_SHIFT",
+          "severity": "info",
+          "strength": 0.2347839437,
+        },
+      ],
+      "key": "["SPIKE"]",
+      "rowCount": 37,
+      "score": 41,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 1,
+          "message": "Average 9,793.24 vs 2,118.77 overall (1.9 sigma)",
+          "rule": "MEAN_SHIFT",
+          "severity": "warn",
+          "strength": 0.6247051635,
+        },
+        {
+          "columnIndex": 1,
+          "message": "Values reach 4.28 sigma from the overall mean (range 342 to 19,654)",
+          "rule": "RANGE_OUTLIER",
+          "severity": "warn",
+          "strength": 0.3705311909,
+        },
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+      ],
+      "key": "["WIDE"]",
+      "rowCount": 37,
+      "score": 31,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 3,
+          "message": "Date range starts late compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+        {
+          "columnIndex": 4,
+          "message": "0% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "info",
+          "strength": 0.236318408,
+        },
+      ],
+      "key": "["SMALL"]",
+      "rowCount": 5,
+      "score": 9,
+    },
+  ],
+  "totalGroups": 8,
+  "totalRows": 268,
+}
+`;
+
+exports[`Analytical whole-result behaviour (characterisation) freezes scoring at low sensitivity 1`] = `
+{
+  "groups": [
+    {
+      "anomalous": false,
+      "flags": [],
+      "key": "["APAC"]",
+      "rowCount": 38,
+      "score": 0,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 3,
+          "message": "Date range ends early compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["EMEA"]",
+      "rowCount": 38,
+      "score": 5,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 4,
+          "message": "100% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "high",
+          "strength": 1,
+        },
+        {
+          "columnIndex": 3,
+          "message": "Date range starts late compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["LATAM"]",
+      "rowCount": 38,
+      "score": 42,
+    },
+    {
+      "anomalous": false,
+      "flags": [],
+      "key": "["US"]",
+      "rowCount": 38,
+      "score": 0,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 2,
+          "message": "Every value here is OK; overall there are 3 distinct values",
+          "rule": "CONSTANT_IN_GROUP",
+          "severity": "info",
+          "strength": 0.25,
+        },
+      ],
+      "key": "["CONST"]",
+      "rowCount": 37,
+      "score": 4,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 2,
+          "message": "ERR is 100% of this group vs 28% overall",
+          "rule": "TOP_VALUE_DOMINANCE",
+          "severity": "high",
+          "strength": 0.7201492537,
+        },
+        {
+          "columnIndex": 3,
+          "message": "Date range ends early compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+        {
+          "columnIndex": 2,
+          "message": "Every value here is ERR; overall there are 3 distinct values",
+          "rule": "CONSTANT_IN_GROUP",
+          "severity": "info",
+          "strength": 0.25,
+        },
+      ],
+      "key": "["SPIKE"]",
+      "rowCount": 37,
+      "score": 36,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 1,
+          "message": "Average 9,793.24 vs 2,118.77 overall (1.9 sigma)",
+          "rule": "MEAN_SHIFT",
+          "severity": "warn",
+          "strength": 0.6247051635,
+        },
+        {
+          "columnIndex": 1,
+          "message": "Values reach 4.28 sigma from the overall mean (range 342 to 19,654)",
+          "rule": "RANGE_OUTLIER",
+          "severity": "warn",
+          "strength": 0.3705311909,
+        },
+      ],
+      "key": "["WIDE"]",
+      "rowCount": 37,
+      "score": 28,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 3,
+          "message": "Date range starts late compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["SMALL"]",
+      "rowCount": 5,
+      "score": 5,
+    },
+  ],
+  "totalGroups": 8,
+  "totalRows": 268,
+}
+`;
+
+exports[`Analytical whole-result behaviour (characterisation) freezes scoring at normal sensitivity 1`] = `
+{
+  "groups": [
+    {
+      "anomalous": false,
+      "flags": [],
+      "key": "["APAC"]",
+      "rowCount": 38,
+      "score": 0,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 3,
+          "message": "Date range ends early compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["EMEA"]",
+      "rowCount": 38,
+      "score": 5,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 4,
+          "message": "100% null here vs 14% overall",
+          "rule": "NULL_RATE_DELTA",
+          "severity": "high",
+          "strength": 1,
+        },
+        {
+          "columnIndex": 3,
+          "message": "Date range starts late compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["LATAM"]",
+      "rowCount": 38,
+      "score": 42,
+    },
+    {
+      "anomalous": false,
+      "flags": [],
+      "key": "["US"]",
+      "rowCount": 38,
+      "score": 0,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 2,
+          "message": "Every value here is OK; overall there are 3 distinct values",
+          "rule": "CONSTANT_IN_GROUP",
+          "severity": "info",
+          "strength": 0.25,
+        },
+      ],
+      "key": "["CONST"]",
+      "rowCount": 37,
+      "score": 4,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 2,
+          "message": "ERR is 100% of this group vs 28% overall",
+          "rule": "TOP_VALUE_DOMINANCE",
+          "severity": "high",
+          "strength": 0.7201492537,
+        },
+        {
+          "columnIndex": 3,
+          "message": "Date range ends early compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+        {
+          "columnIndex": 2,
+          "message": "Every value here is ERR; overall there are 3 distinct values",
+          "rule": "CONSTANT_IN_GROUP",
+          "severity": "info",
+          "strength": 0.25,
+        },
+      ],
+      "key": "["SPIKE"]",
+      "rowCount": 37,
+      "score": 36,
+    },
+    {
+      "anomalous": true,
+      "flags": [
+        {
+          "columnIndex": 1,
+          "message": "Average 9,793.24 vs 2,118.77 overall (1.9 sigma)",
+          "rule": "MEAN_SHIFT",
+          "severity": "warn",
+          "strength": 0.6247051635,
+        },
+        {
+          "columnIndex": 1,
+          "message": "Values reach 4.28 sigma from the overall mean (range 342 to 19,654)",
+          "rule": "RANGE_OUTLIER",
+          "severity": "warn",
+          "strength": 0.3705311909,
+        },
+      ],
+      "key": "["WIDE"]",
+      "rowCount": 37,
+      "score": 28,
+    },
+    {
+      "anomalous": false,
+      "flags": [
+        {
+          "columnIndex": 3,
+          "message": "Date range starts late compared with the overall range",
+          "rule": "DATE_WINDOW_SHIFT",
+          "severity": "info",
+          "strength": 0.3,
+        },
+      ],
+      "key": "["SMALL"]",
+      "rowCount": 5,
+      "score": 5,
+    },
+  ],
+  "totalGroups": 8,
+  "totalRows": 268,
+}
+`;
+
+exports[`Analytical whole-result behaviour (characterisation) freezes the population statistics the rules compare against 1`] = `
+[
+  {
+    "columnIndex": 1,
+    "distinctCount": 55,
+    "nullCount": 0,
+    "numericCount": 268,
+    "rowCount": 268,
+  },
+  {
+    "columnIndex": 2,
+    "distinctCount": 3,
+    "nullCount": 0,
+    "numericCount": null,
+    "rowCount": 268,
+  },
+  {
+    "columnIndex": 3,
+    "distinctCount": 108,
+    "nullCount": 0,
+    "numericCount": null,
+    "rowCount": 268,
+  },
+  {
+    "columnIndex": 4,
+    "distinctCount": 2,
+    "nullCount": 38,
+    "numericCount": null,
+    "rowCount": 268,
+  },
+]
+`;

@@ -5,6 +5,7 @@ import { getElementById } from './dom.js';
 import { closeRowView } from './rowView.js';
 import { renderExploreView, disposeExploreView } from './explore/explorePanel.js';
 import { disposeComposerChart } from './explore/composerTab.js';
+import { renderAnalyticalView, disposeAnalyticalView } from './analytical/analyticalPanel.js';
 import {
     callPanelMethod,
     getActiveSourceUri,
@@ -13,7 +14,7 @@ import {
 } from './types.js';
 import type { ResultSet, ResultSetColumn } from './types.js';
 
-type ResultViewMode = 'table' | 'chart' | 'diff' | 'explore';
+type ResultViewMode = 'table' | 'chart' | 'diff' | 'explore' | 'analytical';
 
 interface AnalysisField {
     id: string;
@@ -84,7 +85,7 @@ function getResultKey(rsIndex: number = getActiveGridIndex()): string {
 
 function normalizeMode(mode: string | undefined | null): ResultViewMode {
     const normalized = (mode || '').toLowerCase();
-    if (normalized === 'chart' || normalized === 'diff' || normalized === 'table' || normalized === 'explore') {
+    if (normalized === 'chart' || normalized === 'diff' || normalized === 'table' || normalized === 'explore' || normalized === 'analytical') {
         return normalized;
     }
     return DEFAULT_VIEW_MODE;
@@ -277,6 +278,7 @@ function applyViewMode(mode: string, rsIndex: number = getActiveGridIndex()): vo
     const forcedTableMode = !resultSet || resultSet.isLog || resultSet.isError;
     const effectiveMode = forcedTableMode ? 'table' : normalizedMode;
     if (effectiveMode !== 'explore') disposeExploreView();
+    if (effectiveMode !== 'analytical') disposeAnalyticalView();
 
     if (effectiveMode === 'table') {
         activeDiffTruncated = false;
@@ -312,6 +314,9 @@ function applyViewMode(mode: string, rsIndex: number = getActiveGridIndex()): vo
     } else if (effectiveMode === 'explore') {
         activeDiffTruncated = false;
         renderExploreView(rsIndex);
+    } else if (effectiveMode === 'analytical') {
+        activeDiffTruncated = false;
+        renderAnalyticalView(rsIndex);
     }
 }
 

@@ -13,6 +13,8 @@ import type {
     DiskGroupLevel,
     DiskGroupPathItem,
     DiskGroupQueryResult,
+    DiskGroupStatsRequest,
+    DiskGroupStatsResult,
     DiskQuerySpec,
 } from './types.js';
 import type {
@@ -255,7 +257,7 @@ interface ResultPanelWebviewToHostMessageMap {
         sourceUri: string;
         resultSetIndex: number;
         requestId: number;
-        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group';
+        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
         querySpec?: DiskQuerySpec;
         offset?: number;
         limit?: number;
@@ -264,6 +266,7 @@ interface ResultPanelWebviewToHostMessageMap {
         aggregations?: Array<{ columnIndex: number; fn: string }>;
         grouping?: DiskGroupLevel[];
         groupPath?: DiskGroupPathItem[];
+        groupStats?: DiskGroupStatsRequest;
     };
     moveToDisk: { sourceUri: string; resultSetIndex: number };
     moveAllToDisk: { sourceUri: string };
@@ -400,7 +403,7 @@ interface ResultPanelHostToWebviewMessageMap {
         sourceUri: string;
         resultSetIndex: number;
         requestId: number;
-        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group';
+        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
         rows?: Uint8Array | unknown[][];
         offset?: number;
         filteredCount?: number;
@@ -409,6 +412,7 @@ interface ResultPanelHostToWebviewMessageMap {
         distinctTruncated?: boolean;
         aggregations?: DiskAggregationResult[];
         groupResult?: DiskGroupQueryResult;
+        groupStatsResult?: DiskGroupStatsResult;
     };
     databaseAggregationResult: {
         sourceUri: string;

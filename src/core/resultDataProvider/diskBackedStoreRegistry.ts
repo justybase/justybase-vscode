@@ -6,6 +6,8 @@ import type {
     DiskGroupLevel,
     DiskGroupPathItem,
     DiskGroupQueryResult,
+    DiskGroupStatsRequest,
+    DiskGroupStatsResult,
     DiskQuerySpec,
     RowRange,
 } from './types';
@@ -82,6 +84,13 @@ export function aggregateDiskBackedRows(
     requests: DiskAggregationRequest[],
 ): DiskAggregationResult[] | undefined {
     return diskBackedStoreRegistry.get(storeId)?.aggregateRows(spec, requests);
+}
+
+export function queryDiskBackedGroupStats(
+    storeId: string,
+    request: DiskGroupStatsRequest,
+): DiskGroupStatsResult | undefined {
+    return diskBackedStoreRegistry.get(storeId)?.queryGroupStats(request);
 }
 
 export function queryDiskBackedGroups(

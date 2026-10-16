@@ -24,6 +24,7 @@ module.exports = {
   },
   collectCoverageFrom: [
     'media/resultPanel/explore/**/*.ts',
+    'media/resultPanel/analytical/**/*.ts',
     'media/resultPanel/analysis.ts',
     'media/resultPanel/diskBackedGrid.ts',
     'media/resultPanel/testBridge.ts',

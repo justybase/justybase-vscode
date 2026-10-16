@@ -140,6 +140,87 @@ export interface DiskGroupQueryResult {
     aggregations?: DiskAggregationResult[];
 }
 
+/**
+ * Exact grouped statistics over every spilled row (grid filters are not applied).
+ * Columns are requested in batches so one SQL pass never grows unbounded.
+ */
+export interface DiskGroupStatsRequest {
+    /** Grouping columns in priority order, at most three. */
+    groupColumns: number[];
+    /** Columns whose statistics are returned in this batch. */
+    statColumns: number[];
+    /** Largest groups to list; clamped by the store. */
+    limit: number;
+    /** Columns that should also report top values (population and per group, when bounded). */
+    topColumns?: number[];
+    topLimit?: number;
+    /** Dimension columns that should also report RARE_VALUE per group. Must be among statColumns. */
+    rareColumns?: number[];
+    /** Numeric columns whose quartiles are returned per group and for the population (robust mode). */
+    quantileColumns?: number[];
+    /** Dimension columns whose full distribution is returned when at most ANALYTICAL_CATEGORY_MAX_DISTINCT values. */
+    categoryColumns?: number[];
+}
+
+export interface DiskQuartiles {
+    q1: number;
+    median: number;
+    q3: number;
+}
+
+export interface DiskRareValues {
+    total: number;
+    examples: string[];
+}
+
+export interface DiskTopValue {
+    value: unknown;
+    count: number;
+}
+
+export interface DiskColumnGroupStats {
+    columnIndex: number;
+    /** Non-null values, matching COUNT(column). */
+    nonNullCount: number;
+    distinctCount: number;
+    min: unknown;
+    max: unknown;
+    /** Present only when the column is stored as INTEGER or REAL. Population standard deviation. */
+    numeric?: { mean: number | null; stddev: number | null; quartiles?: DiskQuartiles };
+    topValues?: DiskTopValue[];
+    /** Full distribution of a dimension column with few distinct values (MIX_SHIFT). */
+    categories?: DiskTopValue[];
+    /** Group statistics only: values of this column owned by this group alone, at most a few times. */
+    rare?: DiskRareValues;
+}
+
+export interface DiskGroupStatsRow {
+    /** One value per grouping column; null is a SQL NULL group. */
+    values: unknown[];
+    count: number;
+    columns: DiskColumnGroupStats[];
+}
+
+/** A statistic the store skipped because of a bound (distinct or group count) or the column's storage. */
+export interface DiskGroupStatsOmission {
+    columnIndex: number;
+    field: 'topValues' | 'categories' | 'rare' | 'quartiles';
+    reason: 'too-many-distinct' | 'too-many-groups' | 'not-numeric';
+}
+
+export interface DiskGroupStatsResult {
+    groupColumns: number[];
+    totalRows: number;
+    /** Distinct group keys across the whole result, including unlisted groups. */
+    totalGroups: number;
+    groups: DiskGroupStatsRow[];
+    /** Rows that belong to groups which are not listed. */
+    unlistedRows: number;
+    population: DiskColumnGroupStats[];
+    /** Evaluations the store skipped, so the view can report reduced coverage. Absent when nothing was skipped. */
+    omitted?: DiskGroupStatsOmission[];
+}
+
 export function diskQuerySpecHasFilters(spec: DiskQuerySpec | undefined): boolean {
     if (!spec) {
         return false;
