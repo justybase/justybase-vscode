@@ -6,9 +6,6 @@ on:
 permissions:
   contents: read
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   build-duckdb:
     name: Build DuckDB (${{ matrix.target }})
@@ -23,20 +20,20 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             expected_binding_package: '@duckdb/node-bindings-linux-x64'
-          - os: macos-14
+          - os: macos-latest
             target: darwin-arm64
             expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Bootstrap pinned Access index-code reference
         shell: bash
         run: tools/access-ddl-compare/bootstrap.sh
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -87,7 +84,7 @@ jobs:
           PY
 
       - name: Upload DuckDB VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: justybaselite-duckdb-${{ matrix.target }}
           path: extensions/duckdb/justybaselite-duckdb-${{ matrix.target }}.vsix

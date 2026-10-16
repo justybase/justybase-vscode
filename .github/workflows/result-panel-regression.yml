@@ -54,8 +54,8 @@ jobs:
       JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
       JUSTYBASE_EXTENSION_HOST_SCREENSHOTS: ${{ inputs.capture_screenshots == true && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -82,7 +82,7 @@ jobs:
           JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-artifacts
       - name: Upload Extension Host diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: result-panel-extension-host-${{ matrix.os }}
           path: ${{ runner.temp }}/justybase-extension-host-artifacts
@@ -93,8 +93,8 @@ jobs:
     name: Bundled webview protocol fixture
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -104,7 +104,7 @@ jobs:
       - run: npx playwright test --config=test-harness/playwright.config.ts test-harness/tests/table-rendering.spec.ts
       - name: Upload Playwright diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: result-panel-playwright
           path: test-results
@@ -118,8 +118,8 @@ jobs:
       JUSTYBASE_EXTENSION_HOST_REPEAT: "20"
       JUSTYBASE_EXTENSION_HOST_KEEP_ARTIFACTS: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -130,7 +130,7 @@ jobs:
         run: xvfb-run -a npm run test:extension-host
       - name: Upload repeated-run diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: result-panel-extension-host-repeat-linux
           path: ${{ runner.temp }}/justybase-extension-host-repeat
