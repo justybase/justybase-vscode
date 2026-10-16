@@ -23,6 +23,8 @@ const entries = [
   ['lexer', 'netezza/lexer'],
   ['identifierPattern', 'netezza/identifierPattern'],
   ['sourceScan', 'sourceScan'],
+  ['statements', 'statements'],
+  ['postgresqlLexical', 'postgresqlLexical'],
   ['sqlVisitorCore', 'validation/visitor/sqlVisitorCore'],
   ['scopeBuilder', 'validation/visitor/scopeBuilder'],
   ['typeComparisonUtils', 'validation/visitor/typeComparisonUtils'],
