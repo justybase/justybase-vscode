@@ -188,11 +188,10 @@ var TableCore = (() => {
       console.trace();
       console.groupEnd();
     }
-    const onAfterUpdateHandler = () => {
-      if (!onAfterUpdate) return;
+    const onAfterUpdateHandler = onAfterUpdate ? () => {
       const { schedule, untrack } = table._reactivity;
       schedule(() => untrack(() => onAfterUpdate()));
-    };
+    } : void 0;
     const debugOptions = true ? {
       onBeforeCompare: () => {
       },
@@ -206,18 +205,16 @@ var TableCore = (() => {
           endCalcTime = performance.now();
           logTime(Math.round((endCalcTime - startCalcTime) * 100) / 100, true);
         }
-        onAfterUpdateHandler();
+        onAfterUpdateHandler?.();
       }
-    } : { onAfterUpdate: () => {
-      onAfterUpdateHandler();
-    } };
+    } : { onAfterUpdate: onAfterUpdateHandler };
     return memo({
       ...memoOptions,
       ...debugOptions
     });
   }
   function getFunctionNameInfo(staticFnName, splitBy = "_") {
-    const [parentName, fnKey] = staticFnName.split(splitBy);
+    const [parentName, fnKey] = staticFnName.replace(splitBy, " ").split(" ");
     return {
       fnKey,
       fnName: `${parentName}.${fnKey}`,
@@ -294,453 +291,6 @@ var TableCore = (() => {
     });
   } };
 
-  // node_modules/@tanstack/table-core/dist/core/headers/constructHeader.js
-  function getHeaderPrototype(table) {
-    if (!table._headerPrototype) {
-      table._headerPrototype = { table };
-      const features = Object.values(table._features);
-      for (let i = 0; i < features.length; i++) features[i].assignHeaderPrototype?.(table._headerPrototype, table);
-    }
-    return table._headerPrototype;
-  }
-  function constructHeader(table, column, options) {
-    const headerPrototype = getHeaderPrototype(table);
-    const header = Object.create(headerPrototype);
-    header.colSpan = 0;
-    header.column = column;
-    header.depth = options.depth;
-    header.headerGroup = null;
-    header.id = options.id ?? column.id;
-    header.index = options.index;
-    header.isPlaceholder = !!options.isPlaceholder;
-    header.placeholderId = options.placeholderId;
-    header.rowSpan = 0;
-    header.subHeaders = [];
-    const initFns = table._headerInstanceInitFns;
-    for (let i = 0; i < initFns.length; i++) initFns[i](header);
-    return header;
-  }
-
-  // node_modules/@tanstack/table-core/dist/features/column-pinning/columnPinningFeature.utils.js
-  function getDefaultColumnPinningState() {
-    return {
-      start: [],
-      end: []
-    };
-  }
-  function column_pin(column, position) {
-    const leafColumns = column.getLeafColumns();
-    const columnIds = [];
-    for (let i = 0; i < leafColumns.length; i++) {
-      const id = leafColumns[i].id;
-      if (id) columnIds.push(id);
-    }
-    table_setColumnPinning(column.table, (old) => {
-      if (position === "end") return {
-        start: old.start.filter((d) => !columnIds.includes(d)),
-        end: [...old.end.filter((d) => !columnIds.includes(d)), ...columnIds]
-      };
-      if (position === "start") return {
-        start: [...old.start.filter((d) => !columnIds.includes(d)), ...columnIds],
-        end: old.end.filter((d) => !columnIds.includes(d))
-      };
-      return {
-        start: old.start.filter((d) => !columnIds.includes(d)),
-        end: old.end.filter((d) => !columnIds.includes(d))
-      };
-    });
-  }
-  function column_getCanPin(column) {
-    return column.getLeafColumns().some((leafColumn) => (leafColumn.columnDef.enablePinning ?? true) && (column.table.options.enableColumnPinning ?? true));
-  }
-  function column_getIsPinned(column) {
-    const leafColumns = column.getLeafColumns();
-    const { start, end } = column.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    for (let i = 0; i < leafColumns.length; i++) if (start.includes(leafColumns[i].id)) return "start";
-    for (let i = 0; i < leafColumns.length; i++) if (end.includes(leafColumns[i].id)) return "end";
-    return false;
-  }
-  function column_getPinnedIndex(column) {
-    const position = column_getIsPinned(column);
-    return position ? column.table.atoms.columnPinning?.get()?.[position].indexOf(column.id) ?? -1 : 0;
-  }
-  function row_getCenterVisibleCells(row) {
-    const allCells = callMemoOrStaticFn(row, "getVisibleCells", row_getVisibleCells);
-    const { start, end } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    if (!start.length && !end.length) return allCells;
-    const startAndEnd = [...start, ...end];
-    return allCells.filter((d) => !startAndEnd.includes(d.column.id));
-  }
-  function row_getStartVisibleCells(row) {
-    const { start } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    if (!start.length) return [];
-    const allVisibleCells = callMemoOrStaticFn(row, "getVisibleCellsByColumnId", row_getVisibleCellsByColumnId);
-    const cells = [];
-    for (let i = 0; i < start.length; i++) {
-      const cell = allVisibleCells[start[i]];
-      if (cell) {
-        cell.position = "start";
-        cells.push(cell);
-      }
-    }
-    return cells;
-  }
-  function row_getEndVisibleCells(row) {
-    const { end } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    if (!end.length) return [];
-    const allVisibleCells = callMemoOrStaticFn(row, "getVisibleCellsByColumnId", row_getVisibleCellsByColumnId);
-    const cells = [];
-    for (let i = 0; i < end.length; i++) {
-      const cell = allVisibleCells[end[i]];
-      if (cell) {
-        cell.position = "end";
-        cells.push(cell);
-      }
-    }
-    return cells;
-  }
-  function table_setColumnPinning(table, updater) {
-    setStateSlice(table, "columnPinning", updater);
-  }
-  function table_resetColumnPinning(table, defaultState) {
-    table_setColumnPinning(table, defaultState ? getDefaultColumnPinningState() : cloneState(table.initialState.columnPinning ?? getDefaultColumnPinningState()));
-  }
-  function table_getIsSomeColumnsPinned(table, position) {
-    const pinningState = table.atoms.columnPinning?.get();
-    if (!position) return Boolean(pinningState?.start.length || pinningState?.end.length);
-    return Boolean(pinningState?.[position].length);
-  }
-  function table_getStartHeaderGroups(table) {
-    const allColumns = table.getAllColumns();
-    const leafColumnsById = table.getAllLeafColumnsById();
-    const { start } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    const orderedLeafColumns = [];
-    for (let i = 0; i < start.length; i++) {
-      const column = leafColumnsById[start[i]];
-      if (column && callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible)) orderedLeafColumns.push(column);
-    }
-    return buildHeaderGroups(allColumns, orderedLeafColumns, table, "start");
-  }
-  function table_getEndHeaderGroups(table) {
-    const allColumns = table.getAllColumns();
-    const leafColumnsById = table.getAllLeafColumnsById();
-    const { end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    const orderedLeafColumns = [];
-    for (let i = 0; i < end.length; i++) {
-      const column = leafColumnsById[end[i]];
-      if (column && callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible)) orderedLeafColumns.push(column);
-    }
-    return buildHeaderGroups(allColumns, orderedLeafColumns, table, "end");
-  }
-  function table_getCenterHeaderGroups(table) {
-    const allColumns = table.getAllColumns();
-    let leafColumns = callMemoOrStaticFn(table, "getVisibleLeafColumns", table_getVisibleLeafColumns);
-    const { start, end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    if (start.length || end.length) {
-      const startAndEnd = [...start, ...end];
-      leafColumns = leafColumns.filter((column) => !startAndEnd.includes(column.id));
-    }
-    return buildHeaderGroups(allColumns, leafColumns, table, "center");
-  }
-  function table_getStartFooterGroups(table) {
-    return [...callMemoOrStaticFn(table, "getStartHeaderGroups", table_getStartHeaderGroups)].reverse();
-  }
-  function table_getEndFooterGroups(table) {
-    return [...callMemoOrStaticFn(table, "getEndHeaderGroups", table_getEndHeaderGroups)].reverse();
-  }
-  function table_getCenterFooterGroups(table) {
-    return [...callMemoOrStaticFn(table, "getCenterHeaderGroups", table_getCenterHeaderGroups)].reverse();
-  }
-  function table_getStartFlatHeaders(table) {
-    const leftHeaderGroups = callMemoOrStaticFn(table, "getStartHeaderGroups", table_getStartHeaderGroups);
-    const result = [];
-    for (let i = 0; i < leftHeaderGroups.length; i++) {
-      const headers = leftHeaderGroups[i].headers;
-      for (let j = 0; j < headers.length; j++) result.push(headers[j]);
-    }
-    return result;
-  }
-  function table_getEndFlatHeaders(table) {
-    const rightHeaderGroups = callMemoOrStaticFn(table, "getEndHeaderGroups", table_getEndHeaderGroups);
-    const result = [];
-    for (let i = 0; i < rightHeaderGroups.length; i++) {
-      const headers = rightHeaderGroups[i].headers;
-      for (let j = 0; j < headers.length; j++) result.push(headers[j]);
-    }
-    return result;
-  }
-  function table_getCenterFlatHeaders(table) {
-    const centerHeaderGroups = callMemoOrStaticFn(table, "getCenterHeaderGroups", table_getCenterHeaderGroups);
-    const result = [];
-    for (let i = 0; i < centerHeaderGroups.length; i++) {
-      const headers = centerHeaderGroups[i].headers;
-      for (let j = 0; j < headers.length; j++) result.push(headers[j]);
-    }
-    return result;
-  }
-  function table_getStartLeafHeaders(table) {
-    return callMemoOrStaticFn(table, "getStartFlatHeaders", table_getStartFlatHeaders).filter((header) => !header.subHeaders.length);
-  }
-  function table_getEndLeafHeaders(table) {
-    return callMemoOrStaticFn(table, "getEndFlatHeaders", table_getEndFlatHeaders).filter((header) => !header.subHeaders.length);
-  }
-  function table_getCenterLeafHeaders(table) {
-    return callMemoOrStaticFn(table, "getCenterFlatHeaders", table_getCenterFlatHeaders).filter((header) => !header.subHeaders.length);
-  }
-  function table_getStartLeafColumns(table) {
-    const { start } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    const leafColumnsById = table.getAllLeafColumnsById();
-    const result = [];
-    for (let i = 0; i < start.length; i++) {
-      const column = leafColumnsById[start[i]];
-      if (column) result.push(column);
-    }
-    return result;
-  }
-  function table_getEndLeafColumns(table) {
-    const { end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    const leafColumnsById = table.getAllLeafColumnsById();
-    const result = [];
-    for (let i = 0; i < end.length; i++) {
-      const column = leafColumnsById[end[i]];
-      if (column) result.push(column);
-    }
-    return result;
-  }
-  function table_getCenterLeafColumns(table) {
-    const { start, end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    if (!start.length && !end.length) return table.getAllLeafColumns();
-    const startAndEnd = [...start, ...end];
-    return table.getAllLeafColumns().filter((d) => !startAndEnd.includes(d.id));
-  }
-  function table_getPinnedLeafColumns(table, position) {
-    return !position ? table.getAllLeafColumns() : position === "start" ? callMemoOrStaticFn(table, "getStartLeafColumns", table_getStartLeafColumns) : position === "end" ? callMemoOrStaticFn(table, "getEndLeafColumns", table_getEndLeafColumns) : callMemoOrStaticFn(table, "getCenterLeafColumns", table_getCenterLeafColumns);
-  }
-  function table_getStartVisibleLeafColumns(table) {
-    return callMemoOrStaticFn(table, "getStartLeafColumns", table_getStartLeafColumns).filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_getEndVisibleLeafColumns(table) {
-    return callMemoOrStaticFn(table, "getEndLeafColumns", table_getEndLeafColumns).filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_getCenterVisibleLeafColumns(table) {
-    return callMemoOrStaticFn(table, "getCenterLeafColumns", table_getCenterLeafColumns).filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_getPinnedVisibleLeafColumns(table, position) {
-    return !position ? callMemoOrStaticFn(table, "getVisibleLeafColumns", table_getVisibleLeafColumns) : position === "start" ? callMemoOrStaticFn(table, "getStartVisibleLeafColumns", table_getStartVisibleLeafColumns) : position === "end" ? callMemoOrStaticFn(table, "getEndVisibleLeafColumns", table_getEndVisibleLeafColumns) : callMemoOrStaticFn(table, "getCenterVisibleLeafColumns", table_getCenterVisibleLeafColumns);
-  }
-
-  // node_modules/@tanstack/table-core/dist/features/column-visibility/columnVisibilityFeature.utils.js
-  function getDefaultColumnVisibilityState() {
-    return makeObjectMap();
-  }
-  function column_toggleVisibility(column, visible) {
-    if (column_getCanHide(column)) table_setColumnVisibility(column.table, (old) => {
-      const next = Object.assign(makeObjectMap(), old);
-      const nextVisible = visible ?? !callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible);
-      const leafColumns = column.getLeafColumns();
-      for (let i = 0; i < leafColumns.length; i++) {
-        const leafColumn = leafColumns[i];
-        if (column_getCanHide(leafColumn)) next[leafColumn.id] = nextVisible;
-      }
-      return next;
-    });
-  }
-  function column_getIsVisible(column) {
-    const columnVisibility = column.table.atoms.columnVisibility?.get();
-    if (!columnVisibility) return true;
-    const childColumns = column.columns;
-    if (childColumns.length) return childColumns.some((childColumn) => callMemoOrStaticFn(childColumn, "getIsVisible", column_getIsVisible));
-    return (hasOwn(columnVisibility, column.id) ? columnVisibility[column.id] : void 0) ?? true;
-  }
-  function column_getCanHide(column) {
-    return (column.columnDef.enableHiding ?? true) && (column.table.options.enableHiding ?? true);
-  }
-  function column_getToggleVisibilityHandler(column) {
-    return (e) => {
-      column_toggleVisibility(column, e.target.checked);
-    };
-  }
-  function row_getVisibleCells(row) {
-    const allCells = row.getAllCells();
-    const visibleCells = [];
-    for (let i = 0; i < allCells.length; i++) {
-      const cell = allCells[i];
-      if (callMemoOrStaticFn(cell.column, "getIsVisible", column_getIsVisible)) visibleCells.push(cell);
-    }
-    const { start, end } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    if (!start.length && !end.length) return visibleCells;
-    const visibleCellsByColumnId = callMemoOrStaticFn(row, "getVisibleCellsByColumnId", row_getVisibleCellsByColumnId);
-    const startCells = [];
-    for (let i = 0; i < start.length; i++) {
-      const cell = visibleCellsByColumnId[start[i]];
-      if (cell) startCells.push(cell);
-    }
-    const endCells = [];
-    for (let i = 0; i < end.length; i++) {
-      const cell = visibleCellsByColumnId[end[i]];
-      if (cell) endCells.push(cell);
-    }
-    const centerCells = [];
-    for (let i = 0; i < visibleCells.length; i++) {
-      const cell = visibleCells[i];
-      const id = cell.column.id;
-      if (!start.includes(id) && !end.includes(id)) centerCells.push(cell);
-    }
-    return [
-      ...startCells,
-      ...centerCells,
-      ...endCells
-    ];
-  }
-  function row_getVisibleCellsByColumnId(row) {
-    const result = makeObjectMap();
-    const allCells = row.getAllCells();
-    for (let i = 0; i < allCells.length; i++) {
-      const cell = allCells[i];
-      if (callMemoOrStaticFn(cell.column, "getIsVisible", column_getIsVisible)) result[cell.column.id] = cell;
-    }
-    return result;
-  }
-  function table_getVisibleFlatColumns(table) {
-    return table.getAllFlatColumns().filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_getVisibleLeafColumns(table) {
-    return table.getAllLeafColumns().filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_setColumnVisibility(table, updater) {
-    setStateSlice(table, "columnVisibility", updater);
-  }
-  function table_resetColumnVisibility(table, defaultState) {
-    table_setColumnVisibility(table, defaultState ? makeObjectMap() : Object.assign(makeObjectMap(), cloneState(table.initialState.columnVisibility ?? {})));
-  }
-  function table_toggleAllColumnsVisible(table, value) {
-    value = value ?? !table_getIsAllColumnsVisible(table);
-    const visibility = makeObjectMap();
-    const leafColumns = table.getAllLeafColumns();
-    for (let i = 0; i < leafColumns.length; i++) {
-      const column = leafColumns[i];
-      visibility[column.id] = !value ? !column_getCanHide(column) : value;
-    }
-    table_setColumnVisibility(table, visibility);
-  }
-  function table_getIsAllColumnsVisible(table) {
-    return !table.getAllLeafColumns().some((column) => !callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_getIsSomeColumnsVisible(table) {
-    return table.getAllLeafColumns().some((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
-  }
-  function table_getToggleAllColumnsVisibilityHandler(table) {
-    return (e) => {
-      table_toggleAllColumnsVisible(table, e.target.checked);
-    };
-  }
-
-  // node_modules/@tanstack/table-core/dist/core/headers/buildHeaderGroups.js
-  function getMaxHeaderDepth(columns, depth = 1) {
-    let maxDepth = depth;
-    for (let i = 0; i < columns.length; i++) {
-      const column = columns[i];
-      if (callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible) && column.columns.length) maxDepth = Math.max(maxDepth, getMaxHeaderDepth(column.columns, depth + 1));
-    }
-    return maxDepth;
-  }
-  function formatHeaderGroupId(headerFamily, depth) {
-    return headerFamily ? `${headerFamily}_${depth}` : String(depth);
-  }
-  function formatHeaderId(headerFamily, depth, columnId, childHeaderId) {
-    let id = headerFamily ?? "";
-    if (depth) id = id ? `${id}_${depth}` : String(depth);
-    if (columnId) id = id ? `${id}_${columnId}` : columnId;
-    if (childHeaderId) id = id ? `${id}_${childHeaderId}` : childHeaderId;
-    return id;
-  }
-  function countPendingHeadersForColumn(headers, column) {
-    let count = 0;
-    for (let i = 0; i < headers.length; i++) if (headers[i].column === column) count++;
-    return count;
-  }
-  function constructHeaderGroup(headersToGroup, depth, table, headerFamily, headerGroups, headerGroupInitFns) {
-    const headerGroup = {
-      depth,
-      id: formatHeaderGroupId(headerFamily, depth),
-      headers: []
-    };
-    const pendingParentHeaders = [];
-    for (let i = 0; i < headersToGroup.length; i++) {
-      if (!(i in headersToGroup)) continue;
-      const headerToGroup = headersToGroup[i];
-      const latestPendingParentHeader = pendingParentHeaders[pendingParentHeaders.length - 1];
-      const isLeafHeader = headerToGroup.column.depth === headerGroup.depth;
-      let column;
-      let isPlaceholder = false;
-      if (isLeafHeader && headerToGroup.column.parent) column = headerToGroup.column.parent;
-      else {
-        column = headerToGroup.column;
-        isPlaceholder = true;
-      }
-      if (latestPendingParentHeader && latestPendingParentHeader.column === column) latestPendingParentHeader.subHeaders.push(headerToGroup);
-      else {
-        const header = constructHeader(table, column, {
-          id: formatHeaderId(headerFamily, depth, column.id, headerToGroup.id),
-          isPlaceholder,
-          placeholderId: isPlaceholder ? String(countPendingHeadersForColumn(pendingParentHeaders, column)) : void 0,
-          depth,
-          index: pendingParentHeaders.length
-        });
-        header.subHeaders.push(headerToGroup);
-        pendingParentHeaders.push(header);
-      }
-      headerGroup.headers.push(headerToGroup);
-      headerToGroup.headerGroup = headerGroup;
-    }
-    for (let i = 0; i < headerGroupInitFns.length; i++) headerGroupInitFns[i](headerGroup);
-    headerGroups.push(headerGroup);
-    if (depth > 0) constructHeaderGroup(pendingParentHeaders, depth - 1, table, headerFamily, headerGroups, headerGroupInitFns);
-  }
-  function updateHeaderSpans(headers) {
-    for (let i = 0; i < headers.length; i++) {
-      const header = headers[i];
-      if (!callMemoOrStaticFn(header.column, "getIsVisible", column_getIsVisible)) continue;
-      let colSpan = 0;
-      if (header.subHeaders.length) {
-        updateHeaderSpans(header.subHeaders);
-        for (let j = 0; j < header.subHeaders.length; j++) {
-          const child = header.subHeaders[j];
-          if (!callMemoOrStaticFn(child.column, "getIsVisible", column_getIsVisible)) continue;
-          colSpan += child.colSpan;
-        }
-      } else colSpan = 1;
-      header.colSpan = colSpan;
-      if (header.isPlaceholder && header.subHeaders.length === 1 && header.subHeaders[0].column === header.column) {
-        let rowSpan = 1;
-        let chainChild = header.subHeaders[0];
-        while (chainChild) {
-          chainChild.rowSpan = 0;
-          rowSpan++;
-          chainChild = chainChild.subHeaders.length === 1 && chainChild.subHeaders[0].column === header.column ? chainChild.subHeaders[0] : void 0;
-        }
-        header.rowSpan = rowSpan;
-      } else header.rowSpan = 1;
-    }
-  }
-  function buildHeaderGroups(allColumns, columnsToGroup, table, headerFamily) {
-    const maxDepth = getMaxHeaderDepth(allColumns);
-    const headerGroups = [];
-    const headerGroupInitFns = table._headerGroupInstanceInitFns;
-    const bottomHeaders = new Array(columnsToGroup.length);
-    for (let i = 0; i < columnsToGroup.length; i++) {
-      if (!(i in columnsToGroup)) continue;
-      bottomHeaders[i] = constructHeader(table, columnsToGroup[i], {
-        depth: maxDepth,
-        index: i
-      });
-    }
-    constructHeaderGroup(bottomHeaders, maxDepth - 1, table, headerFamily, headerGroups, headerGroupInitFns);
-    headerGroups.reverse();
-    updateHeaderSpans(headerGroups[0]?.headers ?? []);
-    return headerGroups;
-  }
-
   // node_modules/@tanstack/table-core/dist/core/columns/constructColumn.js
   function getColumnPrototype(table) {
     if (!table._columnPrototype) {
@@ -760,18 +310,20 @@ var TableCore = (() => {
     const id = resolvedColumnDef.id ?? accessorKeyString?.replaceAll(".", "_") ?? (typeof resolvedColumnDef.header === "string" ? resolvedColumnDef.header : void 0);
     let accessorFn;
     if (resolvedColumnDef.accessorFn) accessorFn = resolvedColumnDef.accessorFn;
-    else if (accessorKey !== void 0) if (typeof accessorKey === "string" && accessorKey.includes(".")) {
-      const keys = accessorKey.split(".");
-      accessorFn = (originalRow) => {
-        let result = originalRow;
-        for (let i = 0; i < keys.length; i++) {
-          const key = keys[i];
-          result = result?.[key];
-          if (result === void 0) console.warn(`"${key}" in deeply nested key "${accessorKey}" returned undefined.`);
-        }
-        return result;
-      };
-    } else accessorFn = (originalRow) => originalRow[resolvedColumnDef.accessorKey];
+    else if (accessorKey !== void 0) {
+      if (typeof accessorKey === "string" && accessorKey.includes(".")) {
+        const keys = accessorKey.split(".");
+        accessorFn = (originalRow) => {
+          let result = originalRow;
+          for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            result = result?.[key];
+            if (result === void 0) console.warn(`"${key}" in deeply nested key "${accessorKey}" returned undefined.`);
+          }
+          return result;
+        };
+      } else accessorFn = (originalRow) => originalRow[resolvedColumnDef.accessorKey];
+    }
     if (!id) {
       if (true) throw new Error(resolvedColumnDef.accessorFn ? `coreColumnsFeature require an id when using an accessorFn` : `coreColumnsFeature require an id when using a non-string header`);
       throw new Error();
@@ -789,83 +341,53 @@ var TableCore = (() => {
     return column;
   }
 
-  // node_modules/@tanstack/table-core/dist/features/column-ordering/columnOrderingFeature.utils.js
-  function getDefaultColumnOrderState() {
-    return [];
+  // node_modules/@tanstack/table-core/dist/core/featureStubs.js
+  function getIsColumnVisible(column) {
+    return column.getIsVisible?.() ?? true;
   }
-  function table_getColumnIndexes(table) {
-    const buildIndexes = (columns) => {
-      const indexes = makeObjectMap();
-      for (let i = 0; i < columns.length; i++) indexes[columns[i].id] = i;
-      return indexes;
-    };
-    return {
-      all: buildIndexes(table_getPinnedVisibleLeafColumns(table)),
-      center: buildIndexes(table_getPinnedVisibleLeafColumns(table, "center")),
-      start: buildIndexes(table_getPinnedVisibleLeafColumns(table, "start")),
-      end: buildIndexes(table_getPinnedVisibleLeafColumns(table, "end"))
-    };
+  function getVisibleLeafColumns(table) {
+    return table.getVisibleLeafColumns?.() ?? table.getAllLeafColumns();
   }
-  function column_getIndex(column, position) {
-    return callMemoOrStaticFn(column.table, "getColumnIndexes", table_getColumnIndexes)[position === "start" ? "start" : position === "end" ? "end" : position === "center" ? "center" : "all"][column.id] ?? -1;
+  function getVisibleCells(row) {
+    return row.getVisibleCells?.() ?? row.getAllCells();
   }
-  function column_getIsFirstColumn(column, position) {
-    return table_getPinnedVisibleLeafColumns(column.table, position)[0]?.id === column.id;
+  function getVisibleCellsByColumnId(row) {
+    return row.getVisibleCellsByColumnId?.() ?? row.getAllCellsByColumnId();
   }
-  function column_getIsLastColumn(column, position) {
-    const columns = table_getPinnedVisibleLeafColumns(column.table, position);
-    return columns[columns.length - 1]?.id === column.id;
+  function orderLeafColumns(table, columns) {
+    const orderedTable = table;
+    const leafColumns = columns;
+    return orderedTable.getOrderColumnsFn?.()(leafColumns) ?? orderedTable._orderGroupedColumns?.(leafColumns) ?? columns;
   }
-  function table_setColumnOrder(table, updater) {
-    setStateSlice(table, "columnOrder", updater);
+  function orderByColumnPinning(table, items, getColumnId, getItemsByColumnId) {
+    return table._orderByColumnPinning?.(items, getColumnId, getItemsByColumnId) ?? items;
   }
-  function table_resetColumnOrder(table, defaultState) {
-    table_setColumnOrder(table, defaultState ? [] : cloneState(table.initialState.columnOrder ?? []));
+  function getPinnedVisibleLeafColumns(table, position) {
+    return table.getPinnedVisibleLeafColumns?.(position) ?? (position && position !== "center" ? [] : getVisibleLeafColumns(table));
   }
-  function table_getOrderColumnsFn(table) {
-    const columnOrder = table.atoms.columnOrder?.get();
-    return (columns) => {
-      let orderedColumns = [];
-      if (!columnOrder?.length) orderedColumns = columns;
-      else {
-        const remaining = /* @__PURE__ */ new Map();
-        for (let i = 0; i < columns.length; i++) {
-          const column = columns[i];
-          remaining.set(column.id, column);
-        }
-        for (let i = 0; i < columnOrder.length; i++) {
-          const id = columnOrder[i];
-          const column = remaining.get(id);
-          if (column) {
-            orderedColumns.push(column);
-            remaining.delete(id);
-          }
-        }
-        for (let i = 0; i < columns.length; i++) {
-          const column = columns[i];
-          if (remaining.has(column.id)) orderedColumns.push(column);
-        }
-      }
-      return orderColumns(table, orderedColumns);
-    };
+  function getGlobalFilterFn(table) {
+    return table.getGlobalFilterFn?.();
   }
-  function orderColumns(table, leafColumns) {
-    const grouping = table.atoms.grouping?.get() ?? [];
-    const { groupedColumnMode } = table.options;
-    if (!grouping.length || !groupedColumnMode) return leafColumns;
-    const nonGroupingColumns = leafColumns.filter((col) => !grouping.includes(col.id));
-    if (groupedColumnMode === "remove") return nonGroupingColumns;
-    const leafColumnsById = /* @__PURE__ */ new Map();
-    for (let i = 0; i < leafColumns.length; i++) {
-      const col = leafColumns[i];
-      leafColumnsById.set(col.id, col);
-    }
-    const groupingColumns = [];
-    for (let i = 0; i < grouping.length; i++) {
-      const col = leafColumnsById.get(grouping[i]);
-      if (col) groupingColumns.push(col);
-    }
-    return [...groupingColumns, ...nonGroupingColumns];
+  function getCanGlobalFilter(column) {
+    return column.getCanGlobalFilter?.() ?? false;
+  }
+  function expandRowModel(table, rowModel) {
+    return table._expandRows?.(rowModel) ?? rowModel;
+  }
+  function autoResetExpanded(table) {
+    table.autoResetExpanded?.();
+  }
+  function autoResetPageIndex(table) {
+    table.autoResetPageIndex?.();
+  }
+  function autoResetSorting(table) {
+    table.autoResetSorting?.();
+  }
+  function autoResetCellSelection(table) {
+    table.autoResetCellSelection?.();
+  }
+  function getAggregateColumnValue(table) {
+    return table._aggregateColumnValue;
   }
 
   // node_modules/@tanstack/table-core/dist/core/columns/coreColumnsFeature.utils.js
@@ -875,7 +397,7 @@ var TableCore = (() => {
   function column_getLeafColumns(column) {
     if (column.columns.length) {
       const leafColumns = column.columns.flatMap((col) => col.getLeafColumns());
-      return callMemoOrStaticFn(column.table, "getOrderColumns", table_getOrderColumnsFn)(leafColumns);
+      return orderLeafColumns(column.table, leafColumns);
     }
     return [column];
   }
@@ -923,7 +445,7 @@ var TableCore = (() => {
   }
   function table_getAllLeafColumns(table) {
     const leafColumns = table.getAllColumns().flatMap((c) => c.getLeafColumns());
-    return callMemoOrStaticFn(table, "getOrderColumns", table_getOrderColumnsFn)(leafColumns);
+    return orderLeafColumns(table, leafColumns);
   }
   function table_getAllLeafColumnsById(table) {
     const result = makeObjectMap();
@@ -995,6 +517,139 @@ var TableCore = (() => {
     }
   };
 
+  // node_modules/@tanstack/table-core/dist/core/headers/constructHeader.js
+  function getHeaderPrototype(table) {
+    if (!table._headerPrototype) {
+      table._headerPrototype = { table };
+      const features = Object.values(table._features);
+      for (let i = 0; i < features.length; i++) features[i].assignHeaderPrototype?.(table._headerPrototype, table);
+    }
+    return table._headerPrototype;
+  }
+  function constructHeader(table, column, options) {
+    const headerPrototype = getHeaderPrototype(table);
+    const header = Object.create(headerPrototype);
+    header.colSpan = 0;
+    header.column = column;
+    header.depth = options.depth;
+    header.headerGroup = null;
+    header.id = options.id ?? column.id;
+    header.index = options.index;
+    header.isPlaceholder = !!options.isPlaceholder;
+    header.placeholderId = options.placeholderId;
+    header.rowSpan = 0;
+    header.subHeaders = [];
+    const initFns = table._headerInstanceInitFns;
+    for (let i = 0; i < initFns.length; i++) initFns[i](header);
+    return header;
+  }
+
+  // node_modules/@tanstack/table-core/dist/core/headers/buildHeaderGroups.js
+  function getMaxHeaderDepth(columns, depth = 1) {
+    let maxDepth = depth;
+    for (let i = 0; i < columns.length; i++) {
+      const column = columns[i];
+      if (getIsColumnVisible(column) && column.columns.length) maxDepth = Math.max(maxDepth, getMaxHeaderDepth(column.columns, depth + 1));
+    }
+    return maxDepth;
+  }
+  function formatHeaderGroupId(headerFamily, depth) {
+    return headerFamily ? `${headerFamily}_${depth}` : String(depth);
+  }
+  function formatHeaderId(headerFamily, depth, columnId, childHeaderId) {
+    let id = headerFamily ?? "";
+    if (depth) id = id ? `${id}_${depth}` : String(depth);
+    if (columnId) id = id ? `${id}_${columnId}` : columnId;
+    if (childHeaderId) id = id ? `${id}_${childHeaderId}` : childHeaderId;
+    return id;
+  }
+  function countPendingHeadersForColumn(headers, column) {
+    let count = 0;
+    for (let i = 0; i < headers.length; i++) if (headers[i].column === column) count++;
+    return count;
+  }
+  function constructHeaderGroup(headersToGroup, depth, table, headerFamily, headerGroups, headerGroupInitFns) {
+    const headerGroup = {
+      depth,
+      id: formatHeaderGroupId(headerFamily, depth),
+      headers: []
+    };
+    const pendingParentHeaders = [];
+    for (let i = 0; i < headersToGroup.length; i++) {
+      if (!(i in headersToGroup)) continue;
+      const headerToGroup = headersToGroup[i];
+      const latestPendingParentHeader = pendingParentHeaders[pendingParentHeaders.length - 1];
+      const isLeafHeader = headerToGroup.column.depth === headerGroup.depth;
+      let column;
+      let isPlaceholder = false;
+      if (isLeafHeader && headerToGroup.column.parent) column = headerToGroup.column.parent;
+      else {
+        column = headerToGroup.column;
+        isPlaceholder = true;
+      }
+      if (latestPendingParentHeader && latestPendingParentHeader.column === column) latestPendingParentHeader.subHeaders.push(headerToGroup);
+      else {
+        const header = constructHeader(table, column, {
+          id: formatHeaderId(headerFamily, depth, column.id, headerToGroup.id),
+          isPlaceholder,
+          placeholderId: isPlaceholder ? String(countPendingHeadersForColumn(pendingParentHeaders, column)) : void 0,
+          depth,
+          index: pendingParentHeaders.length
+        });
+        header.subHeaders.push(headerToGroup);
+        pendingParentHeaders.push(header);
+      }
+      headerGroup.headers.push(headerToGroup);
+      headerToGroup.headerGroup = headerGroup;
+    }
+    for (let i = 0; i < headerGroupInitFns.length; i++) headerGroupInitFns[i](headerGroup);
+    headerGroups.push(headerGroup);
+    if (depth > 0) constructHeaderGroup(pendingParentHeaders, depth - 1, table, headerFamily, headerGroups, headerGroupInitFns);
+  }
+  function updateHeaderSpans(headers) {
+    for (let i = 0; i < headers.length; i++) {
+      const header = headers[i];
+      if (!getIsColumnVisible(header.column)) continue;
+      let colSpan = 0;
+      if (header.subHeaders.length) {
+        updateHeaderSpans(header.subHeaders);
+        for (let j = 0; j < header.subHeaders.length; j++) {
+          const child = header.subHeaders[j];
+          if (!getIsColumnVisible(child.column)) continue;
+          colSpan += child.colSpan;
+        }
+      } else colSpan = 1;
+      header.colSpan = colSpan;
+      if (header.isPlaceholder && header.subHeaders.length === 1 && header.subHeaders[0].column === header.column) {
+        let rowSpan = 1;
+        let chainChild = header.subHeaders[0];
+        while (chainChild) {
+          chainChild.rowSpan = 0;
+          rowSpan++;
+          chainChild = chainChild.subHeaders.length === 1 && chainChild.subHeaders[0].column === header.column ? chainChild.subHeaders[0] : void 0;
+        }
+        header.rowSpan = rowSpan;
+      } else header.rowSpan = 1;
+    }
+  }
+  function buildHeaderGroups(allColumns, columnsToGroup, table, headerFamily) {
+    const maxDepth = getMaxHeaderDepth(allColumns);
+    const headerGroups = [];
+    const headerGroupInitFns = table._headerGroupInstanceInitFns;
+    const bottomHeaders = new Array(columnsToGroup.length);
+    for (let i = 0; i < columnsToGroup.length; i++) {
+      if (!(i in columnsToGroup)) continue;
+      bottomHeaders[i] = constructHeader(table, columnsToGroup[i], {
+        depth: maxDepth,
+        index: i
+      });
+    }
+    constructHeaderGroup(bottomHeaders, maxDepth - 1, table, headerFamily, headerGroups, headerGroupInitFns);
+    headerGroups.reverse();
+    updateHeaderSpans(headerGroups[0]?.headers ?? []);
+    return headerGroups;
+  }
+
   // node_modules/@tanstack/table-core/dist/core/headers/coreHeadersFeature.utils.js
   function collectLeafHeaders(header, leafHeaders) {
     for (let i = 0; i < header.subHeaders.length; i++) collectLeafHeaders(header.subHeaders[i], leafHeaders);
@@ -1013,27 +668,7 @@ var TableCore = (() => {
     };
   }
   function table_getHeaderGroups(table) {
-    const { start, end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
-    const allColumns = table.getAllColumns();
-    const leafColumns = callMemoOrStaticFn(table, "getVisibleLeafColumns", table_getVisibleLeafColumns);
-    if (!start.length && !end.length) return buildHeaderGroups(allColumns, leafColumns, table);
-    const leafColumnsById = table.getAllLeafColumnsById();
-    const leftColumns = [];
-    for (let i = 0; i < start.length; i++) {
-      const column = leafColumnsById[start[i]];
-      if (column && callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible)) leftColumns.push(column);
-    }
-    const rightColumns = [];
-    for (let i = 0; i < end.length; i++) {
-      const column = leafColumnsById[end[i]];
-      if (column && callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible)) rightColumns.push(column);
-    }
-    const centerColumns = leafColumns.filter((column) => !start.includes(column.id) && !end.includes(column.id));
-    return buildHeaderGroups(allColumns, [
-      ...leftColumns,
-      ...centerColumns,
-      ...rightColumns
-    ], table);
+    return buildHeaderGroups(table.getAllColumns(), orderByColumnPinning(table, getVisibleLeafColumns(table), (column) => column.id), table);
   }
   function table_getFooterGroups(table) {
     return [...table.getHeaderGroups()].reverse();
@@ -1126,427 +761,6 @@ var TableCore = (() => {
     return row;
   };
 
-  // node_modules/@tanstack/table-core/dist/features/row-sorting/sortFns.js
-  var reSplitAlphaNumeric = /([0-9]+)/gm;
-  function constructSortFn(def) {
-    const sortFn = Object.assign((rowA, rowB, columnId) => {
-      let dataValueA = rowA.getValue(columnId);
-      let dataValueB = rowB.getValue(columnId);
-      const resolveDataValue = sortFn.resolveDataValue;
-      if (resolveDataValue) {
-        dataValueA = resolveDataValue(dataValueA);
-        dataValueB = resolveDataValue(dataValueB);
-      }
-      return sortFn.sort(dataValueA, dataValueB, rowA, rowB, columnId);
-    }, def);
-    return sortFn;
-  }
-  var sortFn_alphanumeric = constructSortFn({
-    resolveDataValue: (dataValue) => toString(dataValue).toLowerCase(),
-    sort: (dataValueA, dataValueB) => compareAlphanumeric(dataValueA, dataValueB)
-  });
-  var sortFn_alphanumericCaseSensitive = constructSortFn({
-    resolveDataValue: (dataValue) => toString(dataValue),
-    sort: (dataValueA, dataValueB) => compareAlphanumeric(dataValueA, dataValueB)
-  });
-  var sortFn_text = constructSortFn({
-    resolveDataValue: (dataValue) => toString(dataValue).toLowerCase(),
-    sort: (dataValueA, dataValueB) => compareBasic(dataValueA, dataValueB)
-  });
-  var sortFn_textCaseSensitive = constructSortFn({
-    resolveDataValue: (dataValue) => toString(dataValue),
-    sort: (dataValueA, dataValueB) => compareBasic(dataValueA, dataValueB)
-  });
-  var sortFn_datetime = constructSortFn({
-    resolveDataValue: (dataValue) => toDateSortValue(dataValue),
-    sort: (dataValueA, dataValueB) => dataValueA > dataValueB ? 1 : dataValueA < dataValueB ? -1 : 0
-  });
-  var sortFn_basic = constructSortFn({ sort: (dataValueA, dataValueB) => compareBasic(dataValueA, dataValueB) });
-  function compareBasic(a, b) {
-    return a === b ? 0 : a > b ? 1 : -1;
-  }
-  function toDateSortValue(value) {
-    return value instanceof Date ? value.getTime() : value;
-  }
-  function toString(a) {
-    if (typeof a === "number") {
-      if (isNaN(a) || a === Infinity || a === -Infinity) return "";
-      return String(a);
-    }
-    if (typeof a === "string") return a;
-    return "";
-  }
-  function compareAlphanumeric(aStr, bStr) {
-    let ai = 0;
-    let bi = 0;
-    const aLen = aStr.length;
-    const bLen = bStr.length;
-    while (ai < aLen && bi < bLen) {
-      const aIsNumeric = isDigit(aStr.charCodeAt(ai));
-      const bIsNumeric = isDigit(bStr.charCodeAt(bi));
-      const aEnd = findChunkEnd(aStr, ai, aIsNumeric);
-      const bEnd = findChunkEnd(bStr, bi, bIsNumeric);
-      if (!aIsNumeric && !bIsNumeric) {
-        const stringComparison = compareStringChunks(aStr, ai, aEnd, bStr, bi, bEnd);
-        if (stringComparison) return stringComparison;
-        ai = aEnd;
-        bi = bEnd;
-        continue;
-      }
-      if (aIsNumeric !== bIsNumeric) return aIsNumeric ? 1 : -1;
-      const numericComparison = compareNumericChunks(aStr, ai, aEnd, bStr, bi, bEnd);
-      if (numericComparison) return numericComparison;
-      ai = aEnd;
-      bi = bEnd;
-    }
-    return countRemainingChunks(aStr, ai) - countRemainingChunks(bStr, bi);
-  }
-  function isDigit(charCode) {
-    return charCode >= 48 && charCode <= 57;
-  }
-  function findChunkEnd(str, start, isNumeric) {
-    let end = start + 1;
-    while (end < str.length && isDigit(str.charCodeAt(end)) === isNumeric) end++;
-    return end;
-  }
-  function compareStringChunks(aStr, aStart, aEnd, bStr, bStart, bEnd) {
-    const aLength = aEnd - aStart;
-    const bLength = bEnd - bStart;
-    const minLength = aLength < bLength ? aLength : bLength;
-    for (let i = 0; i < minLength; i++) {
-      const aCode = aStr.charCodeAt(aStart + i);
-      const bCode = bStr.charCodeAt(bStart + i);
-      if (aCode > bCode) return 1;
-      if (bCode > aCode) return -1;
-    }
-    if (aLength > bLength) return 1;
-    if (bLength > aLength) return -1;
-    return 0;
-  }
-  function compareNumericChunks(aStr, aStart, aEnd, bStr, bStart, bEnd) {
-    let aSignificantStart = aStart;
-    while (aSignificantStart < aEnd && aStr.charCodeAt(aSignificantStart) === 48) aSignificantStart++;
-    let bSignificantStart = bStart;
-    while (bSignificantStart < bEnd && bStr.charCodeAt(bSignificantStart) === 48) bSignificantStart++;
-    const aSignificantLength = aEnd - aSignificantStart;
-    const bSignificantLength = bEnd - bSignificantStart;
-    if (aSignificantLength === 0 && bSignificantLength === 0) return 0;
-    if (aSignificantLength <= 15 && bSignificantLength <= 15) {
-      const an2 = parseSmallInt(aStr, aSignificantStart, aEnd);
-      const bn2 = parseSmallInt(bStr, bSignificantStart, bEnd);
-      if (an2 > bn2) return 1;
-      if (bn2 > an2) return -1;
-      return 0;
-    }
-    const an = parseInt(aStr.slice(aStart, aEnd), 10);
-    const bn = parseInt(bStr.slice(bStart, bEnd), 10);
-    if (an > bn) return 1;
-    if (bn > an) return -1;
-    return 0;
-  }
-  function parseSmallInt(str, start, end) {
-    let result = 0;
-    for (let i = start; i < end; i++) result = result * 10 + str.charCodeAt(i) - 48;
-    return result;
-  }
-  function countRemainingChunks(str, start) {
-    let count = 0;
-    let index = start;
-    while (index < str.length) {
-      count++;
-      index = findChunkEnd(str, index, isDigit(str.charCodeAt(index)));
-    }
-    return count;
-  }
-
-  // node_modules/@tanstack/table-core/dist/features/cell-selection/cellSelectionFeature.utils.js
-  function getDefaultCellSelectionState() {
-    return [];
-  }
-  function table_resetCellSelection(table, defaultState) {
-    setStateSlice(table, "cellSelection", defaultState ? getDefaultCellSelectionState() : cloneState(table.initialState.cellSelection) ?? getDefaultCellSelectionState());
-  }
-  function table_autoResetCellSelection(table) {
-    if (!table.atoms.cellSelection) return;
-    if (table.options.autoResetAll ?? table.options.autoResetCellSelection ?? true) table._reactivity.schedule(() => table_resetCellSelection(table));
-  }
-
-  // node_modules/@tanstack/table-core/dist/features/row-expanding/rowExpandingFeature.utils.js
-  function getDefaultExpandedState() {
-    return makeObjectMap();
-  }
-  function table_autoResetExpanded(table) {
-    if (!table.atoms.expanded) return;
-    if (table.options.autoResetAll ?? table.options.autoResetExpanded ?? !table.options.manualExpanding) table._reactivity.schedule(() => table_resetExpanded(table));
-  }
-  function table_setExpanded(table, updater) {
-    table.options.onExpandedChange?.(updater);
-  }
-  function table_toggleAllRowsExpanded(table, expanded) {
-    const currentExpanded = table.atoms.expanded?.get() ?? {};
-    if (expanded ?? !table_getIsAllRowsExpanded(table)) {
-      if (currentExpanded === true) return;
-      if (!table_getCanSomeRowsExpand(table)) return;
-      table_setExpanded(table, true);
-    } else {
-      if (currentExpanded !== true && !Object.keys(currentExpanded).length) return;
-      table_setExpanded(table, makeObjectMap());
-    }
-  }
-  function table_resetExpanded(table, defaultState) {
-    const initialExpanded = table.initialState.expanded;
-    setStateSlice(table, "expanded", defaultState ? makeObjectMap() : initialExpanded === true ? true : Object.assign(makeObjectMap(), cloneState(initialExpanded ?? {})));
-  }
-  function table_getCanSomeRowsExpand(table) {
-    return table.getPrePaginatedRowModel().flatRows.some((row) => row_getCanExpand(row));
-  }
-  function table_getToggleAllRowsExpandedHandler(table) {
-    return (_e) => {
-      table_toggleAllRowsExpanded(table);
-    };
-  }
-  function table_getIsSomeRowsExpanded(table) {
-    const expanded = table.atoms.expanded?.get() ?? {};
-    return expanded === true || Object.values(expanded).some(Boolean);
-  }
-  function table_getIsAllRowsExpanded(table) {
-    const expanded = table.atoms.expanded?.get() ?? {};
-    if (expanded === true) return true;
-    if (!Object.keys(expanded).length) return false;
-    const expandableRows = table.getRowModel().flatRows.filter((row) => row_getCanExpand(row));
-    if (!expandableRows.length) return false;
-    if (expandableRows.some((row) => !row_getIsExpanded(row))) return false;
-    return true;
-  }
-  function table_getExpandedDepth(table) {
-    let maxDepth = 0;
-    const expanded = table.atoms.expanded?.get();
-    (expanded === true ? Object.values(table.getRowModel().rowsById).filter((row) => row_getCanExpand(row)).map((row) => row.id) : Object.keys(expanded ?? {})).forEach((id) => {
-      const splitId = id.split(".");
-      maxDepth = Math.max(maxDepth, splitId.length);
-    });
-    return maxDepth;
-  }
-  function row_toggleExpanded(row, expanded) {
-    const currentExpanded = row.table.atoms.expanded?.get() ?? {};
-    const currentExists = currentExpanded === true || isExpandedRowId(currentExpanded, row.id);
-    const targetExpanded = expanded ?? !currentExists;
-    if (targetExpanded === currentExists) return;
-    if (targetExpanded && !row_getCanExpand(row)) return;
-    table_setExpanded(row.table, (old) => {
-      const exists = old === true ? true : isExpandedRowId(old, row.id);
-      let oldExpanded = makeObjectMap();
-      if (old === true) Object.values(row.table.getRowModel().rowsById).forEach((rowModelRow) => {
-        if (row_getCanExpand(rowModelRow)) oldExpanded[rowModelRow.id] = true;
-      });
-      else oldExpanded = Object.assign(makeObjectMap(), old);
-      if (!exists && targetExpanded) {
-        oldExpanded[row.id] = true;
-        return oldExpanded;
-      }
-      if (exists && !targetExpanded) {
-        const rest = makeObjectMap();
-        const rowIds = Object.keys(oldExpanded);
-        for (let i = 0; i < rowIds.length; i++) {
-          const rowId = rowIds[i];
-          if (rowId !== row.id && oldExpanded[rowId]) rest[rowId] = true;
-        }
-        return rest;
-      }
-      return old;
-    });
-  }
-  function row_getIsExpanded(row) {
-    const expanded = row.table.atoms.expanded?.get() ?? {};
-    return !!(row.table.options.getIsRowExpanded?.(row) ?? (expanded === true || isExpandedRowId(expanded, row.id)));
-  }
-  function isExpandedRowId(expanded, rowId) {
-    return !!(expanded && expanded !== true && hasOwn(expanded, rowId) && expanded[rowId]);
-  }
-  function row_getCanExpand(row) {
-    return row.table.options.getRowCanExpand?.(row) ?? ((row.table.options.enableExpanding ?? true) && !!row.subRows.length);
-  }
-  function row_getIsAllParentsExpanded(row) {
-    let isFullyExpanded = true;
-    let currentRow = row;
-    while (isFullyExpanded && currentRow.parentId) {
-      currentRow = row.table.getRow(currentRow.parentId, true);
-      isFullyExpanded = row_getIsExpanded(currentRow);
-    }
-    return isFullyExpanded;
-  }
-  function row_getToggleExpandedHandler(row) {
-    const canExpand = row_getCanExpand(row);
-    return () => {
-      if (!canExpand) return;
-      row_toggleExpanded(row);
-    };
-  }
-
-  // node_modules/@tanstack/table-core/dist/features/row-pagination/rowPaginationFeature.utils.js
-  var defaultPageIndex = 0;
-  function table_autoResetPageIndex(table) {
-    if (table.options.autoResetAll ?? table.options.autoResetPageIndex ?? !table.options.manualPagination) {
-      if ((table.atoms.pagination?.get()?.pageIndex ?? defaultPageIndex) === defaultPageIndex) return;
-      table_resetPageIndex(table, true);
-    }
-  }
-  function table_setPagination(table, updater) {
-    setStateSlice(table, "pagination", updater);
-  }
-  function table_setPageIndex(table, updater) {
-    table_setPagination(table, (old) => {
-      let pageIndex = functionalUpdate(updater, old.pageIndex);
-      const maxPageIndex = typeof table.options.pageCount === "undefined" || table.options.pageCount === -1 ? Number.MAX_SAFE_INTEGER : table.options.pageCount - 1;
-      pageIndex = Math.max(0, Math.min(pageIndex, maxPageIndex));
-      return {
-        ...old,
-        pageIndex
-      };
-    });
-  }
-  function table_resetPageIndex(table, defaultState) {
-    table_setPageIndex(table, defaultState ? defaultPageIndex : table.initialState.pagination?.pageIndex ?? defaultPageIndex);
-  }
-
-  // node_modules/@tanstack/table-core/dist/features/row-sorting/rowSortingFeature.utils.js
-  function getDefaultSortingState() {
-    return [];
-  }
-  function table_setSorting(table, updater) {
-    setStateSlice(table, "sorting", updater);
-  }
-  function table_resetSorting(table, defaultState) {
-    table_setSorting(table, defaultState ? [] : cloneState(table.initialState.sorting ?? []));
-  }
-  function table_autoResetSorting(table) {
-    if (!table.atoms.sorting) return;
-    if (table.options.autoResetAll ?? table.options.autoResetSorting ?? false) table_resetSorting(table);
-  }
-  function column_getAutoSortFn(column) {
-    const sortFns2 = column.table._rowModelFns.sortFns;
-    const firstRows = column.table.getFilteredRowModel().flatRows.slice(0, 10);
-    let sortFnName;
-    let isString = false;
-    for (let i = 0; i < firstRows.length; i++) {
-      const value = firstRows[i].getValue(column.id);
-      if (Object.prototype.toString.call(value) === "[object Date]") {
-        sortFnName = "datetime";
-        break;
-      }
-      if (typeof value === "string") {
-        isString = true;
-        if (value.split(reSplitAlphaNumeric).length > 1) {
-          sortFnName = "alphanumeric";
-          break;
-        }
-      }
-    }
-    if (!sortFnName && isString) sortFnName = "text";
-    if (sortFnName) {
-      let sortFn = sortFns2?.[sortFnName];
-      if (!sortFn) {
-        if (true) console.warn(`sortFn '${sortFnName}' (auto) for column '${column.id}' is not registered`);
-        if (sortFnName === "alphanumeric") sortFn = sortFns2?.text;
-      }
-      if (sortFn) return sortFn;
-    }
-    return sortFn_basic;
-  }
-  function column_getAutoSortDir(column) {
-    const firstRows = column.table.getFilteredRowModel().flatRows.slice(0, 10);
-    for (let i = 0; i < firstRows.length; i++) {
-      const value = firstRows[i].getValue(column.id);
-      if (value == null) continue;
-      return typeof value === "string" ? "asc" : "desc";
-    }
-    return "desc";
-  }
-  function column_getSortFn(column) {
-    const sortFns2 = column.table._rowModelFns.sortFns;
-    if (isFunction(column.columnDef.sortFn)) return column.columnDef.sortFn;
-    if (column.columnDef.sortFn === "auto") return column_getAutoSortFn(column);
-    const sortFn = sortFns2?.[column.columnDef.sortFn];
-    if (!sortFn) console.warn(`sortFn '${String(column.columnDef.sortFn)}' for column '${column.id}' is not registered`);
-    return sortFn ?? sortFn_basic;
-  }
-  function column_toggleSorting(column, desc, multi) {
-    const nextSortingOrder = column_getNextSortingOrder(column, multi && column_getCanMultiSort(column));
-    const hasManualValue = typeof desc !== "undefined";
-    table_setSorting(column.table, (old) => {
-      const existingIndex = old.findIndex((d) => d.id === column.id);
-      const existingSorting = existingIndex === -1 ? void 0 : old[existingIndex];
-      let newSorting = [];
-      let sortAction;
-      const nextDesc = hasManualValue ? desc : nextSortingOrder === "desc";
-      const isMultiMode = !!(old.length && column_getCanMultiSort(column) && multi);
-      if (isMultiMode) if (existingSorting) sortAction = "toggle";
-      else sortAction = "add";
-      else if (existingSorting) sortAction = "toggle";
-      else sortAction = "replace";
-      if (sortAction === "toggle") {
-        if (!hasManualValue) {
-          if (!nextSortingOrder) sortAction = "remove";
-        }
-      }
-      if (sortAction === "add") {
-        newSorting = [...old, {
-          id: column.id,
-          desc: nextDesc
-        }];
-        newSorting.splice(0, newSorting.length - (column.table.options.maxMultiSortColCount ?? Number.MAX_SAFE_INTEGER));
-      } else if (sortAction === "toggle") newSorting = isMultiMode ? old.map((d) => {
-        if (d.id === column.id) return {
-          ...d,
-          desc: nextDesc
-        };
-        return d;
-      }) : [{
-        id: column.id,
-        desc: nextDesc
-      }];
-      else if (sortAction === "remove") newSorting = isMultiMode ? old.filter((d) => d.id !== column.id) : [];
-      else newSorting = [{
-        id: column.id,
-        desc: nextDesc
-      }];
-      return newSorting;
-    });
-  }
-  function column_getFirstSortDir(column) {
-    return column.columnDef.sortDescFirst ?? column.table.options.sortDescFirst ?? column_getAutoSortDir(column) === "desc" ? "desc" : "asc";
-  }
-  function column_getNextSortingOrder(column, multi) {
-    const firstSortDirection = column_getFirstSortDir(column);
-    const isSorted = column_getIsSorted(column);
-    if (!isSorted) return firstSortDirection;
-    if (isSorted !== firstSortDirection && (column.table.options.enableSortingRemoval ?? true) && (multi ? column.table.options.enableMultiRemove ?? true : true)) return false;
-    return isSorted === "desc" ? "asc" : "desc";
-  }
-  function column_getCanSort(column) {
-    return (column.columnDef.enableSorting ?? true) && (column.table.options.enableSorting ?? true) && !!column.accessorFn;
-  }
-  function column_getCanMultiSort(column) {
-    return column.columnDef.enableMultiSort ?? column.table.options.enableMultiSort ?? !!column.accessorFn;
-  }
-  function column_getIsSorted(column) {
-    const columnSort = column.table.atoms.sorting?.get()?.find((d) => d.id === column.id);
-    return !columnSort ? false : columnSort.desc ? "desc" : "asc";
-  }
-  function column_getSortIndex(column) {
-    return column.table.atoms.sorting?.get()?.findIndex((d) => d.id === column.id) ?? -1;
-  }
-  function column_clearSorting(column) {
-    table_setSorting(column.table, (old) => old.length ? old.filter((d) => d.id !== column.id) : []);
-  }
-  function column_getToggleSortingHandler(column) {
-    const canSort = column_getCanSort(column);
-    return (e) => {
-      if (!canSort) return;
-      column_toggleSorting(column, void 0, column_getCanMultiSort(column) ? column.table.options.isMultiSortEvent?.(e) : false);
-    };
-  }
-
   // node_modules/@tanstack/table-core/dist/core/row-models/createCoreRowModel.js
   function createCoreRowModel() {
     return (table) => {
@@ -1557,10 +771,10 @@ var TableCore = (() => {
         memoDeps: () => [table.options.data],
         fn: () => _createCoreRowModel(table, table.options.data),
         onAfterUpdate: skipFirstRun(() => {
-          table_autoResetExpanded(table);
-          table_autoResetPageIndex(table);
-          table_autoResetSorting(table);
-          table_autoResetCellSelection(table);
+          autoResetExpanded(table);
+          autoResetPageIndex(table);
+          autoResetSorting(table);
+          autoResetCellSelection(table);
         })
       });
     };
@@ -1684,17 +898,8 @@ var TableCore = (() => {
     return rows[displayIndex] === row ? displayIndex : -1;
   }
   function table_getRowsInDisplayOrder(table) {
-    const rows = table.getPrePaginatedRowModel().rows;
-    if (table.options.paginateExpandedRows === false) {
-      const displayRows = [];
-      const handleRow = (row) => {
-        row._displayIndexCache = displayRows.length;
-        displayRows.push(row);
-        if (row.subRows.length && row.getIsExpanded?.()) row.subRows.forEach(handleRow);
-      };
-      rows.forEach(handleRow);
-      return displayRows;
-    }
+    const rowModel = table.getPrePaginatedRowModel();
+    const rows = table.options.paginateExpandedRows === false ? expandRowModel(table, rowModel).rows : rowModel.rows;
     for (let i = 0; i < rows.length; i++) rows[i]._displayIndexCache = i;
     return rows;
   }
@@ -2195,7 +1400,10 @@ var TableCore = (() => {
         const e = effect(() => {
           atom.get();
           if (!observed.current) observed.current = true;
-          else obs.next?.(atom._snapshot);
+          else {
+            activeSub = void 0;
+            obs.next?.(atom._snapshot);
+          }
         });
         return { unsubscribe: () => {
           e.stop();
@@ -2447,27 +1655,8 @@ var TableCore = (() => {
   }
 
   // node_modules/@tanstack/table-core/dist/features/row-aggregation/rowAggregationFeature.utils.js
-  function isAggregationFnDef(value) {
-    return !!value && typeof value === "object" && "aggregate" in value;
-  }
-  function isAggregationFnDescriptor(value) {
-    return !!value && typeof value === "object" && "id" in value && "aggregationFn" in value;
-  }
-  function warn(message) {
-    if (true) console.warn(message);
-  }
   function resolveMaxAggregationDepth(maxDepth) {
     return maxDepth === void 0 || Number.isNaN(maxDepth) ? 0 : Math.max(0, Math.floor(maxDepth));
-  }
-  function collectNormalizedAggregationRow(row, depth, maxDepth, seen, result) {
-    if (row.subRows.length && depth < maxDepth) {
-      for (let i = 0; i < row.subRows.length; i++) collectNormalizedAggregationRow(row.subRows[i], depth + 1, maxDepth, seen, result);
-      return;
-    }
-    if (!seen.has(row.id)) {
-      seen.add(row.id);
-      result.push(row);
-    }
   }
   function collectUniqueAggregationRow(row, depth, maxDepth, result) {
     if (row.subRows.length && depth < maxDepth) {
@@ -2475,13 +1664,6 @@ var TableCore = (() => {
       return;
     }
     result.push(row);
-  }
-  function normalizeAggregationRows(rows, maxDepth = 0) {
-    const result = [];
-    const seen = /* @__PURE__ */ new Set();
-    const normalizedMaxDepth = resolveMaxAggregationDepth(maxDepth);
-    for (let i = 0; i < rows.length; i++) collectNormalizedAggregationRow(rows[i], 0, normalizedMaxDepth, seen, result);
-    return result;
   }
   function normalizeUniqueAggregationRows(rows, maxDepth = 0) {
     const normalizedMaxDepth = resolveMaxAggregationDepth(maxDepth);
@@ -2495,121 +1677,6 @@ var TableCore = (() => {
     if (!needsDescent) return rows;
     const result = [];
     for (let i = 0; i < rows.length; i++) collectUniqueAggregationRow(rows[i], 0, normalizedMaxDepth, result);
-    return result;
-  }
-  function getAutoAggregationFnName(value) {
-    if (typeof value === "number") return "sum";
-    if (value instanceof Date && !Number.isNaN(value.getTime())) return "extent";
-  }
-  function column_getAutoAggregationFn(column) {
-    const value = column.table.getCoreRowModel().flatRows[0]?.getValue(column.id);
-    const name = getAutoAggregationFnName(value);
-    if (!name) return void 0;
-    const aggregationFn = column.table._rowModelFns.aggregationFns?.[name];
-    if (!aggregationFn) warn(`aggregationFn '${name}' (auto) for column '${column.id}' is not registered`);
-    return aggregationFn;
-  }
-  function resolveAggregationFn(column, ref) {
-    if (isAggregationFnDef(ref)) return ref;
-    if (ref === "auto") return column_getAutoAggregationFn(column);
-    const aggregationFn = column.table._rowModelFns.aggregationFns?.[ref];
-    if (!aggregationFn) warn(`aggregationFn '${String(ref)}' for column '${column.id}' is not registered`);
-    return aggregationFn;
-  }
-  function column_getAggregationFns(column) {
-    const option = column.columnDef.aggregationFn;
-    const registry = column.table._rowModelFns.aggregationFns;
-    const coreRowModel = column.table.getCoreRowModel();
-    const previous = column._resolvedAggregationFnsCache;
-    if (previous && previous.option === option && previous.registry === registry && previous.coreRowModel === coreRowModel) return previous.value;
-    const finish = (value) => {
-      column._resolvedAggregationFnsCache = {
-        coreRowModel,
-        option,
-        registry,
-        value
-      };
-      return value;
-    };
-    if (option == null) return finish([]);
-    if (!Array.isArray(option)) return finish([{
-      aggregationFn: resolveAggregationFn(column, option),
-      id: typeof option === "string" ? option : void 0
-    }]);
-    const ids = makeObjectMap();
-    for (let i = 0; i < option.length; i++) {
-      const item = option[i];
-      const id = typeof item === "string" ? item : isAggregationFnDescriptor(item) ? item.id : void 0;
-      if (id !== void 0) ids[id] = (ids[id] ?? 0) + 1;
-    }
-    const resolved = [];
-    for (let i = 0; i < option.length; i++) {
-      const item = option[i];
-      const id = typeof item === "string" ? item : isAggregationFnDescriptor(item) ? item.id : void 0;
-      if (id === void 0) {
-        warn(`aggregationFn at index ${i} for column '${column.id}' needs a stable id`);
-        resolved.push({
-          aggregationFn: void 0,
-          id: void 0
-        });
-        continue;
-      }
-      if (ids[id] > 1) {
-        warn(`aggregationFn id '${id}' for column '${column.id}' is duplicated`);
-        resolved.push({
-          aggregationFn: void 0,
-          id
-        });
-        continue;
-      }
-      const ref = isAggregationFnDescriptor(item) ? item.aggregationFn : item;
-      resolved.push({
-        aggregationFn: resolveAggregationFn(column, ref),
-        id
-      });
-    }
-    return finish(resolved);
-  }
-  function getSubRowResult(subRowValue, isMultiple, id) {
-    if (!isMultiple) return subRowValue;
-    if (!id || !subRowValue || typeof subRowValue !== "object") return void 0;
-    return hasOwn(subRowValue, id) ? subRowValue[id] : void 0;
-  }
-  function aggregateColumnValue(args) {
-    const { subRows, column, groupingRow, rows, uniqueRows } = args;
-    const internalColumn = column;
-    const maxDepth = resolveMaxAggregationDepth(args.maxDepth ?? internalColumn.columnDef.maxAggregationDepth);
-    const aggregationRows = uniqueRows ? normalizeUniqueAggregationRows(rows, maxDepth) : normalizeAggregationRows(rows, maxDepth);
-    const entries = column_getAggregationFns(internalColumn);
-    const isMultiple = Array.isArray(internalColumn.columnDef.aggregationFn);
-    const canMerge = !!subRows?.length && subRows.every((row) => !!row.groupingColumnId && row.groupingColumnId !== column.id);
-    const getValue = (row) => row.getValue(column.id);
-    const execute = (entry) => {
-      const definition = entry.aggregationFn;
-      if (!definition) return void 0;
-      const context = {
-        ...subRows ? { subRows } : {},
-        column,
-        columnId: column.id,
-        getValue,
-        ...groupingRow ? { groupingRow } : {},
-        maxDepth,
-        rows: aggregationRows,
-        table: column.table
-      };
-      if (canMerge && definition.merge) return definition.merge({
-        ...context,
-        subRowResults: subRows.map((row) => getSubRowResult(row.getValue(column.id), isMultiple, entry.id)),
-        subRows
-      });
-      return definition.aggregate(context);
-    };
-    if (!isMultiple) return entries[0] ? execute(entries[0]) : void 0;
-    const result = makeObjectMap();
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      if (entry.id !== void 0) result[entry.id] = execute(entry);
-    }
     return result;
   }
 
@@ -2740,6 +1807,85 @@ var TableCore = (() => {
     }
   };
 
+  // node_modules/@tanstack/table-core/dist/features/column-ordering/columnOrderingFeature.utils.js
+  function getDefaultColumnOrderState() {
+    return [];
+  }
+  function table_getColumnIndexes(table) {
+    const buildIndexes = (columns) => {
+      const indexes = makeObjectMap();
+      for (let i = 0; i < columns.length; i++) indexes[columns[i].id] = i;
+      return indexes;
+    };
+    return {
+      all: buildIndexes(getPinnedVisibleLeafColumns(table)),
+      center: buildIndexes(getPinnedVisibleLeafColumns(table, "center")),
+      start: buildIndexes(getPinnedVisibleLeafColumns(table, "start")),
+      end: buildIndexes(getPinnedVisibleLeafColumns(table, "end"))
+    };
+  }
+  function column_getIndex(column, position) {
+    return callMemoOrStaticFn(column.table, "getColumnIndexes", table_getColumnIndexes)[position === "start" ? "start" : position === "end" ? "end" : position === "center" ? "center" : "all"][column.id] ?? -1;
+  }
+  function column_getIsFirstColumn(column, position) {
+    return getPinnedVisibleLeafColumns(column.table, position)[0]?.id === column.id;
+  }
+  function column_getIsLastColumn(column, position) {
+    const columns = getPinnedVisibleLeafColumns(column.table, position);
+    return columns[columns.length - 1]?.id === column.id;
+  }
+  function table_setColumnOrder(table, updater) {
+    setStateSlice(table, "columnOrder", updater);
+  }
+  function table_resetColumnOrder(table, defaultState) {
+    table_setColumnOrder(table, defaultState ? [] : cloneState(table.initialState.columnOrder ?? []));
+  }
+  function table_getOrderColumnsFn(table) {
+    const columnOrder = table.atoms.columnOrder?.get();
+    return (columns) => {
+      let orderedColumns = [];
+      if (!columnOrder?.length) orderedColumns = columns;
+      else {
+        const remaining = /* @__PURE__ */ new Map();
+        for (let i = 0; i < columns.length; i++) {
+          const column = columns[i];
+          remaining.set(column.id, column);
+        }
+        for (let i = 0; i < columnOrder.length; i++) {
+          const id = columnOrder[i];
+          const column = remaining.get(id);
+          if (column) {
+            orderedColumns.push(column);
+            remaining.delete(id);
+          }
+        }
+        for (let i = 0; i < columns.length; i++) {
+          const column = columns[i];
+          if (remaining.has(column.id)) orderedColumns.push(column);
+        }
+      }
+      return orderColumns(table, orderedColumns);
+    };
+  }
+  function orderColumns(table, leafColumns) {
+    const grouping = table.atoms.grouping?.get() ?? [];
+    const { groupedColumnMode } = table.options;
+    if (!grouping.length || !groupedColumnMode) return leafColumns;
+    const nonGroupingColumns = leafColumns.filter((col) => !grouping.includes(col.id));
+    if (groupedColumnMode === "remove") return nonGroupingColumns;
+    const leafColumnsById = /* @__PURE__ */ new Map();
+    for (let i = 0; i < leafColumns.length; i++) {
+      const col = leafColumns[i];
+      leafColumnsById.set(col.id, col);
+    }
+    const groupingColumns = [];
+    for (let i = 0; i < grouping.length; i++) {
+      const col = leafColumnsById.get(grouping[i]);
+      if (col) groupingColumns.push(col);
+    }
+    return [...groupingColumns, ...nonGroupingColumns];
+  }
+
   // node_modules/@tanstack/table-core/dist/features/column-grouping/columnGroupingFeature.utils.js
   function getDefaultGroupingState() {
     return [];
@@ -2831,7 +1977,8 @@ var TableCore = (() => {
     constructTableAPIs: (table) => {
       assignTableAPIs("columnGroupingFeature", table, {
         table_setGrouping: { fn: (updater) => table_setGrouping(table, updater) },
-        table_resetGrouping: { fn: (defaultState) => table_resetGrouping(table, defaultState) }
+        table_resetGrouping: { fn: (defaultState) => table_resetGrouping(table, defaultState) },
+        table__orderGroupedColumns: { fn: (columns) => orderColumns(table, columns) }
       });
     }
   };
@@ -2880,6 +2027,240 @@ var TableCore = (() => {
       });
     }
   };
+
+  // node_modules/@tanstack/table-core/dist/features/column-pinning/columnPinningFeature.utils.js
+  function getDefaultColumnPinningState() {
+    return {
+      start: [],
+      end: []
+    };
+  }
+  function column_pin(column, position) {
+    const leafColumns = column.getLeafColumns();
+    const columnIds = [];
+    for (let i = 0; i < leafColumns.length; i++) {
+      const id = leafColumns[i].id;
+      if (id) columnIds.push(id);
+    }
+    table_setColumnPinning(column.table, (old) => {
+      if (position === "end") return {
+        start: old.start.filter((d) => !columnIds.includes(d)),
+        end: [...old.end.filter((d) => !columnIds.includes(d)), ...columnIds]
+      };
+      if (position === "start") return {
+        start: [...old.start.filter((d) => !columnIds.includes(d)), ...columnIds],
+        end: old.end.filter((d) => !columnIds.includes(d))
+      };
+      return {
+        start: old.start.filter((d) => !columnIds.includes(d)),
+        end: old.end.filter((d) => !columnIds.includes(d))
+      };
+    });
+  }
+  function column_getCanPin(column) {
+    return column.getLeafColumns().some((leafColumn) => (leafColumn.columnDef.enablePinning ?? true) && (column.table.options.enableColumnPinning ?? true));
+  }
+  function column_getIsPinned(column) {
+    const leafColumns = column.getLeafColumns();
+    const { start, end } = column.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    for (let i = 0; i < leafColumns.length; i++) if (start.includes(leafColumns[i].id)) return "start";
+    for (let i = 0; i < leafColumns.length; i++) if (end.includes(leafColumns[i].id)) return "end";
+    return false;
+  }
+  function column_getPinnedIndex(column) {
+    const position = column_getIsPinned(column);
+    return position ? column.table.atoms.columnPinning?.get()?.[position].indexOf(column.id) ?? -1 : 0;
+  }
+  function row_getCenterVisibleCells(row) {
+    const allCells = getVisibleCells(row);
+    const { start, end } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    if (!start.length && !end.length) return allCells;
+    const startAndEnd = [...start, ...end];
+    return allCells.filter((d) => !startAndEnd.includes(d.column.id));
+  }
+  function row_getStartVisibleCells(row) {
+    const { start } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    if (!start.length) return [];
+    const allVisibleCells = getVisibleCellsByColumnId(row);
+    const cells = [];
+    for (let i = 0; i < start.length; i++) {
+      const cell = allVisibleCells[start[i]];
+      if (cell) {
+        cell.position = "start";
+        cells.push(cell);
+      }
+    }
+    return cells;
+  }
+  function row_getEndVisibleCells(row) {
+    const { end } = row.table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    if (!end.length) return [];
+    const allVisibleCells = getVisibleCellsByColumnId(row);
+    const cells = [];
+    for (let i = 0; i < end.length; i++) {
+      const cell = allVisibleCells[end[i]];
+      if (cell) {
+        cell.position = "end";
+        cells.push(cell);
+      }
+    }
+    return cells;
+  }
+  function table_setColumnPinning(table, updater) {
+    setStateSlice(table, "columnPinning", updater);
+  }
+  function table_resetColumnPinning(table, defaultState) {
+    table_setColumnPinning(table, defaultState ? getDefaultColumnPinningState() : cloneState(table.initialState.columnPinning ?? getDefaultColumnPinningState()));
+  }
+  function table_getIsSomeColumnsPinned(table, position) {
+    const pinningState = table.atoms.columnPinning?.get();
+    if (!position) return Boolean(pinningState?.start.length || pinningState?.end.length);
+    return Boolean(pinningState?.[position].length);
+  }
+  function table_getStartHeaderGroups(table) {
+    const allColumns = table.getAllColumns();
+    const leafColumnsById = table.getAllLeafColumnsById();
+    const { start } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    const orderedLeafColumns = [];
+    for (let i = 0; i < start.length; i++) {
+      const column = leafColumnsById[start[i]];
+      if (column && getIsColumnVisible(column)) orderedLeafColumns.push(column);
+    }
+    return buildHeaderGroups(allColumns, orderedLeafColumns, table, "start");
+  }
+  function table_getEndHeaderGroups(table) {
+    const allColumns = table.getAllColumns();
+    const leafColumnsById = table.getAllLeafColumnsById();
+    const { end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    const orderedLeafColumns = [];
+    for (let i = 0; i < end.length; i++) {
+      const column = leafColumnsById[end[i]];
+      if (column && getIsColumnVisible(column)) orderedLeafColumns.push(column);
+    }
+    return buildHeaderGroups(allColumns, orderedLeafColumns, table, "end");
+  }
+  function table_getCenterHeaderGroups(table) {
+    const allColumns = table.getAllColumns();
+    let leafColumns = getVisibleLeafColumns(table);
+    const { start, end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    if (start.length || end.length) {
+      const startAndEnd = [...start, ...end];
+      leafColumns = leafColumns.filter((column) => !startAndEnd.includes(column.id));
+    }
+    return buildHeaderGroups(allColumns, leafColumns, table, "center");
+  }
+  function table_getStartFooterGroups(table) {
+    return [...callMemoOrStaticFn(table, "getStartHeaderGroups", table_getStartHeaderGroups)].reverse();
+  }
+  function table_getEndFooterGroups(table) {
+    return [...callMemoOrStaticFn(table, "getEndHeaderGroups", table_getEndHeaderGroups)].reverse();
+  }
+  function table_getCenterFooterGroups(table) {
+    return [...callMemoOrStaticFn(table, "getCenterHeaderGroups", table_getCenterHeaderGroups)].reverse();
+  }
+  function table_getStartFlatHeaders(table) {
+    const leftHeaderGroups = callMemoOrStaticFn(table, "getStartHeaderGroups", table_getStartHeaderGroups);
+    const result = [];
+    for (let i = 0; i < leftHeaderGroups.length; i++) {
+      const headers = leftHeaderGroups[i].headers;
+      for (let j = 0; j < headers.length; j++) result.push(headers[j]);
+    }
+    return result;
+  }
+  function table_getEndFlatHeaders(table) {
+    const rightHeaderGroups = callMemoOrStaticFn(table, "getEndHeaderGroups", table_getEndHeaderGroups);
+    const result = [];
+    for (let i = 0; i < rightHeaderGroups.length; i++) {
+      const headers = rightHeaderGroups[i].headers;
+      for (let j = 0; j < headers.length; j++) result.push(headers[j]);
+    }
+    return result;
+  }
+  function table_getCenterFlatHeaders(table) {
+    const centerHeaderGroups = callMemoOrStaticFn(table, "getCenterHeaderGroups", table_getCenterHeaderGroups);
+    const result = [];
+    for (let i = 0; i < centerHeaderGroups.length; i++) {
+      const headers = centerHeaderGroups[i].headers;
+      for (let j = 0; j < headers.length; j++) result.push(headers[j]);
+    }
+    return result;
+  }
+  function table_getStartLeafHeaders(table) {
+    return callMemoOrStaticFn(table, "getStartFlatHeaders", table_getStartFlatHeaders).filter((header) => !header.subHeaders.length);
+  }
+  function table_getEndLeafHeaders(table) {
+    return callMemoOrStaticFn(table, "getEndFlatHeaders", table_getEndFlatHeaders).filter((header) => !header.subHeaders.length);
+  }
+  function table_getCenterLeafHeaders(table) {
+    return callMemoOrStaticFn(table, "getCenterFlatHeaders", table_getCenterFlatHeaders).filter((header) => !header.subHeaders.length);
+  }
+  function table_getStartLeafColumns(table) {
+    const { start } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    const leafColumnsById = table.getAllLeafColumnsById();
+    const result = [];
+    for (let i = 0; i < start.length; i++) {
+      const column = leafColumnsById[start[i]];
+      if (column) result.push(column);
+    }
+    return result;
+  }
+  function table_getEndLeafColumns(table) {
+    const { end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    const leafColumnsById = table.getAllLeafColumnsById();
+    const result = [];
+    for (let i = 0; i < end.length; i++) {
+      const column = leafColumnsById[end[i]];
+      if (column) result.push(column);
+    }
+    return result;
+  }
+  function table_getCenterLeafColumns(table) {
+    const { start, end } = table.atoms.columnPinning?.get() ?? getDefaultColumnPinningState();
+    if (!start.length && !end.length) return table.getAllLeafColumns();
+    const startAndEnd = [...start, ...end];
+    return table.getAllLeafColumns().filter((d) => !startAndEnd.includes(d.id));
+  }
+  function table_getPinnedLeafColumns(table, position) {
+    return !position ? table.getAllLeafColumns() : position === "start" ? callMemoOrStaticFn(table, "getStartLeafColumns", table_getStartLeafColumns) : position === "end" ? callMemoOrStaticFn(table, "getEndLeafColumns", table_getEndLeafColumns) : callMemoOrStaticFn(table, "getCenterLeafColumns", table_getCenterLeafColumns);
+  }
+  function table_getStartVisibleLeafColumns(table) {
+    return callMemoOrStaticFn(table, "getStartLeafColumns", table_getStartLeafColumns).filter((column) => getIsColumnVisible(column));
+  }
+  function table_getEndVisibleLeafColumns(table) {
+    return callMemoOrStaticFn(table, "getEndLeafColumns", table_getEndLeafColumns).filter((column) => getIsColumnVisible(column));
+  }
+  function table_getCenterVisibleLeafColumns(table) {
+    return callMemoOrStaticFn(table, "getCenterLeafColumns", table_getCenterLeafColumns).filter((column) => getIsColumnVisible(column));
+  }
+  function table_getPinnedVisibleLeafColumns(table, position) {
+    return !position ? getVisibleLeafColumns(table) : position === "start" ? callMemoOrStaticFn(table, "getStartVisibleLeafColumns", table_getStartVisibleLeafColumns) : position === "end" ? callMemoOrStaticFn(table, "getEndVisibleLeafColumns", table_getEndVisibleLeafColumns) : callMemoOrStaticFn(table, "getCenterVisibleLeafColumns", table_getCenterVisibleLeafColumns);
+  }
+
+  // node_modules/@tanstack/table-core/dist/features/column-pinning/orderByColumnPinning.js
+  function orderByColumnPinning2(table, items, getColumnId, getItemsByColumnId) {
+    const columnPinning = table.atoms.columnPinning?.get();
+    if (!columnPinning || !columnPinning.start.length && !columnPinning.end.length) return items;
+    const { start, end } = columnPinning;
+    let itemsByColumnId = getItemsByColumnId?.();
+    if (!itemsByColumnId) {
+      itemsByColumnId = makeObjectMap();
+      for (let i = 0; i < items.length; i++) itemsByColumnId[getColumnId(items[i])] = items[i];
+    }
+    const ordered = [];
+    for (let i = 0; i < start.length; i++) {
+      const item = itemsByColumnId[start[i]];
+      if (item) ordered.push(item);
+    }
+    for (let i = 0; i < items.length; i++) {
+      const columnId = getColumnId(items[i]);
+      if (!start.includes(columnId) && !end.includes(columnId)) ordered.push(items[i]);
+    }
+    for (let i = 0; i < end.length; i++) {
+      const item = itemsByColumnId[end[i]];
+      if (item) ordered.push(item);
+    }
+    return ordered;
+  }
 
   // node_modules/@tanstack/table-core/dist/features/column-pinning/columnPinningFeature.js
   var columnPinningFeature = {
@@ -2936,11 +2317,12 @@ var TableCore = (() => {
         table_setColumnPinning: { fn: (updater) => table_setColumnPinning(table, updater) },
         table_resetColumnPinning: { fn: (defaultState) => table_resetColumnPinning(table, defaultState) },
         table_getIsSomeColumnsPinned: { fn: (position) => table_getIsSomeColumnsPinned(table, position) },
+        table__orderByColumnPinning: { fn: (items, getColumnId, getItemsByColumnId) => orderByColumnPinning2(table, items, getColumnId, getItemsByColumnId) },
         table_getStartHeaderGroups: {
           fn: () => table_getStartHeaderGroups(table),
           memoDeps: () => [
             table.getAllColumns(),
-            callMemoOrStaticFn(table, "getVisibleLeafColumns", table_getVisibleLeafColumns),
+            getVisibleLeafColumns(table),
             table.atoms.columnPinning?.get()?.start,
             table.atoms.columnOrder?.get()
           ]
@@ -2949,7 +2331,7 @@ var TableCore = (() => {
           fn: () => table_getCenterHeaderGroups(table),
           memoDeps: () => [
             table.getAllColumns(),
-            callMemoOrStaticFn(table, "getVisibleLeafColumns", table_getVisibleLeafColumns),
+            getVisibleLeafColumns(table),
             table.atoms.columnPinning?.get(),
             table.atoms.columnOrder?.get()
           ]
@@ -2958,7 +2340,7 @@ var TableCore = (() => {
           fn: () => table_getEndHeaderGroups(table),
           memoDeps: () => [
             table.getAllColumns(),
-            callMemoOrStaticFn(table, "getVisibleLeafColumns", table_getVisibleLeafColumns),
+            getVisibleLeafColumns(table),
             table.atoms.columnPinning?.get()?.end,
             table.atoms.columnOrder?.get()
           ]
@@ -3109,10 +2491,10 @@ var TableCore = (() => {
   }
   function table_getColumnOffsets(table) {
     return {
-      all: buildColumnOffsets(table_getPinnedVisibleLeafColumns(table)),
-      center: buildColumnOffsets(table_getPinnedVisibleLeafColumns(table, "center")),
-      start: buildColumnOffsets(table_getPinnedVisibleLeafColumns(table, "start")),
-      end: buildColumnOffsets(table_getPinnedVisibleLeafColumns(table, "end"))
+      all: buildColumnOffsets(getPinnedVisibleLeafColumns(table)),
+      center: buildColumnOffsets(getPinnedVisibleLeafColumns(table, "center")),
+      start: buildColumnOffsets(getPinnedVisibleLeafColumns(table, "start")),
+      end: buildColumnOffsets(getPinnedVisibleLeafColumns(table, "end"))
     };
   }
   function toOffsetsKey(position) {
@@ -3157,25 +2539,24 @@ var TableCore = (() => {
   function table_resetColumnSizing(table, defaultState) {
     table_setColumnSizing(table, defaultState ? makeObjectMap() : Object.assign(makeObjectMap(), cloneState(table.initialState.columnSizing ?? {})));
   }
+  function sumColumnSizes(columns) {
+    let sum = 0;
+    for (let i = 0; i < columns.length; i++) sum += callMemoOrStaticFn(columns[i], "getSize", column_getSize);
+    return sum;
+  }
   function table_getTotalSize(table) {
     return table.getHeaderGroups()[0]?.headers.reduce((sum, header) => {
       return sum + header_getSize(header);
     }, 0) ?? 0;
   }
   function table_getStartTotalSize(table) {
-    return callMemoOrStaticFn(table, "getStartHeaderGroups", table_getStartHeaderGroups)[0]?.headers.reduce((sum, header) => {
-      return sum + header_getSize(header);
-    }, 0) ?? 0;
+    return sumColumnSizes(getPinnedVisibleLeafColumns(table, "start"));
   }
   function table_getCenterTotalSize(table) {
-    return callMemoOrStaticFn(table, "getCenterHeaderGroups", table_getCenterHeaderGroups)[0]?.headers.reduce((sum, header) => {
-      return sum + header_getSize(header);
-    }, 0) ?? 0;
+    return sumColumnSizes(getPinnedVisibleLeafColumns(table, "center"));
   }
   function table_getEndTotalSize(table) {
-    return callMemoOrStaticFn(table, "getEndHeaderGroups", table_getEndHeaderGroups)[0]?.headers.reduce((sum, header) => {
-      return sum + header_getSize(header);
-    }, 0) ?? 0;
+    return sumColumnSizes(getPinnedVisibleLeafColumns(table, "end"));
   }
 
   // node_modules/@tanstack/table-core/dist/features/column-resizing/columnResizingFeature.utils.js
@@ -3474,6 +2855,89 @@ var TableCore = (() => {
     }
   };
 
+  // node_modules/@tanstack/table-core/dist/features/column-visibility/columnVisibilityFeature.utils.js
+  function getDefaultColumnVisibilityState() {
+    return makeObjectMap();
+  }
+  function column_toggleVisibility(column, visible) {
+    if (column_getCanHide(column)) table_setColumnVisibility(column.table, (old) => {
+      const next = Object.assign(makeObjectMap(), old);
+      const nextVisible = visible ?? !callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible);
+      const leafColumns = column.getLeafColumns();
+      for (let i = 0; i < leafColumns.length; i++) {
+        const leafColumn = leafColumns[i];
+        if (column_getCanHide(leafColumn)) next[leafColumn.id] = nextVisible;
+      }
+      return next;
+    });
+  }
+  function column_getIsVisible(column) {
+    const columnVisibility = column.table.atoms.columnVisibility?.get();
+    if (!columnVisibility) return true;
+    const childColumns = column.columns;
+    if (childColumns.length) return childColumns.some((childColumn) => callMemoOrStaticFn(childColumn, "getIsVisible", column_getIsVisible));
+    return (hasOwn(columnVisibility, column.id) ? columnVisibility[column.id] : void 0) ?? true;
+  }
+  function column_getCanHide(column) {
+    return (column.columnDef.enableHiding ?? true) && (column.table.options.enableHiding ?? true);
+  }
+  function column_getToggleVisibilityHandler(column) {
+    return (e) => {
+      column_toggleVisibility(column, e.target.checked);
+    };
+  }
+  function row_getVisibleCells(row) {
+    const allCells = row.getAllCells();
+    const visibleCells = [];
+    for (let i = 0; i < allCells.length; i++) {
+      const cell = allCells[i];
+      if (callMemoOrStaticFn(cell.column, "getIsVisible", column_getIsVisible)) visibleCells.push(cell);
+    }
+    return orderByColumnPinning(row.table, visibleCells, (cell) => cell.column.id, () => callMemoOrStaticFn(row, "getVisibleCellsByColumnId", row_getVisibleCellsByColumnId));
+  }
+  function row_getVisibleCellsByColumnId(row) {
+    const result = makeObjectMap();
+    const allCells = row.getAllCells();
+    for (let i = 0; i < allCells.length; i++) {
+      const cell = allCells[i];
+      if (callMemoOrStaticFn(cell.column, "getIsVisible", column_getIsVisible)) result[cell.column.id] = cell;
+    }
+    return result;
+  }
+  function table_getVisibleFlatColumns(table) {
+    return table.getAllFlatColumns().filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
+  }
+  function table_getVisibleLeafColumns(table) {
+    return table.getAllLeafColumns().filter((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
+  }
+  function table_setColumnVisibility(table, updater) {
+    setStateSlice(table, "columnVisibility", updater);
+  }
+  function table_resetColumnVisibility(table, defaultState) {
+    table_setColumnVisibility(table, defaultState ? makeObjectMap() : Object.assign(makeObjectMap(), cloneState(table.initialState.columnVisibility ?? {})));
+  }
+  function table_toggleAllColumnsVisible(table, value) {
+    value = value ?? !table_getIsAllColumnsVisible(table);
+    const visibility = makeObjectMap();
+    const leafColumns = table.getAllLeafColumns();
+    for (let i = 0; i < leafColumns.length; i++) {
+      const column = leafColumns[i];
+      visibility[column.id] = !value ? !column_getCanHide(column) : value;
+    }
+    table_setColumnVisibility(table, visibility);
+  }
+  function table_getIsAllColumnsVisible(table) {
+    return !table.getAllLeafColumns().some((column) => !callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
+  }
+  function table_getIsSomeColumnsVisible(table) {
+    return table.getAllLeafColumns().some((column) => callMemoOrStaticFn(column, "getIsVisible", column_getIsVisible));
+  }
+  function table_getToggleAllColumnsVisibilityHandler(table) {
+    return (e) => {
+      table_toggleAllColumnsVisible(table, e.target.checked);
+    };
+  }
+
   // node_modules/@tanstack/table-core/dist/features/column-visibility/columnVisibilityFeature.js
   var columnVisibilityFeature = {
     getInitialState: (initialState) => {
@@ -3549,6 +3013,7 @@ var TableCore = (() => {
   };
 
   // node_modules/@tanstack/table-core/dist/features/column-filtering/filterFns.js
+  // @__NO_SIDE_EFFECTS__
   function constructFilterFn(def) {
     const filterFn = Object.assign((row, columnId, filterValue, addMeta) => {
       const rawValue = row.getValue(columnId);
@@ -3557,190 +3022,14 @@ var TableCore = (() => {
     }, def);
     return filterFn;
   }
-  var filterFn_equals = constructFilterFn({
-    filter: (dataValue, filterValue) => dataValue === filterValue,
-    autoRemove: (val) => testFalsy(val)
-  });
-  var filterFn_weakEquals = constructFilterFn({
-    filter: (dataValue, filterValue) => dataValue == filterValue,
-    autoRemove: (val) => testFalsy(val)
-  });
-  var filterFn_includesStringSensitive = constructFilterFn({
-    filter: (dataValue, filterValue) => Boolean(dataValue?.includes(filterValue)),
-    autoRemove: (val) => testFalsy(val),
-    resolveFilterValue: (val) => String(val),
-    resolveDataValue: (val) => val == null ? void 0 : String(val)
-  });
-  var filterFn_includesString = constructFilterFn({
+  var filterFn_includesString = /* @__PURE__ */ constructFilterFn({
     filter: (dataValue, filterValue) => Boolean(dataValue?.includes(filterValue)),
     autoRemove: (val) => testFalsy(val),
     resolveFilterValue: (val) => String(val).toLowerCase(),
     resolveDataValue: (val) => val == null ? void 0 : String(val).toLowerCase()
-  });
-  var filterFn_equalsString = constructFilterFn({
-    filter: (dataValue, filterValue) => dataValue === filterValue,
-    autoRemove: (val) => testFalsy(val),
-    resolveFilterValue: (val) => String(val).toLowerCase(),
-    resolveDataValue: (val) => val == null ? void 0 : String(val).toLowerCase()
-  });
-  var filterFn_equalsStringSensitive = constructFilterFn({
-    filter: (dataValue, filterValue) => dataValue === filterValue,
-    autoRemove: (val) => testFalsy(val),
-    resolveFilterValue: (val) => String(val),
-    resolveDataValue: (val) => val == null ? void 0 : String(val)
-  });
-  var filterFn_startsWith = constructFilterFn({
-    filter: (dataValue, filterValue) => Boolean(dataValue?.startsWith(filterValue)),
-    autoRemove: (val) => testFalsy(val),
-    resolveFilterValue: (val) => String(val).toLowerCase(),
-    resolveDataValue: (val) => val == null ? void 0 : String(val).toLowerCase()
-  });
-  var filterFn_endsWith = constructFilterFn({
-    filter: (dataValue, filterValue) => Boolean(dataValue?.endsWith(filterValue)),
-    autoRemove: (val) => testFalsy(val),
-    resolveFilterValue: (val) => String(val).toLowerCase(),
-    resolveDataValue: (val) => val == null ? void 0 : String(val).toLowerCase()
-  });
-  var filterFn_empty = constructFilterFn({
-    filter: (dataValue) => testValueEmpty(dataValue),
-    autoRemove: (val) => testFalsy(val) || val === false
-  });
-  var filterFn_notEmpty = constructFilterFn({
-    filter: (dataValue) => !testValueEmpty(dataValue),
-    autoRemove: (val) => testFalsy(val) || val === false
-  });
-  var filterFn_greaterThan = constructFilterFn({
-    filter: (dataValue, filterValue) => compareGreaterThan(dataValue, filterValue),
-    autoRemove: (val) => testFalsy(val)
-  });
-  var filterFn_greaterThanOrEqualTo = constructFilterFn({
-    filter: (dataValue, filterValue) => compareGreaterThanOrEqualTo(dataValue, filterValue),
-    autoRemove: (val) => testFalsy(val)
-  });
-  var filterFn_lessThan = constructFilterFn({
-    filter: (dataValue, filterValue) => !compareGreaterThanOrEqualTo(dataValue, filterValue),
-    autoRemove: (val) => testFalsy(val)
-  });
-  var filterFn_lessThanOrEqualTo = constructFilterFn({
-    filter: (dataValue, filterValue) => !compareGreaterThan(dataValue, filterValue),
-    autoRemove: (val) => testFalsy(val)
-  });
-  var filterFn_between = constructFilterFn({
-    filter: (dataValue, filterValues) => compareBetween(dataValue, filterValues, false),
-    autoRemove: (val) => testFalsy(val) || Array.isArray(val) && testFalsy(val[0]) && testFalsy(val[1])
-  });
-  var filterFn_betweenInclusive = constructFilterFn({
-    filter: (dataValue, filterValues) => compareBetween(dataValue, filterValues, true),
-    autoRemove: (val) => testFalsy(val) || Array.isArray(val) && testFalsy(val[0]) && testFalsy(val[1])
-  });
-  var filterFn_inNumberRange = constructFilterFn({
-    filter: (dataValue, filterValue) => {
-      if (typeof dataValue !== "number" || Number.isNaN(dataValue)) return false;
-      const [min, max] = filterValue;
-      return dataValue >= min && dataValue <= max;
-    },
-    resolveFilterValue: (val) => {
-      const [unsafeMin, unsafeMax] = val;
-      const parsedMin = typeof unsafeMin !== "number" ? parseFloat(unsafeMin) : unsafeMin;
-      const parsedMax = typeof unsafeMax !== "number" ? parseFloat(unsafeMax) : unsafeMax;
-      let min = unsafeMin === null || Number.isNaN(parsedMin) ? -Infinity : parsedMin;
-      let max = unsafeMax === null || Number.isNaN(parsedMax) ? Infinity : parsedMax;
-      if (min > max) {
-        const temp = min;
-        min = max;
-        max = temp;
-      }
-      return [min, max];
-    },
-    autoRemove: (val) => testFalsy(val) || Array.isArray(val) && testFalsy(val[0]) && testFalsy(val[1])
-  });
-  var filterFn_inDateRange = constructFilterFn({
-    filter: (dataValue, filterValue) => {
-      const [min, max] = filterValue;
-      return dataValue >= min && dataValue <= max;
-    },
-    resolveFilterValue: (val) => {
-      const [unsafeMin, unsafeMax] = val;
-      const parsedMin = toDateTimestamp(unsafeMin);
-      const parsedMax = toDateTimestamp(unsafeMax);
-      let min = Number.isNaN(parsedMin) ? -Infinity : parsedMin;
-      let max = Number.isNaN(parsedMax) ? Infinity : parsedMax;
-      if (min > max) {
-        const temp = min;
-        min = max;
-        max = temp;
-      }
-      return [min, max];
-    },
-    resolveDataValue: (val) => toDateTimestamp(val),
-    autoRemove: (val) => testFalsy(val) || Array.isArray(val) && testFalsy(val[0]) && testFalsy(val[1])
-  });
-  var filterFn_arrHas = constructFilterFn({
-    filter: (dataValue, filterValue) => {
-      for (let i = 0; i < filterValue.length; i++) if (dataValue === filterValue[i]) return true;
-      return false;
-    },
-    autoRemove: (val) => testFalsy(val) || !val?.length
-  });
-  var filterFn_arrIncludes = constructFilterFn({
-    filter: (dataValue, filterValue) => {
-      if (typeof dataValue !== "string" && !Array.isArray(dataValue)) return false;
-      for (let i = 0; i < filterValue.length; i++) if (dataValue.includes(filterValue[i])) return true;
-      return false;
-    },
-    autoRemove: (val) => testFalsy(val) || !val?.length
-  });
-  var filterFn_arrIncludesAll = constructFilterFn({
-    filter: (dataValue, filterValue) => {
-      if (!Array.isArray(dataValue)) return false;
-      for (let i = 0; i < filterValue.length; i++) if (!dataValue.includes(filterValue[i])) return false;
-      return true;
-    },
-    autoRemove: (val) => testFalsy(val) || !val?.length
-  });
-  var filterFn_arrIncludesSome = constructFilterFn({
-    filter: (dataValue, filterValue) => {
-      if (!Array.isArray(dataValue)) return false;
-      for (let i = 0; i < filterValue.length; i++) if (dataValue.includes(filterValue[i])) return true;
-      return false;
-    },
-    autoRemove: (val) => testFalsy(val) || !val?.length
   });
   function testFalsy(val) {
     return val === void 0 || val === null || val === "";
-  }
-  function testValueEmpty(dataValue) {
-    return dataValue == null || String(dataValue).trim() === "";
-  }
-  function toDateTimestamp(value) {
-    if (value instanceof Date) return value.getTime();
-    if (typeof value === "number") return value;
-    if (value == null || value === "") return NaN;
-    return new Date(value).getTime();
-  }
-  function compareGreaterThan(dataValue, filterValue) {
-    const numericDataValue = dataValue == null ? 0 : +dataValue;
-    const numericFilterValue = Number(filterValue);
-    if (!isNaN(numericFilterValue) && !isNaN(numericDataValue)) return numericDataValue > numericFilterValue;
-    return String(dataValue ?? "").toLowerCase().trim() > String(filterValue).toLowerCase().trim();
-  }
-  function compareGreaterThanOrEqualTo(dataValue, filterValue) {
-    return dataValue === filterValue || compareGreaterThan(dataValue, filterValue);
-  }
-  function compareBetween(dataValue, filterValues, inclusive) {
-    const min = filterValues[0];
-    const hasMin = min !== "" && min !== void 0;
-    if (hasMin) {
-      if (!(inclusive ? compareGreaterThanOrEqualTo(dataValue, min) : compareGreaterThan(dataValue, min))) return false;
-    }
-    const max = filterValues[1];
-    if (max === "" || max === void 0) return true;
-    if (hasMin) {
-      const numericMin = Number(min);
-      const numericMax = Number(max);
-      if (!isNaN(numericMin) && !isNaN(numericMax) && numericMin > numericMax) return true;
-    }
-    return inclusive ? !compareGreaterThan(dataValue, max) : !compareGreaterThanOrEqualTo(dataValue, max);
   }
 
   // node_modules/@tanstack/table-core/dist/features/global-filtering/globalFilteringFeature.utils.js
@@ -3796,6 +3085,157 @@ var TableCore = (() => {
     }
   };
 
+  // node_modules/@tanstack/table-core/dist/features/row-expanding/rowExpandingFeature.utils.js
+  function getDefaultExpandedState() {
+    return makeObjectMap();
+  }
+  function table_autoResetExpanded(table) {
+    if (!table.atoms.expanded) return;
+    if (table.options.autoResetAll ?? table.options.autoResetExpanded ?? !table.options.manualExpanding) table._reactivity.schedule(() => table_resetExpanded(table));
+  }
+  function table_setExpanded(table, updater) {
+    table.options.onExpandedChange?.(updater);
+  }
+  function table_toggleAllRowsExpanded(table, expanded) {
+    const currentExpanded = table.atoms.expanded?.get() ?? {};
+    if (expanded ?? !table_getIsAllRowsExpanded(table)) {
+      if (currentExpanded === true) return;
+      if (!table_getCanSomeRowsExpand(table)) return;
+      table_setExpanded(table, true);
+    } else {
+      if (currentExpanded !== true && !Object.keys(currentExpanded).length) return;
+      table_setExpanded(table, makeObjectMap());
+    }
+  }
+  function table_resetExpanded(table, defaultState) {
+    const initialExpanded = table.initialState.expanded;
+    setStateSlice(table, "expanded", defaultState ? makeObjectMap() : initialExpanded === true ? true : Object.assign(makeObjectMap(), cloneState(initialExpanded ?? {})));
+  }
+  function table_getCanSomeRowsExpand(table) {
+    return table.getPrePaginatedRowModel().flatRows.some((row) => row_getCanExpand(row));
+  }
+  function table_getToggleAllRowsExpandedHandler(table) {
+    return (_e) => {
+      table_toggleAllRowsExpanded(table);
+    };
+  }
+  function table_getIsSomeRowsExpanded(table) {
+    const expanded = table.atoms.expanded?.get() ?? {};
+    return expanded === true || Object.values(expanded).some(Boolean);
+  }
+  function table_getIsAllRowsExpanded(table) {
+    const expanded = table.atoms.expanded?.get() ?? {};
+    if (expanded === true) return true;
+    if (!Object.keys(expanded).length) return false;
+    const expandableRows = table.getRowModel().flatRows.filter((row) => row_getCanExpand(row));
+    if (!expandableRows.length) return false;
+    if (expandableRows.some((row) => !row_getIsExpanded(row))) return false;
+    return true;
+  }
+  function table_getExpandedDepth(table) {
+    let maxDepth = 0;
+    const expanded = table.atoms.expanded?.get();
+    (expanded === true ? Object.values(table.getRowModel().rowsById).filter((row) => row_getCanExpand(row)).map((row) => row.id) : Object.keys(expanded ?? {})).forEach((id) => {
+      const splitId = id.split(".");
+      maxDepth = Math.max(maxDepth, splitId.length);
+    });
+    return maxDepth;
+  }
+  function row_toggleExpanded(row, expanded) {
+    const currentExpanded = row.table.atoms.expanded?.get() ?? {};
+    const currentExists = currentExpanded === true || isExpandedRowId(currentExpanded, row.id);
+    const targetExpanded = expanded ?? !currentExists;
+    if (targetExpanded === currentExists) return;
+    if (targetExpanded && !row_getCanExpand(row)) return;
+    table_setExpanded(row.table, (old) => {
+      const exists = old === true ? true : isExpandedRowId(old, row.id);
+      let oldExpanded = makeObjectMap();
+      if (old === true) Object.values(row.table.getRowModel().rowsById).forEach((rowModelRow) => {
+        if (row_getCanExpand(rowModelRow)) oldExpanded[rowModelRow.id] = true;
+      });
+      else oldExpanded = Object.assign(makeObjectMap(), old);
+      if (!exists && targetExpanded) {
+        oldExpanded[row.id] = true;
+        return oldExpanded;
+      }
+      if (exists && !targetExpanded) {
+        const rest = makeObjectMap();
+        const rowIds = Object.keys(oldExpanded);
+        for (let i = 0; i < rowIds.length; i++) {
+          const rowId = rowIds[i];
+          if (rowId !== row.id && oldExpanded[rowId]) rest[rowId] = true;
+        }
+        return rest;
+      }
+      return old;
+    });
+  }
+  function row_getIsExpanded(row) {
+    const expanded = row.table.atoms.expanded?.get() ?? {};
+    return !!(row.table.options.getIsRowExpanded?.(row) ?? (expanded === true || isExpandedRowId(expanded, row.id)));
+  }
+  function isExpandedRowId(expanded, rowId) {
+    return !!(expanded && expanded !== true && hasOwn(expanded, rowId) && expanded[rowId]);
+  }
+  function row_getCanExpand(row) {
+    return row.table.options.getRowCanExpand?.(row) ?? ((row.table.options.enableExpanding ?? true) && !!row.subRows.length);
+  }
+  function row_getIsAllParentsExpanded(row) {
+    let isFullyExpanded = true;
+    let currentRow = row;
+    while (isFullyExpanded && currentRow.parentId) {
+      currentRow = row.table.getRow(currentRow.parentId, true);
+      isFullyExpanded = row_getIsExpanded(currentRow);
+    }
+    return isFullyExpanded;
+  }
+  function row_getToggleExpandedHandler(row) {
+    const canExpand = row_getCanExpand(row);
+    return () => {
+      if (!canExpand) return;
+      row_toggleExpanded(row);
+    };
+  }
+
+  // node_modules/@tanstack/table-core/dist/features/row-expanding/createExpandedRowModel.js
+  function createExpandedRowModel() {
+    return (_table) => {
+      const table = _table;
+      return tableMemo({
+        feature: "rowExpandingFeature",
+        table,
+        fnName: "table.getExpandedRowModel",
+        memoDeps: () => [
+          table.atoms.expanded?.get(),
+          table.getPreExpandedRowModel(),
+          table.options.paginateExpandedRows,
+          table.options.manualPagination
+        ],
+        fn: () => _createExpandedRowModel(table)
+      });
+    };
+  }
+  function _createExpandedRowModel(table) {
+    const rowModel = table.getPreExpandedRowModel();
+    const expanded = table.atoms.expanded?.get();
+    if (!rowModel.rows.length || expanded !== true && !Object.keys(expanded ?? {}).length) return rowModel;
+    if (!table.options.paginateExpandedRows && !table.options.manualPagination) return rowModel;
+    return expandRows(rowModel);
+  }
+  function expandRows(rowModel) {
+    const expandedRows = [];
+    const handleRow = (row) => {
+      expandedRows.push(row);
+      if (row.subRows.length && row_getIsExpanded(row)) row.subRows.forEach(handleRow);
+    };
+    rowModel.rows.forEach(handleRow);
+    return {
+      rows: expandedRows,
+      flatRows: rowModel.flatRows,
+      rowsById: rowModel.rowsById
+    };
+  }
+
   // node_modules/@tanstack/table-core/dist/features/row-expanding/rowExpandingFeature.js
   var rowExpandingFeature = {
     getInitialState: (initialState) => {
@@ -3829,10 +3269,265 @@ var TableCore = (() => {
         table_getToggleAllRowsExpandedHandler: { fn: () => table_getToggleAllRowsExpandedHandler(table) },
         table_getIsSomeRowsExpanded: { fn: () => table_getIsSomeRowsExpanded(table) },
         table_getIsAllRowsExpanded: { fn: () => table_getIsAllRowsExpanded(table) },
-        table_getExpandedDepth: { fn: () => table_getExpandedDepth(table) }
+        table_getExpandedDepth: { fn: () => table_getExpandedDepth(table) },
+        table__expandRows: { fn: expandRows }
       });
     }
   };
+
+  // node_modules/@tanstack/table-core/dist/features/row-sorting/sortFns.js
+  var reSplitAlphaNumeric = /([0-9]+)/gm;
+  // @__NO_SIDE_EFFECTS__
+  function constructSortFn(def) {
+    const sortFn = Object.assign((rowA, rowB, columnId) => {
+      let dataValueA = rowA.getValue(columnId);
+      let dataValueB = rowB.getValue(columnId);
+      const resolveDataValue = sortFn.resolveDataValue;
+      if (resolveDataValue) {
+        dataValueA = resolveDataValue(dataValueA);
+        dataValueB = resolveDataValue(dataValueB);
+      }
+      return sortFn.sort(dataValueA, dataValueB, rowA, rowB, columnId);
+    }, def);
+    return sortFn;
+  }
+  var sortFn_alphanumeric = /* @__PURE__ */ constructSortFn({
+    resolveDataValue: (dataValue) => toString(dataValue).toLowerCase(),
+    sort: (dataValueA, dataValueB) => compareAlphanumeric(dataValueA, dataValueB)
+  });
+  var sortFn_basic = /* @__PURE__ */ constructSortFn({ sort: (dataValueA, dataValueB) => compareBasic(dataValueA, dataValueB) });
+  function compareBasic(a, b) {
+    return a === b ? 0 : a > b ? 1 : -1;
+  }
+  function toString(a) {
+    if (typeof a === "number") {
+      if (isNaN(a) || a === Infinity || a === -Infinity) return "";
+      return String(a);
+    }
+    if (typeof a === "string") return a;
+    return "";
+  }
+  function compareAlphanumeric(aStr, bStr) {
+    let ai = 0;
+    let bi = 0;
+    const aLen = aStr.length;
+    const bLen = bStr.length;
+    while (ai < aLen && bi < bLen) {
+      const aIsNumeric = isDigit(aStr.charCodeAt(ai));
+      const bIsNumeric = isDigit(bStr.charCodeAt(bi));
+      const aEnd = findChunkEnd(aStr, ai, aIsNumeric);
+      const bEnd = findChunkEnd(bStr, bi, bIsNumeric);
+      if (!aIsNumeric && !bIsNumeric) {
+        const stringComparison = compareStringChunks(aStr, ai, aEnd, bStr, bi, bEnd);
+        if (stringComparison) return stringComparison;
+        ai = aEnd;
+        bi = bEnd;
+        continue;
+      }
+      if (aIsNumeric !== bIsNumeric) return aIsNumeric ? 1 : -1;
+      const numericComparison = compareNumericChunks(aStr, ai, aEnd, bStr, bi, bEnd);
+      if (numericComparison) return numericComparison;
+      ai = aEnd;
+      bi = bEnd;
+    }
+    return countRemainingChunks(aStr, ai) - countRemainingChunks(bStr, bi);
+  }
+  function isDigit(charCode) {
+    return charCode >= 48 && charCode <= 57;
+  }
+  function findChunkEnd(str, start, isNumeric) {
+    let end = start + 1;
+    while (end < str.length && isDigit(str.charCodeAt(end)) === isNumeric) end++;
+    return end;
+  }
+  function compareStringChunks(aStr, aStart, aEnd, bStr, bStart, bEnd) {
+    const aLength = aEnd - aStart;
+    const bLength = bEnd - bStart;
+    const minLength = aLength < bLength ? aLength : bLength;
+    for (let i = 0; i < minLength; i++) {
+      const aCode = aStr.charCodeAt(aStart + i);
+      const bCode = bStr.charCodeAt(bStart + i);
+      if (aCode > bCode) return 1;
+      if (bCode > aCode) return -1;
+    }
+    if (aLength > bLength) return 1;
+    if (bLength > aLength) return -1;
+    return 0;
+  }
+  function compareNumericChunks(aStr, aStart, aEnd, bStr, bStart, bEnd) {
+    let aSignificantStart = aStart;
+    while (aSignificantStart < aEnd && aStr.charCodeAt(aSignificantStart) === 48) aSignificantStart++;
+    let bSignificantStart = bStart;
+    while (bSignificantStart < bEnd && bStr.charCodeAt(bSignificantStart) === 48) bSignificantStart++;
+    const aSignificantLength = aEnd - aSignificantStart;
+    const bSignificantLength = bEnd - bSignificantStart;
+    if (aSignificantLength === 0 && bSignificantLength === 0) return 0;
+    if (aSignificantLength <= 15 && bSignificantLength <= 15) {
+      const an2 = parseSmallInt(aStr, aSignificantStart, aEnd);
+      const bn2 = parseSmallInt(bStr, bSignificantStart, bEnd);
+      if (an2 > bn2) return 1;
+      if (bn2 > an2) return -1;
+      return 0;
+    }
+    const an = parseInt(aStr.slice(aStart, aEnd), 10);
+    const bn = parseInt(bStr.slice(bStart, bEnd), 10);
+    if (an > bn) return 1;
+    if (bn > an) return -1;
+    return 0;
+  }
+  function parseSmallInt(str, start, end) {
+    let result = 0;
+    for (let i = start; i < end; i++) result = result * 10 + str.charCodeAt(i) - 48;
+    return result;
+  }
+  function countRemainingChunks(str, start) {
+    let count = 0;
+    let index = start;
+    while (index < str.length) {
+      count++;
+      index = findChunkEnd(str, index, isDigit(str.charCodeAt(index)));
+    }
+    return count;
+  }
+
+  // node_modules/@tanstack/table-core/dist/features/row-sorting/rowSortingFeature.utils.js
+  function getDefaultSortingState() {
+    return [];
+  }
+  function table_setSorting(table, updater) {
+    setStateSlice(table, "sorting", updater);
+  }
+  function table_resetSorting(table, defaultState) {
+    table_setSorting(table, defaultState ? [] : cloneState(table.initialState.sorting ?? []));
+  }
+  function table_autoResetSorting(table) {
+    if (!table.atoms.sorting) return;
+    if (table.options.autoResetAll ?? table.options.autoResetSorting ?? false) table_resetSorting(table);
+  }
+  function column_getAutoSortFn(column) {
+    const sortFns2 = column.table._rowModelFns.sortFns;
+    const firstRows = column.table.getFilteredRowModel().flatRows.slice(0, 10);
+    let sortFnName;
+    let isString = false;
+    for (let i = 0; i < firstRows.length; i++) {
+      const value = firstRows[i].getValue(column.id);
+      if (Object.prototype.toString.call(value) === "[object Date]") {
+        sortFnName = "datetime";
+        break;
+      }
+      if (typeof value === "string") {
+        isString = true;
+        if (value.split(reSplitAlphaNumeric).length > 1) {
+          sortFnName = "alphanumeric";
+          break;
+        }
+      }
+    }
+    if (!sortFnName && isString) sortFnName = "text";
+    if (sortFnName) {
+      let sortFn = sortFns2?.[sortFnName];
+      if (!sortFn) {
+        if (true) console.warn(`sortFn '${sortFnName}' (auto) for column '${column.id}' is not registered`);
+        if (sortFnName === "alphanumeric") sortFn = sortFns2?.text;
+      }
+      if (sortFn) return sortFn;
+    }
+    return sortFn_basic;
+  }
+  function column_getAutoSortDir(column) {
+    const firstRows = column.table.getFilteredRowModel().flatRows.slice(0, 10);
+    for (let i = 0; i < firstRows.length; i++) {
+      const value = firstRows[i].getValue(column.id);
+      if (value == null) continue;
+      return typeof value === "string" ? "asc" : "desc";
+    }
+    return "desc";
+  }
+  function column_getSortFn(column) {
+    const sortFns2 = column.table._rowModelFns.sortFns;
+    if (isFunction(column.columnDef.sortFn)) return column.columnDef.sortFn;
+    if (column.columnDef.sortFn === "auto") return column_getAutoSortFn(column);
+    const sortFn = sortFns2?.[column.columnDef.sortFn];
+    if (!sortFn) console.warn(`sortFn '${String(column.columnDef.sortFn)}' for column '${column.id}' is not registered`);
+    return sortFn ?? sortFn_basic;
+  }
+  function column_toggleSorting(column, desc, multi) {
+    const nextSortingOrder = column_getNextSortingOrder(column, multi && column_getCanMultiSort(column));
+    const hasManualValue = typeof desc !== "undefined";
+    table_setSorting(column.table, (old) => {
+      const existingIndex = old.findIndex((d) => d.id === column.id);
+      const existingSorting = existingIndex === -1 ? void 0 : old[existingIndex];
+      let newSorting = [];
+      let sortAction;
+      const nextDesc = hasManualValue ? desc : nextSortingOrder === "desc";
+      const isMultiMode = !!(old.length && column_getCanMultiSort(column) && multi);
+      if (isMultiMode) {
+        if (existingSorting) sortAction = "toggle";
+        else sortAction = "add";
+      } else if (existingSorting) sortAction = "toggle";
+      else sortAction = "replace";
+      if (sortAction === "toggle") {
+        if (!hasManualValue) {
+          if (!nextSortingOrder) sortAction = "remove";
+        }
+      }
+      if (sortAction === "add") {
+        newSorting = [...old, {
+          id: column.id,
+          desc: nextDesc
+        }];
+        newSorting.splice(0, newSorting.length - (column.table.options.maxMultiSortColCount ?? Number.MAX_SAFE_INTEGER));
+      } else if (sortAction === "toggle") newSorting = isMultiMode ? old.map((d) => {
+        if (d.id === column.id) return {
+          ...d,
+          desc: nextDesc
+        };
+        return d;
+      }) : [{
+        id: column.id,
+        desc: nextDesc
+      }];
+      else if (sortAction === "remove") newSorting = isMultiMode ? old.filter((d) => d.id !== column.id) : [];
+      else newSorting = [{
+        id: column.id,
+        desc: nextDesc
+      }];
+      return newSorting;
+    });
+  }
+  function column_getFirstSortDir(column) {
+    return column.columnDef.sortDescFirst ?? column.table.options.sortDescFirst ?? column_getAutoSortDir(column) === "desc" ? "desc" : "asc";
+  }
+  function column_getNextSortingOrder(column, multi) {
+    const firstSortDirection = column_getFirstSortDir(column);
+    const isSorted = column_getIsSorted(column);
+    if (!isSorted) return firstSortDirection;
+    if (isSorted !== firstSortDirection && (column.table.options.enableSortingRemoval ?? true) && (multi ? column.table.options.enableMultiRemove ?? true : true)) return false;
+    return isSorted === "desc" ? "asc" : "desc";
+  }
+  function column_getCanSort(column) {
+    return (column.columnDef.enableSorting ?? true) && (column.table.options.enableSorting ?? true) && !!column.accessorFn;
+  }
+  function column_getCanMultiSort(column) {
+    return column.columnDef.enableMultiSort ?? column.table.options.enableMultiSort ?? !!column.accessorFn;
+  }
+  function column_getIsSorted(column) {
+    const columnSort = column.table.atoms.sorting?.get()?.find((d) => d.id === column.id);
+    return !columnSort ? false : columnSort.desc ? "desc" : "asc";
+  }
+  function column_getSortIndex(column) {
+    return column.table.atoms.sorting?.get()?.findIndex((d) => d.id === column.id) ?? -1;
+  }
+  function column_clearSorting(column) {
+    table_setSorting(column.table, (old) => old.length ? old.filter((d) => d.id !== column.id) : []);
+  }
+  function column_getToggleSortingHandler(column) {
+    const canSort = column_getCanSort(column);
+    return (e) => {
+      if (!canSort) return;
+      column_toggleSorting(column, void 0, column_getCanMultiSort(column) ? column.table.options.isMultiSortEvent?.(e) : false);
+    };
+  }
 
   // node_modules/@tanstack/table-core/dist/features/row-sorting/rowSortingFeature.js
   var rowSortingFeature = {
@@ -3875,6 +3570,7 @@ var TableCore = (() => {
     },
     constructTableAPIs(table) {
       assignTableAPIs("rowSortingFeature", table, {
+        table_autoResetSorting: { fn: () => table_autoResetSorting(table) },
         table_setSorting: { fn: (updater) => table_setSorting(table, updater) },
         table_resetSorting: { fn: (defaultState) => table_resetSorting(table, defaultState) }
       });
@@ -3920,20 +3616,22 @@ var TableCore = (() => {
     const maxDepth = table.options.maxLeafRowFilterDepth ?? 100;
     const recurseFilterRows = (rowsToFilter2, depth = 0) => {
       const filteredRows = [];
-      for (const row of rowsToFilter2) if (filterRow(row)) if (row.subRows.length && depth < maxDepth) {
-        const newRow = constructRow(table, row.id, row.original, row.index, row.depth, void 0, row.parentId);
-        const filterData = row;
-        newRow.columnFilters = filterData.columnFilters;
-        newRow.columnFiltersMeta = filterData.columnFiltersMeta;
-        filteredRows.push(newRow);
-        newFilteredFlatRows.push(newRow);
-        newFilteredRowsById[newRow.id] = newRow;
-        newRow.subRows = recurseFilterRows(row.subRows, depth + 1);
-      } else {
-        filteredRows.push(row);
-        newFilteredFlatRows.push(row);
-        newFilteredRowsById[row.id] = row;
-        if (row.subRows.length && depth >= maxDepth) addSubRowsToFlatArrays(row.subRows, newFilteredFlatRows, newFilteredRowsById);
+      for (const row of rowsToFilter2) if (filterRow(row)) {
+        if (row.subRows.length && depth < maxDepth) {
+          const newRow = constructRow(table, row.id, row.original, row.index, row.depth, void 0, row.parentId);
+          const filterData = row;
+          newRow.columnFilters = filterData.columnFilters;
+          newRow.columnFiltersMeta = filterData.columnFiltersMeta;
+          filteredRows.push(newRow);
+          newFilteredFlatRows.push(newRow);
+          newFilteredRowsById[newRow.id] = newRow;
+          newRow.subRows = recurseFilterRows(row.subRows, depth + 1);
+        } else {
+          filteredRows.push(row);
+          newFilteredFlatRows.push(row);
+          newFilteredRowsById[row.id] = row;
+          if (row.subRows.length && depth >= maxDepth) addSubRowsToFlatArrays(row.subRows, newFilteredFlatRows, newFilteredRowsById);
+        }
       }
       return filteredRows;
     };
@@ -3965,7 +3663,7 @@ var TableCore = (() => {
           table.atoms.globalFilter?.get()
         ],
         fn: () => _createFilteredRowModel(table),
-        onAfterUpdate: skipFirstRun(() => table_autoResetPageIndex(table))
+        onAfterUpdate: skipFirstRun(() => autoResetPageIndex(table))
       });
     };
   }
@@ -3997,17 +3695,19 @@ var TableCore = (() => {
       });
     });
     const filterableIds = columnFilters?.map((d) => d.id) ?? [];
-    const globalFilterFn = table_getGlobalFilterFn(table);
-    const globallyFilterableColumns = table.getAllLeafColumns().filter((column) => column_getCanGlobalFilter(column));
-    if (hasGlobalFilter && globalFilterFn && globallyFilterableColumns.length) {
-      filterableIds.push("__global__");
-      globallyFilterableColumns.forEach((column) => {
-        resolvedGlobalFilters.push({
-          id: column.id,
-          filterFn: globalFilterFn,
-          resolvedValue: globalFilterFn.resolveFilterValue?.(globalFilter) ?? globalFilter
+    if (hasGlobalFilter) {
+      const globalFilterFn = getGlobalFilterFn(table);
+      const globallyFilterableColumns = globalFilterFn ? table.getAllLeafColumns().filter(getCanGlobalFilter) : [];
+      if (globalFilterFn && globallyFilterableColumns.length) {
+        filterableIds.push("__global__");
+        globallyFilterableColumns.forEach((column) => {
+          resolvedGlobalFilters.push({
+            id: column.id,
+            filterFn: globalFilterFn,
+            resolvedValue: globalFilterFn.resolveFilterValue?.(globalFilter) ?? globalFilter
+          });
         });
-      });
+      }
     }
     const flatRows = rowModel.flatRows;
     for (let i = 0; i < flatRows.length; i++) {
@@ -4069,8 +3769,8 @@ var TableCore = (() => {
           previousPreGroupedRowModel = preGroupedRowModel;
           hasAutoResetDependencies = true;
           if (rowInputsChanged) {
-            table_autoResetExpanded(table);
-            table_autoResetPageIndex(table);
+            autoResetExpanded(table);
+            autoResetPageIndex(table);
           }
         }
       });
@@ -4121,10 +3821,11 @@ var TableCore = (() => {
             }
             const aggregationCache = row._aggregationValuesCache;
             if (aggregationCache && hasOwn(aggregationCache, colId)) return aggregationCache[colId];
+            const aggregate = getAggregateColumnValue(table);
             const column = table.getColumn(colId);
-            if (typeof column.getAggregationFns !== "function") return void 0;
+            if (!aggregate || typeof column.getAggregationFns !== "function") return;
             const cache = row._aggregationValuesCache ??= makeObjectMap();
-            cache[colId] = aggregateColumnValue({
+            cache[colId] = aggregate({
               subRows,
               column,
               groupingRow: row,
@@ -4172,45 +3873,6 @@ var TableCore = (() => {
     return groupMap;
   }
 
-  // node_modules/@tanstack/table-core/dist/features/row-expanding/createExpandedRowModel.js
-  function createExpandedRowModel() {
-    return (_table) => {
-      const table = _table;
-      return tableMemo({
-        feature: "rowExpandingFeature",
-        table,
-        fnName: "table.getExpandedRowModel",
-        memoDeps: () => [
-          table.atoms.expanded?.get(),
-          table.getPreExpandedRowModel(),
-          table.options.paginateExpandedRows,
-          table.options.manualPagination
-        ],
-        fn: () => _createExpandedRowModel(table)
-      });
-    };
-  }
-  function _createExpandedRowModel(table) {
-    const rowModel = table.getPreExpandedRowModel();
-    const expanded = table.atoms.expanded?.get();
-    if (!rowModel.rows.length || expanded !== true && !Object.keys(expanded ?? {}).length) return rowModel;
-    if (!table.options.paginateExpandedRows && !table.options.manualPagination) return rowModel;
-    return expandRows(rowModel);
-  }
-  function expandRows(rowModel) {
-    const expandedRows = [];
-    const handleRow = (row) => {
-      expandedRows.push(row);
-      if (row.subRows.length && row_getIsExpanded(row)) row.subRows.forEach(handleRow);
-    };
-    rowModel.rows.forEach(handleRow);
-    return {
-      rows: expandedRows,
-      flatRows: rowModel.flatRows,
-      rowsById: rowModel.rowsById
-    };
-  }
-
   // node_modules/@tanstack/table-core/dist/features/row-sorting/createSortedRowModel.js
   function createSortedRowModel() {
     return (_table) => {
@@ -4221,7 +3883,7 @@ var TableCore = (() => {
         fnName: "table.getSortedRowModel",
         memoDeps: () => [table.atoms.sorting?.get(), table.getPreSortedRowModel()],
         fn: () => _createSortedRowModel(table),
-        onAfterUpdate: skipFirstRun(() => table_autoResetPageIndex(table))
+        onAfterUpdate: skipFirstRun(() => autoResetPageIndex(table))
       });
     };
   }
