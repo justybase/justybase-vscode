@@ -4822,7 +4822,7 @@
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
     "test:quickfix-regression": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"linterCodeActions.test.ts\"",
     "test:parser-perf": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand --testPathPatterns=\"mssqlParserPerf.test.ts|oracleParserPerf.test.ts|postgresqlConformance.test.ts\"",
-    "test:quality-tools": "node --test scripts/quality-tools.test.mjs scripts/architecture-check.test.mjs scripts/access-index-codes.test.cjs",
+    "test:quality-tools": "node --test scripts/quality-tools.test.mjs scripts/architecture-check.test.mjs scripts/access-index-codes.test.cjs scripts/third-party-notices.test.cjs",
     "test:metadata-core": "npm run test --workspace @justybase/metadata-core",
     "test:sql-core": "npm run build:metadata-core && npm run build:sql-core && node --test scripts/sql-core-exports.test.cjs && npm run test --workspace @justybase/sql-core",
     "test:coverage:changed": "node scripts/quality-changed-coverage.mjs --base=origin/master",
