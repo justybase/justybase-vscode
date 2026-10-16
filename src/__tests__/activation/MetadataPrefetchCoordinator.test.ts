@@ -15,6 +15,7 @@ describe('MetadataPrefetchCoordinator', () => {
             isConnectionPrefetchFresh: jest.fn(() => isFresh),
             refreshIncompleteForeignKeyRelationships: jest.fn(async () => undefined),
             triggerConnectionPrefetch: jest.fn(),
+            recordConnectionPrefetchSkipped: jest.fn(),
         };
         const connectionManager = {
             getConnectionDatabaseKind: jest.fn(() => 'netezza'),
@@ -45,6 +46,8 @@ describe('MetadataPrefetchCoordinator', () => {
 
         expect(metadataCache.refreshIncompleteForeignKeyRelationships).toHaveBeenCalledWith('NZ', expect.any(Function));
         expect(metadataCache.triggerConnectionPrefetch).not.toHaveBeenCalled();
+        // The details panel must still get a card for this connection.
+        expect(metadataCache.recordConnectionPrefetchSkipped).toHaveBeenCalledWith('NZ', 'fresh');
     });
 
     it('runs full prefetch when the core snapshot is stale', async () => {
@@ -54,6 +57,7 @@ describe('MetadataPrefetchCoordinator', () => {
 
         expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith('NZ', expect.any(Function));
         expect(metadataCache.refreshIncompleteForeignKeyRelationships).not.toHaveBeenCalled();
+        expect(metadataCache.recordConnectionPrefetchSkipped).not.toHaveBeenCalled();
         expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Core snapshot expired'));
     });
 

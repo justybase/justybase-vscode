@@ -150,6 +150,10 @@ export class MetadataPrefetchCoordinator {
                 queryExecutor: this.services.queryExecutor,
             });
             if (this.services.metadataCache.isConnectionPrefetchFresh(connectionName)) {
+                // No catalog SQL will run, but the connection still belongs in
+                // the Schema Refresh Details panel. Without this the panel only
+                // ever shows the first connection that happened to refresh.
+                this.services.metadataCache.recordConnectionPrefetchSkipped(connectionName, 'fresh');
                 void this.services.metadataCache.refreshIncompleteForeignKeyRelationships(connectionName, runner)
                     .catch(error => this.logger.warn('FK metadata recovery failed', error));
             } else {

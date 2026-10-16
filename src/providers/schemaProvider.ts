@@ -1098,24 +1098,30 @@ export class SchemaProvider
         }
 
         // Don't block UI - run prefetch in background
-        if (!this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
-            logWithFallback('debug', `[SchemaProvider] Triggering connection prefetch for: ${connectionName}`);
-            void this.metadataCache.whenDiskReady().then(() => {
-                if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
-                    return;
-                }
-                this.metadataCache.triggerConnectionPrefetch(
-                    connectionName,
-                    createConnectionScopedMetadataQueryRunner({
-                        context: this.context,
-                        connectionManager: this.connectionManager,
-                        connectionName,
-                        maxRows: 1000000,
-                        timeoutSeconds: Math.max(1, Math.ceil(SCHEMA_QUERY_TIMEOUT / 1000)),
-                    }),
-                );
-            });
+        if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
+            // A fresh connection runs no catalog SQL here, but it still has to
+            // appear in the Schema Refresh Details panel alongside any other
+            // Netezza connection in the tree.
+            this.metadataCache.recordConnectionPrefetchSkipped(connectionName, 'fresh');
+            return;
         }
+        logWithFallback('debug', `[SchemaProvider] Triggering connection prefetch for: ${connectionName}`);
+        void this.metadataCache.whenDiskReady().then(() => {
+            if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
+                this.metadataCache.recordConnectionPrefetchSkipped(connectionName, 'fresh');
+                return;
+            }
+            this.metadataCache.triggerConnectionPrefetch(
+                connectionName,
+                createConnectionScopedMetadataQueryRunner({
+                    context: this.context,
+                    connectionManager: this.connectionManager,
+                    connectionName,
+                    maxRows: 1000000,
+                    timeoutSeconds: Math.max(1, Math.ceil(SCHEMA_QUERY_TIMEOUT / 1000)),
+                }),
+            );
+        });
     }
 
     /**
