@@ -54,13 +54,8 @@ function packageNameFromNodeModulesPath(value) {
   return segments[0].startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
 }
 
-function coreDependencyDirectories() {
+function sourceMapPackageNames(mapFiles) {
   const dependencyNames = new Set();
-  const mapFiles = [
-    ...walkFiles(path.join(packageDir, 'dist'), file => file.endsWith('.js.map')),
-    ...walkFiles(path.join(packageDir, 'media'), file => /tanstack-.*\.js\.map$/.test(file)),
-  ];
-
   for (const mapFile of mapFiles) {
     const sourceMap = readJson(mapFile);
     for (const source of sourceMap.sources || []) {
@@ -70,6 +65,14 @@ function coreDependencyDirectories() {
       }
     }
   }
+  return dependencyNames;
+}
+
+function coreDependencyDirectories() {
+  const dependencyNames = sourceMapPackageNames([
+    ...walkFiles(path.join(packageDir, 'dist'), file => file.endsWith('.js.map')),
+    ...walkFiles(path.join(packageDir, 'media'), file => /tanstack-.*\.js\.map$/.test(file)),
+  ]);
 
   // Keep direct runtime dependencies represented even when esbuild removes an
   // import through tree-shaking or a platform-specific branch.
@@ -84,13 +87,30 @@ function coreDependencyDirectories() {
 function optionalDependencyDirectories() {
   const lockPath = path.join(packageDir, 'package-lock.json');
   const lock = readJson(lockPath);
-  return Object.entries(lock.packages || {})
+  const lockedDirectories = Object.entries(lock.packages || {})
     .filter(([packagePath, metadata]) =>
       packagePath.includes('node_modules/') && metadata.dev !== true && !metadata.link)
     .map(([packagePath]) => path.join(packageDir, packagePath))
     // Platform-specific optional packages that are not installed for the
     // current VSIX target are not distributed and therefore are not listed.
     .filter(dependencyDir => existsSync(path.join(dependencyDir, 'package.json')));
+
+  // esbuild also inlines packages that the extension lockfile does not list, such as
+  // a parser pulled in through a workspace package hoisted to the repository root.
+  // The bundle source maps are the authority for what is actually distributed.
+  const bundledDirectories = [...sourceMapPackageNames(
+    walkFiles(path.join(packageDir, 'dist'), file => file.endsWith('.js.map')),
+  )].map(name => {
+    const candidates = [
+      path.join(packageDir, 'node_modules', name),
+      path.join(REPOSITORY_ROOT, 'node_modules', name),
+    ];
+    const installed = candidates.find(candidate => existsSync(path.join(candidate, 'package.json')));
+    assert(installed, `Bundled package ${name} is not installed; run npm install before generating notices`);
+    return installed;
+  });
+
+  return [...lockedDirectories, ...bundledDirectories];
 }
 
 function findLicenseFile(directory) {
