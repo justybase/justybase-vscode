@@ -63,6 +63,7 @@ const NON_GRID_STATE_KEYS = new Set([
     '_layoutMode',
     '_viewModes',
     '_exploreStates',
+    '_analyticalStates',
     'loadingOverlayDismissedSources',
 ]);
 

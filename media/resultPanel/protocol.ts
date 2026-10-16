@@ -190,7 +190,8 @@ function validateWebviewMessage(message: MessageRecord): boolean {
         case 'diskQuery':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.requestId)
-                && ['window', 'count', 'distinct', 'aggregate', 'group'].includes(String(message.action));
+                && ['window', 'count', 'distinct', 'aggregate', 'group', 'groupStats'].includes(String(message.action))
+                && (message.action !== 'groupStats' || isRecord(message.groupStats));
         case 'moveToDisk':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex);
         case 'requestDatabaseGrouping':
@@ -281,7 +282,7 @@ function validateHostMessage(message: MessageRecord): boolean {
         case 'diskQueryResult':
             return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
                 && isIndex(message.requestId)
-                && ['window', 'count', 'distinct', 'aggregate', 'group'].includes(String(message.action));
+                && ['window', 'count', 'distinct', 'aggregate', 'group', 'groupStats'].includes(String(message.action));
         case 'databaseAggregationResult':
         case 'databaseFilterValuesResult':
         case 'databaseFilterApplyResult':

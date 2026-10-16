@@ -8,6 +8,8 @@ import type {
     DiskGroupLevel,
     DiskGroupPathItem,
     DiskGroupQueryResult,
+    DiskGroupStatsRequest,
+    DiskGroupStatsResult,
     DiskQuerySpec,
 } from '../../core/resultDataProvider/types';
 import type {
@@ -290,7 +292,7 @@ export type ResultPanelWebviewToHostMessage =
         sourceUri: string;
         resultSetIndex: number;
         requestId: number;
-        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group';
+        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
         querySpec?: DiskQuerySpec;
         offset?: number;
         limit?: number;
@@ -298,6 +300,7 @@ export type ResultPanelWebviewToHostMessage =
         distinctLimit?: number;
         aggregations?: DiskAggregationRequest[];
         grouping?: DiskGroupLevel[];
+        groupStats?: DiskGroupStatsRequest;
         groupPath?: DiskGroupPathItem[];
     }
     | { command: 'moveToDisk'; sourceUri: string; resultSetIndex: number }
@@ -473,7 +476,7 @@ export type ResultPanelHostToWebviewMessage =
         sourceUri: string;
         resultSetIndex: number;
         requestId: number;
-        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group';
+        action: 'window' | 'count' | 'distinct' | 'aggregate' | 'group' | 'groupStats';
         rows?: Uint8Array | unknown[][];
         offset?: number;
         filteredCount?: number;
@@ -482,6 +485,7 @@ export type ResultPanelHostToWebviewMessage =
         distinctTruncated?: boolean;
         aggregations?: DiskAggregationResult[];
         groupResult?: DiskGroupQueryResult;
+        groupStatsResult?: DiskGroupStatsResult;
     }
     | {
         command: 'databaseAggregationResult';

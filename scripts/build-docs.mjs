@@ -86,6 +86,7 @@ const navGroups = [
       'guide/user/sql-quality',
       'guide/user/performance-reliability',
       'guide/user/data-grid',
+      'guide/user/analytical-view',
       'guide/user/import-export',
       'guide/user/schema-search',
       'guide/user/ai-assistant',
