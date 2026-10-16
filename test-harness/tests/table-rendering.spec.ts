@@ -1,6 +1,19 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 
 const TEST_PAGE = 'http://localhost:8892/test-harness/table-rendering.html';
+
+/** Starts a native column-header drag and waits until the grouping drop zone is revealed. */
+async function startColumnHeaderDrag(page: Page, source: Locator): Promise<void> {
+    const sourceBox = await source.boundingBox();
+    if (!sourceBox) {
+        throw new Error('Column header is not laid out');
+    }
+    const y = sourceBox.y + sourceBox.height / 2;
+    await page.mouse.move(sourceBox.x + 8, y);
+    await page.mouse.down();
+    await page.mouse.move(sourceBox.x + 20, y, { steps: 2 });
+    await expect(page.locator('body')).toHaveClass(/group-dragging/);
+}
 
 test.beforeEach(({ browser }) => {
     // Keep the managed Chromium version in the report for every static
@@ -32,6 +45,126 @@ test.describe('Table rendering', () => {
             await expect(page.locator('button.result-set-close-btn').first()).toHaveAccessibleName(/Close/);
             await expect(page.locator('button.pin-icon').first()).toHaveAttribute('aria-pressed', /true|false/);
         }
+    });
+
+    test('dragging a column header toward the right grid edge scrolls the grid and moves the column', async ({ page }) => {
+        await page.setViewportSize({ width: 480, height: 720 });
+        const wrapper = page.locator('#gridContainer .grid-wrapper.active');
+        await expect.poll(() => wrapper.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+
+        const firstHeader = wrapper.locator('thead th[data-col-id]').first();
+        const originalFirstColId = await firstHeader.getAttribute('data-col-id');
+        await startColumnHeaderDrag(page, firstHeader);
+
+        const wrapperBox = await wrapper.boundingBox();
+        const headerRowBox = await wrapper.locator('thead').boundingBox();
+        if (!wrapperBox || !headerRowBox) {
+            throw new Error('Grid is not laid out during drag');
+        }
+        await page.mouse.move(wrapperBox.x + wrapperBox.width - 8, headerRowBox.y + headerRowBox.height / 2, { steps: 8 });
+        await expect.poll(() => wrapper.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+
+        // Drop on the right-most data column header that is still visible at the right edge, inside its
+        // right part. Dropping on the left half of the column next to the source is a no-op, so the
+        // target must be chosen explicitly.
+        const dropPoint = await wrapper.evaluate((el) => {
+            const wrapperRect = el.getBoundingClientRect();
+            const headerRects = Array.from(el.querySelectorAll<HTMLElement>('thead th[data-col-id]'))
+                .map((th) => th.getBoundingClientRect())
+                .filter((rect) => rect.right > wrapperRect.left + 100 && rect.left < wrapperRect.right - 20);
+            const target = headerRects.reduce<DOMRect | null>(
+                (rightMost, rect) => (!rightMost || rect.left > rightMost.left ? rect : rightMost),
+                null,
+            );
+            const headerRow = el.querySelector('thead')?.getBoundingClientRect();
+            if (!target || !headerRow) {
+                return null;
+            }
+            return {
+                x: Math.min(target.right, wrapperRect.right) - 10,
+                y: headerRow.y + headerRow.height / 2,
+            };
+        });
+        if (!dropPoint) {
+            throw new Error('No fully visible data column header to drop on');
+        }
+        await page.mouse.move(dropPoint.x, dropPoint.y, { steps: 4 });
+        await page.mouse.up();
+
+        await expect.poll(() => wrapper.locator('thead th[data-col-id]').first().getAttribute('data-col-id'))
+            .not.toBe(originalFirstColId);
+    });
+
+    test('dragging a column header over the right part of the row-number column scrolls the grid left', async ({ page }) => {
+        await page.setViewportSize({ width: 480, height: 720 });
+        const wrapper = page.locator('#gridContainer .grid-wrapper.active');
+        await expect.poll(() => wrapper.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+        await wrapper.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+        await expect.poll(() => wrapper.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+        const scrolledLeft = await wrapper.evaluate((el) => el.scrollLeft);
+
+        await startColumnHeaderDrag(page, wrapper.locator('thead th[data-col-id]').last());
+
+        const rowNumberBox = await wrapper.locator('thead th.row-number-header').boundingBox();
+        const headerRowBox = await wrapper.locator('thead').boundingBox();
+        if (!rowNumberBox || !headerRowBox) {
+            throw new Error('Row-number header is not laid out during drag');
+        }
+        await page.mouse.move(
+            rowNumberBox.x + rowNumberBox.width - 4,
+            headerRowBox.y + headerRowBox.height / 2,
+            { steps: 8 },
+        );
+        // Chromium delivers dragover on pointer movement, so nudge the pointer while waiting for the edge scroll.
+        let nudge = 0;
+        await expect.poll(async () => {
+            nudge += 1;
+            await page.mouse.move(rowNumberBox.x + rowNumberBox.width - 4 + (nudge % 2), headerRowBox.y + headerRowBox.height / 2);
+            return wrapper.evaluate((el) => el.scrollLeft);
+        }).toBeLessThan(scrolledLeft);
+
+        // Cancel without dropping: the row-number column is not a column drop target.
+        await page.keyboard.press('Escape');
+        await page.mouse.up();
+    });
+
+    test('cell context menu stays fully reachable in a short results panel', async ({ page }) => {
+        await page.setViewportSize({ width: 900, height: 300 });
+        const cell = page.locator('#gridContainer tbody td:not(.row-number-cell)').nth(3);
+        await cell.click({ button: 'right' });
+
+        const menu = page.locator('.grid-context-menu');
+        await expect(menu).toBeVisible();
+        await expect.poll(() => menu.evaluate((el) => {
+            const rect = el.getBoundingClientRect();
+            return rect.top >= 0 && rect.bottom <= window.innerHeight;
+        })).toBe(true);
+        await expect.poll(() => menu.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    });
+
+    test('dragging a cell selection across grouped rows leaves no native text selection behind', async ({ page }) => {
+        await page.locator('#gridContainer tbody tr td:not(.row-number-cell)').nth(5).click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: 'Group by This Column' }).click();
+
+        const groupHeader = page.locator('#gridContainer tr.group-header').first();
+        await expect(groupHeader).toBeVisible();
+        // First span is the zero-width indent; the second is the expand indicator.
+        await groupHeader.locator('span').nth(1).click();
+        const childCell = page.locator('#gridContainer tbody tr:not(.group-header) td[data-cell-id]').nth(0);
+        await expect(childCell).toBeVisible();
+
+        const headerText = await groupHeader.locator('td').nth(1).boundingBox();
+        const target = await childCell.boundingBox();
+        if (!headerText || !target) {
+            throw new Error('Grouped rows are not laid out');
+        }
+        await page.mouse.move(headerText.x + 40, headerText.y + headerText.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 10 });
+        await page.mouse.up();
+
+        const nativeSelection = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+        expect(nativeSelection).toBe('');
     });
 
     test('renders the grid container with table element', async ({ page }) => {
@@ -367,6 +500,26 @@ test.describe('Table rendering', () => {
             const afterClick = await getIdValues();
             return before.some((value, index) => value !== afterClick[index]);
         }).toBe(true);
+    });
+
+    test('sort icon points in the direction of the active sort', async ({ page }) => {
+        const ASC_ARROW = 'M8 3l4.5 6h-9L8 3z';
+        const DESC_ARROW = 'M8 13l4.5-6h-9L8 13z';
+        const sortButton = page.locator('#gridContainer table thead th').nth(1).locator('.header-btn-sort');
+        const sortTitle = async () => (await sortButton.getAttribute('title')) ?? '';
+        const expectArrowMatchesTitle = async () => {
+            await expect.poll(sortTitle).toMatch(/Sorted (ascending|descending)/);
+            const expected = (await sortTitle()).includes('descending') ? DESC_ARROW : ASC_ARROW;
+            await expect.poll(() => sortButton.locator('svg path').getAttribute('d')).toBe(expected);
+        };
+
+        await sortButton.click();
+        await expectArrowMatchesTitle();
+        const firstTitle = await sortTitle();
+
+        await sortButton.click();
+        await expect.poll(sortTitle).not.toBe(firstTitle);
+        await expectArrowMatchesTitle();
     });
 
     test('global filter input is functional', async ({ page }) => {

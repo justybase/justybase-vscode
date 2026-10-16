@@ -43,10 +43,10 @@ export function createChartRangeSubmenuItem(
     const item = document.createElement('div');
     item.className = 'grid-context-menu-item has-submenu';
     item.textContent = 'Chart Range';
-    item.style.padding = '6px 16px';
+    item.style.padding = '3px 12px';
     item.style.cursor = 'pointer';
     item.style.color = 'var(--vscode-menu-foreground)';
-    item.style.fontSize = '13px';
+    item.style.fontSize = '12px';
     item.style.userSelect = 'none';
 
     let categorySubmenu: HTMLElement | null = null;
@@ -80,10 +80,10 @@ export function createChartRangeSubmenuItem(
             const variantItem = document.createElement('div');
             variantItem.className = 'grid-context-menu-item';
             variantItem.textContent = variant.label;
-            variantItem.style.padding = '6px 16px';
+            variantItem.style.padding = '3px 12px';
             variantItem.style.cursor = 'pointer';
             variantItem.style.color = 'var(--vscode-menu-foreground)';
-            variantItem.style.fontSize = '13px';
+            variantItem.style.fontSize = '12px';
 
             variantItem.addEventListener('mouseover', () => {
                 variantItem.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';
@@ -122,10 +122,10 @@ export function createChartRangeSubmenuItem(
             const categoryItem = document.createElement('div');
             categoryItem.className = 'grid-context-menu-item has-submenu';
             categoryItem.textContent = category.label;
-            categoryItem.style.padding = '6px 16px';
+            categoryItem.style.padding = '3px 12px';
             categoryItem.style.cursor = 'pointer';
             categoryItem.style.color = 'var(--vscode-menu-foreground)';
-            categoryItem.style.fontSize = '13px';
+            categoryItem.style.fontSize = '12px';
 
             categoryItem.addEventListener('mouseover', () => {
                 categoryItem.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';
@@ -159,10 +159,10 @@ export function createContextMenuItem(text: string, onClick: () => void): HTMLEl
     const item = document.createElement('div');
     item.className = 'grid-context-menu-item';
     item.textContent = text;
-    item.style.padding = '6px 16px';
+    item.style.padding = '3px 12px';
     item.style.cursor = 'pointer';
     item.style.color = 'var(--vscode-menu-foreground)';
-    item.style.fontSize = '13px';
+    item.style.fontSize = '12px';
     item.style.userSelect = 'none';
 
     item.addEventListener('mouseover', () => {

@@ -628,6 +628,24 @@ body.vscode-dark {
     min-width: 0;
     justify-content: center;
 }
+/* The More menu is positioned against the viewport from its trigger (see positionToolbarMoreMenu), because
+   the toolbar wraps on narrow panels and the trigger is not always at the right edge. */
+.toolbar-more-btn .toolbar-more-menu {
+    position: fixed;
+    min-width: 0;
+    width: 240px;
+    max-width: calc(100vw - 16px);
+}
+/* Icon-only overflow trigger: no outline, a hover background only. */
+.controls .toolbar-more-btn .split-btn__primary {
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 1px 6px;
+}
+.controls .toolbar-more-btn .split-btn__primary:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+    border-color: transparent;
+}
 
 .refresh-limit-panel {
     position: fixed;
@@ -1018,6 +1036,63 @@ body.group-dragging .grouping-panel {
     cursor: not-allowed;
 }
 
+/* Analyze menu: Charts, Diff, Explore and Analytical share one entry point; Sidebar is an icon toggle. */
+.layout-switcher__analyze {
+    position: relative;
+    display: inline-flex;
+}
+.layout-switcher .layout-switcher__caret {
+    margin-left: 4px;
+    font-size: 9px;
+    opacity: 0.7;
+}
+.layout-switcher .layout-switcher__btn--icon {
+    padding: 3px 6px;
+}
+.layout-switcher__menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 1000;
+    min-width: 128px;
+    display: flex;
+    flex-direction: column;
+    padding: 3px 0;
+    background: var(--vscode-menu-background);
+    border: 1px solid var(--vscode-menu-border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.layout-switcher__menu[hidden] {
+    display: none;
+}
+.layout-switcher .layout-switcher__menu-item {
+    appearance: none;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--vscode-menu-foreground);
+    font-family: var(--justybase-results-grid-font-family, var(--vscode-font-family));
+    font-size: 11px;
+    line-height: 16px;
+    min-height: 24px;
+    text-align: left;
+    padding: 4px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+/* Matches the specificity of the shared `.controls button` rules, which the menu sits inside. */
+.layout-switcher .layout-switcher__menu-item:hover,
+.layout-switcher .layout-switcher__menu-item:focus-visible {
+    background: var(--vscode-menu-selectionBackground);
+    color: var(--vscode-menu-selectionForeground, var(--vscode-menu-foreground));
+    outline: none;
+}
+.layout-switcher .layout-switcher__menu-item[aria-checked="true"]::before {
+    content: '\2713';
+    margin-right: 6px;
+}
+
 .toolbar-separator {
     flex: 0 0 1px;
     width: 1px;
@@ -1026,6 +1101,21 @@ body.group-dragging .grouping-panel {
     background-color: var(--vscode-toolbar-dividerBackground, var(--vscode-panel-border));
     margin: 0 2px;
     align-self: stretch;
+}
+
+/* Right-hand toolbar actions (export, columns, row view, more, edit): a lighter outline and a
+   22px height. Scoped away from the view switcher, which keeps its own sizing. */
+.controls .toolbar-group:not(.toolbar-group--view) button,
+.controls .toolbar-group:not(.toolbar-group--view) .split-btn__primary,
+.controls .toolbar-group:not(.toolbar-group--view) .split-btn__arrow {
+    min-height: 22px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    line-height: 14px;
+    border-color: color-mix(in srgb, var(--vscode-panel-border, #808080) 55%, transparent);
+}
+.controls .toolbar-group:not(.toolbar-group--view) button:hover {
+    border-color: var(--vscode-focusBorder);
 }
 
 /* Narrow panels: toolbar controls clip inside their own box instead of
@@ -1084,9 +1174,6 @@ body.group-dragging .grouping-panel {
     }
     .toolbar-group--export .split-btn__primary {
         padding: 2px 6px;
-    }
-    .toolbar-more-btn__label {
-        display: none;
     }
     .toolbar-more-btn .split-btn__primary {
         padding: 2px 6px;
@@ -1546,13 +1633,16 @@ th .header-btn {
     margin: 0 1px;
     user-select: none;
     flex-shrink: 0;
-    opacity: 0.6;
+    /* Idle header controls stay hidden so the header shows only the column name and type;
+       they appear on header hover/focus, while active controls remain visible. */
+    opacity: 0;
     transition: opacity 0.15s, background-color 0.15s;
-    color: var(--tx3);
+    color: var(--vscode-descriptionForeground, var(--tx3));
 }
 
-th:hover .header-btn {
-    opacity: 0.8;
+th:hover .header-btn,
+th:focus-within .header-btn {
+    opacity: 0.75;
 }
 
 th .header-btn:hover {
@@ -1571,7 +1661,7 @@ th .header-btn svg {
 }
 
 td {
-    padding: 4px 10px;
+    padding: 2px 10px;
     border-left: 1px solid var(--border-color);
     border-right: 1px solid var(--border-color);
     border-top: 1px solid var(--border-color);
@@ -1998,6 +2088,8 @@ tfoot {
     background-color: var(--group-header-bg) !important;
     font-weight: bold;
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* Group Footer Row (subtotals per group) */

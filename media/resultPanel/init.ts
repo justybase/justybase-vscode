@@ -2849,12 +2849,35 @@ function updateResponsiveCollapseMenuItem(): void {
     : "Move columns that do not fit into expandable row details";
 }
 
+/**
+ * Places the More menu under its trigger, right-aligned to it, and keeps it inside the viewport.
+ * The toolbar wraps on narrow panels, so the trigger can sit anywhere along the row.
+ */
+function positionToolbarMoreMenu(menu: HTMLElement, trigger: HTMLElement): void {
+  const margin = 8;
+  menu.style.position = "fixed";
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const anchor = trigger.getBoundingClientRect();
+  const size = menu.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(margin, anchor.right - size.width),
+    window.innerWidth - size.width - margin,
+  );
+  const top = Math.min(anchor.bottom + 4, window.innerHeight - size.height - margin);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+}
+
 getResultPanelWindow().toggleToolbarMoreMenu = function (event) {
   event.stopPropagation();
   const menu = getElementById("toolbarMoreMenu");
   if (!menu) return;
   updateResponsiveCollapseMenuItem();
-  menu.style.display = menu.style.display === "none" ? "block" : "none";
+  const opening = menu.style.display === "none";
+  menu.style.display = opening ? "block" : "none";
+  const trigger = getElementById("toolbarMoreBtn");
+  if (opening && trigger) positionToolbarMoreMenu(menu, trigger);
 };
 
 getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent) {

@@ -120,9 +120,12 @@ export function attachSelectionEvents(scope: SelectionEventsScope): AttachedSele
             return;
         }
 
-        // Skip selection on group header rows (expand/collapse handled by indicator.onclick)
+        // Group header rows never start a cell selection (expand/collapse is handled by indicator.onclick).
+        // Blocking the mousedown default keeps the browser from starting a native text selection there,
+        // which would otherwise paint over the grouped rows while the user drags a cell range.
         const tr = td.closest('tr');
         if (tr && tr.classList.contains('group-header')) {
+            e.preventDefault();
             return;
         }
 
@@ -183,6 +186,8 @@ export function attachSelectionEvents(scope: SelectionEventsScope): AttachedSele
         model.startCell = getCellId(e.target) ?? null;
         model.endCell = model.startCell;
         e.preventDefault();
+        // A native text selection left over from elsewhere would be drawn on top of the cell range.
+        window.getSelection()?.removeAllRanges();
 
         requestResultsViewFocus();
         wrapper.focus();

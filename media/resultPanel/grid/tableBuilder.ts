@@ -24,6 +24,7 @@ import {
     debounce,
 } from '../utils.js';
 import { setupCellEditing } from './cellEditing.js';
+import { attachColumnDragAutoScroll } from './dragAutoScroll.js';
 import { getSavedStateFor, saveAllGridStates, resolveScrollStateForResultSet } from './persistence.js';
 import { createHeaderCellWithFilter, reorderColumnsForPinning, renderRowCountInfo } from '../filter.js';
 import { setupCellSelectionEvents } from '../selection.js';
@@ -139,6 +140,7 @@ export function createResultSetGrid(
     wrapper.style.display = rsIndex === getActiveGridIndex() ? 'block' : 'none';
     wrapper.dataset.index = String(rsIndex);
     container.appendChild(wrapper);
+    attachColumnDragAutoScroll(wrapper);
 
     if (!rs.data || !Array.isArray(rs.data)) {
         renderStateCard(wrapper, {

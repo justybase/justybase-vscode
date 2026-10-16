@@ -109,12 +109,22 @@ export class ResultsHtmlGenerator {
             <div class="layout-wrapper" id="layoutWrapper">
                     <div class="controls">
                         <div class="toolbar-group toolbar-group--view">
-                        <div class="layout-switcher" id="layoutSwitcher" role="group" aria-label="Result layout">
-                            <button type="button" class="layout-switcher__btn active" data-layout="table" aria-pressed="true" title="Standard table layout">Table</button>
-                            <button type="button" class="layout-switcher__btn" data-layout="sidebar" aria-pressed="false" title="Table with schema sidebar and grouping">Sidebar</button>
-                            <button type="button" class="layout-switcher__btn" data-layout="charts" aria-pressed="false" title="Professional range charts (ECharts)">Charts</button>
-                            <button type="button" class="layout-switcher__btn" data-layout="diff" aria-pressed="false" title="Compare two result sets">Diff</button>
-                            <button type="button" class="layout-switcher__btn" data-layout="explore" aria-pressed="false" title="Explore columns, filters, pivot and charts">Explore</button>
+                        <div class="layout-switcher" id="layoutSwitcher" role="group" aria-label="Result view">
+                            <button type="button" class="layout-switcher__btn active" data-layout="table" aria-pressed="true" title="Result grid">Table</button>
+                            <div class="layout-switcher__analyze">
+                                <button type="button" class="layout-switcher__btn" data-layout="analyze" aria-haspopup="menu" aria-expanded="false" aria-controls="layoutAnalyzeMenu" title="Charts, diff, explore and analytical views of this result">
+                                    <span class="layout-switcher__label">Analyze</span><span class="layout-switcher__caret" aria-hidden="true">▾</span>
+                                </button>
+                                <div class="layout-switcher__menu" id="layoutAnalyzeMenu" role="menu" aria-label="Analysis views" hidden>
+                                    <button type="button" class="layout-switcher__menu-item" role="menuitemradio" aria-checked="false" data-layout="charts">Charts</button>
+                                    <button type="button" class="layout-switcher__menu-item" role="menuitemradio" aria-checked="false" data-layout="diff">Diff</button>
+                                    <button type="button" class="layout-switcher__menu-item" role="menuitemradio" aria-checked="false" data-layout="explore" title="Explore columns, filters, pivot and charts">Explore</button>
+                                    <button type="button" class="layout-switcher__menu-item" role="menuitemradio" aria-checked="false" data-layout="analytical" title="Group rows and compare each group with the whole result to spot anomalies">Analytical</button>
+                                </div>
+                            </div>
+                            <button type="button" class="layout-switcher__btn layout-switcher__btn--icon" data-layout="sidebar" aria-pressed="false" aria-label="Sidebar layout" title="Sidebar layout with schema and grouping">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><line x1="6" y1="2.5" x2="6" y2="13.5"/></svg>
+                            </button>
                         </div>
                         </div>
                         <div class="toolbar-separator" aria-hidden="true"></div>
@@ -153,7 +163,7 @@ export class ResultsHtmlGenerator {
                         </div>
 
                         <div class="split-btn toolbar-more-btn" id="toolbarMoreBtn">
-                            <button class="btn split-btn__primary" onclick="toggleToolbarMoreMenu(event)" title="More actions" aria-label="More actions" aria-haspopup="menu">⋯ <span class="toolbar-more-btn__label">More</span></button>
+                            <button class="btn split-btn__primary" onclick="toggleToolbarMoreMenu(event)" title="More actions" aria-label="More actions" aria-haspopup="menu"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="13.5" y2="8"/><line x1="2.5" y1="12" x2="13.5" y2="12"/></svg></button>
                             <div class="split-btn__menu toolbar-more-menu" id="toolbarMoreMenu" style="display:none" onclick="handleToolbarMoreMenuClick(event)" role="menu">
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">View</div>
                                 ${responsiveCollapseMenuItem}
@@ -180,6 +190,7 @@ export class ResultsHtmlGenerator {
                             <option value="chart">Charts</option>
                             <option value="diff">Diff</option>
                             <option value="explore">Explore</option>
+                            <option value="analytical">Analytical</option>
                         </select>
                         <select id="diffBaselineSelect" class="view-mode-select-hidden" title="Choose baseline result set" style="display: none;" aria-hidden="true"></select>
 
@@ -402,67 +413,117 @@ export class ResultsHtmlGenerator {
                         window.syncLayoutSwitcher('table');
                     }
                 };
+                var LAYOUT_LABELS = { charts: 'Charts', diff: 'Diff', explore: 'Explore', analytical: 'Analytical' };
+                var ANALYSIS_BY_MODE = { 'range-chart': 'charts', chart: 'charts', diff: 'diff', explore: 'explore', analytical: 'analytical' };
                 window.syncLayoutSwitcher = function(viewMode) {
                     var switcher = document.getElementById('layoutSwitcher');
                     if (!switcher) return;
-                    var activeLayout = null;
-                    if (viewMode === 'range-chart' || viewMode === 'chart') {
-                        activeLayout = 'charts';
-                    } else if (viewMode === 'table') {
-                        activeLayout = document.body.classList.contains('sidebar-layout') ? 'sidebar' : 'table';
-                    } else if (viewMode === 'diff') {
-                        activeLayout = 'diff';
-                    } else if (viewMode === 'explore') {
-                        activeLayout = 'explore';
+                    var analysis = ANALYSIS_BY_MODE[viewMode] || null;
+                    var isTable = !analysis && viewMode === 'table';
+                    var tableBtn = switcher.querySelector('[data-layout="table"]');
+                    if (tableBtn) {
+                        tableBtn.classList.toggle('active', isTable);
+                        tableBtn.setAttribute('aria-pressed', isTable ? 'true' : 'false');
                     }
-                    switcher.querySelectorAll('.layout-switcher__btn').forEach(function(btn) {
-                        var isActive = !!activeLayout && btn.dataset.layout === activeLayout;
-                        btn.classList.toggle('active', isActive);
-                        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                    var sidebarBtn = switcher.querySelector('[data-layout="sidebar"]');
+                    if (sidebarBtn) {
+                        var sidebarOn = isTable && document.body.classList.contains('sidebar-layout');
+                        sidebarBtn.classList.toggle('active', sidebarOn);
+                        sidebarBtn.setAttribute('aria-pressed', sidebarOn ? 'true' : 'false');
+                    }
+                    var analyzeBtn = switcher.querySelector('[data-layout="analyze"]');
+                    if (analyzeBtn) {
+                        analyzeBtn.classList.toggle('active', !!analysis);
+                        var label = analyzeBtn.querySelector('.layout-switcher__label');
+                        if (label) label.textContent = analysis ? LAYOUT_LABELS[analysis] : 'Analyze';
+                    }
+                    switcher.querySelectorAll('.layout-switcher__menu-item').forEach(function(item) {
+                        item.setAttribute('aria-checked', item.dataset.layout === analysis ? 'true' : 'false');
                     });
+                };
+                window.toggleAnalyzeMenu = function(force) {
+                    var analyzeBtn = document.querySelector('#layoutSwitcher [data-layout="analyze"]');
+                    var menu = document.getElementById('layoutAnalyzeMenu');
+                    if (!analyzeBtn || !menu) return;
+                    var open = typeof force === 'boolean' ? force : menu.hidden;
+                    menu.hidden = !open;
+                    analyzeBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    if (open) {
+                        var current = menu.querySelector('[aria-checked="true"]') || menu.querySelector('.layout-switcher__menu-item');
+                        if (current) current.focus();
+                    }
                 };
                 window.setLayoutSwitcherDisabled = function(disabled) {
                     var switcher = document.getElementById('layoutSwitcher');
                     if (!switcher) return;
-                    switcher.querySelectorAll('.layout-switcher__btn').forEach(function(btn) {
-                        btn.disabled = !!disabled;
+                    switcher.querySelectorAll('[data-layout]').forEach(function(control) {
+                        control.disabled = !!disabled;
                     });
-                    if (disabled) window.syncLayoutSwitcher('table');
+                    if (disabled) {
+                        window.toggleAnalyzeMenu(false);
+                        window.syncLayoutSwitcher('table');
+                    }
                 };
                 window.applyLayoutSwitcherChoice = function(layout) {
                     var normalized = layout === 'table2' ? 'sidebar' : layout;
+                    if (normalized === 'analyze') {
+                        window.toggleAnalyzeMenu();
+                        return;
+                    }
+                    window.toggleAnalyzeMenu(false);
                     if (normalized === 'table') {
                         if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
                         window.setLayoutMode('top');
                         setViewMode('table');
+                        window.syncLayoutSwitcher('table');
                     } else if (normalized === 'sidebar') {
                         if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
-                        window.setLayoutMode('sidebar');
+                        window.setLayoutMode(document.body.classList.contains('sidebar-layout') ? 'top' : 'sidebar');
                         setViewMode('table');
+                        window.syncLayoutSwitcher('table');
                     } else if (normalized === 'charts') {
                         var opened = typeof window.openRangeChartForActiveResult === 'function'
                             && window.openRangeChartForActiveResult();
                         if (!opened && typeof window.syncLayoutSwitcher === 'function') {
-                            var modeSelect = document.getElementById('viewModeSelect');
-                            window.syncLayoutSwitcher(modeSelect && modeSelect.value === 'table' ? 'table' : 'table');
+                            window.syncLayoutSwitcher('table');
                         }
-                    } else if (normalized === 'diff') {
+                    } else if (normalized === 'diff' || normalized === 'explore' || normalized === 'analytical') {
                         if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
                         window.setLayoutMode('top');
-                        setViewMode('diff');
-                    } else if (normalized === 'explore') {
-                        if (typeof window.closeRangeChartModal === 'function') window.closeRangeChartModal();
-                        window.setLayoutMode('top');
-                        setViewMode('explore');
+                        setViewMode(normalized);
+                        window.syncLayoutSwitcher(normalized);
                     }
                 };
                 (function initLayoutSwitcher() {
                     var switcher = document.getElementById('layoutSwitcher');
                     if (!switcher) return;
                     switcher.addEventListener('click', function(event) {
-                        var btn = event.target.closest('.layout-switcher__btn');
-                        if (!btn || btn.disabled) return;
-                        window.applyLayoutSwitcherChoice(btn.dataset.layout);
+                        var control = event.target.closest('[data-layout]');
+                        if (!control || control.disabled) return;
+                        window.applyLayoutSwitcherChoice(control.dataset.layout);
+                    });
+                    switcher.addEventListener('keydown', function(event) {
+                        var menu = document.getElementById('layoutAnalyzeMenu');
+                        if (!menu || menu.hidden) return;
+                        if (event.key === 'Escape') {
+                            window.toggleAnalyzeMenu(false);
+                            var analyzeBtn = switcher.querySelector('[data-layout="analyze"]');
+                            if (analyzeBtn) analyzeBtn.focus();
+                            return;
+                        }
+                        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                            var items = Array.prototype.slice.call(menu.querySelectorAll('.layout-switcher__menu-item'));
+                            var index = items.indexOf(document.activeElement);
+                            var step = event.key === 'ArrowDown' ? 1 : -1;
+                            items[(index + step + items.length) % items.length].focus();
+                            event.preventDefault();
+                        }
+                    });
+                    document.addEventListener('click', function(event) {
+                        var target = event.target;
+                        if (!target || !target.closest || !target.closest('#layoutSwitcher')) {
+                            window.toggleAnalyzeMenu(false);
+                        }
                     });
                 })();
                 // Restore layout from persisted state (accept legacy 'table2')
