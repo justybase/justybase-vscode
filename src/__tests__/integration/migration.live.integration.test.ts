@@ -16,7 +16,6 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createRequire } from 'node:module';
 import type { DatabaseConnection, DatabaseKind } from '../../contracts/database';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import type { ConnectionDetails } from '../../types';
@@ -58,19 +57,6 @@ const hasDb2 = Boolean(process.env.DB2_LIVE_TEST_HOST && process.env.DB2_LIVE_TE
 const hasMssql = Boolean(process.env.MSSQL_LIVE_TEST_HOST && process.env.MSSQL_LIVE_TEST_PASSWORD);
 const hasOracle = Boolean(process.env.ORACLE_LIVE_TEST_HOST && process.env.ORACLE_LIVE_TEST_PASSWORD);
 const hasVertica = Boolean(process.env.VERTICA_LIVE_TEST_HOST);
-
-const db2RuntimeRequire = createRequire(
-    path.join(process.cwd(), 'extensions', 'db2', 'package.json'),
-);
-let hasDb2Runtime = false;
-try {
-    const { configureBundledClidriverForCurrentProcess } = require('../../../extensions/db2/src/db2Connection');
-    configureBundledClidriverForCurrentProcess();
-    db2RuntimeRequire('ibm_db');
-    hasDb2Runtime = true;
-} catch {
-    hasDb2Runtime = false;
-}
 
 function buildLiveDetails(
     envPrefix: string,
@@ -698,7 +684,7 @@ describeIfNetezza('Live migration between databases', () => {
         enabled: boolean;
         nameCase: 'upper' | 'lower';
     }> = [
-        { label: 'Db2', kind: 'db2', envPrefix: 'DB2', enabled: hasDb2 && hasDb2Runtime, nameCase: 'upper' },
+        { label: 'Db2', kind: 'db2', envPrefix: 'DB2', enabled: hasDb2, nameCase: 'upper' },
         { label: 'MS SQL Server', kind: 'mssql', envPrefix: 'MSSQL', enabled: hasMssql, nameCase: 'lower' },
         { label: 'Oracle', kind: 'oracle', envPrefix: 'ORACLE', enabled: hasOracle, nameCase: 'upper' },
         { label: 'Vertica', kind: 'vertica', envPrefix: 'VERTICA', enabled: hasVertica, nameCase: 'lower' },

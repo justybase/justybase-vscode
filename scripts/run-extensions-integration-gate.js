@@ -73,7 +73,7 @@ const REQUIRED_ENVIRONMENT = Object.freeze({
 
 const RUNTIME_MODULES = Object.freeze({
     access: ['@duckdb/node-api', 'mdb-reader'],
-    db2: ['ibm_db'],
+    db2: ['@justybase/db2/compat'],
     duckdb: ['@duckdb/node-api', '@justybase/spreadsheet-tasks', 'mdb-reader'],
     mssql: ['mssql'],
     mysql: ['mysql2'],

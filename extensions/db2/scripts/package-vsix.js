@@ -14,6 +14,10 @@ function getProductionDependencyDirectories(cwd) {
 
     const dependencyDirectories = packageEntries
         .filter(([packagePath, metadata]) => packagePath.startsWith('node_modules/') && !metadata.dev)
+        // The pure TypeScript Db2 driver is bundled into dist/extension.js.
+        // Keep its declared dependency for reproducibility and notices without
+        // shipping a second, unused copy in the VSIX.
+        .filter(([packagePath]) => packagePath !== 'node_modules/@justybase/db2')
         .map(([packagePath]) => path.join(cwd, packagePath))
         .filter(packagePath => fs.existsSync(packagePath));
 

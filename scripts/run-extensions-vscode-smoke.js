@@ -17,7 +17,7 @@ const smokeTestPath = path.join(repositoryRoot, 'scripts', 'extensionHost', 'com
 
 const EXTENSIONS = Object.freeze({
     access: { id: 'krzysztof-d.justybaselite-access', kind: 'access', runtime: ['@duckdb/node-api', 'mdb-reader'] },
-    db2: { id: 'krzysztof-d.justybaselite-db2', kind: 'db2', runtime: ['ibm_db'] },
+    db2: { id: 'krzysztof-d.justybaselite-db2', kind: 'db2', runtime: ['@justybase/db2/compat'] },
     duckdb: { id: 'krzysztof-d.justybaselite-duckdb', kind: 'duckdb', runtime: ['@duckdb/node-api'] },
     mssql: { id: 'krzysztof-d.justybaselite-mssql', kind: 'mssql', runtime: ['mssql'] },
     mysql: { id: 'krzysztof-d.justybaselite-mysql', kind: 'mysql', runtime: ['mysql2'] },
@@ -69,32 +69,12 @@ function validateExtension(extensionKey) {
     }
 }
 
-function prependEnvironmentPath(environment, name, value) {
-    const values = (environment[name] || '').split(path.delimiter).filter(Boolean);
-    if (!values.includes(value)) {
-        environment[name] = [value, ...values].join(path.delimiter);
-    }
-}
-
 function buildExtensionHostEnvironment(extensionKey) {
     const environment = {
         ...process.env,
         NODE_ENV: 'test',
         COMPANION_CORE_EXTENSION_ID: coreExtensionId,
     };
-
-    if (extensionKey === 'db2') {
-        const cliDriverHome = path.join(extensionRoot('db2'), 'node_modules', 'ibm_db', 'installer', 'clidriver');
-        environment.DB2CODEPAGE = environment.DB2CODEPAGE || '1208';
-        environment.IBM_DB_HOME = cliDriverHome;
-        prependEnvironmentPath(environment, 'PATH', path.join(cliDriverHome, 'bin'));
-        prependEnvironmentPath(environment, 'PATH', path.join(cliDriverHome, 'lib'));
-        if (process.platform === 'linux') {
-            prependEnvironmentPath(environment, 'LD_LIBRARY_PATH', path.join(cliDriverHome, 'lib'));
-        } else if (process.platform === 'darwin') {
-            prependEnvironmentPath(environment, 'DYLD_LIBRARY_PATH', path.join(cliDriverHome, 'lib'));
-        }
-    }
 
     return environment;
 }

@@ -42,14 +42,8 @@
     "build:minified": "node esbuild.db2.js --minify",
     "build:dev": "node esbuild.db2.js",
     "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
-    "install:vscode": "node scripts/switch-runtime.js napi",
-    "rebuild:napi": "node scripts/switch-runtime.js napi",
-    "rebuild:electron": "node scripts/switch-runtime.js napi",
-    "rebuild:node": "node scripts/switch-runtime.js napi",
-    "switch:runtime": "node scripts/switch-runtime.js",
-    "verify:runtime-deps": "node scripts/verify-napi-runtime.js",
-    "prepackage": "npm run verify:runtime-deps",
-    "package": "node scripts/package-vsix.js package"
+    "package": "node scripts/package-vsix.js package",
+    "postpackage": "node scripts/verify-vsix.js"
   },
   "contributes": {
     "submenus": [
@@ -116,10 +110,7 @@
     }
   },
   "dependencies": {
-    "ibm_db": "^4.0.1"
-  },
-  "devDependencies": {
-    "node-gyp": "^11.5.0"
+    "@justybase/db2": "0.1.0-alpha.1"
   },
   "preview": true
 }

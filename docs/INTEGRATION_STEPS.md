@@ -123,9 +123,8 @@ injection at `dialects/mssql/syntaxes/mssql.tmLanguage.json`.
 ## Db2 Checklist
 
 The Db2 extension has a dedicated live suite at
-`src/__tests__/integration/db2.integration.test.ts`. Native `ibm_db` must be
-aligned to the Node/Jest ABI before the suite runs (the npm script does this
-via the shared N-API runtime helper (`switch-runtime.js auto-for-live-tests`). Provide `DB2_LIVE_TEST_HOST`,
+`src/__tests__/integration/db2.integration.test.ts` using the pinned TypeScript
+DRDA driver. Provide `DB2_LIVE_TEST_HOST`,
 `DB2_LIVE_TEST_DATABASE`, `DB2_LIVE_TEST_USER`, and `DB2_LIVE_TEST_PASSWORD`
 (optional port default **50000**, optional `DB2_LIVE_TEST_CURRENT_SCHEMA` /
 fixture schema) and run:

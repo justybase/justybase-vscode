@@ -37,7 +37,7 @@ Cancellation can stop the client pipeline, but a database may finish an in-fligh
 
 The Netezza target writer uses the 2.4.4 driver's virtual import-stream registry and `FROM EXTERNAL` protocol, with driver-managed socket backpressure. This is the preferred path for Netezza targets because it avoids staging migration rows in a temporary client file.
 
-The live migration coverage includes Netezza↔PostgreSQL and Netezza↔Oracle paths, local SQLite→Netezza, and optional Db2→Netezza when Db2 credentials and the native `ibm_db` runtime are available. Parquet, CSV, XLSX, XLSB, Avro, and Access files can be exposed through the DuckDB/File SQL connection where the format is supported; Parquet→Netezza is verified by selecting the file view and migrating that result. File SQL is the appropriate route for Parquet because the Netezza driver itself does not parse Parquet.
+The live migration coverage includes Netezza↔PostgreSQL and Netezza↔Oracle paths, local SQLite→Netezza, and optional Db2→Netezza when Db2 credentials are available. Parquet, CSV, XLSX, XLSB, Avro, and Access files can be exposed through the DuckDB/File SQL connection where the format is supported; Parquet→Netezza is verified by selecting the file view and migrating that result. File SQL is the appropriate route for Parquet because the Netezza driver itself does not parse Parquet.
 
 ## ETL Designer
 

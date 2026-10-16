@@ -58,17 +58,7 @@ export const db2Dialect: DatabaseDialect = {
         storage: "options",
         min: 1,
         max: 300,
-        description: "Optional connection timeout passed to ibm_db.",
-        layout: "half",
-      },
-      {
-        key: "clientCodepage",
-        label: "Client Codepage",
-        type: "text",
-        storage: "options",
-        placeholder: "Optional, for example 1208",
-        description:
-          "Optional Db2 ClientCodepage override. Leave blank to use the driver default conversion.",
+        description: "Optional timeout for opening the Db2 connection.",
         layout: "half",
       },
       {

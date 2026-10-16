@@ -13,10 +13,7 @@ async function main() {
     const options = {
         extensionDevelopmentPath: db2ExtensionRoot,
         extensionTestsPath,
-        extensionTestsEnv: {
-            ...process.env,
-            DB2_EXTENSION_ROOT: db2ExtensionRoot,
-        },
+        extensionTestsEnv: { ...process.env },
         launchArgs: ['--disable-extensions'],
     };
 
@@ -26,12 +23,12 @@ async function main() {
         options.version = requestedVersion;
     }
 
-    console.log(`Running Db2 native-runtime smoke test in VS Code ${requestedVersion}.`);
+    console.log(`Running Db2 TypeScript-driver smoke test in VS Code ${requestedVersion}.`);
     await runTests(options);
 }
 
 main().catch(error => {
-    console.error('Db2 VS Code runtime compatibility test failed.');
+    console.error('Db2 VS Code Extension Host smoke test failed.');
     console.error(error);
     process.exit(1);
 });

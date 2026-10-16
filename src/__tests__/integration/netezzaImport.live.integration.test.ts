@@ -4,7 +4,7 @@
  * The suite deliberately exercises both direct file imports and the migration
  * service. Direct imports cover the historical XLSX/clipboard failure mode;
  * migration tests cover SQLite and DuckDB File SQL (including Parquet).
- * Db2 is enabled only when its live credentials and native runtime are present.
+ * Db2 is enabled only when its live credentials are present.
  *
  * Run with NZ_DEV_* credentials:
  *   npm run test:netezza:import:integration
@@ -13,7 +13,6 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createRequire } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import * as vscode from 'vscode';
 import type { DatabaseKind } from '../../contracts/database';
@@ -25,7 +24,6 @@ import { MigrationService } from '../../migration/migrationService';
 import type { MigrationRequest } from '../../migration/types';
 import type { ConnectionDetails } from '../../types';
 import { NzConnection } from '@justybase/netezza-driver';
-import { configureBundledClidriverForCurrentProcess } from '../../../extensions/db2/src/db2Connection';
 import { db2Dialect } from '../../../extensions/db2/src/db2Dialect';
 import { fileDialect } from '../../../extensions/duckdb/src/fileDialect';
 import { loadDuckDb } from '../../../extensions/duckdb/src/duckdbConnection';
@@ -45,17 +43,6 @@ const NZ_CONFIG = {
 
 const hasNetezza = Boolean(process.env.NZ_DEV_PASSWORD);
 const describeIfNetezza = hasNetezza ? describe : describe.skip;
-const db2Require = createRequire(path.join(process.cwd(), 'extensions', 'db2', 'package.json'));
-
-let hasDb2Runtime = false;
-try {
-    configureBundledClidriverForCurrentProcess();
-    db2Require('ibm_db');
-    hasDb2Runtime = true;
-} catch {
-    hasDb2Runtime = false;
-}
-
 function buildNetezzaDetails(): ConnectionDetails {
     return {
         name: 'nz-import-live',
@@ -606,10 +593,6 @@ describeIfNetezza('Live Netezza virtual import and migration coverage', () => {
     }, 240000);
 
     it('migrates a Db2 table into Netezza when Db2 live access is configured', async () => {
-        if (!hasDb2Runtime) {
-            console.log('Skipping Db2 migration: ibm_db runtime is unavailable.');
-            return;
-        }
         const db2Details = buildOptionalDetails('DB2', 'db2');
         if (!db2Details) {
             console.log('Skipping Db2 migration: DB2_LIVE_TEST_* credentials are unavailable.');

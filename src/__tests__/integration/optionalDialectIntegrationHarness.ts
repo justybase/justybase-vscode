@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createRequire } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import type {
     DatabaseConnection,
@@ -11,10 +10,7 @@ import type {
 } from '../../contracts/database';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import type { ConnectionDetails } from '../../types';
-import {
-    Db2Connection,
-    configureBundledClidriverForCurrentProcess,
-} from '../../../extensions/db2/src/db2Connection';
+import { Db2Connection } from '../../../extensions/db2/src/db2Connection';
 import { db2Dialect } from '../../../extensions/db2/src/db2Dialect';
 import { db2MetadataProvider } from '../../../extensions/db2/src/db2SchemaProvider';
 import { MsSqlConnection } from '../../../extensions/mssql/src/mssqlConnection';
@@ -44,19 +40,6 @@ registerDatabaseDialect(mssqlDialect);
 registerDatabaseDialect(oracleDialect);
 registerDatabaseDialect(postgresqlDialect);
 registerDatabaseDialect(verticaDialect);
-
-const db2RuntimeRequire = createRequire(
-    path.join(process.cwd(), 'extensions', 'db2', 'package.json'),
-);
-function hasDb2NodeRuntime(): boolean {
-    try {
-        configureBundledClidriverForCurrentProcess();
-        db2RuntimeRequire('ibm_db');
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 type LivePrefix = 'DB2' | 'MSSQL' | 'ORACLE' | 'POSTGRES' | 'PG' | 'VERTICA';
 type LiveDbType = 'db2' | 'mssql' | 'oracle' | 'postgresql' | 'vertica';
@@ -314,15 +297,12 @@ export interface LiveDialectHarness {
 
 export const db2Harness: LiveDialectHarness = {
     name: 'Db2',
-    config: hasDb2NodeRuntime()
-        ? buildLiveConfig('DB2', 50000, {
+    config: buildLiveConfig('DB2', 50000, {
             currentSchema: 'CURRENT_SCHEMA',
             security: 'SECURITY',
             sslServerCertificate: 'SSL_SERVER_CERTIFICATE',
             connectTimeout: 'CONNECT_TIMEOUT',
-            clientCodepage: 'CLIENT_CODEPAGE',
-        })
-        : undefined,
+        }),
     createConnection: config => new Db2Connection(config),
     metadataProvider: db2MetadataProvider,
     smokeSql: 'SELECT 1 AS TEST_VALUE FROM SYSIBM.SYSDUMMY1',

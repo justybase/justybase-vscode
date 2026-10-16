@@ -32,7 +32,7 @@ For the Netezza import protocol, run the focused live suite separately with cred
 npm run test:netezza:import:integration
 ```
 
-It validates virtual-stream imports for XLSX/CSV/TXT and clipboard data, plus SQLite and Parquet/File SQL migrations. The Db2 case runs when `DB2_LIVE_TEST_*` credentials and the native `ibm_db` runtime are available. These suites are excluded from the normal unit-test configurations by `scripts/jestLiveDbIgnorePatterns.cjs`.
+It validates virtual-stream imports for XLSX/CSV/TXT and clipboard data, plus SQLite and Parquet/File SQL migrations. The Db2 case runs when `DB2_LIVE_TEST_*` credentials are available. These suites are excluded from the normal unit-test configurations by `scripts/jestLiveDbIgnorePatterns.cjs`.
 
 Locale-formatted number imports have their own round-trip suite that creates and drops uniquely named tables:
 
