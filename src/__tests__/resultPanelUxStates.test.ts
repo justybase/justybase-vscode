@@ -94,7 +94,9 @@ describe('result panel UX states', () => {
             writable: true,
             value: {
                 createElement: jest.fn(() => wrapperFactory()),
-                getElementById: jest.fn(() => null)
+                getElementById: jest.fn(() => null),
+                // Grid setup registers the document-level column drag auto-scroll listener.
+                addEventListener: jest.fn()
             }
         });
 

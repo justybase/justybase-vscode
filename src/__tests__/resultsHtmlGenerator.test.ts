@@ -1,5 +1,16 @@
 import { ResultsHtmlGenerator } from '../views/resultsHtmlGenerator';
 
+const SWITCHER_URIS = {
+    scriptUri: { toString: () => 'script.js' } as never,
+    virtualUri: { toString: () => 'virtual.js' } as never,
+    mainScriptUri: { toString: () => 'main.js' } as never,
+    styleUri: { toString: () => 'style.css' } as never,
+    workerUri: { toString: () => 'worker.js' } as never,
+    fontRegularUri: { toString: () => 'fonts/a.woff2' } as never,
+    fontBoldUri: { toString: () => 'fonts/b.woff2' } as never,
+    fontMediumUri: { toString: () => 'fonts/c.woff2' } as never,
+};
+
 describe('ResultsHtmlGenerator', () => {
     it('includes row view and value viewer surfaces in the result panel HTML', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
@@ -61,7 +72,8 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).not.toContain('id="resultStatusline"');
         expect(html).toContain('id="rowCountInfo"');
         // The overflow-menu label is wrapped so narrow panels can iconify it.
-        expect(html).toContain('toolbar-more-btn__label');
+        expect(html).toContain('aria-label="More actions"');
+        expect(html).not.toContain('toolbar-more-btn__label');
     });
 
     it('does not acquire the VS Code API in the inline bootstrap script', () => {
@@ -138,7 +150,8 @@ describe('ResultsHtmlGenerator', () => {
         });
 
         expect(html).toContain('data-layout="sidebar"');
-        expect(html).toContain('>Sidebar</button>');
+        expect(html).toContain('aria-label="Sidebar layout"');
+        // Diff is an analysis view and lives in the Analyze menu.
         expect(html).toContain('data-layout="diff"');
         expect(html).not.toContain('data-layout="table2"');
         expect(html).not.toContain('>Table2</button>');
@@ -190,5 +203,22 @@ describe('ResultsHtmlGenerator', () => {
             fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
         });
         expect(html.indexOf('href="legacy.css"')).toBeLessThan(html.indexOf('href="shared-grid.css"'));
+    });
+
+    it('groups the analysis views under one Analyze menu and keeps Sidebar as an icon toggle', () => {
+        const html = new ResultsHtmlGenerator('test-csp').generateHtml(SWITCHER_URIS);
+        const switcherStart = html.indexOf('id="layoutSwitcher"');
+        const switcherEnd = html.indexOf('id="viewModeSelect"', switcherStart);
+        const switcher = html.slice(switcherStart, switcherEnd);
+
+        expect(switcher).toContain('data-layout="table"');
+        expect(switcher).toContain('data-layout="analyze"');
+        expect(switcher).toContain('id="layoutAnalyzeMenu"');
+        expect(switcher).toContain('layout-switcher__btn--icon" data-layout="sidebar"');
+        // The four analysis views live in the menu, not as top-level switcher buttons.
+        for (const view of ['charts', 'diff', 'explore', 'analytical']) {
+            expect(switcher).toContain(`class="layout-switcher__menu-item" role="menuitemradio" aria-checked="false" data-layout="${view}"`);
+            expect(switcher).not.toContain(`class="layout-switcher__btn" data-layout="${view}"`);
+        }
     });
 });

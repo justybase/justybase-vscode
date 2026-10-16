@@ -945,7 +945,8 @@ export function closeRangeChartModal(): void {
 
     const modeSelect = getElementById<HTMLSelectElement>('viewModeSelect');
     const viewMode = modeSelect?.value || 'table';
-    callPanelMethod('syncLayoutSwitcher', viewMode === 'chart' || viewMode === 'diff' ? viewMode : 'table');
+    const switcherModes = ['chart', 'diff', 'explore', 'analytical'];
+    callPanelMethod('syncLayoutSwitcher', switcherModes.includes(viewMode) ? viewMode : 'table');
 }
 
 export function buildDefaultRangeChartSelection(table: TanStackTable): Set<string> | null {

@@ -111,9 +111,9 @@ describe('result panel sizing helpers', () => {
             dataType: 'varchar'
         };
 
-        // Header width = text measurement (50) + header extra width (210) = 260
-        expect(gridModule.calculateAutoHeaderWidth(column, measureText)).toBe(260);
-        // Cell width = content (200) + cell extra width (18) = 218, but min with header (260) = 260
-        expect(gridModule.calculateAutoColumnWidth(column, [['x'.repeat(20)]], measureText)).toBe(260);
+        // Header width = text measurement (50) + header extra width (18 + 148 controls) = 216
+        expect(gridModule.calculateAutoHeaderWidth(column, measureText)).toBe(216);
+        // Cell width = content (200) + cell extra width (18) = 218, which is larger than the header (216)
+        expect(gridModule.calculateAutoColumnWidth(column, [['x'.repeat(20)]], measureText)).toBe(218);
     });
 });

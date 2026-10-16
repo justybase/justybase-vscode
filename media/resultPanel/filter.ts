@@ -10,7 +10,6 @@ import {
 import { formatCellValue, formatSqlIdentifierForInsertion } from './utils.js';
 import { matchesFilterValueSearch, parseFilterNumericValue, sortFilterValues } from './filterValueSort.js';
 import { savePinnedState } from './grid/persistence.js';
-import { openResultFormattingPanel } from './formatting.js';
 import { postHostMessage } from './protocol.js';
 import type {
     AggregationSelection,
@@ -162,11 +161,13 @@ export function createHeaderCellWithFilter(
     const sortIndex = header.column.getSortIndex?.() ?? -1;
     sortBtn.className = 'header-btn header-btn-sort' + (isSorted ? ' active' : '');
     sortBtn.style.position = 'relative';
-    sortBtn.innerHTML = isSorted
-        ? (isSorted === 'asc'
-            ? '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l4 5H4l4-5zm0 12l-4-5h8l-4 5z"/></svg>'
-            : '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14l-4-5h8l-4 5zm0-12l4 5H4l4-5z"/></svg>')
-        : '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L5 5h6L8 1zM8 15l3-4H5l3 4z"/></svg>';
+    // Active sort shows only the arrow for its direction; the neutral state shows both arrows.
+    const sortArrowPath = isSorted === 'asc'
+        ? 'M8 3l4.5 6h-9L8 3z'
+        : isSorted === 'desc'
+            ? 'M8 13l4.5-6h-9L8 13z'
+            : 'M8 1L5 5h6L8 1zM8 15l3-4H5l3 4z';
+    sortBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="${sortArrowPath}"/></svg>`;
 
     if (isSorted && activeSortCount > 1 && sortIndex >= 0) {
         const sortOrderBadge = document.createElement('span');
@@ -218,7 +219,6 @@ export function createHeaderCellWithFilter(
 
     if (hasActiveFilter) {
         filterBtn.classList.add('active');
-        filterBtn.style.color = 'var(--vscode-charts-blue)';
         filterBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2h14l-5.5 6.5V14l-3 2v-7.5L1 2z"/></svg>';
         th.style.backgroundColor = 'var(--vscode-list-activeSelectionBackground)';
         th.style.borderBottom = '2px solid var(--vscode-charts-blue)';
@@ -248,7 +248,6 @@ export function createHeaderCellWithFilter(
 
     if (aggCount > 0) {
         aggBtn.classList.add('active');
-        aggBtn.style.color = 'var(--vscode-charts-green)';
 
         if (aggCount > 1) {
             const badge = document.createElement('span');
@@ -256,7 +255,7 @@ export function createHeaderCellWithFilter(
             badge.style.position = 'absolute';
             badge.style.top = '-6px';
             badge.style.right = '-8px';
-            badge.style.backgroundColor = 'var(--vscode-charts-green)';
+            badge.style.backgroundColor = 'var(--ac)';
             badge.style.color = 'var(--vscode-button-foreground)';
             badge.style.fontSize = '9px';
             badge.style.padding = '1px 3px';
@@ -273,29 +272,6 @@ export function createHeaderCellWithFilter(
         showAggregationDropdown(header.column, table, aggBtn, rsIndex, resultSet.executionTimestamp, scheduleRender);
     };
 
-    const groupBtn = document.createElement('span');
-    const currentGrouping = table.getState().grouping ?? [];
-    const isGrouped = currentGrouping.includes(header.column.id);
-    groupBtn.className = 'header-btn header-btn-group' + (isGrouped ? ' active' : '');
-    groupBtn.textContent = '#';
-    groupBtn.title = isGrouped ? 'Remove this column from grouping' : 'Group by this column';
-    if (isGrouped) {
-        groupBtn.style.color = 'var(--vscode-charts-purple)';
-    }
-    groupBtn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const grouping = table.getState().grouping ?? [];
-        if (grouping.includes(header.column.id)) {
-            table.setGrouping(grouping.filter((columnId) => columnId !== header.column.id));
-        } else {
-            table.setGrouping([...grouping, header.column.id]);
-        }
-        if (scheduleRender) {
-            scheduleRender();
-        }
-    };
-
     // Pin column button
     const pinBtn = document.createElement('span');
     pinBtn.className = 'header-btn header-btn-pin';
@@ -306,7 +282,6 @@ export function createHeaderCellWithFilter(
     const isPinned = currentPinned.includes(header.column.id);
     if (isPinned) {
         pinBtn.classList.add('active');
-        pinBtn.style.color = 'var(--vscode-charts-yellow)';
         pinBtn.title = 'Unpin column';
         th.classList.add('pinned-column');
     }
@@ -318,12 +293,10 @@ export function createHeaderCellWithFilter(
 
         if (isNowPinned) {
             pinBtn.classList.add('active');
-            pinBtn.style.color = 'var(--vscode-charts-yellow)';
             pinBtn.title = 'Unpin column';
             th.classList.add('pinned-column');
         } else {
             pinBtn.classList.remove('active');
-            pinBtn.style.color = '';
             pinBtn.title = 'Pin column';
             th.classList.remove('pinned-column');
         }
@@ -335,24 +308,9 @@ export function createHeaderCellWithFilter(
         }
     };
 
-    const formatBtn = document.createElement('span');
-    formatBtn.className = 'header-btn header-btn-format';
-    formatBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1a.5.5 0 0 1 .5.5V3h3v-.5a.5.5 0 0 1 1 0V3h1.5a.5.5 0 0 1 .5.5v3A3.5 3.5 0 0 1 9.5 13H8v1.5a.5.5 0 0 1-1 0V13H5.5A3.5 3.5 0 0 1 2 6.5v-3a.5.5 0 0 1 .5-.5H4V3.5a.5.5 0 0 1 1 0V3h1.5a.5.5 0 0 1 .5-.5zM3 6.5a2.5 2.5 0 0 1 2.5-2.5h5A2.5 2.5 0 0 1 13 6.5v3a2.5 2.5 0 0 1-2.5 2.5h-5A2.5 2.5 0 0 1 3 9.5v-3z"/></svg>';
-    formatBtn.title = 'Format column';
-    formatBtn.onclick = (e) => {
-        e.stopPropagation();
-        openResultFormattingPanel({
-            scope: 'column',
-            columnId: header.column.id,
-            columnName: header.column.columnDef.header
-        });
-    };
-
     headerContent.appendChild(aggBtn);
-    headerContent.appendChild(groupBtn);
     headerContent.appendChild(filterBtn);
     headerContent.appendChild(pinBtn);
-    headerContent.appendChild(formatBtn);
 
     // Drag and drop handlers
     th.ondragstart = (e) => {

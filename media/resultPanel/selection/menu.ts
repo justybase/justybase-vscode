@@ -33,8 +33,8 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
     menu.style.borderRadius = '4px';
     menu.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
     menu.style.zIndex = '10000';
-    menu.style.minWidth = '200px';
-    menu.style.padding = '4px 0';
+    menu.style.minWidth = '180px';
+    menu.style.padding = '2px 0';
 
     // ─── Column Actions (from clicked cell) ───
     let colId: string | null = null;
@@ -101,7 +101,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const colSep1 = document.createElement('div');
         colSep1.style.height = '1px';
         colSep1.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        colSep1.style.margin = '4px 0';
+        colSep1.style.margin = '2px 0';
         menu.appendChild(colSep1);
 
         // Filter by this value (uses raw value, condition filter format)
@@ -157,7 +157,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const colSep2 = document.createElement('div');
         colSep2.style.height = '1px';
         colSep2.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        colSep2.style.margin = '4px 0';
+        colSep2.style.margin = '2px 0';
         menu.appendChild(colSep2);
 
         // Group by This Column
@@ -185,7 +185,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const colSep3 = document.createElement('div');
         colSep3.style.height = '1px';
         colSep3.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        colSep3.style.margin = '4px 0';
+        colSep3.style.margin = '2px 0';
         menu.appendChild(colSep3);
     }
 
@@ -214,7 +214,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             const sepRow = document.createElement('div');
             sepRow.style.height = '1px';
             sepRow.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-            sepRow.style.margin = '4px 0';
+            sepRow.style.margin = '2px 0';
             menu.appendChild(sepRow);
 
             const rowCount = selectedCells.size > 0 ? new Set(Array.from(selectedCells).map(function (c) { return c.split('-')[0]; })).size : 0;
@@ -235,7 +235,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const rowSep = document.createElement('div');
         rowSep.style.height = '1px';
         rowSep.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        rowSep.style.margin = '4px 0';
+        rowSep.style.margin = '2px 0';
         menu.appendChild(rowSep);
     }
 
@@ -285,7 +285,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const chartSeparator = document.createElement('div');
         chartSeparator.style.height = '1px';
         chartSeparator.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        chartSeparator.style.margin = '4px 0';
+        chartSeparator.style.margin = '2px 0';
         menu.appendChild(chartSeparator);
     }
 
@@ -293,7 +293,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
     const separator1 = document.createElement('div');
     separator1.style.height = '1px';
     separator1.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-    separator1.style.margin = '4px 0';
+    separator1.style.margin = '2px 0';
     menu.appendChild(separator1);
 
     // Export Selection submenu
@@ -320,7 +320,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const separator2 = document.createElement('div');
         separator2.style.height = '1px';
         separator2.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        separator2.style.margin = '4px 0';
+        separator2.style.margin = '2px 0';
         menu.appendChild(separator2);
     }
 
@@ -345,14 +345,15 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
 
     document.body.appendChild(menu);
 
-    // Position menu to stay within viewport
+    // Keep the menu inside the viewport. A menu taller than a small results panel scrolls
+    // instead of being clipped at both edges.
+    menu.style.maxHeight = Math.max(120, window.innerHeight - 16) + 'px';
+    menu.style.overflowY = 'auto';
     const menuRect = menu.getBoundingClientRect();
-    if (menuRect.right > window.innerWidth) {
-        menu.style.left = (window.innerWidth - menuRect.width - 10) + 'px';
-    }
-    if (menuRect.bottom > window.innerHeight) {
-        menu.style.top = (window.innerHeight - menuRect.height - 10) + 'px';
-    }
+    const fittedLeft = Math.min(x, window.innerWidth - menuRect.width - 8);
+    const fittedTop = Math.min(y, window.innerHeight - menuRect.height - 8);
+    menu.style.left = Math.max(8, fittedLeft) + 'px';
+    menu.style.top = Math.max(8, fittedTop) + 'px';
 
     // Close menu on click outside
     const closeMenu = function (e: MouseEvent) {
