@@ -1,0 +1,28 @@
+# Dependabot configuration.
+#
+# Scope: the GitHub Actions used by .github/workflows/*.yml. The npm workspaces
+# (root, packages/*, extensions/*) are deliberately not managed here so that
+# lockfile updates stay under manual control.
+#
+# Minor and patch bumps land in one grouped PR. Major bumps stay ungrouped and
+# arrive as individual PRs because an action major can carry breaking changes
+# (for example actions/checkout@v7 and actions/download-artifact@v8). Keeping
+# this current is what prevents the "some workflows on v4, others on v7" drift.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
