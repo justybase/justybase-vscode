@@ -104,15 +104,6 @@ function runAction(extension, action, extraArgs) {
     switch (action) {
         case 'install':
             requirePath(extension.packageJson, `${extension.marketplaceName} package manifest`);
-            if (extension.id === 'db2') {
-                run(
-                    npmInvocation.command,
-                    [...npmInvocation.prefixArgs, ...buildNpmRunArgs('install:vscode', extraArgs)],
-                    { cwd: extension.directory }
-                );
-                return;
-            }
-
             run(npmInvocation.command, [...npmInvocation.prefixArgs, 'install', ...extraArgs], { cwd: extension.directory });
             return;
         case 'lint':

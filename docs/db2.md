@@ -15,8 +15,9 @@ The Db2 pack is published with `"preview": true`. Treat it as a **near-full comp
 
 ### Connection and metadata
 
-- Shared connection UI: host/port/database/user, `currentSchema`, connect timeout, `ClientCodepage`, SSL options
-- Native `ibm_db` + bundled clidriver (platform-specific VSIX)
+- Shared connection UI: host/port/database/user, `currentSchema`, connect timeout, SSL options
+- Pure TypeScript DRDA runtime from the pinned `@justybase/db2` package; no native module or ODBC installation
+- Exact numeric results: `BIGINT` is a JavaScript `bigint`; `DECIMAL` and `NUMERIC` are decimal strings
 - Schema explorer: TABLE, VIEW, NICKNAME, ALIAS, PROCEDURE, FUNCTION, plus read-only federated groups
 
 ### SQL editor
@@ -67,17 +68,16 @@ Indexes** remains a separate maintenance command and is not part of the webview.
 | `DB2_LIVE_TEST_USER` | yes | |
 | `DB2_LIVE_TEST_PASSWORD` | yes | |
 | `DB2_LIVE_TEST_CURRENT_SCHEMA` | no | |
-| `DB2_LIVE_TEST_CLIENT_CODEPAGE` / `SECURITY` / … | no | connection options |
+| `DB2_LIVE_TEST_SECURITY` / `DB2_LIVE_TEST_SSL_SERVER_CERTIFICATE` | no | TLS options |
 | `DB2_LIVE_FIXTURE_SCHEMA` | no | default `JBL_LIVE` |
-| `DB2_LIVE_TEST_REQUIRED=false` | no | Soft-skip live suite locally. Default locally: **required** (fail if env/`ibm_db` missing). On GitHub Actions soft-skip when secrets absent (do not set REQUIRED). |
+| `DB2_LIVE_TEST_REQUIRED=false` | no | Soft-skip live suite locally. Default locally: **required** (fail if DB2 env is missing). On GitHub Actions soft-skip when secrets are absent (do not set REQUIRED). |
 
 ## Developer commands
 
 ```bash
 npm run install:db2
-npm run db2:runtime:napi          # shared Node-API runtime
 npm run db2:connect-probe
-npm run test:db2:integration      # dedicated live suite (auto-for-live-tests)
+npm run test:db2:integration      # dedicated live suite
 npm run verify:db2
 DB2_VSCODE_TEST_VERSION=stable npm run test:db2:vscode-runtime
 # Add DB2_VSCODE_RUNTIME_LIVE=true to run SELECT 1 against DB2_LIVE_TEST_*.
@@ -98,17 +98,26 @@ npm run db2:drop-live-fixture
 |-------|----------|
 | Unit | explain parser, tuning advisor, quality rules DB2001–8, streaming cancel mocks, Db2 parser LUW + authoring |
 | Live | `test:db2:integration` — metadata, DDL, completion E2E, DB2xxx + SQL004/SQL025 quality, explain/tuning soft-skip, maintenance, fixture |
-| Manual | F5 Extension Host with Db2 VSIX + `db2:runtime:napi` |
+| Manual | F5 Extension Host with Db2 VSIX; optionally set `DB2_VSCODE_RUNTIME_LIVE=true` for a live smoke query |
+
+## Migration notes (ibm_db runtime → TypeScript driver)
+
+Earlier Db2 packs used the native `ibm_db` module with a bundled IBM CLI driver. The current pack uses the pure TypeScript `@justybase/db2` driver. Behaviour changes that affect users and integrations:
+
+- **No native runtime:** no IBM CLI/ODBC installation, no `DB2CODEPAGE` or `IBM_DB_HOME` setup, and no platform-specific VSIX. The packaged VSIX is portable (about 1 MB).
+- **BIGINT values** are JavaScript `bigint` (exact). Code that expects a JavaScript `number` must convert explicitly.
+- **DECIMAL and NUMERIC values** are decimal strings, so no precision is lost.
+- **`ClientCodepage` option removed.** The DRDA protocol negotiates encodings. Saved connections that still carry the option ignore it. UTF-8 data, including Polish diacritics, round-trips unchanged.
+- **Connection errors** start with `Failed to connect to Db2:` and append `Connection details: database=…, host=…, port=…, user=…`. The password is never included.
 
 ## Packaging note
 
-Root extension ships editor assets; the Db2 VSIX ships `ibm_db` + providers. Install order: core then Db2 pack (see [INTEGRATION_STEPS.md](./INTEGRATION_STEPS.md)).
+Root extension ships editor assets; the Db2 VSIX bundles the pinned `@justybase/db2` driver and Db2 providers. Install order: core then Db2 pack (see [INTEGRATION_STEPS.md](./INTEGRATION_STEPS.md)).
 
-## VS Code native-runtime compatibility
+## VS Code runtime compatibility
 
-The packaged `ibm_db` binding targets **Node-API 8**, so the VSIX is not tied
-to a particular host ABI. Release CI loads the native driver from an Extension
-Host on the minimum supported VS Code (`1.103.2`), current Stable,
-and Insiders. Add `DB2_VSCODE_RUNTIME_LIVE=true` to make the same test perform
-`SELECT 1 FROM SYSIBM.SYSDUMMY1` using `DB2_LIVE_TEST_*`; the compatibility
-gate intentionally validates only native loading.
+The Db2 driver is bundled JavaScript/TypeScript code and does not load a native
+binding. Release CI checks activation on the minimum supported VS Code
+(`1.103.2`), current Stable, and Insiders. Add `DB2_VSCODE_RUNTIME_LIVE=true`
+to run `SELECT 1 FROM SYSIBM.SYSDUMMY1` using `DB2_LIVE_TEST_*` inside the
+Extension Host.

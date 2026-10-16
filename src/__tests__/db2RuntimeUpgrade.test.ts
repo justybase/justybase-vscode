@@ -1,7 +1,6 @@
 import type { DatabaseConnection, DatabaseDataReader, DatabaseDdlKeyInfo } from '../contracts/database';
 import { db2AdvancedFeatures } from '../../extensions/db2/src/db2DdlGenerator';
 import { db2Dialect } from '../../extensions/db2/src/db2Dialect';
-import { buildConnectionString, Db2Connection } from '../../extensions/db2/src/db2Connection';
 import { db2MetadataProvider } from '../../extensions/db2/src/db2SchemaProvider';
 import {
     buildBatchObjectListQuery,
@@ -188,214 +187,9 @@ describe('DB2 runtime upgrade surfaces', () => {
         expect(query).toContain('WITH ROUTINE_SIGNATURES');
     });
 
-	it('adds UTF-8 client codepage (1208) by default for proper Unicode support', () => {
-		const query = buildConnectionString({
-			host: 'db2.example.local',
-			port: 50000,
-			database: 'TESTDB',
-			user: 'db2inst1',
-			password: 'secret'
-		});
-
-		expect(query).toContain('ClientCodepage=1208');
-	});
-
-    it('allows overriding the DB2 client codepage from connection options', () => {
-        const query = buildConnectionString({
-            host: 'db2.example.local',
-            port: 50000,
-            database: 'TESTDB',
-            user: 'db2inst1',
-            password: 'secret',
-            options: {
-                clientCodepage: '819'
-            }
-        });
-
-        expect(query).toContain('ClientCodepage=819');
-    });
-
-	it('uses UTF-8 (1208) for both legacy and explicit client codepage settings', () => {
-		const legacyDefaultQuery = buildConnectionString({
-			host: 'db2.example.local',
-			port: 50000,
-			database: 'TESTDB',
-			user: 'db2inst1',
-			password: 'secret',
-			options: {
-				clientCodepage: '1208'
-			}
-		});
-
-		const explicitUtf8Query = buildConnectionString({
-			host: 'db2.example.local',
-			port: 50000,
-			database: 'TESTDB',
-			user: 'db2inst1',
-			password: 'secret',
-			options: {
-				clientCodepage: '1208',
-				clientCodepageExplicit: true
-			}
-		});
-
-		expect(legacyDefaultQuery).toContain('ClientCodepage=1208');
-		expect(explicitUtf8Query).toContain('ClientCodepage=1208');
-	});
-
-	it('keeps Unicode schema names intact in the DB2 connection string with UTF-8 codepage', () => {
-		const query = buildConnectionString({
-			host: 'db2.example.local',
-			port: 50000,
-			database: 'TESTDB',
-			user: 'db2inst1',
-			password: 'secret',
-			options: {
-				currentSchema: 'ZAŻÓŁĆ'
-			}
-		});
-
-		expect(query).toContain('CURRENTSCHEMA=ZAŻÓŁĆ');
-		expect(query).toContain('ClientCodepage=1208');
-	});
-
-    it('escapes DB2 connection string values using ODBC brace escaping rules', () => {
-        const query = buildConnectionString({
-            host: 'db2.example.local',
-            port: 50000,
-            database: 'TESTDB',
-            user: 'db2=inst1',
-            password: ' pa;ss}word ',
-            options: {
-                currentSchema: 'QA=TEAM'
-            }
-        });
-
-        expect(query).toContain('UID={db2=inst1}');
-        expect(query).toContain('PWD={ pa;ss}}word }');
-        expect(query).toContain('CURRENTSCHEMA={QA=TEAM}');
-    });
-
-    it('keeps DDL queries working when ibm_db result handles expose close() without closeSync()', () => {
-        const close = jest.fn();
-        const connection = new Db2Connection({
-            host: 'db2.example.local',
-            port: 50000,
-            database: 'TESTDB',
-            user: 'db2inst1',
-            password: 'secret'
-        });
-
-        const internal = connection as unknown as {
-            _database: {
-                querySync: (sql: string) => void;
-                queryResultSync: (sql: string) => unknown;
-            };
-        };
-
-        internal._database = {
-            querySync: (_sql: string): void => {
-                return;
-            },
-            queryResultSync: (_sql: string): unknown => ({
-                getColumnMetadataSync: () => [{ SQL_DESC_NAME: 'DDL', SQL_DESC_TYPE_NAME: 'VARCHAR' }],
-                getColumnNamesSync: () => ['DDL'],
-                fetchAllSync: () => [{ DDL: 'CREATE TABLE "DB2INST1"."EM" (ID INT);' }],
-                close
-            })
-        };
-
-        const result = connection.executeSql('SELECT DBMS_METADATA.GET_DDL(\'TABLE\', \'EM\', \'DB2INST1\') AS DDL');
-        expect(result.rows).toEqual([{ DDL: 'CREATE TABLE "DB2INST1"."EM" (ID INT);' }]);
-        expect(close).toHaveBeenCalled();
-    });
-
-    it('surfaces DB2 syntax errors when row-returning execution produces no result handle', () => {
-        const connection = new Db2Connection({
-            host: 'db2.example.local',
-            port: 50000,
-            database: 'TESTDB',
-            user: 'db2inst1',
-            password: 'secret'
-        });
-
-        const internal = connection as unknown as {
-            _database: {
-                querySync: (sql: string) => unknown;
-                queryResultSync: (sql: string) => unknown;
-            };
-        };
-
-        internal._database = {
-            querySync: (_sql: string): unknown => {
-                throw new Error('SQL0104N  An unexpected token "," was found following "1".');
-            },
-            queryResultSync: (_sql: string): unknown => null
-        };
-
-        expect(() => connection.executeSql('SELECT 1,,2 FROM DB2INST1.V_PRODUCTS_CATEGORIES'))
-            .toThrow('SQL0104N');
-    });
-
-    it('falls back to querySync rows when ibm_db does not return a result handle', () => {
-        const connection = new Db2Connection({
-            host: 'db2.example.local',
-            port: 50000,
-            database: 'TESTDB',
-            user: 'db2inst1',
-            password: 'secret'
-        });
-
-        const internal = connection as unknown as {
-            _database: {
-                querySync: (sql: string) => unknown;
-                queryResultSync: (sql: string) => unknown;
-            };
-        };
-
-        internal._database = {
-            querySync: (_sql: string): unknown => [{ TEST_VALUE: 1 }],
-            queryResultSync: (_sql: string): unknown => null
-        };
-
-        expect(connection.executeSql('SELECT 1 AS TEST_VALUE FROM SYSIBM.SYSDUMMY1')).toEqual({
-            columns: [{ name: 'TEST_VALUE', typeName: '' }],
-            rows: [{ TEST_VALUE: 1 }],
-            recordsAffected: -1
-        });
-    });
-
-    it('treats node-ibm_db querySync error payloads as execution errors instead of result rows', () => {
-        const connection = new Db2Connection({
-            host: 'db2.example.local',
-            port: 50000,
-            database: 'TESTDB',
-            user: 'db2inst1',
-            password: 'secret'
-        });
-
-        const internal = connection as unknown as {
-            _database: {
-                querySync: (sql: string) => unknown;
-                queryResultSync: (sql: string) => unknown;
-            };
-        };
-
-        internal._database = {
-            querySync: (_sql: string): unknown =>
-                '[node-ibm_db] Error in ODBCConnection::QuerySync while executing query.\t-104\t' +
-                '[IBM][CLI Driver][DB2/LINUXX8664] SQL0104N  An unexpected token "," was found following "SELECT 1,".  ' +
-                'Expected tokens may include:  "<space>".  SQLSTATE=42601',
-            queryResultSync: (_sql: string): unknown => null
-        };
-
-        expect(() => connection.executeSql('SELECT 1,,2 FROM DB2INST1.V_PRODUCTS_CATEGORIES'))
-            .toThrow('SQL0104N');
-    });
-
     it('enables DB2 procedures in dialect capabilities and connection form', () => {
         expect(db2Dialect.capabilities.supportsProcedures).toBe(true);
-        expect(db2Dialect.connectionForm?.fields.some(field => field.key === 'clientCodepage')).toBe(true);
+        expect(db2Dialect.connectionForm?.fields.some(field => field.key === 'clientCodepage')).toBe(false);
     });
 
     it('quotes DB2 identifiers only when needed', () => {
@@ -719,7 +513,7 @@ describe('DB2 runtime upgrade surfaces', () => {
             },
             {
                 match: 'FROM SYSCAT.DATAPARTITIONEXPRESSION',
-                error: new Error('[node-ibm_db] Error in ODBCConnection::QuerySync while executing query.')
+                error: new Error('Db2 catalog query is unavailable.')
             }
         ]);
 

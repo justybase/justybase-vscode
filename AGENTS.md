@@ -9,6 +9,7 @@ Monorepo for the JustyBase SQL Editor: a VS Code extension for IBM Netezza / Pur
 **External dependencies:**
 
 - `@justybase/netezza-driver` (published npm package)
+- `@justybase/db2` (published npm package, bundled by the Db2 companion extension)
 - `@justybase/spreadsheet-tasks` (published npm package)
 
 ## Repository Layout
@@ -211,7 +212,7 @@ npm run vscode:prepublish  # Clean, build, and generate third-party notices
 npm run package            # Build VSIX
 npm run package:pre        # Build + package
 npm run package:access     # Package one optional extension
-npm run package:db2        # Package Db2 (runtime-specific)
+npm run package:db2        # Package the portable Db2 VSIX
 npm run package:clickhouse # Package ClickHouse
 ```
 

@@ -371,7 +371,7 @@ async function buildLiveDb2SchemaProvider(
 }
 
 const config = db2Harness.config;
-// Local runs are mandatory (fail if DB2_LIVE_TEST_* / ibm_db missing).
+// Local runs are mandatory (fail if DB2_LIVE_TEST_* is missing).
 // GitHub Actions soft-skips when secrets are absent — do not set DB2_LIVE_TEST_REQUIRED there.
 const isCi = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 const requireLive = isCi
@@ -380,7 +380,7 @@ const requireLive = isCi
 if (requireLive && !config) {
 	throw new Error(
 		'Db2 live integration requires DB2_LIVE_TEST_HOST, DB2_LIVE_TEST_DATABASE, '
-			+ 'DB2_LIVE_TEST_USER and DB2_LIVE_TEST_PASSWORD (and a working ibm_db Node runtime). '
+			+ 'DB2_LIVE_TEST_USER and DB2_LIVE_TEST_PASSWORD. '
 			+ 'Set DB2_LIVE_TEST_REQUIRED=false to soft-skip locally.',
 	);
 }
@@ -443,6 +443,21 @@ describeIfConfigured('db2 integration', () => {
 		showInformationMessage.mockReset();
 		showWarningMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
 		showInformationMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
+	});
+
+	it('preserves exact BIGINT, DECIMAL, and Unicode values', async () => {
+		const rows = await readRows(connection, `
+			SELECT
+				CAST('9223372036854775807' AS BIGINT) AS EXACT_BIGINT,
+				CAST('1234567890123.123456789012345678' AS DECIMAL(31, 18)) AS EXACT_DECIMAL,
+				CAST('Zażółć gęślą jaźń' AS VARCHAR(64)) AS POLISH_TEXT
+			FROM SYSIBM.SYSDUMMY1 WITH UR
+		`);
+
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.EXACT_BIGINT).toBe(9223372036854775807n);
+		expect(rows[0]?.EXACT_DECIMAL).toBe('1234567890123.123456789012345678');
+		expect(rows[0]?.POLISH_TEXT).toBe('Zażółć gęślą jaźń');
 	});
 
 	it('cancels a large streaming result and keeps the Db2 session usable', async () => {

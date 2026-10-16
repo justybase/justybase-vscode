@@ -18,8 +18,9 @@ Connect to a Db2 LUW database, browse `SYSCAT` metadata, write SQL, execute it, 
 
 ## What you get
 
-- Db2 LUW connection profile with `currentSchema`, SSL, connect timeout, and UTF-8 `ClientCodepage=1208` by default.
-- Native `ibm_db` runtime with streaming results and cancellation.
+- Db2 LUW connection profile with `currentSchema`, SSL, and connect timeout. Character encoding follows the DRDA protocol.
+- Pure TypeScript `@justybase/db2` runtime with asynchronous streaming and cancellation.
+- Exact numeric results: `BIGINT` is returned as `bigint`, and `DECIMAL` as a decimal string.
 - Metadata for tables, views, nicknames, aliases, procedures, functions, indexes, constraints, partitions, and comments.
 - Db2-aware completion, hover information, semantic highlighting, snippets, and parser-backed diagnostics.
 - Quality rules **DB2001–DB2008** for common Db2 SQL problems.
@@ -65,13 +66,13 @@ The saved password is handled by VS Code Secret Storage. Do not put Db2 credenti
 
 ## Platform support
 
-The published VSIX contains the platform-specific `ibm_db` / clidriver runtime:
+The VSIX uses the same pure TypeScript runtime across supported targets:
 
 - Windows x64
 - Linux x64
 - macOS Apple Silicon
 
-Install the VSIX matching the operating system and architecture running VS Code. No separate Netezza extension or ODBC registration is needed.
+No platform-specific Db2 binary or ODBC registration is needed. No separate Netezza extension is required.
 
 ## Development and verification
 
@@ -79,7 +80,6 @@ From the repository root:
 
 ```bash
 npm run install:db2
-npm run db2:runtime:napi
 npm run test:db2:integration
 npm run verify:db2
 ```
@@ -90,7 +90,7 @@ Live database tests use `DB2_LIVE_TEST_*` variables. Optional VS Code Extension 
 
 | Area | Db2 LUW support |
 | --- | --- |
-| Connections and cancellation | Native `ibm_db`, streaming |
+| Connections and cancellation | TypeScript DRDA driver, async streaming |
 | Schema browser | Tables, views, nicknames, aliases, routines, keys, partitions |
 | SQL intelligence | Db2 parser, completion, snippets, semantic tokens, DB2001–DB2008 |
 | Explain and tuning | Explain graph and tuning advisor |
