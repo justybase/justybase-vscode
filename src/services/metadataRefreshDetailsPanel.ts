@@ -102,6 +102,7 @@ export function getMetadataRefreshDetailsHtml(): string {
   .repeat-refresh { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 3px; padding: 4px 9px; cursor: pointer; margin-top: 8px; }
   .repeat-refresh:hover { background: var(--vscode-button-hoverBackground); }
   .snapshot { color: var(--vscode-descriptionForeground); font-size: .9em; margin: 8px 0; }
+  .skip-note { color: var(--vscode-descriptionForeground); background: var(--vscode-textCodeBlock-background); border-left: 3px solid var(--vscode-editorWarning-foreground); padding: 6px 9px; margin: 8px 0; font-size: .9em; }
   .snapshot.ok { color: var(--vscode-testing-iconPassed); }
   .snapshot.degraded { color: var(--vscode-editorWarning-foreground); }
   .snapshot.incomplete { color: var(--vscode-editorWarning-foreground); }
@@ -112,6 +113,7 @@ export function getMetadataRefreshDetailsHtml(): string {
 <h1>Schema refresh diagnostics</h1>
 <p class="hint">Executed, running, queued and planned catalog SQL. Planned statements may be skipped when a cache layer is already valid or when no external table exists.</p>
 <div class="controls">
+  <label>Connection <select id="connection-filter"><option value="all">All connections</option></select></label>
   <label>Status <select id="status-filter"><option value="all">All</option><option value="running">Running</option><option value="failed">Failed</option><option value="timeout">Timeout</option><option value="slow">Slow (&gt; 5 s)</option><option value="completed">Completed</option><option value="queued">Queued</option><option value="planned">Planned</option><option value="skipped">Skipped</option></select></label>
   <label>Sort <select id="sort-order"><option value="duration-desc">Execution time (longest first)</option><option value="started-desc">Started most recently</option><option value="queue-desc">Queue wait (longest first)</option><option value="duration-asc">Execution time (shortest first)</option></select></label>
 </div>
@@ -120,12 +122,19 @@ export function getMetadataRefreshDetailsHtml(): string {
   const content = document.getElementById('content');
   const vscode = acquireVsCodeApi();
   const statusFilter = document.getElementById('status-filter');
+  const connectionFilter = document.getElementById('connection-filter');
   const sortOrder = document.getElementById('sort-order');
   const slowQueryThresholdMs = 5000;
   let currentDetails = [];
+  let renderedConnectionSignature = null;
   const labels = {
     running: 'Running now', queued: 'Queued', planned: 'Planned next',
     completed: 'Executed', failed: 'Failed', skipped: 'Skipped'
+  };
+  const skipLabels = {
+    fresh: 'Skipped: cached metadata is still fresh, so no catalog SQL ran for this connection in this session.',
+    suppressed: 'Skipped: automatic refresh is suppressed after repeated failures for this connection.',
+    locked: 'Skipped: another VS Code window holds the metadata refresh lock for this connection.'
   };
   const stateLabel = {
     running: 'running', queued: 'queued', planned: 'planned',
@@ -237,11 +246,17 @@ export function getMetadataRefreshDetailsHtml(): string {
     return '<div class="stats">' + values.map(value => '<div class="stat"><span class="stat-label">' + value[0] + '</span><span class="stat-value">' + escapeHtml(value[1]) + '</span></div>').join('') + '</div>';
   };
   const render = (details) => {
+    syncConnectionFilter(details);
     if (!details || details.length === 0) {
       content.innerHTML = '<p class="empty">No schema refresh has started in this VS Code session.</p>';
       return;
     }
-    content.innerHTML = details.map(refresh => {
+    const visible = getVisibleConnections(details);
+    if (!visible.length) {
+      content.innerHTML = '<p class="empty">No schema refresh details are tracked for the selected connection.</p>';
+      return;
+    }
+    content.innerHTML = visible.map(refresh => {
       const allQueries = [...refresh.queries];
       const queries = getFilteredSortedQueries(allQueries);
       return '<section class="refresh">'
@@ -249,8 +264,11 @@ export function getMetadataRefreshDetailsHtml(): string {
         + '<span class="progress">' + escapeHtml(refresh.percent) + '%</span>'
         + '<span class="meta">' + escapeHtml(refresh.stage) + ' · updated ' + escapeHtml(formatTime(refresh.updatedAt)) + '</span>'
         + '<span class="message">' + escapeHtml(refresh.message) + '</span></div>'
+        + (refresh.skipReason
+          ? '<div class="skip-note">' + escapeHtml(skipLabels[refresh.skipReason] || refresh.message) + '</div>'
+          : '')
         + '<button class="repeat-refresh" type="button" data-repeat-full-refresh="' + escapeHtml(refresh.connectionName) + '">Repeat full metadata refresh</button>'
-        + renderStats(refresh, allQueries)
+        + (refresh.skipReason ? '' : renderStats(refresh, allQueries))
         + renderSnapshot(refresh.snapshot)
         + renderGroup(queries, 'running')
         + renderGroup(queries, 'queued')
@@ -260,6 +278,21 @@ export function getMetadataRefreshDetailsHtml(): string {
         + renderGroup(queries, 'skipped')
         + '</section>';
     }).join('');
+  };
+  const syncConnectionFilter = (details) => {
+    const names = details.map(refresh => refresh.connectionName);
+    const signature = names.join(' ');
+    if (signature === renderedConnectionSignature) return;
+    renderedConnectionSignature = signature;
+    connectionFilter.innerHTML = '<option value="all">All connections</option>'
+      + names.map(name => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join('');
+    if (names.indexOf(connectionFilter.value) === -1) connectionFilter.value = 'all';
+  };
+  const getVisibleConnections = (details) => {
+    const selected = connectionFilter.value;
+    return selected && selected !== 'all'
+      ? details.filter(refresh => refresh.connectionName === selected)
+      : details;
   };
   const mergeRefreshDetails = (incomingDetails) => {
     const latestByConnection = new Map(currentDetails.map(detail => [detail.connectionName, detail]));
@@ -273,6 +306,7 @@ export function getMetadataRefreshDetailsHtml(): string {
     return [...latestByConnection.values()];
   };
   statusFilter.addEventListener('change', () => render(currentDetails));
+  connectionFilter.addEventListener('change', () => render(currentDetails));
   sortOrder.addEventListener('change', () => render(currentDetails));
   content.addEventListener('click', event => {
     const target = event.target;

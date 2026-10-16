@@ -13,6 +13,7 @@ import { CachePrefetcher, DisposableQueryRunnerRawFn, QueryRunnerRawFn, PREFETCH
 import type {
   MetadataPrefetchProgress,
   MetadataPrefetchRefreshDetails,
+  MetadataPrefetchSkipReason,
 } from '../prefetch';
 import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
 import { searchMetadataIndex, type SearchIndexOptions } from '../searchIndex';
@@ -1719,6 +1720,24 @@ export class MetadataCache implements MetadataPrefetchTarget {
       runQueryFn,
       options,
     );
+  }
+
+  /**
+   * Publish a diagnostics card for a connection that never ran catalog SQL in
+   * this session (fresh cache, suppressed circuit, lock held elsewhere).
+   *
+   * Callers that short-circuit on `isConnectionPrefetchFresh` would otherwise
+   * leave the Schema Refresh Details panel with a card for the first
+   * connection only.
+   */
+  recordConnectionPrefetchSkipped(
+    connectionName: string,
+    reason: MetadataPrefetchSkipReason,
+  ): void {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return;
+    }
+    this.prefetcher.recordConnectionPrefetchSkipped(connectionName, reason);
   }
 
   triggerFullColumnPrefetch(

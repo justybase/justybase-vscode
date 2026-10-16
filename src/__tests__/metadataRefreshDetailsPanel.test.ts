@@ -82,6 +82,7 @@ describe('MetadataRefreshDetailsPanel', () => {
 
         const elements = new Map<string, { value: string; innerHTML: string; addEventListener: jest.Mock }>([
             ['content', { value: '', innerHTML: '', addEventListener: jest.fn() }],
+            ['connection-filter', { value: 'all', innerHTML: '<option value="all">All connections</option>', addEventListener: jest.fn() }],
             ['status-filter', { value: 'all', innerHTML: '', addEventListener: jest.fn() }],
             ['sort-order', { value: 'duration-desc', innerHTML: '', addEventListener: jest.fn() }],
         ]);

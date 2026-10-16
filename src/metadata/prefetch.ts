@@ -104,6 +104,7 @@ interface ActiveRefreshDetails {
     nextQueryId: number;
     queries: Map<string, MetadataPrefetchQueryActivity>;
     snapshot?: MetadataPrefetchSnapshotStatus;
+    skipReason?: MetadataPrefetchSkipReason;
 }
 
 interface NetezzaColumnsWithRelationships {
@@ -228,6 +229,22 @@ export type MetadataPrefetchProgressStage =
     | 'complete'
     | 'error';
 
+/**
+ * Why a connection reached the prefetch gate without running any catalog SQL.
+ * Recorded so the Schema Refresh Details panel can still show the connection
+ * instead of silently omitting it.
+ */
+export type MetadataPrefetchSkipReason =
+    | 'fresh'
+    | 'suppressed'
+    | 'locked';
+
+const METADATA_PREFETCH_SKIP_MESSAGES: Record<MetadataPrefetchSkipReason, string> = {
+    fresh: 'Metadata is up to date — no full refresh ran for this connection in this session.',
+    suppressed: 'Automatic refresh is suppressed after repeated failures. Use Repeat full metadata refresh to run it once.',
+    locked: 'Metadata refresh is running in another VS Code window.',
+};
+
 export interface MetadataPrefetchProgress {
     connectionName: string;
     /** Identifies one full refresh so UI progress never mixes two refreshes. */
@@ -299,6 +316,11 @@ export interface MetadataPrefetchRefreshDetails {
     longestSqlQueryId?: string;
     queries: readonly MetadataPrefetchQueryActivity[];
     snapshot?: MetadataPrefetchSnapshotStatus;
+    /**
+     * Set when the connection reached the refresh gate without running catalog
+     * SQL, so the diagnostics panel can still show a card for it.
+     */
+    skipReason?: MetadataPrefetchSkipReason;
 }
 
 export type PrefetchRefreshDetailsReporter = (details: MetadataPrefetchRefreshDetails) => void;
@@ -408,7 +430,63 @@ export class CachePrefetcher {
                     missingColumnKeys: [...details.snapshot.missingColumnKeys],
                 }
                 : undefined,
+            skipReason: details.skipReason,
         });
+    }
+
+    /**
+     * Record that a connection passed the prefetch gate without running any
+     * catalog SQL (fresh cache, suppressed retry circuit, or a lock held by
+     * another window).
+     *
+     * The panel keys cards by `connectionName`, so without this a second
+     * connection served from a fresh cache never produces a card and the panel
+     * appears to only ever show the first connection.
+     *
+     * A real refresh always wins: once a record without `skipReason` exists it
+     * is never replaced by a no-op card, and repeated identical skip records
+     * are not republished.
+     */
+    recordConnectionPrefetchSkipped(
+        connectionName: string,
+        reason: MetadataPrefetchSkipReason,
+    ): void {
+        const existing = this.refreshDetailsByConnection.get(connectionName);
+        if (existing !== undefined) {
+            if (existing.skipReason === undefined) {
+                // A real refresh record must never be replaced by a no-op card.
+                return;
+            }
+            if (existing.skipReason === reason) {
+                return;
+            }
+        }
+
+        const now = Date.now();
+        // `completedAt` stays undefined on purpose: no refresh reached a
+        // terminal state, and consumers key off `completedAt` to invalidate
+        // cached work (for example the database analysis index).
+        const details: ActiveRefreshDetails = existing ?? {
+            connectionName,
+            refreshId: `${connectionName}:skip:${++this.refreshSequence}`,
+            stage: 'complete',
+            percent: 100,
+            message: METADATA_PREFETCH_SKIP_MESSAGES[reason],
+            startedAt: now,
+            updatedAt: now,
+            revision: 0,
+            longestSqlDurationMs: 0,
+            nextQueryId: 0,
+            queries: new Map<string, MetadataPrefetchQueryActivity>(),
+        };
+        details.skipReason = reason;
+        details.stage = 'complete';
+        details.percent = 100;
+        details.message = METADATA_PREFETCH_SKIP_MESSAGES[reason];
+        details.startedAt = now;
+        details.updatedAt = now;
+        this.refreshDetailsByConnection.set(connectionName, details);
+        this.publishRefreshDetails(details);
     }
 
     private updateLongestSqlDuration(
@@ -1673,6 +1751,7 @@ export class CachePrefetcher {
         }
 
         if (!this.shouldStartConnectionPrefetch(connectionName, options)) {
+            this.recordConnectionPrefetchSkipped(connectionName, 'suppressed');
             return;
         }
 
@@ -1681,6 +1760,7 @@ export class CachePrefetcher {
             // still available. Checking only for a table layer is insufficient:
             // a partial checkpoint recovery can retain tables while a column
             // layer is missing, and that refresh must not be silently skipped.
+            this.recordConnectionPrefetchSkipped(connectionName, 'fresh');
             return;
         }
 
@@ -1713,6 +1793,7 @@ export class CachePrefetcher {
         }
         if (!prefetchLease) {
             this.connectionPrefetchInProgress.delete(connectionName);
+            this.recordConnectionPrefetchSkipped(connectionName, 'locked');
             return;
         }
 
