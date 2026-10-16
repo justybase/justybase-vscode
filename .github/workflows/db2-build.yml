@@ -7,95 +7,47 @@ permissions:
   contents: read
 
 jobs:
+  # The Db2 runtime is pure TypeScript and is bundled into extensions/db2/dist/extension.js,
+  # so a single VSIX is valid on every platform. Do not reintroduce an OS matrix here:
+  # extensions/db2/scripts/verify-vsix.js fails the package step if a native binary or a
+  # duplicate @justybase/db2 copy ends up in the archive.
   build-db2:
-    name: Build DB2 (${{ matrix.platform }}-${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-2022
-            platform: win32
-            arch: x64
-            expected_driver: node_modules/ibm_db/installer/clidriver/bin/db2cli64.dll
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.so
-          - os: macos-14
-            platform: darwin
-            arch: arm64
-            expected_driver: node_modules/ibm_db/installer/clidriver/lib/libdb2.dylib
+    name: Build portable Db2 VSIX
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/db2/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
 
-      - name: Install DB2 extension dependencies
-        working-directory: extensions/db2
-        run: npm ci
+      - name: Build shared workspace packages
+        run: npm run build:designer-core && npm run build:shared-workspaces
 
-      - name: Build ibm_db as a stable Node-API runtime
-        working-directory: extensions/db2
-        run: node scripts/rebuild-napi.js
-        env:
-          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+      - name: Install Db2 extension dependencies
+        run: npm run install:db2
 
-      - name: Verify ibm_db native runtime
-        working-directory: extensions/db2
-        run: node scripts/verify-napi-runtime.js
+      - name: Check types and build Db2 extension
+        run: npm run check-types:db2 && npm run build:db2
 
-      - name: Type check DB2 extension
-        run: npm run check-types:db2
+      - name: Package and verify Db2 VSIX
+        run: npm --prefix extensions/db2 run package -- --out justybaselite-db2.vsix
 
-      - name: Build DB2 extension
-        run: npm run build:db2
-
-      - name: Package DB2 VSIX
-        working-directory: extensions/db2
-        run: npm run package -- --out justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
-
-      - name: Verify packaged runtime files
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          import zipfile
-          vsix_path = 'extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix'
-          expected_driver = '${{ matrix.expected_driver }}'
-          with zipfile.ZipFile(vsix_path, 'r') as z:
-              names = z.namelist()
-              has_binding = any('node_modules/ibm_db/build/Release/odbc_bindings.node' in name for name in names)
-              has_driver = any(expected_driver in name for name in names)
-              marker_name = next((name for name in names if name.endswith('node_modules/ibm_db/build/Release/.justybase-napi-runtime.json')), None)
-              if not has_binding:
-                  raise SystemExit('Missing odbc_bindings.node in packaged VSIX')
-              if not has_driver:
-                  raise SystemExit(f'Missing expected platform driver file in VSIX: {expected_driver}')
-              if not marker_name:
-                  raise SystemExit('Missing N-API runtime marker in packaged VSIX')
-              marker = json.loads(z.read(marker_name))
-              if marker.get('runtime') != 'napi' or marker.get('napiVersion') != 8:
-                  raise SystemExit(f'Unexpected N-API runtime marker: {marker}')
-              if marker.get('platform') != '${{ matrix.platform }}' or marker.get('arch') != '${{ matrix.arch }}':
-                  raise SystemExit(f'Packaged runtime marker targets the wrong platform: {marker}')
-          print('VSIX runtime asset verification passed')
-          PY
-
-      - name: Upload DB2 VSIX artifact
-        uses: actions/upload-artifact@v5
+      - name: Upload Db2 VSIX artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}
-          path: extensions/db2/justybaselite-db2-${{ matrix.platform }}-${{ matrix.arch }}.vsix
+          name: justybaselite-db2
+          path: extensions/db2/justybaselite-db2.vsix
           retention-days: 1
 
   verify-vscode-runtime:
@@ -108,10 +60,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -122,17 +74,16 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: Install DB2 extension dependencies
-        working-directory: extensions/db2
-        run: npm ci
+      - name: Build shared workspace packages
+        run: npm run build:designer-core && npm run build:shared-workspaces
 
-      - name: Build and verify N-API runtime
-        working-directory: extensions/db2
-        run: node scripts/rebuild-napi.js && node scripts/verify-napi-runtime.js
-        env:
-          IBM_DB_HOME: ${{ github.workspace }}/extensions/db2/node_modules/ibm_db/installer/clidriver
+      - name: Install Db2 extension dependencies
+        run: npm run install:db2
 
-      - name: Run Extension Host native-runtime smoke test
+      - name: Build Db2 extension
+        run: npm run check-types:db2 && npm run build:db2
+
+      - name: Run Extension Host driver smoke test
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:db2:vscode-runtime
         env:
           DB2_VSCODE_TEST_VERSION: ${{ matrix.vscode }}
