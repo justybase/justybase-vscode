@@ -1,6 +1,6 @@
 ---
 name: multidialect-conformance
-description: Status and rules of the multidialect SQL conformance program for justybase-vscode, a consumer of the pinned JustyBase.SqlConformance snapshot. Use when changing parser or linter behaviour covered by the shared corpus, regenerating conformance fixtures, or deciding what is safe to commit.
+description: Status and rules of the multidialect SQL conformance program for justybase-vscode, a local-only consumer of the JustyBase.SqlConformance corpus. Use when changing parser or linter behaviour covered by the shared corpus or running the local conformance tests.
 ---
 
 # Multidialect conformance: justybase-vscode
@@ -11,21 +11,39 @@ file is a working summary and may lag behind it.
 
 ## Role
 
-The extension consumes a pinned snapshot of the shared corpus in
-`src/__tests__/sqlParser/fixtures/sqlConformance/`.
+SQL conformance tests are optional local developer tests. This repository does
+not vendor the corpus and standard CI never uses it. Conformance tests read the
+sibling checkout directly via `JUSTYBASE_SQL_CONFORMANCE_PATH`:
 
-- Regenerate: `npm run conformance:sync`. Check: `npm run conformance:check`.
-- Do not edit files under `fixtures/sqlConformance/` by hand.
-- A snapshot must come from a committed corpus revision with `corpusDirty: false`.
+```bash
+cd justybase-vscode
+export JUSTYBASE_SQL_CONFORMANCE_PATH="$(realpath ../JustyBase.SqlConformance)"
+npm run test:conformance
+npm run test:postgresql:conformance
+```
+
+- `npm run test:conformance` runs `jest.conformance.config.js` (shared live
+  baseline + PostgreSQL parser/editor contracts). The config self-limits via
+  `testMatch`, so it cannot pick up regular unit tests.
+- The same tests are excluded from the default Jest configs
+  (`jest.config.js`, `jest.fast.config.js`, `jest.validate.config.js`), so
+  `npm test`, `npm run test:coverage` and `npm run verify:pr` work without the
+  corpus.
+- A missing `JUSTYBASE_SQL_CONFORMANCE_PATH` on an explicit conformance run is
+  a hard error, never a silent skip.
 
 ## Current state
 
-- The pinned snapshot is `feac362`, `corpusDirty: false`, 2471 cases.
-- Commits on `origin/master`: `2f16a00f` (Netezza ISNULL builtin),
-  `df81ecca` (legacy PostgreSQL test renders `{{cf}}`), `c6d85f3d` (dialect
-  parser alignment), `1246d1ca` (snapshot consumer tests and sync scripts).
-- Last gate: `npm run verify:pr` exited 0 on the pinned snapshot before the
-  parser commits were split out.
+- No committed corpus snapshot. Former `feac362` snapshot, sync scripts
+  (`conformance:sync`, `conformance:check`, `conformance:postgresql:sync`,
+  `conformance:postgresql:check`) and snapshot hash verification are removed.
+- `postgresqlVersion.test.ts` keeps hand-maintained regression SQL and runs in
+  standard CI. `postgresqlParser.test.ts` keeps the scanner/splitter and parser
+  construction-budget checks.
+- The transactional live probe
+  (`src/__tests__/integration/postgresqlConformance.live.integration.test.ts`,
+  `npm run test:postgresql:conformance:live`) loads cases from the env corpus
+  and is not part of any CI workflow.
 
 ## Rules
 
@@ -35,14 +53,17 @@ The extension consumes a pinned snapshot of the shared corpus in
 - Live checks read environment variables only. `POSTGRES_LIVE_TEST_*` is an
   alias for `PG_LIVE_TEST_*`, set in `~/.bashrc`; the PostgreSQL dev host is
   `192.168.0.61`.
-- Do not commit fixtures that were not regenerated from a clean corpus commit.
+- Do not commit corpus cases or regenerated fixtures into this repository.
 - Commits pass through a `pre-commit` hook that builds the workspace, so a
   commit can take several minutes.
 
 ## Related projects
 
 - `JustyBase.SqlConformance`: the corpus owner and the source of truth.
-- `JustyBase.NetezzaSql` (C#) and `justybase_rust_tauri` (Rust): consumers of
-  the same pinned-snapshot model.
+- `JustyBase.NetezzaSql` (C#): local-only consumer of the same corpus
+  (`dotnet test --filter "Category=SqlConformance"` with
+  `JUSTYBASE_SQL_CONFORMANCE_PATH` set).
+- `justybase_rust_tauri` (Rust): still pins a snapshot under
+  `crates/app-core/tests/fixtures/sql-conformance/` (out of scope here).
 - `justybase` (C# application): routes Oracle, PostgreSQL and MySQL to the
   Netezza profile. This program does not change that routing.

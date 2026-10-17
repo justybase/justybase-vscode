@@ -1,6 +1,15 @@
 jest.unmock('chevrotain');
 import { getPostgresqlVersionDiagnostics } from '../../dialects/postgresql/versionDiagnostics';
-import cases from './fixtures/postgresqlConformance.json';
+
+// Hand-maintained regression SQL for server-version diagnostics. This test is
+// independent of the shared SQL conformance corpus and runs in standard CI.
+const cases = [
+  { id: 'postgresql.parser.json-table.001', sql: 'SELECT * FROM JSON_TABLE(\'[{"id":1}]\', \'$[*]\' COLUMNS(id integer PATH \'$.id\')) AS jt' },
+  { id: 'postgresql.parser.merge-returning.001', sql: 'MERGE INTO items i USING other o ON i.id=o.id WHEN MATCHED THEN DELETE RETURNING i.id' },
+  { id: 'postgresql.parser.merge-by-source.001', sql: 'MERGE INTO items i USING other o ON i.id=o.id WHEN NOT MATCHED BY SOURCE THEN DELETE' },
+  { id: 'postgresql.parser.returning-old-new.001', sql: 'UPDATE items SET id=1 RETURNING WITH (OLD AS o, NEW AS n) o.id, n.id' },
+  { id: 'postgresql.parser.virtual.001', sql: 'CREATE TABLE t(id integer, doubled integer GENERATED ALWAYS AS (id * 2) VIRTUAL)' },
+];
 
 describe('PostgreSQL server-version diagnostics', () => {
   it.each([

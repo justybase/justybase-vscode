@@ -1,1 +1,0 @@
-{"formatVersion":1,"dialect":"netezza","name":"partial","databases":[{"name":"JUST_DATA","schemas":[{"name":"SALES","tables":[{"name":"CUSTOMERS","columns":[{"name":"CUSTOMER_ID","type":"INTEGER"},{"name":"CUSTOMER_NAME","type":"VARCHAR(120)"}]},{"name":"EMPTY_META","columns":[]}]}]}]}

@@ -1,12 +1,15 @@
 jest.unmock('chevrotain');
 
-import { createHash } from 'node:crypto';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CompletionTriggerKind } from 'vscode-languageserver/node';
-import editors from './fixtures/postgresqlEditorConformance.json';
-import parsers from './fixtures/postgresqlConformance.json';
-import fixtures from './fixtures/postgresqlMetadataFixtures.json';
-import provenance from './fixtures/postgresqlConformanceProvenance.json';
+import {
+    assertConformanceCasesSane,
+    loadSqlConformanceCases,
+    loadSqlConformanceMetadataFixture,
+    resolveSqlConformanceRoot,
+    selectPostgresqlCases,
+    type SqlConformanceMetadataFixture,
+} from './sqlConformanceCorpus';
 import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
 import { MetadataBridge } from '../../server/metadataBridge';
 import { provideHover } from '../../server/hoverEngine';
@@ -25,7 +28,7 @@ interface EditorCase {
   sql: string;
   contract: string;
   cursorMarker?: string;
-  metadataFixture?: keyof typeof fixtures;
+  metadataFixture?: string;
   expect: {
     statementCount?: number; statementTypes?: string[];
     contains?: { label: string }[] | string; containsSignature?: string; activeParameter?: number;
@@ -33,7 +36,15 @@ interface EditorCase {
     diagnostics?: { containsCodes?: string[]; notContainsCodes?: string[] };
   };
 }
-const fixture = fixtures['postgresql/authoring'];
+
+// Local-only PostgreSQL conformance: reads the sibling JustyBase.SqlConformance
+// checkout via JUSTYBASE_SQL_CONFORMANCE_PATH. Never uses committed fixtures.
+const corpusRoot = resolveSqlConformanceRoot();
+const postgresqlCases = selectPostgresqlCases(loadSqlConformanceCases(corpusRoot));
+const editors = postgresqlCases.filter(testCase => testCase.contract !== 'parser') as unknown as EditorCase[];
+const getFixture = (id: string): SqlConformanceMetadataFixture =>
+  loadSqlConformanceMetadataFixture(corpusRoot, id);
+const fixture = getFixture('postgresql/authoring');
 const database = fixture.databases[0];
 const schema = database.schemas[0];
 const table = (name: string) => schema.tables.find(item => item.name === name);
@@ -70,12 +81,12 @@ function bridge(): MetadataBridge {
   });
 }
 
-describe('PostgreSQL canonical editor contracts (offline)', () => {
-  it('locks the canonical IDs and exported content hash', () => {
-    expect(createHash('sha256').update(JSON.stringify({ parsers, editors, fixtures })).digest('hex')).toBe(provenance.contentHash);
-    expect(new Set([...parsers, ...editors].map(item => item.id)).size).toBe(provenance.caseCount);
+describe('PostgreSQL canonical editor contracts (local conformance)', () => {
+  it('loads a non-empty corpus with unique case IDs', () => {
+    assertConformanceCasesSane(postgresqlCases);
+    expect(editors.length).toBeGreaterThan(0);
   });
-  it.each(editors as EditorCase[])('$id', async testCase => {
+  it.each(editors)('$id', async testCase => {
     const cursor = testCase.cursorMarker ? testCase.sql.indexOf(testCase.cursorMarker) : testCase.sql.length;
     const sql = testCase.cursorMarker ? testCase.sql.replace(testCase.cursorMarker, '') : testCase.sql;
     const document = TextDocument.create('file:///postgresql-contract.sql', 'sql', 1, sql);
@@ -99,7 +110,7 @@ describe('PostgreSQL canonical editor contracts (offline)', () => {
         break;
       }
       case 'diagnostics': {
-        const executionContext = fixtures[testCase.metadataFixture ?? 'postgresql/authoring'].executionContext;
+        const executionContext = getFixture(testCase.metadataFixture ?? 'postgresql/authoring').executionContext;
         const result = new SqlValidator(schemaProvider, postgresqlSqlAuthoring.validation, executionContext).validate(sql);
         const codes = [...result.errors, ...result.warnings].map(issue => issue.code);
         for (const code of testCase.expect.diagnostics?.containsCodes ?? []) expect(codes).toContain(code);
