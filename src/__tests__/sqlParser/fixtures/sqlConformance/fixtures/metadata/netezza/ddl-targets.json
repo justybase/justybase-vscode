@@ -1,0 +1,38 @@
+{
+  "formatVersion": 1,
+  "dialect": "netezza",
+  "name": "ddl-targets",
+  "databases": [
+    {
+      "name": "JUST_DATA",
+      "schemas": [
+        {
+          "name": "ADMIN",
+          "tables": [
+            {
+              "name": "DIMDATE",
+              "columns": [
+                {
+                  "name": "DATEKEY",
+                  "type": "INT4"
+                },
+                {
+                  "name": "FULLDATEALTERNATEKEY",
+                  "type": "DATE"
+                },
+                {
+                  "name": "DAYNUMBEROFWEEK",
+                  "type": "INT2"
+                },
+                {
+                  "name": "FRENCHDAYNAMEOFWEEK",
+                  "type": "VARCHAR(10)"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

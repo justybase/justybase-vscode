@@ -1,0 +1,33 @@
+{
+  "formatVersion": 1,
+  "dialect": "netezza",
+  "name": "hover-vscode",
+  "databases": [
+    {
+      "name": "JUST_DATA_2",
+      "schemas": [
+        {
+          "name": "ADMIN",
+          "tables": [
+            {
+              "name": "FACT_SALES_2",
+              "description": "Daily sales facts",
+              "columns": [
+                {
+                  "name": "PRODUCT_ID",
+                  "type": "INTEGER",
+                  "description": "Foreign key to DIMPRODUCT"
+                },
+                {
+                  "name": "SALES_AMOUNT",
+                  "type": "DECIMAL(18,2)",
+                  "description": "Net sales amount"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 jest.unmock('chevrotain');
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -28,7 +28,7 @@ const client = new pg.Client({
   application_name: 'justybase-postgresql-conformance',
 });
 const schema = 'jbp_' + randomUUID().replace(/-/g, '');
-const evidence: { id: string; accepted: boolean; sqlstate?: string; expected: boolean }[] = [];
+const evidence: { id: string; accepted: boolean; sqlstate?: string; expected: boolean; inputHash: string; sqlHash: string; phase: string }[] = [];
 let version: number;
 let connected = false;
 let cleanupVerified = false;
@@ -64,15 +64,24 @@ describe('PostgreSQL server conformance (transactional fixtures)', () => {
   });
 
   it.each(cases)('$id', async testCase => {
+    const fixtureName = 'jb_cf_' + randomUUID().replace(/-/g, '').slice(0, 12);
+    const probe = (testCase as { liveProbe?: { setup: string[] } }).liveProbe;
+    const render = (source: string): string => source.replace(/\{\{cf\}\}/g, fixtureName)
+      .replace(/\bpublic\./g, '"' + schema + '".');
     // Qualify only corpus fixture names; never use an existing public object.
-    let sql = testCase.sql.replace(/\bpublic\./g, '"' + schema + '".');
+    let sql = render(testCase.sql);
     // Planning proves syntax and binding without running unbounded recursive SELECTs.
-    if (/^\s*(SELECT|WITH)\b/i.test(sql)) sql = 'EXPLAIN ' + sql;
+    const phase = /^\s*(SELECT|WITH)\b/i.test(sql) ? 'plan' : 'execute';
+    if (phase === 'plan') sql = 'EXPLAIN ' + sql;
     const expected = testCase.expect.valid && getPostgresqlVersionDiagnostics(testCase.sql, version).length === 0;
     await client.query('SAVEPOINT conformance_case');
     let accepted = false;
     let sqlstate: string | undefined;
+    // Fixture failures must fail the test, never count as syntax rejection.
+    let setupCompleted = false;
     try {
+      for (const statement of probe?.setup ?? []) await client.query(render(statement));
+      setupCompleted = true;
       await client.query(sql, /\$1\b/.test(sql) ? [1] : undefined);
       accepted = true;
     } catch (error) {
@@ -81,7 +90,10 @@ describe('PostgreSQL server conformance (transactional fixtures)', () => {
       await client.query('ROLLBACK TO SAVEPOINT conformance_case');
       await client.query('RELEASE SAVEPOINT conformance_case');
     }
-    evidence.push({ id: testCase.id, accepted, sqlstate, expected });
+    expect(setupCompleted).toBe(true);
+    evidence.push({ id: testCase.id, accepted, sqlstate, expected,
+      inputHash: createHash('sha256').update(testCase.sql).digest('hex'),
+      sqlHash: createHash('sha256').update(sql).digest('hex'), phase });
     // Missing fixtures, privileges, timeouts or connectivity are never syntax evidence.
     if (!accepted) expect(testCase.id === 'postgresql.parser.bad-explain-format.001'
       ? ['22023'] : ['42601', '42P10', '0A000']).toContain(sqlstate);
