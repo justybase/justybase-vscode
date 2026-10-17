@@ -28,6 +28,7 @@ const NETEZZA_BUILTIN_FUNCTION_OVERLAYS = new Set<string>([
     'GET_VIEWDEF',
     'SETSEED',
     'DCEIL',
+    'ISNULL',
     'DFLOOR',
     'FPOW',
     'NUMERIC_SQRT',
