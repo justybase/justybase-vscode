@@ -1112,8 +1112,15 @@ SELECT * FROM ABC;`);
       expectValid("GENERATE STATISTICS ON TESTDB..EMPLOYEES;");
     });
 
-    it("should validate GENERATE EXPRESS STATISTICS FOR TABLE", () => {
-      expectValid("GENERATE EXPRESS STATISTICS FOR TABLE TESTDB..EMPLOYEES;");
+    it("should reject GENERATE EXPRESS STATISTICS FOR TABLE (live Netezza expects ON)", () => {
+      expectErrorCode(
+        "GENERATE EXPRESS STATISTICS FOR TABLE TESTDB..EMPLOYEES;",
+        "NZS008",
+      );
+    });
+
+    it("should reject GENERATE EXPRESS STATISTICS without a target", () => {
+      expectErrorCode("GENERATE EXPRESS STATISTICS;", "NZS008");
     });
 
     it("should validate GENERATE STATISTICS with column list", () => {

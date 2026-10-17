@@ -19,6 +19,8 @@ import type { ValidationError } from "./types";
  * - ALTER TABLE ... DROP <column> and DROP CONSTRAINT require RESTRICT or CASCADE; NZS005.
  * - GRANT/REVOKE ... ON TABLE names the object class, so a relation name there is rejected; PAR003.
  * - Multi-row VALUES is rejected (one INSERT per row); NZS006.
+ * - GENERATE [EXPRESS] STATISTICS accepts only the optional `ON <table>` target;
+ *   `FOR TABLE` is rejected and the deprecated EXPRESS form requires ON; NZS008.
  */
 
 function errorAt(code: string, message: string, token: IToken): ValidationError {
@@ -202,6 +204,35 @@ export function detectNetezzaSyntaxRestrictions(
               "NZS005",
               `ALTER TABLE ... ${what} requires RESTRICT or CASCADE in Netezza.`,
               tokens[dropIndex],
+            ),
+          );
+        }
+      }
+    }
+
+    // GENERATE [EXPRESS] STATISTICS accepts only the optional ON <table> target.
+    // Live Netezza rejects `FOR TABLE` ("found FOR ... expecting ON") and
+    // requires ON for the deprecated EXPRESS form; the bare non-EXPRESS form
+    // covers every table in the current database and is accepted.
+    if (name === "Generate") {
+      let scan = index + 1;
+      let express = false;
+      if (tokenName(tokens[scan]) === "Express") {
+        express = true;
+        scan += 1;
+      }
+      if (tokenName(tokens[scan]) === "Statistics") {
+        scan += 1;
+        const nextName = tokenName(tokens[scan]);
+        const atEnd = nextName === undefined || nextName === "Semicolon";
+        if (nextName !== "On" && !(atEnd && !express)) {
+          errors.push(
+            errorAt(
+              "NZS008",
+              express
+                ? "GENERATE EXPRESS STATISTICS requires ON and a table name in Netezza."
+                : "Netezza does not accept GENERATE STATISTICS FOR TABLE; use ON <table>.",
+              tokens[scan] ?? tokens[index],
             ),
           );
         }
