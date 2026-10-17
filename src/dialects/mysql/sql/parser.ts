@@ -28,6 +28,8 @@ export class MysqlSqlParser extends NetezzaSqlParser {
     return false;
   }
 
+  protected getForeignKeyActions(): readonly string[] { return ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']; }
+
   protected supportsCommentOnColumn(): boolean {
     return false;
   }
@@ -60,7 +62,10 @@ export class MysqlSqlParser extends NetezzaSqlParser {
       this.OR([
         { ALT: () => this.SUBRULE(this.mysqlParenthesizedTail) },
         {
-          GATE: () => this.LA(1).tokenType !== netezzaLexer.LParen,
+          GATE: () => this.LA(1).tokenType !== netezzaLexer.LParen
+            && this.LA(1).tokenType !== netezzaLexer.RParen
+            && this.LA(1).tokenType !== netezzaLexer.Distribute
+            && this.LA(1).tokenType !== netezzaLexer.Organize,
           ALT: () => this.SUBRULE(this.commandTailToken),
         },
       ]);
@@ -68,7 +73,10 @@ export class MysqlSqlParser extends NetezzaSqlParser {
 
     this.RULE("mysqlParenthesizedTail", () => {
       this.CONSUME(netezzaLexer.LParen);
-      this.AT_LEAST_ONE(() => this.SUBRULE(this.commandTailToken));
+      this.MANY({
+        GATE: () => this.LA(1).tokenType !== netezzaLexer.RParen,
+        DEF: () => this.SUBRULE(this.mysqlColumnAttribute),
+      });
       this.CONSUME(netezzaLexer.RParen);
     });
 
@@ -76,7 +84,10 @@ export class MysqlSqlParser extends NetezzaSqlParser {
       this.OR([
         { ALT: () => this.SUBRULE(this.mysqlParenthesizedTail) },
         {
-          GATE: () => this.LA(1).tokenType !== netezzaLexer.LParen,
+          GATE: () => this.LA(1).tokenType !== netezzaLexer.LParen
+            && this.LA(1).tokenType !== netezzaLexer.RParen
+            && this.LA(1).tokenType !== netezzaLexer.Distribute
+            && this.LA(1).tokenType !== netezzaLexer.Organize,
           ALT: () => this.SUBRULE(this.commandTailToken),
         },
       ]);

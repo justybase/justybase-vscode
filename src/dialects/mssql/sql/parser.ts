@@ -88,6 +88,8 @@ export class MsSqlSqlParser extends NetezzaSqlParser {
     return false;
   }
 
+  protected getForeignKeyActions(): readonly string[] { return ['NO ACTION', 'CASCADE', 'SET NULL', 'SET DEFAULT']; }
+
   protected supportsDropIfExistsBeforeTarget(): boolean {
     return true;
   }
@@ -155,6 +157,19 @@ export class MsSqlSqlParser extends NetezzaSqlParser {
   }
 
   protected registerDialectExtensions(): void {
+    this.OVERRIDE_RULE('alterTableAddConstraintAction', () => {
+      this.CONSUME(baseLexer.Add);
+      this.OR([
+        { ALT: () => this.SUBRULE(this.tableConstraintDefinition) },
+        { ALT: () => this.SUBRULE(this.columnDefinition) },
+      ]);
+    });
+    this.OVERRIDE_RULE('alterTableAlterColumnAction', () => {
+      this.CONSUME(baseLexer.Alter);
+      this.CONSUME(baseLexer.Column);
+      this.SUBRULE(this.columnDefinition);
+    });
+
     this.RULE('mssqlTopClause', () => {
 			this.CONSUME(mssqlLexer.MsSqlTop);
 			this.OR([

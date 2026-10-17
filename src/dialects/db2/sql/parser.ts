@@ -87,6 +87,7 @@ const DB2_PROGRAM_TOKENS: TokenType[] = [
  * are preserved as an offset-stable token CST until deeper visitor work lands.
  */
 export class Db2SqlParser extends NetezzaSqlParser {
+	db2ValuesQuery!: AnyRule;
 	db2IsolationClause!: AnyRule;
 	db2OptimizeForClause!: AnyRule;
 	db2ForClause!: AnyRule;
@@ -96,6 +97,14 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	db2ProgramToken!: AnyRule;
 	db2ProcedureUnit!: AnyRule;
 	db2TableResultClause!: AnyRule;
+	db2TableOption!: AnyRule;
+	db2PartitionClause!: AnyRule;
+	db2PartitionKeyList!: AnyRule;
+	db2PartitionNullOrder!: AnyRule;
+	db2PartitionDefinition!: AnyRule;
+	db2PartitionBoundary!: AnyRule;
+	db2PartitionInclusivity!: AnyRule;
+	db2ConstraintAttributes!: AnyRule;
 
 	public constructor() {
 		super(db2Lexer);
@@ -105,9 +114,16 @@ export class Db2SqlParser extends NetezzaSqlParser {
 		return false;
 	}
 
+	protected getAdditionalPrimaryExpressionAlternatives(): OrAlternative[] {
+		return [{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDate) }];
+	}
+
+	protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {
+		return event === 'DELETE' ? ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL'] : [];
+	}
+
 	protected registerCreateTableDialectClauses(): void {
-		// Db2 has no Netezza DISTRIBUTE ON / ORGANIZE ON clauses.
-		// ORGANIZE BY / PARTITION BY / DATA CAPTURE fall through commandTail when present.
+		this.MANY(() => this.SUBRULE(this.db2TableOption));
 	}
 
 	protected registerAlterTableDialectRule(): void {
@@ -141,6 +157,7 @@ export class Db2SqlParser extends NetezzaSqlParser {
 
 	protected getAdditionalStatementAlternatives(): OrAlternative[] {
 		return [
+			{ GATE: () => this.LA(1).tokenType === baseLexer.Values, ALT: () => this.SUBRULE(this.db2ValuesQuery) },
 			{
 				GATE: () => this.startsDb2Procedure(),
 				ALT: () => this.SUBRULE(this.db2ProcedureUnit),
@@ -182,6 +199,154 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	}
 
 	protected registerDialectExtensions(): void {
+		this.RULE('db2ValuesQuery', () => {
+			this.CONSUME(baseLexer.Values);
+			this.AT_LEAST_ONE_SEP({ SEP: baseLexer.Comma, DEF: () => this.SUBRULE(this.expression) });
+		});
+		this.OVERRIDE_RULE('cteDefinition', () => {
+			this.CONSUME(baseLexer.Identifier);
+			this.OPTION(() => this.SUBRULE(this.cteColumnList));
+			this.CONSUME(baseLexer.As);
+			this.CONSUME(baseLexer.LParen);
+			this.OR([
+				{ ALT: () => this.SUBRULE(this.withStatement) },
+				{ ALT: () => this.SUBRULE(this.selectStatement) },
+				{ ALT: () => this.SUBRULE(this.db2ValuesQuery) },
+			]);
+			this.CONSUME(baseLexer.RParen);
+		});
+		this.RULE('db2TableOption', () => {
+			this.OR([
+				{ ALT: () => {
+					this.CONSUME(db2Lexer.Db2OrganizeBy);
+					this.OR1([
+						{ ALT: () => this.CONSUME(baseLexer.Row) },
+						{ ALT: () => this.CONSUME(baseLexer.Column) },
+						{ GATE: () => this.LA(1).image.toUpperCase() === 'DIMENSIONS', ALT: () => {
+							this.CONSUME(baseLexer.Identifier);
+							this.SUBRULE(this.columnList);
+						} },
+					]);
+				} },
+				{ ALT: () => { this.CONSUME(baseLexer.In); this.SUBRULE(this.identifier); } },
+				{ GATE: () => this.LA(1).image.toUpperCase() === 'COMPRESS', ALT: () => {
+					this.CONSUME1(baseLexer.Identifier);
+					const compressed = this.LA(1).image.toUpperCase() === 'YES';
+					this.OR2([{ GATE: () => /^(YES|NO)$/i.test(this.LA(1).image), ALT: () => this.CONSUME2(baseLexer.Identifier) }]);
+					this.OPTION({ GATE: () => compressed && /^(ADAPTIVE|STATIC)$/i.test(this.LA(1).image), DEF: () => this.CONSUME3(baseLexer.Identifier) });
+				} },
+				{ ALT: () => {
+					this.CONSUME(db2Lexer.Db2DataCapture);
+					this.OR3([
+						{ ALT: () => this.CONSUME(baseLexer.None) },
+						{ GATE: () => this.LA(1).image.toUpperCase() === 'CHANGES', ALT: () => this.CONSUME4(baseLexer.Identifier) },
+					]);
+				} },
+				{ ALT: () => {
+					this.CONSUME(baseLexer.Distribute);
+					this.OR4([{ GATE: () => this.LA(1).image.toUpperCase() === 'BY', ALT: () => this.CONSUME5(baseLexer.Identifier) }]);
+					this.OR5([
+						{ ALT: () => { this.CONSUME(baseLexer.Hash); this.SUBRULE1(this.columnList); } },
+						{ ALT: () => this.CONSUME(baseLexer.Random) },
+					]);
+				} },
+				{ ALT: () => this.SUBRULE(this.db2PartitionClause) },
+			]);
+		});
+
+		this.RULE('db2PartitionClause', () => {
+			this.CONSUME(baseLexer.PartitionBy);
+			this.CONSUME(baseLexer.Range);
+			this.SUBRULE(this.db2PartitionKeyList);
+			this.CONSUME(baseLexer.LParen);
+			this.AT_LEAST_ONE_SEP({
+				SEP: baseLexer.Comma,
+				DEF: () => this.SUBRULE(this.db2PartitionDefinition),
+			});
+			this.CONSUME(baseLexer.RParen);
+		});
+
+		this.RULE('db2PartitionKeyList', () => {
+			this.CONSUME(baseLexer.LParen);
+			this.AT_LEAST_ONE_SEP({
+				SEP: baseLexer.Comma,
+				DEF: () => {
+					this.SUBRULE(this.expression);
+					this.OPTION({ GATE: () => this.LA(1).tokenType === baseLexer.Nulls, DEF: () => this.SUBRULE(this.db2PartitionNullOrder) });
+				},
+			});
+			this.CONSUME(baseLexer.RParen);
+		});
+
+		this.RULE('db2PartitionNullOrder', () => {
+			this.CONSUME(baseLexer.Nulls);
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === baseLexer.First, ALT: () => this.CONSUME(baseLexer.First) },
+				{ GATE: () => this.LA(1).image.toUpperCase() === 'LAST', ALT: () => this.CONSUME1(baseLexer.Identifier) },
+			]);
+		});
+
+		this.RULE('db2PartitionDefinition', () => {
+			this.OR([{ GATE: () => this.LA(1).image.toUpperCase() === 'PARTITION', ALT: () => this.CONSUME(baseLexer.Identifier) }]);
+			this.SUBRULE(this.identifier);
+			this.OR1([{ GATE: () => this.LA(1).image.toUpperCase() === 'STARTING', ALT: () => this.CONSUME1(baseLexer.Identifier) }]);
+			this.OPTION(() => this.CONSUME(baseLexer.From));
+			this.SUBRULE(this.db2PartitionBoundary);
+			this.OPTION1({
+				GATE: () => /^(INCLUSIVE|EXCLUSIVE)$/i.test(this.LA(1).image),
+				DEF: () => this.SUBRULE(this.db2PartitionInclusivity),
+			});
+			this.OR2([{ GATE: () => this.LA(1).image.toUpperCase() === 'ENDING', ALT: () => this.CONSUME2(baseLexer.Identifier) }]);
+			this.OPTION2({
+				GATE: () => this.LA(1).image.toUpperCase() === 'AT',
+				DEF: () => this.CONSUME3(baseLexer.Identifier),
+			});
+			this.SUBRULE1(this.db2PartitionBoundary);
+			this.OPTION3({
+				GATE: () => /^(INCLUSIVE|EXCLUSIVE)$/i.test(this.LA(1).image),
+				DEF: () => this.SUBRULE1(this.db2PartitionInclusivity),
+			});
+			this.OPTION4(() => { this.CONSUME(baseLexer.In); this.SUBRULE1(this.identifier); });
+		});
+
+		this.RULE('db2PartitionInclusivity', () => {
+			this.OR([
+				{ GATE: () => this.LA(1).image.toUpperCase() === 'INCLUSIVE', ALT: () => this.CONSUME(baseLexer.Identifier) },
+				{ GATE: () => this.LA(1).image.toUpperCase() === 'EXCLUSIVE', ALT: () => this.CONSUME1(baseLexer.Identifier) },
+			]);
+		});
+
+		this.RULE('db2PartitionBoundary', () => {
+			this.OR([
+				{ GATE: () => /^(MINVALUE|MAXVALUE)$/i.test(this.LA(1).image), ALT: () => this.CONSUME(baseLexer.Identifier) },
+				{ ALT: () => {
+					this.CONSUME(baseLexer.LParen);
+					this.AT_LEAST_ONE_SEP({ SEP: baseLexer.Comma, DEF: () => this.SUBRULE1(this.expression) });
+					this.CONSUME(baseLexer.RParen);
+				} },
+				{ GATE: () => this.LA(1).tokenType !== baseLexer.LParen && !/^(MINVALUE|MAXVALUE)$/i.test(this.LA(1).image), ALT: () => this.SUBRULE(this.expression) },
+			]);
+		});
+
+		this.RULE('db2ConstraintAttributes', () => {
+			this.OPTION(() => this.CONSUME(baseLexer.Not));
+			this.OR([{ GATE: () => this.LA(1).image.toUpperCase() === 'ENFORCED', ALT: () => this.CONSUME(baseLexer.Identifier) }]);
+			this.OPTION1(() => {
+				this.OR1([
+					{ GATE: () => this.LA(1).image.toUpperCase() === 'TRUSTED', ALT: () => this.CONSUME1(baseLexer.Identifier) },
+					{ GATE: () => this.LA(1).image.toUpperCase() === 'NOT', ALT: () => {
+						this.CONSUME1(baseLexer.Not);
+						this.CONSUME2(baseLexer.Identifier);
+					} },
+				]);
+			});
+		});
+		this.OVERRIDE_RULE('tableConstraintDefinition', () => {
+			this.OPTION(() => { this.CONSUME(baseLexer.Constraint); this.SUBRULE(this.identifier); });
+			this.SUBRULE(this.constraintDefinition);
+			this.OPTION1(() => this.SUBRULE(this.db2ConstraintAttributes));
+		});
+
 		this.RULE('db2IsolationClause', () => {
 			this.OR([
 				{ ALT: () => this.CONSUME(db2Lexer.Db2WithUr) },

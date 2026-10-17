@@ -55,7 +55,9 @@ export const OracleBindVariable = createToken({
 
 export const OracleQualifiedFunction = createToken({
     name: 'OracleQualifiedFunction',
-    pattern: /[A-Za-z_][A-Za-z0-9_$#]*(?:\.[A-Za-z_][A-Za-z0-9_$#]*)+(?=\s*\()/,
+    // Kept as an exported token for compatibility; dotted names are parsed
+    // structurally so schema.table (...) is not mistaken for a function call.
+    pattern: Lexer.NA,
 });
 
 export const OracleAtSign = createToken({

@@ -225,6 +225,16 @@ export class BaseSqlParser extends CstParser {
 
   protected registerCreateTableDialectClauses(): void {}
 
+  /** Opt in per dialect; Netezza deliberately keeps its existing constraint grammar. */
+  protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {
+    switch (event) {
+      case 'DELETE':
+      case 'UPDATE':
+      default:
+        return [];
+    }
+  }
+
   /** Hook for dialect-specific clauses between a table name and its body. */
   protected registerCreateTableNameDialectClauses(): void {}
 
@@ -417,6 +427,7 @@ export class BaseSqlParser extends CstParser {
       Type,
       Cascade,
       Restrict,
+      Action,
       SameAs,
       Hash,
       Deferrable,
@@ -1083,6 +1094,33 @@ export class BaseSqlParser extends CstParser {
       this.CONSUME(References);
       this.SUBRULE(this.qualifiedName);
       this.OPTION2(() => this.SUBRULE1(this.columnList));
+      let seenDelete = false;
+      let seenUpdate = false;
+      this.MANY({
+        GATE: () => this.getForeignKeyActions('DELETE').length > 0 || this.getForeignKeyActions('UPDATE').length > 0,
+        DEF: () => {
+          this.CONSUME(On);
+          let event: 'DELETE' | 'UPDATE' = 'DELETE';
+          this.OR([
+            { GATE: () => !seenDelete && this.getForeignKeyActions('DELETE').length > 0, ALT: () => { this.CONSUME(Delete); seenDelete = true; } },
+            { GATE: () => !seenUpdate && this.getForeignKeyActions('UPDATE').length > 0, ALT: () => { this.CONSUME(Update); event = 'UPDATE'; seenUpdate = true; } },
+          ]);
+          this.OR1([
+            { GATE: () => this.getForeignKeyActions(event).includes('CASCADE'), ALT: () => this.CONSUME(Cascade) },
+            { GATE: () => this.getForeignKeyActions(event).includes('RESTRICT'), ALT: () => this.CONSUME(Restrict) },
+            { GATE: () => this.getForeignKeyActions(event).includes('NO ACTION') && this.LA(1).image.toUpperCase() === 'NO', ALT: () => {
+              this.CONSUME(Identifier); this.CONSUME(Action);
+            } },
+            { ALT: () => {
+              this.CONSUME(Set);
+              this.OR2([
+                { GATE: () => this.getForeignKeyActions(event).includes('SET NULL'), ALT: () => this.CONSUME(Null) },
+                { GATE: () => this.getForeignKeyActions(event).includes('SET DEFAULT'), ALT: () => this.CONSUME(Default) },
+              ]);
+            } },
+          ]);
+        },
+      });
     });
 
     this.RULE("checkConstraint", () => {
