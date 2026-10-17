@@ -63,9 +63,10 @@ export class SqliteSqlParser extends BaseSqlParser {
         }
 
         if (first === baseLexer.Temp || first === baseLexer.Temporary) {
-            return this.LA(3).tokenType === target
-                || (this.LA(3).tokenType === sqliteLexer.Virtual
-                    && this.LA(4).tokenType === target);
+            // TEMP/TEMPORARY combines with TABLE only: live SQLite 3.46.1
+            // rejects CREATE TEMP VIRTUAL TABLE with `near "VIRTUAL": syntax
+            // error`, while plain CREATE VIRTUAL TABLE ... USING rtree works.
+            return this.LA(3).tokenType === target;
         }
 
         if (first === sqliteLexer.Virtual) {
@@ -212,8 +213,18 @@ export class SqliteSqlParser extends BaseSqlParser {
 
         this.OVERRIDE_RULE('createTableStatement', () => {
             this.CONSUME(baseLexer.Create);
-            this.OPTION(() => this.SUBRULE(this.tableTypeClause));
-            this.OPTION1(() => this.CONSUME(sqliteLexer.Virtual));
+            let hasTableTypeClause = false;
+            this.OPTION(() => {
+                this.SUBRULE(this.tableTypeClause);
+                hasTableTypeClause = true;
+            });
+            this.OPTION1({
+                // Live SQLite rejects TEMP/TEMPORARY combined with VIRTUAL
+                // (`near "VIRTUAL": syntax error`); VIRTUAL is only valid
+                // without a table-type clause.
+                GATE: () => !hasTableTypeClause,
+                DEF: () => this.CONSUME(sqliteLexer.Virtual),
+            });
             this.CONSUME(baseLexer.Table);
             this.OPTION2(() => {
                 this.CONSUME(baseLexer.If);

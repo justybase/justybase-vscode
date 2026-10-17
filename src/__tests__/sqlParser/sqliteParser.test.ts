@@ -56,6 +56,9 @@ END`);
         'GROOM TABLE orders VERSIONS',
         'CREATE TABLE orders (id INTEGER) DISTRIBUTE ON (id)',
         'CREATE EXTERNAL TABLE ext_orders (id INTEGER)',
+        // Live SQLite 3.46.1 rejects TEMP combined with VIRTUAL
+        // (`near "VIRTUAL": syntax error`) while plain CREATE VIRTUAL TABLE works.
+        'CREATE TEMP VIRTUAL TABLE vt USING rtree(id, x, y)',
     ])('rejects non-SQLite syntax: %s', (sql) => {
         const result = parse(sql);
         expect(result.actionableParserErrors.length).toBeGreaterThan(0);
@@ -124,7 +127,6 @@ END`);
         // CREATE VIRTUAL TABLE
         'CREATE VIRTUAL TABLE vt USING fts5(content)',
         'CREATE VIRTUAL TABLE IF NOT EXISTS vt USING fts5(content, \'tokenize = porter\')',
-        'CREATE TEMP VIRTUAL TABLE vt USING rtree(id, x, y)',
         // Schema-qualified trigger names
         'CREATE TRIGGER main.trig AFTER INSERT ON t BEGIN SELECT 1; END',
         // FK actions, MATCH and deferrability on inline REFERENCES
