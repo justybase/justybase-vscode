@@ -7,7 +7,8 @@ import { createSqlParserInstance } from '../../dialects/postgresql/sql/parser';
 
 describe('PostgreSQL conformance snapshot', () => {
   it.each(cases)('$id', ({ sql, expect: expected }) => {
-    const result = parseSqlStatements({ sql, databaseKind: 'postgresql' });
+    // Live-baseline cases use the fixture placeholder; render it as the shared live test does.
+    const result = parseSqlStatements({ sql: sql.replace(/\{\{cf\}\}/g, 'JB_CF_FIXTURE'), databaseKind: 'postgresql' });
     if (expected.valid) expect([...result.lexResult.errors, ...result.actionableParserErrors].map(e => e.message)).toEqual([]);
     expect({ sql, valid: result.lexResult.errors.length === 0 && result.actionableParserErrors.length === 0 }).toEqual({ sql, valid: expected.valid });
   });
