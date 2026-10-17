@@ -56,14 +56,17 @@ completion and preprocessing.
 | Repository | Responsibility |
 | --- | --- |
 | JustyBase.SqlConformance | Neutral parser/editor expectations, synthetic catalog fixtures, source references, live oracle evidence, dialect-aware adapter and P0 completeness gate |
-| justybase-vscode | Snapshot-based regression tests against production APIs, scanner/splitter and performance tests, session/runtime tests, built LSP protocol test, live PostgreSQL matrix and CI |
+| justybase-vscode | Local-only conformance tests against production APIs via `JUSTYBASE_SQL_CONFORMANCE_PATH`, hand-maintained regression tests, scanner/splitter and performance tests, session/runtime tests, built LSP protocol test, live PostgreSQL matrix (local only) |
 
-Root tests consume committed JSON snapshots and need no sibling checkout.
-`scripts/sync-postgresql-conformance.cjs` exports the canonical cases and
-fixtures, records the corpus revision/version and content SHA-256, and
-`--check` rejects stale exports. Set JUSTYBASE_SQL_CONFORMANCE_PATH if the
-corpus is not the sibling checkout. Exported content includes uncommitted corpus
-edits in its SHA-256; a revision alone does not identify those edits.
+SQL conformance tests are optional local developer tests. Set
+`JUSTYBASE_SQL_CONFORMANCE_PATH` to a local JustyBase.SqlConformance checkout
+(e.g. `export JUSTYBASE_SQL_CONFORMANCE_PATH="$(realpath ../JustyBase.SqlConformance)"`
+from this repository) and run `npm run test:conformance` or
+`npm run test:postgresql:conformance`. The corpus is not vendored into this
+repository and is not used by standard CI. A missing variable on an explicit
+conformance run is a hard error. The transactional live probe
+(`npm run test:postgresql:conformance:live`) likewise loads its cases from the
+env corpus and never runs in CI.
 
 Common cases in a PostgreSQL report must have executionDialect=postgresql.
 A successful common case executed with Netezza is not PostgreSQL evidence.
@@ -72,19 +75,23 @@ A successful common case executed with Netezza is not PostgreSQL evidence.
 
 ```sh
 npm run test:postgresql:authoring
-npm run test:parser-perf
+npm run test:postgresql:conformance
+npm run test:postgresql:conformance:live
 npm run test:lsp:postgresql
 npm run test:postgres:integration
-npm run test:postgresql:conformance:live
-npm run conformance:postgresql:sync
-npm run conformance:postgresql:check
 npm run verify:postgresql
 ```
 
-Both live commands require POSTGRES_LIVE_TEST_HOST, POSTGRES_LIVE_TEST_DATABASE,
+`test:postgresql:authoring` runs the hand-maintained regression tests in
+standard CI without any corpus. `test:postgresql:conformance` and
+`test:postgresql:conformance:live` are explicit local-only commands requiring
+`JUSTYBASE_SQL_CONFORMANCE_PATH`; the live command additionally requires
+POSTGRES_LIVE_TEST_HOST, POSTGRES_LIVE_TEST_DATABASE,
 POSTGRES_LIVE_TEST_USER and POSTGRES_LIVE_TEST_PASSWORD; PORT defaults to 5432.
-Missing configuration is an error on explicit invocation. Live suites are
-excluded from the default root Jest run.
+Missing configuration is an error on explicit invocation. Conformance and live
+suites are excluded from the default root Jest run. The CI PostgreSQL workflow
+runs live integration, authoring and built LSP checks; it does not verify the
+SQL corpus.
 
 The conformance suite creates a random schema inside a transaction, substitutes
 that schema for canonical public fixture references, plans SELECT/WITH queries,
@@ -94,9 +101,11 @@ Missing relations, permissions and timeouts cannot count as syntax rejection.
 Reports in artifacts/postgresql contain IDs, version, verdicts, SQLSTATE and
 cleanup status, without credentials or row values.
 
-The PostgreSQL workflow runs live integration, authoring, corpus and built LSP
-checks against PostgreSQL 16, 17 and 18. Local live evidence was obtained on
-16.13; results on 17 and 18 must come from those CI jobs or equivalent runs.
+The PostgreSQL CI workflow runs live integration, authoring and built LSP
+checks against PostgreSQL 16, 17 and 18. Corpus verification
+(`test:postgresql:conformance`, `test:postgresql:conformance:live`) is a local
+developer gate only and never runs in CI. Local live evidence was obtained on
+16.13; results on 17 and 18 must come from equivalent local runs.
 Do not relabel documentation-backed 17/18 cases as server-verified on the basis
 of a 16 run.
 

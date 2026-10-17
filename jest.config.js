@@ -15,6 +15,11 @@ module.exports = {
     "/node_modules/",
     ...liveDbIgnorePatterns,
     "/__tests__/performance/",
+    // Local-only SQL conformance (requires JUSTYBASE_SQL_CONFORMANCE_PATH).
+    // Run explicitly via `npm run test:conformance`.
+    "sqlParser/sharedLiveConformance\\.test\\.ts$",
+    "sqlParser/postgresqlConformance\\.test\\.ts$",
+    "sqlParser/postgresqlEditorConformance\\.test\\.ts$",
   ],
   moduleFileExtensions: ["ts", "tsx", "js", "json"],
   resolver: "<rootDir>/scripts/jest-media-resolver.cjs",

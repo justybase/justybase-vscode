@@ -4,8 +4,19 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import cases from '../sqlParser/fixtures/postgresqlConformance.json';
+import {
+  loadSqlConformanceCases,
+  resolveSqlConformanceRoot,
+  selectPostgresqlCases,
+} from '../sqlParser/sqlConformanceCorpus';
 import { getPostgresqlVersionDiagnostics } from '../../dialects/postgresql/versionDiagnostics';
+
+// Explicit local-only conformance probe: cases come from the sibling
+// JustyBase.SqlConformance checkout via JUSTYBASE_SQL_CONFORMANCE_PATH.
+const cases = selectPostgresqlCases(loadSqlConformanceCases(resolveSqlConformanceRoot()))
+  .filter(testCase => testCase.contract === 'parser') as {
+    id: string; sql: string; expect: { valid: boolean };
+  }[];
 
 interface LiveClient {
   connect(): Promise<void>;

@@ -4821,7 +4821,7 @@
     "test:result-panel:extension-host": "npm run test:extension-host",
     "test:completion-parity": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"completionEngine.test.ts\"",
     "test:quickfix-regression": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --testPathPatterns=\"linterCodeActions.test.ts\"",
-    "test:parser-perf": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand --testPathPatterns=\"mssqlParserPerf.test.ts|oracleParserPerf.test.ts|postgresqlConformance.test.ts\"",
+    "test:parser-perf": "cross-env NODE_ENV=test JEST_SILENT=1 NODE_OPTIONS=--max-old-space-size=4096 jest --runInBand --testPathPatterns=\"mssqlParserPerf.test.ts|oracleParserPerf.test.ts\"",
     "test:quality-tools": "node --test scripts/quality-tools.test.mjs scripts/architecture-check.test.mjs scripts/access-index-codes.test.cjs scripts/third-party-notices.test.cjs",
     "test:metadata-core": "npm run test --workspace @justybase/metadata-core",
     "test:sql-core": "npm run build:metadata-core && npm run build:sql-core && node --test scripts/sql-core-exports.test.cjs && npm run test --workspace @justybase/sql-core",
@@ -4912,12 +4912,9 @@
     "check-types:shared": "npm run build:metadata-core && npm run build:designer-core && npm run check-types --workspace @justybase/sql-core && npm run build:sql-core && npm run check-types --workspace @justybase/duckdb-runtime && npm run build:duckdb-runtime && npm run check-types --workspace @justybase/netezza-runtime && npm run build:netezza-runtime && npm run build:runtime && npm run build:sqlite-runtime && npm run check-types --workspace @justybase/sqlite-runtime",
     "test:postgresql:authoring": "cross-env NODE_ENV=test jest --runInBand --testPathPatterns=postgresql",
     "test:postgresql:conformance:live": "cross-env NODE_ENV=test jest --config jest.live.config.js --runInBand src/__tests__/integration/postgresqlConformance.live.integration.test.ts",
-    "conformance:postgresql:sync": "node scripts/sync-postgresql-conformance.cjs",
-    "conformance:postgresql:check": "node scripts/sync-postgresql-conformance.cjs --check",
     "test:lsp:postgresql": "npm run build && node scripts/postgresqlLspSmoke.mjs",
-    "conformance:sync": "node scripts/sync-sql-conformance.cjs",
-    "conformance:check": "node scripts/sync-sql-conformance.cjs --check",
-    "test:conformance": "cross-env NODE_ENV=test jest --runInBand --testPathPatterns=sharedLiveConformance.test.ts"
+    "test:conformance": "cross-env NODE_ENV=test jest --config jest.conformance.config.js --runInBand",
+    "test:postgresql:conformance": "cross-env NODE_ENV=test jest --config jest.conformance.config.js --runInBand --testPathPatterns=\"postgresql(Conformance|EditorConformance)\\.test\\.ts$\""
   },
   "lint-staged": {
     "!(media|packages)/**/*.{ts,tsx}": [

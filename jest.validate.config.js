@@ -8,5 +8,10 @@ module.exports = {
     "/node_modules/",
     "/__tests__/performance/",
     ...liveDbIgnorePatterns,
+    // Local-only SQL conformance (requires JUSTYBASE_SQL_CONFORMANCE_PATH).
+    // Run explicitly via `npm run test:conformance`.
+    "sqlParser/sharedLiveConformance\\.test\\.ts$",
+    "sqlParser/postgresqlConformance\\.test\\.ts$",
+    "sqlParser/postgresqlEditorConformance\\.test\\.ts$",
   ],
 };
