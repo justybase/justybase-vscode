@@ -1,0 +1,33 @@
+{
+  "formatVersion": 1,
+  "corpusVersion": "0.3.0",
+  "primaryDialect": "netezza",
+  "offsetEncoding": "utf-16",
+  "contracts": [
+    "parser",
+    "statement",
+    "recovery",
+    "semantic",
+    "completion",
+    "diagnostics",
+    "quick-fix",
+    "hover",
+    "signature",
+    "formatting",
+    "metadata"
+  ],
+  "areas": [
+    "query",
+    "ddl",
+    "dml",
+    "nzplsql",
+    "functions",
+    "metadata"
+  ],
+  "evidenceLevels": [
+    "oracleVerified",
+    "editorContract",
+    "source-backed",
+    "needsVerification"
+  ]
+}

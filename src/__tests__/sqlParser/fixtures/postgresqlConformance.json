@@ -1510,6 +1510,423 @@
     ]
   },
   {
+    "id": "postgresql.parser.live-baseline.add-column-if-absent",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "ddl",
+    "priority": "P1",
+    "sql": "ALTER TABLE {{cf}} ADD COLUMN IF NOT EXISTS note text",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "add-column-if-absent"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "execute",
+      "setup": [
+        "CREATE TABLE {{cf}} (id INTEGER NOT NULL)"
+      ],
+      "teardown": [
+        "DROP TABLE {{cf}}"
+      ],
+      "expected": "ok",
+      "fixtureDdl": true,
+      "cleanupCheckSql": "SELECT COUNT(*) FROM pg_class WHERE relnamespace = current_schema()::regnamespace AND relname = lower('{{cf}}')"
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "642352bd5ab6fa5f7d078c6019b6acd71430d0c34566014d342686c66c0953bf",
+        "sqlHash": "86caafcf2b4942e8e9d56c100f0a380d8e3b260e05b780517f13105ca3bcf628",
+        "outcome": "ok",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.live-baseline.array",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P1",
+    "sql": "SELECT ARRAY[1,2]::integer[]",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "array"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "query",
+      "setup": [],
+      "teardown": [],
+      "expected": "ok",
+      "fixtureDdl": false
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "585632f3b7afea02c98e8e411c6e26cb5973edbf2cfdb22272ad3a5e264a8613",
+        "sqlHash": "fb2b88d82f0d2ce3fa43f8ada6f1bd8b95f963fe87641288dd9a4da356655ec8",
+        "outcome": "ok",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.live-baseline.cte",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P1",
+    "sql": "WITH x(id) AS (VALUES (1)) SELECT id FROM x",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "cte"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "query",
+      "setup": [],
+      "teardown": [],
+      "expected": "ok",
+      "fixtureDdl": false
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "78f60484bae2981db33a679e6fd28edd00339b673be7c094b4b0ec795bea376c",
+        "sqlHash": "64114794f366d946ac83ddb91432605a1a197863c8e34e7d1b91929e83aa41ed",
+        "outcome": "ok",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.live-baseline.distinct-on",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P1",
+    "sql": "SELECT DISTINCT ON (id) id FROM (VALUES (1), (1)) AS x(id) ORDER BY id",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "distinct-on"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "query",
+      "setup": [],
+      "teardown": [],
+      "expected": "ok",
+      "fixtureDdl": false
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "94f0e81638eaa5fa714ec0ae580a04ce9e71ccc5e6a740c9d0a2463f81ad77e8",
+        "sqlHash": "c7be04247e9850f9a039347d63bed8f144f5757da31340a11d0e747c9077649f",
+        "outcome": "ok",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.live-baseline.list-partition",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "ddl",
+    "priority": "P1",
+    "sql": "CREATE TABLE {{cf}} (id integer, region text) PARTITION BY LIST (region)",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "list-partition"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "execute",
+      "setup": [],
+      "teardown": [
+        "DROP TABLE {{cf}}"
+      ],
+      "expected": "ok",
+      "fixtureDdl": true,
+      "cleanupCheckSql": "SELECT COUNT(*) FROM pg_class WHERE relnamespace = current_schema()::regnamespace AND relname = lower('{{cf}}')"
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "8459f8657f7eb706f0a5d8cfe0b0b3f1bfc62c800efadba5d3c715c34236dcc6",
+        "sqlHash": "900a4800921bfc5426cf17d8e3182c487aa9fecf7249c40f3b20047fc0943226",
+        "outcome": "ok",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.live-baseline.malformed-select",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P1",
+    "sql": "SELECT FROM",
+    "expect": {
+      "valid": false
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "malformed-select"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "query",
+      "setup": [],
+      "teardown": [],
+      "expected": "syntax-error",
+      "fixtureDdl": false,
+      "errorCodes": [
+        "42601"
+      ]
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "7c0c5df83b8efa366151dbdfc0820ef3d19199aa9bb857668585f016023926f5",
+        "sqlHash": "33484d15149ca73925fd710bc32441f6cf4fdd782ea00a7562f04a600771be74",
+        "outcome": "syntax-error",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
+    "id": "postgresql.parser.live-baseline.select",
+    "dialect": "postgresql",
+    "category": "parser",
+    "contract": "parser",
+    "area": "query",
+    "priority": "P1",
+    "sql": "SELECT 1",
+    "expect": {
+      "valid": true
+    },
+    "verification": {
+      "status": "oracleVerified"
+    },
+    "sources": [
+      {
+        "repository": "JustyBase.SqlConformance",
+        "path": "scripts/author_multidialect_baseline.py",
+        "test": "select"
+      }
+    ],
+    "tags": [
+      "multidialect-live-baseline"
+    ],
+    "liveProbe": {
+      "mode": "query",
+      "setup": [],
+      "teardown": [],
+      "expected": "ok",
+      "fixtureDdl": false
+    },
+    "oracle": {
+      "engine": "postgresql",
+      "version": "16.13",
+      "method": "production-connection-live-execution",
+      "verifiedAt": "2026-10-17T07:20:16.555Z",
+      "evidence": "reports/live-matrix/postgresql-initial.json"
+    },
+    "oracleEvidence": [
+      {
+        "engine": "postgresql",
+        "version": "16.13",
+        "method": "production-connection-live-execution",
+        "verifiedAt": "2026-10-17T07:20:16.555Z",
+        "evidence": "reports/live-matrix/postgresql-initial.json",
+        "caseHash": "eb50efe9227dd009783371fa674ead8ecbf1451f1ff3b930f4b64488b276727c",
+        "sqlHash": "e004ebd5b5532a4b85984a62f8ad48a81aa3460c1ca07701f386135d72cdecf5",
+        "outcome": "ok",
+        "phase": "execute",
+        "sessionSettings": {
+          "searchPath": "b73f17d716be57d526d6c29ce2197efe46eb02468d82dae0825420c5bb33cb5e",
+          "standardConformingStrings": "on"
+        },
+        "cleanup": true,
+        "reportHash": "fa784bb05549e151fbfd066e4195327fdd38c7eb8dce63e57eb51b3e9319fd8e"
+      }
+    ]
+  },
+  {
     "id": "postgresql.parser.materialized-cte.001",
     "dialect": "postgresql",
     "category": "parser",

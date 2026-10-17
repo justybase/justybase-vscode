@@ -1,0 +1,60 @@
+{
+  "sourceEvidence": "Initial declarations are limited to behavior established by inspected tests and authoring profiles; omitted properties are unknown.",
+  "capabilities": {
+    "databases": true,
+    "schemas": true,
+    "databaseSchemaTableQualification": true,
+    "doubleDotQualification": true,
+    "cte": true,
+    "recursiveCte": true,
+    "subqueries": true,
+    "joins": true,
+    "windowFunctions": true,
+    "merge": true,
+    "procedures": true,
+    "nzplsql": true,
+    "temporaryTables": true,
+    "ctas": true,
+    "views": true,
+    "externalTables": true,
+    "distributeOn": true,
+    "organizeOn": true,
+    "generateStatistics": true
+  },
+  "dialect": "netezza",
+  "evidence": {
+    "cte": [
+      "crates/sql-lang/tests/cte_structure.rs",
+      "src/__tests__/sqlParser/procedure/procedureMatrixCases.ts"
+    ],
+    "databaseSchemaTableQualification": [
+      "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json"
+    ],
+    "doubleDotQualification": [
+      "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json",
+      "crates/sql-lang/tests/language.rs"
+    ],
+    "nzplsql": [
+      "src/__tests__/sqlParser/procedure/procedureMatrixCases.ts",
+      "crates/app-core/tests/procedure_live.rs"
+    ],
+    "distributeOn": [
+      "src/__tests__/sqlParser/validator.ddl.test.ts"
+    ],
+    "organizeOn": [
+      "src/__tests__/sqlParser/validator.ddl.test.ts"
+    ],
+    "temporaryTables": [
+      "src/__tests__/sqlParser/validator.ddl.test.ts"
+    ],
+    "ctas": [
+      "src/__tests__/sqlParser/validator.ddl.test.ts"
+    ],
+    "externalTables": [
+      "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json"
+    ],
+    "merge": [
+      "tests/JustyBase.NetezzaSql.Tests/Fixtures/parity/parser.json"
+    ]
+  }
+}

@@ -2,6 +2,7 @@
 module.exports = [
   "realDatabase.integration.test.ts",
   "optionalDialects.live.integration.test.ts",
+  "dialectDdlConformance.live.integration.test.ts",
   "postgres.integration.test.ts",
   "postgresqlConformance.live.integration.test.ts",
   "duckdb.integration.test.ts",
