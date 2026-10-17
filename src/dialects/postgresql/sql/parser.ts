@@ -25,6 +25,7 @@ export class PostgreSqlParser extends BaseSqlParser {
   declare postgresqlRoutineArgument: Rule;
   declare postgresqlAtomicBody: Rule;
   declare postgresqlAlterAction: Rule;
+  declare postgresqlTableOption: Rule;
 
   constructor() {
     super(t);
@@ -35,6 +36,12 @@ export class PostgreSqlParser extends BaseSqlParser {
 
   protected supportsDropIfExistsBeforeTarget(): boolean { return true; }
   protected supportsStandaloneOffsetClause(): boolean { return true; }
+
+  protected getForeignKeyActions(): readonly string[] { return ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']; }
+
+  protected registerCreateTableDialectClauses(): void {
+    this.MANY(() => this.SUBRULE(this.postgresqlTableOption));
+  }
 
   private functionAhead(): boolean {
     let i = 1;
@@ -48,14 +55,47 @@ export class PostgreSqlParser extends BaseSqlParser {
 
 
   private registerAdvancedPostgresqlRules(): void {
-    this.RULE('postgresqlAlterAction', () => this.OR([
+    this.RULE('postgresqlTableOption', () => this.OR([
+      { ALT: () => {
+        this.CONSUME(t.PartitionBy);
+        this.OR1([
+          { ALT: () => this.CONSUME(t.Range) },
+          { ALT: () => this.CONSUME(t.Hash) },
+          { GATE: () => this.LA(1).image.toUpperCase() === 'LIST', ALT: () => this.CONSUME(t.Identifier) },
+        ]);
+        this.SUBRULE(this.columnList);
+      } },
+      { GATE: () => this.LA(1).image.toUpperCase() === 'TABLESPACE', ALT: () => {
+        this.CONSUME1(t.Identifier); this.SUBRULE(this.identifier);
+      } },
+      { ALT: () => {
+        this.CONSUME(t.On); this.CONSUME(t.Commit);
+        this.OR2([
+          { ALT: () => this.CONSUME(t.Drop) },
+          { ALT: () => { this.CONSUME(t.Delete); this.CONSUME(t.Rows); } },
+          { GATE: () => this.LA(1).image.toUpperCase() === 'PRESERVE', ALT: () => { this.CONSUME2(t.Identifier); this.CONSUME1(t.Rows); } },
+        ]);
+      } },
+    ]));
+
+    this.RULE('postgresqlAlterAction', () => {
+      let addIfNotExists = false;
+      this.OR([
       { ALT: () => {
         this.CONSUME(t.Add); this.OPTION(() => this.CONSUME(t.Column));
-        this.OR1([{ ALT: () => this.SUBRULE(this.tableConstraintDefinition) }, { ALT: () => this.SUBRULE(this.columnDefinition) }]);
+        this.OPTION6(() => {
+          this.CONSUME(t.If); this.CONSUME2(t.Not); this.CONSUME(t.Exists);
+          addIfNotExists = true;
+        });
+        this.OR1([
+          { GATE: () => !addIfNotExists, ALT: () => this.SUBRULE(this.tableConstraintDefinition) },
+          { ALT: () => this.SUBRULE(this.columnDefinition) },
+        ]);
       } },
       { ALT: () => {
         this.CONSUME(t.Drop);
         this.OPTION1(() => this.OR2([{ ALT: () => this.CONSUME1(t.Column) }, { ALT: () => this.CONSUME(t.Constraint) }]));
+        this.OPTION7(() => { this.CONSUME1(t.If); this.CONSUME1(t.Exists); });
         this.SUBRULE(this.identifier);
         this.OPTION2(() => this.OR3([{ ALT: () => this.CONSUME(t.Cascade) }, { ALT: () => this.CONSUME(t.Restrict) }]));
       } },
@@ -79,7 +119,8 @@ export class PostgreSqlParser extends BaseSqlParser {
         this.CONSUME(t.To); this.SUBRULE3(this.identifier);
       } },
       { ALT: () => { this.CONSUME(t.Owner); this.CONSUME1(t.To); this.SUBRULE4(this.identifier); } },
-    ]));
+      ]);
+    });
     this.OVERRIDE_RULE('alterTableStatement', () => {
       this.CONSUME(t.Alter); this.CONSUME(t.Table); this.SUBRULE(this.qualifiedName);
       this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlAlterAction) });

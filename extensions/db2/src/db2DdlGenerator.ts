@@ -570,13 +570,9 @@ function buildConstraintStatements(schema: string, tableName: string, keysInfo: 
 
             const referencedColumns = keyInfo.pkColumns.map(column => formatIdentifier(column)).join(', ');
             const deleteRule = mapReferentialAction(keyInfo.deleteType);
-            const updateRule = mapReferentialAction(keyInfo.updateType);
             clause = `ALTER TABLE ${tableIdentifier} ADD CONSTRAINT ${formatIdentifier(name)} FOREIGN KEY (${columns}) REFERENCES ${referencedSchema}.${referencedTable} (${referencedColumns})`;
             if (deleteRule) {
                 clause += ` ON DELETE ${deleteRule}`;
-            }
-            if (updateRule) {
-                clause += ` ON UPDATE ${updateRule}`;
             }
             clause += `${constraintState};`;
         }

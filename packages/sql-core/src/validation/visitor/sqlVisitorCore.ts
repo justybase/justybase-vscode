@@ -1289,6 +1289,16 @@ export class SqlVisitor
     ddlVisitor.createTableStatement(this, ctx);
   }
 
+  db2TableOption(): void { /* Physical table options do not introduce query scope. */ }
+  db2PartitionClause(): void { /* Partition metadata does not introduce query scope. */ }
+  db2PartitionKeyList(): void { /* Partition metadata does not introduce query scope. */ }
+  db2PartitionNullOrder(): void { /* Partition null ordering does not introduce query scope. */ }
+  db2PartitionDefinition(): void { /* Partition metadata does not introduce query scope. */ }
+  db2PartitionBoundary(): void { /* Partition boundary expressions are not query rows. */ }
+  db2PartitionInclusivity(): void { /* Partition boundary attributes have no query scope. */ }
+  db2ConstraintAttributes(): void { /* Enforcement attributes do not introduce query scope. */ }
+  postgresqlTableOption(): void { /* Physical table options do not introduce query scope. */ }
+
   createDatabaseStatement(ctx: Record<string, CstNode[]>): void {
     commandVisitor.visitCommandTail(this, ctx);
   }

@@ -273,7 +273,8 @@ describe('DB2 runtime upgrade surfaces', () => {
         expect(ddl).toContain('DISTRIBUTE BY HASH (EMPNO)');
         expect(ddl).toContain('ORGANIZE BY DIMENSIONS (DEPTNO)');
         expect(ddl).toContain('ALTER TABLE DB2INST1.EM ADD CONSTRAINT PK_EM PRIMARY KEY (EMPNO);');
-        expect(ddl).toContain('ALTER TABLE DB2INST1.EM ADD CONSTRAINT FK_EM_DEPT FOREIGN KEY (DEPTNO) REFERENCES DB2INST1.DEPT (DEPTNO) ON DELETE CASCADE ON UPDATE NO ACTION;');
+        expect(ddl).toContain('ALTER TABLE DB2INST1.EM ADD CONSTRAINT FK_EM_DEPT FOREIGN KEY (DEPTNO) REFERENCES DB2INST1.DEPT (DEPTNO) ON DELETE CASCADE;');
+        expect(ddl).not.toContain(' ON UPDATE ');
         expect(ddl).toContain(`COMMENT ON TABLE DB2INST1.EM IS 'Employees table';`);
         expect(ddl).toContain(`COMMENT ON COLUMN DB2INST1.EM.EMPNO IS 'Employee number';`);
         expect(ddl).toContain(`COMMENT ON COLUMN DB2INST1.EM.ENAME IS 'Employee name';`);

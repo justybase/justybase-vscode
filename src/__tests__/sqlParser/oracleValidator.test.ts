@@ -7,6 +7,28 @@ import { createMockSchemaProvider } from '../../sqlParser/schemaProvider';
 import { SqlValidator } from '../../sqlParser/validator';
 
 describe('Oracle SQL validator', () => {
+  it.each(['app.sum', 'app.pkg.sum', '"app".sum', 'app."sum"'])(
+    'preserves the qualified function name %s during validation', (functionName) => {
+      const result = new SqlValidator(undefined, oracleSqlAuthoring.validation).validate(
+        `SELECT ${functionName}(1) FROM dual WHERE ${functionName}(1) > 0`,
+      );
+
+      expect(result.errors.map(error => error.code)).not.toContain('SQL021');
+      expect(result.errors.filter(error => error.code === 'SQL011').map(error => error.message)).toEqual([
+        `Function '${functionName}' does not exist`,
+        `Function '${functionName}' does not exist`,
+      ]);
+    },
+  );
+
+  it('still rejects unqualified aggregate functions in WHERE', () => {
+    const result = new SqlValidator(undefined, oracleSqlAuthoring.validation).validate(
+      'SELECT sum(1) FROM dual WHERE sum(1) > 0',
+    );
+
+    expect(result.errors.map(error => error.code)).toContain('SQL021');
+  });
+
   it('validates an anonymous PL/SQL block through the Oracle runtime', () => {
     const result = new SqlValidator(undefined, oracleSqlAuthoring.validation).validate(`
       DECLARE

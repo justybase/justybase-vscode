@@ -536,16 +536,18 @@ export function functionCall(
   host: SqlVisitorHost,
   ctx: Record<string, CstNode[] | IToken[]>,
 ): void {
-  const identifierTokens = ctx.identifier
+  const nestedIdentifierTokens = ctx.identifier
     ? (ctx.identifier as CstNode[]).map(node => host.getFirstTokenFromCst(node)).filter((token): token is IToken => !!token)
-    : (ctx.Identifier as unknown as IToken[] | undefined) ?? [];
+    : [];
+  // Dialects may mix direct name tokens with identifier children in qualified calls.
+  const identifierTokens = [
+    ...nestedIdentifierTokens,
+    ...["Identifier", "QuotedIdentifier", "Next", "Replace", "Random", "Value", "IsNull", "If", "BacktickIdentifier"]
+      .flatMap(name => (ctx[name] as IToken[] | undefined) ?? []),
+  ].sort((left, right) => left.startOffset - right.startOffset);
   const fnToken =
     (ctx.OracleQualifiedFunction?.[0] as unknown as IToken | undefined) ||
-    (identifierTokens[0] as IToken | undefined) ||
-    (ctx.Replace?.[0] as unknown as IToken | undefined) ||
-    (ctx.Random?.[0] as unknown as IToken | undefined) ||
-    (ctx.If?.[0] as unknown as IToken | undefined) ||
-    (ctx.BacktickIdentifier?.[0] as unknown as IToken | undefined);
+    (identifierTokens[0] as IToken | undefined);
   let upper = "";
 
   if (fnToken) {

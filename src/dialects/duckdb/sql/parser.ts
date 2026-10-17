@@ -221,6 +221,15 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
   }
 
   protected registerDialectExtensions(): void {
+    this.OVERRIDE_RULE('subquery', () => {
+      this.CONSUME(baseLexer.LParen);
+      this.OR([
+        { ALT: () => this.SUBRULE(this.selectStatement) },
+        { ALT: () => this.SUBRULE(this.withStatement) },
+        { ALT: () => this.SUBRULE(this.valuesClause) },
+      ]);
+      this.CONSUME(baseLexer.RParen);
+    });
     this.RULE('duckdbListLiteral', () => {
       this.CONSUME(baseLexer.LBracket);
       this.OPTION(() => {

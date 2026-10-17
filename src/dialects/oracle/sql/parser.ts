@@ -16,7 +16,6 @@ const ORACLE_PROGRAM_TOKENS: TokenType[] = [
     oracleLexer.OracleReturning,
     oracleLexer.OraclePragma,
     oracleLexer.OracleBindVariable,
-    oracleLexer.OracleQualifiedFunction,
     oracleLexer.OracleAtSign,
     oracleLexer.OracleOrderSiblingsBy,
     baseLexer.Create,
@@ -147,6 +146,7 @@ export class OracleSqlParser extends NetezzaSqlParser {
     oraclePackageRoutine!: AnyRule;
     oracleTriggerUnit!: AnyRule;
     oracleTriggerHeader!: AnyRule;
+    oracleAddColumns!: AnyRule;
 
     public constructor() {
         super(oracleLexer);
@@ -189,6 +189,10 @@ export class OracleSqlParser extends NetezzaSqlParser {
         return false;
     }
 
+    protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {
+        return event === 'DELETE' ? ['CASCADE', 'SET NULL'] : [];
+    }
+
     protected registerCreateTableDialectClauses(): void {
         // Oracle has no Netezza DISTRIBUTE/ORGANIZE clauses.
     }
@@ -198,7 +202,13 @@ export class OracleSqlParser extends NetezzaSqlParser {
             this.CONSUME(baseLexer.Alter);
             this.CONSUME(baseLexer.Table);
             this.SUBRULE(this.qualifiedName);
-            this.OPTION(() => this.SUBRULE(this.alterTableAction));
+            this.OPTION(() => this.OR([
+                {
+                    GATE: () => this.LA(1).tokenType === baseLexer.Add && this.LA(2).tokenType === baseLexer.LParen,
+                    ALT: () => this.SUBRULE(this.oracleAddColumns),
+                },
+                { ALT: () => this.SUBRULE(this.alterTableAction) },
+            ]));
         });
     }
 
@@ -213,6 +223,12 @@ export class OracleSqlParser extends NetezzaSqlParser {
     }
 
     protected registerDialectExtensions(): void {
+        this.RULE('oracleAddColumns', () => {
+            this.CONSUME(baseLexer.Add);
+            this.CONSUME(baseLexer.LParen);
+            this.AT_LEAST_ONE_SEP({ SEP: baseLexer.Comma, DEF: () => this.SUBRULE(this.columnDefinition) });
+            this.CONSUME(baseLexer.RParen);
+        });
         this.RULE('oracleProgramToken', () => {
             this.OR(this.getTokenAlternatives(ORACLE_PROGRAM_TOKENS));
         });
@@ -699,15 +715,7 @@ export class OracleSqlParser extends NetezzaSqlParser {
                     ALT: () => this.CONSUME1(baseLexer.Identifier),
                 },
             ]);
-            this.OR1([
-                {
-                    GATE: () => this.LA(1).tokenType === oracleLexer.OracleQualifiedFunction,
-                    ALT: () => this.CONSUME(oracleLexer.OracleQualifiedFunction),
-                },
-                {
-                    ALT: () => this.SUBRULE(this.qualifiedName),
-                },
-            ]);
+            this.SUBRULE(this.qualifiedName);
             this.OPTION1({
                 GATE: () => this.LA(1).tokenType === baseLexer.LParen,
                 DEF: () => {
@@ -807,9 +815,52 @@ export class OracleSqlParser extends NetezzaSqlParser {
             ]);
         });
 
+        this.OVERRIDE_RULE('primaryExpression', () => {
+            this.OR([
+                {
+                    GATE: () => {
+                        const la1 = this.LA(1);
+                        const la2 = this.LA(2);
+                        return la1.tokenType === baseLexer.NumberLiteral
+                            || la1.tokenType === baseLexer.BracedVariable
+                            || la1.tokenType === baseLexer.BracesOnlyVariable
+                            || la1.tokenType === baseLexer.DollarNumber
+                            || la1.tokenType === baseLexer.DollarIdentifier
+                            || la1.tokenType === baseLexer.StringLiteral
+                            || la1.tokenType === baseLexer.Null
+                            || ((la1.tokenType === baseLexer.Identifier || la1.tokenType === baseLexer.QuotedIdentifier)
+                                && la2.tokenType === baseLexer.StringLiteral);
+                    },
+                    ALT: () => this.SUBRULE(this.literal),
+                },
+                {
+                    GATE: () => this.LA(1).tokenType === baseLexer.IsNull && this.LA(2).tokenType === baseLexer.LParen,
+                    ALT: () => {
+                        this.CONSUME(baseLexer.IsNull);
+                        this.CONSUME1(baseLexer.LParen);
+                        this.OPTION(() => this.OR1([
+                            { ALT: () => this.CONSUME(baseLexer.Distinct) },
+                            { ALT: () => this.CONSUME(baseLexer.All) },
+                        ]));
+                        this.OPTION1(() => this.SUBRULE(this.functionArguments));
+                        this.CONSUME1(baseLexer.RParen);
+                    },
+                },
+                { GATE: () => this.oracleFunctionAhead(), ALT: () => this.SUBRULE(this.functionCall) },
+                { ALT: () => this.SUBRULE(this.castFunctionExpression) },
+                { ALT: () => this.SUBRULE(this.extractExpression) },
+                { ALT: () => this.SUBRULE(this.caseExpression) },
+                { ALT: () => this.SUBRULE(this.existsExpression) },
+                { ALT: () => this.SUBRULE(this.subquery) },
+                { ALT: () => this.SUBRULE(this.expressionList) },
+                ...this.getAdditionalPrimaryExpressionAlternatives(),
+                { ALT: () => this.SUBRULE(this.columnReference) },
+                { ALT: () => this.CONSUME(baseLexer.Parameter) },
+            ]);
+        });
+
         this.OVERRIDE_RULE('functionCall', () => {
             this.OR1([
-                { ALT: () => this.CONSUME(oracleLexer.OracleQualifiedFunction) },
                 { ALT: () => this.CONSUME(baseLexer.Identifier) },
                 { ALT: () => this.CONSUME(baseLexer.QuotedIdentifier) },
                 { ALT: () => this.CONSUME(baseLexer.Next) },
@@ -818,6 +869,7 @@ export class OracleSqlParser extends NetezzaSqlParser {
                 { ALT: () => this.CONSUME(baseLexer.Value) },
                 { ALT: () => this.CONSUME(baseLexer.IsNull) },
             ]);
+            this.MANY(() => { this.CONSUME(baseLexer.Dot); this.SUBRULE(this.identifier); });
             this.CONSUME(baseLexer.LParen);
             this.OPTION(() => {
                 this.OR3([
@@ -1073,6 +1125,12 @@ export class OracleSqlParser extends NetezzaSqlParser {
             ? tokenImage(this.LA(4))
             : second;
         return kind === 'PROCEDURE' || kind === 'FUNCTION';
+    }
+
+    private oracleFunctionAhead(): boolean {
+        let offset = 1;
+        while (this.LA(offset + 1).tokenType === baseLexer.Dot) offset += 2;
+        return this.LA(offset + 1).tokenType === baseLexer.LParen;
     }
 
     private startsOraclePackage(): boolean {
