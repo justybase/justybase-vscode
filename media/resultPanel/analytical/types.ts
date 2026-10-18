@@ -216,6 +216,12 @@ export interface AnalyticalDataset {
     /** Column indexes that were excluded as identifiers or group keys. */
     excludedColumns: number[];
     coverage?: AnalyticalCoverage;
+    /**
+     * Set when the analysis ran over a filtered scope: rows in scope, and rows in the whole result.
+     * The Analytical view reports the scope explicitly so numbers are never read as full-result ones.
+     */
+    scopedRows?: number;
+    sourceRows?: number;
 }
 
 export function createDefaultAnalyticalState(): AnalyticalPersistedState {

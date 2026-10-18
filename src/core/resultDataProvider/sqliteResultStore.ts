@@ -8,6 +8,7 @@ import { buildDiskQuery } from './diskQueryBuilder';
 import { mapColumnTypeToSqlite, sqliteColumnName } from './netezzaToSqliteType';
 import { isTemporalColumnType, normalizeTemporalCellValue } from './temporalColumnTypes';
 import { loadNodeSqliteModule } from './sqliteModuleLoader';
+import { diskQuerySpecHasFilters } from './types';
 import type {
     DiskAggregationRequest,
     DiskAggregationResult,
@@ -586,9 +587,44 @@ export class SqliteResultStore implements IResultRowSource {
     /**
      * Exact statistics per group over every spilled row. Population statistics use the same
      * single-pass moments as the groups, so client-side anomaly rules compare like with like.
+     *
+     * A request may carry a filter `spec` (the Analysis Document does this when the analysis scope
+     * is "filtered rows"). The scope is applied by shadowing `result_rows` with a temporary copy of
+     * the filtered rows for the duration of this synchronous call: every statistic below then sees
+     * exactly the scoped population, including population moments, category counts and quartiles,
+     * without threading a WHERE clause through each statement.
      */
     public queryGroupStats(request: DiskGroupStatsRequest): DiskGroupStatsResult {
         this.assertNotDisposed();
+        if (diskQuerySpecHasFilters(request.spec)) {
+            return this.runWithScopedRows(request.spec as DiskQuerySpec, () => this.queryGroupStatsUnscoped(request));
+        }
+        return this.queryGroupStatsUnscoped(request);
+    }
+
+    /**
+     * Creates the scoped copy, shadows the spilled table, runs the statistics and always restores
+     * the store. The scoped copy is a temporary table so the filters keep their bound parameters.
+     */
+    private runWithScopedRows<T>(spec: DiskQuerySpec, run: () => T): T {
+        const built = buildDiskQuery(spec, this.columnCount, this._columnTypes);
+        const whereClause = built.whereSql ? ` WHERE ${built.whereSql}` : '';
+        this._database.exec('DROP TABLE IF EXISTS temp.justybase_scoped_rows');
+        this._database.exec('DROP VIEW IF EXISTS temp.result_rows');
+        const createScoped = this._database.prepare(
+            `CREATE TEMP TABLE justybase_scoped_rows AS SELECT * FROM main.result_rows${whereClause}`,
+        );
+        createScoped.run(...asSqlParams(built.whereParams));
+        this._database.exec('CREATE TEMP VIEW result_rows AS SELECT * FROM temp.justybase_scoped_rows');
+        try {
+            return run();
+        } finally {
+            this._database.exec('DROP VIEW IF EXISTS temp.result_rows');
+            this._database.exec('DROP TABLE IF EXISTS temp.justybase_scoped_rows');
+        }
+    }
+
+    private queryGroupStatsUnscoped(request: DiskGroupStatsRequest): DiskGroupStatsResult {
         const groupColumns = this.validColumnList(request.groupColumns, GROUP_STATS_MAX_GROUP_COLUMNS);
         const statColumns = this.validColumnList(request.statColumns, GROUP_STATS_MAX_STAT_COLUMNS, new Set(groupColumns));
         const limit = clampInteger(request.limit, 1, GROUP_STATS_MAX_LIMIT);

@@ -262,6 +262,11 @@ export interface DiskGroupStatsRequest {
     groupColumns: number[];
     statColumns: number[];
     limit: number;
+    /**
+     * Optional scope: when the spec carries filters, the store computes every statistic over the
+     * matching rows only, so an analysis can follow the document's filters without copying rows.
+     */
+    spec?: DiskQuerySpec;
     topColumns?: number[];
     topLimit?: number;
     rareColumns?: number[];

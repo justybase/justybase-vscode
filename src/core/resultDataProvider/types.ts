@@ -149,6 +149,12 @@ export interface DiskGroupStatsRequest {
     groupColumns: number[];
     /** Columns whose statistics are returned in this batch. */
     statColumns: number[];
+    /**
+     * Optional scope: when the spec carries filters, every statistic (population, groups, quartiles,
+     * top values, quartiles) is computed over the filtered rows only, so an analysis can be scoped
+     * to what the user currently sees without copying the result.
+     */
+    spec?: DiskQuerySpec;
     /** Largest groups to list; clamped by the store. */
     limit: number;
     /** Columns that should also report top values (population and per group, when bounded). */
