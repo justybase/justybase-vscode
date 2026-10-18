@@ -561,6 +561,88 @@ describe("tableCommands", () => {
     });
   });
 
+  describe("db2 table SQL variants", () => {
+    async function getHandler(command: string): Promise<any> {
+      registerTableCommands(mockDeps);
+      const calls = (vscode.commands.registerCommand as jest.Mock).mock.calls;
+      const cmd = calls.find((call: any[]) => call[0] === command);
+      return cmd[1] as any;
+    }
+
+    const mockItem: SchemaItemData = {
+      label: "TEST_TABLE",
+      dbName: "TESTDB",
+      schema: "ADMIN",
+      objType: "TABLE",
+      connectionName: "test-conn",
+    };
+
+    it("uses TRUNCATE TABLE ... IMMEDIATE for Db2", async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("db2");
+      const handler = await getHandler("netezza.truncateTable");
+      const { runQuery } = require("../core/queryRunner");
+      (vscode.window.showWarningMessage as jest.Mock).mockResolvedValueOnce("Yes, delete all data");
+
+      await handler(mockItem);
+
+      expect(runQuery).toHaveBeenCalledWith(
+        expect.anything(),
+        "TRUNCATE TABLE TESTDB.ADMIN.TEST_TABLE IMMEDIATE;",
+        true,
+        "test-conn",
+        expect.anything(),
+      );
+    });
+
+    it("uses RENAME TABLE for Db2 renames", async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("db2");
+      const handler = await getHandler("netezza.renameTable");
+      const { runQuery } = require("../core/queryRunner");
+      (vscode.window.showInputBox as jest.Mock).mockResolvedValueOnce("RENAMED_TABLE");
+
+      await handler(mockItem);
+
+      expect(runQuery).toHaveBeenCalledWith(
+        expect.anything(),
+        "RENAME TABLE TESTDB.ADMIN.TEST_TABLE TO RENAMED_TABLE;",
+        true,
+        "test-conn",
+        expect.anything(),
+      );
+    });
+
+    it("keeps ALTER TABLE ... RENAME TO for other dialects", async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("postgresql");
+      const handler = await getHandler("netezza.renameTable");
+      const { runQuery } = require("../core/queryRunner");
+      (vscode.window.showInputBox as jest.Mock).mockResolvedValueOnce("RENAMED_TABLE");
+
+      await handler(mockItem);
+
+      expect(runQuery).toHaveBeenCalledWith(
+        expect.anything(),
+        "ALTER TABLE TESTDB.ADMIN.TEST_TABLE RENAME TO RENAMED_TABLE;",
+        true,
+        "test-conn",
+        expect.anything(),
+      );
+    });
+
+    it("warns about REORG-pending state when adding a primary key on Db2", async () => {
+      (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("db2");
+      const handler = await getHandler("netezza.addPrimaryKey");
+      (vscode.window.showInputBox as jest.Mock)
+        .mockResolvedValueOnce("PK_TEST_TABLE")
+        .mockResolvedValueOnce("ID");
+      (vscode.window.showInformationMessage as jest.Mock).mockResolvedValueOnce("Yes, add");
+
+      await handler(mockItem);
+
+      const message = (vscode.window.showInformationMessage as jest.Mock).mock.calls[0][0] as string;
+      expect(message).toContain("REORG");
+    });
+  });
+
   describe("addPrimaryKey command", () => {
     it.each(["netezza.addPrimaryKey", "netezza.addUniqueConstraint"])(
       "blocks %s for DuckDB before prompting",

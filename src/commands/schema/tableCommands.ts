@@ -475,7 +475,8 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             if (item && item.label && item.dbName && item.objType === 'TABLE') {
                 const fullName = getFullName(item, connectionManager);
                 const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-                const sql = databaseKind === 'sqlite' ? `DELETE FROM ${fullName};` : `TRUNCATE TABLE ${fullName};`;
+                // Db2 has no bare TRUNCATE TABLE; the IMMEDIATE variant commits at once.
+                const sql = databaseKind === 'sqlite' ? `DELETE FROM ${fullName};` : databaseKind === 'db2' ? `TRUNCATE TABLE ${fullName} IMMEDIATE;` : `TRUNCATE TABLE ${fullName};`;
 
                 const confirmation = await vscode.window.showWarningMessage(
                     `⚠️ WARNING: Are you sure you want to delete ALL data from the table "${fullName}"?\n\n${sql}\n\nThis operation is IRREVERSIBLE!`,
@@ -551,9 +552,12 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                     .map(c => c.trim().toUpperCase())
                     .join(', ');
                 const sql = `ALTER TABLE ${fullName} ADD CONSTRAINT ${constraintName.trim().toUpperCase()} PRIMARY KEY (${columnList});`;
+                const reorgNotice = databaseKind === 'db2'
+                    ? '\n\nDb2 may place the table in REORG-pending state; run REORG TABLE afterward.'
+                    : '';
 
                 const confirmation = await vscode.window.showInformationMessage(
-                    `Add primary key to table "${fullName}"?\n\n${sql}`,
+                    `Add primary key to table "${fullName}"?\n\n${sql}${reorgNotice}`,
                     { modal: true },
                     'Yes, add',
                     'Cancel'
@@ -663,9 +667,12 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                     .map(c => c.trim().toUpperCase())
                     .join(', ');
                 const sql = `ALTER TABLE ${fullName} ADD CONSTRAINT ${constraintName.trim().toUpperCase()} FOREIGN KEY (${columnList}) REFERENCES ${referencedTable.trim().toUpperCase()} (${refColumnList});`;
+                const reorgNotice = databaseKind === 'db2'
+                    ? '\n\nDb2 may place the table in REORG-pending state; run REORG TABLE afterward.'
+                    : '';
 
                 const confirmation = await vscode.window.showInformationMessage(
-                    `Add foreign key to table "${fullName}"?\n\n${sql}`,
+                    `Add foreign key to table "${fullName}"?\n\n${sql}${reorgNotice}`,
                     { modal: true },
                     'Yes, add',
                     'Cancel'
@@ -741,9 +748,12 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                     .map(c => c.trim().toUpperCase())
                     .join(', ');
                 const sql = `ALTER TABLE ${fullName} ADD CONSTRAINT ${constraintName.trim().toUpperCase()} UNIQUE (${columnList});`;
+                const reorgNotice = databaseKind === 'db2'
+                    ? '\n\nDb2 may place the table in REORG-pending state; run REORG TABLE afterward.'
+                    : '';
 
                 const confirmation = await vscode.window.showInformationMessage(
-                    `Add unique constraint to table "${fullName}"?\n\n${sql}`,
+                    `Add unique constraint to table "${fullName}"?\n\n${sql}${reorgNotice}`,
                     { modal: true },
                     'Yes, add',
                     'Cancel'
@@ -816,7 +826,12 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
                 if (!newName || newName === item.label) return;
 
-                const sql = `ALTER TABLE ${fullName} RENAME TO ${newName.trim()};`;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                // Db2 rejects ALTER TABLE ... RENAME TO (SQLCODE -104) and a qualified
+                // rename target (SQLCODE -108); renames use RENAME TABLE instead.
+                const sql = databaseKind === 'db2'
+                    ? `RENAME TABLE ${fullName} TO ${newName.trim()};`
+                    : `ALTER TABLE ${fullName} RENAME TO ${newName.trim()};`;
 
                 try {
                     if (!await requireConnection(connectionManager)) return;
