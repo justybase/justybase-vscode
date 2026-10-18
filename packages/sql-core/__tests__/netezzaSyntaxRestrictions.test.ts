@@ -55,6 +55,52 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     expect(preParseCodes("INSERT INTO T (A) VALUES (1)")).not.toContain("NZS006");
   });
 
+  it("rejects WITH ... INSERT but accepts SELECT after WITH (NZS013, live-verified)", () => {
+    // Live Netezza 11.2.2.1: found "INSERT" expecting SELECT or `(`.
+    expect(preParseCodes(
+      "WITH SRC AS (SELECT 1 AS CODE) INSERT INTO T (CODE) SELECT CODE FROM SRC;",
+    )).toContain("NZS013");
+    // INSERT ... WITH (CTE in query position) stays accepted.
+    expect(preParseCodes(
+      "INSERT INTO T (CODE) WITH SRC AS (SELECT 1 AS CODE) SELECT CODE FROM SRC;",
+    )).not.toContain("NZS013");
+    expect(preParseCodes(
+      "WITH A AS (SELECT 1 AS X) SELECT * FROM A;",
+    )).not.toContain("NZS013");
+  });
+
+  it("rejects INSERT ... WITH without AS but accepts WITH ... AS (NZS016, live-verified)", () => {
+    // Live Netezza 11.2.2.1: found "SELECT" expecting an identifier.
+    expect(preParseCodes(
+      "INSERT INTO T WITH ABC (SELECT 1 AS CODE) SELECT CODE FROM ABC;",
+    )).toContain("NZS016");
+    expect(preParseCodes(
+      "INSERT INTO T (CODE) WITH SRC AS (SELECT 1 AS CODE) SELECT CODE FROM SRC;",
+    )).not.toContain("NZS016");
+    expect(preParseCodes(
+      "INSERT INTO T WITH ABC (C1) AS (SELECT 1 AS C1) SELECT C1 FROM ABC;",
+    )).not.toContain("NZS016");
+  });
+
+  it("rejects SERIAL/BIGSERIAL column types but accepts a column named serial (NZS014, live-verified)", () => {
+    expect(preParseCodes(
+      "CREATE TABLE SERIAL_TYPES (ID SERIAL, BIG_ID BIGSERIAL);",
+    )).toContain("NZS014");
+    expect(preParseCodes("CREATE TABLE T (serial INTEGER);")).not.toContain("NZS014");
+    expect(preParseCodes("CREATE TABLE T (a INT, b VARCHAR(10));")).not.toContain("NZS014");
+    expect(preParseCodes(
+      "CREATE TABLE T (a INT, CONSTRAINT serial PRIMARY KEY (a));",
+    )).not.toContain("NZS014");
+  });
+
+  it("rejects CLOB(n)/NCLOB(n) and bare BLOB column types (NZS015, live-verified)", () => {
+    expect(preParseCodes(
+      "CREATE TABLE LOB_TYPES (DATA CLOB(1000), NDATA NCLOB(500), RAW BLOB);",
+    )).toContain("NZS015");
+    expect(preParseCodes("CREATE TABLE T (a INT, b VARCHAR(10));")).not.toContain("NZS015");
+    expect(preParseCodes("CREATE TABLE T (clob VARCHAR(10));")).not.toContain("NZS015");
+  });
+
   it("accepts standalone OFFSET and ORDER BY followed by OFFSET", () => {
     expect(validator.validate("SELECT 1 OFFSET 1").valid).toBe(true);
     expect(validator.validate("SELECT 1 ORDER BY 1 OFFSET 1").valid).toBe(true);

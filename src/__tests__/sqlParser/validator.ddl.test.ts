@@ -65,19 +65,19 @@ describe("SQL Validator - DDL tests", () => {
 );`);
     });
 
-    it("should validate SERIAL and BIGSERIAL types", () => {
-      expectValid(`CREATE TABLE SERIAL_TYPES (
+    it("should reject SERIAL and BIGSERIAL types (live: not valid Netezza column types)", () => {
+      expectErrorCode(`CREATE TABLE SERIAL_TYPES (
     ID SERIAL,
     BIG_ID BIGSERIAL
-);`);
+);`, "NZS014");
     });
 
-    it("should validate CLOB/NCLOB/BLOB types", () => {
-      expectValid(`CREATE TABLE LOB_TYPES (
+    it("should reject CLOB/NCLOB with length and bare BLOB (live-verified)", () => {
+      expectErrorCode(`CREATE TABLE LOB_TYPES (
     DATA CLOB(1000),
     NDATA NCLOB(500),
     RAW BLOB
-);`);
+);`, "NZS015");
     });
 
     it("should validate CREATE TABLE with DISTRIBUTE ON RANDOM", () => {

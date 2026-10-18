@@ -22,6 +22,16 @@ import type { ValidationError } from "./types";
  * - GENERATE [EXPRESS] STATISTICS accepts only the optional `ON <table>` target;
  *   `FOR TABLE` is rejected and the deprecated EXPRESS form requires ON; NZS008.
  * - EXPLAIN accepts at most one of VERBOSE, DISTRIBUTION, PLANTEXT, or PLANGRAPH; NZS012.
+ * - A WITH clause may only be followed by SELECT or `(`; WITH ... INSERT is
+ *   rejected (live: found "INSERT" expecting SELECT or `(`); NZS013. The
+ *   INSERT ... WITH ... form (CTE in query position) stays accepted.
+ * - SERIAL and BIGSERIAL are rejected as CREATE TABLE column types; NZS014.
+ * - CLOB(n)/NCLOB(n) with a length and a bare BLOB are rejected as CREATE
+ *   TABLE column types; NZS015.
+ * - In INSERT ... WITH the CTE name requires AS before its subquery; a
+ *   parenthesized query without AS is rejected (live: found "SELECT"
+ *   expecting an identifier); NZS016. `WITH name [(cols)] AS (...)` stays
+ *   accepted.
  */
 
 function errorAt(code: string, message: string, token: IToken): ValidationError {
@@ -304,6 +314,206 @@ export function detectNetezzaSyntaxRestrictions(
             tokens[index],
           ),
         );
+      }
+    }
+  }
+
+  // WITH ... INSERT: live Netezza accepts only SELECT or `(` after the CTE
+  // list (`found "INSERT" ... expecting SELECT or '('`). The INSERT ... WITH
+  // form (CTE in query position) and nested WITHs inside CTE bodies stay
+  // accepted. Token-level scan: at statement level (depth 0), once With has
+  // been seen, a bare Insert before any Select is the rejected shape.
+  {
+    let depth = 0;
+    let withAtDepthZero = false;
+    for (let scan = 0; scan < tokens.length; scan += 1) {
+      const current = tokenName(tokens[scan]);
+      if (current === "LParen") {
+        depth += 1;
+        continue;
+      }
+      if (current === "RParen") {
+        depth -= 1;
+        continue;
+      }
+      if (depth !== 0) continue;
+      if (current === "Semicolon") {
+        withAtDepthZero = false;
+        continue;
+      }
+      if (current === "With") {
+        withAtDepthZero = true;
+        continue;
+      }
+      if (withAtDepthZero && current === "Select") {
+        withAtDepthZero = false;
+        continue;
+      }
+      if (withAtDepthZero && current === "Insert") {
+        errors.push(errorAt(
+          "NZS013",
+          "Netezza does not accept INSERT after a WITH clause; only SELECT or '(' may follow WITH.",
+          tokens[scan],
+        ));
+        withAtDepthZero = false;
+      }
+    }
+  }
+
+  // INSERT ... WITH ... : the CTE name requires AS before its subquery
+  // (live: found "SELECT" expecting an identifier); NZS016. The grammar's
+  // insertCteDefinition leaves AS optional, so the no-AS shape parses and is
+  // rejected here. Only the evidenced shape is flagged: a depth-0 CTE name
+  // directly followed by a parenthesized query (`WITH name (SELECT|WITH`
+  // ...)`). `WITH name [(cols)] AS (...)` stays accepted.
+  {
+    let depth = 0;
+    let insertAtDepthZero = false;
+    let cteHeader = false;
+    let expectCteName = false;
+    for (let scan = 0; scan < tokens.length; scan += 1) {
+      const current = tokenName(tokens[scan]);
+      if (current === "LParen") {
+        depth += 1;
+        continue;
+      }
+      if (current === "RParen") {
+        depth -= 1;
+        continue;
+      }
+      if (depth !== 0) continue;
+      if (current === "Semicolon") {
+        insertAtDepthZero = false;
+        cteHeader = false;
+        expectCteName = false;
+        continue;
+      }
+      if (current === "Insert") {
+        insertAtDepthZero = true;
+        cteHeader = false;
+        expectCteName = false;
+        continue;
+      }
+      if (current === "With" && insertAtDepthZero) {
+        cteHeader = true;
+        expectCteName = true;
+        continue;
+      }
+      if (!cteHeader) continue;
+      if (current === "Select") {
+        cteHeader = false;
+        expectCteName = false;
+        continue;
+      }
+      if (current === "Comma") {
+        expectCteName = true;
+        continue;
+      }
+      if (expectCteName && current === "Identifier") {
+        expectCteName = false;
+        if (
+          tokenName(tokens[scan + 1]) === "LParen" &&
+          (tokenName(tokens[scan + 2]) === "Select" ||
+            tokenName(tokens[scan + 2]) === "With")
+        ) {
+          errors.push(errorAt(
+            "NZS016",
+            "The CTE name in INSERT ... WITH requires AS before its subquery.",
+            tokens[scan + 1],
+          ));
+        }
+        continue;
+      }
+      if (current !== "Recursive") expectCteName = false;
+    }
+  }
+
+  // SERIAL/BIGSERIAL are not accepted at all (NZS014); CLOB/NCLOB accept no
+  // length argument and bare BLOB is not a column type (NZS015). Narrowly
+  // scoped to the parenthesized definition list of a CREATE TABLE: a list
+  // opening on WITH/SELECT is a CTAS query and is skipped, and only words
+  // directly inside the list are inspected, so nested expressions and
+  // constraint parens are untouched. A word right after `(` or `,` is the
+  // column name (or a CTAS output name), never the type.
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokenName(tokens[index]) !== "Create") continue;
+    let tableIdx = index + 1;
+    while (
+      tableIdx < tokens.length &&
+      ["Temp", "Temporary", "Global", "External"].includes(
+        tokenName(tokens[tableIdx]) ?? "",
+      )
+    ) {
+      tableIdx += 1;
+    }
+    if (tokenName(tokens[tableIdx]) !== "Table") continue;
+    let openIdx = -1;
+    for (let scan = tableIdx + 1; scan < tokens.length; scan += 1) {
+      const scanName = tokenName(tokens[scan]);
+      if (scanName === "Semicolon") break;
+      if (scanName === "LParen") {
+        openIdx = scan;
+        break;
+      }
+    }
+    if (openIdx === -1) continue;
+    const firstName = tokenName(tokens[openIdx + 1]);
+    if (firstName === "With" || firstName === "Select") continue;
+    let listDepth = 0;
+    for (let scan = openIdx; scan < tokens.length; scan += 1) {
+      const scanName = tokenName(tokens[scan]);
+      if (scanName === "Semicolon") break;
+      if (scanName === "LParen") {
+        listDepth += 1;
+        continue;
+      }
+      if (scanName === "RParen") {
+        listDepth -= 1;
+        if (listDepth === 0) break;
+        continue;
+      }
+      if (listDepth !== 1) continue;
+      const image = tokens[scan].image.toUpperCase();
+      const prev = tokens[scan - 1];
+      const prevName = tokenName(prev);
+      const inNamePosition =
+        prevName === "LParen" ||
+        prevName === "Comma" ||
+        (prev?.image.toUpperCase() === "CONSTRAINT");
+      if (inNamePosition) continue;
+      if (
+        tokenName(tokens[scan]) === "Identifier" &&
+        (image === "SERIAL" || image === "BIGSERIAL")
+      ) {
+        errors.push(errorAt(
+          "NZS014",
+          "SERIAL and BIGSERIAL are not valid Netezza column types.",
+          tokens[scan],
+        ));
+        continue;
+      }
+      if (
+        tokenName(tokens[scan]) === "Identifier" &&
+        (image === "CLOB" || image === "NCLOB") &&
+        tokenName(tokens[scan + 1]) === "LParen"
+      ) {
+        errors.push(errorAt(
+          "NZS015",
+          "Netezza does not accept a length argument on CLOB/NCLOB.",
+          tokens[scan],
+        ));
+        continue;
+      }
+      if (
+        tokenName(tokens[scan]) === "Identifier" &&
+        image === "BLOB" &&
+        tokenName(tokens[scan + 1]) !== "LParen"
+      ) {
+        errors.push(errorAt(
+          "NZS015",
+          "BLOB is not a valid Netezza column type.",
+          tokens[scan],
+        ));
       }
     }
   }
