@@ -306,10 +306,11 @@ describe('commands/schema/copyCommands', () => {
     });
 
     describe('buildTopSelectSql', () => {
-        it('uses TOP for MSSQL and FETCH FIRST for Oracle', async () => {
+        it('uses TOP for MSSQL and FETCH FIRST for Oracle and Db2', async () => {
             const { buildTopSelectSql } = await import('../commands/schema/copyCommands');
             expect(buildTopSelectSql('dbo.T', 100, 'mssql')).toBe('SELECT TOP (100) * FROM dbo.T;');
             expect(buildTopSelectSql('S.T', 100, 'oracle')).toBe('SELECT * FROM S.T FETCH FIRST 100 ROWS ONLY;');
+            expect(buildTopSelectSql('S.T', 100, 'db2')).toBe('SELECT * FROM S.T FETCH FIRST 100 ROWS ONLY;');
             expect(buildTopSelectSql('DB.S.T', 100, 'netezza')).toBe('SELECT * FROM DB.S.T LIMIT 100;');
             expect(buildTopSelectSql('T', 100)).toBe('SELECT * FROM T LIMIT 100;');
         });

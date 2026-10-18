@@ -87,18 +87,18 @@ describe('schema menu capability matrix', () => {
         expectCapabilities('mysql', { supportsTableStatistics: false });
     });
 
-    it('keeps Db2 locked out of destructive/structural actions until the unlock commit', () => {
+    it('enables destructive and structural actions for Db2', () => {
         expectCapabilities('db2', {
-            supportsTruncateTable: false,
-            supportsTableComments: false,
-            supportsColumnComments: false,
-            supportsGrants: false,
-            supportsTableRename: false,
-            supportsTableOwnerChange: false,
-            supportsPrimaryKeyChanges: false,
-            supportsForeignKeyChanges: false,
-            supportsUniqueConstraintChanges: false,
+            supportsTruncateTable: true,
+            supportsTableComments: true,
+            supportsColumnComments: true,
+            supportsGrants: true,
+            supportsTableRename: true,
+            supportsPrimaryKeyChanges: true,
+            supportsForeignKeyChanges: true,
+            supportsUniqueConstraintChanges: true,
         });
+        expectCapabilities('db2', { supportsTableOwnerChange: false });
     });
 
     it('matches the previous comment/grant/rename/owner/constraint visibility', () => {
@@ -118,7 +118,7 @@ describe('schema menu capability matrix', () => {
         for (const kind of ['postgresql', 'oracle', 'mysql', 'mssql']) {
             expectCapabilities(kind, { supportsForeignKeyChanges: true });
         }
-        for (const kind of ['sqlite', 'duckdb', 'db2']) {
+        for (const kind of ['sqlite', 'duckdb']) {
             expectCapabilities(kind, {
                 supportsTableComments: false,
                 supportsGrants: false,

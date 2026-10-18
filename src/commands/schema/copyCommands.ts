@@ -18,7 +18,7 @@ export function buildTopSelectSql(fullName: string, limit: number, databaseKind?
     if (databaseKind === 'mssql') {
         return `SELECT TOP (${limit}) * FROM ${fullName};`;
     }
-    if (databaseKind === 'oracle') {
+    if (databaseKind === 'oracle' || databaseKind === 'db2') {
         return `SELECT * FROM ${fullName} FETCH FIRST ${limit} ROWS ONLY;`;
     }
     return `SELECT * FROM ${fullName} LIMIT ${limit};`;
