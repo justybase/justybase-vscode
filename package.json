@@ -294,6 +294,38 @@
         "title": "Select Top 1000"
       },
       {
+        "command": "netezza.countRows",
+        "title": "Count Rows"
+      },
+      {
+        "command": "netezza.findDuplicateRows",
+        "title": "Find Duplicate Rows..."
+      },
+      {
+        "command": "netezza.createTableFromTable",
+        "title": "Create Table From This..."
+      },
+      {
+        "command": "netezza.callRoutine",
+        "title": "Call Routine..."
+      },
+      {
+        "command": "netezza.setTableStorage",
+        "title": "Set Table Storage..."
+      },
+      {
+        "command": "netezza.createIndex",
+        "title": "Create Index..."
+      },
+      {
+        "command": "netezza.alterColumnQuick",
+        "title": "Alter Table..."
+      },
+      {
+        "command": "netezza.searchSchemaValues",
+        "title": "Search Values in Schema..."
+      },
+      {
         "command": "netezza.copyDrop",
         "title": "Drop Table/View"
       },
@@ -1969,6 +2001,38 @@
           "when": "false"
         },
         {
+          "command": "netezza.countRows",
+          "when": "false"
+        },
+        {
+          "command": "netezza.findDuplicateRows",
+          "when": "false"
+        },
+        {
+          "command": "netezza.createTableFromTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.callRoutine",
+          "when": "false"
+        },
+        {
+          "command": "netezza.setTableStorage",
+          "when": "false"
+        },
+        {
+          "command": "netezza.searchSchemaValues",
+          "when": "false"
+        },
+        {
+          "command": "netezza.createIndex",
+          "when": "false"
+        },
+        {
+          "command": "netezza.alterColumnQuick",
+          "when": "false"
+        },
+        {
           "command": "postgresql.listPartitions",
           "when": "false"
         },
@@ -2389,6 +2453,31 @@
           "group": "1_copy"
         },
         {
+          "command": "netezza.countRows",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/)",
+          "group": "1_copy@2"
+        },
+        {
+          "command": "netezza.findDuplicateRows",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/)",
+          "group": "1_copy@3"
+        },
+        {
+          "command": "netezza.createTableFromTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
+          "group": "1_copy@4"
+        },
+        {
+          "command": "netezza.callRoutine",
+          "when": "(view == netezza.schema && viewItem =~ /^netezza:(PROCEDURE|FUNCTION)$/ || view == netezza.schema && viewItem =~ /^favoritesObject:(PROCEDURE|FUNCTION)$/) && justybase.schema.capabilities.supportsCallRoutine",
+          "group": "1_routine"
+        },
+        {
+          "command": "netezza.searchSchemaValues",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSchemaValueSearch",
+          "group": "1_data@2"
+        },
+        {
           "command": "netezza.copyName",
           "when": "view == netezza.schema && viewItem =~ /netezza:.*/ || view == netezza.schema && viewItem =~ /favoritesObject:.*/",
           "group": "1_copy"
@@ -2434,6 +2523,16 @@
           "group": "3_maintenance"
         },
         {
+          "command": "netezza.setTableStorage",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableStorageOptions",
+          "group": "3_maintenance@1"
+        },
+        {
+          "command": "netezza.createIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == sqlite)",
+          "group": "3_maintenance@2"
+        },
+        {
           "command": "postgresql.listPartitions",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
           "group": "3_maintenance"
@@ -2466,6 +2565,11 @@
         {
           "command": "netezza.addPrimaryKey",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsPrimaryKeyChanges",
+          "group": "5_schema@1"
+        },
+        {
+          "command": "netezza.alterColumnQuick",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == duckdb)",
           "group": "5_schema@1"
         },
         {
