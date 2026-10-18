@@ -6,7 +6,7 @@ import { queryDiskGroupStats } from '../diskBackedGrid.js';
 import type { ExploreColumnRole } from '../explore/types.js';
 import { DISK_STAT_BATCH_COLUMNS, type AnalysisColumn } from './diskAdapter.js';
 import { ANALYTICAL_MAX_GROUPS, ANALYTICAL_TOP_VALUES } from './types.js';
-import type { DiskGroupStatsRequest, DiskGroupStatsResult } from '../types.js';
+import type { DiskGroupStatsRequest, DiskGroupStatsResult, DiskQuerySpec } from '../types.js';
 
 export interface DiskLoadParams {
     rsIndex: number;
@@ -16,6 +16,11 @@ export interface DiskLoadParams {
     isCancelled: () => boolean;
     /** Request quartiles for measure columns (robust mode). Off by default: it adds window passes. */
     quantiles?: boolean;
+    /**
+     * Analysis scope: when it carries filters, the store computes every statistic over the matching
+     * rows only, so the document can analyse exactly the population it displays.
+     */
+    spec?: DiskQuerySpec;
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -57,6 +62,9 @@ export async function collectDiskGroupStats(params: DiskLoadParams): Promise<Dis
             rareColumns: dimensionColumns,
             categoryColumns: dimensionColumns,
         };
+        if (params.spec) {
+            request.spec = params.spec;
+        }
         if (params.quantiles) {
             const quantileColumns = batch.filter(column => column.role === 'measure').map(column => column.index);
             if (quantileColumns.length > 0) {

@@ -21,6 +21,8 @@ import { computeGroupStats, GroupStatsRowLimitError } from './computeGroupStats.
 import { describeCoverageSkips } from './coverage.js';
 import { analyzedColumnsFor, buildDiskGroupDataset, type AnalysisColumn } from './diskAdapter.js';
 import { collectDiskGroupStats } from './diskLoader.js';
+import { analyticalScopeKey, getAnalyticalScope } from './scope.js';
+import { filterRowsBySpec } from '../filterPredicate.js';
 import { renderDetailPane } from './detailPane.js';
 import { el } from './elements.js';
 import { renderGroupPicker } from './groupPicker.js';
@@ -156,6 +158,14 @@ function releaseView(view: AnalyticalViewState): void {
     view.rawKey = undefined;
 }
 
+/** Drops cached datasets so the next render recomputes with the current analysis scope. */
+export function invalidateAnalyticalCache(): void {
+    for (const view of viewStates.values()) {
+        releaseView(view);
+        view.autoStartSuppressed = undefined;
+    }
+}
+
 function trimViewStates(keep: string): void {
     while (viewStates.size > MAX_VIEW_STATES) {
         const oldest = viewStates.keys().next().value;
@@ -204,10 +214,15 @@ async function computeMemoryDataset(
     token: ComputeToken,
     quantiles: boolean,
 ): Promise<AnalyticalDataset | null> {
-    const rows = memoryRows(owner);
-    const roles = classifyColumns(owner.columns, rows);
+    const allRows = memoryRows(owner);
+    // Scope: the document may analyse only the rows that survive its filters. The predicate is the
+    // in-memory twin of the SQL the disk path uses, so both scopes agree row for row.
+    const scope = getAnalyticalScope();
+    const rows = filterRowsBySpec(allRows, scope, owner.columns);
+    const roles = classifyColumns(owner.columns, allRows);
     const columns = owner.columns.map((column, index) => ({ index, name: column.name, role: roles[index] }));
-    return computeGroupStats({ columns, rows, groupColumns, quantiles }, { isCancelled: () => token.cancelled, yieldToUi });
+    const dataset = await computeGroupStats({ columns, rows, groupColumns, quantiles }, { isCancelled: () => token.cancelled, yieldToUi });
+    return dataset ? { ...dataset, scopedRows: scope ? rows.length : undefined, sourceRows: allRows.length } : dataset;
 }
 
 /** Exact disk-backed analysis over every spilled row, in column batches. No sampling. */
@@ -226,15 +241,20 @@ async function computeDiskDataset(
     const { analyzed } = analyzedColumnsFor(columns, groupColumns);
     // Quartiles add window passes over every row, so they are skipped on very large results (robust falls back).
     const quantiles = quantilesWanted && (owner.totalRowCount ?? 0) <= ANALYTICAL_QUANTILE_MAX_DISK_ROWS;
+    const scope = getAnalyticalScope();
     const batches = await collectDiskGroupStats({
         rsIndex,
         groupColumns: groupColumns.map(ref => ref.index),
         statColumns: analyzed,
         isCancelled: () => token.cancelled,
         quantiles,
+        spec: scope,
     });
     if (!batches || token.cancelled) return null;
-    return buildDiskGroupDataset({ columns, groupColumns, batches, quantiles });
+    const dataset = buildDiskGroupDataset({ columns, groupColumns, batches, quantiles });
+    return dataset
+        ? { ...dataset, scopedRows: scope ? dataset.totalRows : undefined, sourceRows: owner.totalRowCount }
+        : dataset;
 }
 
 function scheduleCompute(view: AnalyticalViewState, viewKey: string, rsIndex: number): void {
@@ -251,7 +271,7 @@ function startCompute(view: AnalyticalViewState, viewKey: string, rsIndex: numbe
     cancelInflight(view);
     const token: ComputeToken = { cancelled: false };
     const groupColumns = [...view.persisted.groupColumns];
-    const wantedKey = groupKeyOf(view.persisted);
+    const wantedKey = `${groupKeyOf(view.persisted)}|${analyticalScopeKey(getAnalyticalScope())}`;
     view.token = token;
     view.inflightKey = wantedKey;
     view.status = 'loading';
@@ -301,6 +321,10 @@ function buildNotices(view: AnalyticalViewState, owner: ResultSet): HTMLElement[
         notices.push('Results are still loading; statistics update as rows arrive.');
     }
     const raw = view.raw;
+    if (raw?.scopedRows !== undefined) {
+        const source = raw.sourceRows !== undefined ? raw.sourceRows.toLocaleString('en-US') : 'the whole result';
+        notices.push(`Scope: filtered rows — ${raw.scopedRows.toLocaleString('en-US')} of ${source} rows analysed.`);
+    }
     if (raw?.groupsTruncated) {
         notices.push(`Showing the ${raw.groups.length} largest of ${raw.totalGroups} groups; ${raw.unlistedRows.toLocaleString('en-US')} rows in smaller groups are not listed.`);
     }
@@ -596,7 +620,7 @@ export function renderAnalyticalView(rsIndex: number): void {
         });
     }
 
-    const wantedKey = groupKeyOf(view.persisted);
+    const wantedKey = `${groupKeyOf(view.persisted)}|${analyticalScopeKey(getAnalyticalScope())}`;
     if (view.persisted.groupColumns.length === 0) {
         cancelInflight(view);
         clearDebounce(view);
