@@ -137,6 +137,48 @@ export interface DatabaseCapabilities {
   supportsSessionMonitor: boolean;
   /** Whether SPU/data-slice distribution and skew metrics are meaningful. */
   supportsDistributionMetrics: boolean;
+  /** GENERATE STATISTICS / RUNSTATS / DBMS_STATS style table statistics. */
+  supportsTableStatistics: boolean;
+  /** VACUUM / REORG / SHRINK style space reclamation. */
+  supportsVacuumTable: boolean;
+  /** ANALYZE / UPDATE STATISTICS style optimizer statistics refresh. */
+  supportsAnalyzeTable: boolean;
+  /** REINDEX style index rebuild. */
+  supportsReindexTable: boolean;
+  /** Netezza GROOM TABLE. */
+  supportsGroomTable: boolean;
+  /** Netezza data-slice skew inspection. */
+  supportsTableSkewCheck: boolean;
+  /** TRUNCATE TABLE (or the dialect's fastest full-table clear). */
+  supportsTruncateTable: boolean;
+  /** COMMENT ON TABLE style table comments. */
+  supportsTableComments: boolean;
+  /** COMMENT ON COLUMN style column comments. */
+  supportsColumnComments: boolean;
+  /** GRANT ... ON TABLE style permission grants. */
+  supportsGrants: boolean;
+  /** ALTER TABLE ... RENAME TO style table renames. */
+  supportsTableRename: boolean;
+  /** ALTER TABLE ... OWNER TO style owner changes. */
+  supportsTableOwnerChange: boolean;
+  /** ADD PRIMARY KEY style constraint changes. */
+  supportsPrimaryKeyChanges: boolean;
+  /** ADD FOREIGN KEY style constraint changes. */
+  supportsForeignKeyChanges: boolean;
+  /** ADD UNIQUE style constraint changes. */
+  supportsUniqueConstraintChanges: boolean;
+  /** CREATE/DROP/ATTACH/DETACH partition management. */
+  supportsPartitionManagement: boolean;
+  /** CREATE/DROP INDEX management. */
+  supportsIndexes: boolean;
+  /** PostgreSQL storage parameters (fillfactor, tablespaces). */
+  supportsTableStorageOptions: boolean;
+  /** SQLite database-level maintenance (VACUUM, integrity_check, ...). */
+  supportsSqliteDatabaseMaintenance: boolean;
+  /** Schema-wide text/numeric value search script generation. */
+  supportsSchemaValueSearch: boolean;
+  /** CALL / SELECT routine invocation script generation. */
+  supportsCallRoutine: boolean;
 }
 
 export interface DatabaseSqlFunctionSignature {
@@ -247,6 +289,27 @@ export function createDatabaseCapabilities(
     supportsTableMaintenance: false,
     supportsSessionMonitor: false,
     supportsDistributionMetrics: false,
+    supportsTableStatistics: false,
+    supportsVacuumTable: false,
+    supportsAnalyzeTable: false,
+    supportsReindexTable: false,
+    supportsGroomTable: false,
+    supportsTableSkewCheck: false,
+    supportsTruncateTable: false,
+    supportsTableComments: false,
+    supportsColumnComments: false,
+    supportsGrants: false,
+    supportsTableRename: false,
+    supportsTableOwnerChange: false,
+    supportsPrimaryKeyChanges: false,
+    supportsForeignKeyChanges: false,
+    supportsUniqueConstraintChanges: false,
+    supportsPartitionManagement: false,
+    supportsIndexes: false,
+    supportsTableStorageOptions: false,
+    supportsSqliteDatabaseMaintenance: false,
+    supportsSchemaValueSearch: false,
+    supportsCallRoutine: false,
     ...overrides,
   };
 }
