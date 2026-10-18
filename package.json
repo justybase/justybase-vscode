@@ -366,6 +366,19 @@
         "title": "Reindex Table"
       },
       {
+        "command": "netezza.reindexConcurrently",
+        "title": "Rebuild Indexes Concurrently"
+      },
+      {
+        "command": "netezza.duckdb.listIndexes",
+        "title": "DuckDB: List Indexes",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "netezza.duckdb.dropIndex",
+        "title": "DuckDB: Drop Index..."
+      },
+      {
         "command": "postgresql.listPartitions",
         "title": "List Partitions",
         "icon": "$(list-tree)"
@@ -670,6 +683,11 @@
         "command": "netezza.sqlite.analyzeTable",
         "title": "SQLite: Analyze Table",
         "icon": "$(graph)"
+      },
+      {
+        "command": "netezza.sqlite.rebuildTable",
+        "title": "SQLite: Rebuild Table...",
+        "icon": "$(tools)"
       },
       {
         "command": "netezza.sqlite.vacuum",
@@ -2033,6 +2051,22 @@
           "when": "false"
         },
         {
+          "command": "netezza.reindexConcurrently",
+          "when": "false"
+        },
+        {
+          "command": "netezza.duckdb.listIndexes",
+          "when": "false"
+        },
+        {
+          "command": "netezza.duckdb.dropIndex",
+          "when": "false"
+        },
+        {
+          "command": "netezza.sqlite.rebuildTable",
+          "when": "false"
+        },
+        {
           "command": "postgresql.listPartitions",
           "when": "false"
         },
@@ -2523,6 +2557,21 @@
           "group": "3_maintenance"
         },
         {
+          "command": "netezza.reindexConcurrently",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_maintenance"
+        },
+        {
+          "command": "netezza.duckdb.listIndexes",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == duckdb",
+          "group": "3_maintenance@3"
+        },
+        {
+          "command": "netezza.duckdb.dropIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == duckdb",
+          "group": "3_maintenance@4"
+        },
+        {
           "command": "netezza.setTableStorage",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableStorageOptions",
           "group": "3_maintenance@1"
@@ -2626,6 +2675,11 @@
           "command": "netezza.sqlite.analyzeTable",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@7"
+        },
+        {
+          "command": "netezza.sqlite.rebuildTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "3_sqlite@8"
         },
         {
           "command": "netezza.createDDL",

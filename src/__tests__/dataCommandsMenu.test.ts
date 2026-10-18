@@ -40,6 +40,10 @@ describe('data exploration context menu', () => {
     'netezza.searchSchemaValues',
     'netezza.createIndex',
     'netezza.alterColumnQuick',
+    'netezza.reindexConcurrently',
+    'netezza.duckdb.listIndexes',
+    'netezza.duckdb.dropIndex',
+    'netezza.sqlite.rebuildTable',
   ])('declares the %s command', (command) => {
     expect(manifest.contributes.commands.map((entry) => entry.command)).toContain(command);
   });
@@ -53,6 +57,10 @@ describe('data exploration context menu', () => {
     'netezza.searchSchemaValues',
     'netezza.createIndex',
     'netezza.alterColumnQuick',
+    'netezza.reindexConcurrently',
+    'netezza.duckdb.listIndexes',
+    'netezza.duckdb.dropIndex',
+    'netezza.sqlite.rebuildTable',
   ])('hides %s from the command palette', (command) => {
     expect(palette).toContainEqual({ command, when: 'false' });
   });
@@ -84,5 +92,20 @@ describe('data exploration context menu', () => {
     const entries = menuEntries('netezza.createTableFromTable');
     expect(entries.length).toBeGreaterThan(0);
     expect(entries[0]?.when).toContain('viewItem == netezza:TABLE');
+  });
+
+  it('gates the rebuild, DuckDB index and concurrent reindex actions', () => {
+    expect(menuEntries('netezza.sqlite.rebuildTable')[0]?.when).toContain(
+      'justybase.schema.capabilities.supportsSqliteDatabaseMaintenance',
+    );
+    expect(menuEntries('netezza.duckdb.listIndexes')[0]?.when).toContain(
+      'justybase.schemaDatabaseKind == duckdb',
+    );
+    expect(menuEntries('netezza.duckdb.dropIndex')[0]?.when).toContain(
+      'justybase.schemaDatabaseKind == duckdb',
+    );
+    expect(menuEntries('netezza.reindexConcurrently')[0]?.when).toContain(
+      'justybase.schemaDatabaseKind == postgresql',
+    );
   });
 });
