@@ -5,6 +5,18 @@
 jest.mock('../commands/schema/copyCommands', () => ({
     registerCopyCommands: jest.fn(() => [{ dispose: jest.fn() }])
 }));
+jest.mock('../commands/schema/dataCommands', () => ({
+    registerDataCommands: jest.fn(() => [
+        { dispose: jest.fn() },
+        { dispose: jest.fn() },
+        { dispose: jest.fn() },
+        { dispose: jest.fn() },
+        { dispose: jest.fn() },
+        { dispose: jest.fn() },
+        { dispose: jest.fn() },
+        { dispose: jest.fn() }
+    ])
+}));
 jest.mock('../commands/schema/tableCommands', () => ({
     registerTableCommands: jest.fn(() => [{ dispose: jest.fn() }, { dispose: jest.fn() }])
 }));
@@ -31,7 +43,7 @@ describe('schema command aggregation', () => {
     it('combines all command registration arrays in main entry point', () => {
         const deps = {} as Parameters<typeof registerSchemaCommands>[0];
         const result = registerSchemaCommands(deps);
-        expect(result).toHaveLength(8);
+        expect(result).toHaveLength(16);
         result.forEach(disposable => {
             expect(typeof disposable.dispose).toBe('function');
         });
@@ -40,6 +52,6 @@ describe('schema command aggregation', () => {
     it('exposes backward-compatible re-export entry point', () => {
         const deps = {} as Parameters<typeof registerSchemaCommandsCompat>[0];
         const result = registerSchemaCommandsCompat(deps);
-        expect(result).toHaveLength(8);
+        expect(result).toHaveLength(16);
     });
 });

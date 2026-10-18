@@ -6,6 +6,7 @@
 export * from './types';
 export * from './helpers';
 export * from './copyCommands';
+export * from './dataCommands';
 export * from './tableCommands';
 export * from './maintenanceCommands';
 export * from './ddlCommands';
