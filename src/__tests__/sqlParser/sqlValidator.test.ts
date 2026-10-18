@@ -2301,10 +2301,16 @@ JOIN JUST_DATA.ADMIN.DEPARTMENT B`;
       );
     });
 
-    it("should validate INSERT INTO ... WITH ... SELECT after target table", () => {
-      expectValid(`INSERT INTO TESTDB..FILMS
+    it("should reject INSERT INTO ... WITH without AS (live: CTE name requires AS)", () => {
+      expectErrorCode(`INSERT INTO TESTDB..FILMS
 WITH ABC (SELECT 1 AS CODE, 'Test' AS TITLE)
-SELECT CODE, TITLE FROM ABC;`);
+SELECT CODE, TITLE FROM ABC;`, "NZS016");
+    });
+
+    it("should validate INSERT INTO ... WITH ... AS ... SELECT (CTE in query position)", () => {
+      expectValid(`INSERT INTO TESTDB..FILMS (CODE, TITLE)
+WITH SRC AS (SELECT 1 AS CODE, 'Test' AS TITLE)
+SELECT CODE, TITLE FROM SRC;`);
     });
 
     it("should validate INSERT INTO with nested WITH inside CTE body", () => {
@@ -3155,9 +3161,9 @@ SELECT DK.DEPARTMENT_ID FROM DEPT_KEYS DK;`,
       );
     });
 
-    it("should validate CTE followed by INSERT INTO ... SELECT", () => {
-      expectValid(`WITH SRC AS (SELECT 1 AS CODE, 'Test' AS TITLE)
-INSERT INTO TESTDB..FILMS (CODE, TITLE) SELECT CODE, TITLE FROM SRC;`);
+    it("should reject CTE followed by INSERT INTO (live: only SELECT or '(' may follow WITH)", () => {
+      expectErrorCode(`WITH SRC AS (SELECT 1 AS CODE, 'Test' AS TITLE)
+INSERT INTO TESTDB..FILMS (CODE, TITLE) SELECT CODE, TITLE FROM SRC;`, "NZS013");
     });
 
     it("should validate CTE + CTAS + subsequent SELECT", () => {
@@ -3166,13 +3172,17 @@ INSERT INTO TESTDB..FILMS (CODE, TITLE) SELECT CODE, TITLE FROM SRC;`);
     SELECT * FROM CTE;`);
     });
 
-    it("should validate INSERT INTO ... SELECT with CTE", () => {
-      expectValid(`WITH SRC AS (
+    it("should validate CREATE TEMP TABLE ... AS WITH ... (CTE in CTAS query)", () => {
+      expectValid(`CREATE TEMP TABLE T AS WITH SRC AS (SELECT 1 AS CODE) SELECT CODE FROM SRC;`);
+    });
+
+    it("should reject INSERT INTO ... SELECT with leading CTE (CTE cannot precede INSERT)", () => {
+      expectErrorCode(`WITH SRC AS (
     SELECT EMPLOYEE_ID, FIRST_NAME || ' ' || LAST_NAME AS FULL_NAME
     FROM TESTDB..EMPLOYEES
     WHERE DEPARTMENT_ID = 1
 )
-INSERT INTO TESTDB..FILMS (CODE, TITLE) SELECT EMPLOYEE_ID, FULL_NAME FROM SRC;`);
+INSERT INTO TESTDB..FILMS (CODE, TITLE) SELECT EMPLOYEE_ID, FULL_NAME FROM SRC;`, "NZS013");
     });
 
     it("should validate quoted identifiers", () => {
