@@ -44,6 +44,7 @@ describe('data exploration context menu', () => {
     'netezza.duckdb.listIndexes',
     'netezza.duckdb.dropIndex',
     'netezza.sqlite.rebuildTable',
+    'netezza.exportTableData',
   ])('declares the %s command', (command) => {
     expect(manifest.contributes.commands.map((entry) => entry.command)).toContain(command);
   });
@@ -61,6 +62,7 @@ describe('data exploration context menu', () => {
     'netezza.duckdb.listIndexes',
     'netezza.duckdb.dropIndex',
     'netezza.sqlite.rebuildTable',
+    'netezza.exportTableData',
   ])('hides %s from the command palette', (command) => {
     expect(palette).toContainEqual({ command, when: 'false' });
   });
@@ -92,6 +94,13 @@ describe('data exploration context menu', () => {
     const entries = menuEntries('netezza.createTableFromTable');
     expect(entries.length).toBeGreaterThan(0);
     expect(entries[0]?.when).toContain('viewItem == netezza:TABLE');
+  });
+
+  it('offers table export on tables and views without a kind gate', () => {
+    const entries = menuEntries('netezza.exportTableData');
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0]?.when).toContain('netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)');
+    expect(entries[0]?.when).not.toContain('schemaDatabaseKind');
   });
 
   it('gates the rebuild, DuckDB index and concurrent reindex actions', () => {

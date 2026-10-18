@@ -8,6 +8,7 @@ import { SchemaCommandsDependencies } from './types';
 import { registerCopyCommands } from './copyCommands';
 import { registerDataCommands } from './dataCommands';
 import { registerDuckdbCommands } from './duckdbCommands';
+import { registerTableExportCommands } from './tableExportCommands';
 import { registerTableCommands } from './tableCommands';
 import { registerMaintenanceCommands } from './maintenanceCommands';
 import { registerDDLCommands } from './ddlCommands';
@@ -24,6 +25,7 @@ export function registerSchemaCommands(deps: SchemaCommandsDependencies): vscode
         ...registerCopyCommands(deps),
         ...registerDataCommands(deps),
         ...registerDuckdbCommands(deps),
+        ...registerTableExportCommands(deps),
         ...registerTableCommands(deps),
         ...registerMaintenanceCommands(deps),
         ...registerDDLCommands(deps),
