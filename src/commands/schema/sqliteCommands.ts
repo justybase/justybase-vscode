@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { queryResultToRows, runQueryRaw } from '../../core/queryRunner';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../utils/identifierUtils';
 import { escapeSqlString as escapeSqlLiteral } from '../../utils/sqlUtils';
+import { buildSqliteTableRebuildScript, retargetSqliteCreateTableDdl } from './sqliteRebuild';
 import type { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getItemObjectName } from './helpers';
 
@@ -318,6 +319,103 @@ export function registerSqliteCommands(deps: SchemaCommandsDependencies): vscode
                 const tablePath = formatQualifiedObjectName(selection.catalog, undefined, selection.objectName || '', 'sqlite');
                 return `ANALYZE ${tablePath};`;
             });
+        }),
+        vscode.commands.registerCommand('netezza.sqlite.rebuildTable', async (item: SchemaItemData) => {
+            const selection = await resolveSqliteSelection(deps, item, true);
+            if (!selection || !selection.objectName) {
+                return;
+            }
+
+            try {
+                const tableRows = await querySqliteRows<{ SQL_TEXT?: string | null }>(
+                    deps,
+                    selection,
+                    buildSQLiteTableQuery(
+                        selection.catalog,
+                        selection.objectName,
+                        `SELECT sql AS SQL_TEXT FROM ${'${catalog}'}.sqlite_master WHERE type = 'table' AND name = '${'${table}'}';`
+                    )
+                );
+                const originalDdl = tableRows[0]?.SQL_TEXT?.trim() ?? '';
+                if (!originalDdl) {
+                    vscode.window.showErrorMessage('Could not read the SQLite table definition.');
+                    return;
+                }
+
+                const editedDdl = await vscode.window.showInputBox({
+                    prompt: 'Edit the replacement CREATE TABLE definition (keep the original table name; for complex rewrites draft it in an editor and paste it here)',
+                    value: originalDdl,
+                    validateInput: value => (value && value.trim().length > 0 ? null : 'The replacement definition cannot be empty.')
+                });
+                if (editedDdl === undefined) {
+                    return;
+                }
+
+                const suffix = `${Date.now().toString(36).toUpperCase()}_${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+                const temporaryName = `__JB_REBUILD_${suffix}`;
+                const sequenceBackupName = `__JB_SEQ_${suffix}`;
+                const catalogIdentifier = formatSqliteCatalogIdentifier(selection.catalog);
+                const qualifiedTemporaryName = `${catalogIdentifier}.${formatIdentifierForSql(temporaryName, 'sqlite')}`;
+                const qualifiedTableName = formatQualifiedObjectName(selection.catalog, undefined, selection.objectName, 'sqlite');
+
+                let replacementDdl: string;
+                try {
+                    replacementDdl = retargetSqliteCreateTableDdl(originalDdl, editedDdl, qualifiedTemporaryName);
+                } catch (error) {
+                    vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+                    return;
+                }
+
+                const columnRows = await querySqliteRows<{ COLUMN_NAME?: string | null }>(
+                    deps,
+                    selection,
+                    buildSQLiteTableQuery(
+                        selection.catalog,
+                        selection.objectName,
+                        `SELECT name AS COLUMN_NAME FROM ${'${catalog}'}.pragma_table_info('${'${table}'}') ORDER BY cid;`
+                    )
+                );
+                const columns = columnRows
+                    .map(row => row.COLUMN_NAME)
+                    .filter((name): name is string => typeof name === 'string' && name.length > 0);
+
+                const dependentRows = await querySqliteRows<{ SQL_TEXT?: string | null }>(
+                    deps,
+                    selection,
+                    buildSQLiteTableQuery(
+                        selection.catalog,
+                        selection.objectName,
+                        `SELECT sql AS SQL_TEXT FROM ${'${catalog}'}.sqlite_master WHERE tbl_name = '${'${table}'}' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name;`
+                    )
+                );
+                const dependentDdl = dependentRows
+                    .map(row => row.SQL_TEXT?.trim())
+                    .filter((sql): sql is string => !!sql);
+
+                const script = buildSqliteTableRebuildScript({
+                    schemaName: selection.catalog,
+                    tableName: selection.objectName,
+                    qualifiedTableName,
+                    qualifiedTemporaryName,
+                    sequenceBackupName,
+                    columns,
+                    dependentDdl,
+                    createTableDdl: replacementDdl,
+                    preserveAutoincrement: /\bAUTOINCREMENT\b/i.test(originalDdl) && /\bAUTOINCREMENT\b/i.test(editedDdl),
+                });
+
+                const doc = await vscode.workspace.openTextDocument({
+                    language: 'sql',
+                    content: `-- SQLite: Rebuild ${selection.objectName} (review before running)\n${script}\n`
+                });
+                await vscode.window.showTextDocument(doc, { preview: false });
+                deps.connectionManager.setDocumentConnection(doc.uri.toString(), selection.connectionName);
+                await deps.connectionManager.setDocumentDatabase(doc.uri.toString(), selection.catalog);
+                vscode.window.showInformationMessage(`Rebuild script for ${selection.objectName} opened. Review the mapping and foreign-key check before committing.`);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`SQLite action failed: ${message}`);
+            }
         }),
         vscode.commands.registerCommand('netezza.sqlite.vacuum', async (item: SchemaItemData) => {
             await executeDatabaseAction(deps, item, 'SQLite: VACUUM', async selection => {

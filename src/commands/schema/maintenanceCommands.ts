@@ -630,5 +630,36 @@ export function registerMaintenanceCommands(deps: SchemaCommandsDependencies): v
       resolved.services
     );
   }),
+
+  vscode.commands.registerCommand('netezza.reindexConcurrently', async (item: SchemaItemData) => {
+    if (!isTableItem(item)) {
+      return;
+    }
+
+    const resolved = resolveOperationContext(deps, item, 'Concurrent index rebuild');
+    if (!resolved) {
+      return;
+    }
+    if (!resolved.provider.reindexWithOptions) {
+      vscode.window.showErrorMessage('Concurrent index rebuild is not supported for the active database dialect.');
+      return;
+    }
+
+    const confirmation = await vscode.window.showWarningMessage(
+      `Rebuild indexes on "${resolved.target.qualifiedName}" concurrently?\n\nConcurrent rebuilds keep normal writes available but take longer, cannot run inside a transaction block, and can leave invalid indexes after a failure.`,
+      { modal: true },
+      'Yes, rebuild concurrently',
+      'Cancel'
+    );
+    if (confirmation !== 'Yes, rebuild concurrently') {
+      return;
+    }
+
+    await resolved.provider.reindexWithOptions(
+      resolved.target,
+      { concurrently: true },
+      resolved.services
+    );
+  }),
   ];
 }
