@@ -21,6 +21,9 @@ import { postgresqlExplainProvider } from './postgresqlExplainParser';
 import {
     buildDdlColumnsQuery,
     buildFindTableSchemaQuery,
+    buildForeignTableColumnOptionsQuery,
+    buildForeignTableDefinitionQuery,
+    buildIndexDefinitionQuery,
     buildKeysInfoQuery,
     buildObjectTypeQuery,
     buildRoutineDefinitionQuery,
@@ -31,6 +34,7 @@ import {
     buildTablePartitionKeyQuery,
     buildTablePartitionsQuery,
     buildTableTriggersQuery,
+    buildTriggerDefinitionQuery,
     buildViewDefinitionQuery,
 } from './postgresqlSystemQueries';
 
@@ -58,6 +62,9 @@ interface TextRow {
     DESCRIPTION?: string | null;
     OWNER?: string | null;
     SCHEMA?: string | null;
+    SERVER_NAME?: string | null;
+    TABLE_OPTIONS?: unknown;
+    TABLE_NAME?: string | null;
     VIEW_KIND?: string | null;
     VIEW_SQL?: string | null;
     ROUTINE_DDL?: string | null;
@@ -73,7 +80,7 @@ interface ObjectRow {
     SCHEMA?: string | null;
 }
 
-const SUPPORTED_BATCH_TYPES = new Set(['TABLE', 'VIEW', 'FUNCTION', 'PROCEDURE', 'SEQUENCE']);
+const SUPPORTED_BATCH_TYPES = new Set(['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE', 'FUNCTION', 'PROCEDURE', 'SEQUENCE', 'TRIGGER', 'INDEX']);
 
 function quoteLiteral(value: string): string {
     return `'${value.replace(/'/g, "''")}'`;
@@ -289,6 +296,119 @@ async function generateSequenceDdl(
     return ensureStatementTerminated(ddl);
 }
 
+async function generateIndexDdl(
+    connection: DatabaseConnection,
+    schema: string,
+    indexName: string,
+): Promise<string> {
+    const rows = await executeDatabaseQuery<TextRow>(connection, buildIndexDefinitionQuery(schema, indexName));
+    const ddl = rows[0]?.INDEX_DDL?.trim();
+    if (!ddl) {
+        throw new Error(`PostgreSQL did not return DDL for index ${schema}.${indexName}.`);
+    }
+
+    return ensureStatementTerminated(ddl);
+}
+
+async function generateTriggerDdl(
+    connection: DatabaseConnection,
+    schema: string,
+    triggerName: string,
+): Promise<string> {
+    const rows = await executeDatabaseQuery<TextRow>(connection, buildTriggerDefinitionQuery(schema, triggerName));
+    if (rows.length === 0 || !rows[0]?.TRIGGER_DDL?.trim()) {
+        throw new Error(`PostgreSQL did not return DDL for trigger ${schema}.${triggerName}.`);
+    }
+    if (rows.length > 1) {
+        const tables = rows.map(row => row.TABLE_NAME).filter(Boolean).join(', ');
+        throw new Error(
+            `Trigger ${triggerName} exists on more than one table in schema ${schema} (${tables}). Regenerate DDL from the parent table.`,
+        );
+    }
+
+    return ensureStatementTerminated(rows[0].TRIGGER_DDL!.trim());
+}
+
+/** Parses a PostgreSQL text[] option list (already decoded to strings) into `key 'value'` clauses. */
+function formatOptionClauses(options: unknown): string[] {
+    const entries = Array.isArray(options) ? options : [];
+    return entries
+        .map(entry => String(entry))
+        .map(entry => {
+            const separator = entry.indexOf('=');
+            if (separator < 0) {
+                return null;
+            }
+            const key = entry.slice(0, separator).trim();
+            const value = entry.slice(separator + 1);
+            if (!key) {
+                return null;
+            }
+            return `${formatIdentifierForSql(key, 'postgresql')} ${quoteLiteral(value)}`;
+        })
+        .filter((clause): clause is string => clause !== null);
+}
+
+async function generateForeignTableDdl(
+    connection: DatabaseConnection,
+    schema: string,
+    tableName: string,
+): Promise<string> {
+    const defRows = await executeDatabaseQuery<TextRow & { SERVER_NAME?: string | null; TABLE_OPTIONS?: unknown }>(
+        connection,
+        buildForeignTableDefinitionQuery(schema, tableName),
+    );
+    const definition = defRows[0];
+    if (!definition?.SERVER_NAME) {
+        throw new Error(`PostgreSQL did not return a foreign table definition for ${schema}.${tableName}.`);
+    }
+
+    const columnRows = await executeDatabaseQuery<ColumnRow>(connection, buildDdlColumnsQuery(schema, tableName));
+    if (columnRows.length === 0) {
+        throw new Error(`Foreign table ${schema}.${tableName} was not found or has no columns.`);
+    }
+    const optionRows = await executeDatabaseQuery<TextRow & { ATTNAME?: string | null; COLUMN_OPTIONS?: unknown }>(
+        connection,
+        buildForeignTableColumnOptionsQuery(schema, tableName),
+    );
+    const columnOptions = new Map<string, string[]>();
+    for (const row of optionRows) {
+        if (row.ATTNAME) {
+            columnOptions.set(row.ATTNAME, formatOptionClauses(row.COLUMN_OPTIONS));
+        }
+    }
+
+    const columnClauses = rowsToDdlColumns(columnRows).map(column => {
+        const parts = [formatIdentifierForSql(column.name, 'postgresql'), column.fullTypeName];
+        const options = columnOptions.get(column.name);
+        if (options && options.length > 0) {
+            parts.push(`OPTIONS (${options.join(', ')})`);
+        }
+        if (column.notNull) {
+            parts.push('NOT NULL');
+        }
+        if (column.defaultValue !== null && column.defaultValue !== undefined && column.defaultValue !== '') {
+            parts.push(`DEFAULT ${column.defaultValue}`);
+        }
+        return parts.join(' ');
+    });
+
+    const qualifiedTableName = formatQualifiedName(schema, tableName);
+    const tableOptions = formatOptionClauses(definition.TABLE_OPTIONS);
+    const statements = [
+        `CREATE FOREIGN TABLE ${qualifiedTableName} (\n    ${columnClauses.join(',\n    ')}\n) SERVER ${formatIdentifierForSql(definition.SERVER_NAME, 'postgresql')}${tableOptions.length > 0 ? `\nOPTIONS (${tableOptions.join(', ')})` : ''}\n;`,
+    ];
+    if (definition.DESCRIPTION && definition.DESCRIPTION.trim().length > 0) {
+        statements.push(`COMMENT ON FOREIGN TABLE ${qualifiedTableName} IS ${quoteLiteral(definition.DESCRIPTION)};`);
+    }
+    if (definition.OWNER && definition.OWNER.trim().length > 0) {
+        statements.push(`ALTER FOREIGN TABLE ${qualifiedTableName} OWNER TO ${formatIdentifierForSql(definition.OWNER, 'postgresql')};`);
+    }
+    // Local CHECK / NOT VALID constraints and the referenced server definition are
+    // intentionally out of scope; the server must already exist in the target database.
+    return statements.join('\n');
+}
+
 export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
     explain: postgresqlExplainProvider,
     importTypeMapper: postgresqlImportTypeMapper,
@@ -489,7 +609,7 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
                 const requestedTypes = (
                     options.objectTypes && options.objectTypes.length > 0
                         ? options.objectTypes
-                        : ['TABLE', 'VIEW', 'FUNCTION', 'PROCEDURE', 'SEQUENCE']
+                        : ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE', 'FUNCTION', 'PROCEDURE', 'SEQUENCE']
                 ).map((type) => type.trim().toUpperCase());
                 const ddlBlocks: string[] = [];
                 const errors: string[] = [];
@@ -534,6 +654,14 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
                                 );
                             } else if (objectType === 'SEQUENCE') {
                                 ddlCode = await generateSequenceDdl(connection, schema, objectName);
+                            } else if (objectType === 'MATERIALIZED VIEW') {
+                                ddlCode = await this.generateViewDDL(connection, options.database, schema, objectName);
+                            } else if (objectType === 'FOREIGN TABLE') {
+                                ddlCode = await generateForeignTableDdl(connection, schema, objectName);
+                            } else if (objectType === 'TRIGGER') {
+                                ddlCode = await generateTriggerDdl(connection, schema, objectName);
+                            } else if (objectType === 'INDEX') {
+                                ddlCode = await generateIndexDdl(connection, schema, objectName);
                             }
 
                             if (ddlCode.trim().length > 0) {
@@ -578,8 +706,14 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
                 let ddlCode: string;
                 if (normalizedObjectType === 'TABLE') {
                     ddlCode = await this.generateTableDDL(connection, database, resolvedSchema, objectName);
-                } else if (normalizedObjectType === 'VIEW') {
+                } else if (normalizedObjectType === 'VIEW' || normalizedObjectType === 'MATERIALIZED VIEW') {
                     ddlCode = await this.generateViewDDL(connection, database, resolvedSchema, objectName);
+                } else if (normalizedObjectType === 'FOREIGN TABLE') {
+                    ddlCode = await generateForeignTableDdl(connection, resolvedSchema, objectName);
+                } else if (normalizedObjectType === 'TRIGGER') {
+                    ddlCode = await generateTriggerDdl(connection, resolvedSchema, objectName);
+                } else if (normalizedObjectType === 'INDEX') {
+                    ddlCode = await generateIndexDdl(connection, resolvedSchema, objectName);
                 } else if (normalizedObjectType === 'FUNCTION') {
                     ddlCode = await generateRoutineDdl(connection, resolvedSchema, objectName, 'FUNCTION');
                 } else if (normalizedObjectType === 'PROCEDURE') {

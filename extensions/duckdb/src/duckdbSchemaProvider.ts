@@ -18,7 +18,7 @@ import {
 } from './duckdbSystemQueries';
 
 export const duckdbMetadataProvider = createDelegatingMetadataProvider({
-    defaultObjectTypes: ['TABLE', 'VIEW'],
+    defaultObjectTypes: ['TABLE', 'VIEW', 'INDEX'],
     defaultColumnObjectTypes: ['TABLE', 'VIEW'],
     listDatabases: buildListDatabasesQuery,
     listSchemas: buildListSchemasQuery,

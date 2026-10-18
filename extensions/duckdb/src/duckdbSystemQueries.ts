@@ -243,6 +243,20 @@ export function buildObjectTypeQuery(database: string, objectType: string): stri
         return buildListViewsQuery(database);
     }
 
+    if (normalizedType === 'INDEX') {
+        return `
+            SELECT
+                index_name AS ${quoteAlias('OBJNAME')},
+                0 AS ${quoteAlias('OBJID')},
+                schema_name AS ${quoteAlias('SCHEMA')},
+                'INDEX' AS ${quoteAlias('OBJTYPE')},
+                table_name AS ${quoteAlias('DESCRIPTION')},
+                '' AS ${quoteAlias('OWNER')}
+            FROM duckdb_indexes()
+            ORDER BY schema_name, index_name
+        `;
+    }
+
     return buildEmptyObjectTypeQuery();
 }
 
@@ -251,6 +265,8 @@ export function buildTypeGroupsQuery(): string {
         SELECT 'TABLE' AS ${quoteAlias('OBJTYPE')}
         UNION ALL
         SELECT 'VIEW' AS ${quoteAlias('OBJTYPE')}
+        UNION ALL
+        SELECT 'INDEX' AS ${quoteAlias('OBJTYPE')}
     `;
 }
 

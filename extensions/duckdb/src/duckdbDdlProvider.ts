@@ -28,6 +28,25 @@ interface SqliteParamRow {
     sql?: string | null;
 }
 
+interface DuckDbIndexRow {
+    sql?: string | null;
+}
+
+async function generateIndexDdl(connection: DatabaseConnection, schema: string, indexName: string): Promise<string> {
+    const query = `
+        SELECT sql AS "SQL_TEXT"
+        FROM duckdb_indexes()
+        WHERE schema_name = '${schema.replace(/'/g, "''")}'
+          AND index_name = '${indexName.replace(/'/g, "''")}'
+    `;
+    const rows = await executeDatabaseQuery<DuckDbIndexRow>(connection, query);
+    const ddl = rows[0]?.sql?.trim();
+    if (!ddl) {
+        throw new Error(`DuckDB did not return DDL for index ${schema}.${indexName}.`);
+    }
+    return ddl.endsWith(';') ? ddl : `${ddl};`;
+}
+
 type DuckDbDdlProvider = NonNullable<DatabaseAdvancedFeatures['ddl']>;
 
 function buildQualifiedName(schema: string | undefined, objectName: string): string {
@@ -233,6 +252,8 @@ export const duckdbDdlProvider: DuckDbDdlProvider = {
                 ddlCode = await this.generateTableDDL(connection, database, schema, objectName);
             } else if (normalizedType === 'VIEW') {
                 ddlCode = await this.generateViewDDL(connection, database, schema, objectName);
+            } else if (normalizedType === 'INDEX') {
+                ddlCode = await generateIndexDdl(connection, schema, objectName);
             } else {
                 throw new Error(`DuckDB DDL generation is not implemented for object type "${objectType}".`);
             }

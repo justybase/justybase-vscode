@@ -22,8 +22,13 @@ const DB2_DEFAULT_OBJECT_TYPES = [
     'VIEW',
     'NICKNAME',
     'ALIAS',
+    'MATERIALIZED QUERY TABLE',
     'PROCEDURE',
     'FUNCTION',
+    'SEQUENCE',
+    'INDEX',
+    'TRIGGER',
+    'TABLESPACE',
     'SERVER',
     'SERVER OPTION',
     'WRAPPER',
@@ -32,7 +37,7 @@ const DB2_DEFAULT_OBJECT_TYPES = [
     'PASSTHRU AUTH'
 ] as const;
 
-const DB2_DEFAULT_COLUMN_OBJECT_TYPES = ['TABLE', 'VIEW', 'NICKNAME', 'ALIAS'] as const;
+const DB2_DEFAULT_COLUMN_OBJECT_TYPES = ['TABLE', 'VIEW', 'NICKNAME', 'ALIAS', 'MATERIALIZED QUERY TABLE'] as const;
 
 export const db2MetadataProvider = createDelegatingMetadataProvider({
     defaultObjectTypes: DB2_DEFAULT_OBJECT_TYPES,

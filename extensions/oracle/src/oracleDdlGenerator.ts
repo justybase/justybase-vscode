@@ -219,6 +219,7 @@ function isSupportedObjectType(objectType: string): boolean {
     const normalizedType = objectType.trim().toUpperCase();
     return normalizedType === 'TABLE'
         || normalizedType === 'VIEW'
+        || normalizedType === 'MATERIALIZED VIEW'
         || normalizedType === 'PROCEDURE'
         || normalizedType === 'FUNCTION'
         || normalizedType === 'PACKAGE'
@@ -356,7 +357,7 @@ async function generateObjectDdl(
     if (normalizedType === 'FUNCTION' || normalizedType === 'PACKAGE' || normalizedType === 'PACKAGE BODY' || normalizedType === 'TRIGGER') {
         return generateRoutineLikeDdl(connection, schema, objectName, normalizedType);
     }
-    if (normalizedType === 'SEQUENCE' || normalizedType === 'SYNONYM') {
+    if (normalizedType === 'SEQUENCE' || normalizedType === 'SYNONYM' || normalizedType === 'MATERIALIZED VIEW') {
         return getDbmsMetadataDdl(connection, schema, objectName, normalizedType);
     }
     if (normalizedType === 'INDEX') {

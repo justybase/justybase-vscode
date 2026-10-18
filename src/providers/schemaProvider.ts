@@ -2747,6 +2747,8 @@ export class SchemaProvider
                             'GLOBAL TEMP TABLE',
                             'VIEW',
                             'MATERIALIZED VIEW',
+                            'MATERIALIZED QUERY TABLE',
+                            'FOREIGN TABLE',
                             'NICKNAME',
                             'ALIAS',
                             'SYNONYM',
@@ -3155,6 +3157,20 @@ export class SchemaItem extends vscode.TreeItem {
                 return new vscode.ThemeIcon('table');
             case 'VIEW':
                 return new vscode.ThemeIcon('eye');
+            case 'MATERIALIZED VIEW':
+                return new vscode.ThemeIcon('eye');
+            case 'FOREIGN TABLE':
+                return new vscode.ThemeIcon('server-environment');
+            case 'TRIGGER':
+                return new vscode.ThemeIcon('zap');
+            case 'INDEX':
+                return new vscode.ThemeIcon('list-tree');
+            case 'MATERIALIZED QUERY TABLE':
+                return new vscode.ThemeIcon('eye');
+            case 'SEQUENCE':
+                return new vscode.ThemeIcon('symbol-numeric');
+            case 'TABLESPACE':
+                return new vscode.ThemeIcon('database');
             case 'NICKNAME':
                 return new vscode.ThemeIcon('references');
             case 'ALIAS':

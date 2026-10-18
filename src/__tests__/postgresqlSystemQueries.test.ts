@@ -57,11 +57,11 @@ describe('postgresqlSystemQueries', () => {
         const functionQuery = compactSql(buildObjectTypeQuery('FUNCTION'));
         const proceduresQuery = compactSql(buildListProceduresQuery('public'));
 
-        expect(tablesQuery).toContain(`c.relkind IN ('r', 'p', 'f')`);
+        expect(tablesQuery).toContain(`c.relkind IN ('r', 'p')`);
         expect(tablesQuery).toContain(`'TABLE' AS "OBJTYPE"`);
         expect(tablesQuery).toContain(`AND n.nspname = 'public'`);
 
-        expect(viewsQuery).toContain(`c.relkind IN ('v', 'm')`);
+        expect(viewsQuery).toContain(`c.relkind IN ('v')`);
         expect(viewsQuery).toContain(`'VIEW' AS "OBJTYPE"`);
         expect(viewsQuery).toContain(`AND n.nspname = 'analytics'`);
 
@@ -89,7 +89,7 @@ describe('postgresqlSystemQueries', () => {
             expect(query).toContain('AS "DESCRIPTION"');
         }
 
-        expect(columnsQuery).toContain(`c.relkind IN ('r', 'p', 'f', 'v', 'm')`);
+        expect(columnsQuery).toContain(`c.relkind IN ('r', 'p', 'v')`);
         expect(columnsQuery).toContain(`current_database() AS "DATABASE"`);
         expect(columnsQuery).toContain(`AND n.nspname = 'public'`);
         expect(columnsQuery).toContain(`AND c.relname = 'orders'`);
@@ -97,7 +97,7 @@ describe('postgresqlSystemQueries', () => {
         expect(columnsQuery).toContain('AS "IS_PK"');
         expect(columnsQuery).toContain('AS "IS_FK"');
 
-        expect(tableColumnsQuery).toContain(`c.relkind IN ('r', 'p', 'f', 'v', 'm')`);
+        expect(tableColumnsQuery).toContain(`c.relkind IN ('r', 'p', 'v', 'm', 'f')`);
         expect(tableColumnsQuery).toContain('AS "FULL_TYPE"');
         expect(tableColumnsQuery).toContain('AS "ATTNOTNULL"');
 
@@ -106,7 +106,7 @@ describe('postgresqlSystemQueries', () => {
         expect(lookupByObjectIdQuery).toContain('WHERE c.oid = 42');
         expect(lookupByObjectIdQuery).toContain('AS "DATABASE"');
 
-        expect(lookupByNameQuery).toContain(`c.relkind IN ('r', 'p', 'f', 'v', 'm')`);
+        expect(lookupByNameQuery).toContain(`c.relkind IN ('r', 'p', 'v', 'm', 'f')`);
         expect(lookupByNameQuery).toContain(`AND n.nspname = 'public'`);
         expect(lookupByNameQuery).toContain(`AND c.relname = 'orders'`);
     });
@@ -118,11 +118,11 @@ describe('postgresqlSystemQueries', () => {
         const keysInfoQuery = compactSql(buildKeysInfoQuery('public', 'orders'));
         const ownerQuery = compactSql(buildTableOwnerQuery('public', 'orders'));
 
-        expect(commentQuery).toContain(`c.relkind IN ('r', 'p', 'f', 'v', 'm')`);
+        expect(commentQuery).toContain(`c.relkind IN ('r', 'p', 'v', 'm', 'f')`);
         expect(commentQuery).toContain('AS "DESCRIPTION"');
 
         expect(findSchemaQuery).toContain(`ORDER BY CASE WHEN n.nspname = 'public' THEN 0 ELSE 1 END`);
-        expect(findSchemaQuery).toContain(`c.relkind IN ('r', 'p', 'f', 'v', 'm')`);
+        expect(findSchemaQuery).toContain(`c.relkind IN ('r', 'p', 'v', 'm', 'f')`);
 
         expect(ddlColumnsQuery).toContain('AS "FULL_TYPE"');
         expect(ddlColumnsQuery).toContain(`n.nspname = 'public'`);
@@ -133,7 +133,7 @@ describe('postgresqlSystemQueries', () => {
         expect(keysInfoQuery).toContain(`tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE', 'FOREIGN KEY')`);
 
         expect(ownerQuery).toContain('pg_catalog.pg_get_userbyid(c.relowner)');
-        expect(ownerQuery).toContain(`c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S')`);
+        expect(ownerQuery).toContain(`c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')`);
     });
 
     it('builds PostgreSQL source and partition helper queries', () => {

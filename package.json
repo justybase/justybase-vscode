@@ -2486,12 +2486,12 @@
         },
         {
           "command": "netezza.copySelectAll",
-          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/",
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/",
           "group": "1_copy"
         },
         {
           "command": "netezza.copyDrop",
-          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/",
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/",
           "group": "1_copy"
         },
         {
@@ -2696,7 +2696,7 @@
         },
         {
           "command": "netezza.createDDL",
-          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT)/",
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|MATERIALIZED QUERY TABLE|FOREIGN TABLE|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|TRIGGER|INDEX|STAGE|STREAM|TASK|FILE FORMAT)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|MATERIALIZED QUERY TABLE|FOREIGN TABLE|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|TRIGGER|INDEX|STAGE|STREAM|TASK|FILE FORMAT)/",
           "group": "1_copy"
         },
         {
