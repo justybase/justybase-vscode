@@ -38,6 +38,9 @@ jest.mock('../commands/schema/utilityCommands', () => ({
 jest.mock('../commands/schema/duckdbCommands', () => ({
     registerDuckdbCommands: jest.fn(() => [{ dispose: jest.fn() }, { dispose: jest.fn() }])
 }));
+jest.mock('../commands/schema/tableExportCommands', () => ({
+    registerTableExportCommands: jest.fn(() => [{ dispose: jest.fn() }])
+}));
 
 import { registerSchemaCommands } from '../commands/schema/schemaCommands';
 import { registerSchemaCommands as registerSchemaCommandsCompat } from '../commands/schemaCommands';
@@ -46,7 +49,7 @@ describe('schema command aggregation', () => {
     it('combines all command registration arrays in main entry point', () => {
         const deps = {} as Parameters<typeof registerSchemaCommands>[0];
         const result = registerSchemaCommands(deps);
-        expect(result).toHaveLength(18);
+        expect(result).toHaveLength(19);
         result.forEach(disposable => {
             expect(typeof disposable.dispose).toBe('function');
         });
@@ -55,6 +58,6 @@ describe('schema command aggregation', () => {
     it('exposes backward-compatible re-export entry point', () => {
         const deps = {} as Parameters<typeof registerSchemaCommandsCompat>[0];
         const result = registerSchemaCommandsCompat(deps);
-        expect(result).toHaveLength(18);
+        expect(result).toHaveLength(19);
     });
 });

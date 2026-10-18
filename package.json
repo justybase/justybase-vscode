@@ -330,6 +330,10 @@
         "title": "Drop Table/View"
       },
       {
+        "command": "netezza.exportTableData",
+        "title": "Export Table Data..."
+      },
+      {
         "command": "netezza.copyName",
         "title": "Copy Name"
       },
@@ -2067,6 +2071,10 @@
           "when": "false"
         },
         {
+          "command": "netezza.exportTableData",
+          "when": "false"
+        },
+        {
           "command": "postgresql.listPartitions",
           "when": "false"
         },
@@ -2500,6 +2508,11 @@
           "command": "netezza.createTableFromTable",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
           "group": "1_copy@4"
+        },
+        {
+          "command": "netezza.exportTableData",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/)",
+          "group": "1_copy@5"
         },
         {
           "command": "netezza.callRoutine",
