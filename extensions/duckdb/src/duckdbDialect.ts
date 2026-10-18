@@ -26,7 +26,12 @@ export const duckdbDialect: DatabaseDialect = {
         supportsExplainGraph: true,
         supportsTuningAdvisor: true,
         supportsTableMaintenance: true,
-        supportsSessionMonitor: true
+        supportsSessionMonitor: true,
+        supportsAnalyzeTable: true,
+        supportsTruncateTable: true,
+        supportsTableRename: true,
+        supportsIndexes: true,
+        supportsSchemaValueSearch: true,
     }),
     designerCapabilities: getDatabaseDesignerCapabilities('duckdb'),
     connectionForm: {

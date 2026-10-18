@@ -576,7 +576,28 @@ describe('ConnectionManager', () => {
                 supportsProcedures: true,
                 supportsTableMaintenance: true,
                 supportsSessionMonitor: true,
-                supportsDistributionMetrics: true
+                supportsDistributionMetrics: true,
+                supportsTableStatistics: true,
+                supportsVacuumTable: false,
+                supportsAnalyzeTable: false,
+                supportsReindexTable: false,
+                supportsGroomTable: true,
+                supportsTableSkewCheck: true,
+                supportsTruncateTable: true,
+                supportsTableComments: true,
+                supportsColumnComments: true,
+                supportsGrants: true,
+                supportsTableRename: true,
+                supportsTableOwnerChange: true,
+                supportsPrimaryKeyChanges: true,
+                supportsForeignKeyChanges: false,
+                supportsUniqueConstraintChanges: true,
+                supportsPartitionManagement: false,
+                supportsIndexes: false,
+                supportsTableStorageOptions: false,
+                supportsSqliteDatabaseMaintenance: false,
+                supportsSchemaValueSearch: true,
+                supportsCallRoutine: true
             });
         });
 
@@ -630,7 +651,28 @@ describe('ConnectionManager', () => {
                 supportsProcedures: false,
                 supportsTableMaintenance: true,
                 supportsSessionMonitor: false,
-                supportsDistributionMetrics: false
+                supportsDistributionMetrics: false,
+                supportsTableStatistics: true,
+                supportsVacuumTable: true,
+                supportsAnalyzeTable: true,
+                supportsReindexTable: true,
+                supportsGroomTable: false,
+                supportsTableSkewCheck: false,
+                supportsTruncateTable: true,
+                supportsTableComments: false,
+                supportsColumnComments: false,
+                supportsGrants: false,
+                supportsTableRename: true,
+                supportsTableOwnerChange: false,
+                supportsPrimaryKeyChanges: false,
+                supportsForeignKeyChanges: false,
+                supportsUniqueConstraintChanges: false,
+                supportsPartitionManagement: false,
+                supportsIndexes: true,
+                supportsTableStorageOptions: false,
+                supportsSqliteDatabaseMaintenance: true,
+                supportsSchemaValueSearch: true,
+                supportsCallRoutine: false
             });
         });
 
@@ -645,7 +687,28 @@ describe('ConnectionManager', () => {
                 supportsProcedures: false,
                 supportsTableMaintenance: false,
                 supportsSessionMonitor: false,
-                supportsDistributionMetrics: false
+                supportsDistributionMetrics: false,
+                supportsTableStatistics: false,
+                supportsVacuumTable: false,
+                supportsAnalyzeTable: false,
+                supportsReindexTable: false,
+                supportsGroomTable: false,
+                supportsTableSkewCheck: false,
+                supportsTruncateTable: false,
+                supportsTableComments: false,
+                supportsColumnComments: false,
+                supportsGrants: false,
+                supportsTableRename: false,
+                supportsTableOwnerChange: false,
+                supportsPrimaryKeyChanges: false,
+                supportsForeignKeyChanges: false,
+                supportsUniqueConstraintChanges: false,
+                supportsPartitionManagement: false,
+                supportsIndexes: false,
+                supportsTableStorageOptions: false,
+                supportsSqliteDatabaseMaintenance: false,
+                supportsSchemaValueSearch: false,
+                supportsCallRoutine: false
             });
         });
 
@@ -667,7 +730,28 @@ describe('ConnectionManager', () => {
                     supportsProcedures: false,
                     supportsTableMaintenance: false,
                     supportsSessionMonitor: false,
-                    supportsDistributionMetrics: false
+                    supportsDistributionMetrics: false,
+                    supportsTableStatistics: false,
+                    supportsVacuumTable: false,
+                    supportsAnalyzeTable: false,
+                    supportsReindexTable: false,
+                    supportsGroomTable: false,
+                    supportsTableSkewCheck: false,
+                    supportsTruncateTable: false,
+                    supportsTableComments: false,
+                    supportsColumnComments: false,
+                    supportsGrants: false,
+                    supportsTableRename: false,
+                    supportsTableOwnerChange: false,
+                    supportsPrimaryKeyChanges: false,
+                    supportsForeignKeyChanges: false,
+                    supportsUniqueConstraintChanges: false,
+                    supportsPartitionManagement: false,
+                    supportsIndexes: false,
+                    supportsTableStorageOptions: false,
+                    supportsSqliteDatabaseMaintenance: false,
+                    supportsSchemaValueSearch: false,
+                    supportsCallRoutine: false
                 });
                 expect(manager.supportsCapability('supportsExplainPlan', undefined, connectionName)).toBe(false);
             }

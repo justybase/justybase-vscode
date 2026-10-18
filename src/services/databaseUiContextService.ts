@@ -10,7 +10,28 @@ type CapabilityContextKey =
     | 'supportsProcedures'
     | 'supportsTableMaintenance'
     | 'supportsSessionMonitor'
-    | 'supportsDistributionMetrics';
+    | 'supportsDistributionMetrics'
+    | 'supportsTableStatistics'
+    | 'supportsVacuumTable'
+    | 'supportsAnalyzeTable'
+    | 'supportsReindexTable'
+    | 'supportsGroomTable'
+    | 'supportsTableSkewCheck'
+    | 'supportsTruncateTable'
+    | 'supportsTableComments'
+    | 'supportsColumnComments'
+    | 'supportsGrants'
+    | 'supportsTableRename'
+    | 'supportsTableOwnerChange'
+    | 'supportsPrimaryKeyChanges'
+    | 'supportsForeignKeyChanges'
+    | 'supportsUniqueConstraintChanges'
+    | 'supportsPartitionManagement'
+    | 'supportsIndexes'
+    | 'supportsTableStorageOptions'
+    | 'supportsSqliteDatabaseMaintenance'
+    | 'supportsSchemaValueSearch'
+    | 'supportsCallRoutine';
 
 const CAPABILITY_CONTEXT_KEYS: readonly CapabilityContextKey[] = [
     'supportsExplainPlan',
@@ -19,7 +40,28 @@ const CAPABILITY_CONTEXT_KEYS: readonly CapabilityContextKey[] = [
     'supportsProcedures',
     'supportsTableMaintenance',
     'supportsSessionMonitor',
-    'supportsDistributionMetrics'
+    'supportsDistributionMetrics',
+    'supportsTableStatistics',
+    'supportsVacuumTable',
+    'supportsAnalyzeTable',
+    'supportsReindexTable',
+    'supportsGroomTable',
+    'supportsTableSkewCheck',
+    'supportsTruncateTable',
+    'supportsTableComments',
+    'supportsColumnComments',
+    'supportsGrants',
+    'supportsTableRename',
+    'supportsTableOwnerChange',
+    'supportsPrimaryKeyChanges',
+    'supportsForeignKeyChanges',
+    'supportsUniqueConstraintChanges',
+    'supportsPartitionManagement',
+    'supportsIndexes',
+    'supportsTableStorageOptions',
+    'supportsSqliteDatabaseMaintenance',
+    'supportsSchemaValueSearch',
+    'supportsCallRoutine'
 ];
 
 export const DATABASE_UI_CONTEXT_PREFIX = 'justybase';

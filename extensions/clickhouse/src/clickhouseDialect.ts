@@ -24,6 +24,7 @@ export const clickhouseDialect: DatabaseDialect = {
         supportsExplainGraph: false,
         supportsTableMaintenance: true,
         supportsSessionMonitor: true,
+        supportsVacuumTable: true,
     }),
     designerCapabilities: getDatabaseDesignerCapabilities('clickhouse'),
     connectionForm: {

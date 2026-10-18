@@ -2395,42 +2395,42 @@
         },
         {
           "command": "netezza.grantPermissions",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schema.capabilities.supportsGrants",
           "group": "2_permissions"
         },
         {
           "command": "netezza.groomTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == netezza",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsGroomTable",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.addTableComment",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableComments",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.addColumnComment",
-          "when": "view == netezza.schema && viewItem == column && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "view == netezza.schema && viewItem == column && justybase.schema.capabilities.supportsColumnComments",
           "group": "1_actions"
         },
         {
           "command": "netezza.generateStatistics",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql || justybase.schemaDatabaseKind == sqlite)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsTableStatistics",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.vacuumTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsVacuumTable",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.analyzeTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == sqlite)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsAnalyzeTable",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.reindexTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql || justybase.schemaDatabaseKind == sqlite)",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsReindexTable",
           "group": "3_maintenance"
         },
         {
@@ -2460,12 +2460,12 @@
         },
         {
           "command": "netezza.truncateTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTruncateTable",
           "group": "4_danger"
         },
         {
           "command": "netezza.addPrimaryKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsPrimaryKeyChanges",
           "group": "5_schema@1"
         },
         {
@@ -2480,47 +2480,47 @@
         },
         {
           "command": "netezza.addForeignKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != netezza && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsForeignKeyChanges",
           "group": "5_schema@2"
         },
         {
           "command": "netezza.addUniqueConstraint",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsUniqueConstraintChanges",
           "group": "5_schema@3"
         },
         {
           "command": "netezza.sqlite.viewIndexes",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@1"
         },
         {
           "command": "netezza.sqlite.addIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@2"
         },
         {
           "command": "netezza.sqlite.dropIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@3"
         },
         {
           "command": "netezza.sqlite.viewForeignKeys",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@4"
         },
         {
           "command": "netezza.sqlite.viewTriggers",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@5"
         },
         {
           "command": "netezza.sqlite.reindexTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@6"
         },
         {
           "command": "netezza.sqlite.analyzeTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == sqlite",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "3_sqlite@7"
         },
         {
@@ -2540,17 +2540,17 @@
         },
         {
           "command": "netezza.checkSkew",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == netezza",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsTableSkewCheck",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.changeOwner",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != sqlite && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableOwnerChange",
           "group": "3_maintenance"
         },
         {
           "command": "netezza.renameTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableRename",
           "group": "3_maintenance"
         },
         {
@@ -2645,32 +2645,32 @@
         },
         {
           "command": "netezza.sqlite.vacuum",
-          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "7_sqlite@1"
         },
         {
           "command": "netezza.sqlite.vacuumInto",
-          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "7_sqlite@2"
         },
         {
           "command": "netezza.sqlite.integrityCheck",
-          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "7_sqlite@3"
         },
         {
           "command": "netezza.sqlite.foreignKeyCheck",
-          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "7_sqlite@4"
         },
         {
           "command": "netezza.sqlite.walCheckpoint",
-          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "7_sqlite@5"
         },
         {
           "command": "netezza.sqlite.databaseInfo",
-          "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind == sqlite",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
           "group": "7_sqlite@6"
         },
         {

@@ -23,7 +23,12 @@ const fileConnectionConstructor = FileDuckDbConnection as unknown as DatabaseCon
 export const fileDialect: DatabaseDialect = {
     kind: 'file',
     displayName: 'Excel (XLSX/XLSB) / CSV / Parquet / Avro / Access (DuckDB)',
-    capabilities: createDatabaseCapabilities({}),
+    capabilities: createDatabaseCapabilities({
+        supportsTruncateTable: true,
+        supportsTableComments: true,
+        supportsColumnComments: true,
+        supportsTableRename: true,
+    }),
     designerCapabilities: getDatabaseDesignerCapabilities('file'),
     connectionForm: {
         fields: [

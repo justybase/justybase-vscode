@@ -23,7 +23,17 @@ const accessConnectionConstructor = AccessConnection as unknown as DatabaseConne
 export const accessDialect: DatabaseDialect = {
     kind: 'access',
     displayName: 'Microsoft Access',
-    capabilities: createDatabaseCapabilities({}),
+    capabilities: createDatabaseCapabilities({
+        supportsTruncateTable: true,
+        supportsTableComments: true,
+        supportsColumnComments: true,
+        supportsGrants: true,
+        supportsTableRename: true,
+        supportsTableOwnerChange: true,
+        supportsPrimaryKeyChanges: true,
+        supportsForeignKeyChanges: true,
+        supportsUniqueConstraintChanges: true,
+    }),
     connectionForm: {
         fields: [
             {

@@ -18,7 +18,12 @@ const INSTALL_HINT =
 export const fileDialectStub: DatabaseDialect = {
     kind: 'file',
     displayName: 'Excel (XLSX/XLSB) / CSV / Parquet / Avro / Access (DuckDB)',
-    capabilities: createDatabaseCapabilities(),
+    capabilities: createDatabaseCapabilities({
+        supportsTruncateTable: true,
+        supportsTableComments: true,
+        supportsColumnComments: true,
+        supportsTableRename: true,
+    }),
     connectionForm: {
         fields: [
             {
