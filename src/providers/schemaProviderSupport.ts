@@ -215,7 +215,7 @@ export function buildInsertText(label: string, schema?: string, dbName?: string,
  * Extracts pure function for determining if object type is expandable - testable
  */
 export function isExpandableType(objType: string | undefined): boolean {
-    const expandableTypes = ['TABLE', 'GLOBAL TEMP TABLE', 'VIEW', 'NICKNAME', 'ALIAS', 'SYNONYM', 'EXTERNAL TABLE', 'SYSTEM VIEW', 'SYSTEM TABLE'];
+    const expandableTypes = ['TABLE', 'GLOBAL TEMP TABLE', 'VIEW', 'MATERIALIZED VIEW', 'MATERIALIZED QUERY TABLE', 'FOREIGN TABLE', 'NICKNAME', 'ALIAS', 'SYNONYM', 'EXTERNAL TABLE', 'SYSTEM VIEW', 'SYSTEM TABLE'];
     return objType ? expandableTypes.includes(objType) : false;
 }
 

@@ -13,23 +13,25 @@ type OracleCatalogObjectType =
     | 'TRIGGER'
     | 'INDEX';
 
-type OracleColumnObjectType = 'TABLE' | 'VIEW';
+type OracleColumnObjectType = 'TABLE' | 'VIEW' | 'MATERIALIZED VIEW';
 
 export const ORACLE_DEFAULT_OBJECT_TYPES = [
     'TABLE',
     'VIEW',
+    'MATERIALIZED VIEW',
     'PROCEDURE',
     'FUNCTION',
     'PACKAGE',
     'PACKAGE BODY',
     'SEQUENCE',
     'SYNONYM',
-    'TRIGGER'
+    'TRIGGER',
+    'INDEX'
 ] as const;
 
-export const ORACLE_DEFAULT_COLUMN_OBJECT_TYPES = ['TABLE', 'VIEW'] as const;
+export const ORACLE_DEFAULT_COLUMN_OBJECT_TYPES = ['TABLE', 'VIEW', 'MATERIALIZED VIEW'] as const;
 
-const ORACLE_TABLE_LIKE_OBJECT_TYPES = new Set<OracleColumnObjectType>(['TABLE', 'VIEW']);
+const ORACLE_TABLE_LIKE_OBJECT_TYPES = new Set<OracleColumnObjectType>(['TABLE', 'VIEW', 'MATERIALIZED VIEW']);
 const ORACLE_SOURCE_SEARCH_OBJECT_TYPES: readonly OracleCatalogObjectType[] = [
     'PROCEDURE',
     'FUNCTION',
@@ -179,7 +181,7 @@ function buildTableLikeObjectQuery(
     database?: string,
     schema?: string
 ): string {
-    const tableType = objectType === 'VIEW' ? 'VIEW' : 'TABLE';
+    const tableType = objectType === 'VIEW' ? 'VIEW' : objectType === 'MATERIALIZED VIEW' ? 'MATERIALIZED VIEW' : 'TABLE';
     return `
         SELECT
             O.OBJECT_NAME AS OBJNAME,
@@ -431,7 +433,7 @@ export function buildListProceduresQuery(database?: string, schema?: string): st
 
 export function buildObjectTypeQuery(objectType: string, database?: string): string {
     const normalizedType = objectType.trim().toUpperCase();
-    if (normalizedType === 'TABLE' || normalizedType === 'VIEW') {
+    if (normalizedType === 'TABLE' || normalizedType === 'VIEW' || normalizedType === 'MATERIALIZED VIEW') {
         return buildTableLikeObjectQuery(normalizedType as OracleColumnObjectType, database);
     }
 
@@ -917,6 +919,9 @@ export function mapObjectTypeToDbmsMetadataType(objectType: string): string {
     const normalizedType = objectType.trim().toUpperCase();
     if (normalizedType === 'PACKAGE BODY') {
         return 'PACKAGE_BODY';
+    }
+    if (normalizedType === 'MATERIALIZED VIEW') {
+        return 'MATERIALIZED_VIEW';
     }
 
     return normalizedType;

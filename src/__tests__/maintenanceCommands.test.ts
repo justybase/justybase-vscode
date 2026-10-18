@@ -90,8 +90,8 @@ describe('commands/schema/maintenanceCommands', () => {
     it('registers all maintenance commands', () => {
       const disposables = registerMaintenanceCommands(deps);
 
-      // 7 core Netezza commands + 5 PostgreSQL partition/index commands
-      expect(disposables).toHaveLength(12);
+      // 7 core Netezza commands + 5 PostgreSQL partition/index commands + concurrent reindex
+      expect(disposables).toHaveLength(13);
       expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
         'netezza.groomTable',
         expect.any(Function)
@@ -140,6 +140,10 @@ describe('commands/schema/maintenanceCommands', () => {
  );
  expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
  'postgresql.createIndex',
+ expect.any(Function)
+ );
+ expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+ 'netezza.reindexConcurrently',
  expect.any(Function)
  );
  });

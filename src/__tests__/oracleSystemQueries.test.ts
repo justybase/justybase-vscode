@@ -188,7 +188,7 @@ describe('oracleSystemQueries', () => {
             useServerSideFilter: false
         }));
 
-        expect(objectSearchQuery).toContain("O.OBJECT_TYPE IN ('TABLE', 'VIEW', 'PROCEDURE', 'FUNCTION', 'PACKAGE', 'PACKAGE BODY', 'SEQUENCE', 'SYNONYM', 'TRIGGER')");
+        expect(objectSearchQuery).toContain("O.OBJECT_TYPE IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW', 'PROCEDURE', 'FUNCTION', 'PACKAGE', 'PACKAGE BODY', 'SEQUENCE', 'SYNONYM', 'TRIGGER', 'INDEX')");
         expect(objectSearchQuery).toContain("'COLUMN' AS TYPE");
         expect(objectSearchQuery).toContain("'OBJ_DESC' AS MATCH_TYPE");
         expect(objectSearchQuery).toContain("'COL_DESC' AS MATCH_TYPE");

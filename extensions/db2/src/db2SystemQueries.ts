@@ -7,6 +7,11 @@ type Db2CatalogObjectType =
     | 'FUNCTION'
     | 'NICKNAME'
     | 'ALIAS'
+    | 'MATERIALIZED QUERY TABLE'
+    | 'SEQUENCE'
+    | 'INDEX'
+    | 'TRIGGER'
+    | 'TABLESPACE'
     | 'SERVER'
     | 'WRAPPER'
     | 'SERVER OPTION'
@@ -14,13 +19,14 @@ type Db2CatalogObjectType =
     | 'USER MAPPING'
     | 'PASSTHRU AUTH';
 
-type Db2TableLikeObjectType = 'TABLE' | 'VIEW' | 'NICKNAME' | 'ALIAS';
+type Db2TableLikeObjectType = 'TABLE' | 'VIEW' | 'NICKNAME' | 'ALIAS' | 'MATERIALIZED QUERY TABLE';
 
 const TABLE_OBJECT_TYPES: Readonly<Record<Db2TableLikeObjectType, readonly string[]>> = {
     TABLE: ['T'],
     VIEW: ['V'],
     NICKNAME: ['N'],
-    ALIAS: ['A']
+    ALIAS: ['A'],
+    'MATERIALIZED QUERY TABLE': ['S']
 };
 
 const DEFAULT_TABLE_LIKE_OBJECT_TYPES: readonly Db2TableLikeObjectType[] = ['TABLE', 'VIEW'];
@@ -184,6 +190,7 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
                     WHEN 'V' THEN 'VIEW'
                     WHEN 'N' THEN 'NICKNAME'
                     WHEN 'A' THEN 'ALIAS'
+                    WHEN 'S' THEN 'MATERIALIZED QUERY TABLE'
                     ELSE 'TABLE'
                 END AS TYPE,
                 INT(COALESCE(T.TABLEID, 0)) AS OBJID,
@@ -191,7 +198,7 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
                 COALESCE(T.REMARKS, '') AS DESCRIPTION,
                 'NAME' AS MATCH_TYPE
             FROM SYSCAT.TABLES T
-            WHERE T.TYPE IN ('T', 'V', 'N', 'A')
+            WHERE T.TYPE IN ('T', 'V', 'N', 'A', 'S')
               AND UPPER(T.TABNAME) LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
             SELECT
@@ -203,6 +210,7 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
                     WHEN 'V' THEN 'VIEW'
                     WHEN 'N' THEN 'NICKNAME'
                     WHEN 'A' THEN 'ALIAS'
+                    WHEN 'S' THEN 'MATERIALIZED QUERY TABLE'
                     ELSE 'TABLE'
                 END AS TYPE,
                 INT(COALESCE(T.TABLEID, 0)) AS OBJID,
@@ -210,7 +218,7 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
                 COALESCE(T.REMARKS, '') AS DESCRIPTION,
                 'OBJ_DESC' AS MATCH_TYPE
             FROM SYSCAT.TABLES T
-            WHERE T.TYPE IN ('T', 'V', 'N', 'A')
+            WHERE T.TYPE IN ('T', 'V', 'N', 'A', 'S')
               AND UPPER(COALESCE(T.REMARKS, '')) LIKE '${likePattern}' ESCAPE '\\'
               AND UPPER(T.TABNAME) NOT LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
@@ -257,7 +265,7 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
             INNER JOIN SYSCAT.TABLES T
                 ON T.TABSCHEMA = C.TABSCHEMA
                AND T.TABNAME = C.TABNAME
-            WHERE T.TYPE IN ('T', 'V', 'N', 'A')
+            WHERE T.TYPE IN ('T', 'V', 'N', 'A', 'S')
               AND UPPER(C.COLNAME) LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
             SELECT
@@ -274,7 +282,7 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
             INNER JOIN SYSCAT.TABLES T
                 ON T.TABSCHEMA = C.TABSCHEMA
                AND T.TABNAME = C.TABNAME
-            WHERE T.TYPE IN ('T', 'V', 'N', 'A')
+            WHERE T.TYPE IN ('T', 'V', 'N', 'A', 'S')
               AND UPPER(COALESCE(C.REMARKS, '')) LIKE '${likePattern}' ESCAPE '\\'
               AND UPPER(C.COLNAME) NOT LIKE '${likePattern}' ESCAPE '\\'
         ) AS R
@@ -543,6 +551,67 @@ export function buildObjectTypeQuery(objectType: string, database?: string): str
         `;
     }
 
+    if (normalizedType === 'SEQUENCE') {
+        return `
+            SELECT
+                RTRIM(SEQNAME) AS OBJNAME,
+                0 AS OBJID,
+                RTRIM(SEQSCHEMA) AS SCHEMA,
+                COALESCE(REMARKS, '') AS DESCRIPTION,
+                RTRIM(COALESCE(DEFINER, '')) AS OWNER,
+                ${databaseSelection}
+            FROM SYSCAT.SEQUENCES
+            ORDER BY SEQSCHEMA, SEQNAME
+            WITH UR
+        `;
+    }
+
+    if (normalizedType === 'INDEX') {
+        return `
+            SELECT
+                RTRIM(INDNAME) AS OBJNAME,
+                0 AS OBJID,
+                RTRIM(INDSCHEMA) AS SCHEMA,
+                COALESCE('ON ' || RTRIM(TABSCHEMA) || '.' || RTRIM(TABNAME), '') AS DESCRIPTION,
+                RTRIM(COALESCE(DEFINER, '')) AS OWNER,
+                ${databaseSelection}
+            FROM SYSCAT.INDEXES
+            WHERE TRIM(INDSCHEMA) NOT LIKE 'SYS%'
+            ORDER BY INDSCHEMA, INDNAME
+            WITH UR
+        `;
+    }
+
+    if (normalizedType === 'TRIGGER') {
+        return `
+            SELECT
+                RTRIM(TRIGNAME) AS OBJNAME,
+                0 AS OBJID,
+                RTRIM(TRIGSCHEMA) AS SCHEMA,
+                COALESCE('ON ' || RTRIM(TABSCHEMA) || '.' || RTRIM(TABNAME), '') AS DESCRIPTION,
+                RTRIM(COALESCE(DEFINER, '')) AS OWNER,
+                ${databaseSelection}
+            FROM SYSCAT.TRIGGERS
+            ORDER BY TRIGSCHEMA, TRIGNAME
+            WITH UR
+        `;
+    }
+
+    if (normalizedType === 'TABLESPACE') {
+        return `
+            SELECT
+                RTRIM(TBSPACE) AS OBJNAME,
+                INT(COALESCE(TBSPACEID, 0)) AS OBJID,
+                NULL AS SCHEMA,
+                COALESCE(REMARKS, '') AS DESCRIPTION,
+                RTRIM(COALESCE(DEFINER, '')) AS OWNER,
+                ${databaseSelection}
+            FROM SYSCAT.TABLESPACES
+            ORDER BY TBSPACE
+            WITH UR
+        `;
+    }
+
     const tableTypes = normalizeDb2TableTypes([normalizedType], DEFAULT_TABLE_LIKE_OBJECT_TYPES);
     return `
         SELECT
@@ -586,6 +655,16 @@ export function buildTypeGroupsQuery(database?: string): string {
         SELECT 'USER MAPPING' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
         UNION ALL
         SELECT 'PASSTHRU AUTH' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
+        UNION ALL
+        SELECT 'MATERIALIZED QUERY TABLE' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
+        UNION ALL
+        SELECT 'SEQUENCE' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
+        UNION ALL
+        SELECT 'INDEX' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
+        UNION ALL
+        SELECT 'TRIGGER' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
+        UNION ALL
+        SELECT 'TABLESPACE' AS OBJTYPE FROM SYSIBM.SYSDUMMY1
         WITH UR
     `;
 }

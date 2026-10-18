@@ -19,8 +19,8 @@ import {
 } from './postgresqlSystemQueries';
 
 export const postgresqlMetadataProvider = createDelegatingMetadataProvider({
-    defaultObjectTypes: ['TABLE', 'VIEW', 'SEQUENCE', 'FUNCTION', 'PROCEDURE'],
-    defaultColumnObjectTypes: ['TABLE', 'VIEW'],
+    defaultObjectTypes: ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE', 'SEQUENCE', 'FUNCTION', 'PROCEDURE', 'TRIGGER', 'INDEX'],
+    defaultColumnObjectTypes: ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE'],
     listDatabases: buildListDatabasesQuery,
     listSchemas: () => buildListSchemasQuery(),
     listTables: (_database, schema) => buildListTablesQuery(schema),

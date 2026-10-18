@@ -273,7 +273,7 @@ async function createConnectionFromDetails(connectionDetails: ConnectionDetails)
 }
 
 async function readDdl(connection: DatabaseConnection, objectType: string, schema: string, objectName: string): Promise<string> {
-    const rows = await executeDatabaseQuery<DdlTextRow>(connection, buildDdlQuery(objectType as 'TABLE' | 'VIEW' | 'PROCEDURE' | 'FUNCTION', objectName, schema));
+    const rows = await executeDatabaseQuery<DdlTextRow>(connection, buildDdlQuery(objectType as 'TABLE' | 'VIEW' | 'PROCEDURE' | 'FUNCTION' | 'TRIGGER', objectName, schema));
     const ddl = rows[0]?.DDL?.trim();
     if (!ddl) {
         throw new Error(`Db2 did not return DDL for ${objectType} ${schema}.${objectName}.`);

@@ -99,8 +99,13 @@ describe('DB2 runtime upgrade surfaces', () => {
             'VIEW',
             'NICKNAME',
             'ALIAS',
+            'MATERIALIZED QUERY TABLE',
             'PROCEDURE',
             'FUNCTION',
+            'SEQUENCE',
+            'INDEX',
+            'TRIGGER',
+            'TABLESPACE',
             'SERVER',
             'SERVER OPTION',
             'WRAPPER',
@@ -108,7 +113,7 @@ describe('DB2 runtime upgrade surfaces', () => {
             'USER MAPPING',
             'PASSTHRU AUTH'
         ]);
-        expect(db2MetadataProvider.defaultColumnObjectTypes).toEqual(['TABLE', 'VIEW', 'NICKNAME', 'ALIAS']);
+        expect(db2MetadataProvider.defaultColumnObjectTypes).toEqual(['TABLE', 'VIEW', 'NICKNAME', 'ALIAS', 'MATERIALIZED QUERY TABLE']);
     });
 
     it('keeps DB2 lookup queries aware of database, schema, and table inputs', () => {
@@ -121,7 +126,7 @@ describe('DB2 runtime upgrade surfaces', () => {
         expect(query).toContain("'TESTDB' AS DATABASE");
         expect(query).toContain("C.TABSCHEMA = 'DB2INST1'");
         expect(query).toContain("C.TABNAME = 'EM'");
-        expect(query).toContain("T.TYPE IN ('T', 'V', 'N', 'A')");
+        expect(query).toContain("T.TYPE IN ('T', 'V', 'N', 'A', 'S')");
     });
 
     it('builds separate object queries for DB2 federated and schema-scoped groups', () => {

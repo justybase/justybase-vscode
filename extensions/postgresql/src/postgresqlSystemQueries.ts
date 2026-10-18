@@ -1,12 +1,16 @@
 import type { DatabaseSourceSearchQueryOptions } from '@justybase/contracts';
 
-type PostgreSqlTableLikeType = 'TABLE' | 'VIEW';
-type PostgreSqlCatalogObjectType = PostgreSqlTableLikeType | 'SEQUENCE' | 'FUNCTION' | 'PROCEDURE';
+type PostgreSqlTableLikeType = 'TABLE' | 'VIEW' | 'MATERIALIZED VIEW' | 'FOREIGN TABLE';
+type PostgreSqlCatalogObjectType = PostgreSqlTableLikeType | 'SEQUENCE' | 'FUNCTION' | 'PROCEDURE' | 'TRIGGER' | 'INDEX';
 
-const TABLE_RELKINDS = ['r', 'p', 'f'] as const;
-const VIEW_RELKINDS = ['v', 'm'] as const;
+const TABLE_RELKINDS = ['r', 'p'] as const;
+const MATERIALIZED_VIEW_RELKINDS = ['m'] as const;
+const FOREIGN_TABLE_RELKINDS = ['f'] as const;
+const VIEW_RELKINDS = ['v'] as const;
+/** Every relation kind with browsable columns. */
+const COLUMN_BEARING_RELKINDS = [...TABLE_RELKINDS, ...VIEW_RELKINDS, ...MATERIALIZED_VIEW_RELKINDS, ...FOREIGN_TABLE_RELKINDS] as const;
 const SEQUENCE_RELKINDS = ['S'] as const;
-const DEFAULT_TYPE_GROUPS = ['TABLE', 'VIEW', 'SEQUENCE', 'FUNCTION', 'PROCEDURE'] as const;
+const DEFAULT_TYPE_GROUPS = ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE', 'SEQUENCE', 'FUNCTION', 'PROCEDURE', 'TRIGGER', 'INDEX'] as const;
 
 function quoteLiteral(value: string | undefined): string {
     return `'${(value ?? '').replace(/'/g, "''")}'`;
@@ -40,14 +44,14 @@ function buildUserSchemaPredicate(alias: string): string {
     `.trim();
 }
 
-function buildRelkindList(objectTypes?: readonly string[], fallback: readonly PostgreSqlTableLikeType[] = ['TABLE', 'VIEW']): string {
+function buildRelkindList(objectTypes?: readonly string[], fallback: readonly PostgreSqlTableLikeType[] = ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE']): string {
     const normalizedTypes = (objectTypes ?? fallback)
         .map(type => type.trim().toUpperCase())
-        .filter((type): type is PostgreSqlTableLikeType => type === 'TABLE' || type === 'VIEW');
+        .filter((type): type is PostgreSqlTableLikeType => type === 'TABLE' || type === 'VIEW' || type === 'MATERIALIZED VIEW' || type === 'FOREIGN TABLE');
 
     const relkinds = new Set<string>();
     for (const type of normalizedTypes.length > 0 ? normalizedTypes : fallback) {
-        const source = type === 'VIEW' ? VIEW_RELKINDS : TABLE_RELKINDS;
+        const source = type === 'VIEW' ? VIEW_RELKINDS : type === 'MATERIALIZED VIEW' ? MATERIALIZED_VIEW_RELKINDS : type === 'FOREIGN TABLE' ? FOREIGN_TABLE_RELKINDS : TABLE_RELKINDS;
         for (const relkind of source) {
             relkinds.add(relkind);
         }
@@ -165,6 +169,56 @@ export function buildObjectTypeQuery(objectType: string): string {
         return buildRelationObjectQuery(SEQUENCE_RELKINDS, 'SEQUENCE');
     }
 
+    if (normalizedType === 'MATERIALIZED VIEW') {
+        return buildRelationObjectQuery(MATERIALIZED_VIEW_RELKINDS, 'MATERIALIZED VIEW');
+    }
+
+    if (normalizedType === 'FOREIGN TABLE') {
+        return buildRelationObjectQuery(FOREIGN_TABLE_RELKINDS, 'FOREIGN TABLE');
+    }
+
+    if (normalizedType === 'TRIGGER') {
+        return `
+            SELECT
+                t.tgname AS "OBJNAME",
+                t.oid::INT AS "OBJID",
+                n.nspname AS "SCHEMA",
+                COALESCE('ON ' || c.relname || ' (' || CASE t.tgenabled WHEN 'O' THEN 'enabled' WHEN 'D' THEN 'disabled' ELSE 'replica/always' END || ')', '') AS "DESCRIPTION",
+                pg_get_userbyid(c.relowner) AS "OWNER",
+                current_database() AS "DATABASE"
+            FROM pg_catalog.pg_trigger t
+            INNER JOIN pg_catalog.pg_class c
+                ON c.oid = t.tgrelid
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = c.relnamespace
+            WHERE NOT t.tgisinternal
+              AND ${buildUserSchemaPredicate('n.nspname')}
+            ORDER BY n.nspname, t.tgname
+        `;
+    }
+
+    if (normalizedType === 'INDEX') {
+        return `
+            SELECT
+                c.relname AS "OBJNAME",
+                c.oid::INT AS "OBJID",
+                n.nspname AS "SCHEMA",
+                COALESCE('ON ' || tbl.relname, '') AS "DESCRIPTION",
+                pg_get_userbyid(c.relowner) AS "OWNER",
+                current_database() AS "DATABASE"
+            FROM pg_catalog.pg_index i
+            INNER JOIN pg_catalog.pg_class c
+                ON c.oid = i.indexrelid
+            INNER JOIN pg_catalog.pg_class tbl
+                ON tbl.oid = i.indrelid
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = c.relnamespace
+            WHERE NOT i.indisprimary
+              AND ${buildUserSchemaPredicate('n.nspname')}
+            ORDER BY n.nspname, c.relname
+        `;
+    }
+
     if (normalizedType === 'FUNCTION') {
         return buildRoutineObjectQuery('f', 'FUNCTION');
     }
@@ -178,8 +232,8 @@ export function buildObjectTypeQuery(objectType: string): string {
 
 export function buildObjectSearchQuery(database: string, likePattern: string): string {
     const databaseLiteral = quoteLiteral(database);
-    const relationRelkinds = buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS, ...SEQUENCE_RELKINDS]);
-    const tableLikeRelkinds = buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS]);
+    const relationRelkinds = buildInList([...COLUMN_BEARING_RELKINDS, ...SEQUENCE_RELKINDS]);
+    const tableLikeRelkinds = buildInList([...COLUMN_BEARING_RELKINDS]);
 
     return `
         SELECT * FROM (
@@ -189,6 +243,8 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
                 n.nspname AS "SCHEMA",
                 ${databaseLiteral} AS "DATABASE",
                 CASE
+                    WHEN c.relkind IN (${buildInList(MATERIALIZED_VIEW_RELKINDS)}) THEN 'MATERIALIZED VIEW'
+                    WHEN c.relkind IN (${buildInList(FOREIGN_TABLE_RELKINDS)}) THEN 'FOREIGN TABLE'
                     WHEN c.relkind IN (${buildInList(VIEW_RELKINDS)}) THEN 'VIEW'
                     WHEN c.relkind IN (${buildInList(SEQUENCE_RELKINDS)}) THEN 'SEQUENCE'
                     ELSE 'TABLE'
@@ -209,6 +265,8 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
                 n.nspname AS "SCHEMA",
                 ${databaseLiteral} AS "DATABASE",
                 CASE
+                    WHEN c.relkind IN (${buildInList(MATERIALIZED_VIEW_RELKINDS)}) THEN 'MATERIALIZED VIEW'
+                    WHEN c.relkind IN (${buildInList(FOREIGN_TABLE_RELKINDS)}) THEN 'FOREIGN TABLE'
                     WHEN c.relkind IN (${buildInList(VIEW_RELKINDS)}) THEN 'VIEW'
                     WHEN c.relkind IN (${buildInList(SEQUENCE_RELKINDS)}) THEN 'SEQUENCE'
                     ELSE 'TABLE'
@@ -483,7 +541,7 @@ export function buildTableColumnsQuery(_database: string, schema: string, tableN
         LEFT JOIN pg_catalog.pg_attrdef ad
             ON ad.adrelid = c.oid
            AND ad.adnum = a.attnum
-        WHERE c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS])})
+        WHERE c.relkind IN (${buildInList([...COLUMN_BEARING_RELKINDS])})
           AND ${buildUserSchemaPredicate('n.nspname')}
           ${buildSchemaPredicate('n.nspname', schema)}
           ${buildNamePredicate('c.relname', tableName)}
@@ -534,7 +592,7 @@ export function buildColumnMetadataQuery(_database: string, schema: string, tabl
         LEFT JOIN pg_catalog.pg_attrdef ad
             ON ad.adrelid = c.oid
            AND ad.adnum = a.attnum
-        WHERE c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS])})
+        WHERE c.relkind IN (${buildInList([...COLUMN_BEARING_RELKINDS])})
           AND ${buildUserSchemaPredicate('n.nspname')}
           ${buildSchemaPredicate('n.nspname', schema)}
           ${buildNamePredicate('c.relname', tableName)}
@@ -595,7 +653,7 @@ export function buildLookupColumnsQuery(
         `;
     }
 
-    return buildColumnsWithKeysQuery(undefined, params.schema, params.tableName, ['TABLE', 'VIEW']);
+    return buildColumnsWithKeysQuery(undefined, params.schema, params.tableName, ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE']);
 }
 
 export function buildTableCommentQuery(_database: string, schema: string, tableName: string): string {
@@ -605,7 +663,7 @@ export function buildTableCommentQuery(_database: string, schema: string, tableN
         FROM pg_catalog.pg_class c
         INNER JOIN pg_catalog.pg_namespace n
             ON n.oid = c.relnamespace
-        WHERE c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS])})
+        WHERE c.relkind IN (${buildInList([...COLUMN_BEARING_RELKINDS])})
           AND n.nspname = ${quoteLiteral(schema)}
           AND c.relname = ${quoteLiteral(tableName)}
         LIMIT 1
@@ -618,7 +676,7 @@ export function buildFindTableSchemaQuery(tableName: string): string {
         FROM pg_catalog.pg_class c
         INNER JOIN pg_catalog.pg_namespace n
             ON n.oid = c.relnamespace
-        WHERE c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS])})
+        WHERE c.relkind IN (${buildInList([...COLUMN_BEARING_RELKINDS])})
           AND ${buildUserSchemaPredicate('n.nspname')}
           AND c.relname = ${quoteLiteral(tableName)}
         ORDER BY CASE WHEN n.nspname = 'public' THEN 0 ELSE 1 END, n.nspname
@@ -644,7 +702,7 @@ export function buildDdlColumnsQuery(schema: string, tableName: string): string 
         LEFT JOIN pg_catalog.pg_attrdef ad
             ON ad.adrelid = c.oid
            AND ad.adnum = a.attnum
-        WHERE c.relkind IN (${buildInList(TABLE_RELKINDS)})
+        WHERE c.relkind IN (${buildInList(COLUMN_BEARING_RELKINDS)})
           AND n.nspname = ${quoteLiteral(schema)}
           AND c.relname = ${quoteLiteral(tableName)}
         ORDER BY a.attnum
@@ -694,7 +752,7 @@ export function buildTableOwnerQuery(schema: string, tableName: string): string 
         FROM pg_catalog.pg_class c
         INNER JOIN pg_catalog.pg_namespace n
             ON n.oid = c.relnamespace
-        WHERE c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS, ...SEQUENCE_RELKINDS])})
+        WHERE c.relkind IN (${buildInList([...COLUMN_BEARING_RELKINDS, ...SEQUENCE_RELKINDS])})
           AND n.nspname = ${quoteLiteral(schema)}
           AND c.relname = ${quoteLiteral(tableName)}
         LIMIT 1
@@ -728,6 +786,83 @@ export function buildTableTriggersQuery(schema: string, tableName: string): stri
           AND c.relname = ${quoteLiteral(tableName)}
           AND NOT t.tgisinternal
         ORDER BY t.tgname
+    `;
+}
+
+/** Single index definition plus the parent table (index names are schema-unique). */
+export function buildIndexDefinitionQuery(schema: string, indexName: string): string {
+    return `
+        SELECT
+            pg_catalog.pg_get_indexdef(c.oid) AS "INDEX_DDL",
+            tbl.relname AS "TABLE_NAME"
+        FROM pg_catalog.pg_class c
+        INNER JOIN pg_catalog.pg_index i
+            ON i.indexrelid = c.oid
+        INNER JOIN pg_catalog.pg_class tbl
+            ON tbl.oid = i.indrelid
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        WHERE n.nspname = ${quoteLiteral(schema)}
+          AND c.relname = ${quoteLiteral(indexName)}
+        LIMIT 1
+    `;
+}
+
+/** Single trigger definition plus the parent table (trigger names may repeat per table). */
+export function buildTriggerDefinitionQuery(schema: string, triggerName: string): string {
+    return `
+        SELECT
+            pg_catalog.pg_get_triggerdef(t.oid, true) AS "TRIGGER_DDL",
+            c.relname AS "TABLE_NAME"
+        FROM pg_catalog.pg_trigger t
+        INNER JOIN pg_catalog.pg_class c
+            ON c.oid = t.tgrelid
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        WHERE n.nspname = ${quoteLiteral(schema)}
+          AND t.tgname = ${quoteLiteral(triggerName)}
+          AND NOT t.tgisinternal
+        ORDER BY c.relname
+    `;
+}
+
+/** Foreign table server, options, owner and comment. */
+export function buildForeignTableDefinitionQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            s.srvname AS "SERVER_NAME",
+            ft.ftoptions AS "TABLE_OPTIONS",
+            COALESCE(pg_catalog.obj_description(c.oid, 'pg_class'), '') AS "DESCRIPTION",
+            pg_catalog.pg_get_userbyid(c.relowner) AS "OWNER"
+        FROM pg_catalog.pg_foreign_table ft
+        INNER JOIN pg_catalog.pg_class c
+            ON c.oid = ft.ftrelid
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        INNER JOIN pg_catalog.pg_foreign_server s
+            ON s.oid = ft.ftserver
+        WHERE n.nspname = ${quoteLiteral(schema)}
+          AND c.relname = ${quoteLiteral(tableName)}
+        LIMIT 1
+    `;
+}
+
+/** Per-column OPTIONS for foreign table columns. */
+export function buildForeignTableColumnOptionsQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            a.attname AS "ATTNAME",
+            a.attoptions AS "COLUMN_OPTIONS"
+        FROM pg_catalog.pg_attribute a
+        INNER JOIN pg_catalog.pg_class c
+            ON c.oid = a.attrelid
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        WHERE n.nspname = ${quoteLiteral(schema)}
+          AND c.relname = ${quoteLiteral(tableName)}
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+          AND a.attoptions IS NOT NULL
     `;
 }
 
@@ -780,7 +915,7 @@ export function buildViewDefinitionQuery(schema: string, viewName: string): stri
             ON n.oid = c.relnamespace
         WHERE n.nspname = ${quoteLiteral(schema)}
           AND c.relname = ${quoteLiteral(viewName)}
-          AND c.relkind IN (${buildInList(VIEW_RELKINDS)})
+          AND c.relkind IN (${buildInList([...VIEW_RELKINDS, ...MATERIALIZED_VIEW_RELKINDS])})
         LIMIT 1
     `;
 }
@@ -904,7 +1039,7 @@ export function buildAlterTablePropertiesQuery(schema: string, tableName: string
             ON t.oid = c.reltablespace
         WHERE n.nspname = ${quoteLiteral(schema)}
           AND c.relname = ${quoteLiteral(tableName)}
-          AND c.relkind IN (${buildInList([...TABLE_RELKINDS, ...VIEW_RELKINDS])})
+          AND c.relkind IN (${buildInList([...COLUMN_BEARING_RELKINDS])})
     `;
 }
 
