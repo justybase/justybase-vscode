@@ -21,6 +21,7 @@ import type { ValidationError } from "./types";
  * - Multi-row VALUES is rejected (one INSERT per row); NZS006.
  * - GENERATE [EXPRESS] STATISTICS accepts only the optional `ON <table>` target;
  *   `FOR TABLE` is rejected and the deprecated EXPRESS form requires ON; NZS008.
+ * - EXPLAIN accepts at most one of VERBOSE, DISTRIBUTION, PLANTEXT, or PLANGRAPH; NZS012.
  */
 
 function errorAt(code: string, message: string, token: IToken): ValidationError {
@@ -48,6 +49,12 @@ function tokenName(token: IToken | undefined): string | undefined {
 }
 
 const JOIN_TYPE_BEFORE_OUTER = new Set(["Left", "Right", "Full"]);
+const EXPLAIN_OPTIONS: Record<string, true> = {
+  Verbose: true,
+  Distribution: true,
+  Plantext: true,
+  Plangraph: true,
+};
 
 export function detectNetezzaSyntaxRestrictions(
   tokens: readonly IToken[],
@@ -57,6 +64,15 @@ export function detectNetezzaSyntaxRestrictions(
   for (let index = 0; index < tokens.length; index += 1) {
     const name = tokenName(tokens[index]);
     const image = tokens[index].image.toUpperCase();
+    if (name === "Explain"
+      && EXPLAIN_OPTIONS[tokenName(tokens[index + 1]) ?? ""] === true
+      && EXPLAIN_OPTIONS[tokenName(tokens[index + 2]) ?? ""] === true) {
+      errors.push(errorAt(
+        "NZS012",
+        "Netezza EXPLAIN accepts at most one option.",
+        tokens[index + 2],
+      ));
+    }
     if (image === "INTERVAL" && tokenName(tokens[index + 1]) === "StringLiteral"
       && /^(YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)$/.test(tokens[index + 2]?.image.toUpperCase() ?? "")) {
       errors.push(errorAt("NZS007", "Netezza interval units belong inside the interval literal.", tokens[index + 2]));

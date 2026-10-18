@@ -28,6 +28,22 @@ import {
 } from "./validator.test.shared";
 
 describe("SQL Validator - Comprehensive Netezza SQL tests", () => {
+  it("accepts at most one Netezza EXPLAIN option", () => {
+    for (const sql of [
+      "EXPLAIN SELECT 1;",
+      "EXPLAIN VERBOSE SELECT 1;",
+      "EXPLAIN DISTRIBUTION SELECT 1;",
+      "EXPLAIN PLANTEXT SELECT 1;",
+      "EXPLAIN PLANGRAPH SELECT 1;",
+    ]) {
+      expectValid(sql);
+    }
+
+    expectSyntaxError(
+      "EXPLAIN VERBOSE DISTRIBUTION PLANTEXT SELECT 1;",
+    );
+  });
+
   setupSqlValidatorTests();
 
   describe("SELECT — valid syntax", () => {
@@ -1071,9 +1087,6 @@ SELECT * FROM ABC;`);
       expectValid("EXPLAIN VERBOSE SELECT * FROM TESTDB..EMPLOYEES;");
     });
 
-    it("should validate EXPLAIN VERBOSE DISTRIBUTION PLANTEXT SELECT", () => {
-      expectValid("EXPLAIN VERBOSE DISTRIBUTION PLANTEXT SELECT 1;");
-    });
 
     it("should validate EXPLAIN PLANGRAPH SELECT", () => {
       expectValid("EXPLAIN PLANGRAPH SELECT * FROM TESTDB..EMPLOYEES;");
