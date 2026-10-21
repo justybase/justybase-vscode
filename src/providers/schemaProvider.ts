@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { DatabaseKind } from '../contracts/database';
 import type { DatabaseForeignKeyColumnReference } from '../contracts/database';
+import type { DatabaseTableDetailKind } from '@justybase/contracts';
 import { getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { tryNormalizeDatabaseKind } from '../contracts/database';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
@@ -24,6 +25,8 @@ import { DatabaseMetadata, TableMetadata, ColumnMetadata, ProcedureMetadata } fr
 import {
     getForeignKeyReferencesForTable,
     getForeignKeyReferencingTable,
+    isForeignKeyCatalogUnavailable,
+    normalizeForeignKeyRelationshipRows,
 } from '../metadata/foreignKeyRelationships';
 import type { ForeignKeyTableIdentity } from '../metadata/foreignKeyRelationships';
 import type { LocalDefinition } from './types';
@@ -1580,6 +1583,127 @@ export class SchemaProvider
         return item;
     }
 
+    /** Keys / Indexes / Triggers folders followed by the FK relationship groups. */
+    private createTableChildGroupItems(tableItem: SchemaItem): SchemaItem[] {
+        return [...this.createTableDetailGroupItems(tableItem), ...this.createRelationshipGroupItems(tableItem)];
+    }
+
+    private createTableDetailGroupItems(tableItem: SchemaItem): SchemaItem[] {
+        const connectionName = tableItem.connectionName;
+        const tableType = tableItem.objType?.toUpperCase();
+        if (!connectionName || !tableItem.dbName || !tableItem.schema || tableType !== 'TABLE') {
+            return [];
+        }
+        let provider;
+        try {
+            provider = this.getMetadataProvider(connectionName);
+        } catch {
+            return [];
+        }
+        if (typeof provider.buildTableDetailQuery !== 'function') {
+            return [];
+        }
+        const tableName = tableItem.rawLabel || tableItem.label;
+        const folders: ReadonlyArray<[DatabaseTableDetailKind, string, string]> = [
+            ['keys', 'Keys', 'key'],
+            ['indexes', 'Indexes', 'list-ordered'],
+            ['triggers', 'Triggers', 'zap'],
+        ];
+        return folders.map(([detail, label, icon]) => {
+            const item = new SchemaItem(
+                label,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                `tableDetailGroup:${detail}`,
+                tableItem.dbName,
+                tableItem.objType,
+                tableItem.schema,
+                tableItem.objId,
+                undefined,
+                connectionName,
+                tableName,
+            );
+            item.iconPath = new vscode.ThemeIcon(icon);
+            item.description = undefined;
+            return item;
+        });
+    }
+
+    private async getTableDetailGroupChildren(group: SchemaItem): Promise<SchemaItem[]> {
+        const detail = group.contextValue.slice('tableDetailGroup:'.length) as DatabaseTableDetailKind;
+        const connectionName = group.connectionName;
+        const tableName = group.parentName;
+        if (!connectionName || !group.dbName || !group.schema || !tableName) {
+            return [];
+        }
+        const status = (label: string, icon: string, tooltip?: string) => {
+            const item = new SchemaItem(label, vscode.TreeItemCollapsibleState.None, 'schemaRelationshipStatus', group.dbName, undefined, group.schema, undefined, undefined, connectionName, tableName);
+            item.id = `${group.id}|status`;
+            item.iconPath = new vscode.ThemeIcon(icon);
+            item.tooltip = tooltip ?? label;
+            return [item];
+        };
+        try {
+            const query = this.getMetadataProvider(connectionName).buildTableDetailQuery?.(group.dbName, group.schema, tableName, detail);
+            if (!query) return [];
+            const result = await runQueryRaw(this.context, query, true, this.connectionManager, connectionName, undefined, undefined, undefined, undefined, false);
+            const rows = result ? queryResultToRows<Record<string, unknown>>(result) : [];
+            if (rows.length === 0) {
+                return status(detail === 'keys' ? '(No keys or constraints)' : detail === 'indexes' ? '(No indexes)' : '(No triggers)', 'info');
+            }
+            return rows.map(row => this.createTableDetailItem(group, detail, row));
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            return status(`Could not load ${detail}`, 'warning', message);
+        }
+    }
+
+    private createTableDetailItem(group: SchemaItem, detail: DatabaseTableDetailKind, row: Record<string, unknown>): SchemaItem {
+        const text = (key: string) => {
+            const value = row[key] ?? row[key.toLowerCase()];
+            return value === null || value === undefined ? '' : String(value).trim();
+        };
+        const name = text('NAME');
+        const kind = text('KIND').toUpperCase();
+        const summary = text('DETAIL');
+        // Plain indexes and triggers reuse the regular object context so Drop/DDL menus apply;
+        // indexes backing a PRIMARY KEY/UNIQUE constraint are managed through the constraint.
+        const contextValue = detail === 'keys'
+            ? 'tableConstraint'
+            : detail === 'triggers'
+                ? 'netezza:TRIGGER'
+                : kind === 'INDEX' ? 'netezza:INDEX' : 'tableConstraintIndex';
+        const objType = detail === 'keys' ? kind : detail === 'triggers' ? 'TRIGGER' : 'INDEX';
+        const item = new SchemaItem(
+            name,
+            vscode.TreeItemCollapsibleState.None,
+            contextValue,
+            group.dbName,
+            objType,
+            group.schema,
+            undefined,
+            undefined,
+            group.connectionName,
+            group.parentName,
+        );
+        item.id = `${group.id}|${detail}|${name}`;
+        const label = kind === 'TRIGGER' || kind === 'INDEX' ? '' : kind;
+        item.description = [label, summary].filter(Boolean).join(' · ');
+        item.tooltip = [`${name}`, kind, summary, `Table: ${group.schema}.${group.parentName}`].filter(Boolean).join('\n');
+        const icon = detail === 'triggers'
+            ? new vscode.ThemeIcon(kind === 'TRIGGER' ? 'zap' : 'circle-slash')
+            : kind === 'PRIMARY KEY'
+                ? new vscode.ThemeIcon('key', new vscode.ThemeColor('charts.yellow'))
+                : kind === 'FOREIGN KEY'
+                    ? new vscode.ThemeIcon('link', new vscode.ThemeColor('charts.blue'))
+                    : kind === 'UNIQUE'
+                        ? new vscode.ThemeIcon('symbol-key')
+                        : detail === 'indexes'
+                            ? new vscode.ThemeIcon('list-ordered')
+                            : new vscode.ThemeIcon('check');
+        item.iconPath = icon;
+        return item;
+    }
+
     private createRelationshipGroupItems(tableItem: SchemaItem): SchemaItem[] {
         const connectionName = tableItem.connectionName;
         const database = tableItem.dbName;
@@ -1588,7 +1712,7 @@ export class SchemaProvider
         if (
             !connectionName
             || !database
-            || this.getConnectionDatabaseKind(connectionName) !== 'netezza'
+            || !this.supportsTreeForeignKeys(connectionName)
             || (tableType !== 'TABLE' && tableType !== 'GLOBAL TEMP TABLE')
         ) {
             return [];
@@ -1640,6 +1764,47 @@ export class SchemaProvider
         });
     }
 
+    /**
+     * Netezza fills FK slices during schema prefetch; other dialects with an FK
+     * catalog query load the current database slice when a relationship group opens.
+     */
+    private supportsTreeForeignKeys(connectionName: string): boolean {
+        const kind = this.getConnectionDatabaseKind(connectionName);
+        if (kind === 'netezza') return true;
+        if (!kind) return false;
+        try {
+            return typeof this.getMetadataProvider(connectionName).buildForeignKeyRelationshipsQuery === 'function';
+        } catch {
+            return false;
+        }
+    }
+
+    private async ensureOnDemandForeignKeySlice(connectionName: string, database: string): Promise<void> {
+        if (this.getConnectionDatabaseKind(connectionName) === 'netezza') return;
+        if (this.metadataCache.getForeignKeyRelationshipsForDatabase?.(connectionName, database)?.complete) return;
+        const query = this.getMetadataProvider(connectionName).buildForeignKeyRelationshipsQuery?.(database);
+        if (!query) return;
+        try {
+            const result = await runQueryRaw(this.context, query, true, this.connectionManager, connectionName, undefined, undefined, undefined, undefined, false);
+            const rows = result ? queryResultToRows<Record<string, unknown>>(result) : [];
+            this.metadataCache.setForeignKeyRelationshipsForDatabase?.(
+                connectionName,
+                database,
+                normalizeForeignKeyRelationshipRows(rows, database),
+                Boolean(result),
+                result ? 'complete' : 'failed',
+            );
+        } catch (error: unknown) {
+            this.metadataCache.setForeignKeyRelationshipsForDatabase?.(
+                connectionName,
+                database,
+                [],
+                false,
+                isForeignKeyCatalogUnavailable(error) ? 'unavailable' : 'failed',
+            );
+        }
+    }
+
     private async getForeignKeyRelationshipSnapshot(
         connectionName: string,
         currentDatabase: string,
@@ -1647,7 +1812,9 @@ export class SchemaProvider
     ): Promise<ForeignKeyRelationshipSnapshot> {
         const references: DatabaseForeignKeyColumnReference[] = [];
         const errors: string[] = [];
-        if (direction === 'references') {
+        // Only Netezza resolves FKs across databases; other dialects keep FKs inside one catalog.
+        const crossDatabase = this.getConnectionDatabaseKind(connectionName) === 'netezza';
+        if (direction === 'references' || !crossDatabase) {
             const slice = this.metadataCache.getForeignKeyRelationshipsForDatabase?.(
                 connectionName,
                 currentDatabase,
@@ -1800,7 +1967,9 @@ export class SchemaProvider
         const targetKey = buildNetezzaDbSchemaCacheKey(formatNetezzaCatalogIdentifier(relatedDatabase), formatNetezzaCatalogIdentifier(relatedSchema));
         const catalogLoaded = this.metadataCache.isObjectsCatalogLoaded?.(group.connectionName || '', targetKey, 'TABLE') === true;
         const tables = catalogLoaded ? this.metadataCache.getTables(group.connectionName || '', targetKey) : undefined;
-        const targetDatabaseMissing = !targetSlice
+        // The cached-catalogue heuristics below use Netezza cache keys and prefetch state.
+        const targetDatabaseMissing = this.getConnectionDatabaseKind(group.connectionName || '') === 'netezza'
+            && !targetSlice
             && this.metadataCache.isConnectionPrefetchFresh?.(group.connectionName || '') === true
             && this.metadataCache.getDatabases(group.connectionName || '')?.some(database =>
                 String(database.DATABASE || database.label || '').trimEnd() === relatedDatabase) === false;
@@ -1825,6 +1994,7 @@ export class SchemaProvider
         }
 
         try {
+            await this.ensureOnDemandForeignKeySlice(connectionName, database);
             const snapshot = await this.getForeignKeyRelationshipSnapshot(
                 connectionName,
                 database,
@@ -1903,7 +2073,7 @@ export class SchemaProvider
                 element.parentObjId,
             );
         } else if (
-            element.contextValue === 'netezzaRelationshipGroup'
+            (element.contextValue === 'netezzaRelationshipGroup' || element.contextValue.startsWith('tableDetailGroup:'))
             && element.connectionName
             && element.dbName
             && element.parentName
@@ -2798,6 +2968,8 @@ export class SchemaProvider
             }
         } else if (element.contextValue === 'netezzaRelationshipGroup') {
             return this.getRelationshipGroupChildren(element);
+        } else if (element.contextValue.startsWith('tableDetailGroup:')) {
+            return this.getTableDetailGroupChildren(element);
         } else if (element.contextValue.startsWith('netezza:')) {
             // Children: Columns
             const tableName = element.rawLabel || element.label;
@@ -2824,7 +2996,7 @@ export class SchemaProvider
                     );
                     return [
                         ...this.createSchemaColumnItems(element, visibleColumns),
-                        ...this.createRelationshipGroupItems(element),
+                        ...this.createTableChildGroupItems(element),
                     ];
                 }
                 // If cache is stale (no isPk), fall through to refetch
@@ -2959,7 +3131,7 @@ export class SchemaProvider
                     item.sourceContext = 'schema';
                     item.id = `${item.id}|schema`;
                     return item;
-                }), ...this.createRelationshipGroupItems(element)];
+                }), ...this.createTableChildGroupItems(element)];
             } catch (e: unknown) {
                 const errorMsg = e instanceof Error ? e.message : String(e);
                 if (e instanceof SchemaQueryTimeoutError) {
@@ -2972,7 +3144,7 @@ export class SchemaProvider
                 }
                 return [
                     this.createErrorItem(element.connectionName, errorMsg, 'netezza'),
-                    ...this.createRelationshipGroupItems(element),
+                    ...this.createTableChildGroupItems(element),
                 ];
             }
         }
