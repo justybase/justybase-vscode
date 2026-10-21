@@ -492,6 +492,148 @@ describe("LspCompletionEngine", () => {
     });
   });
 
+  describe("operand continuation and position-appropriate suggestions", () => {
+    const DIMDATE = "SELECT * FROM JUST_DATA..DIMDATE D";
+
+    it.each([
+      [`${DIMDATE}|`, "alias after a FROM target"],
+      [`${DIMDATE}\nWHERE D.CALENDARQUARTER > 0\nS|`, "word after a complete predicate"],
+      ["SELECT DATEKEY S| FROM JUST_DATA..DIMDATE", "select-list alias"],
+      ["SELECT DATEKEY AS |", "name after SELECT ... AS"],
+      ["SELECT * FROM JUST_DATA..DIMDATE AS |", "name after FROM ... AS"],
+    ])("offers nothing for %s (%s)", async (sql) => {
+      expect(await complete(sql, CompletionTriggerKind.TriggerCharacter)).toEqual([]);
+      expect(await complete(sql)).toEqual([]);
+    });
+
+    it.each([
+      [`${DIMDATE} WHERE D.DATEKEY > 0 A|`, ["AND"]],
+      [`${DIMDATE} WHERE D.DATEKEY > 0 L|`, ["LIMIT"]],
+      [`${DIMDATE} WHERE D.DATEKEY > 0 G|`, ["GROUP"]],
+      [`${DIMDATE} WHERE D.DATEKEY LIKE 'A%' E|`, ["ESCAPE", "EXCEPT"]],
+      ["SELECT DATEKEY F|", ["FROM"]],
+      ["SELECT SUM(DATEKEY) O|", ["OVER"]],
+      ["SELECT CASE WHEN DATEKEY > 0 T|", ["THEN"]],
+      [`${DIMDATE} ORDER BY D.DATEKEY D|`, ["DESC"]],
+      [`${DIMDATE} ORDER BY D.DATEKEY DESC L|`, ["LIMIT"]],
+      [`${DIMDATE} ORDER BY D.DATEKEY DESC NULLS |`, ["FIRST", "LAST"]],
+      [`${DIMDATE} GROUP BY D.DATEKEY H|`, ["HAVING"]],
+      ["UPDATE JUST_DATA..DIMDATE SET DATEKEY = 1 W|", ["WHERE"]],
+    ])("offers only continuation keywords for %s", async (sql, expected) => {
+      expect(labels(await complete(sql)).sort()).toEqual([...expected].sort());
+    });
+
+    it("offers predicate keywords but no columns after an operand on explicit invoke", async () => {
+      const result = labels(await complete(`${DIMDATE} WHERE D.DATEKEY |`));
+      expect(result).toEqual(expect.arrayContaining(["IN", "BETWEEN", "LIKE", "IS", "AND", "GROUP", "ORDER", "LIMIT"]));
+      expect(result).not.toContain("CALENDARQUARTER");
+    });
+
+    it.each([
+      `${DIMDATE} WHERE C|`,
+      `${DIMDATE} WHERE D.DATEKEY = 1 AND C|`,
+      `${DIMDATE} WHERE D.DATEKEY + C|`,
+    ])("still offers columns where an operand is expected: %s", async (sql) => {
+      expect(labels(await complete(sql))).toContain("CALENDARQUARTER");
+    });
+  });
+
+  describe("whole-phrase completions", () => {
+    function textOf(item: CompletionItem | undefined): string | undefined {
+      return item?.textEdit?.newText ?? item?.insertText;
+    }
+
+    it("offers all non-aggregated SELECT items right after GROUP BY", async () => {
+      const items = await complete(
+        "SELECT D.CALENDARYEAR, D.DATEKEY AS K, UPPER(D.CALENDARQUARTER) Q, COUNT(*) N, 1 FROM JUST_DATA..DIMDATE D GROUP BY |",
+      );
+      expect(items[0]?.label).toBe("D.CALENDARYEAR, D.DATEKEY, UPPER(D.CALENDARQUARTER)");
+      expect(items[0]?.detail).toBe("Non-aggregated SELECT items");
+    });
+
+    it("does not offer the GROUP BY list without an aggregate or after the first item", async () => {
+      expect(labels(await complete("SELECT D.DATEKEY FROM JUST_DATA..DIMDATE D GROUP BY |")))
+        .not.toContain("D.DATEKEY");
+      expect(labels(await complete("SELECT D.DATEKEY, COUNT(*) FROM JUST_DATA..DIMDATE D GROUP BY D.DATEKEY, |")))
+        .not.toContain("D.DATEKEY");
+    });
+
+    it("offers SELECT output aliases after ORDER BY", async () => {
+      expect(labels(await complete("SELECT D.DATEKEY AS DK, COUNT(*) N FROM JUST_DATA..DIMDATE D GROUP BY D.DATEKEY ORDER BY |")))
+        .toEqual(expect.arrayContaining(["DK", "N"]));
+    });
+
+    it("offers a column list with a VALUES template after INSERT INTO table", async () => {
+      const items = await complete("INSERT INTO JUST_DATA..DIMDATE V|");
+      expect(items[0]?.label).toBe("(DATEKEY, CALENDARQUARTER) VALUES (…)");
+      expect(textOf(items[0])).toBe("(DATEKEY, CALENDARQUARTER) VALUES (${1:DATEKEY}, ${2:CALENDARQUARTER})");
+      expect(labels(items)).toContain("VALUES");
+    });
+
+    it("offers all columns at once in an empty INSERT column list and skips listed ones", async () => {
+      expect(labels(await complete("INSERT INTO JUST_DATA..DIMDATE (|"))[0]).toBe("DATEKEY, CALENDARQUARTER");
+      const afterFirst = labels(await complete("INSERT INTO JUST_DATA..DIMDATE (DATEKEY, |"));
+      expect(afterFirst).toEqual(["CALENDARQUARTER"]);
+    });
+
+    it("offers one tab stop per listed column after VALUES (", async () => {
+      const items = await complete("INSERT INTO JUST_DATA..DIMDATE (DATEKEY, CALENDARQUARTER) VALUES (|");
+      expect(textOf(items[0])).toBe("${1:DATEKEY}, ${2:CALENDARQUARTER}");
+    });
+
+    it("offers only statement-opening keywords at the start of a statement", async () => {
+      const result = labels(await complete("SELECT 1;\nSE|"));
+      expect(result).toEqual(expect.arrayContaining(["SELECT", "SET"]));
+      expect(result).not.toEqual(expect.arrayContaining(["OFFSET"]));
+      expect(result).not.toContain("CASE");
+      expect(result).not.toContain("INTERSECT");
+    });
+
+    it("treats BETWEEN ... AND as one predicate", async () => {
+      const result = labels(await complete("SELECT * FROM JUST_DATA..DIMDATE D WHERE D.DATEKEY BETWEEN 1 AND 5 |"));
+      expect(result).toEqual(expect.arrayContaining(["AND", "OR", "GROUP"]));
+      expect(result).not.toContain("BETWEEN");
+      expect(result).not.toContain("IN");
+    });
+
+    it.each([
+      ["upper", "sel|", "SELECT"],
+      ["lower", "SEL|", "select"],
+      ["matchTyped", "sel|", "select"],
+      ["matchTyped", "SEL|", "SELECT"],
+    ] as const)("inserts keywords with completionKeywordCase=%s (%s -> %s)", async (keywordCase, sql, expected) => {
+      const baseContext = await metadataProvider.getContext("file:///completion-engine.sql");
+      metadataProvider.getContext.mockResolvedValue({ ...baseContext, completionKeywordCase: keywordCase } as typeof baseContext);
+      const item = (await complete(sql)).find((candidate) => candidate.label === "SELECT");
+      expect(item?.label).toBe("SELECT");
+      expect(textOf(item) ?? item?.label).toBe(expected);
+    });
+  });
+
+  describe("dialect snippets", () => {
+    it("offers snippets of the active dialect at a statement start only", async () => {
+      expect(labels(await complete("nzsel|"))).toEqual(
+        expect.arrayContaining(["nzselect", "nzselectall", "nzselecttop"]),
+      );
+      expect(labels(await complete("SELECT 1;\nnzsel|"))).toContain("nzselect");
+      expect(labels(await complete("SELECT * FROM JUST_DATA..DIMDATE WHERE nzsel|"))).not.toContain("nzselect");
+    });
+
+    it("lists a snippet with several prefixes once and keeps the alternative prefix searchable", async () => {
+      const items = (await complete("DROP|")).filter((item) => item.kind === CompletionItemKind.Snippet);
+      expect(labels(items)).toEqual(expect.arrayContaining(["nzdroptable", "nzdroptablesimple", "nzdropnocheck"]));
+      expect(labels(items)).not.toContain("DROP TABLE");
+      expect(items.find((item) => item.label === "nzdroptable")?.filterText).toContain("DROP TABLE");
+    });
+
+    it("does not offer snippets of other dialects", async () => {
+      expect(labels(await complete("duckdb|"))).not.toContain("duckdb-read-csv");
+      metadataProvider.databaseKind = "duckdb";
+      expect(labels(await complete("duckdb|"))).toContain("duckdb-read-csv");
+      expect(labels(await complete("nzsel|"))).not.toContain("nzselect");
+    });
+  });
+
   describe("object path and target-context completions", () => {
     it("suggests XLSX sheet views inside a full-path File SQL identifier", async () => {
       metadataProvider.databaseKind = "file";
@@ -772,11 +914,23 @@ SELECT * FROM CTE1`);
       metadataProvider.databaseKind = "postgresql";
       metadataProvider.effectiveDatabase = "APPDB";
 
-      const items = await complete("|");
+      // Mid-statement fallback: the whole dialect keyword catalog.
+      const items = await complete("CREATE TABLE T (A INT) |");
       const upperLabels = labels(items).map((label) => label.toUpperCase());
 
       expect(upperLabels).toContain("ON CONFLICT");
       expect(upperLabels).toContain("RETURNING");
+      expect(upperLabels).not.toContain("GROOM");
+    });
+
+    it("offers only PostgreSQL statement-opening keywords at a statement start", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveDatabase = "APPDB";
+
+      const upperLabels = labels(await complete("|")).map((label) => label.toUpperCase());
+
+      expect(upperLabels).toEqual(expect.arrayContaining(["SELECT", "INSERT", "WITH"]));
+      expect(upperLabels).not.toContain("ON CONFLICT");
       expect(upperLabels).not.toContain("GROOM");
     });
 
@@ -786,7 +940,8 @@ SELECT * FROM CTE1`);
       metadataProvider.databaseKind = "postgresql";
       metadataProvider.effectiveDatabase = "APPDB";
 
-      const items = await complete("|");
+      // Mid-statement fallback: the whole dialect keyword catalog.
+      const items = await complete("CREATE TABLE T (A INT) |");
       const upperLabels = labels(items).map((label) => label.toUpperCase());
 
       expect(upperLabels).toContain("ON CONFLICT");
@@ -800,7 +955,7 @@ SELECT * FROM CTE1`);
       metadataProvider.databaseKind = "oracle";
       metadataProvider.effectiveDatabase = "ORCL";
 
-      const items = await complete("|");
+      const items = await complete("CREATE TABLE T (A INT) |");
       const upperLabels = labels(items).map((label) => label.toUpperCase());
 
       expect(upperLabels).toContain("CONNECT BY");
@@ -2554,8 +2709,10 @@ SELECT SQ.|`);
 
       const items = await complete("INSERT INTO JUST_DATA..FILMS (CODE, |");
       expect(labels(items)).toEqual(
-        expect.arrayContaining(["CODE", "TITLE", "DID"]),
+        expect.arrayContaining(["TITLE", "DID"]),
       );
+      // Columns already listed are not offered again.
+      expect(labels(items)).not.toContain("CODE");
     });
 
     it("returns columns for table alias in INSERT SELECT", async () => {

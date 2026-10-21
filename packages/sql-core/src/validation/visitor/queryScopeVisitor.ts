@@ -6,6 +6,7 @@ import {
 } from "../tokenSpanUtils";
 import type { ColumnInfo, TableInfo } from "../types";
 import type { SqlVisitorHost } from "./sqlVisitorHost";
+import { GROUPING_AGGREGATE_FUNCTIONS } from "../aggregateFunctions";
 
 const RESERVED_UNQUOTED_TABLE_NAME_TOKENS = new Set([
   "From",
@@ -58,23 +59,6 @@ const AGGREGATE_FUNCTIONS = new Set([
   "NTH_VALUE",
 ]);
 
-const GROUPING_AGGREGATE_FUNCTIONS = new Set([
-  "SUM",
-  "COUNT",
-  "AVG",
-  "MIN",
-  "MAX",
-  "STDDEV",
-  "STDDEV_POP",
-  "STDDEV_SAMP",
-  "VARIANCE",
-  "VAR_POP",
-  "VAR_SAMP",
-  "GROUP_CONCAT",
-  "GROUP_CONCAT_SORT",
-  "PERCENTILE_CONT",
-  "PERCENTILE_DISC",
-]);
 
 export function selectStatement(
   host: SqlVisitorHost,

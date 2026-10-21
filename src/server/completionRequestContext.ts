@@ -87,6 +87,7 @@ export class CompletionRequestContextBuilder {
       effectiveSchema,
       netezzaSchemasEnabled,
       joinCompletionSettings: context.joinCompletionSettings ?? DEFAULT_JOIN_COMPLETION_SETTINGS,
+      completionKeywordCase: context.completionKeywordCase,
       linePrefix,
       prevLine,
       cursorOffset,

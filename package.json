@@ -4069,36 +4069,6 @@
         ]
       }
     },
-    "snippets": [
-      {
-        "language": "sql",
-        "path": "./dialects/netezza/snippets/netezza.code-snippets"
-      },
-      {
-        "language": "sql",
-        "path": "./dialects/oracle/snippets/oracle.code-snippets"
-      },
-      {
-        "language": "sql",
-        "path": "./dialects/db2/snippets/db2.code-snippets"
-      },
-      {
-        "language": "sql",
-        "path": "./dialects/mssql/snippets/mssql.code-snippets"
-      },
-      {
-        "language": "sql",
-        "path": "./dialects/duckdb/snippets/duckdb.code-snippets"
-      },
-      {
-        "language": "sql",
-        "path": "./dialects/sqlite/snippets/sqlite.code-snippets"
-      },
-      {
-        "language": "sql",
-        "path": "./dialects/clickhouse/snippets/clickhouse.code-snippets"
-      }
-    ],
     "walkthroughs": [
       {
         "id": "netezzaGettingStarted",
@@ -4284,6 +4254,21 @@
           "type": "boolean",
           "default": true,
           "description": "Generate a unique table alias when accepting a JOIN completion."
+        },
+        "justybase.sql.completionKeywordCase": {
+          "type": "string",
+          "default": "upper",
+          "enum": [
+            "upper",
+            "lower",
+            "matchTyped"
+          ],
+          "enumDescriptions": [
+            "Insert completed keywords in upper case (SELECT).",
+            "Insert completed keywords in lower case (select).",
+            "Follow the typed prefix: lower case when the typed letters are lower case, otherwise upper case."
+          ],
+          "description": "Case of SQL keywords inserted by completion. The suggestion list itself always shows keywords in upper case."
         },
         "justybase.sql.joinAliases": {
           "type": "array",

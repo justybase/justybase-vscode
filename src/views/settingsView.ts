@@ -372,6 +372,19 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: true
             },
             {
+                id: 'completion-keyword-case',
+                label: 'Completion Keyword Case',
+                description: 'Case of SQL keywords inserted by completion',
+                type: 'select',
+                configKey: 'sql.completionKeywordCase',
+                defaultValue: 'upper',
+                options: [
+                    { label: 'UPPER', value: 'upper' },
+                    { label: 'lower', value: 'lower' },
+                    { label: 'Match typed letters', value: 'matchTyped' }
+                ]
+            },
+            {
                 id: 'join-aliases',
                 label: 'JOIN Table Alias Overrides',
                 description: 'JSON array of table-to-alias overrides used by JOIN completions',
