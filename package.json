@@ -5351,7 +5351,7 @@
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.0",
     "@eslint/js": "^10.0.1",
-    "@justybase/db2": "0.1.0-alpha.2",
+    "@justybase/db2": "0.1.0-alpha.3",
     "@playwright/test": "^1.60.0",
     "@tanstack/table-core": "^9.2.4",
     "@tanstack/virtual-core": "^3.17.0",

@@ -10,7 +10,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @chevrotain/gast | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @chevrotain/regexp-to-ast | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @chevrotain/utils | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
-| @justybase/db2 | 0.1.0-alpha.1 | MIT | [upstream](https://github.com/justybase/JustyBase.Db2.Node) |
+| @justybase/db2 | 0.1.0-alpha.3 | MIT | [upstream](https://github.com/justybase/JustyBase.Db2.Node) |
 | chevrotain | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 
 ## Included license texts
@@ -221,7 +221,7 @@ Apache License
    limitations under the License.
 ```
 
-### @justybase/db2@0.1.0-alpha.1
+### @justybase/db2@0.1.0-alpha.3
 
 ```text
 MIT License
