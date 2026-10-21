@@ -413,6 +413,33 @@ if (process.env.ORACLE_LIVE_TEST_REQUIRED === 'true' && !config) {
 const describeIfConfigured = config ? describe : describe.skip;
 const showWarningMessage = vscode.window.showWarningMessage as unknown as jest.Mock;
 const showInformationMessage = vscode.window.showInformationMessage as unknown as jest.Mock;
+const getExtension = vscode.extensions.getExtension as unknown as jest.Mock;
+
+/**
+ * Stands in for the core extension: DDL generation from connection details asks
+ * core (activateCoreExtension) to open the connection, and Jest has no extension host.
+ */
+function installCoreExtensionStub(): void {
+	getExtension.mockImplementation((id: unknown) => id !== 'krzysztof-d.justybaselite-netezza' ? undefined : {
+		activate: async () => ({
+			version: 1,
+			registerDatabaseDialect: () => undefined,
+			listRegisteredDatabaseDialects: () => [],
+			createConnectedDatabaseConnectionFromDetails: async (details: ConnectionDetails) => {
+				const opened = new OracleConnection({
+					host: details.host,
+					port: details.port,
+					database: details.database,
+					user: details.user,
+					password: details.password,
+					options: details.options,
+				});
+				await opened.connect();
+				return opened;
+			},
+		}),
+	});
+}
 
 describeIfConfigured('oracle integration', () => {
 	let connection: OracleConnection;
@@ -537,6 +564,8 @@ describeIfConfigured('oracle integration', () => {
 		showInformationMessage.mockReset();
 		showWarningMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
 		showInformationMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
+		getExtension.mockReset();
+		installCoreExtensionStub();
 	});
 
 	afterAll(async () => {
