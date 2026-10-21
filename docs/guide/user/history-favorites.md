@@ -4,7 +4,7 @@ description: Re-run useful work, preserve parameters and notes, and curate stabl
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-08-19
+last_verified: 2026-10-21
 product_version: 3.19.1
 ---
 
@@ -30,25 +30,24 @@ History is a convenience record, not a secret store. Do not put passwords or tok
 
 ## Search Query History (keyboard-first)
 
-Press `Ctrl+Alt+R` (`Cmd+Alt+R` on macOS) in a SQL editor — or run **JustyBase: Search Query History…** from the Command Palette — for a terminal-style reverse search over query history (active entries plus archive, newest first).
+Press `Ctrl+R` (`Cmd+R` on macOS) in a SQL editor or in the **Query History** view — `Ctrl+Alt+R` / `Cmd+Alt+R` also works — or run **JustyBase: Search Query History…** from the Command Palette — for a terminal-style reverse search over query history (active entries plus archive, newest first).
 
 - Typing filters fuzzily across SQL text, connection, database, schema, tags, and description; favorites are boosted and marked with `$(star-full)`.
 - Each row shows timestamp, connection/database, and an SQL preview.
 - Pressing `Enter` inserts the SQL at the cursor. It is **never executed automatically**. Macro variables (`${VAR}`/`$VAR`/`&VAR`) resolve through the standard parameter prompt; QuickRerun-style `:name`/`@name` placeholders insert verbatim.
 
-### Optional Ctrl+R binding
+### Ctrl+R scope
 
-`Ctrl+R` is VS Code's native **Open Recent** shortcut, so the extension does not claim it by default. To opt in for SQL editors only, add to your `keybindings.json`:
+`Ctrl+R` is claimed only while a SQL editor (`sql`, `mssql`, `netezza-sql`) or the Query History view has focus. Everywhere else it keeps VS Code's native **Open Recent**. To give `Ctrl+R` back to Open Recent everywhere, add to your `keybindings.json`:
 
 ```json
 {
   "key": "ctrl+r",
-  "command": "netezza.searchQueryHistory",
-  "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+  "command": "-netezza.searchQueryHistory"
 }
 ```
 
-Outside SQL editors, `Ctrl+R` keeps opening recent items.
+`Ctrl+Alt+R` keeps working either way.
 
 ## Favorites
 
@@ -66,6 +65,16 @@ The Schema Browser can favorite tables, views, procedures, functions, and extern
 - an explicit **include now** action for one request.
 
 The desktop workspace file is `.vscode/netezza-favorites.json`. It contains curated context, not connection passwords. Review it before committing: teams may intentionally commit sanitized favorites, but environment-specific names and notes can still be sensitive.
+
+## Object notes
+
+Right-click any table, view, procedure or other object — or one of its columns — in the Schema Browser and choose **Edit Note…** to attach a short note, for example *"Loaded nightly by the ETL job; do not truncate"*. Clearing the text removes the note. A noted node shows 📝 in its description, and the note opens its tooltip. The same note appears on the object in Favorites.
+
+Notes are stored only on this computer, in `object-notes.json` in the extension's global storage — never in the workspace, a favorites file, or the database. A note belongs to one connection profile, database, schema, object type and name; renaming the object in the database leaves the note behind.
+
+- **JustyBase: Open Object Notes File** opens the file for review.
+- **JustyBase: Export Object Notes…** and **JustyBase: Import Object Notes…** move notes between machines. Import merges: when both sides have a note for the same object, the more recently edited one is kept.
+- Copilot's **Get Comments** tool adds the notes of the table and its columns to the database comments, marked as local user notes. Leave sensitive information out of notes if Copilot is in use.
 
 ## Copilot context
 

@@ -4,7 +4,7 @@ description: Navigate databases, schemas, objects, columns, definitions, favorit
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-08-19
+last_verified: 2026-10-21
 product_version: 3.19.1
 ---
 
@@ -25,6 +25,24 @@ The Schema view is a lazy tree: connection → database → schema → object gr
 4. Use context actions to copy a qualified name, generate DDL, view/edit data, add a comment, compare schema, or add the object to favorites.
 5. Use **Filter Visible Objects** in the Schema view toolbar to narrow already loaded object lists by name. This is local and does not run Schema Search; use the clear action to restore the full lists.
 6. Use **Refresh Selected Metadata** after a targeted DDL change. Use **Refresh Schema** after a broad migration or catalog refresh.
+
+## Object context menu
+
+Right-clicking a table, view, procedure or other object opens the same menu layout for every database; an entry the connected dialect does not support is hidden, and so is a submenu with nothing in it.
+
+| Position | Entries |
+| --- | --- |
+| Top | Select Top 1000, Edit Data, Count Rows, Call Routine, Refresh Materialized View |
+| Copy | Copy Name, Create DDL Code |
+| **Data ▸** | Export Table Data, Migration Studio, Search Values, Find Duplicate Rows, Create Table From This, Create View in Another Database, Generate Test Data |
+| **Structure ▸** | Object Designer, columns, keys and constraints, indexes and partitions (Db2, PostgreSQL and MySQL add their designers here) |
+| **Maintenance ▸** | Show Maintenance Status, statistics, space reclaim (Groom / Vacuum / Reorganize (REORG) / Optimize / Move — named after what the database runs), reindex, storage, data skew, Recreate Table |
+| **Analysis ▸** | Compare With, Show Dependencies, Show Used By, Impact Analysis, Show Size & Row Count, Show Privileges |
+| Admin | Grant, Change Owner, Rename, Comment |
+| Favorites | Add to / remove from favorites, Edit Note… (a local note, also on columns — see [object notes](guide/user/history-favorites/#object-notes)) |
+| Last | Truncate, Drop, Drop Constraint |
+
+Destructive actions always sit in the last group, separated from everyday entries. A database node also offers **Lock waits** and **Invalid objects** where the dialect provides them. The per-dialect list is in the [database support matrix](guide/reference/database-support/).
 
 ## DDL and navigation
 

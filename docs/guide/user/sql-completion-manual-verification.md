@@ -25,6 +25,42 @@ The JustyBase SQL editor provides SQL completion through the language server. Th
 - `SELECT` and `INSERT` context suggestions, wildcard expansion, and scope-aware filtering. The parser keeps nested query scopes separate and only exposes CTEs that are visible at the cursor.
 - Identifier matching by direct prefix, compact spelling, `snake_case`/`camelCase` word starts, delimited initials, and multi-character name fragments. Direct matches rank first; fuzzy matches are lower in the list. One-character fragments do not create broad substring matches.
 
+### Position-aware suggestions
+
+Completion follows the cursor position, so the list only contains items that can be typed there:
+
+- After a completed operand, such as `WHERE D.QTY > 0 |`, `SELECT COL |`, or `ORDER BY COL |`, the list contains only operators and clause keywords. Examples are `AND`/`OR`, `GROUP`, `ORDER`, `HAVING`, `LIMIT`, `OFFSET`, `UNION`, `ASC`/`DESC`, `NULLS`, `OVER`, and `THEN` inside an open `CASE`. It contains no columns or functions. Columns and functions return where an operand is expected, for example after `WHERE`, `AND`, a comparison operator, `(`, or `,`.
+- A word typed where an alias belongs, such as `FROM DIMDATE D|`, `SELECT COL X|`, or `AS |`, opens no list unless a clause keyword matches it, for example `W` → `WHERE`.
+- Dialect snippets (Netezza `nz…`, `duckdb-…`, `sqlite-…`, and others) come from the language server. They are offered only for the active dialect and only where a new statement can start: the beginning of the document, after `;`, or at the start of a procedure block. Each snippet is listed once. Alternative prefixes, such as `DROP TABLE` for `nzdroptable`, still find the snippet.
+
+Workspace snippets in `.vscode/justybase.code-snippets` are ordinary VS Code snippets. They are not filtered by position.
+
+### Whole-phrase suggestions
+
+- `GROUP BY |` puts all non-aggregated `SELECT` expressions first as a single item, without their output aliases. For example, `SELECT D.YEAR, UPPER(D.MONTH) M, COUNT(*) …` offers `D.YEAR, UPPER(D.MONTH)`. The item appears only when the `SELECT` list contains an aggregate.
+- `ORDER BY |` also offers the output aliases of the `SELECT` list.
+- `INSERT INTO T |` offers `(c1, c2, …) VALUES (…)`. Accepting it inserts the column list and one tab stop per value. Typing `V` after the table name still finds this item.
+- `INSERT INTO T (|` offers all columns at once. Columns already in the list are not offered again.
+- `INSERT INTO T (a, b) VALUES (|` offers one tab stop per listed column.
+- At the start of a statement, the list contains only keywords that can open a statement. For example, `SE|` offers `SELECT` and `SET` but not `OFFSET` or `CASE`.
+- `justybase.sql.completionKeywordCase` sets the case of inserted keywords: `upper` (default), `lower`, or `matchTyped`. With `matchTyped`, typing `sel` inserts `select`. The list always shows keywords in upper case.
+
+### Expand `*` to a column list
+
+Put the cursor on the `*` of a `SELECT` item and open the light bulb (`Ctrl+.`). Choose **Expand * to column list**. When the NZ001 diagnostic is reported, its quick fix **Expand SELECT * to explicit columns** does the same thing. Every column is qualified. A table without an alias gets a generated one, using the same rules as JOIN completion (`DIMDATE` → `D`; collisions become `D2`, and so on). An existing alias is reused. If the statement already refers to `TABLE.column`, the table name is kept as the qualifier and no alias is added. `X.*` expands only that source.
+
+```sql
+SELECT * FROM DIMDATE
+-- becomes
+SELECT 
+    D.DATEKEY
+    , D.FULLDATEALTERNATEKEY
+    , …
+ FROM DIMDATE D
+```
+
+`justybase.sql.expandStarLayout` selects the layout: `leadingComma` (default, as above), `trailingComma`, or `singleLine`. Columns come from the metadata cache. The action is not offered while the columns of any source are still unknown.
+
 Quoted CTE names remain limited by the SQL grammar. Other quoted table, schema, alias, and column identifiers are supported where the active dialect parser accepts them.
 
 ### JOIN completion
