@@ -15,7 +15,7 @@ import { mssqlMaintenanceProvider } from '../../extensions/mssql/src/mssqlMainte
 import { oracleDialect } from '../../extensions/oracle/src/oracleDialect';
 import { oracleMaintenanceProvider } from '../../extensions/oracle/src/oracleMaintenanceProvider';
 import { db2Dialect } from '../../extensions/db2/src/db2Dialect';
-import { db2MaintenanceProvider } from '../../extensions/db2/src/db2MaintenanceProvider';
+import { DB2_RUNSTATS_OPTIONS, db2MaintenanceProvider } from '../../extensions/db2/src/db2MaintenanceProvider';
 import { postgresqlDialect } from '../../extensions/postgresql/src/postgresqlDialect';
 import { postgresqlMaintenanceProvider } from '../../extensions/postgresql/src/postgresqlMaintenanceProvider';
 import { verticaMaintenanceProvider } from '../../extensions/vertica/src/verticaMaintenanceProvider';
@@ -24,7 +24,8 @@ import { sqliteMaintenanceProvider } from '../dialects/sqlite/maintenanceProvide
 jest.mock('vscode', () => ({
     window: {
         showWarningMessage: jest.fn(),
-        showInformationMessage: jest.fn()
+        showInformationMessage: jest.fn(),
+        showQuickPick: jest.fn(async (items: unknown[]) => items[0])
     }
 }));
 
@@ -295,6 +296,21 @@ describe('db2MaintenanceProvider', () => {
         await db2MaintenanceProvider.generateStatistics!(target, services);
 
         expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('RUNSTATS ON TABLE ADMIN.SALES ON ALL COLUMNS AND DETAILED INDEXES ALL');");
+    });
+
+    it('runs the chosen RUNSTATS variant and nothing when the choice is dismissed', async () => {
+        const services = createServices();
+        const showQuickPick = vscode.window.showQuickPick as jest.Mock;
+        showInformationMessage.mockResolvedValue('Yes, generate');
+        showQuickPick.mockResolvedValueOnce(DB2_RUNSTATS_OPTIONS[2]);
+
+        await db2MaintenanceProvider.generateStatistics!(target, services);
+        expectExecutedSql(services, "CALL SYSPROC.ADMIN_CMD('RUNSTATS ON TABLE ADMIN.SALES WITH DISTRIBUTION AND SAMPLED DETAILED INDEXES ALL TABLESAMPLE SYSTEM (10)');");
+
+        services.executeAndReport.mockClear();
+        showQuickPick.mockResolvedValueOnce(undefined);
+        await db2MaintenanceProvider.generateStatistics!(target, services);
+        expect(services.executeAndReport).not.toHaveBeenCalled();
     });
 
     it('runs REORG TABLE through ADMIN_CMD for Db2 tables', async () => {
