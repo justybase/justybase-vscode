@@ -1143,3 +1143,212 @@ AND c.relname = ${quoteLiteral(indexName)}
 ORDER BY array_position(i.indkey, a.attnum)
 `;
 }
+
+export type PostgreSqlTableDetailKind = 'keys' | 'indexes' | 'triggers';
+
+/** Keys/constraints, indexes or triggers of one table for the schema tree (NAME, KIND, DETAIL). */
+export function buildTableDetailQuery(
+    _database: string,
+    schema: string,
+    tableName: string,
+    detail: PostgreSqlTableDetailKind,
+): string {
+    const tableFilter = `n.nspname = ${quoteLiteral(schema)} AND t.relname = ${quoteLiteral(tableName)}`;
+    if (detail === 'keys') {
+        return `
+            SELECT
+                c.conname AS "NAME",
+                CASE c.contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'u' THEN 'UNIQUE' WHEN 'f' THEN 'FOREIGN KEY'
+                    WHEN 'c' THEN 'CHECK' ELSE 'EXCLUDE' END AS "KIND",
+                pg_catalog.pg_get_constraintdef(c.oid, true) AS "DETAIL"
+            FROM pg_catalog.pg_constraint c
+            INNER JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            WHERE ${tableFilter} AND c.contype IN ('p', 'u', 'f', 'c', 'x')
+            ORDER BY CASE c.contype WHEN 'p' THEN 0 WHEN 'u' THEN 1 WHEN 'f' THEN 2 ELSE 3 END, c.conname
+        `;
+    }
+    if (detail === 'indexes') {
+        return `
+            SELECT
+                i.relname AS "NAME",
+                CASE WHEN ix.indisprimary THEN 'PRIMARY KEY' WHEN ix.indisunique THEN 'UNIQUE' ELSE 'INDEX' END AS "KIND",
+                substring(pg_catalog.pg_get_indexdef(ix.indexrelid) FROM ' USING (.*)$') AS "DETAIL"
+            FROM pg_catalog.pg_index ix
+            INNER JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+            INNER JOIN pg_catalog.pg_class t ON t.oid = ix.indrelid
+            INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+            WHERE ${tableFilter}
+            ORDER BY ix.indisprimary DESC, ix.indisunique DESC, i.relname
+        `;
+    }
+    return `
+        SELECT
+            tg.tgname AS "NAME",
+            CASE tg.tgenabled WHEN 'D' THEN 'DISABLED' ELSE 'TRIGGER' END AS "KIND",
+            substring(pg_catalog.pg_get_triggerdef(tg.oid, true) FROM '((?:BEFORE|AFTER|INSTEAD OF) .*?) ON ') AS "DETAIL"
+        FROM pg_catalog.pg_trigger tg
+        INNER JOIN pg_catalog.pg_class t ON t.oid = tg.tgrelid
+        INNER JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+        WHERE ${tableFilter} AND NOT tg.tgisinternal
+        ORDER BY tg.tgname
+    `;
+}
+
+/**
+ * Catalog-recorded dependencies for impact analysis: views/materialized views
+ * through their rewrite rules (with column detail), SQL-standard routine
+ * bodies, trigger functions and sequence-backed column defaults.
+ */
+export function buildObjectDependenciesQuery(_database: string): string {
+    const relationType = (alias: string) => `CASE ${alias}.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'VIEW' WHEN 'S' THEN 'SEQUENCE' ELSE 'TABLE' END`;
+    const userSchema = (column: string) => `${column} NOT IN ('pg_catalog', 'information_schema') AND ${column} NOT LIKE 'pg\\_toast%'`;
+    return `
+        SELECT DISTINCT sn.nspname AS "SOURCE_SCHEMA", sc.relname AS "SOURCE_NAME", 'VIEW' AS "SOURCE_TYPE",
+            tn.nspname AS "TARGET_SCHEMA", tc.relname AS "TARGET_NAME", ${relationType('tc')} AS "TARGET_TYPE",
+            a.attname AS "TARGET_COLUMN"
+        FROM pg_catalog.pg_depend d
+        INNER JOIN pg_catalog.pg_rewrite r ON r.oid = d.objid AND d.classid = 'pg_catalog.pg_rewrite'::regclass
+        INNER JOIN pg_catalog.pg_class sc ON sc.oid = r.ev_class
+        INNER JOIN pg_catalog.pg_namespace sn ON sn.oid = sc.relnamespace
+        INNER JOIN pg_catalog.pg_class tc ON tc.oid = d.refobjid AND d.refclassid = 'pg_catalog.pg_class'::regclass
+        INNER JOIN pg_catalog.pg_namespace tn ON tn.oid = tc.relnamespace
+        LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = tc.oid AND a.attnum = d.refobjsubid AND d.refobjsubid > 0
+        WHERE sc.oid <> tc.oid AND ${userSchema('sn.nspname')}
+        UNION
+        SELECT pn.nspname, p.proname, 'PROCEDURE', tn.nspname, tc.relname, ${relationType('tc')}, a.attname
+        FROM pg_catalog.pg_depend d
+        INNER JOIN pg_catalog.pg_proc p ON p.oid = d.objid AND d.classid = 'pg_catalog.pg_proc'::regclass
+        INNER JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace
+        INNER JOIN pg_catalog.pg_class tc ON tc.oid = d.refobjid AND d.refclassid = 'pg_catalog.pg_class'::regclass
+        INNER JOIN pg_catalog.pg_namespace tn ON tn.oid = tc.relnamespace
+        LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = tc.oid AND a.attnum = d.refobjsubid AND d.refobjsubid > 0
+        WHERE ${userSchema('pn.nspname')}
+        UNION
+        SELECT tn.nspname, tc.relname, 'TABLE', pn.nspname, p.proname, 'PROCEDURE', NULL
+        FROM pg_catalog.pg_trigger tg
+        INNER JOIN pg_catalog.pg_class tc ON tc.oid = tg.tgrelid
+        INNER JOIN pg_catalog.pg_namespace tn ON tn.oid = tc.relnamespace
+        INNER JOIN pg_catalog.pg_proc p ON p.oid = tg.tgfoid
+        INNER JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace
+        WHERE NOT tg.tgisinternal AND ${userSchema('tn.nspname')}
+        UNION
+        SELECT tn.nspname, tc.relname, 'TABLE', sn.nspname, s.relname, 'SEQUENCE', NULL
+        FROM pg_catalog.pg_depend d
+        INNER JOIN pg_catalog.pg_attrdef ad ON ad.oid = d.objid AND d.classid = 'pg_catalog.pg_attrdef'::regclass
+        INNER JOIN pg_catalog.pg_class tc ON tc.oid = ad.adrelid
+        INNER JOIN pg_catalog.pg_namespace tn ON tn.oid = tc.relnamespace
+        INNER JOIN pg_catalog.pg_class s ON s.oid = d.refobjid AND d.refclassid = 'pg_catalog.pg_class'::regclass AND s.relkind = 'S'
+        INNER JOIN pg_catalog.pg_namespace sn ON sn.oid = s.relnamespace
+        WHERE ${userSchema('tn.nspname')}
+    `;
+}
+
+export type PostgreSqlTableReportKind = 'size' | 'privileges' | 'maintenance';
+export type PostgreSqlDatabaseReportKind = 'locks' | 'invalidObjects';
+
+/** Read-only table reports shown in SQL Results (size, privileges, vacuum/analyze status). */
+export function buildTableReportQuery(
+    _database: string,
+    schema: string,
+    tableName: string,
+    report: PostgreSqlTableReportKind,
+): string {
+    const owner = quoteLiteral(schema);
+    const table = quoteLiteral(tableName);
+    if (report === 'size') {
+        return `
+            SELECT
+                n.nspname AS "SCHEMA_NAME",
+                c.relname AS "TABLE_NAME",
+                CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END AS "ESTIMATED_ROWS",
+                pg_size_pretty(pg_total_relation_size(c.oid)) AS "TOTAL_SIZE",
+                pg_size_pretty(pg_relation_size(c.oid)) AS "TABLE_SIZE",
+                pg_size_pretty(pg_indexes_size(c.oid)) AS "INDEXES_SIZE",
+                pg_size_pretty(COALESCE(pg_total_relation_size(NULLIF(c.reltoastrelid, 0)), 0)) AS "TOAST_SIZE",
+                pg_total_relation_size(c.oid) AS "TOTAL_BYTES",
+                COALESCE(t.spcname, 'pg_default') AS "TABLESPACE"
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_tablespace t ON t.oid = c.reltablespace
+            WHERE n.nspname = ${owner} AND c.relname = ${table}
+        `;
+    }
+    if (report === 'privileges') {
+        return `
+            SELECT
+                g.grantee AS "GRANTEE",
+                g.grantor AS "GRANTOR",
+                string_agg(g.privilege_type, ', ' ORDER BY g.privilege_type) AS "PRIVILEGES",
+                bool_or(g.is_grantable = 'YES') AS "WITH_GRANT_OPTION"
+            FROM information_schema.role_table_grants g
+            WHERE g.table_schema = ${owner} AND g.table_name = ${table}
+            GROUP BY g.grantee, g.grantor
+            ORDER BY g.grantee
+        `;
+    }
+    return `
+        SELECT
+            s.schemaname AS "SCHEMA_NAME",
+            s.relname AS "TABLE_NAME",
+            CASE
+                WHEN COALESCE(s.last_analyze, s.last_autoanalyze) IS NULL THEN 'Run ANALYZE (never analyzed)'
+                WHEN s.n_live_tup + s.n_dead_tup > 1000 AND s.n_dead_tup * 100 > (s.n_live_tup + s.n_dead_tup) * 20 THEN 'Run VACUUM (dead rows > 20%)'
+                WHEN s.n_live_tup > 1000 AND s.n_mod_since_analyze * 100 > s.n_live_tup * 20 THEN 'Run ANALYZE (> 20% rows changed since last analyze)'
+                ELSE 'OK'
+            END AS "RECOMMENDATION",
+            s.n_live_tup AS "LIVE_ROWS",
+            s.n_dead_tup AS "DEAD_ROWS",
+            CASE WHEN s.n_live_tup + s.n_dead_tup > 0
+                THEN round(s.n_dead_tup * 100.0 / (s.n_live_tup + s.n_dead_tup), 2) END AS "DEAD_ROWS_PCT",
+            s.n_mod_since_analyze AS "CHANGED_SINCE_ANALYZE",
+            GREATEST(s.last_vacuum, s.last_autovacuum) AS "LAST_VACUUM",
+            GREATEST(s.last_analyze, s.last_autoanalyze) AS "LAST_ANALYZE",
+            s.vacuum_count + s.autovacuum_count AS "VACUUM_COUNT",
+            s.analyze_count + s.autoanalyze_count AS "ANALYZE_COUNT"
+        FROM pg_stat_user_tables s
+        WHERE s.schemaname = ${owner} AND s.relname = ${table}
+    `;
+}
+
+/** Read-only database reports shown in SQL Results (blocking sessions, invalid indexes). */
+export function buildDatabaseReportQuery(_database: string, report: PostgreSqlDatabaseReportKind): string {
+    if (report === 'locks') {
+        return `
+            SELECT
+                w.pid AS "WAITING_PID",
+                w.usename AS "WAITING_USER",
+                w.application_name AS "WAITING_APPLICATION",
+                date_trunc('second', now() - w.query_start)::text AS "WAITING_FOR",
+                w.wait_event_type || ': ' || w.wait_event AS "WAIT_EVENT",
+                b.pid AS "BLOCKING_PID",
+                b.usename AS "BLOCKING_USER",
+                b.application_name AS "BLOCKING_APPLICATION",
+                b.state AS "BLOCKING_STATE",
+                left(w.query, 2000) AS "WAITING_SQL",
+                left(b.query, 2000) AS "BLOCKING_SQL"
+            FROM pg_stat_activity w
+            CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) AS blocker(pid)
+            JOIN pg_stat_activity b ON b.pid = blocker.pid
+            WHERE w.datname = current_database()
+            ORDER BY w.query_start
+        `;
+    }
+    // PostgreSQL has no invalid routines or views; a failed CREATE INDEX CONCURRENTLY leaves an invalid index.
+    return `
+        SELECT
+            n.nspname AS "SCHEMA_NAME",
+            ic.relname AS "OBJECT_NAME",
+            'INDEX' AS "OBJECT_TYPE",
+            CASE WHEN NOT i.indisvalid THEN 'INVALID' ELSE 'NOT READY' END AS "STATUS",
+            tc.relname AS "TABLE_NAME",
+            'Drop and recreate the index, or run REINDEX INDEX' AS "DETAIL"
+        FROM pg_index i
+        JOIN pg_class ic ON ic.oid = i.indexrelid
+        JOIN pg_class tc ON tc.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = ic.relnamespace
+        WHERE (NOT i.indisvalid OR NOT i.indisready)
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY 1, 2
+    `;
+}

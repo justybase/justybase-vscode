@@ -565,3 +565,161 @@ export function buildProcedureSourceSearchQuery(database: string, options: Datab
           ${filter}
     `;
 }
+
+export type MysqlTableDetailKind = 'keys' | 'indexes' | 'triggers';
+
+/** Keys/constraints, indexes or triggers of one table for the schema tree (NAME, KIND, DETAIL). */
+export function buildTableDetailQuery(
+    database: string,
+    schema: string,
+    tableName: string,
+    detail: MysqlTableDetailKind,
+): string {
+    // MySQL databases are schemas; the tree reports the same name in both fields.
+    const owner = quoteLiteral(schema || database);
+    const table = quoteLiteral(tableName);
+    if (detail === 'keys') {
+        return `
+            SELECT
+                tc.CONSTRAINT_NAME AS ${quoteAlias('NAME')},
+                tc.CONSTRAINT_TYPE AS ${quoteAlias('KIND')},
+                CONCAT(
+                    COALESCE(GROUP_CONCAT(kcu.COLUMN_NAME ORDER BY kcu.ORDINAL_POSITION SEPARATOR ', '), ''),
+                    CASE WHEN tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
+                         THEN CONCAT(' -> ', MAX(kcu.REFERENCED_TABLE_SCHEMA), '.', MAX(kcu.REFERENCED_TABLE_NAME)) ELSE '' END
+                ) AS ${quoteAlias('DETAIL')}
+            FROM information_schema.TABLE_CONSTRAINTS tc
+            LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu
+                ON kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+               AND kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+               AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA
+               AND kcu.TABLE_NAME = tc.TABLE_NAME
+            WHERE tc.TABLE_SCHEMA = ${owner} AND tc.TABLE_NAME = ${table}
+            GROUP BY tc.CONSTRAINT_NAME, tc.CONSTRAINT_TYPE
+            ORDER BY FIELD(tc.CONSTRAINT_TYPE, 'PRIMARY KEY', 'UNIQUE', 'FOREIGN KEY', 'CHECK'), tc.CONSTRAINT_NAME
+        `;
+    }
+    if (detail === 'indexes') {
+        return `
+            SELECT
+                s.INDEX_NAME AS ${quoteAlias('NAME')},
+                CASE WHEN s.INDEX_NAME = 'PRIMARY' THEN 'PRIMARY KEY' WHEN MAX(s.NON_UNIQUE) = 0 THEN 'UNIQUE' ELSE 'INDEX' END AS ${quoteAlias('KIND')},
+                CONCAT(LOWER(MAX(s.INDEX_TYPE)), ' (',
+                       GROUP_CONCAT(COALESCE(s.COLUMN_NAME, s.EXPRESSION) ORDER BY s.SEQ_IN_INDEX SEPARATOR ', '), ')') AS ${quoteAlias('DETAIL')}
+            FROM information_schema.STATISTICS s
+            WHERE s.TABLE_SCHEMA = ${owner} AND s.TABLE_NAME = ${table}
+            GROUP BY s.INDEX_NAME
+            ORDER BY s.INDEX_NAME <> 'PRIMARY', MAX(s.NON_UNIQUE), s.INDEX_NAME
+        `;
+    }
+    return `
+        SELECT
+            t.TRIGGER_NAME AS ${quoteAlias('NAME')},
+            'TRIGGER' AS ${quoteAlias('KIND')},
+            CONCAT(t.ACTION_TIMING, ' ', t.EVENT_MANIPULATION) AS ${quoteAlias('DETAIL')}
+        FROM information_schema.TRIGGERS t
+        WHERE t.EVENT_OBJECT_SCHEMA = ${owner} AND t.EVENT_OBJECT_TABLE = ${table}
+        ORDER BY t.ACTION_ORDER, t.TRIGGER_NAME
+    `;
+}
+
+export type MysqlTableReportKind = 'size' | 'privileges' | 'maintenance';
+export type MysqlDatabaseReportKind = 'locks' | 'invalidObjects';
+
+/** Read-only table reports shown in SQL Results (size, privileges, fragmentation). */
+export function buildTableReportQuery(
+    database: string,
+    schema: string,
+    tableName: string,
+    report: MysqlTableReportKind,
+): string {
+    // MySQL databases are schemas; the tree reports the same name in both fields.
+    const owner = quoteLiteral(schema || database);
+    const table = quoteLiteral(tableName);
+    const a = quoteAlias;
+    if (report === 'size') {
+        return `
+            SELECT
+                t.TABLE_SCHEMA AS ${a('SCHEMA_NAME')},
+                t.TABLE_NAME AS ${a('TABLE_NAME')},
+                t.ENGINE AS ${a('ENGINE')},
+                t.TABLE_ROWS AS ${a('ESTIMATED_ROWS')},
+                ROUND((t.DATA_LENGTH + t.INDEX_LENGTH) / 1048576, 2) AS ${a('TOTAL_MB')},
+                ROUND(t.DATA_LENGTH / 1048576, 2) AS ${a('DATA_MB')},
+                ROUND(t.INDEX_LENGTH / 1048576, 2) AS ${a('INDEXES_MB')},
+                ROUND(t.DATA_FREE / 1048576, 2) AS ${a('FREE_MB')},
+                t.AVG_ROW_LENGTH AS ${a('AVG_ROW_LENGTH')},
+                t.ROW_FORMAT AS ${a('ROW_FORMAT')},
+                t.CREATE_TIME AS ${a('CREATED')},
+                t.UPDATE_TIME AS ${a('LAST_UPDATED')}
+            FROM information_schema.TABLES t
+            WHERE t.TABLE_SCHEMA = ${owner} AND t.TABLE_NAME = ${table}
+        `;
+    }
+    if (report === 'privileges') {
+        return `
+            SELECT
+                p.GRANTEE AS ${a('GRANTEE')},
+                'TABLE' AS ${a('LEVEL')},
+                GROUP_CONCAT(p.PRIVILEGE_TYPE ORDER BY p.PRIVILEGE_TYPE SEPARATOR ', ') AS ${a('PRIVILEGES')},
+                MAX(p.IS_GRANTABLE) AS ${a('WITH_GRANT_OPTION')}
+            FROM information_schema.TABLE_PRIVILEGES p
+            WHERE p.TABLE_SCHEMA = ${owner} AND p.TABLE_NAME = ${table}
+            GROUP BY p.GRANTEE
+            UNION ALL
+            SELECT
+                p.GRANTEE,
+                'SCHEMA (inherited)',
+                GROUP_CONCAT(p.PRIVILEGE_TYPE ORDER BY p.PRIVILEGE_TYPE SEPARATOR ', '),
+                MAX(p.IS_GRANTABLE)
+            FROM information_schema.SCHEMA_PRIVILEGES p
+            WHERE p.TABLE_SCHEMA = ${owner}
+            GROUP BY p.GRANTEE
+            ORDER BY 1, 2
+        `;
+    }
+    return `
+        SELECT
+            t.TABLE_SCHEMA AS ${a('SCHEMA_NAME')},
+            t.TABLE_NAME AS ${a('TABLE_NAME')},
+            CASE
+                WHEN t.DATA_FREE > 10485760 AND t.DATA_FREE * 100 > (t.DATA_LENGTH + t.INDEX_LENGTH + t.DATA_FREE) * 20
+                    THEN 'OPTIMIZE TABLE recommended (free space > 20%)'
+                ELSE 'OK'
+            END AS ${a('RECOMMENDATION')},
+            ROUND(t.DATA_FREE * 100 / NULLIF(t.DATA_LENGTH + t.INDEX_LENGTH + t.DATA_FREE, 0), 2) AS ${a('FREE_SPACE_PCT')},
+            ROUND(t.DATA_FREE / 1048576, 2) AS ${a('FREE_MB')},
+            t.TABLE_ROWS AS ${a('ESTIMATED_ROWS')},
+            t.ENGINE AS ${a('ENGINE')},
+            t.UPDATE_TIME AS ${a('LAST_UPDATED')},
+            t.CHECK_TIME AS ${a('LAST_CHECKED')}
+        FROM information_schema.TABLES t
+        WHERE t.TABLE_SCHEMA = ${owner} AND t.TABLE_NAME = ${table}
+    `;
+}
+
+/** Read-only database reports shown in SQL Results; MySQL has no invalid-object catalog. */
+export function buildDatabaseReportQuery(_database: string, report: MysqlDatabaseReportKind): string | undefined {
+    if (report !== 'locks') {
+        return undefined;
+    }
+    const a = quoteAlias;
+    // MySQL 8 lock waits; INNODB_TRX needs the PROCESS privilege to show other sessions.
+    return `
+        SELECT
+            r.trx_mysql_thread_id AS ${a('WAITING_THREAD')},
+            TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS ${a('WAIT_SECONDS')},
+            b.trx_mysql_thread_id AS ${a('BLOCKING_THREAD')},
+            b.trx_state AS ${a('BLOCKING_STATE')},
+            CONCAT(dl.OBJECT_SCHEMA, '.', dl.OBJECT_NAME) AS ${a('LOCKED_OBJECT')},
+            dl.LOCK_TYPE AS ${a('LOCK_TYPE')},
+            dl.LOCK_MODE AS ${a('LOCK_MODE')},
+            LEFT(r.trx_query, 2000) AS ${a('WAITING_SQL')},
+            LEFT(b.trx_query, 2000) AS ${a('BLOCKING_SQL')}
+        FROM performance_schema.data_lock_waits w
+        JOIN information_schema.INNODB_TRX r ON r.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
+        JOIN information_schema.INNODB_TRX b ON b.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
+        LEFT JOIN performance_schema.data_locks dl ON dl.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID
+        ORDER BY ${a('WAIT_SECONDS')} DESC
+    `;
+}

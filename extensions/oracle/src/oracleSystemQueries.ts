@@ -926,3 +926,201 @@ export function mapObjectTypeToDbmsMetadataType(objectType: string): string {
 
     return normalizedType;
 }
+
+export type OracleTableDetailKind = 'keys' | 'indexes' | 'triggers';
+
+/** Keys/constraints, indexes or triggers of one table for the schema tree (NAME, KIND, DETAIL). */
+export function buildTableDetailQuery(
+    _database: string,
+    schema: string,
+    tableName: string,
+    detail: OracleTableDetailKind,
+): string {
+    const owner = quoteLiteral(schema);
+    const table = quoteLiteral(tableName);
+    if (detail === 'keys') {
+        // NOT NULL column checks are stored as CHECK constraints; they add noise.
+        return `
+            SELECT
+                c.CONSTRAINT_NAME AS "NAME",
+                DECODE(c.CONSTRAINT_TYPE, 'P', 'PRIMARY KEY', 'U', 'UNIQUE', 'R', 'FOREIGN KEY', 'CHECK') AS "KIND",
+                (SELECT LISTAGG(cc.COLUMN_NAME, ', ') WITHIN GROUP (ORDER BY cc.POSITION)
+                   FROM ALL_CONS_COLUMNS cc
+                  WHERE cc.OWNER = c.OWNER AND cc.CONSTRAINT_NAME = c.CONSTRAINT_NAME)
+                || CASE WHEN c.CONSTRAINT_TYPE = 'C' THEN ': ' || c.SEARCH_CONDITION_VC END
+                || CASE WHEN c.CONSTRAINT_TYPE = 'R'
+                        THEN (SELECT ' -> ' || r.OWNER || '.' || r.TABLE_NAME FROM ALL_CONSTRAINTS r
+                               WHERE r.OWNER = c.R_OWNER AND r.CONSTRAINT_NAME = c.R_CONSTRAINT_NAME)
+                   END AS "DETAIL"
+            FROM ALL_CONSTRAINTS c
+            WHERE c.OWNER = ${owner} AND c.TABLE_NAME = ${table}
+              AND c.CONSTRAINT_TYPE IN ('P', 'U', 'R', 'C')
+              AND NOT (c.CONSTRAINT_TYPE = 'C' AND c.SEARCH_CONDITION_VC LIKE '"%" IS NOT NULL')
+            ORDER BY DECODE(c.CONSTRAINT_TYPE, 'P', 0, 'U', 1, 'R', 2, 3), c.CONSTRAINT_NAME
+        `;
+    }
+    if (detail === 'indexes') {
+        return `
+            SELECT
+                i.INDEX_NAME AS "NAME",
+                CASE WHEN i.UNIQUENESS = 'UNIQUE' THEN 'UNIQUE' ELSE 'INDEX' END AS "KIND",
+                i.INDEX_TYPE || ' (' || (SELECT LISTAGG(ic.COLUMN_NAME || DECODE(ic.DESCEND, 'DESC', ' DESC', ''), ', ')
+                                           WITHIN GROUP (ORDER BY ic.COLUMN_POSITION)
+                                          FROM ALL_IND_COLUMNS ic
+                                         WHERE ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME) || ')' AS "DETAIL"
+            FROM ALL_INDEXES i
+            WHERE i.TABLE_OWNER = ${owner} AND i.TABLE_NAME = ${table}
+            ORDER BY i.UNIQUENESS DESC, i.INDEX_NAME
+        `;
+    }
+    return `
+        SELECT
+            t.TRIGGER_NAME AS "NAME",
+            CASE WHEN t.STATUS = 'DISABLED' THEN 'DISABLED' ELSE 'TRIGGER' END AS "KIND",
+            t.TRIGGER_TYPE || ' ' || t.TRIGGERING_EVENT AS "DETAIL"
+        FROM ALL_TRIGGERS t
+        WHERE t.TABLE_OWNER = ${owner} AND t.TABLE_NAME = ${table}
+        ORDER BY t.TRIGGER_NAME
+    `;
+}
+
+/** ALL_DEPENDENCIES edges between user-schema objects for impact analysis. */
+export function buildObjectDependenciesQuery(_database: string): string {
+    const normalized = (column: string) => `CASE
+                WHEN ${column} IN ('VIEW', 'MATERIALIZED VIEW') THEN 'VIEW'
+                WHEN ${column} IN ('PROCEDURE', 'FUNCTION', 'PACKAGE', 'PACKAGE BODY', 'TRIGGER', 'TYPE', 'TYPE BODY') THEN 'PROCEDURE'
+                WHEN ${column} = 'SEQUENCE' THEN 'SEQUENCE'
+                ELSE 'TABLE' END`;
+    return `
+        SELECT DISTINCT
+            d.OWNER AS "SOURCE_SCHEMA",
+            d.NAME AS "SOURCE_NAME",
+            ${normalized('d.TYPE')} AS "SOURCE_TYPE",
+            d.REFERENCED_OWNER AS "TARGET_SCHEMA",
+            d.REFERENCED_NAME AS "TARGET_NAME",
+            ${normalized('d.REFERENCED_TYPE')} AS "TARGET_TYPE",
+            CAST(NULL AS VARCHAR2(128)) AS "TARGET_COLUMN"
+        FROM ALL_DEPENDENCIES d
+        WHERE d.OWNER IN (SELECT USERNAME FROM ALL_USERS WHERE ORACLE_MAINTAINED = 'N')
+          AND d.REFERENCED_OWNER IN (SELECT USERNAME FROM ALL_USERS WHERE ORACLE_MAINTAINED = 'N')
+          AND d.REFERENCED_TYPE IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW', 'SEQUENCE', 'PROCEDURE', 'FUNCTION', 'PACKAGE', 'TYPE')
+          AND NOT (d.OWNER = d.REFERENCED_OWNER AND d.NAME = d.REFERENCED_NAME)
+    `;
+}
+
+export type OracleTableReportKind = 'size' | 'privileges' | 'maintenance';
+export type OracleDatabaseReportKind = 'locks' | 'invalidObjects';
+
+/** Read-only table reports shown in SQL Results (size, privileges, optimizer statistics status). */
+export function buildTableReportQuery(
+    _database: string,
+    schema: string,
+    tableName: string,
+    report: OracleTableReportKind,
+): string {
+    const owner = quoteLiteral(schema);
+    const table = quoteLiteral(tableName);
+    if (report === 'size') {
+        // USER_SEGMENTS needs no extra privilege; other schemas fall back to the statistics estimate.
+        const segmentMb = (filter: string) => `ROUND((SELECT SUM(s.BYTES) FROM USER_SEGMENTS s WHERE ${filter}) / 1048576, 2)`;
+        return `
+            SELECT
+                t.OWNER AS "SCHEMA_NAME",
+                t.TABLE_NAME AS "TABLE_NAME",
+                t.NUM_ROWS AS "ROWS_FROM_STATISTICS",
+                CASE WHEN t.OWNER = USER THEN ${segmentMb('s.SEGMENT_NAME = t.TABLE_NAME')} END AS "TABLE_MB",
+                CASE WHEN t.OWNER = USER THEN ${segmentMb('s.SEGMENT_NAME IN (SELECT i.INDEX_NAME FROM USER_INDEXES i WHERE i.TABLE_NAME = t.TABLE_NAME)')} END AS "INDEXES_MB",
+                CASE WHEN t.OWNER = USER THEN ${segmentMb('s.SEGMENT_NAME IN (SELECT l.SEGMENT_NAME FROM USER_LOBS l WHERE l.TABLE_NAME = t.TABLE_NAME)')} END AS "LOBS_MB",
+                ROUND(t.NUM_ROWS * t.AVG_ROW_LEN / 1048576, 2) AS "ESTIMATED_DATA_MB",
+                t.BLOCKS AS "BLOCKS",
+                t.AVG_ROW_LEN AS "AVG_ROW_LEN",
+                t.TABLESPACE_NAME AS "TABLESPACE",
+                t.LAST_ANALYZED AS "LAST_ANALYZED",
+                CASE WHEN t.OWNER = USER THEN NULL
+                    ELSE 'Segment sizes are shown for your own schema only; ESTIMATED_DATA_MB comes from statistics' END AS "NOTE"
+            FROM ALL_TABLES t
+            WHERE t.OWNER = ${owner} AND t.TABLE_NAME = ${table}
+        `;
+    }
+    if (report === 'privileges') {
+        return `
+            SELECT
+                p.GRANTEE AS "GRANTEE",
+                p.GRANTOR AS "GRANTOR",
+                LISTAGG(p.PRIVILEGE, ', ') WITHIN GROUP (ORDER BY p.PRIVILEGE) AS "PRIVILEGES",
+                MAX(p.GRANTABLE) AS "WITH_GRANT_OPTION"
+            FROM ALL_TAB_PRIVS p
+            WHERE p.TABLE_SCHEMA = ${owner} AND p.TABLE_NAME = ${table}
+            GROUP BY p.GRANTEE, p.GRANTOR
+            ORDER BY p.GRANTEE
+        `;
+    }
+    return `
+        SELECT
+            s.OWNER AS "SCHEMA_NAME",
+            s.TABLE_NAME AS "TABLE_NAME",
+            CASE
+                WHEN s.LAST_ANALYZED IS NULL THEN 'Gather statistics (never analyzed)'
+                WHEN s.STALE_STATS = 'YES' THEN 'Gather statistics (stale)'
+                WHEN t.CHAIN_CNT > 0 AND s.NUM_ROWS > 0 AND t.CHAIN_CNT * 100 > s.NUM_ROWS * 5 THEN 'Move/rebuild table (chained rows > 5%)'
+                ELSE 'OK'
+            END AS "RECOMMENDATION",
+            s.LAST_ANALYZED AS "LAST_ANALYZED",
+            s.STALE_STATS AS "STALE_STATS",
+            s.STATTYPE_LOCKED AS "STATS_LOCKED",
+            s.NUM_ROWS AS "ROWS_FROM_STATISTICS",
+            m.INSERTS AS "INSERTS_SINCE_STATS",
+            m.UPDATES AS "UPDATES_SINCE_STATS",
+            m.DELETES AS "DELETES_SINCE_STATS",
+            m.TRUNCATED AS "TRUNCATED_SINCE_STATS",
+            t.CHAIN_CNT AS "CHAINED_ROWS"
+        FROM ALL_TAB_STATISTICS s
+        JOIN ALL_TABLES t ON t.OWNER = s.OWNER AND t.TABLE_NAME = s.TABLE_NAME
+        LEFT JOIN ALL_TAB_MODIFICATIONS m
+            ON m.TABLE_OWNER = s.OWNER AND m.TABLE_NAME = s.TABLE_NAME AND m.PARTITION_NAME IS NULL
+        WHERE s.OWNER = ${owner} AND s.TABLE_NAME = ${table} AND s.OBJECT_TYPE = 'TABLE'
+    `;
+}
+
+/** Read-only database reports shown in SQL Results (blocked sessions, invalid objects). */
+export function buildDatabaseReportQuery(_database: string, report: OracleDatabaseReportKind): string {
+    if (report === 'locks') {
+        // V$SESSION needs SELECT_CATALOG_ROLE (or a direct grant); without it Oracle reports ORA-00942.
+        return `
+            SELECT
+                w.SID AS "WAITING_SID",
+                w.USERNAME AS "WAITING_USER",
+                w.PROGRAM AS "WAITING_PROGRAM",
+                w.SECONDS_IN_WAIT AS "WAIT_SECONDS",
+                w.EVENT AS "WAIT_EVENT",
+                b.SID AS "BLOCKING_SID",
+                b.SERIAL# AS "BLOCKING_SERIAL",
+                b.USERNAME AS "BLOCKING_USER",
+                b.PROGRAM AS "BLOCKING_PROGRAM",
+                b.STATUS AS "BLOCKING_STATUS",
+                o.OWNER || '.' || o.OBJECT_NAME AS "LOCKED_OBJECT",
+                w.SQL_ID AS "WAITING_SQL_ID",
+                b.SQL_ID AS "BLOCKING_SQL_ID"
+            FROM V$SESSION w
+            JOIN V$SESSION b ON b.SID = w.BLOCKING_SESSION
+            LEFT JOIN ALL_OBJECTS o ON o.OBJECT_ID = w.ROW_WAIT_OBJ#
+            WHERE w.BLOCKING_SESSION IS NOT NULL
+            ORDER BY w.SECONDS_IN_WAIT DESC
+        `;
+    }
+    return `
+        SELECT
+            o.OWNER AS "SCHEMA_NAME",
+            o.OBJECT_NAME AS "OBJECT_NAME",
+            o.OBJECT_TYPE AS "OBJECT_TYPE",
+            o.STATUS AS "STATUS",
+            o.LAST_DDL_TIME AS "SINCE",
+            (SELECT MIN('Line ' || e.LINE || ': ' || SUBSTR(e.TEXT, 1, 900)) KEEP (DENSE_RANK FIRST ORDER BY e.SEQUENCE)
+               FROM ALL_ERRORS e
+              WHERE e.OWNER = o.OWNER AND e.NAME = o.OBJECT_NAME AND e.TYPE = o.OBJECT_TYPE) AS "DETAIL"
+        FROM ALL_OBJECTS o
+        JOIN ALL_USERS u ON u.USERNAME = o.OWNER AND u.ORACLE_MAINTAINED = 'N'
+        WHERE o.STATUS = 'INVALID'
+        ORDER BY o.OWNER, o.OBJECT_TYPE, o.OBJECT_NAME
+    `;
+}
