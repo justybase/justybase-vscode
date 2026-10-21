@@ -56,6 +56,12 @@ jest.mock('../export/xlsbExporter', () => ({
     copyFileToClipboard: jest.fn().mockResolvedValue(true)
 }));
 
+jest.mock('../export/exportUtils', () => ({
+    ...jest.requireActual('../export/exportUtils'),
+    copyFileToClipboardWithMode: jest.fn().mockResolvedValue('file'),
+    openFileExternally: jest.fn().mockResolvedValue(undefined)
+}));
+
 jest.mock('../export/xlsxExporter', () => ({
     exportStructuredToXlsx: jest.fn().mockResolvedValue(undefined)
 }));
@@ -64,6 +70,7 @@ import * as vscode from 'vscode';
 import { exportResultSetToFile } from '../export/resultExporter';
 import { exportStructuredToXlsb } from '../export/xlsbExporter';
 import { exportStructuredToXlsx } from '../export/xlsxExporter';
+import { copyFileToClipboardWithMode, openFileExternally } from '../export/exportUtils';
 
 describe('ExportManager', () => {
     let manager: ExportManager;
@@ -1018,9 +1025,51 @@ describe('ExportManager', () => {
                         rows: [['queued']]
                     })
                 ],
-                expect.stringMatching(/netezza_export_all_.*\.xlsx$/),
-                true
+                expect.stringMatching(/justybase-exports[\\/]All_results_\d{8}_\d{6}\.xlsx$/),
+                false
             );
+            // The file itself is put on the clipboard once, after the workbook is written.
+            expect(copyFileToClipboardWithMode).toHaveBeenCalledWith(expect.stringMatching(/All_results_.*\.xlsx$/));
+        });
+    });
+
+    describe('Export & Open / Export & Copy file', () => {
+        const sourceUri = 'file:///people.sql';
+        beforeEach(() => {
+            resultsMap.set(sourceUri, [{
+                name: 'People',
+                columns: [{ name: 'id', type: 'int' }],
+                data: [[1]],
+                sql: 'SELECT id FROM people'
+            } as ResultSet]);
+        });
+
+        it('opens the temp export in the default application', async () => {
+            await manager.initiateExportWithSelection({ sourceUri, resultSetIndex: 0, rowIndices: [], columnIds: ['0'] }, 'csv', 'open');
+
+            expect(exportResultSetToFile).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.stringMatching(/justybase-exports[\\/]People_\d{8}_\d{6}\.csv$/),
+                expect.objectContaining({ format: 'csv' })
+            );
+            expect(openFileExternally).toHaveBeenCalledWith(expect.stringMatching(/People_.*\.csv$/));
+            expect(copyFileToClipboardWithMode).not.toHaveBeenCalled();
+        });
+
+        it('puts the exported file itself on the clipboard', async () => {
+            await manager.initiateExportWithSelection({ sourceUri, resultSetIndex: 0, rowIndices: [], columnIds: ['0'] }, 'xlsx', 'temp');
+
+            expect(exportStructuredToXlsx).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/People_.*\.xlsx$/), false);
+            expect(copyFileToClipboardWithMode).toHaveBeenCalledWith(expect.stringMatching(/People_.*\.xlsx$/));
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining('copied the file to the clipboard'));
+        });
+
+        it('says when only the path could be copied', async () => {
+            (copyFileToClipboardWithMode as jest.Mock).mockResolvedValueOnce('path');
+
+            await manager.initiateExportWithSelection({ sourceUri, resultSetIndex: 0, rowIndices: [], columnIds: ['0'] }, 'json', 'temp');
+
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('the file path was copied instead'));
         });
     });
 });

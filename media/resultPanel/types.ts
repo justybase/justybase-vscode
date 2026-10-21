@@ -555,12 +555,11 @@ export interface ResultPanelGlobals {
     ) => void;
     __exportActiveGridAsXlsb?: () => void;
     exportActiveGridAsXlsb?: () => void;
-    toggleExportSplitMenu?: (event: Event) => void;
     toggleExportPrimaryMenu?: (event?: Event) => void;
     handleExportPrimaryClick?: (event?: Event) => void;
     toggleToolbarMoreMenu?: (event: Event) => void;
     handleToolbarMoreMenuClick?: (event: MouseEvent) => void;
-    handleExportSplitMenuClick?: (event: MouseEvent) => void;
+    copyGridAsImage?: () => void;
     init?: () => void;
     sourceResultsCache?: Record<string, unknown>;
     resultFormattingPayload?: unknown;

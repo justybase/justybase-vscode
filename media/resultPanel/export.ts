@@ -6,9 +6,10 @@ import {
     getGlobalDragState
 } from './state.js';
 import { getCurrentExportFormattingMetadata } from './formatting.js';
-import { postHostMessage, getHostState, setHostState } from './protocol.js';
+import { postHostMessage } from './protocol.js';
 import { asHtml, getElementById } from './dom.js';
 import {
+    callPanelMethod,
     getActiveSourceUri,
     getResultSetAt,
     getResultSets,
@@ -27,6 +28,7 @@ interface ExportFormatOption {
     id: string;
     label: string;
     description: string;
+    more?: boolean;
 }
 
 interface ResultSetExportMetadata {
@@ -196,24 +198,31 @@ export function exportToCsv(): void {
     postExportWithScope(payload, data => vscode.postMessage({ command: 'exportCsv', data }));
 }
 
-const PRIMARY_EXPORT_FORMATS: ExportFormatOption[] = [
-    { id: 'excel', label: 'Excel (.xlsb — fast, active view)', description: 'Binary Excel of the active view' },
-    { id: 'xlsx', label: 'Excel (.xlsx)', description: 'Modern Excel format' },
-    { id: 'csv', label: 'CSV', description: 'Comma separated values' },
-    { id: 'csv.gz', label: 'CSV.GZ', description: 'Gzip-compressed CSV' },
-    { id: 'csv.zst', label: 'CSV.ZST', description: 'Zstandard-compressed CSV' },
-    { id: 'json', label: 'JSON', description: 'JavaScript object notation' },
-    { id: 'xml', label: 'XML', description: 'Extensible markup language' },
-    { id: 'sql', label: 'SQL INSERT', description: 'SQL insert statements' },
-    { id: 'markdown', label: 'Markdown (.md — file, with SQL)', description: 'Markdown document with SQL (up to 1000 rows)' },
-    { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format' },
-    { id: 'xpt', label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5' }
+/** Common formats are chips; `more` formats sit in the "More…" picker. */
+const EXPORT_FORMATS: ExportFormatOption[] = [
+    { id: 'xlsx', label: 'Excel', description: 'Excel workbook (.xlsx)' },
+    { id: 'csv', label: 'CSV', description: 'Comma separated values (.csv)' },
+    { id: 'json', label: 'JSON', description: 'Array of row objects (.json)' },
+    { id: 'markdown', label: 'Markdown', description: 'Markdown table with the SQL (.md, up to 1000 rows)' },
+    { id: 'sql', label: 'SQL INSERT', description: 'INSERT statements, data only (.sql)' },
+    { id: 'excel', label: 'Excel binary (.xlsb)', description: 'Binary Excel workbook (.xlsb) — fastest for large results', more: true },
+    { id: 'xml', label: 'XML', description: 'Extensible markup language (.xml)', more: true },
+    { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format (.parquet)', more: true },
+    { id: 'csv.gz', label: 'CSV.GZ', description: 'Gzip-compressed CSV (.csv.gz)', more: true },
+    { id: 'csv.zst', label: 'CSV.ZST', description: 'Zstandard-compressed CSV (.csv.zst)', more: true },
+    { id: 'xpt', label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5 (.xpt)', more: true },
 ];
 
-/** Primary export always saves straight to disk (save dialog). Post-save actions
- * (Open / Show in Explorer / Copy to clipboard / Close) are offered by the host
- * in the "Export completed" notification. */
-const PRIMARY_EXPORT_DESTINATION = 'file';
+const DEFAULT_EXPORT_FORMAT = 'xlsx';
+
+/**
+ * Host destinations: save dialog, temp file opened externally, temp file put on
+ * the clipboard, or the exported text itself put on the clipboard.
+ */
+type ExportDestination = 'file' | 'open' | 'temp' | 'clipboard';
+
+/** Formats whose exported content is text that can go straight to the clipboard. */
+const TEXT_CONTENT_FORMATS = new Set(['csv', 'json', 'markdown', 'sql', 'xml']);
 
 type ExportRowScope = 'loaded' | 'all';
 
@@ -253,7 +262,6 @@ function showStandaloneExportScope(onSelected: (scope: ExportRowScope) => void):
     const menu = getElementById('exportPrimaryMenu');
     if (!menu) return;
 
-    closeExportSplitMenu();
     menu.innerHTML = '';
 
     const header = document.createElement('div');
@@ -301,13 +309,6 @@ function postExportWithScope<T extends object>(
     showStandaloneExportScope(scope => post({ ...data, rowScope: scope }));
 }
 
-function closeExportSplitMenu(): void {
-    const menu = getElementById('exportSplitMenu');
-    if (menu) {
-        menu.style.display = 'none';
-    }
-}
-
 function createExportMenuItem(label: string, description: string, onClick: () => void): HTMLDivElement {
     const item = document.createElement('div');
     item.className = 'split-btn__menu-item export-menu-item';
@@ -329,82 +330,207 @@ function createExportMenuItem(label: string, description: string, onClick: () =>
     return item;
 }
 
-function renderExportPrimaryFormatMenu(): void {
-    const menu = getElementById('exportPrimaryMenu');
-    if (!menu) {
-        return;
-    }
-
-    menu.innerHTML = '';
-
-    const header = document.createElement('div');
-    header.className = 'export-menu-header';
-    header.textContent = 'Choose export format';
-    menu.appendChild(header);
-
-    PRIMARY_EXPORT_FORMATS.forEach(format => {
-        menu.appendChild(createExportMenuItem(format.label, format.description, () => {
-            onPrimaryExportFormatSelected(format.id);
-        }));
-    });
-}
-
-function onPrimaryExportFormatSelected(formatId: string): void {
-    if (activeResultHasTrailingLimit()) {
-        renderExportPrimaryScopeMenu(formatId);
-        return;
-    }
-    submitPrimaryExportSelection(formatId, 'loaded');
-}
-
 function activeResultHasTrailingLimit(): boolean {
     const refreshSql = getResultSetAt(getActiveGridIndex())?.refreshSql?.trim();
     if (!refreshSql) return false;
     return /\blimit(?:\s+(?:\/\*[\s\S]*?\*\/\s*)*|\/\*[\s\S]*?\*\/\s*)(\d+)(\s*;?\s*)$/i.test(refreshSql);
 }
 
-function renderExportPrimaryScopeMenu(formatId: string): void {
+/**
+ * Choices of the open Export menu. They start from the same defaults every time
+ * the menu opens: the button never silently repeats an earlier export.
+ */
+const exportMenuSelection: { format: string; rowScope: ExportRowScope } = {
+    format: DEFAULT_EXPORT_FORMAT,
+    rowScope: 'loaded',
+};
+
+function resetExportMenuSelection(): void {
+    exportMenuSelection.format = DEFAULT_EXPORT_FORMAT;
+    exportMenuSelection.rowScope = 'loaded';
+}
+
+function createExportMenuSection(title: string): HTMLDivElement {
+    const section = document.createElement('div');
+    section.className = 'export-menu-section';
+    const heading = document.createElement('div');
+    heading.className = 'export-menu-section__title';
+    heading.textContent = title;
+    section.appendChild(heading);
+    return section;
+}
+
+function createExportChip(label: string, title: string, checked: boolean, onSelect: () => void): HTMLButtonElement {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'export-chip';
+    chip.setAttribute('role', 'radio');
+    chip.setAttribute('aria-checked', String(checked));
+    chip.title = title;
+    chip.textContent = label;
+    chip.onclick = (event) => {
+        event.stopPropagation();
+        onSelect();
+    };
+    return chip;
+}
+
+function renderFormatSection(menu: HTMLElement): void {
+    const section = createExportMenuSection('Format');
+    const group = document.createElement('div');
+    group.className = 'export-chip-group';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'Export format');
+
+    const selected = exportMenuSelection.format;
+    EXPORT_FORMATS.filter(format => !format.more).forEach(format => {
+        group.appendChild(createExportChip(format.label, format.description, format.id === selected, () => {
+            exportMenuSelection.format = format.id;
+            renderExportMenu();
+        }));
+    });
+
+    const more = document.createElement('select');
+    more.className = 'export-more-formats';
+    more.setAttribute('aria-label', 'More export formats');
+    const moreFormats = EXPORT_FORMATS.filter(format => format.more);
+    const selectedMore = moreFormats.some(format => format.id === selected);
+    more.classList.toggle('is-selected', selectedMore);
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'More…';
+    more.appendChild(placeholder);
+    moreFormats.forEach(format => {
+        const option = document.createElement('option');
+        option.value = format.id;
+        option.textContent = format.label;
+        option.title = format.description;
+        option.selected = format.id === selected;
+        more.appendChild(option);
+    });
+    more.onclick = (event) => event.stopPropagation();
+    more.onchange = () => {
+        if (more.value) {
+            exportMenuSelection.format = more.value;
+            renderExportMenu();
+        }
+    };
+    group.appendChild(more);
+    section.appendChild(group);
+
+    const description = EXPORT_FORMATS.find(format => format.id === selected)?.description;
+    if (description) {
+        const hint = document.createElement('div');
+        hint.className = 'export-menu-hint';
+        hint.textContent = description;
+        section.appendChild(hint);
+    }
+    menu.appendChild(section);
+}
+
+function renderRowScopeSection(menu: HTMLElement): void {
+    const section = createExportMenuSection('Rows');
+    const group = document.createElement('div');
+    group.className = 'export-chip-group';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'Rows to export');
+    const scopes: Array<{ id: ExportRowScope; label: string; title: string }> = [
+        { id: 'loaded', label: 'Loaded rows', title: 'Export only the rows currently loaded in SQL Results.' },
+        { id: 'all', label: 'ALL rows', title: 'Re-run SQL without LIMIT, then export all returned rows.' },
+    ];
+    scopes.forEach(scope => {
+        group.appendChild(createExportChip(scope.label, scope.title, exportMenuSelection.rowScope === scope.id, () => {
+            exportMenuSelection.rowScope = scope.id;
+            renderExportMenu();
+        }));
+    });
+    section.appendChild(group);
+    menu.appendChild(section);
+}
+
+function createExportActionButton(
+    icon: string,
+    label: string,
+    title: string,
+    destination: ExportDestination,
+): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'export-action';
+    button.setAttribute('role', 'menuitem');
+    button.dataset.destination = destination;
+    button.title = title;
+    button.innerHTML = `<span class="export-action__icon" aria-hidden="true">${icon}</span><span>${label}</span>`;
+    button.onclick = (event) => {
+        event.stopPropagation();
+        submitExportSelection(destination);
+    };
+    return button;
+}
+
+function renderActionSection(menu: HTMLElement): void {
+    const actions = document.createElement('div');
+    actions.className = 'export-actions';
+    actions.appendChild(createExportActionButton('💾', 'Save as…', 'Choose where to save the file', 'file'));
+    actions.appendChild(createExportActionButton('↗', 'Export & Open', 'Save to the temp folder and open it in the default application', 'open'));
+    actions.appendChild(createExportActionButton('📋', 'Export & Copy file', 'Save to the temp folder and put the file itself on the clipboard (paste it into a mail, chat or folder)', 'temp'));
+    if (TEXT_CONTENT_FORMATS.has(exportMenuSelection.format)) {
+        actions.appendChild(createExportActionButton('📝', 'Copy content', 'Put the exported text itself on the clipboard (no file)', 'clipboard'));
+    }
+    menu.appendChild(actions);
+}
+
+function createExportFooterItem(label: string, onClick: () => void): HTMLDivElement {
+    const item = document.createElement('div');
+    item.className = 'split-btn__menu-item export-menu-footer-item';
+    item.setAttribute('role', 'menuitem');
+    item.tabIndex = 0;
+    item.textContent = label;
+    const run = () => {
+        closeExportPrimaryMenu();
+        onClick();
+    };
+    item.onclick = (event) => {
+        event.stopPropagation();
+        run();
+    };
+    item.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            run();
+        }
+    };
+    return item;
+}
+
+function renderExportMenu(): void {
     const menu = getElementById('exportPrimaryMenu');
     if (!menu) return;
 
     menu.innerHTML = '';
-
     const header = document.createElement('div');
-    header.className = 'export-menu-header export-menu-header--with-back';
-
-    const backButton = document.createElement('button');
-    backButton.type = 'button';
-    backButton.className = 'export-menu-back';
-    backButton.textContent = 'Back';
-    backButton.onclick = (event) => {
-        event.stopPropagation();
-        renderExportPrimaryFormatMenu();
-    };
-    header.appendChild(backButton);
-
-    const title = document.createElement('span');
-    title.className = 'export-menu-header__title';
-    title.textContent = 'Rows to export';
-    header.appendChild(title);
+    header.className = 'export-menu-header';
+    header.textContent = 'Export active result';
     menu.appendChild(header);
 
-    menu.appendChild(createExportMenuItem(
-        'Loaded rows',
-        'Export only the rows currently loaded in SQL Results.',
-        () => submitPrimaryExportSelection(formatId, 'loaded'),
-    ));
-    menu.appendChild(createExportMenuItem(
-        'ALL rows',
-        'Re-run SQL without LIMIT, then export all returned rows.',
-        () => submitPrimaryExportSelection(formatId, 'all'),
-    ));
+    renderFormatSection(menu);
+    if (activeResultHasTrailingLimit()) {
+        renderRowScopeSection(menu);
+    }
+    renderActionSection(menu);
+
+    const separator = document.createElement('div');
+    separator.className = 'split-btn__menu-separator';
+    menu.appendChild(separator);
+    if (getResultSets().filter(resultSet => !resultSet.isLog && !resultSet.isError).length > 1) {
+        menu.appendChild(createExportFooterItem('All result sets → Excel workbook…', () => exportAllResultSetsToExcel()));
+    }
+    menu.appendChild(createExportFooterItem('Copy grid as image (up to 500 rows)', () => callPanelMethod('copyGridAsImage')));
 }
 
-function submitPrimaryExportSelection(formatId: string, rowScope: ExportRowScope = 'loaded', remember = true): void {
+function submitExportSelection(destination: ExportDestination): void {
     const exportData = collectCurrentViewExportMetadata();
     closeExportPrimaryMenu();
-    closeExportSplitMenu();
-
     if (!exportData) {
         return;
     }
@@ -412,71 +538,13 @@ function submitPrimaryExportSelection(formatId: string, rowScope: ExportRowScope
     vscode.postMessage({
         command: 'initiateExportWithSelection',
         data: exportData,
-        format: formatId,
-        destination: PRIMARY_EXPORT_DESTINATION,
-        rowScope,
+        format: exportMenuSelection.format,
+        destination,
+        rowScope: activeResultHasTrailingLimit() ? exportMenuSelection.rowScope : 'loaded',
     });
-    if (remember) {
-        rememberLastExportSelection(formatId, rowScope);
-    }
 }
 
-interface LastExportSelection {
-    format: string;
-    rowScope: ExportRowScope;
-}
-
-const LAST_EXPORT_STATE_KEY = '_lastExport';
-
-/** In-memory fallback when the host state API is unavailable (tests, harness). */
-let lastExportMemory: LastExportSelection | null = null;
-
-export function readLastExportSelection(): LastExportSelection | null {
-    const state = getHostState() as Record<string, unknown> | null | undefined;
-    const raw = (state?.[LAST_EXPORT_STATE_KEY] ?? lastExportMemory) as Partial<LastExportSelection> | undefined;
-    if (!raw || typeof raw.format !== 'string') return null;
-    if (!PRIMARY_EXPORT_FORMATS.some((format) => format.id === raw.format)) return null;
-    const rowScope: ExportRowScope = raw.rowScope === 'all' ? 'all' : 'loaded';
-    return { format: raw.format, rowScope };
-}
-
-export function rememberLastExportSelection(formatId: string, rowScope: ExportRowScope): void {
-    const state = (getHostState() as Record<string, unknown> | null | undefined) ?? {};
-    state[LAST_EXPORT_STATE_KEY] = { format: formatId, rowScope } satisfies LastExportSelection;
-    setHostState(state);
-    lastExportMemory = { format: formatId, rowScope };
-    updateExportPrimaryButton(formatId);
-}
-
-function updateExportPrimaryButton(formatId?: string): void {
-    const exportBtn = document.querySelector('#exportSplitBtn .split-btn__primary');
-    if (!exportBtn) return;
-    const format = PRIMARY_EXPORT_FORMATS.find((candidate) => candidate.id === formatId);
-    const label = format ? `Repeat last export: ${format.label}` : 'Export results (active view)';
-    exportBtn.setAttribute('title', label);
-    exportBtn.setAttribute('aria-label', label);
-}
-
-/** Restore the repeat-last-export hint after webview revival. */
-export function syncExportPrimaryButton(): void {
-    updateExportPrimaryButton(readLastExportSelection()?.format);
-}
-
-/**
- * Variant C: the primary Export button repeats the last format in one click;
- * the ▾ arrow (and this fallback) opens the format menu instead.
- */
 export function handleExportPrimaryClick(event?: Event): void {
-    event?.stopPropagation?.();
-    const last = readLastExportSelection();
-    if (last && collectCurrentViewExportMetadata()) {
-        // Repeat uses the stored preference. A context-forced downgrade to
-        // 'loaded' (no trailing LIMIT) must not overwrite a remembered ALL
-        // scope, otherwise the next LIMIT result would silently forget it.
-        const rowScope: ExportRowScope = last.rowScope === 'all' && activeResultHasTrailingLimit() ? 'all' : 'loaded';
-        submitPrimaryExportSelection(last.format, rowScope, false);
-        return;
-    }
     toggleExportPrimaryMenu(event);
 }
 
@@ -488,10 +556,7 @@ export function toggleExportPrimaryMenu(event?: Event): void {
         return;
     }
 
-    const isOpen = menu.style.display === 'block';
-    closeExportSplitMenu();
-
-    if (isOpen) {
+    if (menu.style.display === 'block') {
         closeExportPrimaryMenu();
         return;
     }
@@ -500,13 +565,15 @@ export function toggleExportPrimaryMenu(event?: Event): void {
         return;
     }
 
-    renderExportPrimaryFormatMenu();
+    resetExportMenuSelection();
+    renderExportMenu();
     menu.style.display = 'block';
 
     const exportBtn = document.querySelector('#exportSplitBtn .split-btn__primary');
     if (exportBtn) {
         exportBtn.setAttribute('aria-expanded', 'true');
     }
+    menu.querySelector<HTMLElement>('.export-chip[aria-checked="true"]')?.focus();
 }
 
 export function handleClickExport(): void {

@@ -66,7 +66,7 @@ describe('ResultsHtmlGenerator', () => {
         // …Escape clears the filter field…
         expect(html).toContain('onGlobalFilterKeydown(event)');
         expect(html).toContain('Esc = clear');
-        // …the primary Export repeats the last format…
+        // …the Export button always opens its menu (it never repeats a remembered format)…
         expect(html).toContain('handleExportPrimaryClick(event)');
         // …and no separate statusline is rendered under the grid.
         expect(html).not.toContain('id="resultStatusline"');
@@ -113,7 +113,7 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('JetBrains Mono, Consolas, monospace');
     });
 
-    it('uses host-managed copy and keeps export actions in split button', () => {
+    it('uses host-managed copy and keeps a single Export menu', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
         const html = generator.generateHtml({
             scriptUri: { toString: () => 'script.js' } as never,
@@ -128,12 +128,11 @@ describe('ResultsHtmlGenerator', () => {
 
         expect(html).toContain('window.justybaseUseHostCopyShortcut = true;');
 
-        const exportAllIndex = html.indexOf('Export All to Excel');
-        const exportSplitMenu = html.indexOf('exportSplitMenu');
-
-        expect(exportAllIndex).toBeGreaterThan(-1);
-        expect(exportSplitMenu).toBeGreaterThan(-1);
-        expect(html).toContain('split-btn__menu-item');
+        // One button and one menu: no second ▾ arrow with a parallel list of options.
+        expect(html).toContain('id="exportPrimaryMenu"');
+        expect(html).not.toContain('exportSplitMenu');
+        expect(html).not.toContain('toggleExportSplitMenu');
+        expect(html).toContain('aria-haspopup="menu"');
     });
 
     it('groups the compact toolbar with a single Sidebar/Diff view switcher and scoped export labels', () => {
@@ -162,8 +161,7 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('toolbar-group--search');
         expect(html).toContain('toolbar-group--export');
         expect(html).toContain('toolbar-group--table');
-        expect(html).toContain('Excel (.xlsb — fast, active view)');
-        expect(html).toContain('Copy selection as Markdown');
+        expect(html).not.toContain('Excel (.xlsb — fast, active view)');
         expect(html).toContain('data-action="query-duckdb"');
         expect(html).not.toContain('fast xlsb export');
         // Legacy table2 layout choice still resolves to the sidebar.

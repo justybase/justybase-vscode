@@ -315,7 +315,8 @@ async function clickCsvExport(page: Page): Promise<ExportResult> {
     await page.locator('#exportBtn').click();
     const menu = page.locator('#exportPrimaryMenu');
     await expect(menu).toBeVisible();
-    await menu.getByRole('menuitem', { name: /^CSV Comma separated values$/ }).click();
+    await menu.getByRole('radio', { name: 'CSV', exact: true }).click();
+    await menu.getByRole('menuitem', { name: /Save as/ }).click();
     await page.waitForFunction(() => window.__hostMessages.some(item => item.message?.command === 'initiateExportWithSelection'));
     return page.evaluate((start) => window.__dataGridPerf.exportState(start) as ExportResult, startedAt);
 }
@@ -331,7 +332,8 @@ async function clickFilteredSelectionCsvExport(page: Page): Promise<ExportResult
         window.__hostMessages.length = 0;
         return performance.now();
     });
-    await menu.getByText('Export Selection to CSV', { exact: true }).click();
+    await menu.getByText('Export Selection', { exact: true }).hover();
+    await page.locator('.grid-context-submenu').getByText('CSV', { exact: true }).click();
     await page.waitForFunction(() => window.__hostMessages.some(item => item.message?.command === 'exportCsv'));
     return page.evaluate((start) => window.__dataGridPerf.exportState(start) as ExportResult, startedAt);
 }

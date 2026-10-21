@@ -97,7 +97,6 @@ import {
   handleClickExport,
   toggleExportPrimaryMenu,
   handleExportPrimaryClick,
-  syncExportPrimaryButton,
   handleClickQueryLocallyDuckDB,
   setGlobalDragStateForExport,
   exportAllVisibleToCsv,
@@ -2788,11 +2787,9 @@ document.addEventListener("mousedown", (e) => {
       dropdown.style.display = "none";
     }
   }
-  // Close export menus when clicking outside
+  // Close the export menu when clicking outside
   const splitBtn = getElementById("exportSplitBtn");
   if (splitBtn && target && !splitBtn.contains(target)) {
-    const sm = getElementById("exportSplitMenu");
-    if (sm) sm.style.display = "none";
     const primaryMenu = getElementById("exportPrimaryMenu");
     if (primaryMenu) primaryMenu.style.display = "none";
     const exportBtn = document.querySelector("#exportSplitBtn .split-btn__primary");
@@ -2819,17 +2816,6 @@ document.addEventListener("mousedown", (e) => {
     }
   }
 });
-
-getResultPanelWindow().toggleExportSplitMenu = function (event: Event) {
-  event.stopPropagation();
-  const primaryMenu = getElementById("exportPrimaryMenu");
-  if (primaryMenu) primaryMenu.style.display = "none";
-  const exportBtn = document.querySelector("#exportSplitBtn .split-btn__primary");
-  if (exportBtn) exportBtn.setAttribute("aria-expanded", "false");
-  const m = getElementById("exportSplitMenu");
-  if (!m) return;
-  m.style.display = m.style.display === "none" ? "block" : "none";
-};
 
 getResultPanelWindow().toggleExportPrimaryMenu = toggleExportPrimaryMenu;
 
@@ -2963,26 +2949,6 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
     });
     return;
   }
-};
-
-getResultPanelWindow().handleExportSplitMenuClick = function (event: MouseEvent) {
-  const target = asHtml(event.target);
-  const item = target?.closest(".split-btn__menu-item") as HTMLElement | null;
-  if (!item) return;
-  const action = item.dataset.action;
-  const splitMenu = getElementById("exportSplitMenu");
-  if (splitMenu) splitMenu.style.display = "none";
-  if (action === "current-view") { handleClickExport(); }
-  else if (action === "all-rows") { exportAllVisibleToExcel(); }
-  else if (action === "excel") { exportAllVisibleToExcel(); }
-  else if (action === "markdown") { exportToMdFile(); }
-  else if (action === "json") { exportToJson(); }
-  else if (action === "csv") { exportToCsv(); }
-  else if (action === "copy-html") { callPanelMethod('copySelectionAsHtml'); }
-  else if (action === "copy-md") { callPanelMethod('copySelection', true); }
-  else if (action === "copy-image") { copyGridAsImage(); }
-  else if (action === "export-all-excel") { exportAllResultSetsToExcel(); }
-  else if (action === "query-duckdb") { handleClickQueryLocallyDuckDB(); }
 };
 
 function updateEditButtonsState(): void {
@@ -3250,6 +3216,7 @@ function setupWindowFunctions(): void {
   panel.closeValueViewer = closeValueViewer;
   panel.handleClickExport = handleClickExport;
   panel.handleExportPrimaryClick = handleExportPrimaryClick;
+  panel.copyGridAsImage = copyGridAsImage;
   panel.toggleExportPrimaryMenu = toggleExportPrimaryMenu;
   panel.setResultViewMode = setActiveResultViewMode;
   panel.initializeResultView = initializeResultView;
@@ -3528,8 +3495,6 @@ function setupWindowFunctions(): void {
   panel.onColumnSearchBlur = onColumnSearchBlur;
   panel.onColumnSearchFocus = onColumnSearchFocus;
   panel.init = init;
-  // Restore the repeat-last-export hint (the button exists: scripts run at end of body).
-  syncExportPrimaryButton();
 }
 
 // Initialize window functions

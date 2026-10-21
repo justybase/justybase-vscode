@@ -142,6 +142,34 @@ test.describe('Table rendering', () => {
         await expect.poll(() => menu.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
     });
 
+    test('export menu starts from defaults and posts Export & Open / Export & Copy file', async ({ page }) => {
+        const exportMessages = () => page.evaluate(() =>
+            ((window as unknown as { __postedMessages: Array<Record<string, unknown>> }).__postedMessages)
+                .filter(message => message.command === 'initiateExportWithSelection')
+                .map(message => ({ format: message.format, destination: message.destination })));
+        const menu = page.locator('#exportPrimaryMenu');
+
+        await page.locator('#exportBtn').click();
+        await expect(menu).toBeVisible();
+        await expect(menu.getByRole('radio', { name: 'Excel', exact: true })).toHaveAttribute('aria-checked', 'true');
+        // Text content can only be copied for text formats.
+        await expect(menu.getByRole('menuitem', { name: /Copy content/ })).toHaveCount(0);
+        await menu.getByRole('radio', { name: 'CSV', exact: true }).click();
+        await expect(menu.getByRole('menuitem', { name: /Copy content/ })).toBeVisible();
+        await menu.getByRole('menuitem', { name: /Export & Open/ }).click();
+        await expect(menu).toBeHidden();
+
+        // Reopening must not remember CSV: the button never repeats an earlier choice.
+        await page.locator('#exportBtn').click();
+        await expect(menu.getByRole('radio', { name: 'Excel', exact: true })).toHaveAttribute('aria-checked', 'true');
+        await menu.getByRole('menuitem', { name: /Export & Copy file/ }).click();
+
+        await expect.poll(exportMessages).toEqual([
+            { format: 'csv', destination: 'open' },
+            { format: 'xlsx', destination: 'temp' },
+        ]);
+    });
+
     test('Copy as JSON from the cell context menu writes plain JSON', async ({ page }) => {
         await page.evaluate(() => {
             const target = window as unknown as { __copiedText?: string };
