@@ -10,6 +10,7 @@ import { generateViewDDL } from './viewDDL';
 import { generateProcedureDDL } from './procedureDDL';
 import { generateExternalTableDDL } from './externalTableDDL';
 import { generateSynonymDDL } from './synonymDDL';
+import { generateMaterializedViewDDL, generateRoutineDDL, generateSequenceDDL } from './catalogObjectDDL';
 import type { NzConnection, ConnectionDetails } from '../../../types';
 
 /**
@@ -66,21 +67,21 @@ export async function generateDDL(
                 ddlCode,
                 objectInfo: { database, schema, objectName, objectType }
             };
-        } else {
-            // For other object types, return placeholder
-            const ddlCode = `-- DDL generation for ${objectType} not yet implemented
--- Object: ${database}.${schema}.${objectName}
--- Type: ${objectType}
---
--- This feature can be extended to support:
--- - FUNCTION: Query _V_FUNCTION system table
--- - AGGREGATE: Query _V_AGGREGATE system table
-`;
+        } else if (upperType === 'SEQUENCE' || upperType === 'MATERIALIZED VIEW' || upperType === 'FUNCTION' || upperType === 'AGGREGATE') {
+            const ddlCode = upperType === 'SEQUENCE'
+                ? await generateSequenceDDL(connection, database, schema, objectName)
+                : upperType === 'MATERIALIZED VIEW'
+                    ? await generateMaterializedViewDDL(connection, database, schema, objectName)
+                    : await generateRoutineDDL(connection, database, schema, objectName, upperType);
             return {
                 success: true,
                 ddlCode,
-                objectInfo: { database, schema, objectName, objectType },
-                note: `${objectType} DDL generation not yet implemented`
+                objectInfo: { database, schema, objectName, objectType }
+            };
+        } else {
+            return {
+                success: false,
+                error: `DDL generation is not available for ${objectType} objects.`
             };
         }
     } catch (e: unknown) {
