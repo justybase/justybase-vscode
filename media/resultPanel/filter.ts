@@ -552,13 +552,19 @@ async function showDiskColumnFilterDropdown(
     }
 
     dropdown.innerHTML = '';
+    dropdown.appendChild(createFilterContextHeader(column.columnDef.header));
     const { valuesTab, conditionsTab, valuesContent, conditionsContent } = createTabs(dropdown);
 
     const diskScopeRow = document.createElement('div');
     diskScopeRow.className = 'filter-dropdown-selection-info';
     diskScopeRow.style.color = 'var(--vscode-descriptionForeground)';
     diskScopeRow.textContent = 'Filter scope: Full spilled dataset (disk-backed, local SQLite)';
-    dropdown.insertBefore(diskScopeRow, dropdown.firstChild);
+    const diskContextHeader = dropdown.querySelector('.filter-context-header');
+    if (diskContextHeader) {
+        diskContextHeader.after(diskScopeRow);
+    } else {
+        dropdown.insertBefore(diskScopeRow, dropdown.firstChild);
+    }
 
     const existingColumnFilter = resultSet.diskQuerySpec?.columnFilters
         ?.find((filter) => filter.columnIndex === columnIndex);
@@ -695,7 +701,11 @@ async function showDiskColumnFilterDropdown(
 
     if (hasActiveDiskFilter) {
         const banner = createFilterActiveBanner(removeDiskColumnFilter);
-        dropdown.insertBefore(banner, dropdown.firstChild);
+        if (diskScopeRow.isConnected) {
+            diskScopeRow.after(banner);
+        } else {
+            dropdown.insertBefore(banner, dropdown.firstChild);
+        }
     }
 
     dropdown.appendChild(selectionInfo);
@@ -1194,7 +1204,12 @@ export function showColumnFilterDropdown(
     // Dodajemy tylko selectionInfo i actionsContainer na dole
     if (hasActiveFilter) {
         const banner = createFilterActiveBanner(removeColumnFilter);
-        dropdown.insertBefore(banner, dropdown.firstChild);
+        const contextHeader = dropdown.querySelector('.filter-context-header');
+        if (contextHeader) {
+            contextHeader.after(banner);
+        } else {
+            dropdown.insertBefore(banner, dropdown.firstChild);
+        }
     }
     dropdown.appendChild(modeRow);
     dropdown.appendChild(selectionInfo);
@@ -1310,8 +1325,26 @@ function detectNumericColumn(uniqueValues: string[]): boolean {
     return uniqueValues.some(v => parseFilterNumericValue(v) !== null);
 }
 
-function createDropdownContainer(anchorElement: HTMLElement, _columnHeader: string): HTMLDivElement {
-    void _columnHeader;
+function createFilterContextHeader(columnHeader: string): HTMLDivElement {
+    const header = document.createElement('div');
+    header.className = 'filter-context-header';
+
+    const title = document.createElement('span');
+    title.className = 'filter-context-title';
+    const name = (columnHeader ?? '').trim() || 'column';
+    title.textContent = `Filter: ${name}`;
+    title.title = name;
+
+    const subtitle = document.createElement('span');
+    subtitle.className = 'filter-context-subtitle';
+    subtitle.textContent = 'Filter values — tick rows to keep, or switch to Conditions';
+
+    header.appendChild(title);
+    header.appendChild(subtitle);
+    return header;
+}
+
+function createDropdownContainer(anchorElement: HTMLElement, columnHeader: string): HTMLDivElement {
     const dropdown = document.createElement('div');
     dropdown.className = 'column-filter-dropdown';
     dropdown.style.position = 'fixed';
@@ -1369,8 +1402,14 @@ function createDropdownContainer(anchorElement: HTMLElement, _columnHeader: stri
     dropdown.style.minHeight = absoluteMinHeight + 'px';
     dropdown.style.maxHeight = dropdownHeight + 'px';
 
+    dropdown.appendChild(createFilterContextHeader(columnHeader));
+
     return dropdown;
 }
+
+const FILTER_TAB_VALUES_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 3h14v2H1V3zm0 4h14v2H1V7zm0 4h9v2H1v-2z"/></svg>';
+const FILTER_TAB_CONDITIONS_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 4h14v1.6H1V4zm0 6.4h14V12H1v-1.6zM5 2.4v4H3.4v-4H5zm7 6.4v4H10.4v-4H12z"/></svg>';
+const FILTER_SEARCH_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7 2a5 5 0 1 0 3.2 8.9l3 3 1.4-1.4-3-3A5 5 0 0 0 7 2zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>';
 
 function createTabs(dropdown: HTMLDivElement): {
     valuesTab: HTMLButtonElement;
@@ -1384,12 +1423,12 @@ function createTabs(dropdown: HTMLDivElement): {
 
     const valuesTab = document.createElement('button');
     valuesTab.className = 'filter-tab active';
-    valuesTab.textContent = '📋 Values';
+    valuesTab.innerHTML = `${FILTER_TAB_VALUES_ICON}<span>Values</span>`;
     valuesTab.dataset.tab = 'values';
 
     const conditionsTab = document.createElement('button');
     conditionsTab.className = 'filter-tab';
-    conditionsTab.textContent = '🔧 Conditions';
+    conditionsTab.innerHTML = `${FILTER_TAB_CONDITIONS_ICON}<span>Conditions</span>`;
     conditionsTab.dataset.tab = 'conditions';
 
     tabsContainer.appendChild(valuesTab);
@@ -1482,7 +1521,8 @@ function createValuesTabContent(
 
     const searchIcon = document.createElement('span');
     searchIcon.className = 'filter-search-icon';
-    searchIcon.textContent = '🔍';
+    searchIcon.setAttribute('aria-hidden', 'true');
+    searchIcon.innerHTML = FILTER_SEARCH_ICON;
 
     const searchBox = document.createElement('input');
     searchBox.type = 'text';

@@ -3597,12 +3597,12 @@ tfoot {
 
 .column-filter-dropdown {
     font-family: var(--mono);
-    font-size: 9px;
+    font-size: 10px;
 }
 
 .filter-dropdown-selection-info {
     padding: 5px 10px;
-    font-size: 9px;
+    font-size: 10px;
     color: var(--tx2);
     border-top: 1px solid var(--bd);
     flex-shrink: 0;
@@ -3677,6 +3677,36 @@ tfoot {
     color: var(--vscode-charts-blue, #3794ff);
 }
 
+/* Filter context header — mirrors the aggregation dropdown title row. */
+.filter-context-header {
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--bd);
+    background: transparent;
+}
+
+.filter-context-title {
+    display: block;
+    flex: 1;
+    padding: 6px 10px 0;
+    color: var(--ac);
+    font-size: 10px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+}
+
+.filter-context-subtitle {
+    display: block;
+    padding: 2px 10px 6px;
+    color: var(--tx2);
+    font-size: 10px;
+    font-family: var(--mono);
+}
+
 /* Filter Tabs */
 .filter-tabs {
     display: flex;
@@ -3685,17 +3715,26 @@ tfoot {
 }
 
 .filter-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 6px 10px;
     cursor: pointer;
     border: none;
     background: transparent;
     color: var(--tx2);
-    font-size: 9px;
+    font-size: 10px;
     font-family: var(--mono);
     user-select: none;
     transition: .1s;
     text-transform: uppercase;
     letter-spacing: .4px;
+}
+
+.filter-tab svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
 }
 
 .filter-tab:hover {
@@ -3752,8 +3791,8 @@ tfoot {
 
 .filter-operator-select,
 .filter-type-dropdown {
-    padding: 3px 6px;
-    font-size: 9px;
+    padding: 4px 6px;
+    font-size: 11px;
     font-family: var(--mono);
     background: var(--s1);
     color: var(--tx);
@@ -3761,6 +3800,7 @@ tfoot {
     border-radius: 4px;
     cursor: pointer;
     min-width: 100px;
+    min-height: 26px;
 }
 
 .filter-operator-select:focus,
@@ -3771,14 +3811,16 @@ tfoot {
 
 .filter-value-input {
     flex: 1;
-    padding: 3px 6px;
-    font-size: 9px;
+    padding: 4px 6px;
+    font-size: 11px;
     font-family: var(--mono);
     background: var(--s1);
     color: var(--tx);
     border: 1px solid var(--bd2);
     border-radius: 4px;
     min-width: 60px;
+    min-height: 26px;
+    box-sizing: border-box;
 }
 
 .filter-value-input:focus {
@@ -3805,7 +3847,7 @@ tfoot {
 
 .filter-logic-btn {
     padding: 2px 8px;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 600;
     font-family: var(--mono);
     border: 1px solid var(--bd2);
@@ -3827,15 +3869,17 @@ tfoot {
     border-color: var(--ac);
 }
 
-/* Values List with Counts */
+/* Values list — flat rows like the aggregation dropdown (no boxed chrome). */
 .filter-values-container {
     flex: 1;
     min-height: 60px;
     max-height: none;
     overflow-y: auto;
-    border: 1px solid var(--bd2);
-    border-radius: 4px;
-    background: var(--s1);
+    border: none;
+    border-top: 1px solid var(--bd);
+    border-radius: 0;
+    background: transparent;
+    padding: 2px 0;
 }
 .filter-values-container::-webkit-scrollbar { width: 3px; }
 .filter-values-container::-webkit-scrollbar-thumb { background: var(--bd2); }
@@ -3843,11 +3887,11 @@ tfoot {
 .filter-value-item {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 4px 10px;
+    gap: 8px;
+    padding: 5px 12px;
     cursor: pointer;
-    transition: .1s;
-    font-size: 10px;
+    transition: background-color 0.1s;
+    font-size: 12px;
     color: var(--tx);
 }
 
@@ -3856,10 +3900,12 @@ tfoot {
 }
 
 .filter-value-item input[type="checkbox"] {
-    accent-color: var(--ac);
-    width: 12px;
-    height: 12px;
+    accent-color: var(--vscode-focusBorder);
+    width: 13px;
+    height: 13px;
+    margin: 0;
     flex-shrink: 0;
+    cursor: pointer;
 }
 
 .filter-value-label {
@@ -3867,11 +3913,14 @@ tfoot {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 12px;
+    min-width: 0;
 }
 
 .filter-value-count {
-    font-size: 9px;
+    font-size: 10px;
     color: var(--tx3);
+    flex-shrink: 0;
 }
 
 /* Quick Filters */
@@ -3883,13 +3932,13 @@ tfoot {
 }
 
 .quick-filter-btn {
-    padding: 2px 6px;
-    font-size: 9px;
+    padding: 2px 7px;
+    font-size: 10px;
     font-family: var(--mono);
     border: 1px solid var(--bd2);
     border-radius: 3px;
     cursor: pointer;
-    background: var(--s1);
+    background: transparent;
     color: var(--tx2);
     transition: .1s;
 }
@@ -3913,15 +3962,16 @@ tfoot {
 
 .filter-search-input {
     width: 100%;
-    padding: 5px 8px 5px 26px;
+    padding: 5px 8px 5px 28px;
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     background: var(--s1);
     color: var(--tx);
     border: 1px solid var(--bd2);
     border-radius: 4px;
     box-sizing: border-box;
     outline: none;
+    min-height: 26px;
 }
 
 .filter-search-input:focus {
@@ -3953,8 +4003,15 @@ tfoot {
     left: 8px;
     top: 50%;
     transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
     color: var(--tx3);
-    font-size: 10px;
+}
+
+.filter-search-icon svg {
+    width: 12px;
+    height: 12px;
+    display: block;
 }
 
 /* Filter Actions */
@@ -4014,12 +4071,12 @@ tfoot {
 }
 
 .filter-selection-btn {
-    padding: 3px 6px;
-    font-size: 9px;
+    padding: 2px 7px;
+    font-size: 10px;
     border: 1px solid var(--bd2);
     border-radius: 3px;
     cursor: pointer;
-    background: var(--s1);
+    background: transparent;
     color: var(--tx2);
     font-family: var(--mono);
     transition: .1s;
@@ -4044,7 +4101,7 @@ tfoot {
 
 .filter-between-separator {
     color: var(--tx3);
-    font-size: 9px;
+    font-size: 10px;
 }
 
 /* Add condition button */
@@ -4053,7 +4110,7 @@ tfoot {
     align-items: center;
     gap: 4px;
     padding: 4px 6px;
-    font-size: 9px;
+    font-size: 10px;
     font-family: var(--mono);
     border: 1px dashed var(--bd2);
     border-radius: 4px;
