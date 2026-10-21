@@ -7,6 +7,7 @@ import { Logger } from '../utils/logger';
 import { getExtensionDocumentParseSession } from '../core/extensionDocumentParseSession';
 import { DatabaseTunnelManager } from '../core/databaseTunnel';
 import { configureDatabaseTunnelRuntime } from '../core/connectionFactory';
+import { initializeObjectNotesStore } from '../core/objectNotesStore';
 import {
     createExtensionServices,
     type ExtensionServices,
@@ -52,6 +53,17 @@ export function activateCoreServices(
         getExtensionDocumentParseSession(),
     );
     logger.info(`[perf] SchemaProvider ctor: ${(performance.now() - t).toFixed(1)}ms`);
+
+    try {
+        const objectNotes = initializeObjectNotesStore(context);
+        context.subscriptions.push(objectNotes.store.onDidChange(() => schemaProvider.refreshItemDecorations()));
+        objectNotes.loaded.catch((error: unknown) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn(`Netezza extension: Object notes could not be loaded: ${errorMessage}`);
+        });
+    } catch (error) {
+        logger.warn(`Netezza extension: Object notes are unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     context.subscriptions.push({
         dispose: () => {
