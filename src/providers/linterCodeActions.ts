@@ -16,7 +16,7 @@ import {
     parseTableReferenceText,
 } from '../core/tableQualificationActions';
 import { SqlParser } from '../sql/sqlParser';
-import { SqlLexer, type Scope, type TableInfo } from '../sqlParser';
+import { SqlLexer, type Scope } from '../sqlParser';
 import { parseSqlStatements } from '../sqlParser/parsingRuntime';
 import { createSqlValidatorForDocument } from '../commands/validationCommands';
 import { parseSemanticScopeWithParser } from './parsers/parserSqlContext';
@@ -28,9 +28,26 @@ import {
 } from '../server/quickFixPolicy';
 
 export { getNetezzaQuickFixSafety, isNetezzaFixAllEligible } from '../server/quickFixPolicy';
+import {
+    EXPAND_STAR_LAYOUTS,
+    buildSelectStarExpansion,
+    findSelectStarContext,
+    type ExpandStarLayout,
+    type SelectStarSource,
+} from '../sql/expandSelectStar';
+import { MetadataCacheSchemaProvider } from '../sqlParser/metadataCacheAdapter';
+import { normalizeJoinCompletionSettings } from '../lsp/joinCompletionSettings';
+import { matchesJoinTableIdentity } from '../server/completionJoinRelationUtils';
 
 type DatabaseKindResolver = (documentUri: string) => DatabaseKind | undefined;
 
+
+const REFACTOR_REWRITE_KIND: vscode.CodeActionKind =
+    ((vscode.CodeActionKind as unknown as { RefactorRewrite?: vscode.CodeActionKind }).RefactorRewrite
+        ?? ((vscode.CodeActionKind as unknown as { Refactor?: vscode.CodeActionKind }).Refactor
+            ?? vscode.CodeActionKind.QuickFix));
+
+export const EXPAND_SELECT_STAR_REFACTOR_TITLE = 'Expand * to column list';
 
 const SOURCE_FIX_ALL_KIND: vscode.CodeActionKind =
     ((vscode.CodeActionKind as unknown as { SourceFixAll?: vscode.CodeActionKind }).SourceFixAll
@@ -69,7 +86,8 @@ function applySafeFixAllEdit(document: vscode.TextDocument, edit: vscode.Workspa
 export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvider {
     public static readonly providedCodeActionKinds = [
         vscode.CodeActionKind.QuickFix,
-        SOURCE_FIX_ALL_KIND
+        SOURCE_FIX_ALL_KIND,
+        REFACTOR_REWRITE_KIND
     ];
 
     constructor(
@@ -284,6 +302,16 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         }
 
         actions.push(...this.createFixAllSafeActions(document, range, context.diagnostics));
+
+        // The same expansion is a refactoring on any `*` select item, also when
+        // the NZ001 rule is disabled or the diagnostic is not at the cursor.
+        const hasStarFix = actions.some(action => action.title === ERROR_CODE_ACTIONS['NZ001'].title);
+        if (!hasStarFix && (!context.only || context.only.contains(REFACTOR_REWRITE_KIND) || REFACTOR_REWRITE_KIND.contains(context.only))) {
+            const refactor = this.createSelectStarExpansionRefactor(document, range);
+            if (refactor) {
+                actions.push(refactor);
+            }
+        }
         return actions;
     }
 
@@ -1267,24 +1295,141 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
     }
 
     private createSelectStarExpansionFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
-        const statementBoundary = this.getStatementBoundary(document, diagnostic);
-        if (!statementBoundary) {
-            return undefined;
-        }
-
-        const validator = createSqlValidatorForDocument(document.uri.toString());
-        const validationResult = validator.validate(statementBoundary.sql);
-        const expandedColumns = this.buildExpandedSelectStarColumns(validationResult.scope);
-        if (expandedColumns.length === 0) {
+        const edit = this.buildSelectStarExpansionEdit(document, document.offsetAt(diagnostic.range.start));
+        if (!edit) {
             return undefined;
         }
 
         const action = new vscode.CodeAction(ERROR_CODE_ACTIONS['NZ001'].title, vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
         action.isPreferred = true;
-        action.edit = new vscode.WorkspaceEdit();
-        action.edit.replace(document.uri, diagnostic.range, expandedColumns.join(', '));
+        action.edit = edit;
         return action;
+    }
+
+    private createSelectStarExpansionRefactor(
+        document: vscode.TextDocument,
+        range: vscode.Range | vscode.Selection,
+    ): vscode.CodeAction | undefined {
+        const candidate = range as { start?: vscode.Position };
+        if (!candidate?.start) {
+            return undefined;
+        }
+        const offset = document.offsetAt(candidate.start);
+        const text = document.getText();
+        const starOffset = text[offset] === '*' ? offset : text[offset - 1] === '*' ? offset - 1 : undefined;
+        if (starOffset === undefined) {
+            return undefined;
+        }
+        const edit = this.buildSelectStarExpansionEdit(document, starOffset);
+        if (!edit) {
+            return undefined;
+        }
+        const action = new vscode.CodeAction(EXPAND_SELECT_STAR_REFACTOR_TITLE, REFACTOR_REWRITE_KIND);
+        action.edit = edit;
+        return action;
+    }
+
+    /**
+     * Replaces the `*` at `starOffset` with qualified columns (layout from
+     * `justybase.sql.expandStarLayout`) and adds a generated alias to every
+     * unaliased source; existing aliases are reused.
+     */
+    private buildSelectStarExpansionEdit(document: vscode.TextDocument, starOffset: number): vscode.WorkspaceEdit | undefined {
+        const statement = SqlParser.getStatementAtPosition(document.getText(), starOffset);
+        if (!statement) {
+            return undefined;
+        }
+        const context = findSelectStarContext(statement.sql, starOffset - statement.start);
+        if (!context) {
+            return undefined;
+        }
+
+        const documentUri = document.uri.toString();
+        const databaseKind = this.getDocumentDatabaseKind(document);
+        const scope = createSqlValidatorForDocument(documentUri).validate(statement.sql).scope;
+        const schemaProvider = this.createSchemaProvider(documentUri);
+        const sqlSettings = vscode.workspace.getConfiguration('justybase.sql', document.uri);
+        const configuredLayout = sqlSettings.get<string>('expandStarLayout', 'leadingComma');
+        const layout: ExpandStarLayout = EXPAND_STAR_LAYOUTS.includes(configuredLayout as ExpandStarLayout)
+            ? configuredLayout as ExpandStarLayout
+            : 'leadingComma';
+        const configuredAliases = normalizeJoinCompletionSettings({
+            joinAliases: sqlSettings.get<unknown>('joinAliases', []),
+        }).aliases;
+
+        const edits = buildSelectStarExpansion(statement.sql, context, {
+            layout,
+            indentUnit: this.getIndentUnit(document),
+            databaseKind,
+            getColumns: source => this.getSelectStarSourceColumns(scope, schemaProvider, source),
+            getConfiguredAlias: source => configuredAliases.find(entry =>
+                matchesJoinTableIdentity(entry.table, source))?.alias,
+        });
+        if (!edits) {
+            return undefined;
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        for (const replacement of edits) {
+            const start = document.positionAt(statement.start + replacement.start);
+            if (replacement.start === replacement.end) {
+                edit.insert(document.uri, start, replacement.newText);
+            } else {
+                edit.replace(
+                    document.uri,
+                    new vscode.Range(start, document.positionAt(statement.start + replacement.end)),
+                    replacement.newText,
+                );
+            }
+        }
+        return edit;
+    }
+
+    /** Columns of a FROM source: validator scope (CTEs, derived tables) first, then the metadata cache. */
+    private getSelectStarSourceColumns(
+        scope: Scope | undefined,
+        schemaProvider: MetadataCacheSchemaProvider | undefined,
+        source: SelectStarSource,
+    ): readonly string[] | undefined {
+        const key = (source.alias ?? source.table).toUpperCase();
+        const scoped = scope
+            ? [...scope.tables.values()].find(table => (table.alias || table.name).toUpperCase() === key)
+                ?? (!source.alias || source.isSubquery
+                    ? undefined
+                    : [...scope.tables.values()].find(table => !table.alias && table.name.toUpperCase() === source.table.toUpperCase()))
+                ?? [...scope.ctes.values()].find(cte => cte.name.toUpperCase() === source.table.toUpperCase())
+            : undefined;
+        const columns = scoped?.columns.length
+            ? scoped.columns
+            : source.isSubquery
+                ? undefined
+                : schemaProvider?.getTable(source.database, source.schema, source.table)?.columns;
+        const names = columns?.map(column => column.alias || column.name).filter(Boolean);
+        return names && names.length > 0 ? names : undefined;
+    }
+
+    private createSchemaProvider(documentUri: string): MetadataCacheSchemaProvider | undefined {
+        if (!this.deps) {
+            return undefined;
+        }
+        try {
+            const connectionName = this.deps.connectionManager.resolveConnectionName?.(documentUri);
+            return connectionName
+                ? new MetadataCacheSchemaProvider(this.deps.metadataCache, this.deps.connectionManager, connectionName, documentUri)
+                : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    private getIndentUnit(document: vscode.TextDocument): string {
+        const editorSettings = vscode.workspace.getConfiguration('editor', document.uri);
+        if (editorSettings.get<boolean>('insertSpaces', true) === false) {
+            return '\t';
+        }
+        const tabSize = editorSettings.get<number>('tabSize', 4);
+        return ' '.repeat(typeof tabSize === 'number' && tabSize > 0 ? tabSize : 4);
     }
 
     private createCrossJoinFix(
@@ -1434,53 +1579,6 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         action.edit = new vscode.WorkspaceEdit();
         action.edit.replace(document.uri, diagnostic.range, suggestedFix);
         return action;
-    }
-
-    private buildExpandedSelectStarColumns(scope: Scope): string[] {
-        const visibleTables = this.getVisibleTables(scope);
-        if (visibleTables.length === 0) {
-            return [];
-        }
-
-        const useQualifier = visibleTables.length > 1;
-        const columns: string[] = [];
-        const seenColumns = new Set<string>();
-
-        for (const table of visibleTables) {
-            const qualifier = table.alias || table.name;
-            if (!qualifier) {
-                continue;
-            }
-
-            for (const column of table.columns) {
-                const columnName = column.alias || column.name;
-                if (!columnName) {
-                    continue;
-                }
-
-                const expandedColumn = useQualifier ? `${qualifier}.${columnName}` : columnName;
-                const dedupeKey = expandedColumn.toUpperCase();
-                if (seenColumns.has(dedupeKey)) {
-                    continue;
-                }
-
-                seenColumns.add(dedupeKey);
-                columns.push(expandedColumn);
-            }
-        }
-
-        return columns;
-    }
-
-    private getVisibleTables(scope: Scope): TableInfo[] {
-        const tables: TableInfo[] = [];
-        scope.tables.forEach(table => {
-            tables.push(table);
-        });
-        scope.ctes.forEach(cte => {
-            tables.push(cte);
-        });
-        return tables;
     }
 
     private createTableQualificationFixes(

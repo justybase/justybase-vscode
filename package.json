@@ -4270,6 +4270,21 @@
           ],
           "description": "Case of SQL keywords inserted by completion. The suggestion list itself always shows keywords in upper case."
         },
+        "justybase.sql.expandStarLayout": {
+          "type": "string",
+          "default": "leadingComma",
+          "enum": [
+            "leadingComma",
+            "trailingComma",
+            "singleLine"
+          ],
+          "enumDescriptions": [
+            "One column per line with leading commas (`    , D.COL`).",
+            "One column per line with trailing commas (`    D.COL,`).",
+            "All columns on the original line, separated by `, `."
+          ],
+          "description": "Layout of the column list produced by the \"Expand * to column list\" refactoring and the NZ001 quick fix. Unaliased tables receive a generated alias; existing aliases are reused."
+        },
         "justybase.sql.joinAliases": {
           "type": "array",
           "default": [],

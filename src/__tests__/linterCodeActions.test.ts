@@ -18,7 +18,13 @@ jest.mock('vscode', () => ({
         insert: jest.fn(),
         replace: jest.fn(),
         delete: jest.fn()
-    }))
+    })),
+    Range: jest.fn().mockImplementation((start: unknown, end: unknown) => ({ start, end })),
+    workspace: {
+        getConfiguration: jest.fn(() => ({
+            get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+        })),
+    },
 }));
 
 jest.mock('../sql/sqlParser', () => ({
@@ -356,6 +362,7 @@ describe('providers/linterCodeActions', () => {
     });
 
     it('adds NZ001 quick fix to expand SELECT * into explicit columns', () => {
+        resolveDatabaseKind.mockReturnValueOnce('netezza');
         const statementSql = 'SELECT * FROM DB..CUSTOMERS C JOIN DB..ORDERS O ON C.ID = O.CUSTOMER_ID';
         const document = makeDocument(statementSql);
         (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
@@ -390,16 +397,59 @@ describe('providers/linterCodeActions', () => {
 
         const expandFix = actions.find(action => action.title === 'Expand SELECT * to explicit columns');
         expect(expandFix).toBeDefined();
+        // Existing aliases are reused; leading-comma layout is the default.
         expect((expandFix?.edit as unknown as MockWorkspaceEdit).replace).toHaveBeenCalledWith(
             document.uri,
             diagnostic.range,
-            expect.stringContaining('C.ID')
+            '\n    C.ID\n    , C.NAME\n    , O.ID\n    , O.CUSTOMER_ID\n'
         );
-        expect((expandFix?.edit as unknown as MockWorkspaceEdit).replace).toHaveBeenCalledWith(
-            document.uri,
-            diagnostic.range,
-            expect.stringContaining('O.CUSTOMER_ID')
-        );
+        expect((expandFix?.edit as unknown as MockWorkspaceEdit).insert).not.toHaveBeenCalled();
+    });
+
+    it('adds a missing alias when expanding SELECT * and offers it as a refactoring without NZ001', () => {
+        resolveDatabaseKind.mockReturnValue('netezza');
+        const statementSql = 'SELECT * FROM DIMACCOUNT';
+        const document = makeDocument(statementSql);
+        (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
+            sql: statementSql,
+            start: 0,
+            end: statementSql.length
+        });
+        (getInitializedSqlValidator as jest.Mock).mockReturnValue({
+            validate: jest.fn().mockReturnValue({
+                valid: true,
+                errors: [],
+                warnings: [],
+                scope: {
+                    tables: new Map([
+                        ['DIMACCOUNT', { name: 'DIMACCOUNT', columns: [{ name: 'ACCOUNTKEY' }, { name: 'ACCOUNTNAME' }] }]
+                    ]),
+                    ctes: new Map(),
+                    level: 0
+                }
+            })
+        });
+        const starOffset = statementSql.indexOf('*');
+        try {
+            const actions = provider.provideCodeActions(
+                document as vscode.TextDocument,
+                { start: { line: 0, character: starOffset }, end: { line: 0, character: starOffset } } as unknown as vscode.Range,
+                { diagnostics: [] } as unknown as vscode.CodeActionContext,
+                {} as vscode.CancellationToken
+            );
+
+            const refactor = actions.find(action => action.title === 'Expand * to column list');
+            expect(refactor).toBeDefined();
+            const edit = refactor?.edit as unknown as MockWorkspaceEdit;
+            expect(edit.replace).toHaveBeenCalledWith(
+                document.uri,
+                { start: { line: 0, character: starOffset }, end: { line: 0, character: starOffset + 1 } },
+                '\n    D.ACCOUNTKEY\n    , D.ACCOUNTNAME\n'
+            );
+            expect(edit.insert).toHaveBeenCalledWith(document.uri, { line: 0, character: statementSql.length }, ' D');
+        } finally {
+            resolveDatabaseKind.mockReturnValue('postgresql');
+        }
     });
 
     it.each([
@@ -1173,6 +1223,7 @@ describe('providers/linterCodeActions', () => {
         });
 
         it('GATE: NZ001 SELECT * expansion includes all aliased columns from all tables', () => {
+            resolveDatabaseKind.mockReturnValueOnce('netezza');
             const statementSql = 'SELECT * FROM DB..CUSTOMERS C JOIN DB..ORDERS O ON C.ID = O.CUSTOMER_ID';
             const document = makeDocument(statementSql);
             (SqlParser.getStatementAtPosition as jest.Mock).mockReturnValue({
