@@ -4,7 +4,7 @@ description: Inspect active sessions, query state, users, roles, permissions, an
 audience: user
 category: Product guides
 status: Partial
-last_verified: 2026-08-19
+last_verified: 2026-10-21
 product_version: 3.19.1
 ---
 
@@ -18,6 +18,8 @@ product_version: 3.19.1
 </figure>
 
 Open **Session Monitor** from the JustyBase commands or database-specific context. Review session identifiers, user/database, state, query text where exposed by the dialect, elapsed time, and cancellation/termination actions. Treat terminate as a privileged operational action and verify the selected connection before confirming.
+
+**Cancel query** stops the running statement and keeps the session (and its open transaction) alive; **Kill session** ends the connection and rolls back its open work. Cancel is offered for Db2 (`WLM_CANCEL_ACTIVITY`), PostgreSQL (`pg_cancel_backend`) and Oracle 18c+ (`ALTER SYSTEM CANCEL SQL`); the other dialects offer Kill only. Oracle needs `SELECT` on `V$SESSION` for the connected account to resolve the session serial number.
 
 The monitor is database-specific. Netezza exposes warehouse/session concepts that do not map one-to-one to SQLite or Access. Metadata sessions created by JustyBase can be swept separately; user query sessions are not swept by the metadata setting.
 

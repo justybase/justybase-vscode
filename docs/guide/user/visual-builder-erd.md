@@ -4,7 +4,7 @@ description: Build a query from tables and relationships, then inspect structure
 audience: user
 category: Product guides
 status: Partial
-last_verified: 2026-08-19
+last_verified: 2026-10-21
 product_version: 3.19.1
 ---
 
@@ -33,7 +33,7 @@ The builder is strongest for Netezza and DuckDB/File SQL workflows. It uses meta
   <figcaption>ERDs make relationships and dependencies visible from catalog metadata.</figcaption>
 </figure>
 
-Open **Show ERD** for a table group or selected object. The diagram uses available catalog constraints and related object metadata. It is useful for orientation and dependency review; missing foreign keys mean missing edges, not proof that no business relationship exists.
+Open **Show ERD** for a table group or selected object. The diagram uses available catalog constraints and related object metadata. It is available for Netezza, Db2, PostgreSQL, Oracle, MS SQL Server and MySQL; edges come from declared foreign keys, which Netezza does not enforce, so Netezza diagrams show only the keys that were declared. It is useful for orientation and dependency review; missing foreign keys mean missing edges, not proof that no business relationship exists.
 
 ## Review checklist
 

@@ -4,7 +4,7 @@ description: Explore streamed, multi-result, memory-backed, and disk-backed resu
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-09-23
+last_verified: 2026-10-21
 product_version: 3.19.1
 ---
 
@@ -18,7 +18,7 @@ The Result Panel is a data exploration workspace, not only a table widget. It vi
 2. Use column sorting, a column filter, or global search. The grid virtualizes the rendered window; it does not imply that the whole database has been fetched.
 3. Open the column profile to inspect distinct values, null counts, distributions, and summary statistics.
 4. Group or pivot when the result shape supports it, then use charts or time views to inspect patterns.
-5. Open **Row View** for side-by-side rows or **Value Viewer** for a long cell.
+5. Open **Row View** for side-by-side rows or **Value Viewer** for a long cell. Row View uses a compact layout; hover a column name to see its full name and data type.
 6. Pin important result sets and let grid state (column order, filters, sorting, visibility, and pinning) persist for the file.
 
 ## Column filters and grouped tree rows
@@ -176,7 +176,20 @@ Batch statements appear as separate tabs. Pinning protects a result from normal 
 
 ## Copy and export
 
-Copy selected cells or rows as TSV, Markdown, CSV, or CSV-semicolon. Export can use raw values or display-formatted values, controlled by `justybase.results.useFormattedValuesForExport`. Formatting controls include integer/decimal grouping, group and decimal separators, scale, trailing zeros, and rounding mode. A display value such as `1 234,50` is not the same as the raw numeric value `1234.5`; choose deliberately before handing data to another system.
+**Copy** in the grid context menu copies the selection as tab-separated values without headers. **Copy as ▸** holds the other formats: tabbed with headers, Markdown table, CSV, JSON (an array of row objects), SQL INSERT statements, SQL IN list, and HTML table. **SQL IN list** turns the selected cells into a predicate list to paste after a column in a `WHERE` clause, for example `IN (1001, 1002, 'O''Brien')`. Numbers are written without quotes and text is quoted with `'` doubled. NULLs and duplicate values are left out. Lists longer than ten values are wrapped ten values per line. **Export Selection ▸** and **Export All Visible ▸** write Excel, CSV, or JSON files.
+
+The toolbar **Export** menu first asks for a format (Excel, CSV, JSON, Markdown, SQL INSERT; **More…** adds XLSB, XML, Parquet, CSV.GZ, CSV.ZST and SAS XPORT) and the rows (**Loaded rows**, or **ALL rows**, which re-runs the SQL without its LIMIT). Then choose where the result goes:
+
+| Action | Result |
+| --- | --- |
+| **Save as…** | Asks for a location and saves the file |
+| **Export & Open** | Saves to the temp folder and opens the file in its default application |
+| **Export & Copy file** | Saves to the temp folder and puts the file itself on the clipboard, ready to paste into a mail, chat, or folder |
+| **Copy content** | Text formats only (CSV, JSON, Markdown, SQL INSERT, XML): puts the exported text on the clipboard without creating a file |
+
+The menu opens with the same defaults every time; it never silently repeats an earlier export choice.
+
+Export can use raw values or display-formatted values, controlled by `justybase.results.useFormattedValuesForExport`. Formatting controls include integer/decimal grouping, group and decimal separators, scale, trailing zeros, and rounding mode. A display value such as `1 234,50` is not the same as the raw numeric value `1234.5`; choose deliberately before handing data to another system.
 
 The grid can export query results to XLSB, XLSX, CSV, CSV.GZ, CSV.ZST, JSON, XML, SQL INSERT, Markdown, and Parquet.
 

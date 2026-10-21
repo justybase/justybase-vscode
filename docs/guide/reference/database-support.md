@@ -4,7 +4,7 @@ description: Compare the advertised JustyBase dialects by runtime, authoring dep
 audience: reference
 category: Reference
 status: Supported
-last_verified: 2026-10-04
+last_verified: 2026-10-21
 product_version: 3.19.1
 ---
 
@@ -25,6 +25,29 @@ JustyBase presents one workspace shell, but a capability is only available when 
 | Vertica | Preview companion runtime using `vertica-nodejs`; TLS and session options | Vertica SQL authoring, completion, snippets, diagnostics | `v_catalog`/`v_monitor` metadata, object and source search | DDL, explain graph, tuning, projections and skew inspection | Import previews, statistics/purge helpers, session monitoring, shared result workflows | Preview; runtime setup and privileges required |
 | Access | Preview Access reader/session plus local embedded runtime | File SQL authoring and local completion; not a warehouse dialect | MDB/ACCDB tables, columns, DDL boundary | File/session operations; no warehouse session model | Access file import/edit/export plus local result workflows | Preview; file/runtime boundary |
 | Files / DuckDB / SQLite | Preview local DuckDB or SQLite runtime; no server credential required | File SQL dialects, local completion and formatting | Lazy local catalogs incl. DuckDB indexes, and source profiles | Local DDL, explain, integrity/maintenance varies by runtime; DuckDB foreign keys and CHECK constraints can be declared when creating/replacing a table, but cannot be added through ALTER TABLE | CSV/TSV, XLSX/XLSB, Parquet, Avro, Access; result export | Preview desktop/local; file sources can be read-only; no TCP tunnel |
+
+## Schema tree actions by dialect
+
+The schema tree shows an action only when the connected dialect advertises it; empty submenus are hidden. Reports are read-only catalog queries that open in SQL Results.
+
+| Action | Netezza | Db2 | PostgreSQL | Oracle | MS SQL Server | MySQL |
+| --- | --- | --- | --- | --- | --- | --- |
+| ER diagram | Yes | Yes | Yes | Yes | Yes | Yes |
+| Dependencies / impact | Yes | Yes | Yes | Yes | Yes | — |
+| Session Monitor: Kill session | Yes | `FORCE APPLICATION` | `pg_terminate_backend` | `ALTER SYSTEM KILL SESSION` ¹ | `KILL` | `KILL` |
+| Session Monitor: Cancel query | — | `WLM_CANCEL_ACTIVITY` | `pg_cancel_backend` | `ALTER SYSTEM CANCEL SQL` (18c+) ¹ | — | — |
+| Analysis ▸ Table size / Table privileges | — | Yes | Yes | Yes (size: own schema only) | Yes | Yes |
+| Maintenance ▸ Maintenance status | — | REORGCHK-style recommendation | `pg_stat_user_tables` | Statistics staleness | Index fragmentation | `DATA_FREE` |
+| Database ▸ Lock waits | — | `MON_LOCKWAITS` | `pg_blocking_pids` | `V$SESSION` ¹ | `dm_exec_requests` | `performance_schema` ¹ |
+| Database ▸ Invalid objects | — | `SYSCAT.INVALIDOBJECTS` | Invalid indexes | `ALL_OBJECTS` + `ALL_ERRORS` | — | — |
+| Refresh Materialized View | Yes ² | `REFRESH TABLE` (MQT) | Yes, optional `CONCURRENTLY` | `DBMS_MVIEW.REFRESH` | — | — |
+| Space reclaim (Maintenance ▸) | GROOM | Reorganize Table (REORG) | Vacuum Table | Move Table | — | Optimize Table |
+| Statistics (Maintenance ▸) | `GENERATE STATISTICS` | RUNSTATS: all columns, with distribution, sampled 10 %, or saved profile | Analyze Table (`ANALYZE`) | `DBMS_STATS.GATHER_TABLE_STATS` | `UPDATE STATISTICS` | Analyze Table (`ANALYZE TABLE`) |
+
+¹ Needs `SELECT` on `V$SESSION` (Oracle) or `performance_schema` (MySQL) for the connected account; without it the action reports the database error. Oracle Cancel/Kill has not been verified against a privileged live account.
+² Netezza materialized views are kept current on insert; **Refresh** re-sorts the unsorted tail of the view.
+
+ClickHouse offers Optimize Table and session kill; Vertica, DuckDB and SQLite keep their own maintenance actions listed in the matrix above.
 
 ## Status interpretation
 
