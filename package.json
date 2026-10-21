@@ -4945,6 +4945,18 @@
         "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
       },
       {
+        "command": "netezza.searchQueryHistory",
+        "key": "ctrl+r",
+        "mac": "cmd+r",
+        "when": "editorTextFocus && !notebookEditorFocused && (resourceLangId == sql || resourceLangId == mssql || resourceLangId == netezza-sql)"
+      },
+      {
+        "command": "netezza.searchQueryHistory",
+        "key": "ctrl+r",
+        "mac": "cmd+r",
+        "when": "focusedView == netezza.queryHistory"
+      },
+      {
         "command": "netezza.schema.goToObject",
         "key": "ctrl+alt+o",
         "mac": "cmd+alt+o",
