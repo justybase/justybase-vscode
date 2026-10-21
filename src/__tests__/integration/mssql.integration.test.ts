@@ -636,7 +636,7 @@ describeIfConfigured('mssql integration', () => {
 			);
 		}, 120000);
 
-		it('offers MSSQL keywords and excludes Netezza-only GROOM', async () => {
+		it('offers MSSQL statement keywords and snippets at statement start and excludes Netezza-only GROOM', async () => {
 			const provider = new LiveMsSqlCompletionMetadataProvider(
 				connection,
 				config!.database,
@@ -650,7 +650,10 @@ describeIfConfigured('mssql integration', () => {
 			);
 			const upperLabels = completionLabels(items).map((label) => label.toUpperCase());
 
-			expect(upperLabels).toEqual(expect.arrayContaining(['TOP', 'OUTPUT', 'CROSS APPLY']));
+			// At a bare statement start completion offers only statement-opening keywords
+			// plus the dialect's snippets; clause keywords such as TOP, OUTPUT, CROSS APPLY are no
+			// longer listed there.
+			expect(upperLabels).toEqual(expect.arrayContaining(['SELECT', 'GO', 'MSSQL-TOP', 'MSSQL-CROSS-APPLY']));
 			expect(upperLabels).not.toContain('GROOM');
 		}, 60000);
 	});

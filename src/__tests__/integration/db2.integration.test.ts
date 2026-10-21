@@ -387,6 +387,7 @@ if (requireLive && !config) {
 const describeIfConfigured = config ? describe : describe.skip;
 const showWarningMessage = vscode.window.showWarningMessage as unknown as jest.Mock;
 const showInformationMessage = vscode.window.showInformationMessage as unknown as jest.Mock;
+const showQuickPick = vscode.window.showQuickPick as unknown as jest.Mock;
 
 describeIfConfigured('db2 integration', () => {
 	let connection: Db2Connection;
@@ -443,6 +444,9 @@ describeIfConfigured('db2 integration', () => {
 		showInformationMessage.mockReset();
 		showWarningMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
 		showInformationMessage.mockImplementation(async (_message: unknown, _options: unknown, ...items: unknown[]) => items[0]);
+		// RUNSTATS asks which statistics to collect; take the first (default) option.
+		showQuickPick.mockReset();
+		showQuickPick.mockImplementation(async (items: unknown) => (await (items as Promise<unknown[]> | unknown[]))[0]);
 	});
 
 	it('preserves exact BIGINT, DECIMAL, and Unicode values', async () => {
@@ -840,7 +844,7 @@ describeIfConfigured('db2 integration', () => {
 			expect(labels).toContain(tableName.toUpperCase());
 		}, 120000);
 
-		it('offers Db2 keywords and excludes Netezza-only GROOM', async () => {
+		it('offers Db2 statement keywords and snippets at statement start and excludes Netezza-only GROOM', async () => {
 			const provider = new LiveDb2CompletionMetadataProvider(
 				connection,
 				config!.database,
@@ -854,7 +858,10 @@ describeIfConfigured('db2 integration', () => {
 			);
 			const upperLabels = completionLabels(items).map((label) => label.toUpperCase());
 
-			expect(upperLabels).toEqual(expect.arrayContaining(['FETCH FIRST', 'WITH UR']));
+			// At a bare statement start completion offers only statement-opening keywords
+			// plus the dialect's snippets; clause keywords such as FETCH FIRST, WITH UR are no
+			// longer listed there.
+			expect(upperLabels).toEqual(expect.arrayContaining(['SELECT', 'DB2-FETCH-FIRST', 'DB2-OPTIMIZE-FOR']));
 			expect(upperLabels).not.toContain('GROOM');
 		}, 60000);
 	});

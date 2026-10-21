@@ -1331,7 +1331,7 @@ describeIfConfigured('oracle integration', () => {
 			expect(labels).toContain(tableName.toUpperCase());
 		}, 120000);
 
-		it('offers Oracle keywords and excludes Netezza-only GROOM', async () => {
+		it('offers Oracle statement keywords and snippets at statement start and excludes Netezza-only GROOM', async () => {
 			const provider = new LiveOracleCompletionMetadataProvider(
 				connection,
 				config!.database,
@@ -1345,7 +1345,10 @@ describeIfConfigured('oracle integration', () => {
 			);
 			const upperLabels = completionLabels(items).map((label) => label.toUpperCase());
 
-			expect(upperLabels).toEqual(expect.arrayContaining(['DUAL', 'CONNECT BY']));
+			// At a bare statement start completion offers only statement-opening keywords
+			// plus the dialect's snippets; clause keywords such as DUAL, CONNECT BY are no
+			// longer listed there.
+			expect(upperLabels).toEqual(expect.arrayContaining(['SELECT', 'COMMIT', 'ORACONNECTBY']));
 			expect(upperLabels).not.toContain('GROOM');
 		}, 60000);
 	});
