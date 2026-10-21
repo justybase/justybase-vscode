@@ -97,9 +97,17 @@ function groupKeyOf(state: AnalyticalPersistedState): string {
     return state.detection.mode === 'robust' ? `${grouping}|quartiles` : grouping;
 }
 
-/** The cached dataset when it belongs to the current grouping, otherwise undefined. */
+/**
+ * Cache key of a computation: the grouping plus the analysis scope. Every comparison with
+ * rawKey / inflightKey / autoStartSuppressed must use this key, never groupKeyOf alone.
+ */
+function computeKeyOf(state: AnalyticalPersistedState): string {
+    return `${groupKeyOf(state)}|${analyticalScopeKey(getAnalyticalScope())}`;
+}
+
+/** The cached dataset when it belongs to the current grouping and scope, otherwise undefined. */
 function currentRaw(view: AnalyticalViewState): AnalyticalDataset | undefined {
-    return view.rawKey === groupKeyOf(view.persisted) ? view.raw : undefined;
+    return view.rawKey === computeKeyOf(view.persisted) ? view.raw : undefined;
 }
 
 /** What the rules will run with for the cached dataset (fallbacks included). */
@@ -271,7 +279,7 @@ function startCompute(view: AnalyticalViewState, viewKey: string, rsIndex: numbe
     cancelInflight(view);
     const token: ComputeToken = { cancelled: false };
     const groupColumns = [...view.persisted.groupColumns];
-    const wantedKey = `${groupKeyOf(view.persisted)}|${analyticalScopeKey(getAnalyticalScope())}`;
+    const wantedKey = computeKeyOf(view.persisted);
     view.token = token;
     view.inflightKey = wantedKey;
     view.status = 'loading';
@@ -344,8 +352,7 @@ function buildNotices(view: AnalyticalViewState, owner: ResultSet): HTMLElement[
 }
 
 function buildStatusRow(view: AnalyticalViewState, rsIndex: number, viewKey: string, owner: ResultSet): HTMLElement {
-    const state = view.persisted;
-    const wantedKey = groupKeyOf(state);
+    const wantedKey = computeKeyOf(view.persisted);
     const pending = view.status === 'loading' || view.debounce !== undefined;
     const status = el('div', 'analytical-status');
     status.setAttribute('role', 'status');
@@ -620,7 +627,7 @@ export function renderAnalyticalView(rsIndex: number): void {
         });
     }
 
-    const wantedKey = `${groupKeyOf(view.persisted)}|${analyticalScopeKey(getAnalyticalScope())}`;
+    const wantedKey = computeKeyOf(view.persisted);
     if (view.persisted.groupColumns.length === 0) {
         cancelInflight(view);
         clearDebounce(view);
