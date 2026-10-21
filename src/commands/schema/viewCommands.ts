@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { runQueryRaw, queryResultToRows } from '../../core/queryRunner';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { requireConnection, executeWithProgress } from './helpers';
+import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 
 /**
  * Register view/visualization commands
@@ -41,7 +42,16 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
                     return;
                 }
 
-                const schemaQuery = `SELECT DISTINCT SCHEMA FROM ${database}.._V_TABLE ORDER BY SCHEMA`;
+                if (!connectionManager.supportsCapability('supportsErDiagram', undefined, connectionName)) {
+                    vscode.window.showWarningMessage('ER diagrams are not supported for this database type yet.');
+                    return;
+                }
+
+                const isNetezza = connectionManager.getConnectionDatabaseKind(connectionName) === 'netezza';
+                const metadataProvider = isNetezza ? undefined : getDatabaseMetadataProvider(connectionManager.getConnectionDatabaseKind(connectionName)!);
+                const schemaQuery = metadataProvider
+                    ? metadataProvider.buildListSchemasQuery(database!)
+                    : `SELECT DISTINCT SCHEMA FROM ${database}.._V_TABLE ORDER BY SCHEMA`;
                 const schemaResult = await runQueryRaw(context, schemaQuery, true, connectionManager, connectionName, undefined, undefined, undefined, 1000000, false);
 
                 if (!schemaResult || !schemaResult.data) {
@@ -49,7 +59,15 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
                     return;
                 }
 
-                const schemas = queryResultToRows<{ SCHEMA: string }>(schemaResult);
+                const schemas = queryResultToRows<{ SCHEMA?: string; SCHEMA_NAME?: string }>(schemaResult)
+                    .map(row => ({ SCHEMA: String(row.SCHEMA ?? row.SCHEMA_NAME ?? '').trim() }))
+                    .filter(row => row.SCHEMA);
+                // Offer the session's current schema first (catalogs such as Oracle list every system schema).
+                const currentSchema = metadataCache.getCurrentSchema?.(connectionName, database!);
+                if (currentSchema) {
+                    const index = schemas.findIndex(row => row.SCHEMA.toUpperCase() === currentSchema.toUpperCase());
+                    if (index > 0) schemas.unshift(...schemas.splice(index, 1));
+                }
                 if (schemas.length === 0) {
                     vscode.window.showWarningMessage('No tables found in this database');
                     return;
@@ -77,17 +95,19 @@ export function registerViewCommands(deps: SchemaCommandsDependencies): vscode.D
                 await executeWithProgress(
                     `Building ERD for ${database}.${selectedSchema}...`,
                     async (progress) => {
-                        const { buildERDData } = await import('../../schema/erdProvider');
+                        const { buildERDData, buildERDDataFromMetadataProvider } = await import('../../schema/erdProvider');
                         const { ERDView } = await import('../../views/erdView');
 
-                        const erdData = await buildERDData(
-                            context,
-                            connectionManager,
-                            connectionName,
-                            database!,
-                            selectedSchema,
-                            progress
-                        );
+                        const erdData = metadataProvider
+                            ? await buildERDDataFromMetadataProvider(context, connectionManager, connectionName, metadataProvider, database!, selectedSchema, progress)
+                            : await buildERDData(
+                                context,
+                                connectionManager,
+                                connectionName,
+                                database!,
+                                selectedSchema,
+                                progress
+                            );
 
                         tableCount = erdData.tables.length;
                         relCount = erdData.relationships.length;

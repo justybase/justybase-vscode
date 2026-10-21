@@ -182,6 +182,7 @@ describe('commands/schema/viewCommands', () => {
                 connectionName: 'test-conn'
             };
 
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('netezza');
             (runQueryRaw as jest.Mock).mockResolvedValue(null);
 
             await showERDCallback(item);
@@ -197,6 +198,7 @@ describe('commands/schema/viewCommands', () => {
                 connectionName: 'test-conn'
             };
 
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('netezza');
             (runQueryRaw as jest.Mock).mockResolvedValue({ data: [] });
             (queryResultToRows as jest.Mock).mockReturnValue([]);
 

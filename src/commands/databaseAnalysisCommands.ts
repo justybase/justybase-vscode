@@ -57,8 +57,10 @@ export function registerDatabaseAnalysisCommands(context: vscode.ExtensionContex
         const connection = item?.connectionName ?? manager.getConnectionForExecution();
         if (!name || !connection) { throw new Error('Select a database object or column in Schema Browser.'); }
         if (!item.dbName || !item.schema) { throw new Error(`Qualify ${name} as DATABASE.SCHEMA.OBJECT, or select it in Schema Browser.`); }
-        if (manager.getConnectionDatabaseKind(connection) !== 'netezza') { throw new Error('Dependencies and impact analysis currently support Netezza.'); }
-        const type = (column ? 'TABLE' : item.objType ?? item.contextValue?.replace(/^netezza:/, '') ?? 'UNKNOWN') as AnalysisObjectType;
+        if (!manager.supportsCapability('supportsDependencyAnalysis', undefined, connection)) { throw new Error('Dependencies and impact analysis are not available for this database type.'); }
+        const treeType = (column ? 'TABLE' : item.objType ?? item.contextValue?.replace(/^netezza:/, '') ?? 'UNKNOWN').toUpperCase();
+        // Graph namespaces: functions share the routine namespace, materialized views the relation one.
+        const type = (treeType === 'FUNCTION' || treeType === 'AGGREGATE' ? 'PROCEDURE' : treeType === 'MATERIALIZED VIEW' ? 'VIEW' : treeType) as AnalysisObjectType;
         const root: ObjectReference = { database: item.dbName, schema: item.schema, name: type === 'PROCEDURE' ? extractProcedureBaseName(name) : name, type };
         let change: ProposedChange | undefined;
         let changeText: string | undefined;

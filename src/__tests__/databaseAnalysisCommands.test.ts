@@ -17,7 +17,7 @@ function setup() {
     const document={languageId:'sql',uri:{toString:()=> 'file:///test.sql'},isClosed:false,getText:jest.fn(()=>source),offsetAt:jest.fn(()=>5),positionAt:jest.fn((n:number)=>new vscode.Position(0,n))};
     const editor={document,selection:{isEmpty:true,active:new vscode.Position(0,5),start:new vscode.Position(0,0)}};
     Object.assign(vscode.window,{activeTextEditor:editor});
-    const manager={getConnectionForExecution:()=> 'NZ',getConnectionDatabaseKind:()=> 'netezza',getEffectiveDatabase:async()=> 'DB',getEffectiveSchema:async()=> 'PUBLIC'};
+    const manager={getConnectionForExecution:()=> 'NZ',getConnectionDatabaseKind:()=> 'netezza',supportsCapability(_capability: string){return ['netezza','postgresql','oracle','mssql','db2'].includes(this.getConnectionDatabaseKind());},getEffectiveDatabase:async()=> 'DB',getEffectiveSchema:async()=> 'PUBLIC'};
     const cache={getDefaultSchema:()=> 'PUBLIC'};
     const service={dependencies:jest.fn(async(..._args:unknown[])=>({root:{},direction:'incoming',affected:[],edges:[],issues:[],truncated:false})),performance:jest.fn(async(..._args:unknown[])=>({recommendations:[],issues:[]})),dispose:jest.fn()};
     const panel={showDependencies:jest.fn(),showPerformance:jest.fn(),dispose:jest.fn()};

@@ -14,8 +14,48 @@ import { type PerformanceTable, type PerformanceReport, type TableDistribution }
 import { analyzeExplainPlanSemantic, type ExplainPlanSemanticAnalysis } from '../tuning/explainPlanSemanticAnalyzer';
 import { NetezzaTuningAdvisor } from '../../dialects/netezza/tuning/netezzaTuningAdvisor';
 import { AnalysisSession } from './analysisSession';
+import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
+import { runQueryRaw, queryResultToRows } from '../../core/queryRunner';
+import type { AnalysisObjectType } from './sqlAnalysis';
 
 const MAX_OBJECTS = 20_000;
+const MAX_CATALOG_DEPENDENCIES = 200_000;
+
+function catalogObjectType(value: unknown): AnalysisObjectType {
+    const type = String(value ?? '').trim().toUpperCase();
+    return type === 'TABLE' || type === 'VIEW' || type === 'PROCEDURE' || type === 'SEQUENCE' ? type : 'UNKNOWN';
+}
+
+/**
+ * Converts catalog dependency rows (SOURCE_* depends on TARGET_*) into graph
+ * edges. A pair without any recorded column is marked as a wildcard so
+ * column-filtered queries keep it as "column usage not recorded".
+ */
+export function catalogDependencyEdges(database: string, rows: readonly Record<string, unknown>[]): { edges: DependencyEdge[]; objects: ObjectReference[] } {
+    const value = (row: Record<string, unknown>, key: string) => String(row[key] ?? row[key.toLowerCase()] ?? '').trim();
+    const pairs = new Map<string, { source: ObjectReference; target: ObjectReference; columns: Set<string> }>();
+    const objects = new Map<string, ObjectReference>();
+    for (const row of rows) {
+        const source: ObjectReference = { database, schema: value(row, 'SOURCE_SCHEMA'), name: value(row, 'SOURCE_NAME'), type: catalogObjectType(row.SOURCE_TYPE ?? row.source_type) };
+        const target: ObjectReference = { database, schema: value(row, 'TARGET_SCHEMA'), name: value(row, 'TARGET_NAME'), type: catalogObjectType(row.TARGET_TYPE ?? row.target_type) };
+        if (!source.name || !target.name) { continue; }
+        const key = `${objectId(source)}>${objectId(target)}`;
+        const pair = pairs.get(key) ?? { source, target, columns: new Set<string>() };
+        const column = value(row, 'TARGET_COLUMN');
+        if (column) { pair.columns.add(column); }
+        pairs.set(key, pair);
+        objects.set(objectId(source), source);
+        objects.set(objectId(target), target);
+    }
+    const location = { start: 0, end: 0 };
+    const edges: DependencyEdge[] = [...pairs.values()].map(({ source, target, columns }) => {
+        const evidence: DependencyEdge['evidence'] = columns.size
+            ? [...columns].map(column => ({ column, kind: 'column', confidence: 'exact', location }))
+            : [{ kind: 'wildcard', confidence: 'exact', location }];
+        return { source, target, kind: evidence[0].kind, column: evidence[0].column, confidence: 'exact', location, evidence };
+    });
+    return { edges, objects: [...objects.values()] };
+}
 /** Only catalog-confirmed physical tables have a Netezza distribution policy to infer. */
 function distributionFromKeys(keys: string[] | undefined, object: ObjectReference, hasMetadata: boolean): TableDistribution | undefined {
     if (!hasMetadata || object.type !== 'TABLE') { return undefined; }
@@ -61,6 +101,8 @@ export class DatabaseAnalysisService implements vscode.Disposable {
         finally { await session.close(); listener.dispose(); source.dispose(); this.active.delete(source); }
     }
     async dependencies(connection: string, root: ObjectReference, direction: 'incoming' | 'outgoing', depth: number, token: vscode.CancellationToken, column?: string, change?: ProposedChange): Promise<DependencyReport> {
+        const kind = this.manager.getConnectionDatabaseKind?.(connection);
+        if (kind && kind !== 'netezza') { return this.catalogDependencies(connection, kind, root, direction, depth, token, column, change); }
         const generation = this.generation;
         let snapshot = this.cache.getDefinitionCatalog(connection, root.database);
         if (!snapshot) {
@@ -88,6 +130,59 @@ export class DatabaseAnalysisService implements vscode.Disposable {
         if (!this.cache.getForeignKeyRelationshipsForDatabase(connection, root.database)?.complete) { report.issues.push('Foreign-key catalog snapshot is incomplete or unavailable.'); }
         return report;
     }
+    /**
+     * Dialects whose catalogs record dependencies (pg_depend, ALL_DEPENDENCIES,
+     * sys.sql_expression_dependencies, SYSCAT.*DEP) build the graph from those
+     * rows plus declared foreign keys instead of parsing object definitions.
+     */
+    private async catalogDependencies(connection: string, kind: string, root: ObjectReference, direction: 'incoming' | 'outgoing', depth: number, token: vscode.CancellationToken, column?: string, change?: ProposedChange): Promise<DependencyReport> {
+        const provider = getDatabaseMetadataProvider(kind);
+        const query = provider.buildObjectDependenciesQuery?.(root.database);
+        if (!query) { throw new Error('Dependencies and impact analysis are not available for this database type.'); }
+        const read = async (sql: string) => {
+            const result = await runQueryRaw(this.context, sql, true, this.manager, connection, undefined, undefined, undefined, MAX_CATALOG_DEPENDENCIES + 1, false);
+            if (token.isCancellationRequested || this.disposed) { throw new vscode.CancellationError(); }
+            return result ? queryResultToRows<Record<string, unknown>>(result) : [];
+        };
+        const issues: string[] = [];
+        const rows = await read(query);
+        if (rows.length > MAX_CATALOG_DEPENDENCIES) { issues.push(`Dependency catalog exceeded ${MAX_CATALOG_DEPENDENCIES} rows; analysis is partial.`); }
+        const { edges, objects } = catalogDependencyEdges(root.database, rows.slice(0, MAX_CATALOG_DEPENDENCIES));
+
+        let slice = this.cache.getForeignKeyRelationshipsForDatabase(connection, root.database);
+        const fkQuery = provider.buildForeignKeyRelationshipsQuery?.(root.database);
+        if (!slice?.complete && fkQuery) {
+            try {
+                this.cache.setForeignKeyRelationshipsForDatabase(connection, root.database, normalizeForeignKeyRelationshipRows(await read(fkQuery), root.database), true);
+                slice = this.cache.getForeignKeyRelationshipsForDatabase(connection, root.database);
+            } catch (error) {
+                if (error instanceof vscode.CancellationError) { throw error; }
+                issues.push(`Foreign-key catalog unavailable: ${errorText(error)}`);
+            }
+        }
+        for (const fk of slice?.references ?? []) {
+            const location = { start: 0, end: 0 };
+            edges.push({
+                source: { database: root.database, schema: fk.fromSchema, name: fk.fromTable, type: 'TABLE' },
+                target: { database: root.database, schema: fk.toSchema, name: fk.toTable, type: 'TABLE' },
+                kind: 'column', column: fk.toColumn, confidence: 'exact', location,
+                evidence: [{ column: fk.toColumn, kind: 'column', confidence: 'exact', location }],
+            });
+        }
+
+        const index = new DependencyIndex();
+        if (!await index.update([], objects, () => token.isCancellationRequested || this.disposed, edges)) { throw new vscode.CancellationError(); }
+        const report = index.getReport(root, direction, depth, column, 300, change);
+        report.issues.push(...issues,
+            'Dependencies come from the database catalog; dynamic SQL and references resolved only at run time are not included.');
+        if (kind === 'oracle' || kind === 'db2') {
+            report.issues.push('This catalog records object-level dependencies only; column usage inside dependent objects is not verified.');
+        } else if (kind === 'mssql') {
+            report.issues.push('SQL Server records column usage only for schema-bound objects; other dependents are listed without column detail.');
+        }
+        return report;
+    }
+
     private async loadCatalog(session: AnalysisSession, token: vscode.CancellationToken): Promise<DefinitionCatalogSnapshot> {
         const snapshot: DefinitionCatalogSnapshot = { definitions: [], objects: [], issues: [] };
         let totalBytes = 0;
