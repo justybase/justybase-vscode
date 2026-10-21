@@ -3,53 +3,8 @@
 export function injectStyles(): void {
     const style = document.createElement('style');
     style.textContent = `
-    .console-wrapper {
-        background-color: var(--vscode-editor-background);
-        color: var(--vscode-editor-foreground);
-        font-family: var(--vscode-editor-font-family), 'Consolas', 'Courier New', monospace;
-        font-size: var(--vscode-editor-font-size, 13px);
-        overflow-y: auto;
-        padding: 10px;
-        height: 100%;
-        box-sizing: border-box;
-    }
-    .console-view {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .console-line {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-        padding: 3px 8px;
-        border-radius: 4px;
-    }
-    .console-line.separator {
-        color: var(--vscode-descriptionForeground);
-        font-style: italic;
-        font-weight: 400;
-        margin-top: 8px;
-        margin-bottom: 2px;
-        padding-bottom: 6px;
-        border-bottom: 1px solid var(--vscode-panel-border);
-        border-radius: 0;
-    }
-    .console-time {
-        color: var(--vscode-descriptionForeground);
-        opacity: 0.85;
-        font-size: 11px;
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-        flex-shrink: 0;
-        user-select: none;
-    }
-    .console-msg {
-        color: var(--vscode-editor-foreground);
-        min-width: 0;
-    }
+    /* Console log styles live in media/resultPanel.css (single source of truth).
+       Kept here: only error/analysis/grouping styles injected at runtime. */
     .error-wrapper {
         padding: 20px;
         background-color: var(--vscode-editor-background);
