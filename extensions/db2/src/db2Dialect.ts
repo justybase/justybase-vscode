@@ -27,7 +27,8 @@ const db2Capabilities: DatabaseCapabilities = {
   supportsDistributionMetrics: false,
   supportsTableStatistics: true,
   supportsVacuumTable: true,
-  supportsReindexTable: true,
+  // REORG INDEXES (with CLEANUP ONLY) comes from the Db2 extension's own menu entry.
+  supportsReindexTable: false,
   supportsTruncateTable: true,
   supportsTableComments: true,
   supportsColumnComments: true,
@@ -46,6 +47,15 @@ const db2Capabilities: DatabaseCapabilities = {
   supportsTableOwnerChange: false,
   supportsTableStorageOptions: false,
   supportsSqliteDatabaseMaintenance: false,
+  supportsErDiagram: true,
+  supportsDependencyAnalysis: true,
+  supportsTableSizeReport: true,
+  supportsTablePrivilegesReport: true,
+  supportsTableMaintenanceReport: true,
+  supportsLockReport: true,
+  supportsInvalidObjectsReport: true,
+  supportsMaterializedViewRefresh: true,
+  tableReclaimStyle: 'reorg',
 };
 
 export const db2Dialect: DatabaseDialect = {

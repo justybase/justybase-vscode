@@ -3,7 +3,10 @@ import type {
     DatabaseColumnQueryOptions,
     DatabaseMetadataProvider,
     DatabaseMirroredSystemCatalog,
-    DatabaseSourceSearchQueryOptions
+    DatabaseSourceSearchQueryOptions,
+    DatabaseReportKind,
+    DatabaseTableDetailKind,
+    DatabaseTableReportKind
 } from '@justybase/contracts';
 
 export interface DelegatingMetadataProviderConfig {
@@ -28,6 +31,10 @@ export interface DelegatingMetadataProviderConfig {
     viewSourceSearch: (database: string, options: DatabaseSourceSearchQueryOptions) => string;
     procedureSourceSearch: (database: string, options: DatabaseSourceSearchQueryOptions) => string;
     mirroredSystemCatalog?: DatabaseMirroredSystemCatalog;
+    tableDetails?: (database: string, schema: string, tableName: string, detail: DatabaseTableDetailKind) => string | undefined;
+    objectDependencies?: (database: string) => string | undefined;
+    tableReport?: (database: string, schema: string, tableName: string, report: DatabaseTableReportKind) => string | undefined;
+    databaseReport?: (database: string, report: DatabaseReportKind) => string | undefined;
 }
 
 export function createDelegatingMetadataProvider(
@@ -102,6 +109,34 @@ export function createDelegatingMetadataProvider(
         buildProcedureSourceSearchQuery(database: string, options: DatabaseSourceSearchQueryOptions): string {
             return config.procedureSourceSearch(database, options);
         },
-        mirroredSystemCatalog: config.mirroredSystemCatalog
+        mirroredSystemCatalog: config.mirroredSystemCatalog,
+        ...(config.tableDetails
+            ? {
+                buildTableDetailQuery(database: string, schema: string, tableName: string, detail: DatabaseTableDetailKind): string | undefined {
+                    return config.tableDetails!(database, schema, tableName, detail);
+                },
+            }
+            : {}),
+        ...(config.objectDependencies
+            ? {
+                buildObjectDependenciesQuery(database: string): string | undefined {
+                    return config.objectDependencies!(database);
+                },
+            }
+            : {}),
+        ...(config.tableReport
+            ? {
+                buildTableReportQuery(database: string, schema: string, tableName: string, report: DatabaseTableReportKind): string | undefined {
+                    return config.tableReport!(database, schema, tableName, report);
+                },
+            }
+            : {}),
+        ...(config.databaseReport
+            ? {
+                buildDatabaseReportQuery(database: string, report: DatabaseReportKind): string | undefined {
+                    return config.databaseReport!(database, report);
+                },
+            }
+            : {}),
     };
 }

@@ -51,6 +51,15 @@ export interface DatabaseSourceSearchQueryOptions {
     useServerSideFilter: boolean;
 }
 
+/** Table sub-folders shown under a table in the schema tree. */
+export type DatabaseTableDetailKind = 'keys' | 'indexes' | 'triggers';
+
+/** Read-only reports opened from a table node; the result is shown in SQL Results. */
+export type DatabaseTableReportKind = 'size' | 'privileges' | 'maintenance';
+
+/** Read-only reports opened from a database node; the result is shown in SQL Results. */
+export type DatabaseReportKind = 'locks' | 'invalidObjects';
+
 export interface DatabaseMetadataProvider {
     readonly defaultObjectTypes: readonly string[];
     readonly defaultColumnObjectTypes: readonly string[];
@@ -115,4 +124,23 @@ export interface DatabaseMetadataProvider {
      */
     buildProcedureSourceSearchQuery(database: string, options: DatabaseSourceSearchQueryOptions): string;
     mirroredSystemCatalog?: DatabaseMirroredSystemCatalog;
+    /**
+     * Lists one table's keys/constraints, indexes or triggers for the schema
+     * tree. Rows expose NAME, KIND and DETAIL (a short human-readable summary).
+     */
+    buildTableDetailQuery?(database: string, schema: string, tableName: string, detail: DatabaseTableDetailKind): string | undefined;
+    /**
+     * Catalog-recorded object dependencies for impact analysis. Rows expose
+     * SOURCE_SCHEMA/SOURCE_NAME/SOURCE_TYPE (the dependent object),
+     * TARGET_SCHEMA/TARGET_NAME/TARGET_TYPE (what it uses) and an optional
+     * TARGET_COLUMN. Types are normalized to TABLE, VIEW, PROCEDURE or SEQUENCE.
+     */
+    buildObjectDependenciesQuery?(database: string): string | undefined;
+    /**
+     * Read-only report about one table, run as-is in SQL Results. Column
+     * names are free-form but should read well as grid headers.
+     */
+    buildTableReportQuery?(database: string, schema: string, tableName: string, report: DatabaseTableReportKind): string | undefined;
+    /** Read-only database-wide report (lock waits, invalid objects), run as-is in SQL Results. */
+    buildDatabaseReportQuery?(database: string, report: DatabaseReportKind): string | undefined;
 }

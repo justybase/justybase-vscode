@@ -24,12 +24,9 @@ export const accessDialect: DatabaseDialect = {
     kind: 'access',
     displayName: 'Microsoft Access',
     capabilities: createDatabaseCapabilities({
+        // The staged Jet writer accepts DELETE and ALTER TABLE ADD/DROP CONSTRAINT;
+        // it has no RENAME, COMMENT, GRANT or owner statements.
         supportsTruncateTable: true,
-        supportsTableComments: true,
-        supportsColumnComments: true,
-        supportsGrants: true,
-        supportsTableRename: true,
-        supportsTableOwnerChange: true,
         supportsPrimaryKeyChanges: true,
         supportsForeignKeyChanges: true,
         supportsUniqueConstraintChanges: true,

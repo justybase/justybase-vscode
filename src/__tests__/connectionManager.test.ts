@@ -597,7 +597,15 @@ describe('ConnectionManager', () => {
                 supportsTableStorageOptions: false,
                 supportsSqliteDatabaseMaintenance: false,
                 supportsSchemaValueSearch: true,
-                supportsCallRoutine: true
+                supportsCallRoutine: true,
+                supportsErDiagram: true,
+                supportsDependencyAnalysis: true,
+                supportsMaterializedViewRefresh: true,
+                supportsTableSizeReport: false,
+                supportsTablePrivilegesReport: false,
+                supportsTableMaintenanceReport: false,
+                supportsLockReport: false,
+                supportsInvalidObjectsReport: false
             });
         });
 
@@ -672,7 +680,15 @@ describe('ConnectionManager', () => {
                 supportsTableStorageOptions: false,
                 supportsSqliteDatabaseMaintenance: true,
                 supportsSchemaValueSearch: true,
-                supportsCallRoutine: false
+                supportsCallRoutine: false,
+                supportsErDiagram: false,
+                supportsDependencyAnalysis: false,
+                supportsMaterializedViewRefresh: false,
+                supportsTableSizeReport: false,
+                supportsTablePrivilegesReport: false,
+                supportsTableMaintenanceReport: false,
+                supportsLockReport: false,
+                supportsInvalidObjectsReport: false
             });
         });
 
@@ -708,7 +724,15 @@ describe('ConnectionManager', () => {
                 supportsTableStorageOptions: false,
                 supportsSqliteDatabaseMaintenance: false,
                 supportsSchemaValueSearch: false,
-                supportsCallRoutine: false
+                supportsCallRoutine: false,
+                supportsErDiagram: false,
+                supportsDependencyAnalysis: false,
+                supportsMaterializedViewRefresh: false,
+                supportsTableSizeReport: false,
+                supportsTablePrivilegesReport: false,
+                supportsTableMaintenanceReport: false,
+                supportsLockReport: false,
+                supportsInvalidObjectsReport: false
             });
         });
 
@@ -751,7 +775,15 @@ describe('ConnectionManager', () => {
                     supportsTableStorageOptions: false,
                     supportsSqliteDatabaseMaintenance: false,
                     supportsSchemaValueSearch: false,
-                    supportsCallRoutine: false
+                    supportsCallRoutine: false,
+                    supportsErDiagram: false,
+                    supportsDependencyAnalysis: false,
+                    supportsMaterializedViewRefresh: false,
+                    supportsTableSizeReport: false,
+                    supportsTablePrivilegesReport: false,
+                    supportsTableMaintenanceReport: false,
+                    supportsLockReport: false,
+                    supportsInvalidObjectsReport: false
                 });
                 expect(manager.supportsCapability('supportsExplainPlan', undefined, connectionName)).toBe(false);
             }

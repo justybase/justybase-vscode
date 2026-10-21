@@ -30,7 +30,7 @@ export const verticaDialect: DatabaseDialect = {
     supportsSessionMonitor: true,
     supportsTruncateTable: true,
     supportsTableComments: true,
-    supportsColumnComments: true,
+    supportsColumnComments: false, // COMMENT ON COLUMN targets projection columns only
     supportsGrants: true,
     supportsTableRename: true,
     supportsTableOwnerChange: true,

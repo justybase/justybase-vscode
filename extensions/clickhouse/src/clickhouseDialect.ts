@@ -25,6 +25,7 @@ export const clickhouseDialect: DatabaseDialect = {
         supportsTableMaintenance: true,
         supportsSessionMonitor: true,
         supportsVacuumTable: true,
+        tableReclaimStyle: 'optimize',
     }),
     designerCapabilities: getDatabaseDesignerCapabilities('clickhouse'),
     connectionForm: {

@@ -920,7 +920,7 @@ export class ConnectionManager {
         name?: string
     ): boolean {
         const capabilities = this.getConnectionCapabilities(this.resolveConnectionName(documentUri, name));
-        return capabilities?.[capability] ?? false;
+        return capabilities?.[capability] === true;
     }
 
     async setActiveConnection(name: string | null) {

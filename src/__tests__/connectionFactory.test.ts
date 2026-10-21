@@ -139,6 +139,14 @@ describe("connectionFactory", () => {
       supportsSqliteDatabaseMaintenance: false,
       supportsSchemaValueSearch: true,
       supportsCallRoutine: true,
+      supportsErDiagram: true,
+      supportsDependencyAnalysis: true,
+      supportsMaterializedViewRefresh: true,
+      supportsTableSizeReport: false,
+      supportsTablePrivilegesReport: false,
+      supportsTableMaintenanceReport: false,
+      supportsLockReport: false,
+      supportsInvalidObjectsReport: false,
     });
     expect(registeredDialects.some((item) => item.kind === "netezza")).toBe(
       true,
@@ -176,6 +184,14 @@ describe("connectionFactory", () => {
       supportsSqliteDatabaseMaintenance: false,
       supportsSchemaValueSearch: false,
       supportsCallRoutine: false,
+      supportsErDiagram: false,
+      supportsDependencyAnalysis: false,
+      supportsMaterializedViewRefresh: false,
+      supportsTableSizeReport: false,
+      supportsTablePrivilegesReport: false,
+      supportsTableMaintenanceReport: false,
+      supportsLockReport: false,
+      supportsInvalidObjectsReport: false,
     });
     expect(getDatabaseMetadataProvider("netezza").defaultObjectTypes).toContain(
       "TABLE",
@@ -221,6 +237,14 @@ describe("connectionFactory", () => {
         supportsSqliteDatabaseMaintenance: false,
         supportsSchemaValueSearch: false,
         supportsCallRoutine: false,
+        supportsErDiagram: false,
+        supportsDependencyAnalysis: false,
+        supportsMaterializedViewRefresh: false,
+        supportsTableSizeReport: false,
+        supportsTablePrivilegesReport: false,
+        supportsTableMaintenanceReport: false,
+        supportsLockReport: false,
+        supportsInvalidObjectsReport: false,
       });
     },
   );
