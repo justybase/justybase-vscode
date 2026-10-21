@@ -14,6 +14,7 @@ import { getExtensionConfiguration } from '../../compatibility/configuration';
 import type { QueryStreamExportFormat } from '../../export/queryStreamExporter';
 import type { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName } from './helpers';
+import { SELECTABLE_SCHEMA_OBJECT_TYPES } from './menuSql';
 
 interface ExportFormatChoice {
     label: string;
@@ -35,12 +36,7 @@ const EXPORT_FORMATS: ExportFormatChoice[] = [
     { label: 'Parquet', description: 'Apache Parquet columnar file', value: 'parquet', extension: 'parquet' },
 ];
 
-const EXPORTABLE_OBJECT_TYPES: ReadonlySet<string> = new Set([
-    'TABLE',
-    'VIEW',
-    'MATERIALIZED VIEW',
-    'FOREIGN TABLE',
-]);
+const EXPORTABLE_OBJECT_TYPES = SELECTABLE_SCHEMA_OBJECT_TYPES;
 
 export function registerTableExportCommands(deps: SchemaCommandsDependencies): vscode.Disposable[] {
     return [
