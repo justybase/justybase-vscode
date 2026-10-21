@@ -35,6 +35,7 @@ jest.mock('../providers/tableMetadataProvider', () => ({
 
 // Import mocked modules
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
+import type { DatabaseForeignKeyColumnReference } from '../contracts/database';
 
 describe('SchemaProvider', () => {
     let schemaProvider: SchemaProvider;
@@ -1199,6 +1200,76 @@ describe('SchemaProvider', () => {
             expect(schemaProvider.getParent(children[0])?.id).toBe(tableItem.id);
             expect(children.slice(2).map(item => item.label)).toEqual(['References', 'Referenced by']);
             expect(children.slice(2).every(item => item.contextValue === 'netezzaRelationshipGroup')).toBe(true);
+        });
+
+        it('lists keys, indexes and triggers folders for dialects with a table detail query', async () => {
+            mockMetadataCache.getColumns.mockReturnValue([]);
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('db2');
+            const buildTableDetailQuery = jest.fn((_db: string, _schema: string, _table: string, detail: string) => `DETAIL ${detail}`);
+            (
+                schemaProvider as unknown as { getMetadataProvider: () => unknown }
+            ).getMetadataProvider = jest.fn(() => ({ buildTableDetailQuery }));
+
+            const folders = (await schemaProvider.getChildren(tableItem))
+                .filter(item => item.contextValue.startsWith('tableDetailGroup:'));
+            expect(folders.map(item => item.label)).toEqual(['Keys', 'Indexes', 'Triggers']);
+
+            (queryResultToRows as jest.Mock).mockReturnValueOnce([
+                { NAME: 'PK_USERS', KIND: 'PRIMARY KEY', DETAIL: 'ID' },
+                { NAME: 'FK_ROLE', KIND: 'FOREIGN KEY', DETAIL: 'ROLE_ID -> PUBLIC.ROLES' },
+            ]);
+            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [], data: [] });
+            const keys = await schemaProvider.getChildren(folders[0]);
+            expect(buildTableDetailQuery).toHaveBeenCalledWith('TESTDB', 'PUBLIC', 'USERS', 'keys');
+            expect(keys.map(item => [item.label, item.contextValue, item.objType, item.parentName, item.description])).toEqual([
+                ['PK_USERS', 'tableConstraint', 'PRIMARY KEY', 'USERS', 'PRIMARY KEY · ID'],
+                ['FK_ROLE', 'tableConstraint', 'FOREIGN KEY', 'USERS', 'FOREIGN KEY · ROLE_ID -> PUBLIC.ROLES'],
+            ]);
+            expect(schemaProvider.getParent(folders[0])?.id).toBe(tableItem.id);
+
+            (queryResultToRows as jest.Mock).mockReturnValueOnce([
+                { NAME: 'PK_USERS', KIND: 'PRIMARY KEY', DETAIL: 'ID' },
+                { NAME: 'IX_USERS_NAME', KIND: 'INDEX', DETAIL: 'NAME DESC' },
+            ]);
+            const indexes = await schemaProvider.getChildren(folders[1]);
+            expect(indexes.map(item => item.contextValue)).toEqual(['tableConstraintIndex', 'netezza:INDEX']);
+
+            (queryResultToRows as jest.Mock).mockReturnValueOnce([]);
+            const triggers = await schemaProvider.getChildren(folders[2]);
+            expect(triggers.map(item => item.label)).toEqual(['(No triggers)']);
+        });
+
+        it('loads PostgreSQL FK groups on demand from the dialect FK catalog query', async () => {
+            mockMetadataCache.getColumns.mockReturnValue([]);
+            mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('postgresql');
+            const buildForeignKeyRelationshipsQuery = jest.fn(() => 'SELECT PG FKS');
+            (
+                schemaProvider as unknown as { getMetadataProvider: () => unknown }
+            ).getMetadataProvider = jest.fn(() => ({ buildForeignKeyRelationshipsQuery }));
+            let slice: { database: string; references: DatabaseForeignKeyColumnReference[]; complete: boolean } | undefined;
+            mockMetadataCache.getForeignKeyRelationshipsForDatabase.mockImplementation(() => slice);
+            mockMetadataCache.setForeignKeyRelationshipsForDatabase = jest.fn((_connection: string, database: string, references: DatabaseForeignKeyColumnReference[], complete: boolean) => {
+                slice = { database, references, complete };
+            });
+            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [], data: [] });
+            (queryResultToRows as jest.Mock).mockReturnValue([{
+                FROM_DATABASE: 'TESTDB', FROM_SCHEMA: 'PUBLIC', FROM_TABLE: 'USERS', FROM_COLUMN: 'ROLE_ID',
+                TO_SCHEMA: 'PUBLIC', TO_TABLE: 'ROLES', TO_COLUMN: 'ID', CONSTRAINT_NAME: 'FK_USER_ROLE',
+            }]);
+
+            const groups = (await schemaProvider.getChildren(tableItem))
+                .filter(item => item.contextValue === 'netezzaRelationshipGroup');
+            expect(groups.map(item => item.label)).toEqual(['References', 'Referenced by']);
+
+            const outgoing = await schemaProvider.getChildren(groups[0]);
+            expect(buildForeignKeyRelationshipsQuery).toHaveBeenCalledWith('TESTDB');
+            expect(outgoing.map(item => item.label)).toEqual(['ROLE_ID  →  TESTDB.PUBLIC.ROLES.ID']);
+            expect(mockMetadataCache.getDatabases).not.toHaveBeenCalled();
+
+            (runQueryRaw as jest.Mock).mockClear();
+            const incoming = await schemaProvider.getChildren(groups[1]);
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(incoming.map(item => String(item.label))).toEqual(['(No tables reference this table)']);
         });
 
         it('loads outgoing and incoming FKs from cached database relationship slices', async () => {
