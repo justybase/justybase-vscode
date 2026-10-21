@@ -8,6 +8,7 @@ import { logWithFallback } from '../utils/logger';
 import { runQueryRaw, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
 import { NZ_QUERIES } from '../metadata/systemQueries';
+import type { DatabaseMetadataProvider } from '../contracts/database';
 
 /**
  * Represents a table node in the ERD
@@ -277,4 +278,118 @@ export async function buildERDData(
         tables: filteredTables,
         relationships
     };
+}
+
+function isTruthyFlag(value: unknown): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    return typeof value === 'string' && /^(1|t|true|y|yes)$/i.test(value.trim());
+}
+
+function rowText(row: Record<string, unknown>, ...keys: string[]): string {
+    for (const key of keys) {
+        const value = row[key] ?? row[key.toLowerCase()];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
+    }
+    return '';
+}
+
+/**
+ * Builds ERD data from catalog rows returned by a dialect metadata provider
+ * (object list, columns with keys and FK pairs). Pure so it can be unit-tested.
+ */
+export function buildERDDataFromCatalogRows(
+    database: string,
+    schema: string,
+    tableRows: readonly Record<string, unknown>[],
+    columnRows: readonly Record<string, unknown>[],
+    foreignKeyRows: readonly Record<string, unknown>[],
+): ERDData {
+    const tables = new Map<string, TableNode>();
+    for (const row of tableRows) {
+        const tableName = rowText(row, 'OBJNAME', 'TABLENAME', 'TABLE_NAME');
+        const rowSchema = rowText(row, 'SCHEMA', 'SCHEMA_NAME');
+        if (!tableName || (rowSchema && rowSchema !== schema)) continue;
+        tables.set(tableName, { database, schema, tableName, fullName: `${database}.${schema}.${tableName}`, columns: [], primaryKeyColumns: [] });
+    }
+    for (const row of columnRows) {
+        const table = tables.get(rowText(row, 'TABLENAME', 'TABLE_NAME'));
+        const rowSchema = rowText(row, 'SCHEMA', 'SCHEMA_NAME');
+        const name = rowText(row, 'ATTNAME', 'COLUMN_NAME');
+        if (!table || !name || (rowSchema && rowSchema !== schema)) continue;
+        const isPrimaryKey = isTruthyFlag(row.IS_PK ?? row.is_pk);
+        table.columns.push({ name, dataType: rowText(row, 'FORMAT_TYPE', 'DATA_TYPE'), isPrimaryKey, isForeignKey: false });
+        if (isPrimaryKey) table.primaryKeyColumns.push(name);
+    }
+
+    const relationships = new Map<string, RelationshipEdge & { ordinals: number[] }>();
+    for (const row of foreignKeyRows) {
+        const fromSchema = rowText(row, 'FROM_SCHEMA');
+        const fromTableName = rowText(row, 'FROM_TABLE');
+        if (fromSchema !== schema || !tables.has(fromTableName)) continue;
+        const toSchema = rowText(row, 'TO_SCHEMA');
+        const toTableName = rowText(row, 'TO_TABLE');
+        const constraintName = rowText(row, 'CONSTRAINT_NAME') || `${fromTableName}_${toTableName}_fk`;
+        const key = `${fromTableName}|${constraintName}`;
+        const edge = relationships.get(key) ?? {
+            constraintName,
+            fromTable: `${fromSchema}.${fromTableName}`,
+            toTable: `${toSchema}.${toTableName}`,
+            fromColumns: [],
+            toColumns: [],
+            onDelete: 'NO ACTION',
+            onUpdate: 'NO ACTION',
+            ordinals: [],
+        };
+        edge.fromColumns.push(rowText(row, 'FROM_COLUMN'));
+        edge.toColumns.push(rowText(row, 'TO_COLUMN'));
+        edge.ordinals.push(Number(row.ORDINAL_POSITION ?? edge.ordinals.length + 1));
+        relationships.set(key, edge);
+        const fromColumn = tables.get(fromTableName)?.columns.find(column => column.name === rowText(row, 'FROM_COLUMN'));
+        if (fromColumn) fromColumn.isForeignKey = true;
+    }
+
+    const edges: RelationshipEdge[] = [...relationships.values()].map(({ ordinals, ...edge }) => {
+        const order = ordinals.map((ordinal, index) => ({ ordinal, index })).sort((a, b) => a.ordinal - b.ordinal).map(entry => entry.index);
+        return { ...edge, fromColumns: order.map(index => edge.fromColumns[index]), toColumns: order.map(index => edge.toColumns[index]) };
+    });
+    const involved = new Set<string>();
+    for (const edge of edges) {
+        involved.add(edge.fromTable.split('.').pop()!);
+        if (edge.toTable.startsWith(`${schema}.`)) involved.add(edge.toTable.slice(schema.length + 1));
+    }
+    const allTables = [...tables.values()];
+    return {
+        database,
+        schema,
+        tables: allTables.filter(table => involved.has(table.tableName) || allTables.length <= 20),
+        relationships: edges,
+    };
+}
+
+/**
+ * ERD for dialects that expose object, column and FK catalogue queries
+ * through their metadata provider (PostgreSQL, Oracle, SQL Server, MySQL, Db2).
+ */
+export async function buildERDDataFromMetadataProvider(
+    context: vscode.ExtensionContext,
+    connectionManager: ConnectionManager,
+    connectionName: string,
+    provider: DatabaseMetadataProvider,
+    database: string,
+    schema: string,
+    progress?: vscode.Progress<{ message?: string; increment?: number }>,
+): Promise<ERDData> {
+    const read = async (sql: string | undefined) => {
+        if (!sql) return [];
+        const result = await runQueryRaw(context, sql, true, connectionManager, connectionName, undefined, undefined, undefined, 1000000, false);
+        return result ? queryResultToRows<Record<string, unknown>>(result) : [];
+    };
+    progress?.report({ message: 'Fetching tables...' });
+    const tableRows = await read(provider.buildObjectTypeQuery(database, 'TABLE'));
+    progress?.report({ message: 'Fetching columns and keys...' });
+    const columnRows = await read(provider.buildColumnsWithKeysQuery(database, { schema, objTypes: ['TABLE'] }));
+    progress?.report({ message: 'Fetching foreign keys...' });
+    const foreignKeyRows = await read(provider.buildForeignKeyRelationshipsQuery?.(database, { schema }));
+    return buildERDDataFromCatalogRows(database, schema, tableRows, columnRows, foreignKeyRows);
 }
