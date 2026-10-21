@@ -116,5 +116,10 @@ export const postgresqlSessionMonitorProvider: DatabaseSessionMonitorProvider = 
       validatePositiveIntegerSessionId(sessionId, 'PostgreSQL');
       const sql = `SELECT pg_terminate_backend(${sessionId});`;
       await executeSessionMonitorStatement(context, services, sql);
+    },
+
+    async cancelQuery(context, services, sessionId) {
+      validatePositiveIntegerSessionId(sessionId, 'PostgreSQL');
+      await executeSessionMonitorStatement(context, services, `SELECT pg_cancel_backend(${sessionId});`);
     }
 };

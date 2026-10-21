@@ -113,11 +113,14 @@ export interface SessionMonitorData {
     alertSettings: SessionMonitorAlertSettings;
     alerts: SessionMonitorAlert[];
     refreshedAt: string;
+    /** True when the dialect can cancel a running statement without ending the session. */
+    canCancelQuery?: boolean;
 }
 
 export type SessionMonitorWebviewToHostMessage =
     | { command: 'refresh' }
     | { command: 'killSession'; sessionId: number; status?: string; queryId?: string }
+    | { command: 'cancelQuery'; sessionId: number }
     | { command: 'toggleAutoRefresh'; enabled: boolean }
     | { command: 'updateAlertSettings'; settings: Partial<SessionMonitorAlertSettings> };
 
@@ -135,4 +138,5 @@ export interface SessionMonitorViewState {
     alerts: SessionMonitorAlert[];
     alertSettings: SessionMonitorAlertSettings | null;
     refreshedAt: string | null;
+    canCancelQuery?: boolean;
 }

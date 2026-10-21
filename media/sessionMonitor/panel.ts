@@ -193,11 +193,12 @@ function renderSessions() {
             <td>${s.IPADDR || ''}</td>
             <td><div class="sql-preview" title="${escapeHtml(s.COMMAND || '')}">${escapeHtml(s.COMMAND || '')}</div></td>
             <td>
-                <button class="btn btn-danger kill-btn" data-session="${s.ID}" data-status="${escapeHtml(s.STATUS || '')}">✕ Kill</button>
+                ${cancelButton(s.ID)}<button class="btn btn-danger kill-btn" data-session="${s.ID}" data-status="${escapeHtml(s.STATUS || '')}">✕ Kill</button>
             </td>
         </tr>
     `).join('');
 
+    attachCancelHandlers(tbody);
     // Attach kill button handlers
     tbody.querySelectorAll('.kill-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -205,6 +206,21 @@ function renderSessions() {
             const sessionId = parseInt(htmlBtn.dataset.session ?? '', 10);
             const status = htmlBtn.dataset.status || '';
             postToHost({ command: 'killSession', sessionId, status });
+        });
+    });
+}
+
+/** Non-destructive statement cancel, offered only when the dialect supports it. */
+function cancelButton(sessionId: unknown): string {
+    if (!currentData.canCancelQuery || sessionId === undefined || sessionId === null || sessionId === '') return '';
+    return `<button class="btn btn-secondary cancel-query-btn" data-session="${escapeHtml(String(sessionId))}" title="Cancel the running statement; the session stays connected">⏹ Cancel</button> `;
+}
+
+function attachCancelHandlers(tbody: HTMLElement) {
+    tbody.querySelectorAll('.cancel-query-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const sessionId = parseInt((btn as HTMLElement).dataset.session ?? '', 10);
+            if (Number.isInteger(sessionId)) postToHost({ command: 'cancelQuery', sessionId });
         });
     });
 }
@@ -247,11 +263,12 @@ function renderQueries() {
             <td>${formatNumber(q.QS_RESROWS)}</td>
             <td><div class="sql-preview" title="${escapeHtml(q.QS_SQL || '')}">${escapeHtml(q.QS_SQL || '')}</div></td>
             <td>
-                <button class="btn btn-danger query-kill-btn" data-session="${q.QS_SESSIONID}" data-query-id="${escapeHtml(q.QS_QUERY_ID || '')}" data-status="${escapeHtml(q.QS_STATE || '')}">✕ Kill</button>
+ ${cancelButton(q.QS_SESSIONID)}<button class="btn btn-danger query-kill-btn" data-session="${q.QS_SESSIONID}" data-query-id="${escapeHtml(q.QS_QUERY_ID || '')}" data-status="${escapeHtml(q.QS_STATE || '')}">✕ Kill</button>
             </td>
         </tr>
     `).join('');
 
+    attachCancelHandlers(tbody);
     // Attach kill button handlers for queries
     tbody.querySelectorAll('.query-kill-btn').forEach(btn => {
         btn.addEventListener('click', () => {

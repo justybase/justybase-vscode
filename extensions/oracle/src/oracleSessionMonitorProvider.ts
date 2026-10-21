@@ -134,21 +134,30 @@ export const oracleSessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
     async killSession(context, services, sessionId) {
         validatePositiveIntegerSessionId(sessionId, 'Oracle');
-        await executeSessionMonitorStatement(
-            context,
-            services,
-            `
-                DECLARE
-                    v_sid CONSTANT NUMBER := ${sessionId};
-                    v_serial NUMBER;
-                BEGIN
-                    SELECT serial# INTO v_serial
-                    FROM V$SESSION
-                    WHERE SID = v_sid;
+        const serial = await readOracleSessionSerial(services, sessionId);
+        await executeSessionMonitorStatement(context, services, `ALTER SYSTEM KILL SESSION '${sessionId},${serial}' IMMEDIATE`);
+    },
 
-                    EXECUTE IMMEDIATE 'ALTER SYSTEM KILL SESSION ''' || TO_CHAR(v_sid) || ',' || TO_CHAR(v_serial) || ''' IMMEDIATE';
-                END;
-            `
-        );
+    async cancelQuery(context, services, sessionId) {
+        validatePositiveIntegerSessionId(sessionId, 'Oracle');
+        const serial = await readOracleSessionSerial(services, sessionId);
+        // ALTER SYSTEM CANCEL SQL is available from Oracle 18c.
+        await executeSessionMonitorStatement(context, services, `ALTER SYSTEM CANCEL SQL '${sessionId},${serial}'`);
     }
 };
+
+/**
+ * Reads SERIAL# with plain SQL: a PL/SQL block would need a direct grant on
+ * V_$SESSION because role privileges are disabled inside stored code.
+ */
+async function readOracleSessionSerial(
+    services: Parameters<DatabaseSessionMonitorProvider['killSession']>[1],
+    sessionId: number,
+): Promise<number> {
+    const rows = await services.query<{ SERIAL: unknown }>(`SELECT SERIAL# AS SERIAL FROM V$SESSION WHERE SID = ${sessionId}`);
+    const serial = Number(rows[0]?.SERIAL);
+    if (!Number.isInteger(serial)) {
+        throw new Error(`Oracle session ${sessionId} was not found.`);
+    }
+    return serial;
+}

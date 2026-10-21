@@ -576,6 +576,16 @@ export interface DatabaseSessionMonitorProvider {
     queryId: string,
     connectionName?: string
   ): Promise<void>;
+  /**
+   * Cancels the statement running in a session without ending the session
+   * (pg_cancel_backend, ALTER SYSTEM CANCEL SQL, WLM_CANCEL_ACTIVITY).
+   */
+  cancelQuery?(
+    context: unknown,
+    services: DatabaseSessionMonitorServices,
+    sessionId: number,
+    connectionName?: string
+  ): Promise<void>;
 }
 
 export type DatabaseReferenceTopic = 'optimization' | 'procedure' | 'all';
