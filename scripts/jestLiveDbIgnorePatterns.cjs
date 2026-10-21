@@ -35,4 +35,10 @@ module.exports = [
   "mcpLive.integration.test.ts",
   "sasLikeMacros.e2e.test.ts",
   "linterLiveValidation.test.ts",
+  "catalogDependencies.live.integration.test.ts",
+  "db2Runstats.live.integration.test.ts",
+  "materializedViewRefresh.live.integration.test.ts",
+  "schemaReports.live.integration.test.ts",
+  "schemaTreeTableFolders.live.integration.test.ts",
+  "sessionMonitorCancel.live.integration.test.ts",
 ];
