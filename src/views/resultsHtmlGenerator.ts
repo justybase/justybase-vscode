@@ -140,21 +140,8 @@ export class ResultsHtmlGenerator {
                         <div class="toolbar-separator" aria-hidden="true"></div>
                         <div class="toolbar-group toolbar-group--export">
                         <div class="split-btn" id="exportSplitBtn">
-                            <button class="btn split-btn__primary" onclick="handleExportPrimaryClick(event)" title="Export results (active view)" aria-label="Export results (active view)">${exportButtonIcon} Export</button>
-                            <button class="btn split-btn__arrow" onclick="toggleExportSplitMenu(event)" title="Quick export and copy options" aria-label="Quick export and copy options">▾</button>
-                            <div class="split-btn__menu export-primary-menu" id="exportPrimaryMenu" style="display:none" role="menu" aria-label="Export format"></div>
-                            <div class="split-btn__menu" id="exportSplitMenu" style="display:none" onclick="handleExportSplitMenuClick(event)">
-                                <div class="split-btn__menu-item" data-action="excel">Excel (.xlsb — fast, active view)</div>
-                                <div class="split-btn__menu-item" data-action="export-all-excel">Export All to Excel</div>
-                                <div class="split-btn__menu-separator"></div>
-                                <div class="split-btn__menu-item" data-action="markdown">Export to Markdown file (with SQL)</div>
-                                <div class="split-btn__menu-item" data-action="json">Export to JSON file</div>
-                                <div class="split-btn__menu-item" data-action="csv">Export to CSV file</div>
-                                <div class="split-btn__menu-separator"></div>
-                                <div class="split-btn__menu-item" data-action="copy-html">Copy selection as HTML</div>
-                                <div class="split-btn__menu-item" data-action="copy-md">Copy selection as Markdown</div>
-                                <div class="split-btn__menu-item" data-action="copy-image">Copy selection as Image (up to 500 rows)</div>
-                            </div>
+                            <button class="btn split-btn__primary" id="exportBtn" onclick="handleExportPrimaryClick(event)" title="Export the active result: choose format, then Save as, Export &amp; Open or Export &amp; Copy file" aria-label="Export active result" aria-haspopup="menu" aria-expanded="false">${exportButtonIcon} Export ▾</button>
+                            <div class="split-btn__menu export-primary-menu" id="exportPrimaryMenu" style="display:none" role="menu" aria-label="Export active result"></div>
                         </div>
                         </div>
                         <div class="toolbar-group toolbar-group--table">

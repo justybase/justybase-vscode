@@ -114,20 +114,8 @@
         <button id="discardEditsBtn" onclick="discardEdits()" style="display: none;">Discard</button>
         <div class="toolbar-separator"></div>
         <div class="split-btn" id="exportSplitBtn">
-            <button class="btn split-btn__primary" id="exportBtn">Export</button>
-            <button class="btn split-btn__arrow" id="exportArrow">▾</button>
-            <div class="split-btn__menu" id="exportSplitMenu" style="display:none">
-                <div class="split-btn__menu-item" data-action="current-view">Export current view</div>
-                <div class="split-btn__menu-item" data-action="all-rows">Export all rows</div>
-                <div class="split-btn__menu-separator"></div>
-                <div class="split-btn__menu-item" data-action="excel">Excel (.xlsb)</div>
-                <div class="split-btn__menu-item" data-action="markdown">Markdown (.md)</div>
-                <div class="split-btn__menu-item" data-action="json">JSON</div>
-                <div class="split-btn__menu-item" data-action="csv">CSV</div>
-                <div class="split-btn__menu-separator"></div>
-                <div class="split-btn__menu-item" data-action="copy-html">Copy as HTML to clipboard</div>
-                <div class="split-btn__menu-item" data-action="copy-md">Copy as Markdown to clipboard</div>
-            </div>
+            <button class="btn split-btn__primary" id="exportBtn" onclick="handleExportPrimaryClick(event)">Export ▾</button>
+            <div class="split-btn__menu export-primary-menu" id="exportPrimaryMenu" style="display:none" role="menu"></div>
         </div>
         <div class="toolbar-separator"></div>
         <button id="clearLogsBtn" style="display: none;">Clear Logs</button>

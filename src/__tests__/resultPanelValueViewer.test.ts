@@ -73,7 +73,6 @@ jest.mock('../../media/resultPanel/export.js', () => ({
     handleClickExport: jest.fn(),
     toggleExportPrimaryMenu: jest.fn(),
     handleExportPrimaryClick: jest.fn(),
-    syncExportPrimaryButton: jest.fn(),
     handleClickQueryLocallyDuckDB: jest.fn(),
     setGlobalDragStateForExport: jest.fn(),
     exportAllVisibleToCsv: jest.fn(),

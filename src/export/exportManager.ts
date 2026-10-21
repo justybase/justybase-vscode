@@ -7,6 +7,7 @@ import { exportStructuredToXlsb, copyFileToClipboard as copyXlsbToClipboard } fr
 import { exportStructuredToXlsx, StructuredExportItem } from '../export/xlsxExporter';
 import * as fs from 'fs';
 import type { ExportFormattingMetadata } from './exportTypes';
+import { copyFileToClipboardWithMode, exportTempFilePath, openFileExternally } from './exportUtils';
 
 export type { ExportFormattingMetadata } from './exportTypes';
 
@@ -536,20 +537,17 @@ export class ExportManager {
             if (!uri) return;
             targetPath = uri.fsPath;
         } else {
-            targetPath = path.join(os.tmpdir(), `netezza_export_${Date.now()}.${ext}`);
+            targetPath = exportTempFilePath(ext, resultSet.name || 'Result');
         }
 
         if (format === 'excel') {
-            await exportStructuredToXlsb([item], targetPath, destination === 'temp');
+            await exportStructuredToXlsb([item], targetPath, false);
         } else {
-            await exportStructuredToXlsx([item], targetPath, destination === 'temp');
+            await exportStructuredToXlsx([item], targetPath, false);
         }
 
-        if (destination === 'temp') {
-            vscode.window.showInformationMessage(`Exported to temp and copied to clipboard: ${targetPath}`);
-        } else if (destination === 'open') {
-            vscode.env.openExternal(vscode.Uri.file(targetPath));
-            vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
+        if (destination === 'temp' || destination === 'open') {
+            await this.deliverTempExport(targetPath, destination);
         } else {
             await this.showExportCompleted(targetPath, ext.toUpperCase(), this.describeExcelExport(item));
         }
@@ -576,7 +574,7 @@ export class ExportManager {
             if (!uri) return;
             targetPath = uri.fsPath;
         } else {
-            targetPath = path.join(os.tmpdir(), `netezza_export_${Date.now()}.${ext}`);
+            targetPath = exportTempFilePath(ext, resultSet.name || 'Result');
         }
 
         const { exportStructuredToParquet } = await import('../export/parquetExporter');
@@ -591,24 +589,10 @@ export class ExportManager {
             rows,
             sql: resultSet.sql || '',
             name: resultSet.name || 'Result'
-        }], targetPath, destination === 'temp');
+        }], targetPath, false);
 
-        if (destination === 'temp') {
-            if (os.platform() === 'win32') {
-                const { copyFileToClipboard } = await import('../export/parquetExporter');
-                const success = await copyFileToClipboard(targetPath);
-                if (success) {
-                    vscode.window.showInformationMessage(`Exported and file copied to clipboard: ${targetPath}`);
-                } else {
-                    vscode.window.showInformationMessage(`Exported to ${targetPath} (Clipboard copy failed)`);
-                }
-            } else {
-                await vscode.env.clipboard.writeText(targetPath);
-                vscode.window.showInformationMessage(`Exported to temp. Path copied: ${targetPath}`);
-            }
-        } else if (destination === 'open') {
-            vscode.env.openExternal(vscode.Uri.file(targetPath));
-            vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
+        if (destination === 'temp' || destination === 'open') {
+            await this.deliverTempExport(targetPath, destination);
         } else {
             await this.showExportCompleted(targetPath, 'Parquet');
         }
@@ -635,7 +619,7 @@ export class ExportManager {
             if (!uri) return;
             targetPath = uri.fsPath;
         } else {
-            targetPath = path.join(os.tmpdir(), `netezza_export_${Date.now()}.${ext}`);
+            targetPath = exportTempFilePath(ext, resultSet.name || 'Result');
         }
 
         const { exportStructuredToXpt } = await import('../export/xptExporter');
@@ -650,24 +634,10 @@ export class ExportManager {
             rows,
             sql: resultSet.sql || '',
             name: resultSet.name || 'Result'
-        }], targetPath, destination === 'temp');
+        }], targetPath, false);
 
-        if (destination === 'temp') {
-            if (os.platform() === 'win32') {
-                const { copyFileToClipboard } = await import('../export/xptExporter');
-                const success = await copyFileToClipboard(targetPath);
-                if (success) {
-                    vscode.window.showInformationMessage(`Exported and file copied to clipboard: ${targetPath}`);
-                } else {
-                    vscode.window.showInformationMessage(`Exported to ${targetPath} (Clipboard copy failed)`);
-                }
-            } else {
-                await vscode.env.clipboard.writeText(targetPath);
-                vscode.window.showInformationMessage(`Exported to temp. Path copied: ${targetPath}`);
-            }
-        } else if (destination === 'open') {
-            vscode.env.openExternal(vscode.Uri.file(targetPath));
-            vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
+        if (destination === 'temp' || destination === 'open') {
+            await this.deliverTempExport(targetPath, destination);
         } else {
             await this.showExportCompleted(targetPath, 'XPT');
         }
@@ -706,7 +676,7 @@ export class ExportManager {
             if (!uri) return;
             targetPath = uri.fsPath;
         } else {
-            targetPath = path.join(os.tmpdir(), `netezza_export_${Date.now()}.${ext}`);
+            targetPath = exportTempFilePath(ext, resultSet.name || 'Result');
         }
 
         await exportResultSetToFile(resultSet, targetPath, {
@@ -715,21 +685,8 @@ export class ExportManager {
             columnIds: exportData.columnIds
         });
 
-        if (destination === 'temp') {
-            if (os.platform() === 'win32') {
-                const success = await copyXlsbToClipboard(targetPath);
-                if (success) {
-                    vscode.window.showInformationMessage(`Exported and file copied to clipboard: ${targetPath}`);
-                } else {
-                    vscode.window.showInformationMessage(`Exported to ${targetPath} (Clipboard copy failed)`);
-                }
-            } else {
-                await vscode.env.clipboard.writeText(targetPath);
-                vscode.window.showInformationMessage(`Exported to temp. Path copied: ${targetPath}`);
-            }
-        } else if (destination === 'open') {
-            vscode.env.openExternal(vscode.Uri.file(targetPath));
-            vscode.window.showInformationMessage(`Exported to temp and opened: ${targetPath}`);
+        if (destination === 'temp' || destination === 'open') {
+            await this.deliverTempExport(targetPath, destination);
         } else {
             await this.showExportCompleted(targetPath, format.toUpperCase());
         }
@@ -775,7 +732,7 @@ export class ExportManager {
             if (!uri) return;
             targetPath = uri.fsPath;
         } else {
-            targetPath = path.join(os.tmpdir(), `netezza_export_all_${Date.now()}.${ext}`);
+            targetPath = exportTempFilePath(ext, 'All results');
         }
 
         try {
@@ -797,35 +754,22 @@ export class ExportManager {
 
                     if (selectedFormat.id === 'xlsb') {
                         if (cancellationToken) {
-                            await exportStructuredToXlsb(hydratedData, targetPath, selectedDestination.id === 'temp', undefined, cancellationToken);
+                            await exportStructuredToXlsb(hydratedData, targetPath, false, undefined, cancellationToken);
                         } else {
-                            await exportStructuredToXlsb(hydratedData, targetPath, selectedDestination.id === 'temp');
+                            await exportStructuredToXlsb(hydratedData, targetPath, false);
                         }
                     } else {
                         if (cancellationToken) {
-                            await exportStructuredToXlsx(hydratedData, targetPath, selectedDestination.id === 'temp', undefined, cancellationToken);
+                            await exportStructuredToXlsx(hydratedData, targetPath, false, undefined, cancellationToken);
                         } else {
-                            await exportStructuredToXlsx(hydratedData, targetPath, selectedDestination.id === 'temp');
+                            await exportStructuredToXlsx(hydratedData, targetPath, false);
                         }
                     }
                 }
             );
 
-            if (selectedDestination.id === 'temp') {
-                if (os.platform() === 'win32') {
-                    const success = await copyXlsbToClipboard(targetPath);
-                    if (success) {
-                        vscode.window.showInformationMessage(`Exported all results and copied file to clipboard: ${targetPath}`);
-                    } else {
-                        vscode.window.showWarningMessage(`Exported to ${targetPath} (Clipboard copy failed)`);
-                    }
-                } else {
-                    await vscode.env.clipboard.writeText(targetPath);
-                    vscode.window.showInformationMessage(`Exported to temp. Path copied: ${targetPath}`);
-                }
-            } else if (selectedDestination.id === 'open') {
-                vscode.env.openExternal(vscode.Uri.file(targetPath));
-                vscode.window.showInformationMessage(`Exported all results to temp and opened: ${targetPath}`);
+            if (selectedDestination.id === 'temp' || selectedDestination.id === 'open') {
+                await this.deliverTempExport(targetPath, selectedDestination.id, `${metadata.results.length} result set(s)`);
             } else {
                 await this.showExportCompleted(
                     targetPath,
@@ -836,6 +780,28 @@ export class ExportManager {
         } catch (error: unknown) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Export failed: ${errorMsg}`);
+        }
+    }
+
+    /**
+     * Finish an "Export & Copy file" ('temp') or "Export & Open" ('open') export
+     * written to the temp folder.
+     */
+    private async deliverTempExport(targetPath: string, destination: 'temp' | 'open', detail?: string): Promise<void> {
+        const fileName = path.basename(targetPath);
+        const suffix = detail ? ` (${detail})` : '';
+        if (destination === 'open') {
+            await openFileExternally(targetPath);
+            vscode.window.showInformationMessage(`Exported and opened ${fileName}${suffix}`);
+            return;
+        }
+        const mode = await copyFileToClipboardWithMode(targetPath);
+        if (mode === 'file') {
+            vscode.window.showInformationMessage(`Exported ${fileName}${suffix} and copied the file to the clipboard — paste it into a mail, chat or folder.`);
+        } else if (mode === 'path') {
+            vscode.window.showWarningMessage(`Exported ${fileName}${suffix}. This environment cannot put files on the clipboard, so the file path was copied instead: ${targetPath}`);
+        } else {
+            vscode.window.showWarningMessage(`Exported to ${targetPath}${suffix}, but copying to the clipboard failed.`);
         }
     }
 

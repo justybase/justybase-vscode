@@ -1,11 +1,7 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { onGlobalFilterChanged, onGlobalFilterKeydown } from '../init.js';
-import {
-    handleExportPrimaryClick,
-    readLastExportSelection,
-    rememberLastExportSelection,
-    syncExportPrimaryButton,
-} from '../export.js';
+import { handleExportPrimaryClick } from '../export.js';
+import { postHostMessage } from '../protocol.js';
 import { renderRowCountInfo } from '../rowCount.js';
 import {
     addGrid,
@@ -16,6 +12,10 @@ import {
 import { getResultPanelWindow } from '../types.js';
 import type { GridHandle, ResultSet } from '../types.js';
 
+jest.mock('../protocol.js', () => {
+    const actual = jest.requireActual('../protocol.js') as Record<string, unknown>;
+    return { __esModule: true, ...actual, postHostMessage: jest.fn() };
+});
 jest.mock('../rangeChart.js', () => ({ canCreateRangeChart: jest.fn(() => false) }));
 jest.mock('../databaseFilters.js', () => ({
     applyDatabaseFilter: jest.fn(async () => undefined),
@@ -165,78 +165,128 @@ describe('toolbar "⋯" Filter section (variant C)', () => {
     });
 });
 
-describe('export repeat-last-format (variant C)', () => {
-    function withFakeGrid(): void {
-        getResultPanelWindow().resultSets = [minimalResultSet({ refreshSql: 'SELECT 1' })];
+describe('export menu (no remembered choice)', () => {
+    const posted = postHostMessage as jest.Mock;
+
+    function withExportMenu(refreshSql = 'SELECT 1'): void {
+        getResultPanelWindow().resultSets = [minimalResultSet({ refreshSql })];
         addGrid({
             tanTable: {
                 getVisibleLeafColumns: () => [{ id: '0', getIsVisible: () => true }],
             },
         } as unknown as GridHandle);
-    }
-
-    function withExportButton(): void {
         document.body.innerHTML =
             `<div class="split-btn" id="exportSplitBtn">` +
-            `<button class="btn split-btn__primary">Export</button></div>`;
+            `<button class="btn split-btn__primary" id="exportBtn">Export</button>` +
+            `<div class="split-btn__menu" id="exportPrimaryMenu" style="display:none"></div></div>`;
+        posted.mockClear();
     }
 
-    it('round-trips the last selection and rejects unknown formats', () => {
-        rememberLastExportSelection('csv', 'loaded');
-        expect(readLastExportSelection()).toEqual({ format: 'csv', rowScope: 'loaded' });
+    function menu(): HTMLElement {
+        const element = document.getElementById('exportPrimaryMenu');
+        if (!element) throw new Error('export menu missing');
+        return element;
+    }
 
-        rememberLastExportSelection('nope', 'loaded');
-        expect(readLastExportSelection()).toBeNull();
+    function chip(label: string): HTMLButtonElement {
+        const found = Array.from(menu().querySelectorAll<HTMLButtonElement>('.export-chip'))
+            .find(candidate => candidate.textContent === label);
+        if (!found) throw new Error(`chip ${label} missing`);
+        return found;
+    }
 
-        rememberLastExportSelection('csv', 'bogus' as unknown as 'loaded');
-        expect(readLastExportSelection()).toEqual({ format: 'csv', rowScope: 'loaded' });
-    });
+    function action(destination: string): HTMLButtonElement {
+        const found = menu().querySelector<HTMLButtonElement>(`.export-action[data-destination="${destination}"]`);
+        if (!found) throw new Error(`action ${destination} missing`);
+        return found;
+    }
 
-    it('syncs the primary button hint from the last selection', () => {
-        withExportButton();
-        rememberLastExportSelection('xlsx', 'loaded');
-        syncExportPrimaryButton();
+    function lastExportMessage(): Record<string, unknown> | undefined {
+        return posted.mock.calls
+            .map(call => call[0] as Record<string, unknown>)
+            .filter(message => message.command === 'initiateExportWithSelection')
+            .pop();
+    }
 
-        const primary = document.querySelector('#exportSplitBtn .split-btn__primary');
-        expect(primary?.getAttribute('title')).toContain('Excel (.xlsx)');
-        expect(primary?.getAttribute('aria-label')).toContain('Excel (.xlsx)');
-    });
-
-    it('repeats the last format on primary click', () => {
-        withFakeGrid();
-        withExportButton();
-        rememberLastExportSelection('json', 'loaded');
-
-        handleExportPrimaryClick();
-
-        expect(readLastExportSelection()).toEqual({ format: 'json', rowScope: 'loaded' });
-        expect(
-            document.querySelector('#exportSplitBtn .split-btn__primary')?.getAttribute('title'),
-        ).toContain('JSON');
-    });
-
-    it('falls back to loaded rows without overwriting the stored ALL preference', () => {
-        withFakeGrid();
-        rememberLastExportSelection('json', 'all');
+    it('opens the menu instead of repeating an export', () => {
+        withExportMenu();
 
         handleExportPrimaryClick();
 
-        // The context-forced downgrade applies to this export only; the
-        // remembered ALL scope must survive for the next LIMIT result.
-        expect(readLastExportSelection()).toEqual({ format: 'json', rowScope: 'all' });
+        expect(menu().style.display).toBe('block');
+        expect(lastExportMessage()).toBeUndefined();
+        expect(chip('Excel').getAttribute('aria-checked')).toBe('true');
+        expect(Array.from(menu().querySelectorAll('.export-action')).map(button => button.textContent))
+            .toEqual(['💾Save as…', '↗Export & Open', '📋Export & Copy file']);
     });
 
-    it('opens the format menu when nothing was remembered', () => {
-        withExportButton();
-        document.body.innerHTML += `<div class="split-btn__menu" id="exportPrimaryMenu" style="display:none"></div>`;
-        // Poison the memory with an unknown format so the read falls through.
-        rememberLastExportSelection('nope', 'loaded');
+    it('posts the chosen format with the Export & Open destination', () => {
+        withExportMenu();
+        handleExportPrimaryClick();
 
-        // No grid metadata either, so the menu simply stays closed without throwing.
+        chip('CSV').click();
+        action('open').click();
+
+        expect(lastExportMessage()).toMatchObject({ format: 'csv', destination: 'open', rowScope: 'loaded' });
+        expect(menu().style.display).toBe('none');
+    });
+
+    it('starts from the default format again on the next open', () => {
+        withExportMenu();
+        handleExportPrimaryClick();
+        chip('JSON').click();
+        action('temp').click();
+        expect(lastExportMessage()).toMatchObject({ format: 'json', destination: 'temp' });
+
+        handleExportPrimaryClick();
+
+        expect(chip('Excel').getAttribute('aria-checked')).toBe('true');
+        expect(chip('JSON').getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('copies the exported text itself for text formats only', () => {
+        withExportMenu();
+        handleExportPrimaryClick();
+        expect(menu().querySelector('.export-action[data-destination="clipboard"]')).toBeNull();
+
+        chip('Markdown').click();
+        action('clipboard').click();
+
+        expect(lastExportMessage()).toMatchObject({ format: 'markdown', destination: 'clipboard' });
+    });
+
+    it('offers less common formats through the More picker', () => {
+        withExportMenu();
+        handleExportPrimaryClick();
+
+        const more = menu().querySelector<HTMLSelectElement>('.export-more-formats');
+        if (!more) throw new Error('More picker missing');
+        more.value = 'parquet';
+        more.dispatchEvent(new Event('change'));
+        action('file').click();
+
+        expect(lastExportMessage()).toMatchObject({ format: 'parquet', destination: 'file' });
+    });
+
+    it('asks for the row scope only when the SQL ends with LIMIT', () => {
+        withExportMenu();
+        handleExportPrimaryClick();
+        expect(menu().textContent).not.toContain('ALL rows');
+
+        withExportMenu('SELECT * FROM T LIMIT 100');
+        handleExportPrimaryClick();
+        chip('ALL rows').click();
+        action('file').click();
+
+        expect(lastExportMessage()).toMatchObject({ format: 'xlsx', destination: 'file', rowScope: 'all' });
+    });
+
+    it('stays closed when there is no exportable grid', () => {
+        document.body.innerHTML = `<div class="split-btn__menu" id="exportPrimaryMenu" style="display:none"></div>`;
+
         handleExportPrimaryClick(new MouseEvent('click', { bubbles: true }));
-        expect(document.getElementById('exportPrimaryMenu')?.style.display).toBe('none');
 
-        rememberLastExportSelection('csv', 'loaded');
+        expect(document.getElementById('exportPrimaryMenu')?.style.display).toBe('none');
     });
 });
 
