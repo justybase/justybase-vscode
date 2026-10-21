@@ -1341,3 +1341,241 @@ export function buildIsPartitionedQuery(schema: string, tableName: string): stri
         WITH UR
     `;
 }
+
+export type Db2TableDetailKind = 'keys' | 'indexes' | 'triggers';
+
+/** Keys/constraints, indexes or triggers of one table for the schema tree (NAME, KIND, DETAIL). */
+export function buildTableDetailQuery(
+    _database: string,
+    schema: string,
+    tableName: string,
+    detail: Db2TableDetailKind,
+): string {
+    const owner = quoteLiteral(schema);
+    const table = quoteLiteral(tableName);
+    if (detail === 'keys') {
+        return `
+            SELECT
+                RTRIM(c.CONSTNAME) AS NAME,
+                CASE c.TYPE WHEN 'P' THEN 'PRIMARY KEY' WHEN 'U' THEN 'UNIQUE' WHEN 'F' THEN 'FOREIGN KEY' ELSE 'CHECK' END AS KIND,
+                -- Narrow casts keep the row inside a 4K temporary page (SQL1585N otherwise).
+                COALESCE((SELECT CAST(LISTAGG(CAST(RTRIM(k.COLNAME) AS VARCHAR(128)), ', ') WITHIN GROUP (ORDER BY k.COLSEQ) AS VARCHAR(1000))
+                            FROM SYSCAT.KEYCOLUSE k
+                           WHERE k.TABSCHEMA = c.TABSCHEMA AND k.TABNAME = c.TABNAME AND k.CONSTNAME = c.CONSTNAME), '')
+                || COALESCE((SELECT CAST(' -> ' || RTRIM(r.REFTABSCHEMA) || '.' || RTRIM(r.REFTABNAME) AS VARCHAR(300))
+                               FROM SYSCAT.REFERENCES r
+                              WHERE r.TABSCHEMA = c.TABSCHEMA AND r.TABNAME = c.TABNAME AND r.CONSTNAME = c.CONSTNAME), '')
+                || COALESCE((SELECT RTRIM(CAST(SUBSTR(ch.TEXT, 1, 200) AS VARCHAR(200)))
+                               FROM SYSCAT.CHECKS ch
+                              WHERE ch.TABSCHEMA = c.TABSCHEMA AND ch.TABNAME = c.TABNAME AND ch.CONSTNAME = c.CONSTNAME), '')
+                || CASE WHEN c.ENFORCED = 'N' THEN ' (not enforced)' ELSE '' END AS DETAIL
+            FROM SYSCAT.TABCONST c
+            WHERE c.TABSCHEMA = ${owner} AND c.TABNAME = ${table}
+            ORDER BY CASE c.TYPE WHEN 'P' THEN 0 WHEN 'U' THEN 1 WHEN 'F' THEN 2 ELSE 3 END, c.CONSTNAME
+        `;
+    }
+    if (detail === 'indexes') {
+        return `
+            SELECT
+                RTRIM(i.INDNAME) AS NAME,
+                CASE i.UNIQUERULE WHEN 'P' THEN 'PRIMARY KEY' WHEN 'U' THEN 'UNIQUE' ELSE 'INDEX' END AS KIND,
+                COALESCE((SELECT CAST(LISTAGG(CAST(RTRIM(u.COLNAME) || CASE u.COLORDER WHEN 'D' THEN ' DESC' WHEN 'I' THEN ' (INCLUDE)' ELSE '' END AS VARCHAR(140)), ', ')
+                                 WITHIN GROUP (ORDER BY u.COLSEQ) AS VARCHAR(1000))
+                            FROM SYSCAT.INDEXCOLUSE u
+                           WHERE u.INDSCHEMA = i.INDSCHEMA AND u.INDNAME = i.INDNAME), '') AS DETAIL
+            FROM SYSCAT.INDEXES i
+            WHERE i.TABSCHEMA = ${owner} AND i.TABNAME = ${table}
+            ORDER BY CASE i.UNIQUERULE WHEN 'P' THEN 0 WHEN 'U' THEN 1 ELSE 2 END, i.INDNAME
+        `;
+    }
+    return `
+        SELECT
+            RTRIM(t.TRIGNAME) AS NAME,
+            CASE WHEN t.VALID <> 'Y' THEN 'INVALID' ELSE 'TRIGGER' END AS KIND,
+            CASE t.TRIGTIME WHEN 'B' THEN 'BEFORE' WHEN 'A' THEN 'AFTER' ELSE 'INSTEAD OF' END || ' '
+            || CASE t.TRIGEVENT WHEN 'I' THEN 'INSERT' WHEN 'U' THEN 'UPDATE' WHEN 'D' THEN 'DELETE' ELSE 'MULTIPLE EVENTS' END
+            || CASE t.GRANULARITY WHEN 'R' THEN ' FOR EACH ROW' ELSE ' FOR EACH STATEMENT' END AS DETAIL
+        FROM SYSCAT.TRIGGERS t
+        WHERE t.TABSCHEMA = ${owner} AND t.TABNAME = ${table}
+        ORDER BY t.TRIGNAME
+    `;
+}
+
+/**
+ * Catalog-recorded dependencies for impact analysis: views/MQTs (TABDEP),
+ * triggers on the objects they read (TRIGDEP) and routines through their packages (ROUTINEDEP +
+ * PACKAGEDEP), limited to user schemas.
+ */
+export function buildObjectDependenciesQuery(_database: string): string {
+    const baseType = (column: string) => `CASE ${column} WHEN 'V' THEN 'VIEW' WHEN 'Q' THEN 'SEQUENCE' ELSE 'TABLE' END`;
+    const userSchema = (column: string) => `${column} NOT LIKE 'SYS%'`;
+    return `
+        SELECT DISTINCT RTRIM(d.TABSCHEMA) AS SOURCE_SCHEMA, RTRIM(d.TABNAME) AS SOURCE_NAME,
+            CASE d.DTYPE WHEN 'S' THEN 'TABLE' ELSE 'VIEW' END AS SOURCE_TYPE,
+            RTRIM(d.BSCHEMA) AS TARGET_SCHEMA, RTRIM(d.BNAME) AS TARGET_NAME, ${baseType('d.BTYPE')} AS TARGET_TYPE,
+            CAST(NULL AS VARCHAR(128)) AS TARGET_COLUMN
+        FROM SYSCAT.TABDEP d
+        WHERE d.BTYPE IN ('T', 'V', 'S', 'Q') AND ${userSchema('d.TABSCHEMA')}
+
+        UNION
+        SELECT RTRIM(d.TRIGSCHEMA), RTRIM(d.TRIGNAME), 'PROCEDURE', RTRIM(d.BSCHEMA), RTRIM(d.BNAME), ${baseType('d.BTYPE')}, CAST(NULL AS VARCHAR(128))
+        FROM SYSCAT.TRIGDEP d
+        WHERE d.BTYPE IN ('T', 'V', 'S', 'Q') AND ${userSchema('d.TRIGSCHEMA')}
+        UNION
+        SELECT RTRIM(r.ROUTINESCHEMA), RTRIM(r.ROUTINENAME), 'PROCEDURE', RTRIM(p.BSCHEMA), RTRIM(p.BNAME), ${baseType('p.BTYPE')}, CAST(NULL AS VARCHAR(128))
+        FROM SYSCAT.ROUTINEDEP rd
+        INNER JOIN SYSCAT.ROUTINES r ON r.ROUTINESCHEMA = rd.ROUTINESCHEMA AND r.SPECIFICNAME = rd.SPECIFICNAME
+        INNER JOIN SYSCAT.PACKAGEDEP p ON p.PKGSCHEMA = rd.BSCHEMA AND p.PKGNAME = rd.BNAME
+        WHERE rd.BTYPE = 'K' AND p.BTYPE IN ('T', 'V', 'S', 'Q') AND ${userSchema('rd.ROUTINESCHEMA')}
+        UNION
+        SELECT RTRIM(r.ROUTINESCHEMA), RTRIM(r.ROUTINENAME), 'PROCEDURE', RTRIM(rd.BSCHEMA), RTRIM(rd.BNAME), ${baseType('rd.BTYPE')}, CAST(NULL AS VARCHAR(128))
+        FROM SYSCAT.ROUTINEDEP rd
+        INNER JOIN SYSCAT.ROUTINES r ON r.ROUTINESCHEMA = rd.ROUTINESCHEMA AND r.SPECIFICNAME = rd.SPECIFICNAME
+        WHERE rd.BTYPE IN ('T', 'V', 'S', 'Q') AND ${userSchema('rd.ROUTINESCHEMA')}
+    `;
+}
+
+export type Db2TableReportKind = 'size' | 'privileges' | 'maintenance';
+export type Db2DatabaseReportKind = 'locks' | 'invalidObjects';
+
+/** Read-only table reports shown in SQL Results (size, privileges, REORGCHK-style maintenance status). */
+export function buildTableReportQuery(
+    _database: string,
+    schema: string,
+    tableName: string,
+    report: Db2TableReportKind,
+): string {
+    const owner = quoteLiteral(schema);
+    const table = quoteLiteral(tableName);
+    if (report === 'size') {
+        // ADMIN_GET_TAB_INFO sizes are in KB and return one row per database partition.
+        return `
+            SELECT
+                RTRIM(T.TABSCHEMA) AS SCHEMA_NAME,
+                RTRIM(T.TABNAME) AS TABLE_NAME,
+                CASE WHEN T.CARD < 0 THEN NULL ELSE T.CARD END AS ROWS_FROM_STATISTICS,
+                DEC(COALESCE(A.TOTAL_KB, 0) / 1024.0, 18, 2) AS TOTAL_MB,
+                DEC(COALESCE(A.DATA_KB, 0) / 1024.0, 18, 2) AS DATA_MB,
+                DEC(COALESCE(A.INDEX_KB, 0) / 1024.0, 18, 2) AS INDEX_MB,
+                DEC(COALESCE(A.LOB_KB, 0) / 1024.0, 18, 2) AS LOB_XML_MB,
+                CASE WHEN T.NPAGES < 0 THEN NULL ELSE T.NPAGES END AS PAGES_WITH_ROWS,
+                CASE WHEN T.FPAGES < 0 THEN NULL ELSE T.FPAGES END AS TOTAL_PAGES,
+                RTRIM(COALESCE(T.TBSPACE, '')) AS TABLESPACE,
+                T.STATS_TIME AS STATISTICS_TIME
+            FROM SYSCAT.TABLES T
+            LEFT JOIN (
+                SELECT
+                    SUM(DATA_OBJECT_P_SIZE + INDEX_OBJECT_P_SIZE + LONG_OBJECT_P_SIZE + LOB_OBJECT_P_SIZE + XML_OBJECT_P_SIZE) AS TOTAL_KB,
+                    SUM(DATA_OBJECT_P_SIZE) AS DATA_KB,
+                    SUM(INDEX_OBJECT_P_SIZE) AS INDEX_KB,
+                    SUM(LONG_OBJECT_P_SIZE + LOB_OBJECT_P_SIZE + XML_OBJECT_P_SIZE) AS LOB_KB
+                FROM TABLE(SYSPROC.ADMIN_GET_TAB_INFO(${owner}, ${table})) AS I
+            ) A ON 1 = 1
+            WHERE T.TABSCHEMA = ${owner} AND T.TABNAME = ${table}
+            WITH UR
+        `;
+    }
+    if (report === 'privileges') {
+        return `
+            SELECT
+                RTRIM(GRANTEE) AS GRANTEE,
+                CASE GRANTEETYPE WHEN 'U' THEN 'USER' WHEN 'G' THEN 'GROUP' WHEN 'R' THEN 'ROLE' ELSE GRANTEETYPE END AS GRANTEE_TYPE,
+                RTRIM(GRANTOR) AS GRANTOR,
+                CONTROLAUTH AS "CONTROL",
+                SELECTAUTH AS "SELECT",
+                INSERTAUTH AS "INSERT",
+                UPDATEAUTH AS "UPDATE",
+                DELETEAUTH AS "DELETE",
+                ALTERAUTH AS "ALTER",
+                INDEXAUTH AS "INDEX",
+                REFAUTH AS "REFERENCES"
+            FROM SYSCAT.TABAUTH
+            WHERE TABSCHEMA = ${owner} AND TABNAME = ${table}
+            ORDER BY GRANTEE
+            WITH UR
+        `;
+    }
+    // REORGCHK formulas: F1 overflow rows < 5%, F3 full pages > 80% (NPAGES / FPAGES).
+    return `
+        SELECT
+            RTRIM(T.TABSCHEMA) AS SCHEMA_NAME,
+            RTRIM(T.TABNAME) AS TABLE_NAME,
+            CASE
+                WHEN A.REORG_PENDING = 'Y' THEN 'REORG TABLE required (reorg pending)'
+                WHEN T.STATS_TIME IS NULL OR T.CARD < 0 THEN 'Run RUNSTATS (no statistics)'
+                WHEN T.CARD > 0 AND T.OVERFLOW * 100 > T.CARD * 5 THEN 'REORG TABLE recommended (F1: overflow rows > 5%)'
+                WHEN T.FPAGES > 1 AND T.NPAGES * 100 < T.FPAGES * 80 THEN 'REORG TABLE recommended (F3: full pages < 80%)'
+                WHEN T.STATS_TIME < CURRENT TIMESTAMP - 30 DAYS THEN 'Run RUNSTATS (statistics older than 30 days)'
+                ELSE 'OK'
+            END AS RECOMMENDATION,
+            T.STATS_TIME AS STATISTICS_TIME,
+            CASE WHEN T.CARD < 0 THEN NULL ELSE T.CARD END AS ROWS_FROM_STATISTICS,
+            CASE WHEN T.OVERFLOW < 0 THEN NULL ELSE T.OVERFLOW END AS OVERFLOW_ROWS,
+            CASE WHEN T.CARD > 0 AND T.OVERFLOW >= 0 THEN DEC(T.OVERFLOW * 100.0 / T.CARD, 7, 2) END AS OVERFLOW_PCT,
+            CASE WHEN T.FPAGES > 0 AND T.NPAGES >= 0 THEN DEC(T.NPAGES * 100.0 / T.FPAGES, 7, 2) END AS FULL_PAGES_PCT,
+            COALESCE(A.REORG_PENDING, 'N') AS REORG_PENDING,
+            RTRIM(COALESCE(A.INPLACE_REORG_STATUS, '')) AS INPLACE_REORG_STATUS,
+            A.NUM_REORG_REC_ALTERS AS REORG_RECOMMENDED_ALTERS,
+            RTRIM(COALESCE(A.AVAILABLE, '')) AS AVAILABLE
+        FROM SYSCAT.TABLES T
+        LEFT JOIN (
+            SELECT
+                MAX(REORG_PENDING) AS REORG_PENDING,
+                MAX(INPLACE_REORG_STATUS) AS INPLACE_REORG_STATUS,
+                MAX(NUM_REORG_REC_ALTERS) AS NUM_REORG_REC_ALTERS,
+                MIN(AVAILABLE) AS AVAILABLE
+            FROM TABLE(SYSPROC.ADMIN_GET_TAB_INFO(${owner}, ${table})) AS I
+        ) A ON 1 = 1
+        WHERE T.TABSCHEMA = ${owner} AND T.TABNAME = ${table}
+        WITH UR
+    `;
+}
+
+/** Read-only database reports shown in SQL Results (lock waits, invalid or inoperative objects). */
+export function buildDatabaseReportQuery(_database: string, report: Db2DatabaseReportKind): string {
+    if (report === 'locks') {
+        return `
+            SELECT
+                REQ_APPLICATION_HANDLE AS WAITING_APPLICATION,
+                RTRIM(COALESCE(REQ_USERID, '')) AS WAITING_USER,
+                RTRIM(COALESCE(REQ_APPLICATION_NAME, '')) AS WAITING_PROGRAM,
+                LOCK_WAIT_ELAPSED_TIME AS WAIT_SECONDS,
+                HLD_APPLICATION_HANDLE AS BLOCKING_APPLICATION,
+                RTRIM(COALESCE(HLD_USERID, '')) AS BLOCKING_USER,
+                RTRIM(COALESCE(HLD_APPLICATION_NAME, '')) AS BLOCKING_PROGRAM,
+                RTRIM(COALESCE(TABSCHEMA, '')) || '.' || RTRIM(COALESCE(TABNAME, '')) AS LOCKED_OBJECT,
+                RTRIM(COALESCE(LOCK_OBJECT_TYPE, '')) AS LOCK_OBJECT_TYPE,
+                RTRIM(COALESCE(LOCK_MODE, '')) AS HELD_MODE,
+                RTRIM(COALESCE(LOCK_MODE_REQUESTED, '')) AS REQUESTED_MODE,
+                VARCHAR(SUBSTR(COALESCE(REQ_STMT_TEXT, ''), 1, 2000), 2000) AS WAITING_SQL,
+                VARCHAR(SUBSTR(COALESCE(HLD_CURRENT_STMT_TEXT, ''), 1, 2000), 2000) AS BLOCKING_SQL
+            FROM SYSIBMADM.MON_LOCKWAITS
+            ORDER BY LOCK_WAIT_ELAPSED_TIME DESC
+        `;
+    }
+    return `
+        SELECT
+            RTRIM(OBJECTSCHEMA) AS SCHEMA_NAME,
+            RTRIM(COALESCE(OBJECTMODULENAME || '.', '') || OBJECTNAME) AS OBJECT_NAME,
+            CASE OBJECTTYPE
+                WHEN 'F' THEN 'ROUTINE' WHEN 'R' THEN 'TYPE' WHEN 'B' THEN 'TRIGGER' WHEN 'V' THEN 'VIEW'
+                WHEN 'v' THEN 'GLOBAL VARIABLE' WHEN 'y' THEN 'ROW PERMISSION' WHEN '2' THEN 'COLUMN MASK'
+                ELSE OBJECTTYPE
+            END AS OBJECT_TYPE,
+            'INVALID' AS STATUS,
+            INVALIDATE_TIME AS SINCE,
+            VARCHAR(SUBSTR(COALESCE(ERRORMESSAGE, ''), 1, 1000), 1000) AS DETAIL
+        FROM SYSCAT.INVALIDOBJECTS
+        UNION ALL
+        SELECT
+            RTRIM(TABSCHEMA), RTRIM(TABNAME),
+            CASE TYPE WHEN 'V' THEN 'VIEW' WHEN 'S' THEN 'MQT' ELSE 'TABLE' END,
+            CASE STATUS WHEN 'C' THEN 'SET INTEGRITY PENDING' ELSE 'INOPERATIVE' END,
+            ALTER_TIME,
+            CASE STATUS WHEN 'C' THEN 'Run SET INTEGRITY before using the table' ELSE 'Recreate the inoperative view' END
+        FROM SYSCAT.TABLES
+        WHERE STATUS IN ('C', 'X') AND TABSCHEMA NOT LIKE 'SYS%'
+        ORDER BY 1, 2
+        WITH UR
+    `;
+}

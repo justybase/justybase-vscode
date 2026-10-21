@@ -175,21 +175,30 @@ export function buildColumnsWithKeysQuery(
   const catalogPrefix = buildCatalogPrefix(database);
   let query = `
         SELECT 
-            TABLE_SCHEMA AS SCHEMA_NAME,
-            TABLE_NAME,
-            COLUMN_NAME,
-            DATA_TYPE,
-            IS_NULLABLE
-        FROM ${catalogPrefix}INFORMATION_SCHEMA.COLUMNS
+            c.TABLE_SCHEMA AS SCHEMA_NAME,
+            c.TABLE_NAME,
+            c.COLUMN_NAME,
+            c.DATA_TYPE,
+            c.IS_NULLABLE,
+            CASE WHEN EXISTS (
+                SELECT 1
+                FROM ${catalogPrefix}INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                INNER JOIN ${catalogPrefix}INFORMATION_SCHEMA.KEY_COLUMN_USAGE k
+                    ON k.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND k.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                  AND tc.TABLE_SCHEMA = c.TABLE_SCHEMA AND tc.TABLE_NAME = c.TABLE_NAME
+                  AND k.COLUMN_NAME = c.COLUMN_NAME
+            ) THEN 1 ELSE 0 END AS IS_PK
+        FROM ${catalogPrefix}INFORMATION_SCHEMA.COLUMNS c
         WHERE 1 = 1
     `;
   if (schema) {
-    query += ` AND TABLE_SCHEMA = '${schema.replace(/'/g, "''")}'`;
+    query += ` AND c.TABLE_SCHEMA = '${schema.replace(/'/g, "''")}'`;
   }
   if (tableName) {
-    query += ` AND TABLE_NAME = '${tableName.replace(/'/g, "''")}'`;
+    query += ` AND c.TABLE_NAME = '${tableName.replace(/'/g, "''")}'`;
   }
-  query += ` ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION`;
+  query += ` ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION`;
   return query;
 }
 
@@ -410,4 +419,219 @@ export function buildProcedureSourceSearchQuery(
           ${useServerSideFilter ? `AND UPPER(COALESCE(sm.definition, '')) LIKE ${quoteLiteral(likePattern)} ESCAPE '\\'` : ""}
         ORDER BY s.name, o.name
     `;
+}
+
+export type MssqlTableDetailKind = "keys" | "indexes" | "triggers";
+
+/** Keys/constraints, indexes or triggers of one table for the schema tree (NAME, KIND, DETAIL). */
+export function buildTableDetailQuery(
+  database: string,
+  schema: string,
+  tableName: string,
+  detail: MssqlTableDetailKind,
+): string {
+  const prefix = buildCatalogPrefix(database);
+  const tableJoin = `INNER JOIN ${prefix}sys.tables t ON t.object_id = src.parent_object_id
+    INNER JOIN ${prefix}sys.schemas s ON s.schema_id = t.schema_id`;
+  const tableFilter = `s.name = ${quoteLiteral(schema)} AND t.name = ${quoteLiteral(tableName)}`;
+  const indexColumns = (objectId: string, indexId: string) => `STUFF((
+        SELECT ', ' + c.name + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END
+        FROM ${prefix}sys.index_columns ic
+        INNER JOIN ${prefix}sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        WHERE ic.object_id = ${objectId} AND ic.index_id = ${indexId} AND ic.is_included_column = 0
+        ORDER BY ic.key_ordinal
+        FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '')`;
+  if (detail === "keys") {
+    return `
+      SELECT NAME, KIND, DETAIL FROM (
+        SELECT src.name AS NAME,
+          CASE src.type WHEN 'PK' THEN 'PRIMARY KEY' ELSE 'UNIQUE' END AS KIND,
+          ${indexColumns("src.parent_object_id", "src.unique_index_id")} AS DETAIL,
+          CASE src.type WHEN 'PK' THEN 0 ELSE 1 END AS SORT_KEY
+        FROM ${prefix}sys.key_constraints src
+        ${tableJoin}
+        WHERE ${tableFilter}
+        UNION ALL
+        SELECT src.name, 'FOREIGN KEY',
+          STUFF((
+            SELECT ', ' + c.name
+            FROM ${prefix}sys.foreign_key_columns fkc
+            INNER JOIN ${prefix}sys.columns c ON c.object_id = fkc.parent_object_id AND c.column_id = fkc.parent_column_id
+            WHERE fkc.constraint_object_id = src.object_id
+            ORDER BY fkc.constraint_column_id
+            FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '')
+            + ' -> ' + rs.name + '.' + rt.name,
+          2
+        FROM ${prefix}sys.foreign_keys src
+        ${tableJoin}
+        INNER JOIN ${prefix}sys.tables rt ON rt.object_id = src.referenced_object_id
+        INNER JOIN ${prefix}sys.schemas rs ON rs.schema_id = rt.schema_id
+        WHERE ${tableFilter}
+        UNION ALL
+        SELECT src.name, 'CHECK', src.definition, 3
+        FROM ${prefix}sys.check_constraints src
+        ${tableJoin}
+        WHERE ${tableFilter}
+      ) keys_list
+      ORDER BY SORT_KEY, NAME
+    `;
+  }
+  if (detail === "indexes") {
+    return `
+      SELECT i.name AS NAME,
+        CASE WHEN i.is_primary_key = 1 THEN 'PRIMARY KEY' WHEN i.is_unique = 1 THEN 'UNIQUE' ELSE 'INDEX' END AS KIND,
+        LOWER(i.type_desc) + ' (' + ${indexColumns("i.object_id", "i.index_id")} + ')' AS DETAIL
+      FROM ${prefix}sys.indexes i
+      INNER JOIN ${prefix}sys.tables t ON t.object_id = i.object_id
+      INNER JOIN ${prefix}sys.schemas s ON s.schema_id = t.schema_id
+      WHERE ${tableFilter} AND i.index_id > 0 AND i.is_hypothetical = 0
+      ORDER BY i.is_primary_key DESC, i.is_unique DESC, i.name
+    `;
+  }
+  return `
+    SELECT tr.name AS NAME,
+      CASE WHEN tr.is_disabled = 1 THEN 'DISABLED' ELSE 'TRIGGER' END AS KIND,
+      CASE WHEN tr.is_instead_of_trigger = 1 THEN 'INSTEAD OF ' ELSE 'AFTER ' END + STUFF((
+        SELECT ' OR ' + te.type_desc
+        FROM ${prefix}sys.trigger_events te
+        WHERE te.object_id = tr.object_id
+        FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 4, '') AS DETAIL
+    FROM ${prefix}sys.triggers tr
+    INNER JOIN ${prefix}sys.tables t ON t.object_id = tr.parent_id
+    INNER JOIN ${prefix}sys.schemas s ON s.schema_id = t.schema_id
+    WHERE ${tableFilter}
+    ORDER BY tr.name
+  `;
+}
+
+/** sys.sql_expression_dependencies edges inside one database for impact analysis. */
+export function buildObjectDependenciesQuery(database: string): string {
+  const prefix = buildCatalogPrefix(database);
+  const normalized = (alias: string) => `CASE ${alias}.type
+        WHEN 'V' THEN 'VIEW' WHEN 'U' THEN 'TABLE' WHEN 'SO' THEN 'SEQUENCE'
+        WHEN 'P' THEN 'PROCEDURE' WHEN 'FN' THEN 'PROCEDURE' WHEN 'IF' THEN 'PROCEDURE' WHEN 'TF' THEN 'PROCEDURE' WHEN 'TR' THEN 'PROCEDURE'
+        ELSE 'TABLE' END`;
+  return `
+    SELECT DISTINCT
+      ss.name AS SOURCE_SCHEMA,
+      so.name AS SOURCE_NAME,
+      ${normalized("so")} AS SOURCE_TYPE,
+      ts.name AS TARGET_SCHEMA,
+      tob.name AS TARGET_NAME,
+      ${normalized("tob")} AS TARGET_TYPE,
+      tc.name AS TARGET_COLUMN
+    FROM ${prefix}sys.sql_expression_dependencies d
+    INNER JOIN ${prefix}sys.objects so ON so.object_id = d.referencing_id
+    INNER JOIN ${prefix}sys.schemas ss ON ss.schema_id = so.schema_id
+    INNER JOIN ${prefix}sys.objects tob ON tob.object_id = d.referenced_id
+    INNER JOIN ${prefix}sys.schemas ts ON ts.schema_id = tob.schema_id
+    LEFT JOIN ${prefix}sys.columns tc ON tc.object_id = d.referenced_id AND tc.column_id = d.referenced_minor_id AND d.referenced_minor_id > 0
+    WHERE d.referencing_class = 1 AND d.referenced_class = 1 AND so.is_ms_shipped = 0 AND d.referencing_id <> d.referenced_id
+  `;
+}
+
+export type MssqlTableReportKind = "size" | "privileges" | "maintenance";
+export type MssqlDatabaseReportKind = "locks" | "invalidObjects";
+
+/** Runs a statement in the given database so OBJECT_ID / STATS_DATE resolve there, not in the session database. */
+function inDatabase(database: string, sql: string): string {
+  if (!database) {
+    return sql;
+  }
+  return `EXEC [${database.replace(/]/g, "]]")}].sys.sp_executesql N'${sql.replace(/'/g, "''")}'`;
+}
+
+/** Read-only table reports shown in SQL Results (size, permissions, index fragmentation). */
+export function buildTableReportQuery(
+  database: string,
+  schema: string,
+  tableName: string,
+  report: MssqlTableReportKind,
+): string {
+  const tableFilter = `s.name = ${quoteLiteral(schema)} AND t.name = ${quoteLiteral(tableName)}`;
+  if (report === "size") {
+    return inDatabase(database, `
+      SELECT
+        s.name AS SCHEMA_NAME,
+        t.name AS TABLE_NAME,
+        SUM(CASE WHEN p.index_id IN (0, 1) AND au.type = 1 THEN p.rows ELSE 0 END) AS ROW_COUNT,
+        CAST(SUM(au.total_pages) * 8 / 1024.0 AS DECIMAL(18, 2)) AS RESERVED_MB,
+        CAST(SUM(au.used_pages) * 8 / 1024.0 AS DECIMAL(18, 2)) AS USED_MB,
+        CAST(SUM(CASE WHEN p.index_id IN (0, 1) THEN au.data_pages ELSE 0 END) * 8 / 1024.0 AS DECIMAL(18, 2)) AS DATA_MB,
+        CAST(SUM(CASE WHEN p.index_id > 1 THEN au.used_pages ELSE 0 END) * 8 / 1024.0 AS DECIMAL(18, 2)) AS INDEXES_MB,
+        CAST((SUM(au.total_pages) - SUM(au.used_pages)) * 8 / 1024.0 AS DECIMAL(18, 2)) AS UNUSED_MB,
+        COUNT(DISTINCT p.partition_number) AS PARTITIONS
+      FROM sys.tables t
+      INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+      INNER JOIN sys.partitions p ON p.object_id = t.object_id
+      INNER JOIN sys.allocation_units au ON au.container_id = p.partition_id
+      WHERE ${tableFilter}
+      GROUP BY s.name, t.name`);
+  }
+  if (report === "privileges") {
+    return inDatabase(database, `
+      SELECT
+        grantee.name AS GRANTEE,
+        grantee.type_desc AS GRANTEE_TYPE,
+        dp.state_desc AS STATE,
+        dp.permission_name + CASE WHEN dp.minor_id > 0 THEN ' (' + COL_NAME(dp.major_id, dp.minor_id) + ')' ELSE '' END AS PERMISSION,
+        grantor.name AS GRANTOR
+      FROM sys.database_permissions dp
+      INNER JOIN sys.tables t ON t.object_id = dp.major_id
+      INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+      INNER JOIN sys.database_principals grantee ON grantee.principal_id = dp.grantee_principal_id
+      INNER JOIN sys.database_principals grantor ON grantor.principal_id = dp.grantor_principal_id
+      WHERE dp.class = 1 AND ${tableFilter}
+      ORDER BY grantee.name, dp.permission_name`);
+  }
+  // Fragmentation thresholds follow the usual guidance: > 30% rebuild, > 5% reorganize, small indexes skipped.
+  return inDatabase(database, `
+      SELECT
+        s.name AS SCHEMA_NAME,
+        t.name AS TABLE_NAME,
+        COALESCE(i.name, '(heap)') AS INDEX_NAME,
+        i.type_desc AS INDEX_TYPE,
+        CASE
+          WHEN ps.page_count < 1000 THEN 'OK (too small to matter)'
+          WHEN ps.avg_fragmentation_in_percent > 30 THEN 'ALTER INDEX ... REBUILD'
+          WHEN ps.avg_fragmentation_in_percent > 5 THEN 'ALTER INDEX ... REORGANIZE'
+          ELSE 'OK'
+        END AS RECOMMENDATION,
+        CAST(ps.avg_fragmentation_in_percent AS DECIMAL(7, 2)) AS FRAGMENTATION_PCT,
+        ps.page_count AS PAGE_COUNT,
+        STATS_DATE(i.object_id, i.index_id) AS STATISTICS_UPDATED
+      FROM sys.tables t
+      INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+      CROSS APPLY sys.dm_db_index_physical_stats(DB_ID(), t.object_id, NULL, NULL, 'LIMITED') ps
+      INNER JOIN sys.indexes i ON i.object_id = ps.object_id AND i.index_id = ps.index_id
+      WHERE ${tableFilter} AND ps.alloc_unit_type_desc = 'IN_ROW_DATA'
+      ORDER BY ps.avg_fragmentation_in_percent DESC`);
+}
+
+/** Read-only database reports shown in SQL Results; SQL Server has no invalid-object catalog. */
+export function buildDatabaseReportQuery(_database: string, report: MssqlDatabaseReportKind): string | undefined {
+  if (report !== "locks") {
+    return undefined;
+  }
+  // Other sessions are visible only with VIEW SERVER STATE; without it the report lists the caller's own requests.
+  return `
+    SELECT
+      r.session_id AS WAITING_SESSION,
+      ws.login_name AS WAITING_LOGIN,
+      ws.program_name AS WAITING_PROGRAM,
+      DB_NAME(r.database_id) AS DATABASE_NAME,
+      r.wait_time / 1000 AS WAIT_SECONDS,
+      r.wait_type AS WAIT_TYPE,
+      r.wait_resource AS WAIT_RESOURCE,
+      r.blocking_session_id AS BLOCKING_SESSION,
+      bs.login_name AS BLOCKING_LOGIN,
+      bs.program_name AS BLOCKING_PROGRAM,
+      bs.status AS BLOCKING_STATUS,
+      LEFT(wt.text, 2000) AS WAITING_SQL
+    FROM sys.dm_exec_requests r
+    INNER JOIN sys.dm_exec_sessions ws ON ws.session_id = r.session_id
+    LEFT JOIN sys.dm_exec_sessions bs ON bs.session_id = r.blocking_session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) wt
+    WHERE r.blocking_session_id <> 0
+    ORDER BY r.wait_time DESC`;
 }
