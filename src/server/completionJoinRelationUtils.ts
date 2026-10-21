@@ -6,6 +6,7 @@ import {
     formatNetezzaIdentifier,
     unquoteNetezzaIdentifier,
 } from "../dialects/netezza/metadata/identifierUtils";
+import { getTableAliasBase } from "../sql/tableAliasPolicy";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
 import { supportsThreePartPath, usesDatabaseObjectTwoPartName } from "./completionPathUtils";
 
@@ -79,11 +80,5 @@ export function formatJoinTargetPath(
 }
 
 export function getJoinAliasBase(tableName: string): string {
-  const words = tableName
-    .replace(/^"|"$/g, "")
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean);
-  return (words.length > 1
-    ? words.map((word) => word[0]).join("")
-    : words[0]?.[0] ?? "T").toLocaleUpperCase();
+  return getTableAliasBase(tableName);
 }

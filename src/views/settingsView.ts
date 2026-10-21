@@ -385,6 +385,19 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 ]
             },
             {
+                id: 'expand-star-layout',
+                label: 'Expand * Column Layout',
+                description: 'Layout of the column list produced by "Expand * to column list" and the NZ001 quick fix',
+                type: 'select',
+                configKey: 'sql.expandStarLayout',
+                defaultValue: 'leadingComma',
+                options: [
+                    { label: 'One per line, leading commas', value: 'leadingComma' },
+                    { label: 'One per line, trailing commas', value: 'trailingComma' },
+                    { label: 'Single line', value: 'singleLine' }
+                ]
+            },
+            {
                 id: 'join-aliases',
                 label: 'JOIN Table Alias Overrides',
                 description: 'JSON array of table-to-alias overrides used by JOIN completions',
