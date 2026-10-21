@@ -3446,15 +3446,17 @@ tfoot {
 }
 .row-view-section {
     display: grid;
-    grid-template-columns: 130px 1fr;
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    min-height: 32px;
-    align-items: start;
-    gap: 6px;
+    grid-template-columns: minmax(110px, 42%) 1fr;
+    padding: 1px 8px;
+    border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 55%, transparent);
+    align-items: baseline;
+    gap: 8px;
 }
 .row-view-section:hover { background: var(--vscode-list-hoverBackground); }
-.row-view-section.diff { background: var(--vscode-diffEditor-removedTextBackground); }
+.row-view-section.diff {
+    background: color-mix(in srgb, var(--vscode-diffEditor-removedTextBackground) 22%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--vscode-diffEditor-removedTextBackground) 80%, transparent);
+}
 .row-view-key {
     font-size: 12px;
     color: var(--vscode-descriptionForeground);
@@ -3462,7 +3464,7 @@ tfoot {
     align-items: flex-start;
     gap: 4px;
     overflow: hidden;
-    padding-top: 2px;
+    line-height: 1.35;
 }
 .row-view-key-name {
     overflow: hidden;
@@ -3474,29 +3476,32 @@ tfoot {
 .row-view-key-type {
     display: inline-block;
     font-size: 9px;
-    padding: 0 4px;
+    padding: 0 3px;
     border-radius: 3px;
-    background: var(--vscode-badge-background);
-    color: var(--vscode-badge-foreground);
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border);
+    color: var(--vscode-descriptionForeground);
     flex-shrink: 0;
-    line-height: 16px;
+    line-height: 12px;
+    margin-left: auto;
     font-family: var(--justybase-results-grid-font-family, inherit);
 }
 .row-view-vals {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 1px;
+    min-width: 0;
 }
 .row-view-val {
     font-size: var(--justybase-results-grid-font-size);
     color: var(--vscode-editor-foreground);
     word-break: break-all;
-    line-height: 1.5;
-    padding: 2px 4px;
+    line-height: 1.35;
+    padding: 1px 4px;
     border-radius: 3px;
     font-family: var(--justybase-results-grid-font-family, inherit);
 }
-.row-view-val.diff { background: var(--vscode-diffEditor-insertedTextBackground); }
+.row-view-val.diff { background: color-mix(in srgb, var(--vscode-diffEditor-insertedTextBackground) 35%, transparent); }
 .row-view-val.null { color: var(--vscode-descriptionForeground); font-style: italic; }
 .row-view-val.number { color: var(--vscode-charts-blue); }
 .row-view-val.boolean-t { color: var(--vscode-charts-green); font-weight: 600; }
@@ -3507,7 +3512,7 @@ tfoot {
     color: var(--vscode-descriptionForeground);
     padding: 0;
 }
-.row-view-val.label:nth-child(2) { padding-top: 3px; }
+.row-view-val.label:nth-child(2) { padding-top: 1px; }
 
 .row-view-header-actions {
     display: flex;

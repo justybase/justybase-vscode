@@ -120,6 +120,7 @@ export function renderRowViewComparison(
         const type = document.createElement('span');
         type.className = 'row-view-key-type';
         type.textContent = getTypeLabel(column.columnDef.dataType);
+        key.title = [name.textContent, column.columnDef.dataType].filter(Boolean).join(' · ');
         key.append(name, type);
 
         const valueContainer = document.createElement('div');
