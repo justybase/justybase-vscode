@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
+import { schemaTreeMenuEntries } from './helpers/schemaTreeMenu';
 
 interface CommandContribution {
   command: string;
@@ -23,7 +24,7 @@ const manifest = JSON.parse(
   };
 };
 
-const contextMenu = manifest.contributes.menus['view/item/context'] ?? [];
+const contextMenu = schemaTreeMenuEntries(manifest.contributes.menus);
 const palette = manifest.contributes.menus.commandPalette ?? [];
 
 function menuEntries(command: string): MenuEntry[] {
@@ -72,7 +73,7 @@ describe('data exploration context menu', () => {
       const entries = menuEntries(command);
       expect(entries.length).toBeGreaterThan(0);
       for (const entry of entries) {
-        expect(entry.when).toContain('netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)');
+        expect(entry.when).toContain('netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT');
         expect(entry.when).not.toContain('schemaDatabaseKind');
         expect(entry.when).not.toContain('capabilities');
       }
@@ -99,7 +100,7 @@ describe('data exploration context menu', () => {
   it('offers table export on tables and views without a kind gate', () => {
     const entries = menuEntries('netezza.exportTableData');
     expect(entries.length).toBeGreaterThan(0);
-    expect(entries[0]?.when).toContain('netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)');
+    expect(entries[0]?.when).toContain('netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)');
     expect(entries[0]?.when).not.toContain('schemaDatabaseKind');
   });
 

@@ -69,6 +69,7 @@ jest.mock("../commands/schema/helpers", () => ({
   executeWithProgress: jest.fn(async (_title: string, fn: () => Promise<any>) => fn()),
   escapeSqlString: jest.fn((str: string) => str.replace(/'/g, "''")),
   isValidIdentifier: jest.fn((str: string) => /^[A-Za-z][A-Za-z0-9_]*$/.test(str)),
+  openAndRunSql: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("../metadata/cache/schemaTreeDataSource", () => ({
@@ -107,26 +108,28 @@ describe("dataCommands", () => {
     }
   });
 
-  it("countRows executes a COUNT query", async () => {
+  it("countRows shows the COUNT result in SQL Results", async () => {
     const handler = await getHandler("netezza.countRows");
+    const { openAndRunSql } = require("../commands/schema/helpers");
     const { runQuery } = require("../core/queryRunner");
     await handler({ label: "ORDERS", dbName: "DB", schema: "S", objType: "TABLE", connectionName: "c" });
-    expect(runQuery).toHaveBeenCalledWith(
+    // A silent runQuery would discard the count; the query must run in an editor bound to the item.
+    expect(openAndRunSql).toHaveBeenCalledWith(
       expect.anything(),
+      { connectionName: "c", database: "DB" },
       "SELECT COUNT(*) AS row_count FROM DB.S.ORDERS;",
-      true,
-      "c",
-      expect.anything(),
+      "Row count of ORDERS",
     );
+    expect(runQuery).not.toHaveBeenCalled();
   });
 
   it("findDuplicateRows builds a GROUP BY query from prompted columns", async () => {
     (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("postgresql");
     const handler = await getHandler("netezza.findDuplicateRows");
-    const { runQuery } = require("../core/queryRunner");
+    const { openAndRunSql } = require("../commands/schema/helpers");
     (vscode.window.showInputBox as jest.Mock).mockResolvedValueOnce("account_id, order_no");
     await handler({ label: "ORDERS", dbName: "DB", schema: "S", objType: "TABLE", connectionName: "c" });
-    const sql = runQuery.mock.calls[0][1] as string;
+    const sql = (openAndRunSql as jest.Mock).mock.calls[0][2] as string;
     expect(sql).toContain("GROUP BY");
     expect(sql).toContain("HAVING COUNT(*) > 1");
   });
@@ -146,15 +149,14 @@ describe("dataCommands", () => {
   it("callRoutine executes a Db2 function as VALUES", async () => {
     (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("db2");
     const handler = await getHandler("netezza.callRoutine");
-    const { runQuery } = require("../core/queryRunner");
+    const { openAndRunSql } = require("../commands/schema/helpers");
     (vscode.window.showInputBox as jest.Mock).mockResolvedValueOnce("7");
     await handler({ label: "NEXT_VALUE", dbName: "DB", schema: "S", objType: "FUNCTION", connectionName: "c" });
-    expect(runQuery).toHaveBeenCalledWith(
+    expect(openAndRunSql).toHaveBeenCalledWith(
       expect.anything(),
+      { connectionName: "c", database: "DB" },
       expect.stringContaining("VALUES"),
-      true,
-      "c",
-      expect.anything(),
+      "Call NEXT_VALUE",
     );
   });
 

@@ -25,7 +25,7 @@ import {
 import type { ColumnMetadata } from '../../metadata/types';
 import { formatIdentifierForSql, formatQualifiedObjectName } from '../../utils/identifierUtils';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
-import { getFullName, getItemObjectName, isValidIdentifier, executeWithProgress } from './helpers';
+import { getFullName, getItemObjectName, isValidIdentifier, executeWithProgress, openAndRunSql } from './helpers';
 import {
     alterColumnSql,
     callRoutineSql,
@@ -38,15 +38,11 @@ import {
     quoteIdentifierListForKind,
     schemaValueSearchSql,
     supportsSchemaValueSearch,
+    SELECTABLE_SCHEMA_OBJECT_TYPES,
     type SchemaValueSearchTarget,
 } from './menuSql';
 
-const SELECTABLE_OBJECT_TYPES: ReadonlySet<string> = new Set([
-    'TABLE',
-    'VIEW',
-    'MATERIALIZED VIEW',
-    'FOREIGN TABLE',
-]);
+const SELECTABLE_OBJECT_TYPES = SELECTABLE_SCHEMA_OBJECT_TYPES;
 
 const TABLE_ONLY_OBJECT_TYPES: ReadonlySet<string> = new Set(['TABLE']);
 
@@ -79,6 +75,16 @@ async function openSqlForItem(
         }
     }
     await vscode.window.showTextDocument(doc);
+}
+
+/** Runs a query whose rows the user wants to see (counts, duplicates, routine output) in SQL Results. */
+async function showItemQuery(
+    deps: SchemaCommandsDependencies,
+    item: SchemaItemData,
+    sql: string,
+    title: string,
+): Promise<void> {
+    await openAndRunSql(deps.connectionManager, { connectionName: item.connectionName, database: item.dbName }, sql, title);
 }
 
 async function executeItemSql(
@@ -126,7 +132,7 @@ export function registerDataCommands(deps: SchemaCommandsDependencies): vscode.D
                 vscode.window.showErrorMessage('Select a table or view to count rows.');
                 return;
             }
-            await executeItemSql(deps, item, countRowsSql(getFullName(item, connectionManager)), `Counting rows in ${item.label}...`);
+            await showItemQuery(deps, item, countRowsSql(getFullName(item, connectionManager)), `Row count of ${item.label}`);
         }),
 
         vscode.commands.registerCommand('netezza.findDuplicateRows', async (item: SchemaItemData) => {
@@ -148,11 +154,11 @@ export function registerDataCommands(deps: SchemaCommandsDependencies): vscode.D
                 vscode.window.showErrorMessage('Enter at least one column name.');
                 return;
             }
-            await executeItemSql(
+            await showItemQuery(
                 deps,
                 item,
                 duplicateRowsSql(getFullName(item, connectionManager), quotedColumns),
-                `Finding duplicate rows in ${item.label}...`,
+                `Duplicate rows in ${item.label}`,
             );
         }),
 
@@ -227,7 +233,7 @@ export function registerDataCommands(deps: SchemaCommandsDependencies): vscode.D
                     return;
                 }
             }
-            await executeItemSql(deps, item, sql, `Calling ${item.label}...`);
+            await showItemQuery(deps, item, sql, `Call ${item.label}`);
         }),
 
         vscode.commands.registerCommand('netezza.setTableStorage', async (item: SchemaItemData) => {
