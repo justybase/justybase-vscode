@@ -1,3 +1,9 @@
+import {
+  buildInsertAllColumnsItem,
+  buildInsertColumnsAndValuesItem,
+  buildInsertValuesPlaceholderItem,
+  getListedInsertColumns,
+} from "./completionInsertTemplates";
 import { CompletionItem, Position, Range } from "vscode-languageserver/node";
 import type { DatabaseKind } from "../contracts/database";
 import type { LocalDefinition } from "../providers/types";
@@ -114,25 +120,45 @@ export class CompletionPathResolver {
       return toKeywordItems("", position, ["TABLE", "VIEWS"]);
     }
 
+    const typedPrefix = this.contextExtractor.extractCurrentIdentifierPrefix(linePrefix);
+    const prefixBeforeTyped = typedPrefix
+      ? statementPrefix.slice(0, statementPrefix.length - typedPrefix.length)
+      : statementPrefix;
+
+    // Only on an empty first value; a typed word keeps ordinary expression completion.
+    const valuesPlaceholderItem = typedPrefix
+      ? undefined
+      : buildInsertValuesPlaceholderItem(prefixBeforeTyped, typedPrefix, position);
+    if (valuesPlaceholderItem) {
+      return [valuesPlaceholderItem];
+    }
+
     const insertColumnContext =
       this.contextExtractor.parseInsertColumnListContext(
         statementPrefix,
         databaseKind,
       );
     if (insertColumnContext) {
-      const columns = await this.metadataResolver.getMetadataColumnsForSource(
-        documentUri,
-        {
-          db: insertColumnContext.database ?? effectiveDb,
-          schema: insertColumnContext.schema,
-          table: insertColumnContext.table,
-        },
-        effectiveDb,
-        requestContext.effectiveSchema,
-        databaseKind,
-      );
+      const columns = await this.getInsertTargetColumns(requestContext, insertColumnContext);
+      const listed = getListedInsertColumns(prefixBeforeTyped);
+      const remaining = columns.filter((name) => !listed.has(name.toUpperCase()));
       const { toColumnItems } = await import("./completionRenderer");
-      return toColumnItems(columns.map((col) => col.name));
+      const allColumnsItem = listed.size === 0
+        ? buildInsertAllColumnsItem(remaining, typedPrefix, position, databaseKind)
+        : undefined;
+      return [...(allColumnsItem ? [allColumnsItem] : []), ...toColumnItems(remaining)];
+    }
+
+    // `INSERT INTO T |`: the same column lookup as `INSERT INTO T (`.
+    const insertTargetContext = /\s$/.test(prefixBeforeTyped)
+      ? this.contextExtractor.parseInsertColumnListContext(`${prefixBeforeTyped.trimEnd()} (`, databaseKind)
+      : undefined;
+    if (insertTargetContext) {
+      const columns = await this.getInsertTargetColumns(requestContext, insertTargetContext);
+      const templateItem = buildInsertColumnsAndValuesItem(columns, typedPrefix, position, databaseKind);
+      const keywordItems = toKeywordItems(typedPrefix, position, requestContext.completionKeywords)
+        .filter((item) => ["VALUES", "SELECT", "WITH"].includes(item.label.toUpperCase()));
+      return [...(templateItem ? [templateItem] : []), ...keywordItems];
     }
 
     const objectTargetContext =
@@ -152,6 +178,24 @@ export class CompletionPathResolver {
       effectiveSchema,
       databaseKind,
     );
+  }
+
+  private async getInsertTargetColumns(
+    requestContext: CompletionRequestContext,
+    target: { database?: string; schema?: string; table: string },
+  ): Promise<string[]> {
+    const columns = await this.metadataResolver.getMetadataColumnsForSource(
+      requestContext.documentUri,
+      {
+        db: target.database ?? requestContext.effectiveDb,
+        schema: target.schema,
+        table: target.table,
+      },
+      requestContext.effectiveDb,
+      requestContext.effectiveSchema,
+      requestContext.databaseKind,
+    );
+    return columns.map((column) => column.name);
   }
 
   public async resolveDotPathFallbackCompletions(

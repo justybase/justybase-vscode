@@ -26,7 +26,9 @@ import {
   buildExpressionClauseKeywordItems,
   buildExpressionFunctionItems,
   buildExpressionSpecialValueItems,
+  isAliasNamePosition,
   resolveExpressionClauseContext,
+  resolveOperandContinuationKeywords,
 } from "./completionExpressionAnalyzer";
 import { dedupeCompletionItems, getCompletionMatchRank } from "./completionRanker";
 import {
@@ -38,9 +40,11 @@ import {
 } from "./completionDialectAdapter";
 import { findLocalDefinition } from "./completionLocalDefinitionUtils";
 import {
+  applyPrefixRange,
   toColumnItems,
   toMetadataColumnItem,
   toLocalVariableItems,
+  toKeywordItems,
   toScopedColumnItems,
 } from "./completionRenderer";
 import {
@@ -57,6 +61,8 @@ import { CompletionContextExtractor } from "./completionContextExtractor";
 import { CompletionMetadataResolver } from "./completionMetadataResolver";
 import { handleVariableCompletion } from "./completionVariableResolver";
 import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
+import { getUniqueTableAlias } from "../sql/tableAliasPolicy";
+import { extractGroupableSelectExpressions, extractSelectOutputAliases } from "./completionSelectList";
 import type {
   CompletionRequestContext,
   ScopeSource,
@@ -81,146 +87,35 @@ function normalizeRelationColumnName(name: string): string {
 }
 
 /**
- * Output aliases of the top-level SELECT list of the current statement.
- * Live Netezza (Release 11.2.2.1, verified 2026-10-11) resolves SELECT
- * aliases in HAVING (`HAVING N > 0` over `COUNT(*) AS N`). Token-based so
- * it also works on the incomplete statement prefix at the cursor.
+ * Right after `GROUP BY`, one item inserting every non-aggregated SELECT
+ * expression (Redgate SQL Prompt / DataGrip style).
  */
-function extractSelectOutputAliases(statementPrefix: string): string[] {
-  const tokens = SqlLexer.tokenize(statementPrefix).tokens;
-  let selectIndex = -1;
-  let depth = 0;
-  for (let i = 0; i < tokens.length; i++) {
-    const name = tokens[i].tokenType.name;
-    if (name === "LParen") {
-      depth += 1;
-      continue;
-    }
-    if (name === "RParen") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth === 0 && name === "Select") {
-      selectIndex = i;
-      break;
-    }
-  }
-  if (selectIndex < 0) {
+function buildGroupBySelectListItems(
+  statementPrefix: string,
+  typedPrefix: string,
+  position: Position,
+): CompletionItem[] {
+  const beforeTyped = typedPrefix ? statementPrefix.slice(0, -typedPrefix.length) : statementPrefix;
+  if (!/\bGROUP\s+BY\s*$/i.test(beforeTyped)) {
     return [];
   }
-
-  let fromIndex = -1;
-  depth = 0;
-  for (let i = selectIndex + 1; i < tokens.length; i++) {
-    const name = tokens[i].tokenType.name;
-    if (name === "LParen") {
-      depth += 1;
-      continue;
-    }
-    if (name === "RParen") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth > 0) {
-      continue;
-    }
-    if (name === "From") {
-      fromIndex = i;
-      break;
-    }
+  const expressions = extractGroupableSelectExpressions(statementPrefix);
+  if (expressions.length === 0) {
+    return [];
   }
-  const end = fromIndex >= 0 ? fromIndex : tokens.length;
-
-  // Split the top-level select list on commas.
-  const items: { start: number; end: number }[] = [];
-  let itemStart = selectIndex + 1;
-  // Skip DISTINCT / ALL.
-  if (
-    itemStart < end &&
-    (tokens[itemStart].tokenType.name === "Distinct" ||
-      tokens[itemStart].tokenType.name === "All")
-  ) {
-    itemStart += 1;
+  const label = expressions.join(", ");
+  if (typedPrefix && !label.toUpperCase().startsWith(typedPrefix.toUpperCase())) {
+    return [];
   }
-  depth = 0;
-  for (let i = itemStart; i < end; i++) {
-    const name = tokens[i].tokenType.name;
-    if (name === "LParen") {
-      depth += 1;
-      continue;
-    }
-    if (name === "RParen") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth === 0 && name === "Comma") {
-      items.push({ start: itemStart, end: i });
-      itemStart = i + 1;
-    }
-  }
-  if (itemStart < end) {
-    items.push({ start: itemStart, end });
-  }
-
-  const aliases: string[] = [];
-  for (const item of items) {
-    // Depth-0 tokens of this select item plus whether it holds a parenthesized
-    // expression (function call or scalar subquery).
-    const top: typeof tokens = [];
-    let hadParens = false;
-    let itemDepth = 0;
-    for (let i = item.start; i < item.end; i++) {
-      const name = tokens[i].tokenType.name;
-      if (name === "LParen") {
-        itemDepth += 1;
-        hadParens = true;
-        continue;
-      }
-      if (name === "RParen") {
-        itemDepth = Math.max(0, itemDepth - 1);
-        continue;
-      }
-      if (itemDepth === 0) {
-        top.push(tokens[i]);
-      }
-    }
-    if (top.length === 0) {
-      continue;
-    }
-    // `*` and `T.*` contribute no alias.
-    if (
-      top.length === 1 &&
-      top[0].tokenType.name === "Multiply"
-    ) {
-      continue;
-    }
-    if (
-      top.length === 3 &&
-      top[1].image === "." &&
-      top[2].tokenType.name === "Multiply"
-    ) {
-      continue;
-    }
-    const last = top[top.length - 1];
-    if (!isIdentifierToken(last)) {
-      continue;
-    }
-    const prev = top.length >= 2 ? top[top.length - 2] : undefined;
-    const prevName = prev?.tokenType.name;
-    // `expr AS alias`, bare `expr alias` (`CUSTOMER_ID CID`, `COUNT(*) N`),
-    // or `(scalar subquery) alias`.
-    if (
-      prevName === "As" ||
-      (top.length >= 2 &&
-        (isIdentifierToken(prev) || hadParens))
-    ) {
-      const alias = stripQuotes(last.image.trim());
-      if (alias && alias !== "*" && !aliases.some((a) => a.toUpperCase() === alias.toUpperCase())) {
-        aliases.push(alias);
-      }
-    }
-  }
-  return aliases;
+  const item: CompletionItem = {
+    label,
+    kind: CompletionItemKind.Snippet,
+    detail: "Non-aggregated SELECT items",
+    insertText: label,
+    sortText: "0_group_by_select_list",
+  };
+  applyPrefixRange(item, position, typedPrefix);
+  return [item];
 }
 
 export interface QualifierCompletionRequest {
@@ -497,15 +392,7 @@ export class CompletionScopeResolver {
   }
 
   private getUniqueJoinAlias(preferred: string, usedAliases: Set<string>): string {
-    const base = preferred.replace(/[^A-Za-z0-9_$]/g, "").toUpperCase() || "T";
-    if (!usedAliases.has(base)) {
-      return base;
-    }
-    let suffix = 2;
-    while (usedAliases.has(`${base}${suffix}`)) {
-      suffix += 1;
-    }
-    return `${base}${suffix}`;
+    return getUniqueTableAlias(preferred, usedAliases);
   }
 
   public async resolveColumnsForQualifier(
@@ -717,6 +604,12 @@ export class CompletionScopeResolver {
     ) {
       return [];
     }
+    if (
+      (clause === "from" || clause === "select") &&
+      isAliasNamePosition(statementPrefix, typedPrefix)
+    ) {
+      return [];
+    }
     if (clause === "from") {
       // Live Netezza (Release 11.2.2.1, verified 2026-10-11) accepts
       // `JOIN ... USING (col)`; only columns present on both sides of the
@@ -748,6 +641,22 @@ export class CompletionScopeResolver {
       (clause === "values" && typedPrefix === "")
     ) {
       return [];
+    }
+    // After a completed operand (`WHERE A > 0 |`, `SELECT COL |`,
+    // `ORDER BY COL |`) only operators, clause transitions or an alias can
+    // follow; columns, functions and variables would be syntax errors.
+    const continuationKeywords = resolveOperandContinuationKeywords(
+      clause,
+      statementPrefix,
+      typedPrefix,
+      completionKeywords,
+      specialBuiltinValues,
+    );
+    if (continuationKeywords) {
+      const allowed = new Set(continuationKeywords);
+      return toKeywordItems(typedPrefix, position, completionKeywords).filter(
+        (item) => allowed.has(item.label.toUpperCase()),
+      );
     }
     const statementSql = statement ? statement.sql : "";
     const parserFriendlyStatementPrepared = statement
@@ -788,9 +697,9 @@ export class CompletionScopeResolver {
       netezzaSchemasEnabled,
     );
 
-    if (clause === "having") {
-      // Live Netezza resolves SELECT output aliases in HAVING; the table
-      // scope above does not include them.
+    if (clause === "having" || clause === "order") {
+      // Live Netezza resolves SELECT output aliases in HAVING and ORDER BY;
+      // the table scope above does not include them.
       for (const alias of extractSelectOutputAliases(statementPrefix)) {
         if (
           !scopedColumns.some(
@@ -845,7 +754,11 @@ export class CompletionScopeResolver {
       specialBuiltinValues,
       triggerKind === CompletionTriggerKind.Invoked,
     );
+    const groupByItems = clause === "group"
+      ? buildGroupBySelectListItems(statementPrefix, typedPrefix, position)
+      : [];
     const items = dedupeCompletionItems([
+      ...groupByItems,
       ...joinConditionItems,
       ...columnItems,
       ...variableItems,

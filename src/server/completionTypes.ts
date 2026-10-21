@@ -3,6 +3,7 @@ import type { Position } from "vscode-languageserver/node";
 import type { DatabaseKind } from "../contracts/database";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import type {
+  CompletionKeywordCase,
   JoinCompletionSettings,
   MetadataColumnItem,
   MetadataObjectItem,
@@ -103,6 +104,7 @@ export interface CompletionRequestContext {
   effectiveSchema?: string;
   netezzaSchemasEnabled?: boolean;
   joinCompletionSettings?: JoinCompletionSettings;
+  completionKeywordCase?: CompletionKeywordCase;
   linePrefix: string;
   prevLine: string;
   cursorOffset: number;
@@ -129,6 +131,7 @@ export interface CompletionMetadataProvider {
     databaseKind?: DatabaseKind;
     netezzaSchemasEnabled?: boolean;
     joinCompletionSettings?: JoinCompletionSettings;
+    completionKeywordCase?: CompletionKeywordCase;
   }>;
   getDatabases(documentUri: string): Promise<MetadataObjectItem[]>;
   getSchemas(

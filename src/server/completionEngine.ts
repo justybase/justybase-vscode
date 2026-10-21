@@ -1,9 +1,11 @@
 import { buildSqlSourceScanIndex } from "@justybase/sql-core/sourceScan";
 import {
   CompletionItem,
+  CompletionItemKind,
   CompletionTriggerKind,
   Position,
 } from "vscode-languageserver/node";
+import type { CompletionKeywordCase } from "../lsp/protocol";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import type { DocumentParseSession } from "../sqlParser/documentParseSession";
 import { CompletionContextExtractor } from "./completionContextExtractor";
@@ -11,10 +13,15 @@ import { CompletionMetadataResolver } from "./completionMetadataResolver";
 import { CompletionPathResolver } from "./completionPathResolver";
 import { CompletionQualifierResolver } from "./completionQualifierResolver";
 import { CompletionRequestContextBuilder } from "./completionRequestContext";
-import { resolveExpressionClauseContext } from "./completionExpressionAnalyzer";
+import {
+  STATEMENT_START_KEYWORDS,
+  isBareStatementStart,
+  resolveExpressionClauseContext,
+} from "./completionExpressionAnalyzer";
 import { toKeywordItems } from "./completionRenderer";
 import { handleMacroVariableCompletion } from "./completionMacroVariableResolver";
 import { CompletionScopeResolver } from "./completionScopeResolver";
+import { buildSnippetCompletionItems } from "./completionSnippetResolver";
 import type { CompletionMetadataProvider } from "./completionTypes";
 import { CompletionWildcardResolver } from "./completionWildcardResolver";
 
@@ -69,7 +76,14 @@ export class LspCompletionEngine {
     position: Position,
     triggerKind: CompletionTriggerKind = CompletionTriggerKind.Invoked,
   ): Promise<CompletionItem[]> {
-    const items = await this.provideBaseCompletionItems(document, position, triggerKind);
+    const requestState: CompletionRequestState = {};
+    const items = applyKeywordCase(
+      await this.provideBaseCompletionItems(document, position, triggerKind, requestState),
+      requestState.keywordCase,
+      this.contextExtractor.extractCurrentIdentifierPrefix(
+        this.contextExtractor.getLinePrefix(document, position),
+      ),
+    );
     const prefixText = document.getText().slice(0, document.offsetAt(position));
     const isInvoked = triggerKind === CompletionTriggerKind.Invoked;
     const endsWithJoin = /JOIN\s+$/i.test(prefixText);
@@ -97,6 +111,7 @@ export class LspCompletionEngine {
     document: TextDocument,
     position: Position,
     triggerKind: CompletionTriggerKind,
+    requestState: CompletionRequestState,
   ): Promise<CompletionItem[]> {
     let autoJoinConditionTrigger = false;
     if (triggerKind === CompletionTriggerKind.TriggerCharacter) {
@@ -125,6 +140,7 @@ export class LspCompletionEngine {
       document,
       position,
     );
+    requestState.keywordCase = requestContext.completionKeywordCase;
     if (autoJoinConditionTrigger) {
       const joinTargetItems = await this.scopeResolver.getJoinTargetCompletions(
         requestContext,
@@ -236,19 +252,62 @@ export class LspCompletionEngine {
         specialBuiltinValues,
       },
     );
+    const typedPrefix = this.contextExtractor.extractCurrentIdentifierPrefix(linePrefix);
+    const snippetItems = buildSnippetCompletionItems(
+      databaseKind,
+      statementPrefix,
+      typedPrefix,
+      requestPosition,
+    );
     if (semanticScopeResult !== undefined) {
-      return finalizeCompletionItems(semanticScopeResult, triggerKind);
+      return finalizeCompletionItems([...semanticScopeResult, ...snippetItems], triggerKind);
     }
 
+    // At the very start of a statement only statement-opening keywords fit
+    // (`SE|` -> SELECT, SET, ... but not OFFSET, INTERSECT or CASE).
+    const keywordItems = toKeywordItems(typedPrefix, requestPosition, completionKeywords);
+    const startKeywordItems = isBareStatementStart(statementPrefix, typedPrefix)
+      ? keywordItems.filter((item) => STATEMENT_START_KEYWORDS.has(item.label.toUpperCase()))
+      : [];
     return finalizeCompletionItems(
-      toKeywordItems(
-        this.contextExtractor.extractCurrentIdentifierPrefix(linePrefix),
-        requestPosition,
-        completionKeywords,
-      ),
+      [
+        ...(startKeywordItems.length > 0 ? startKeywordItems : keywordItems),
+        ...snippetItems,
+      ],
       triggerKind,
     );
   }
+}
+
+interface CompletionRequestState {
+  keywordCase?: CompletionKeywordCase;
+}
+
+/**
+ * Inserts keywords in the configured case (`justybase.sql.completionKeywordCase`);
+ * labels stay upper-case so the list looks the same. `matchTyped` follows an
+ * all-lower-case typed prefix (`sel` -> `select`).
+ */
+function applyKeywordCase(
+  items: CompletionItem[],
+  keywordCase: CompletionKeywordCase | undefined,
+  typedPrefix: string,
+): CompletionItem[] {
+  const lower =
+    keywordCase === "lower" ||
+    (keywordCase === "matchTyped" && /[a-z]/.test(typedPrefix) && typedPrefix === typedPrefix.toLowerCase());
+  if (!lower) {
+    return items;
+  }
+  return items.map((item) => {
+    if (item.kind !== CompletionItemKind.Keyword) {
+      return item;
+    }
+    const text = (item.textEdit?.newText ?? item.insertText ?? item.label).toLowerCase();
+    return item.textEdit
+      ? { ...item, textEdit: { ...item.textEdit, newText: text } }
+      : { ...item, insertText: text };
+  });
 }
 
 /**

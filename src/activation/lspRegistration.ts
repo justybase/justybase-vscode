@@ -27,6 +27,7 @@ import {
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
   NETEZZA_UX_PERF_NOTIFICATION,
   type DocumentContextChangedParams,
+  type CompletionKeywordCase,
   type MetadataCacheInvalidatedParams,
   type MetadataColumnItem,
   type MetadataContextResponse,
@@ -373,6 +374,7 @@ export async function handleMetadataRequest(
         return {
           ...resolvedContext,
           joinCompletionSettings: getWorkspaceJoinCompletionSettings(params.documentUri),
+          completionKeywordCase: getWorkspaceCompletionKeywordCase(params.documentUri),
         };
       case "databases":
         return await getDatabases(
@@ -540,6 +542,17 @@ export async function handleMetadataRequest(
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
+  }
+}
+
+function getWorkspaceCompletionKeywordCase(documentUri: string): CompletionKeywordCase {
+  try {
+    const value = vscode.workspace
+      .getConfiguration("justybase.sql", vscode.Uri.parse(documentUri))
+      .get<string>("completionKeywordCase", "upper");
+    return value === "lower" || value === "matchTyped" ? value : "upper";
+  } catch {
+    return "upper";
   }
 }
 

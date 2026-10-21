@@ -1,3 +1,4 @@
+import type { IToken } from "chevrotain";
 import { CompletionItem, Position } from "vscode-languageserver/node";
 import type { DatabaseSqlFunctionSignature } from "../sql/authoring/types";
 import { SqlLexer } from "../sqlParser";
@@ -59,26 +60,204 @@ export function buildExpressionClauseKeywordItems(
     return [];
   }
 
-  const allowedKeywords = new Set(predicateKeywords(statementPrefix));
+  const allowedKeywords = new Set(predicateKeywords(tokensBeforeTypedPrefix(statementPrefix, typedPrefix)));
   return toKeywordItems(typedPrefix, position, completionKeywords).filter(
     (item) => allowedKeywords.has(item.label.toUpperCase()),
   );
 }
 
+/**
+ * Tokens preceding the identifier being typed. The typed word itself is not
+ * an operand yet, so `WHERE C|` must be analysed as `WHERE |`.
+ */
+function tokensBeforeTypedPrefix(statementPrefix: string, typedPrefix: string): IToken[] {
+  const text =
+    typedPrefix && statementPrefix.toUpperCase().endsWith(typedPrefix.toUpperCase())
+      ? statementPrefix.slice(0, statementPrefix.length - typedPrefix.length)
+      : statementPrefix;
+  return SqlLexer.tokenize(text).tokens;
+}
+
+const COMPARISON_TOKENS = new Set(["Equals", "NotEquals", "LessThan", "LessThanEquals", "GreaterThan", "GreaterThanEquals", "In", "Between", "Like", "Is"]);
+
 /** Keywords following the current predicate operand or completed comparison. */
-function predicateKeywords(statementPrefix: string): readonly string[] {
-  const tokens = SqlLexer.tokenize(statementPrefix).tokens;
+function predicateKeywords(tokens: readonly IToken[]): readonly string[] {
   let boundary = -1;
+  let openBetween = false;
   for (let index = 0; index < tokens.length; index++) {
-    if (["Where", "On", "Having", "And", "Or"].includes(tokens[index].tokenType.name)) boundary = index;
+    const name = tokens[index].tokenType.name;
+    if (name === "Between") {
+      openBetween = true;
+    } else if (name === "And" && openBetween) {
+      // `x BETWEEN 1 AND 5` is one predicate; its AND is not a boundary.
+      openBetween = false;
+    } else if (["Where", "On", "Having", "And", "Or"].includes(name)) {
+      boundary = index;
+      openBetween = false;
+    }
   }
   const expression = tokens.slice(boundary + 1);
   const last = expression[expression.length - 1]?.tokenType.name;
-  const comparison = expression.some(token => ["Equals", "NotEquals", "LessThan", "LessThanEquals", "GreaterThan", "GreaterThanEquals", "In", "Between", "Like", "Is"].includes(token.tokenType.name));
+  const comparison = expression.some(token => COMPARISON_TOKENS.has(token.tokenType.name));
   if (last && isExpressionEndingToken(last)) {
-    return comparison ? ["AND", "OR"] : ["IN", "BETWEEN", "NOT", "LIKE", "IS", "AND", "OR"];
+    if (!comparison) return ["IN", "BETWEEN", "NOT", "LIKE", "IS", "AND", "OR"];
+    return expression.some(token => token.tokenType.name === "Like") ? ["AND", "OR", "ESCAPE"] : ["AND", "OR"];
   }
   return ["AND", "OR", "NOT"];
+}
+
+const SET_OPERATION_KEYWORDS = ["UNION", "INTERSECT", "EXCEPT"] as const;
+
+/**
+ * Keywords that may follow a completed operand at the top level of a clause.
+ * An identifier typed there is a keyword or an alias, never a column/function.
+ */
+const OPERAND_CONTINUATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
+  select: ["FROM", "AS", "OVER", ...SET_OPERATION_KEYWORDS],
+  where: ["GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS],
+  on: ["JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "WHERE", "GROUP", "ORDER", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS],
+  having: ["ORDER", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS],
+  group: ["HAVING", "ORDER", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS],
+  order: ["ASC", "DESC", "NULLS", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS],
+  // UPDATE ... SET a = 1 [, b = 2] [FROM ...] [WHERE ...]
+  set: ["FROM", "WHERE"],
+};
+
+/** Keywords legal right after an operand inside parentheses or an open CASE. */
+const NESTED_CONTINUATION_KEYWORDS = [
+  "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE", "IS", "ESCAPE", "AS", "FROM", "FOR",
+  "WHEN", "THEN", "ELSE", "END", "OVER", "ORDER", "PARTITION", "ROWS", "RANGE",
+  "ASC", "DESC", "NULLS", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS,
+];
+
+const CLAUSE_START_TOKENS: Readonly<Record<string, readonly string[]>> = {
+  select: ["Select"],
+  where: ["Where"],
+  on: ["On"],
+  having: ["Having"],
+  group: ["Group", "GroupBy"],
+  order: ["Order", "OrderBy"],
+  set: ["Set"],
+};
+
+/** Value-like words that complete an operand even when they are keywords. */
+const VALUE_KEYWORDS = new Set(["TRUE", "FALSE", "UNKNOWN"]);
+
+/**
+ * Returns the keywords allowed after a completed operand in an expression
+ * clause (`WHERE A > 0 |`, `SELECT COL |`, `ORDER BY COL |`), or `undefined`
+ * when the cursor still expects an operand and columns/functions apply.
+ */
+export function resolveOperandContinuationKeywords(
+  clause: string,
+  statementPrefix: string,
+  typedPrefix: string,
+  completionKeywords: readonly string[],
+  specialValues: readonly string[] = [],
+): readonly string[] | undefined {
+  const clauseStarts = CLAUSE_START_TOKENS[clause];
+  if (!clauseStarts) {
+    return undefined;
+  }
+  const tokens = tokensBeforeTypedPrefix(statementPrefix, typedPrefix);
+  let clauseStart = -1;
+  for (let index = tokens.length - 1; index >= 0; index--) {
+    if (clauseStarts.includes(tokens[index].tokenType.name)) {
+      clauseStart = index;
+      break;
+    }
+  }
+  const clauseTokens = tokens.slice(clauseStart + 1);
+  const last = clauseTokens[clauseTokens.length - 1];
+  if (!last) {
+    return undefined;
+  }
+  if (clause === "order" && last.tokenType.name === "Nulls") {
+    return ["FIRST", "LAST"];
+  }
+
+  const keywordWords = new Set(completionKeywords.map((keyword) => keyword.toUpperCase()));
+  for (const value of specialValues) keywordWords.delete(value.toUpperCase());
+  for (const value of VALUE_KEYWORDS) keywordWords.delete(value);
+  const previous = clauseTokens[clauseTokens.length - 2];
+  if (!completesOperand(last, previous, keywordWords)) {
+    if (clause === "order" && (last.tokenType.name === "Asc" || last.tokenType.name === "Desc")) {
+      return ["NULLS", "LIMIT", "OFFSET", ...SET_OPERATION_KEYWORDS];
+    }
+    return undefined;
+  }
+
+  let depth = 0;
+  let openCase = 0;
+  for (const token of clauseTokens) {
+    const name = token.tokenType.name;
+    if (name === "LParen") depth++;
+    else if (name === "RParen") depth = Math.max(0, depth - 1);
+    else if (name === "Case") openCase++;
+    else if (name === "End") openCase = Math.max(0, openCase - 1);
+  }
+  if (depth > 0 || openCase > 0) {
+    return NESTED_CONTINUATION_KEYWORDS;
+  }
+  if (clause === "where" || clause === "on" || clause === "having") {
+    return [...predicateKeywords(clauseTokens), ...OPERAND_CONTINUATION_KEYWORDS[clause]];
+  }
+  return OPERAND_CONTINUATION_KEYWORDS[clause];
+}
+
+const STATEMENT_START_TOKENS = new Set(["Semicolon", "BeginProc", "Begin", "Loop"]);
+
+/** The cursor starts a new statement (document start, after `;`, or a block opener). */
+export function isStatementStartPosition(statementPrefix: string, typedPrefix: string): boolean {
+  const tokens = tokensBeforeTypedPrefix(statementPrefix, typedPrefix);
+  const last = tokens[tokens.length - 1];
+  return !last || STATEMENT_START_TOKENS.has(last.tokenType.name);
+}
+
+/** Keywords that can open a top-level statement (intersected with the dialect's keywords). */
+export const STATEMENT_START_KEYWORDS: ReadonlySet<string> = new Set([
+  "SELECT", "WITH", "VALUES", "INSERT", "INSERT INTO", "UPDATE", "DELETE", "DELETE FROM",
+  "MERGE", "MERGE INTO", "UPSERT", "REPLACE", "CREATE", "CREATE TABLE", "ALTER", "ALTER TABLE",
+  "DROP", "DROP TABLE", "TRUNCATE", "RENAME", "COMMENT", "GRANT", "REVOKE", "CALL", "EXEC",
+  "EXECUTE", "EXPLAIN", "DESCRIBE", "DESC", "SHOW", "USE", "SET", "RESET", "BEGIN", "START",
+  "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE", "ABORT", "LOCK", "DECLARE", "DO", "IF",
+  "GROOM", "GENERATE", "ANALYZE", "VACUUM", "REINDEX", "CLUSTER", "COPY", "LOAD", "UNLOAD",
+  "PRAGMA", "ATTACH", "DETACH", "INSTALL", "EXPORT", "IMPORT", "OPTIMIZE", "SYSTEM", "PRINT",
+  "RAISE", "RETURN", "GO",
+]);
+
+/** No SQL token precedes the word being typed in the current statement. */
+export function isBareStatementStart(statementPrefix: string, typedPrefix: string): boolean {
+  return tokensBeforeTypedPrefix(statementPrefix, typedPrefix).length === 0;
+}
+
+/** `SELECT X AS |` / `FROM T AS |`: the user is naming an alias. */
+export function isAliasNamePosition(statementPrefix: string, typedPrefix: string): boolean {
+  const tokens = tokensBeforeTypedPrefix(statementPrefix, typedPrefix);
+  return tokens[tokens.length - 1]?.tokenType.name === "As";
+}
+
+function completesOperand(
+  token: IToken,
+  previous: IToken | undefined,
+  keywordWords: ReadonlySet<string>,
+): boolean {
+  const name = token.tokenType.name;
+  if (name === "Identifier") {
+    // Dialect keywords the Netezza lexer does not know (ILIKE, TOP, ...)
+    // still expect an operand after them.
+    return !keywordWords.has(token.image.toUpperCase());
+  }
+  if (name === "NumberLiteral") {
+    // MSSQL `SELECT TOP 10 |` still expects the first select item.
+    return previous?.image.toUpperCase() !== "TOP";
+  }
+  if (name === "Multiply") {
+    // `SELECT * |` / `A.* |` versus the arithmetic `A * |`.
+    const previousName = previous?.tokenType.name;
+    return previousName === undefined || previousName === "Comma" || previousName === "Dot" || previousName === "Distinct";
+  }
+  return name === "End" || isExpressionEndingToken(name);
 }
 
 const CLAUSE_KEYWORD_MAP: Record<string, readonly string[]> = {
@@ -111,7 +290,7 @@ export function buildContextualKeywordItems(
   }
 
   const allowed = clause === "where" || clause === "on" || clause === "having"
-    ? [...predicateKeywords(statementPrefix), ...CLAUSE_KEYWORD_MAP[clause].filter(keyword => keyword !== "AND" && keyword !== "OR" && keyword !== "NOT")]
+    ? [...predicateKeywords(tokensBeforeTypedPrefix(statementPrefix, typedPrefix)), ...CLAUSE_KEYWORD_MAP[clause].filter(keyword => keyword !== "AND" && keyword !== "OR" && keyword !== "NOT")]
     : CLAUSE_KEYWORD_MAP[clause];
   if (!allowed || allowed.length === 0) {
     return [];

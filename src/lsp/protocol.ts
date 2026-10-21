@@ -78,7 +78,11 @@ export interface MetadataContextResponse {
   databaseKind?: DatabaseKind;
   netezzaSchemasEnabled?: boolean;
   joinCompletionSettings?: JoinCompletionSettings;
+  /** `justybase.sql.completionKeywordCase`: case of inserted keywords. */
+  completionKeywordCase?: CompletionKeywordCase;
 }
+
+export type CompletionKeywordCase = "upper" | "lower" | "matchTyped";
 
 export interface JoinTableIdentity {
   database?: string;

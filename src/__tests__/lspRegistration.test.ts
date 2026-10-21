@@ -99,6 +99,7 @@ describe('handleMetadataRequest view lookups', () => {
                 effectiveSchema,
                 databaseKind,
                 joinCompletionSettings: DEFAULT_JOIN_COMPLETION_SETTINGS,
+                completionKeywordCase: "upper",
             })
         }
     )

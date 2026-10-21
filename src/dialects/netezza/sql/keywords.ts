@@ -25,7 +25,10 @@ export const NETEZZA_COMPLETION_KEYWORD_OVERLAYS = [
     'STATISTICS',
     'VALUE',
     'FOR',
-    'SESSION'
+    'SESSION',
+    // `LIKE ... ESCAPE '!'` is accepted by NPS (live-verified in
+    // netezzaCompletionKeywordLegality.live.integration.test.ts).
+    'ESCAPE'
 ] as const;
 
 export const NETEZZA_COMPLETION_KEYWORDS = mergeUniqueStrings(
