@@ -10,6 +10,7 @@ import {
     copyAllRowsAsMdAsync,
     copyAllRowsAsync,
     resolvePlainText,
+    clipboardHtml,
     writeMultiFormatToClipboard,
     type ClipboardRowResolver,
 } from './clipboard.js';
@@ -253,7 +254,7 @@ export function createCopyHandlers(scope: SelectionOperationsScope): SelectionCo
                     }
 
                     const plainText = resolvePlainText(payload, plainTextFormat);
-                    writeMultiFormatToClipboard(payload.html, plainText, payload.md, `${payload.matrix.length} cells`);
+                    writeMultiFormatToClipboard(clipboardHtml(payload, plainTextFormat), plainText, payload.md, `${payload.matrix.length} cells`);
                     return;
                 }
 
@@ -269,7 +270,7 @@ export function createCopyHandlers(scope: SelectionOperationsScope): SelectionCo
                 }
 
                 const plainText = resolvePlainText(payload, plainTextFormat);
-                writeMultiFormatToClipboard(payload.html, plainText, payload.md, `${model.selectedCells.size} cells`);
+                writeMultiFormatToClipboard(clipboardHtml(payload, plainTextFormat), plainText, payload.md, `${model.selectedCells.size} cells`);
             })();
         },
 

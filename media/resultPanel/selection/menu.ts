@@ -3,7 +3,7 @@ import { canCreateRangeChart } from '../rangeChart.js';
 import { callPanelMethod, getResultPanelWindow } from '../types.js';
 import type { TanStackColumn, TanStackTable } from '../types.js';
 import { formatCellValue } from '../utils.js';
-import { createChartRangeSubmenuItem, createContextMenuItem, removeOpenSubmenus } from './contextMenu.js';
+import { createChartRangeSubmenuItem, createContextMenuItem, createSubmenuItem, removeOpenSubmenus } from './contextMenu.js';
 import { panelGetIsEditMode, parseDatasetIndex } from './interaction.js';
 import type { SelectionModel } from './model.js';
 import { getCellDescriptorFromTd, triggerRender } from './render.js';
@@ -207,6 +207,12 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         });
         menu.appendChild(copyRowMdItem);
 
+        const rowViewItem = createContextMenuItem('Open in Row View', function () {
+            callPanelMethod('toggleRowView');
+            menu.remove();
+        });
+        menu.appendChild(rowViewItem);
+
         // Delete Row(s) — only in edit mode
         let inEditMode = false;
         try { inEditMode = panelGetIsEditMode(); } catch { /* panel may be unavailable during teardown */ }
@@ -239,26 +245,22 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         menu.appendChild(rowSep);
     }
 
-    // Copy as MD option (default format)
-    const copyAsMdItem = createContextMenuItem('Copy as MD', function () {
-        callPanelMethod('copySelectionAsMd', true);
-        menu.remove();
-    });
-    menu.appendChild(copyAsMdItem);
-
-    // Copy as tabbed with headers option
-    const copyTabbedItem = createContextMenuItem('Copy as tabbed with headers', function () {
-        callPanelMethod('copySelection', true, 'tabbed');
-        menu.remove();
-    });
-    menu.appendChild(copyTabbedItem);
-
-    // Copy option (tabbed without headers)
+    // Copy (tabbed without headers) stays one click; every other format lives in "Copy as".
     const copyItem = createContextMenuItem('Copy', function () {
         callPanelMethod('copySelection', false, 'tabbed');
         menu.remove();
     });
     menu.appendChild(copyItem);
+
+    menu.appendChild(createSubmenuItem('Copy as', [
+        { label: 'Tabbed with headers', onClick: () => callPanelMethod('copySelection', true, 'tabbed') },
+        { label: 'Markdown table', onClick: () => callPanelMethod('copySelectionAsMd', true) },
+        { label: 'CSV', onClick: () => callPanelMethod('copySelection', true, 'csv') },
+        { label: 'JSON', onClick: () => callPanelMethod('copySelection', true, 'json') },
+        { label: 'SQL INSERT statements', onClick: () => callPanelMethod('copySelection', true, 'insert') },
+        { label: 'SQL IN list', onClick: () => callPanelMethod('copySelection', false, 'inList') },
+        { label: 'HTML table', onClick: () => callPanelMethod('copySelectionAsHtml') },
+    ], menu));
 
     const cellDescriptor = clickedCell ? getCellDescriptorFromTd(table, clickedCell) : null;
     if (cellDescriptor) {
@@ -296,52 +298,19 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
     separator1.style.margin = '2px 0';
     menu.appendChild(separator1);
 
-    // Export Selection submenu
     if (hasSelection) {
-        const exportSelectionItem = createContextMenuItem('Export Selection to CSV', function () {
-            callPanelMethod('exportSelectionToCsv');
-            menu.remove();
-        });
-        menu.appendChild(exportSelectionItem);
-
-        const exportSelectionJsonItem = createContextMenuItem('Export Selection to JSON', function () {
-            callPanelMethod('exportSelectionToJson');
-            menu.remove();
-        });
-        menu.appendChild(exportSelectionJsonItem);
-
-        const exportSelectionExcelItem = createContextMenuItem('Export Selection to Excel', function () {
-            callPanelMethod('exportSelectionToExcel');
-            menu.remove();
-        });
-        menu.appendChild(exportSelectionExcelItem);
-
-        // Separator
-        const separator2 = document.createElement('div');
-        separator2.style.height = '1px';
-        separator2.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        separator2.style.margin = '2px 0';
-        menu.appendChild(separator2);
+        menu.appendChild(createSubmenuItem('Export Selection', [
+            { label: 'Excel', onClick: () => callPanelMethod('exportSelectionToExcel') },
+            { label: 'CSV', onClick: () => callPanelMethod('exportSelectionToCsv') },
+            { label: 'JSON', onClick: () => callPanelMethod('exportSelectionToJson') },
+        ], menu));
     }
 
-    // Export All Visible options
-    const exportAllCsvItem = createContextMenuItem('Export All Visible to CSV', function () {
-        callPanelMethod('exportAllVisibleToCsv');
-        menu.remove();
-    });
-    menu.appendChild(exportAllCsvItem);
-
-    const exportAllJsonItem = createContextMenuItem('Export All Visible to JSON', function () {
-        callPanelMethod('exportAllVisibleToJson');
-        menu.remove();
-    });
-    menu.appendChild(exportAllJsonItem);
-
-    const exportAllExcelItem = createContextMenuItem('Export All Visible to Excel', function () {
-        callPanelMethod('exportAllVisibleToExcel');
-        menu.remove();
-    });
-    menu.appendChild(exportAllExcelItem);
+    menu.appendChild(createSubmenuItem('Export All Visible', [
+        { label: 'Excel', onClick: () => callPanelMethod('exportAllVisibleToExcel') },
+        { label: 'CSV', onClick: () => callPanelMethod('exportAllVisibleToCsv') },
+        { label: 'JSON', onClick: () => callPanelMethod('exportAllVisibleToJson') },
+    ], menu));
 
     document.body.appendChild(menu);
 

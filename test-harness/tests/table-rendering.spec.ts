@@ -129,7 +129,7 @@ test.describe('Table rendering', () => {
     });
 
     test('cell context menu stays fully reachable in a short results panel', async ({ page }) => {
-        await page.setViewportSize({ width: 900, height: 300 });
+        await page.setViewportSize({ width: 900, height: 200 });
         const cell = page.locator('#gridContainer tbody td:not(.row-number-cell)').nth(3);
         await cell.click({ button: 'right' });
 
@@ -140,6 +140,62 @@ test.describe('Table rendering', () => {
             return rect.top >= 0 && rect.bottom <= window.innerHeight;
         })).toBe(true);
         await expect.poll(() => menu.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    });
+
+    test('Copy as JSON from the cell context menu writes plain JSON', async ({ page }) => {
+        await page.evaluate(() => {
+            const target = window as unknown as { __copiedText?: string };
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: {
+                    writeText: async (text: string) => { target.__copiedText = text; },
+                    write: async () => { throw new Error('rich clipboard must not be used for JSON'); },
+                },
+            });
+        });
+        const cell = page.locator('#gridContainer tbody td:not(.row-number-cell)').nth(1);
+        await cell.click();
+        await cell.click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: /^Copy as$/ }).hover();
+        await page.locator('.grid-context-submenu .grid-context-menu-item', { hasText: /^JSON$/ }).click();
+
+        const copied = await expect.poll(() => page.evaluate(() => (window as unknown as { __copiedText?: string }).__copiedText))
+            .toBeTruthy().then(() => page.evaluate(() => (window as unknown as { __copiedText?: string }).__copiedText ?? ''));
+        const rows = JSON.parse(copied) as Array<Record<string, unknown>>;
+        expect(rows).toHaveLength(1);
+        expect(Object.keys(rows[0])).toHaveLength(1);
+        await expect(page.locator('.grid-context-menu')).toHaveCount(0);
+    });
+
+    test('Copy as SQL IN list writes one plain IN predicate for the selected column cells', async ({ page }) => {
+        await page.evaluate(() => {
+            const target = window as unknown as { __copiedText?: string };
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: {
+                    writeText: async (text: string) => { target.__copiedText = text; },
+                    write: async () => { throw new Error('rich clipboard must not be used for an IN list'); },
+                },
+            });
+        });
+        const cellInRow = (row: number) =>
+            page.locator('#gridContainer tbody tr').nth(row).locator('td:not(.row-number-cell)').nth(1);
+        await cellInRow(0).click();
+        await page.keyboard.press('Shift+ArrowDown');
+        await page.keyboard.press('Shift+ArrowDown');
+        await cellInRow(1).click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: /^Copy as$/ }).hover();
+        await page.locator('.grid-context-submenu .grid-context-menu-item', { hasText: /^SQL IN list$/ }).click();
+
+        await expect.poll(() => page.evaluate(() => (window as unknown as { __copiedText?: string }).__copiedText))
+            .toBeTruthy();
+        const copied = await page.evaluate(() => (window as unknown as { __copiedText?: string }).__copiedText ?? '');
+        const expectedValues = await Promise.all([0, 1, 2].map(row => cellInRow(row).innerText()));
+        expect(copied).toMatch(/^IN \(.+\)$/);
+        // No header row and at most one literal per distinct selected value.
+        const distinct = new Set(expectedValues.map(value => value.trim()).filter(value => value && value !== 'NULL'));
+        expect(copied.slice(4, -1).split(', ').length).toBe(distinct.size);
+        await expect(page.locator('.grid-context-menu')).toHaveCount(0);
     });
 
     test('dragging a cell selection across grouped rows leaves no native text selection behind', async ({ page }) => {
