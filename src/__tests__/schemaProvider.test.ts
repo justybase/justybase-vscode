@@ -6,7 +6,11 @@
 jest.unmock('chevrotain');
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { SchemaProvider, SchemaItem } from '../providers/schemaProvider';
+import { initializeObjectNotesStore } from '../core/objectNotesStore';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
 import { METADATA_QUERY_TIMEOUT_SECONDS } from '../metadata/metadataQueryLimiter';
@@ -173,6 +177,47 @@ describe('SchemaProvider', () => {
             const result = schemaProvider.getTreeItem(item);
 
             expect(result).toBe(item);
+        });
+
+        it('shows a local user note in the tooltip and description, and drops it after removal', async () => {
+            const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-notes-'));
+            try {
+                const { store } = initializeObjectNotesStore({ globalStorageUri: { fsPath: storageDir }, subscriptions: [] } as unknown as vscode.ExtensionContext);
+                const item = new SchemaItem(
+                    'ORDERS',
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    'netezza:TABLE',
+                    'SALES',
+                    'TABLE',
+                    'ADMIN',
+                    undefined,
+                    undefined,
+                    'NZ',
+                );
+                const plainTooltip = item.tooltip;
+                const plainDescription = item.description;
+                const ref = { connectionName: 'NZ', database: 'SALES', schema: 'ADMIN', objectType: 'TABLE', name: 'ORDERS' };
+
+                await store.set(ref, 'Loaded nightly by ETL');
+                schemaProvider.getTreeItem(item);
+                expect(item.tooltip).toBe(`📝 Loaded nightly by ETL\n\n${plainTooltip}`);
+                expect(String(item.description)).toMatch(/^📝/);
+
+                await store.remove(ref);
+                schemaProvider.getTreeItem(item);
+                expect(item.tooltip).toBe(plainTooltip);
+                expect(item.description).toBe(plainDescription);
+
+                // Favorites build Markdown tooltips: the note stays Markdown and is escaped.
+                const favorite = new SchemaItem('ORDERS', vscode.TreeItemCollapsibleState.Collapsed, 'favoritesObject:TABLE', 'SALES', 'TABLE', 'ADMIN', undefined, undefined, 'NZ');
+                favorite.tooltip = new vscode.MarkdownString('**Favorite:** ORDERS');
+                await store.set(ref, 'do *not* truncate');
+                schemaProvider.getTreeItem(favorite);
+                expect(favorite.tooltip).toBeInstanceOf(vscode.MarkdownString);
+                expect((favorite.tooltip as vscode.MarkdownString).value).toBe('📝 do \\*not\\* truncate\n\n**Favorite:** ORDERS');
+            } finally {
+                fs.rmSync(storageDir, { recursive: true, force: true });
+            }
         });
     });
 

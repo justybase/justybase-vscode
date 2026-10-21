@@ -20,6 +20,7 @@ import { escapeSqlIdentifier, escapeSqlLiteral } from '../../../utils/sqlUtils';
 import { MetadataCache } from '../../../metadataCache';
 import { ColumnMetadata } from '../../../metadata/types';
 import { CopilotToolRuntime } from './copilotToolRuntime';
+import { formatObjectNotesForCopilot, getObjectNotesStore } from '../../../core/objectNotesStore';
 
 const COPILOT_METADATA_MAX_ROWS = 1_000_000;
 
@@ -715,6 +716,8 @@ export class CopilotSchemaIntrospectionTools {
                     results.push(`⚠️ Error fetching column comments: ${msg}`);
                 }
             }
+
+            results.push(...formatObjectNotesForCopilot(getObjectNotesStore()?.findForObject(db, schemaName, table) ?? []));
 
             return results.join('\n');
         } catch (e: unknown) {

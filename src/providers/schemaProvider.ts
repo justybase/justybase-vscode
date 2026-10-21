@@ -61,6 +61,7 @@ import {
 } from '../dialects/netezza/metadata/identifierUtils';
 import { buildFileConnectionDetails, detectFileDataFormat, getFilePaths, normalizeFilePath, saveFileConnectionDetails } from '../services/fileConnectionProfileService';
 import type { MetadataQueryKind } from '../metadata/metadataQueryDiagnostics';
+import { getObjectNotesStore, objectNoteRefForItem } from '../core/objectNotesStore';
 import {
     buildInlineTreeDescription,
     buildInsertText,
@@ -562,6 +563,11 @@ export class SchemaProvider
     refresh(): void {
         this._quickFilterChildren.clear();
         this._useQuickFilterSnapshots = false;
+        this._onDidChangeTreeData.fire();
+    }
+
+    /** Re-renders the visible nodes (e.g. after a note changed) without resetting the quick filter. */
+    refreshItemDecorations(): void {
         this._onDidChangeTreeData.fire();
     }
 
@@ -1525,6 +1531,8 @@ export class SchemaProvider
     }
 
     getTreeItem(element: SchemaItem): vscode.TreeItem {
+        const ref = objectNoteRefForItem(element);
+        element.applyObjectNote(ref ? getObjectNotesStore()?.get(ref)?.note : undefined);
         return element;
     }
 
@@ -3184,6 +3192,8 @@ export class SchemaItem extends vscode.TreeItem {
     public sourceContext?: string;
     public readonly rawLabel: string;
     public readonly objectDescription?: string;
+    /** Tooltip and description as built by the constructor, before a user note is applied. */
+    private noteFreePresentation?: { tooltip: SchemaItem['tooltip']; description: SchemaItem['description'] };
 
     constructor(
         public readonly label: string,
@@ -3320,6 +3330,24 @@ export class SchemaItem extends vscode.TreeItem {
                 arguments: [this, { fromTreeClick: true }],
             };
         }
+    }
+
+    /** Shows a local user note at the top of the tooltip and marks the node with 📝. */
+    applyObjectNote(note: string | undefined): void {
+        this.noteFreePresentation ??= { tooltip: this.tooltip, description: this.description };
+        const { tooltip, description } = this.noteFreePresentation;
+        if (!note) {
+            this.tooltip = tooltip;
+            this.description = description;
+            return;
+        }
+        if (tooltip instanceof vscode.MarkdownString) {
+            const escapedNote = note.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, '\\$&');
+            this.tooltip = new vscode.MarkdownString(`📝 ${escapedNote}\n\n${tooltip.value}`);
+        } else {
+            this.tooltip = `📝 ${note}\n\n${tooltip ?? this.label}`;
+        }
+        this.description = typeof description === 'string' && description ? `📝 ${description}` : '📝';
     }
 
     private getIconForType(type?: string): vscode.ThemeIcon {
