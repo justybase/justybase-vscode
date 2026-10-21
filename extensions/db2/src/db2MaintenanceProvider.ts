@@ -75,9 +75,26 @@ interface Db2IndexColumnRow {
     COLORDER: string;
 }
 
+/**
+ * RUNSTATS variants offered before running statistics; `clause` follows `RUNSTATS ON TABLE <name>`.
+ */
+export const DB2_RUNSTATS_OPTIONS: ReadonlyArray<{ label: string; detail: string; clause: string }> = [
+    { label: 'All columns and indexes', detail: 'Basic column statistics and detailed index statistics', clause: 'ON ALL COLUMNS AND DETAILED INDEXES ALL' },
+    { label: 'With distribution', detail: 'Adds frequency and quantile statistics for skewed data', clause: 'WITH DISTRIBUTION AND DETAILED INDEXES ALL' },
+    { label: 'Sampled (10%)', detail: 'Faster on large tables: system page sampling for the table and indexes', clause: 'WITH DISTRIBUTION AND SAMPLED DETAILED INDEXES ALL TABLESAMPLE SYSTEM (10)' },
+    { label: 'Use statistics profile', detail: 'Repeats the options saved with SET PROFILE for this table', clause: 'USE PROFILE' },
+];
+
 export const db2MaintenanceProvider: DatabaseMaintenanceProvider = {
     async generateStatistics(target, services): Promise<void> {
-        const commandText = `RUNSTATS ON TABLE ${getDb2QualifiedTableName(target)} ON ALL COLUMNS AND DETAILED INDEXES ALL`;
+        const option = await vscode.window.showQuickPick(DB2_RUNSTATS_OPTIONS, {
+            title: `RUNSTATS ${target.qualifiedName}`,
+            placeHolder: 'Choose which statistics to collect',
+        });
+        if (!option) {
+            return;
+        }
+        const commandText = `RUNSTATS ON TABLE ${getDb2QualifiedTableName(target)} ${option.clause}`;
         const sql = `CALL SYSPROC.ADMIN_CMD(${quoteSqlLiteral(commandText)});`;
         const confirmation = await vscode.window.showInformationMessage(
             `Generate statistics for table "${target.qualifiedName}"?\n\n${commandText}`,

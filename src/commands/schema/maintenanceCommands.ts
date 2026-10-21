@@ -12,7 +12,8 @@ import { getDatabaseMaintenanceProvider, getRequiredDatabaseDdlProvider } from '
 import { runQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
 import { generateRecreateTableScript } from '../../schema/tableRecreator';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
-import { getFullName, executeWithProgress } from './helpers';
+import { getFullName, getItemObjectName, executeWithProgress } from './helpers';
+import { refreshMaterializedViewSql } from './menuSql';
 
 type MaintenanceOperation =
   | 'groomTable'
@@ -242,13 +243,16 @@ export function registerMaintenanceCommands(deps: SchemaCommandsDependencies): v
             await invokeMaintenanceOperation(deps, item, 'recreateTable', 'Table recreation');
         }),
 
-        vscode.commands.registerCommand('netezza.vacuumTable', async (item: SchemaItemData) => {
-            if (!isTableItem(item)) {
-                return;
-            }
+        // One space-reclaim operation, offered under the name each dialect uses for it
+        // (VACUUM, REORG TABLE, OPTIMIZE TABLE, ALTER TABLE ... MOVE).
+        ...['netezza.vacuumTable', 'netezza.reorgTable', 'netezza.optimizeTable', 'netezza.moveTable'].map(command =>
+            vscode.commands.registerCommand(command, async (item: SchemaItemData) => {
+                if (!isTableItem(item)) {
+                    return;
+                }
 
-            await invokeMaintenanceOperation(deps, item, 'vacuumTable', 'Table maintenance');
-        }),
+                await invokeMaintenanceOperation(deps, item, 'vacuumTable', 'Table maintenance');
+            })),
 
         vscode.commands.registerCommand('netezza.analyzeTable', async (item: SchemaItemData) => {
             if (!isTableItem(item)) {
@@ -661,5 +665,44 @@ export function registerMaintenanceCommands(deps: SchemaCommandsDependencies): v
       resolved.services
     );
   }),
+
+        vscode.commands.registerCommand('netezza.refreshMaterializedView', async (item: SchemaItemData) => {
+            const { connectionManager, context } = deps;
+            const name = item ? getItemObjectName(item) : '';
+            if (!item?.connectionName || !item.objType || !name) {
+                vscode.window.showErrorMessage('Right-click a materialized view to refresh it.');
+                return;
+            }
+            const databaseKind = connectionManager.getConnectionDatabaseKind(item.connectionName);
+            let concurrently = false;
+            if (databaseKind === 'postgresql') {
+                const mode = await vscode.window.showQuickPick(
+                    [
+                        { label: 'Refresh', description: 'Locks the view against reads until the refresh completes', concurrently: false },
+                        { label: 'Refresh concurrently', description: 'Keeps the view readable; requires a unique index on the view', concurrently: true },
+                    ],
+                    { placeHolder: `Refresh ${name}` },
+                );
+                if (!mode) return;
+                concurrently = mode.concurrently;
+            }
+            let sql: string;
+            try {
+                sql = refreshMaterializedViewSql(databaseKind, item.objType, { database: item.dbName, schema: item.schema, name }, { concurrently });
+            } catch (error) {
+                vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+                return;
+            }
+            try {
+                await executeWithProgress(`Refreshing ${name}...`, async () => {
+                    await runQuery(context, sql, true, item.connectionName, connectionManager);
+                });
+                vscode.window.showInformationMessage(databaseKind === 'netezza'
+                    ? `Refreshed ${name}: rows added since the last refresh are now sorted into the view.`
+                    : `Refreshed ${name}.`);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to refresh ${name}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }),
   ];
 }

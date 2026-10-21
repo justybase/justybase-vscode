@@ -91,7 +91,11 @@ describe('commands/schema/maintenanceCommands', () => {
       const disposables = registerMaintenanceCommands(deps);
 
       // 7 core Netezza commands + 5 PostgreSQL partition/index commands + concurrent reindex
-      expect(disposables).toHaveLength(13);
+      // + Refresh Materialized View + the REORG / Optimize / Move labels of the space-reclaim command
+      expect(disposables).toHaveLength(17);
+      for (const command of ['netezza.refreshMaterializedView', 'netezza.reorgTable', 'netezza.optimizeTable', 'netezza.moveTable']) {
+        expect(vscode.commands.registerCommand).toHaveBeenCalledWith(command, expect.any(Function));
+      }
       expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
         'netezza.groomTable',
         expect.any(Function)
