@@ -185,7 +185,7 @@
     }
   },
   "dependencies": {
-    "@justybase/db2": "0.1.0-alpha.2"
+    "@justybase/db2": "0.1.0-alpha.3"
   },
   "preview": true
 }

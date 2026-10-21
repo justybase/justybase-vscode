@@ -101,7 +101,7 @@ export const db2Dialect: DatabaseDialect = {
         options: [
           {
             value: "",
-            label: "Default",
+            label: "Default (negotiate with the server)",
           },
           {
             value: "3",
@@ -117,7 +117,7 @@ export const db2Dialect: DatabaseDialect = {
           },
         ],
         description:
-          "Optional preference forwarded to the Db2 driver. Leave blank to use its default; the selected mechanism must be supported by the installed driver and server.",
+          "Leave on Default to let the driver negotiate: it starts with 3 and switches to the encrypted 9 or 7 when the server requires it (AUTHENTICATION=SERVER_ENCRYPT). An explicit choice is sent as is and must be accepted by the server.",
         layout: "half",
       },
       {
