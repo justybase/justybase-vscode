@@ -132,9 +132,10 @@ describe('commands/schema/copyCommands', () => {
         it('should register all copy commands', () => {
             const disposables = registerCopyCommands(createDeps());
 
-            expect(disposables).toHaveLength(4);
+            expect(disposables).toHaveLength(5);
             expect(registeredCommands.has('netezza.copySelectAll')).toBe(true);
             expect(registeredCommands.has('netezza.copyDrop')).toBe(true);
+            expect(registeredCommands.has('netezza.dropConstraint')).toBe(true);
             expect(registeredCommands.has('netezza.copyName')).toBe(true);
         });
 
@@ -351,7 +352,7 @@ describe('commands/schema/copyCommands', () => {
             await handler(item);
 
             expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                'Are you sure you want to delete table "testdb.testschema.testtable"?',
+                expect.stringContaining('Are you sure you want to delete table "testdb.testschema.testtable"?'),
                 { modal: true },
                 'Yes, delete',
                 'Cancel'
@@ -397,7 +398,8 @@ describe('commands/schema/copyCommands', () => {
             expect(executeWithProgress).toHaveBeenCalled();
             expect(runQuery).toHaveBeenCalledWith(
                 mockContext,
-                'DROP TABLE testdb.testschema.testtable;',
+                // Without a known dialect the name keeps its exact (lower) case, as getFullName does.
+                'DROP TABLE testdb.testschema."testtable";',
                 true,
                 'testconn',
                 mockConnectionManager

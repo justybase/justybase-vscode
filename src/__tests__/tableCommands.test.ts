@@ -77,6 +77,7 @@ jest.mock("../commands/schema/helpers", () => ({
   getFullName: jest.fn(
     (item: any) => `${item.dbName}.${item.schema}.${item.label}`,
   ),
+  getItemObjectName: jest.fn((item: any) => item.label),
   requireConnection: jest.fn().mockResolvedValue(true),
   executeWithProgress: jest.fn(
     async (_title: string, fn: () => Promise<any>) => {
@@ -621,7 +622,8 @@ describe("tableCommands", () => {
 
       expect(runQuery).toHaveBeenCalledWith(
         expect.anything(),
-        "ALTER TABLE TESTDB.ADMIN.TEST_TABLE RENAME TO RENAMED_TABLE;",
+        // PostgreSQL folds unquoted names to lower case, so the tree's upper-case name is quoted.
+        'ALTER TABLE ADMIN."TEST_TABLE" RENAME TO RENAMED_TABLE;',
         true,
         "test-conn",
         expect.anything(),

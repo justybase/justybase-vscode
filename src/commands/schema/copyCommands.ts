@@ -8,6 +8,7 @@ import { runQuery } from '../../core/queryRunner';
 import type { DatabaseKind } from '../../contracts/database';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
 import { getFullName, executeWithProgress, getItemObjectName } from './helpers';
+import { dropConstraintSql, dropObjectSql, parentTableFromDescription } from './menuSql';
 import { buildSchemaItemMetadataComment } from './tableMetadataCommentService';
 
 /**
@@ -77,10 +78,24 @@ export function registerCopyCommands(deps: SchemaCommandsDependencies): vscode.D
         vscode.commands.registerCommand('netezza.copyDrop', async (item: SchemaItemData) => {
             if (item && getItemObjectName(item) && item.dbName && item.objType) {
                 const fullName = getFullName(item, connectionManager);
-                const sql = `DROP ${item.objType} ${fullName};`;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                let sql: string;
+                try {
+                    sql = dropObjectSql(
+                        databaseKind,
+                        item.objType,
+                        { database: item.dbName, schema: item.schema, name: getItemObjectName(item) },
+                        { parentTable: item.parentName ?? parentTableFromDescription(item.objectDescription) },
+                    );
+                } catch (err: unknown) {
+                    vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+                    return;
+                }
 
                 const confirmation = await vscode.window.showWarningMessage(
-                    `Are you sure you want to delete ${item.objType.toLowerCase()} "${fullName}"?`,
+                    `Are you sure you want to delete ${item.objType.toLowerCase()} "${fullName}"?
+
+${sql}`,
                     { modal: true },
                     'Yes, delete',
                     'Cancel'
@@ -104,6 +119,47 @@ export function registerCopyCommands(deps: SchemaCommandsDependencies): vscode.D
                         vscode.window.showErrorMessage(`Error during deletion: ${message}`);
                     }
                 }
+            }
+        }),
+
+        // Drop a constraint listed in a table's Keys folder
+        vscode.commands.registerCommand('netezza.dropConstraint', async (item: SchemaItemData) => {
+            if (!item || !item.parentName || !item.dbName || !item.objType) {
+                return;
+            }
+            const constraintName = getItemObjectName(item);
+            const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+            let sql: string;
+            try {
+                sql = dropConstraintSql(
+                    databaseKind,
+                    { database: item.dbName, schema: item.schema, name: item.parentName },
+                    constraintName,
+                    item.objType,
+                );
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+                return;
+            }
+            const confirmation = await vscode.window.showWarningMessage(
+                `Drop ${item.objType.toLowerCase()} constraint "${constraintName}" from ${item.parentName}?
+
+${sql}`,
+                { modal: true },
+                'Drop constraint',
+            );
+            if (confirmation !== 'Drop constraint') {
+                return;
+            }
+            try {
+                await executeWithProgress(`Dropping constraint ${constraintName}...`, async () => {
+                    await runQuery(context, sql, true, item.connectionName, connectionManager);
+                });
+                vscode.window.showInformationMessage(`Dropped constraint: ${constraintName}`);
+                schemaProvider.refresh();
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Error dropping constraint: ${message}`);
             }
         }),
 

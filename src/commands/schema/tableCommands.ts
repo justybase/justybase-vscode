@@ -7,9 +7,8 @@
 import * as vscode from 'vscode';
 import { runQuery } from '../../core/queryRunner';
 import { SchemaCommandsDependencies, SchemaItemData } from './types';
-import { getFullName, requireConnection, executeWithProgress, escapeSqlString, isValidIdentifier } from './helpers';
+import { getFullName, getItemObjectName, requireConnection, executeWithProgress, isValidIdentifier } from './helpers';
 import { TableDesignerView } from '../../views/tableDesignerView';
-import { formatIdentifierForSql } from '../../utils/identifierUtils';
 import {
     getTableDesignerUnsupportedReason,
     isTableDesignerSupported,
@@ -17,6 +16,30 @@ import {
 import { getCoreDatabaseDesignerCapabilities } from '../../core/designerCapabilities';
 import { tryGetDatabaseDialect } from '../../core/connectionFactory';
 import { assertDesignerOperation } from '../../views/designerOperationGuard';
+import {
+    changeTableOwnerSql,
+    columnCommentSql,
+    grantGranteeError,
+    grantPrivilegeOptions,
+    grantSql,
+    MenuObjectRef,
+    renameTableSql,
+    tableCommentSql,
+    truncateTableSql,
+} from './menuSql';
+
+function menuObjectRef(item: SchemaItemData): MenuObjectRef {
+    return { database: item.dbName, schema: item.schema, name: getItemObjectName(item) };
+}
+
+function sqlFromGenerator(build: () => string): string | undefined {
+    try {
+        return build();
+    } catch (err: unknown) {
+        vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+        return undefined;
+    }
+}
 
 /**
  * Register table modification commands
@@ -345,18 +368,12 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
         // Grant Permissions
         vscode.commands.registerCommand('netezza.grantPermissions', async (item: SchemaItemData) => {
-            if (item && item.label && item.dbName && item.schema && item.objType) {
+            if (item && item.label && item.dbName && item.objType) {
                 const fullName = getFullName(item, connectionManager);
 
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
                 const privilege = await vscode.window.showQuickPick(
-                    [
-                        { label: 'SELECT', description: 'Privileges to read data' },
-                        { label: 'INSERT', description: 'Privileges to insert data' },
-                        { label: 'UPDATE', description: 'Privileges to update data' },
-                        { label: 'DELETE', description: 'Privileges to delete data' },
-                        { label: 'ALL', description: 'All privileges (SELECT, INSERT, UPDATE, DELETE)' },
-                        { label: 'LIST', description: 'Privileges to list objects' }
-                    ],
+                    grantPrivilegeOptions(databaseKind),
                     {
                         placeHolder: 'Select privilege type'
                     }
@@ -365,22 +382,15 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                 if (!privilege) return;
 
                 const grantee = await vscode.window.showInputBox({
-                    prompt: 'Enter user or group name',
-                    placeHolder: 'e.g. SOME_USER or GROUP_NAME',
-                    validateInput: value => {
-                        if (!value || value.trim().length === 0) {
-                            return 'User/group name cannot be empty';
-                        }
-                        if (!isValidIdentifier(value)) {
-                            return 'Invalid user/group name';
-                        }
-                        return null;
-                    }
+                    prompt: databaseKind === 'snowflake' ? 'Enter role name' : 'Enter user or group name',
+                    placeHolder: databaseKind === 'mysql' ? "e.g. app_user@'%'" : databaseKind === 'snowflake' ? 'e.g. ANALYST_ROLE' : 'e.g. SOME_USER or GROUP_NAME',
+                    validateInput: value => grantGranteeError(databaseKind, value)
                 });
 
                 if (!grantee) return;
 
-                const sql = `GRANT ${privilege.label} ON ${fullName} TO ${grantee.trim().toUpperCase()};`;
+                const sql = sqlFromGenerator(() => grantSql(databaseKind, menuObjectRef(item), item.objType!, privilege.label, grantee));
+                if (!sql) return;
 
                 const confirmation = await vscode.window.showInformationMessage(
                     `Execute: ${sql}`,
@@ -401,7 +411,7 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                         );
 
                         vscode.window.showInformationMessage(
-                            `Granted ${privilege.label} on ${fullName} to ${grantee.trim().toUpperCase()}`
+                            `Granted ${privilege.label} on ${fullName} to ${grantee.trim()}`
                         );
                     } catch (err: unknown) {
                         const message = err instanceof Error ? err.message : String(err);
@@ -424,7 +434,9 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
                 if (comment === undefined) return;
 
-                const sql = `COMMENT ON TABLE ${fullName} IS '${escapeSqlString(comment)}';`;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                const sql = sqlFromGenerator(() => tableCommentSql(databaseKind, menuObjectRef(item), comment));
+                if (!sql) return;
 
                 try {
                     if (!await requireConnection(connectionManager)) return;
@@ -443,9 +455,7 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
         vscode.commands.registerCommand('netezza.addColumnComment', async (item: SchemaItemData) => {
             if (item && item.label && item.dbName && item.parentName) {
                 const colName = item.label.split(' ')[0];
-                const tableName = item.parentName;
-                const schemaName = item.schema || 'ADMIN';
-                const fullColumnRef = `${item.dbName}.${schemaName}.${tableName}.${colName}`;
+                const tableRef: MenuObjectRef = { database: item.dbName, schema: item.schema, name: item.parentName };
 
                 const comment = await vscode.window.showInputBox({
                     prompt: `Enter comment for column "${colName}"`,
@@ -455,7 +465,9 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
                 if (comment === undefined) return;
 
-                const sql = `COMMENT ON COLUMN ${fullColumnRef} IS '${escapeSqlString(comment)}';`;
+                const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+                const sql = sqlFromGenerator(() => columnCommentSql(databaseKind, tableRef, colName, comment));
+                if (!sql) return;
 
                 try {
                     if (!await requireConnection(connectionManager)) return;
@@ -475,8 +487,7 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
             if (item && item.label && item.dbName && item.objType === 'TABLE') {
                 const fullName = getFullName(item, connectionManager);
                 const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-                // Db2 has no bare TRUNCATE TABLE; the IMMEDIATE variant commits at once.
-                const sql = databaseKind === 'sqlite' ? `DELETE FROM ${fullName};` : databaseKind === 'db2' ? `TRUNCATE TABLE ${fullName} IMMEDIATE;` : `TRUNCATE TABLE ${fullName};`;
+                const sql = truncateTableSql(databaseKind, menuObjectRef(item));
 
                 const confirmation = await vscode.window.showWarningMessage(
                     `⚠️ WARNING: Are you sure you want to delete ALL data from the table "${fullName}"?\n\n${sql}\n\nThis operation is IRREVERSIBLE!`,
@@ -784,7 +795,7 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
         // Change Owner
         vscode.commands.registerCommand('netezza.changeOwner', async (item: SchemaItemData) => {
-            if (item && item.label && item.dbName && item.schema && item.objType === 'TABLE') {
+            if (item && item.label && item.dbName && item.objType === 'TABLE') {
                 const fullName = getFullName(item, connectionManager);
 
                 const newOwner = await vscode.window.showInputBox({
@@ -795,8 +806,8 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                 if (!newOwner) return;
 
                 const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-                const cleanOwner = formatIdentifierForSql(newOwner.trim(), databaseKind);
-                const sql = `ALTER TABLE ${fullName} OWNER TO ${cleanOwner};`;
+                const sql = sqlFromGenerator(() => changeTableOwnerSql(databaseKind, menuObjectRef(item), newOwner));
+                if (!sql) return;
 
                 try {
                     if (!await requireConnection(connectionManager)) return;
@@ -815,9 +826,8 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
 
         // Rename Table
         vscode.commands.registerCommand('netezza.renameTable', async (item: SchemaItemData) => {
-            if (item && item.label && item.dbName && item.schema && item.objType === 'TABLE') {
-                const fullName = getFullName(item, connectionManager);
-
+            // MySQL tables have no schema level; the database is their only container.
+            if (item && item.label && item.dbName && item.objType === 'TABLE') {
                 const newName = await vscode.window.showInputBox({
                     prompt: 'Enter new table name',
                     placeHolder: 'NewTableName',
@@ -827,11 +837,8 @@ export function registerTableCommands(deps: SchemaCommandsDependencies): vscode.
                 if (!newName || newName === item.label) return;
 
                 const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-                // Db2 rejects ALTER TABLE ... RENAME TO (SQLCODE -104) and a qualified
-                // rename target (SQLCODE -108); renames use RENAME TABLE instead.
-                const sql = databaseKind === 'db2'
-                    ? `RENAME TABLE ${fullName} TO ${newName.trim()};`
-                    : `ALTER TABLE ${fullName} RENAME TO ${newName.trim()};`;
+                const sql = sqlFromGenerator(() => renameTableSql(databaseKind, menuObjectRef(item), newName));
+                if (!sql) return;
 
                 try {
                     if (!await requireConnection(connectionManager)) return;
