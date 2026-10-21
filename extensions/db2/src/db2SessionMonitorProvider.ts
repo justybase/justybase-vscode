@@ -115,6 +115,24 @@ export const db2SessionMonitorProvider: DatabaseSessionMonitorProvider = {
 
     async killSession(context, services, sessionId) {
         validatePositiveIntegerSessionId(sessionId, 'Db2');
-        await executeSessionMonitorStatement(context, services, `FORCE APPLICATION (${sessionId})`);
+        // FORCE APPLICATION is a CLP command; SQL connections reach it through ADMIN_CMD.
+        await executeSessionMonitorStatement(context, services, `CALL SYSPROC.ADMIN_CMD('FORCE APPLICATION (${sessionId})')`);
+    },
+
+    async cancelQuery(context, services, sessionId) {
+        validatePositiveIntegerSessionId(sessionId, 'Db2');
+        const activities = await services.query<{ UOW_ID: unknown; ACTIVITY_ID: unknown }>(
+            `SELECT UOW_ID, ACTIVITY_ID FROM TABLE(MON_GET_ACTIVITY(${sessionId}, -2)) WHERE ACTIVITY_STATE IN ('EXECUTING', 'IDLE', 'QUEUED')`,
+        );
+        if (activities.length === 0) {
+            throw new Error(`Application ${sessionId} has no running activity to cancel.`);
+        }
+        for (const activity of activities) {
+            await executeSessionMonitorStatement(
+                context,
+                services,
+                `CALL SYSPROC.WLM_CANCEL_ACTIVITY(${sessionId}, ${Number(activity.UOW_ID)}, ${Number(activity.ACTIVITY_ID)})`,
+            );
+        }
     }
 };

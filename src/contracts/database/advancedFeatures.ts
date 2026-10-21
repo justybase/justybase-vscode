@@ -629,6 +629,13 @@ export interface DatabaseSessionMonitorProvider {
         queryId: string,
         connectionName?: string
     ): Promise<void>;
+    /** Cancels the statement running in a session without ending the session. */
+    cancelQuery?(
+        context: unknown,
+        services: SharedDatabaseSessionMonitorServices,
+        sessionId: number,
+        connectionName?: string
+    ): Promise<void>;
 }
 
 export type DatabaseReferenceTopic = 'optimization' | 'procedure' | 'all';

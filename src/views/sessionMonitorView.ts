@@ -69,6 +69,9 @@ export class SessionMonitorView {
                     case 'killSession':
                         await this._killSession(message.sessionId, message.status, message.queryId);
                         return;
+                    case 'cancelQuery':
+                        await this._cancelQuery(message.sessionId);
+                        return;
                     case 'toggleAutoRefresh':
                         this._toggleAutoRefresh(message.enabled);
                         return;
@@ -206,6 +209,28 @@ export class SessionMonitorView {
         }
     }
 
+    private async _cancelQuery(sessionId: number): Promise<void> {
+        try {
+            const confirmation = await vscode.window.showWarningMessage(
+                `Cancel the statement running in session ${sessionId}? The session stays connected.`,
+                { modal: true },
+                'Cancel Statement'
+            );
+            if (confirmation !== 'Cancel Statement') {
+                return;
+            }
+            const provider = await this._getProvider();
+            if (!provider?.cancelQuery) {
+                throw new Error('Cancelling a statement is not supported on this connection; use Kill instead.');
+            }
+            await provider.cancelQuery(this._context, this._getSessionMonitorServices(), sessionId, this._connectionName);
+            vscode.window.showInformationMessage(`Cancel requested for session ${sessionId}.`);
+            await this._fetchAndSendData();
+        } catch (err: unknown) {
+            vscode.window.showErrorMessage(`Failed to cancel the statement: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
     private async _fetchAndSendData(): Promise<void> {
         this._postMessage({ command: 'setLoading', loading: true });
 
@@ -220,7 +245,9 @@ export class SessionMonitorView {
             const alertSettings = this._getAlertSettings();
             const alerts = this._buildAlerts(overview, alertSettings);
 
+            const provider = await this._getProvider();
             const data: SessionMonitorData = {
+                canCancelQuery: Boolean(provider?.cancelQuery),
                 sessions,
                 queries,
                 storage,

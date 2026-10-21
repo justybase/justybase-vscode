@@ -341,14 +341,28 @@ describe('oracleSessionMonitorProvider', () => {
         });
     });
 
-    it('builds ALTER SYSTEM KILL SESSION blocks for Oracle session termination', async () => {
-        mockedRunQueryRaw.mockResolvedValue(undefined as never);
+    it('reads SERIAL# and kills the Oracle session with plain SQL', async () => {
+        mockRows([{ SERIAL: 4711 }]);
 
         await oracleSessionMonitorProvider.killSession(context, services, 15);
 
-        expect(lastSql()).toContain('ALTER SYSTEM KILL SESSION');
-        expect(lastSql()).toContain('v_sid CONSTANT NUMBER := 15');
-        expect(lastSql()).toContain('WHERE SID = v_sid');
+        expect(lastSql()).toBe("ALTER SYSTEM KILL SESSION '15,4711' IMMEDIATE");
+    });
+
+    it('cancels the running Oracle statement without killing the session', async () => {
+        mockRows([{ SERIAL: 4711 }]);
+
+        await oracleSessionMonitorProvider.cancelQuery!(context, services, 15);
+
+        expect(lastSql()).toBe("ALTER SYSTEM CANCEL SQL '15,4711'");
+    });
+
+    it('reports a missing Oracle session instead of killing blindly', async () => {
+        mockRows([]);
+
+        await expect(oracleSessionMonitorProvider.killSession(context, services, 15)).rejects.toThrow(
+            'Oracle session 15 was not found.'
+        );
     });
 
     it('rejects invalid session IDs', async () => {
@@ -392,6 +406,22 @@ describe('db2SessionMonitorProvider', () => {
         await db2SessionMonitorProvider.killSession(context, services, 512);
 
         expect(lastSql()).toContain('FORCE APPLICATION (512)');
+    });
+
+    it('cancels each running Db2 activity with WLM_CANCEL_ACTIVITY', async () => {
+        mockRows([{ UOW_ID: 3, ACTIVITY_ID: 1 }]);
+
+        await db2SessionMonitorProvider.cancelQuery!(context, services, 512);
+
+        expect(lastSql()).toBe('CALL SYSPROC.WLM_CANCEL_ACTIVITY(512, 3, 1)');
+    });
+
+    it('reports Db2 applications without a running activity', async () => {
+        mockRows([]);
+
+        await expect(db2SessionMonitorProvider.cancelQuery!(context, services, 512)).rejects.toThrow(
+            'Application 512 has no running activity to cancel.'
+        );
     });
 
     it('rejects invalid session IDs', async () => {
