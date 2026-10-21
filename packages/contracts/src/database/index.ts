@@ -1,5 +1,5 @@
 import type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue } from './connectionForm';
-import type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseForeignKeyColumnReference, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions } from './metadataProvider';
+import type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseForeignKeyColumnReference, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions, DatabaseTableDetailKind, DatabaseTableReportKind, DatabaseReportKind } from './metadataProvider';
 import type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix } from './dialectTraits';
 import type { DatabaseConnection, DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor, DatabaseCommand, DatabaseDataReader } from './connection';
 import type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseTableDdlMetadata, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseSynonymInfo, DatabaseExternalTableDdlMetadata, DatabaseDdlGenerationMode, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabaseRecreateTableResult, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorServices, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic, DatabaseExplainOptions, DatabaseExplainProvider, DatabaseQueryProfileProvider, DatabaseStageLocation, DatabaseInlineFileFormatOptions, DatabaseCopyIntoTableOptions, DatabaseCopyIntoStageOptions, DatabaseStageWorkflowProvider, DatabaseImportWizardInput, DatabaseImportExecutionPlan, DatabaseImportWizardProvider } from './advancedFeatures';
@@ -120,7 +120,7 @@ export const DATABASE_KIND_OPTIONS: readonly DatabaseKindOption[] = SUPPORTED_DA
 export { DatabaseConnection, DatabaseCommand, DatabaseDataReader };
 export type { DatabaseConnectionConfig, DatabaseConnectionConstructor, DatabaseConnectionStaticConstructor };
 export type { DatabaseConnectionFormSchema, DatabaseConnectionOptions, DatabaseConnectionFieldSchema, DatabaseConnectionFieldType, DatabaseConnectionFieldOption, DatabaseConnectionOptionValue };
-export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseForeignKeyColumnReference, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions };
+export type { DatabaseMetadataProvider, DatabaseColumnQueryOptions, DatabaseForeignKeyColumnReference, DatabaseColumnsWithKeysQuerySet, DatabaseColumnLookupParams, DatabaseMirroredSystemCatalog, DatabaseSourceSearchQueryOptions, DatabaseTableDetailKind, DatabaseTableReportKind, DatabaseReportKind };
 export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualificationTraits, DatabaseCompletionTraits, DatabaseObjectSupportTraits, DatabaseDialectTraitsOverrides, DatabaseThreePartNamePrefix };
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseTableDdlMetadata, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseSynonymInfo, DatabaseExternalTableDdlMetadata, DatabaseDdlGenerationMode, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabaseRecreateTableResult, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorServices, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic, DatabaseExplainOptions, DatabaseExplainProvider, DatabaseQueryProfileProvider, DatabaseStageLocation, DatabaseInlineFileFormatOptions, DatabaseCopyIntoTableOptions, DatabaseCopyIntoStageOptions, DatabaseStageWorkflowProvider, DatabaseImportWizardInput, DatabaseImportExecutionPlan, DatabaseImportWizardProvider };
 export type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle };
@@ -179,7 +179,31 @@ export interface DatabaseCapabilities {
   supportsSchemaValueSearch: boolean;
   /** CALL / SELECT routine invocation script generation. */
   supportsCallRoutine: boolean;
+  /** Foreign-key based entity-relationship diagram for a schema. */
+  supportsErDiagram: boolean;
+  /** Catalog-backed dependencies, used-by and impact analysis. */
+  supportsDependencyAnalysis: boolean;
+  /** Read-only table size / row count report (`buildTableReportQuery(..., 'size')`). */
+  supportsTableSizeReport: boolean;
+  /** Read-only report of the privileges granted on a table. */
+  supportsTablePrivilegesReport: boolean;
+  /** Read-only maintenance status (statistics age, reorg/vacuum need, fragmentation). */
+  supportsTableMaintenanceReport: boolean;
+  /** Read-only report of lock waits / blocking sessions for a database. */
+  supportsLockReport: boolean;
+  /** Read-only list of invalid (uncompilable) objects in a database. */
+  supportsInvalidObjectsReport: boolean;
+  /** Refresh of materialized views (Db2: REFRESH DEFERRED materialized query tables). */
+  supportsMaterializedViewRefresh: boolean;
+  /**
+   * Name the dialect uses for the space-reclaim operation behind `vacuumTable`
+   * (VACUUM, REORG TABLE, OPTIMIZE TABLE, ALTER TABLE ... MOVE); it picks the
+   * menu label. Undefined means "vacuum".
+   */
+  tableReclaimStyle?: DatabaseTableReclaimStyle;
 }
+
+export type DatabaseTableReclaimStyle = 'vacuum' | 'reorg' | 'optimize' | 'move';
 
 export interface DatabaseSqlFunctionSignature {
   name: string;
@@ -310,6 +334,14 @@ export function createDatabaseCapabilities(
     supportsSqliteDatabaseMaintenance: false,
     supportsSchemaValueSearch: false,
     supportsCallRoutine: false,
+    supportsErDiagram: false,
+    supportsDependencyAnalysis: false,
+    supportsTableSizeReport: false,
+    supportsTablePrivilegesReport: false,
+    supportsTableMaintenanceReport: false,
+    supportsLockReport: false,
+    supportsInvalidObjectsReport: false,
+    supportsMaterializedViewRefresh: false,
     ...overrides,
   };
 }
