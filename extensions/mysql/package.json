@@ -37,13 +37,6 @@
         "krzysztof-d.justybaselite-netezza"
     ],
     "contributes": {
-        "submenus": [
-            {
-                "id": "justybase.mysql.tableStructures",
-                "label": "MySQL: Table Structures",
-                "icon": "$(symbol-structure)"
-            }
-        ],
         "commands": [
             {
                 "command": "justybase.mysql.alterTableDesigner",
@@ -62,28 +55,21 @@
             }
         ],
         "menus": {
-            "view/item/context": [
-                {
-                    "submenu": "justybase.mysql.tableStructures",
-                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
-                    "group": "3_maintenance@1"
-                }
-            ],
-            "justybase.mysql.tableStructures": [
+            "justybase.schema.structure": [
                 {
                     "command": "justybase.mysql.alterTableDesigner",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
-                    "group": "1_structure@1"
+                    "group": "1_design@11"
                 },
                 {
                     "command": "justybase.mysql.createIndexWizard",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
-                    "group": "2_index@1"
+                    "group": "3_index@11"
                 },
                 {
                     "command": "justybase.mysql.managePartitions",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == mysql",
-                    "group": "3_partition@1"
+                    "group": "5_partition@20"
                 }
             ]
         }

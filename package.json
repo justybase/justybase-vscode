@@ -327,7 +327,11 @@
       },
       {
         "command": "netezza.copyDrop",
-        "title": "Drop Table/View"
+        "title": "Drop..."
+      },
+      {
+        "command": "netezza.dropConstraint",
+        "title": "Drop Constraint..."
       },
       {
         "command": "netezza.exportTableData",
@@ -996,6 +1000,60 @@
         "command": "netezza.analyzeLastExecution",
         "title": "Analyze Last Execution",
         "category": "JustyBase"
+      },
+      {
+        "command": "netezza.showTableSize",
+        "title": "Show Size & Row Count"
+      },
+      {
+        "command": "netezza.showTablePrivileges",
+        "title": "Show Privileges"
+      },
+      {
+        "command": "netezza.showTableMaintenanceStatus",
+        "title": "Show Maintenance Status"
+      },
+      {
+        "command": "netezza.showLockWaits",
+        "title": "Show Lock Waits / Blocking"
+      },
+      {
+        "command": "netezza.showInvalidObjects",
+        "title": "Show Invalid Objects"
+      },
+      {
+        "command": "netezza.editObjectNote",
+        "title": "Edit Note…",
+        "icon": "$(note)"
+      },
+      {
+        "command": "netezza.openObjectNotesFile",
+        "title": "JustyBase: Open Object Notes File"
+      },
+      {
+        "command": "netezza.exportObjectNotes",
+        "title": "JustyBase: Export Object Notes…"
+      },
+      {
+        "command": "netezza.importObjectNotes",
+        "title": "JustyBase: Import Object Notes…"
+      },
+      {
+        "command": "netezza.refreshMaterializedView",
+        "title": "Refresh Materialized View",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "netezza.reorgTable",
+        "title": "Reorganize Table (REORG)"
+      },
+      {
+        "command": "netezza.optimizeTable",
+        "title": "Optimize Table"
+      },
+      {
+        "command": "netezza.moveTable",
+        "title": "Move Table (Reclaim Space)"
       }
     ],
     "chatParticipants": [
@@ -1872,6 +1930,26 @@
         "id": "netezza.ctxCopilot",
         "label": "AI Copilot",
         "icon": "$(sparkle)"
+      },
+      {
+        "id": "justybase.schema.data",
+        "label": "Data",
+        "icon": "$(table)"
+      },
+      {
+        "id": "justybase.schema.structure",
+        "label": "Structure",
+        "icon": "$(symbol-structure)"
+      },
+      {
+        "id": "justybase.schema.maintenance",
+        "label": "Maintenance",
+        "icon": "$(tools)"
+      },
+      {
+        "id": "justybase.schema.analysis",
+        "label": "Analysis",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "menus": {
@@ -1954,6 +2032,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "netezza.dropConstraint",
+          "when": "false"
+        },
         {
           "command": "netezza.explainQuery",
           "when": "justybase.active.capabilities.supportsExplainPlan"
@@ -2096,6 +2178,46 @@
         },
         {
           "command": "netezza.importDataAdvanced"
+        },
+        {
+          "command": "netezza.showTableSize",
+          "when": "false"
+        },
+        {
+          "command": "netezza.editObjectNote",
+          "when": "false"
+        },
+        {
+          "command": "netezza.showTablePrivileges",
+          "when": "false"
+        },
+        {
+          "command": "netezza.showTableMaintenanceStatus",
+          "when": "false"
+        },
+        {
+          "command": "netezza.showLockWaits",
+          "when": "false"
+        },
+        {
+          "command": "netezza.showInvalidObjects",
+          "when": "false"
+        },
+        {
+          "command": "netezza.refreshMaterializedView",
+          "when": "false"
+        },
+        {
+          "command": "netezza.reorgTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.optimizeTable",
+          "when": "false"
+        },
+        {
+          "command": "netezza.moveTable",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -2415,11 +2537,6 @@
           "group": "0_connection@1"
         },
         {
-          "command": "netezza.migrateData",
-          "when": "view == netezza.schema && (viewItem =~ /^netezza:(TABLE|VIEW|EXTERNAL TABLE)$/ || viewItem =~ /^favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)$/)",
-          "group": "1_data@1"
-        },
-        {
           "command": "netezza.refreshSchemaSelection",
           "when": "view == netezza.schema && (viewItem == serverInstance || viewItem == database || viewItem =~ /^typeGroup:/ || viewItem =~ /^netezza:/)",
           "group": "inline@0"
@@ -2467,327 +2584,147 @@
         {
           "command": "netezza.favorites.addFolder",
           "when": "view == netezza.schema && viewItem == favoritesRoot",
-          "group": "inline"
+          "group": "inline@1"
         },
         {
           "command": "netezza.favorites.editNote",
           "when": "view == netezza.schema && viewItem =~ /^favorites(Folder|Sql|Object)/",
-          "group": "inline"
+          "group": "inline@1"
         },
         {
           "command": "netezza.favorites.moveToFolder",
           "when": "view == netezza.schema && viewItem =~ /^favorites(Folder|Sql|Object)/",
-          "group": "inline"
+          "group": "inline@2"
         },
         {
           "command": "netezza.favorites.delete",
           "when": "view == netezza.schema && viewItem =~ /^favorites(Folder|Sql|Object)/",
-          "group": "1_modification"
+          "group": "1_modification@1"
         },
         {
           "command": "netezza.copySelectAll",
-          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/",
-          "group": "1_copy"
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)(:[a-z]+)?$/",
+          "group": "0_query@1"
+        },
+        {
+          "command": "netezza.dropConstraint",
+          "when": "view == netezza.schema && viewItem == tableConstraint",
+          "group": "9_danger@3"
         },
         {
           "command": "netezza.copyDrop",
-          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/",
-          "group": "1_copy"
+          "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION|SEQUENCE|PROCEDURE|FUNCTION|AGGREGATE|TRIGGER|INDEX|PACKAGE|PACKAGE BODY|EVENT|STAGE|STREAM|TASK|FILE FORMAT)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION|SEQUENCE|PROCEDURE|FUNCTION|AGGREGATE|TRIGGER|INDEX|PACKAGE|PACKAGE BODY|EVENT|STAGE|STREAM|TASK|FILE FORMAT)(:[a-z]+)?$/",
+          "group": "9_danger@2"
         },
         {
           "command": "netezza.countRows",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/)",
-          "group": "1_copy@2"
-        },
-        {
-          "command": "netezza.findDuplicateRows",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/)",
-          "group": "1_copy@3"
-        },
-        {
-          "command": "netezza.createTableFromTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
-          "group": "1_copy@4"
-        },
-        {
-          "command": "netezza.exportTableData",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE)/)",
-          "group": "1_copy@5"
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)(:[a-z]+)?$/)",
+          "group": "0_query@3"
         },
         {
           "command": "netezza.callRoutine",
           "when": "(view == netezza.schema && viewItem =~ /^netezza:(PROCEDURE|FUNCTION)$/ || view == netezza.schema && viewItem =~ /^favoritesObject:(PROCEDURE|FUNCTION)$/) && justybase.schema.capabilities.supportsCallRoutine",
-          "group": "1_routine"
-        },
-        {
-          "command": "netezza.searchSchemaValues",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSchemaValueSearch",
-          "group": "1_data@2"
+          "group": "0_query@4"
         },
         {
           "command": "netezza.copyName",
           "when": "view == netezza.schema && viewItem =~ /netezza:.*/ || view == netezza.schema && viewItem =~ /favoritesObject:.*/",
-          "group": "1_copy"
+          "group": "1_copy@1"
         },
         {
           "command": "netezza.grantPermissions",
           "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW)/) && justybase.schema.capabilities.supportsGrants",
-          "group": "2_permissions"
-        },
-        {
-          "command": "netezza.groomTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsGroomTable",
-          "group": "3_maintenance"
+          "group": "5_admin@1"
         },
         {
           "command": "netezza.addTableComment",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableComments",
-          "group": "3_maintenance"
+          "group": "5_admin@4"
         },
         {
           "command": "netezza.addColumnComment",
           "when": "view == netezza.schema && viewItem == column && justybase.schema.capabilities.supportsColumnComments",
-          "group": "1_actions"
-        },
-        {
-          "command": "netezza.generateStatistics",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsTableStatistics",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "netezza.vacuumTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsVacuumTable",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "netezza.analyzeTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsAnalyzeTable",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "netezza.reindexTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsReindexTable",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "netezza.reindexConcurrently",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "netezza.duckdb.listIndexes",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == duckdb",
-          "group": "3_maintenance@3"
-        },
-        {
-          "command": "netezza.duckdb.dropIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == duckdb",
-          "group": "3_maintenance@4"
-        },
-        {
-          "command": "netezza.setTableStorage",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableStorageOptions",
-          "group": "3_maintenance@1"
-        },
-        {
-          "command": "netezza.createIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == sqlite)",
-          "group": "3_maintenance@2"
-        },
-        {
-          "command": "postgresql.listPartitions",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "postgresql.createPartition",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "postgresql.attachPartition",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "postgresql.listIndexes",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "postgresql.createIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
-          "group": "3_maintenance"
+          "group": "1_actions@1"
         },
         {
           "command": "netezza.truncateTable",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTruncateTable",
-          "group": "4_danger"
-        },
-        {
-          "command": "netezza.addPrimaryKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsPrimaryKeyChanges",
-          "group": "5_schema@1"
-        },
-        {
-          "command": "netezza.alterColumnQuick",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == duckdb)",
-          "group": "5_schema@1"
-        },
-        {
-          "command": "netezza.openObjectDesigner",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == postgresql)",
-          "group": "5_schema@0"
-        },
-        {
-          "command": "netezza.alterTableWizard",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == netezza",
-          "group": "5_schema@1"
-        },
-        {
-          "command": "netezza.addForeignKey",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsForeignKeyChanges",
-          "group": "5_schema@2"
-        },
-        {
-          "command": "netezza.addUniqueConstraint",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsUniqueConstraintChanges",
-          "group": "5_schema@3"
-        },
-        {
-          "command": "netezza.sqlite.viewIndexes",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@1"
-        },
-        {
-          "command": "netezza.sqlite.addIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@2"
-        },
-        {
-          "command": "netezza.sqlite.dropIndex",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@3"
-        },
-        {
-          "command": "netezza.sqlite.viewForeignKeys",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@4"
-        },
-        {
-          "command": "netezza.sqlite.viewTriggers",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@5"
-        },
-        {
-          "command": "netezza.sqlite.reindexTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@6"
-        },
-        {
-          "command": "netezza.sqlite.analyzeTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@7"
-        },
-        {
-          "command": "netezza.sqlite.rebuildTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
-          "group": "3_sqlite@8"
+          "group": "9_danger@1"
         },
         {
           "command": "netezza.createDDL",
           "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|MATERIALIZED QUERY TABLE|FOREIGN TABLE|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|TRIGGER|INDEX|STAGE|STREAM|TASK|FILE FORMAT)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|MATERIALIZED QUERY TABLE|FOREIGN TABLE|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|TRIGGER|INDEX|STAGE|STREAM|TASK|FILE FORMAT)/",
-          "group": "1_copy"
-        },
-        {
-          "command": "netezza.createTableAsView",
-          "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == netezza",
-          "group": "1_copy@1"
-        },
-        {
-          "command": "netezza.recreateTable",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
-          "group": "3_maintenance"
-        },
-        {
-          "command": "netezza.checkSkew",
-          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsTableSkewCheck",
-          "group": "3_maintenance"
+          "group": "1_copy@2"
         },
         {
           "command": "netezza.changeOwner",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableOwnerChange",
-          "group": "3_maintenance"
+          "group": "5_admin@2"
         },
         {
           "command": "netezza.renameTable",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableRename",
-          "group": "3_maintenance"
+          "group": "5_admin@3"
         },
         {
           "command": "netezza.viewEditData",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
-          "group": "1_copy"
+          "group": "0_query@2"
         },
         {
           "command": "netezza.createTableDesigner",
           "when": "view == netezza.schema && viewItem == typeGroup:TABLE && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.createProcedure",
           "when": "view == netezza.schema && viewItem == typeGroup:PROCEDURE && justybase.schema.capabilities.supportsProcedures",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.createView",
           "when": "view == netezza.schema && viewItem == typeGroup:VIEW",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.createSequence",
           "when": "view == netezza.schema && viewItem == typeGroup:SEQUENCE && justybase.schemaDatabaseKind == postgresql",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.createSnowflakeStream",
           "when": "view == netezza.schema && viewItem == typeGroup:STREAM && justybase.schemaDatabaseKind == snowflake",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.createSnowflakeTask",
           "when": "view == netezza.schema && viewItem == typeGroup:TASK && justybase.schemaDatabaseKind == snowflake",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.createSnowflakeDynamicTable",
           "when": "view == netezza.schema && viewItem =~ /typeGroup:DYNAMIC TABLE:snowflake/",
-          "group": "0_create"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.manageSnowflakeDynamicTable",
           "when": "view == netezza.schema && viewItem =~ /netezza:DYNAMIC TABLE:snowflake/",
-          "group": "1_manage"
+          "group": "1_manage@1"
         },
         {
           "command": "netezza.createExternalTable",
           "when": "view == netezza.schema && viewItem =~ /typeGroup:EXTERNAL TABLE/ && justybase.schema.capabilities.supportsExternalTables",
-          "group": "0_create"
-        },
-        {
-          "command": "netezza.compareSchema",
-          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|PROCEDURE)/) && justybase.schemaDatabaseKind == netezza",
-          "group": "6_compare"
+          "group": "0_create@1"
         },
         {
           "command": "netezza.batchExportDDL",
           "when": "view == netezza.schema && viewItem == database && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
-          "group": "7_export"
+          "group": "7_export@1"
         },
         {
           "command": "netezza.batchExportDDL",
           "when": "view == netezza.schema && viewItem =~ /typeGroup:(TABLE|VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE|SYNONYM|NICKNAME|ALIAS|SEQUENCE|STAGE|STREAM|TASK|FILE FORMAT|WAREHOUSE)/ && justybase.schemaDatabaseKind != duckdb && justybase.schemaDatabaseKind != file",
-          "group": "7_export"
+          "group": "7_export@1"
         },
         {
           "command": "netezza.snowflake.switchWarehouse",
@@ -2851,23 +2788,28 @@
         },
         {
           "command": "netezza.showERD",
-          "when": "view == netezza.schema && viewItem == typeGroup:TABLE",
+          "when": "view == netezza.schema && viewItem == typeGroup:TABLE && justybase.schema.capabilities.supportsErDiagram",
           "group": "8_visualization@2"
-        },
-        {
-          "command": "netezza.openTestDataGenerator",
-          "when": "view == netezza.schema && viewItem =~ /netezza:TABLE/",
-          "group": "8_visualization@3"
         },
         {
           "command": "netezza.toggleSchemaFavorite",
           "when": "view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE|FUNCTION|AGGREGATE|EXTERNAL TABLE|SYNONYM)/",
-          "group": "2_favorites@1"
+          "group": "6_favorites@1"
+        },
+        {
+          "command": "netezza.editObjectNote",
+          "when": "view == netezza.schema && viewItem =~ /^(netezza|favoritesObject):/ && viewItem != netezza:favorite",
+          "group": "6_favorites@2"
+        },
+        {
+          "command": "netezza.editObjectNote",
+          "when": "view == netezza.schema && viewItem == column",
+          "group": "6_favorites@2"
         },
         {
           "command": "netezza.toggleSchemaFavorite",
           "when": "view == netezza.schema && viewItem == netezza:favorite",
-          "group": "2_favorites@1"
+          "group": "6_favorites@1"
         },
         {
           "command": "netezza.favorites.toggleCopilotAutoInclude",
@@ -2885,29 +2827,297 @@
           "group": "3_copilot@3"
         },
         {
+          "command": "netezza.findColumnReferences",
+          "when": "view == netezza.schema && viewItem == column && justybase.schema.capabilities.supportsDependencyAnalysis",
+          "group": "4_analysis@1"
+        },
+        {
+          "submenu": "justybase.schema.data",
+          "group": "2_submenus@1",
+          "when": "viewItem =~ /^(netezza|favoritesObject):/"
+        },
+        {
+          "submenu": "justybase.schema.structure",
+          "group": "2_submenus@2",
+          "when": "viewItem =~ /^(netezza|favoritesObject):/"
+        },
+        {
+          "submenu": "justybase.schema.maintenance",
+          "group": "2_submenus@3",
+          "when": "viewItem =~ /^(netezza|favoritesObject):/"
+        },
+        {
+          "submenu": "justybase.schema.analysis",
+          "group": "2_submenus@4",
+          "when": "viewItem =~ /^(netezza|favoritesObject):/"
+        },
+        {
+          "command": "netezza.showLockWaits",
+          "group": "3_monitor@1",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsLockReport"
+        },
+        {
+          "command": "netezza.showInvalidObjects",
+          "group": "3_monitor@2",
+          "when": "view == netezza.schema && viewItem == database && justybase.schema.capabilities.supportsInvalidObjectsReport"
+        },
+        {
+          "command": "netezza.refreshMaterializedView",
+          "group": "0_query@5",
+          "when": "viewItem =~ /^(netezza|favoritesObject):(MATERIALIZED VIEW|MATERIALIZED QUERY TABLE)(:[a-z]+)?$/ && justybase.schema.capabilities.supportsMaterializedViewRefresh"
+        }
+      ],
+      "justybase.schema.data": [
+        {
+          "command": "netezza.migrateData",
+          "when": "view == netezza.schema && (viewItem =~ /^netezza:(TABLE|VIEW|EXTERNAL TABLE)$/ || viewItem =~ /^favoritesObject:(TABLE|VIEW|EXTERNAL TABLE)$/)",
+          "group": "2_copy@1"
+        },
+        {
+          "command": "netezza.findDuplicateRows",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|DYNAMIC TABLE)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|DYNAMIC TABLE)(:[a-z]+)?$/)",
+          "group": "3_inspect@2"
+        },
+        {
+          "command": "netezza.createTableFromTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
+          "group": "2_copy@2"
+        },
+        {
+          "command": "netezza.exportTableData",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|FOREIGN TABLE|EXTERNAL TABLE|MQT|NICKNAME|ALIAS|SYNONYM|DYNAMIC TABLE|PROJECTION)(:[a-z]+)?$/)",
+          "group": "1_export@1"
+        },
+        {
+          "command": "netezza.searchSchemaValues",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSchemaValueSearch",
+          "group": "3_inspect@1"
+        },
+        {
+          "command": "netezza.createTableAsView",
+          "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == netezza",
+          "group": "2_copy@3"
+        },
+        {
+          "command": "netezza.openTestDataGenerator",
+          "when": "view == netezza.schema && viewItem =~ /netezza:TABLE/",
+          "group": "4_generate@1"
+        }
+      ],
+      "justybase.schema.structure": [
+        {
+          "command": "netezza.duckdb.listIndexes",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == duckdb",
+          "group": "3_index@4"
+        },
+        {
+          "command": "netezza.duckdb.dropIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == duckdb",
+          "group": "3_index@5"
+        },
+        {
+          "command": "netezza.createIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == sqlite)",
+          "group": "3_index@1"
+        },
+        {
+          "command": "postgresql.listPartitions",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "5_partition@1"
+        },
+        {
+          "command": "postgresql.createPartition",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "5_partition@2"
+        },
+        {
+          "command": "postgresql.attachPartition",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "5_partition@3"
+        },
+        {
+          "command": "postgresql.listIndexes",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_index@3"
+        },
+        {
+          "command": "postgresql.createIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_index@2"
+        },
+        {
+          "command": "netezza.addPrimaryKey",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsPrimaryKeyChanges",
+          "group": "2_keys@1"
+        },
+        {
+          "command": "netezza.alterColumnQuick",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == postgresql || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == duckdb)",
+          "group": "1_design@2"
+        },
+        {
+          "command": "netezza.openObjectDesigner",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && (justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == postgresql)",
+          "group": "1_design@1"
+        },
+        {
+          "command": "netezza.alterTableWizard",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == netezza",
+          "group": "1_design@3"
+        },
+        {
+          "command": "netezza.addForeignKey",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsForeignKeyChanges",
+          "group": "2_keys@2"
+        },
+        {
+          "command": "netezza.addUniqueConstraint",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsUniqueConstraintChanges",
+          "group": "2_keys@3"
+        },
+        {
+          "command": "netezza.sqlite.viewIndexes",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "3_index@6"
+        },
+        {
+          "command": "netezza.sqlite.addIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "3_index@7"
+        },
+        {
+          "command": "netezza.sqlite.dropIndex",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "3_index@8"
+        },
+        {
+          "command": "netezza.sqlite.viewForeignKeys",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "2_keys@4"
+        },
+        {
+          "command": "netezza.sqlite.viewTriggers",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "4_other@1"
+        }
+      ],
+      "justybase.schema.maintenance": [
+        {
+          "command": "netezza.showTableMaintenanceStatus",
+          "group": "0_status@1",
+          "when": "viewItem =~ /^(netezza|favoritesObject):TABLE(:[a-z]+)?$/ && justybase.schema.capabilities.supportsTableMaintenanceReport"
+        },
+        {
+          "command": "netezza.groomTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsGroomTable",
+          "group": "2_reclaim@1"
+        },
+        {
+          "command": "netezza.generateStatistics",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsTableStatistics",
+          "group": "1_stats@1"
+        },
+        {
+          "command": "netezza.vacuumTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsVacuumTable && justybase.schema.reclaimStyle == vacuum",
+          "group": "2_reclaim@2"
+        },
+        {
+          "command": "netezza.analyzeTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsAnalyzeTable",
+          "group": "1_stats@2"
+        },
+        {
+          "command": "netezza.reindexTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsReindexTable",
+          "group": "3_index@1"
+        },
+        {
+          "command": "netezza.reindexConcurrently",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schemaDatabaseKind == postgresql",
+          "group": "3_index@2"
+        },
+        {
+          "command": "netezza.setTableStorage",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableStorageOptions",
+          "group": "5_rebuild@1"
+        },
+        {
+          "command": "netezza.sqlite.reindexTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "3_index@3"
+        },
+        {
+          "command": "netezza.sqlite.analyzeTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "1_stats@3"
+        },
+        {
+          "command": "netezza.sqlite.rebuildTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsSqliteDatabaseMaintenance",
+          "group": "5_rebuild@3"
+        },
+        {
+          "command": "netezza.recreateTable",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && (justybase.schemaDatabaseKind == netezza || justybase.schemaDatabaseKind == duckdb || justybase.schemaDatabaseKind == mysql || justybase.schemaDatabaseKind == oracle || justybase.schemaDatabaseKind == db2 || justybase.schemaDatabaseKind == mssql || justybase.schemaDatabaseKind == sqlite || justybase.schemaDatabaseKind == clickhouse)",
+          "group": "5_rebuild@2"
+        },
+        {
+          "command": "netezza.checkSkew",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsTableSkewCheck",
+          "group": "4_check@1"
+        },
+        {
+          "command": "netezza.reorgTable",
+          "group": "2_reclaim@3",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsVacuumTable && justybase.schema.reclaimStyle == reorg"
+        },
+        {
+          "command": "netezza.optimizeTable",
+          "group": "2_reclaim@4",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsVacuumTable && justybase.schema.reclaimStyle == optimize"
+        },
+        {
+          "command": "netezza.moveTable",
+          "group": "2_reclaim@5",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schema.capabilities.supportsTableMaintenance && justybase.schema.capabilities.supportsVacuumTable && justybase.schema.reclaimStyle == move"
+        }
+      ],
+      "justybase.schema.analysis": [
+        {
+          "command": "netezza.compareSchema",
+          "when": "(view == netezza.schema && viewItem =~ /netezza:(TABLE|VIEW|PROCEDURE)/ || view == netezza.schema && viewItem =~ /favoritesObject:(TABLE|VIEW|PROCEDURE)/) && justybase.schemaDatabaseKind == netezza",
+          "group": "2_compare@1"
+        },
+        {
           "command": "netezza.showDependencies",
-          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|PROCEDURE|EXTERNAL TABLE)$/",
-          "group": "5_analysis"
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE)$/ && justybase.schema.capabilities.supportsDependencyAnalysis",
+          "group": "1_deps@1"
         },
         {
           "command": "netezza.showUsedBy",
-          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|PROCEDURE|EXTERNAL TABLE)$/",
-          "group": "5_analysis"
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE)$/ && justybase.schema.capabilities.supportsDependencyAnalysis",
+          "group": "1_deps@2"
         },
         {
           "command": "netezza.impactAnalysis",
-          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|PROCEDURE|EXTERNAL TABLE)$/",
-          "group": "5_analysis"
-        },
-        {
-          "command": "netezza.findColumnReferences",
-          "when": "view == netezza.schema && viewItem == column",
-          "group": "5_analysis"
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|MATERIALIZED VIEW|PROCEDURE|FUNCTION|EXTERNAL TABLE)$/ && justybase.schema.capabilities.supportsDependencyAnalysis",
+          "group": "1_deps@3"
         },
         {
           "command": "netezza.impactAnalysis",
-          "when": "view == netezza.schema && viewItem == column",
-          "group": "5_analysis"
+          "when": "view == netezza.schema && viewItem == column && justybase.schema.capabilities.supportsDependencyAnalysis",
+          "group": "1_deps@3"
+        },
+        {
+          "command": "netezza.showTableSize",
+          "group": "3_reports@1",
+          "when": "viewItem =~ /^(netezza|favoritesObject):TABLE(:[a-z]+)?$/ && justybase.schema.capabilities.supportsTableSizeReport"
+        },
+        {
+          "command": "netezza.showTablePrivileges",
+          "group": "3_reports@2",
+          "when": "viewItem =~ /^(netezza|favoritesObject):TABLE(:[a-z]+)?$/ && justybase.schema.capabilities.supportsTablePrivilegesReport"
         }
       ]
     },
