@@ -93,6 +93,34 @@ export const db2Dialect: DatabaseDialect = {
         layout: "half",
       },
       {
+        key: "security_mechanism",
+        label: "Preferred security mechanism",
+        type: "select",
+        storage: "options",
+        defaultValue: "",
+        options: [
+          {
+            value: "",
+            label: "Default",
+          },
+          {
+            value: "3",
+            label: "3 — User ID and password",
+          },
+          {
+            value: "7",
+            label: "7 — User ID and encrypted password",
+          },
+          {
+            value: "9",
+            label: "9 — Encrypted user ID and password",
+          },
+        ],
+        description:
+          "Optional preference forwarded to the Db2 driver. Leave blank to use its default; the selected mechanism must be supported by the installed driver and server.",
+        layout: "half",
+      },
+      {
         key: "security",
         label: "Security",
         type: "select",

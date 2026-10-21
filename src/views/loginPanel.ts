@@ -777,11 +777,26 @@ export class LoginPanel {
                     color: var(--vscode-descriptionForeground);
                 }
                 .tunnel-section {
-                    margin-top: 10px;
                     padding: 14px;
                     border: 1px solid var(--vscode-panel-border);
                     border-radius: 4px;
                     background: var(--vscode-textCodeBlock-background);
+                }
+                .tunnel-disclosure {
+                    margin-top: 10px;
+                }
+                .tunnel-disclosure > summary {
+                    color: var(--vscode-textLink-foreground);
+                    cursor: pointer;
+                    font-size: 12px;
+                    user-select: none;
+                }
+                .tunnel-disclosure[open] > summary {
+                    margin-bottom: 10px;
+                }
+                .tunnel-optional {
+                    color: var(--vscode-descriptionForeground);
+                    font-weight: normal;
                 }
                 .tunnel-title {
                     margin-bottom: 12px;
@@ -967,38 +982,42 @@ export class LoginPanel {
 
                     <div id="dialectFields" class="form-grid">${initialFieldsHtml}</div>
 
-                    <div id="tunnelSection" class="tunnel-section" style="display: none;">
-                        <div class="tunnel-title">Connection tunnel</div>
-                        <label class="checkbox-label" for="tunnelEnabled">
-                            <input type="checkbox" id="tunnelEnabled">
-                            <span>Use HTTPS/WSS TCP tunnel</span>
-                        </label>
-                        <div id="tunnelFields" class="tunnel-fields">
-                            <div class="form-group field-full">
-                                <label for="tunnelServerUrl">Server URL <span class="required-marker">*</span></label>
-                                <input type="url" id="tunnelServerUrl" placeholder="https://gateway.example.com">
-                                <div class="form-hint">Use the relay base URL. The target path is added automatically.</div>
+                    <details id="tunnelDisclosure" class="tunnel-disclosure" style="display: none;">
+                        <summary>Show tunnel info <span class="tunnel-optional">(optional)</span></summary>
+                        <div id="tunnelSection" class="tunnel-section">
+                            <div class="tunnel-title">Connection tunnel <span class="tunnel-optional">(optional)</span></div>
+                            <div class="form-hint">Optional: route this database connection through an HTTPS/WSS TCP relay.</div>
+                            <label class="checkbox-label" for="tunnelEnabled">
+                                <input type="checkbox" id="tunnelEnabled">
+                                <span>Use HTTPS/WSS TCP tunnel</span>
+                            </label>
+                            <div id="tunnelFields" class="tunnel-fields">
+                                <div class="form-group field-full">
+                                    <label for="tunnelServerUrl">Server URL <span class="required-marker">*</span></label>
+                                    <input type="url" id="tunnelServerUrl" placeholder="https://gateway.example.com">
+                                    <div class="form-hint">Use the relay base URL. The target path is added automatically.</div>
+                                </div>
+                                <div class="form-group field-half">
+                                    <label for="tunnelTargetId">Target ID <span class="required-marker">*</span></label>
+                                    <input type="text" id="tunnelTargetId" placeholder="reports">
+                                </div>
+                                <div class="form-group field-half">
+                                    <label for="tunnelLocalPort">Local TCP port <span class="required-marker">*</span></label>
+                                    <input type="number" id="tunnelLocalPort" min="1" max="65535" value="15432">
+                                </div>
+                                <div class="form-group field-full">
+                                    <label for="tunnelToken">Bearer token</label>
+                                    <input type="password" id="tunnelToken" placeholder="Token (blank keeps the saved token)">
+                                    <div class="form-hint">Stored separately in VS Code SecretStorage; it is not the database password.</div>
+                                    <label class="checkbox-label" for="tunnelClearToken">
+                                        <input type="checkbox" id="tunnelClearToken">
+                                        <span>Remove the saved bearer token</span>
+                                    </label>
+                                </div>
                             </div>
-                            <div class="form-group field-half">
-                                <label for="tunnelTargetId">Target ID <span class="required-marker">*</span></label>
-                                <input type="text" id="tunnelTargetId" placeholder="reports">
-                            </div>
-                            <div class="form-group field-half">
-                                <label for="tunnelLocalPort">Local TCP port <span class="required-marker">*</span></label>
-                                <input type="number" id="tunnelLocalPort" min="1" max="65535" value="15432">
-                            </div>
-                            <div class="form-group field-full">
-                                <label for="tunnelToken">Bearer token</label>
-                                <input type="password" id="tunnelToken" placeholder="Token (blank keeps the saved token)">
-                                <div class="form-hint">Stored separately in VS Code SecretStorage; it is not the database password.</div>
-                                <label class="checkbox-label" for="tunnelClearToken">
-                                    <input type="checkbox" id="tunnelClearToken">
-                                    <span>Remove the saved bearer token</span>
-                                </label>
-                            </div>
+                            <div class="form-hint">The database driver connects to 127.0.0.1 and this local port. The relay chooses the remote host and port by Target ID.</div>
                         </div>
-                        <div class="form-hint">The database driver will connect to 127.0.0.1 and this local port. The relay chooses the remote host and port by Target ID.</div>
-                    </div>
+                    </details>
 
                     <div class="actions">
                         <button id="btnSave" onclick="save()">Save & Connect</button>
@@ -1326,7 +1345,7 @@ export class LoginPanel {
                 }
 
                 function synchronizeDatabaseTunnelUiState(kind) {
-                    const section = document.getElementById('tunnelSection');
+                    const disclosure = document.getElementById('tunnelDisclosure');
                     const enabled = document.getElementById('tunnelEnabled');
                     const serverUrl = document.getElementById('tunnelServerUrl');
                     const targetId = document.getElementById('tunnelTargetId');
@@ -1335,11 +1354,11 @@ export class LoginPanel {
                     const port = document.getElementById('port');
                     const supported = Boolean(getDialect(kind).supportsRawTcpTunnel);
 
-                    if (!section || !enabled || !serverUrl || !targetId || !localPort) {
+                    if (!disclosure || !enabled || !serverUrl || !targetId || !localPort) {
                         return;
                     }
 
-                    section.style.display = supported ? 'block' : 'none';
+                    disclosure.style.display = supported ? 'block' : 'none';
                     if (!supported) {
                         enabled.checked = false;
                         tunnelEndpointSnapshot = undefined;
@@ -1377,6 +1396,7 @@ export class LoginPanel {
                 }
 
                 function loadDatabaseTunnelFields(tunnel) {
+                    const disclosure = document.getElementById('tunnelDisclosure');
                     const enabled = document.getElementById('tunnelEnabled');
                     const serverUrl = document.getElementById('tunnelServerUrl');
                     const targetId = document.getElementById('tunnelTargetId');
@@ -1385,6 +1405,7 @@ export class LoginPanel {
                     const clearToken = document.getElementById('tunnelClearToken');
                     if (!enabled || !serverUrl || !targetId || !localPort || !token) return;
 
+                    if (disclosure) disclosure.open = false;
                     enabled.checked = Boolean(tunnel);
                     serverUrl.value = tunnel ? (tunnel.serverUrl || '') : '';
                     targetId.value = tunnel ? (tunnel.targetId || 'reports') : 'reports';
