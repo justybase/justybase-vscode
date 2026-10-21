@@ -23,6 +23,7 @@ jest.mock('../../media/resultPanel/selection/clipboard.js', () => ({
     copyAllRowsAsMd: jest.fn(),
     copyAllRowsAsMdAsync: jest.fn(),
     resolvePlainText: jest.fn((payload: { text: string }) => payload.text),
+    clipboardHtml: jest.fn((payload: { html: string }) => payload.html),
     __testHooks: {}
 }));
 

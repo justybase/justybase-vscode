@@ -178,3 +178,48 @@ export function createContextMenuItem(text: string, onClick: () => void): HTMLEl
 
     return item;
 }
+
+export interface ContextSubmenuEntry {
+    label: string;
+    onClick: () => void;
+}
+
+/** Hover submenu with plain entries; picking one closes the parent menu. */
+export function createSubmenuItem(text: string, entries: ContextSubmenuEntry[], parentMenu: HTMLElement): HTMLElement {
+    const item = document.createElement('div');
+    item.className = 'grid-context-menu-item has-submenu';
+    item.textContent = text;
+    item.style.padding = '3px 12px';
+    item.style.cursor = 'pointer';
+    item.style.color = 'var(--vscode-menu-foreground)';
+    item.style.fontSize = '12px';
+    item.style.userSelect = 'none';
+
+    function openSubmenu(): void {
+        removeOpenSubmenus();
+        const submenu = document.createElement('div');
+        submenu.className = 'grid-context-submenu';
+        entries.forEach(entry => {
+            submenu.appendChild(createContextMenuItem(entry.label, () => {
+                parentMenu.remove();
+                removeOpenSubmenus();
+                entry.onClick();
+            }));
+        });
+        document.body.appendChild(submenu);
+        positionSubmenu(submenu, item.getBoundingClientRect());
+    }
+
+    item.addEventListener('mouseover', () => {
+        item.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';
+        openSubmenu();
+    });
+    item.addEventListener('mouseout', () => {
+        item.style.backgroundColor = 'transparent';
+    });
+    item.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openSubmenu();
+    });
+    return item;
+}

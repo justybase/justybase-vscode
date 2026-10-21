@@ -5,6 +5,9 @@ import {
     getNumericTypeInfo,
     isTemporalType,
 } from '../utils.js';
+import { getResultPanelWindow } from '../types.js';
+import { formatCellsAsInList, formatCellsAsInsert, formatCellsAsJson } from './copyFormats.js';
+import type { CopyFormatTarget } from './copyFormats.js';
 import type {
     ResultColumnDef,
     TanStackColumn,
@@ -101,7 +104,7 @@ function getClipboardCellPayload(row: TanStackRow, col: TanStackColumn): Clipboa
     const columnDef = col.columnDef || {};
 
     if (rawValue === null || rawValue === undefined) {
-        return { text, htmlValue: text, kind: 'text' };
+        return { text, htmlValue: text, kind: 'text', rawValue };
     }
 
     if (isClipboardNumericColumn(columnDef)) {
@@ -111,16 +114,17 @@ function getClipboardCellPayload(row: TanStackRow, col: TanStackColumn): Clipboa
                 text,
                 htmlValue: localizeNumericDisplayText(text),
                 kind: 'number',
-                numericValue
+                numericValue,
+                rawValue,
             };
         }
     }
 
     if (columnDef.inferredDateInteger || isTemporalType(columnDef.dataType)) {
-        return { text, htmlValue: text, kind: 'date' };
+        return { text, htmlValue: text, kind: 'date', rawValue };
     }
 
-    return { text, htmlValue: text, kind: 'text' };
+    return { text, htmlValue: text, kind: 'text', rawValue };
 }
 
 function getClipboardColumnAlignment(columnDef: ResultColumnDef | undefined): string {
@@ -154,6 +158,7 @@ interface ClipboardCellPayload {
     htmlValue: string;
     kind: 'text' | 'number' | 'date';
     numericValue?: string;
+    rawValue?: unknown;
 }
 
 function createPlainTextTable(headers: string[], rows: ClipboardCellPayload[][]) {
@@ -303,7 +308,7 @@ function getClipboardCellPayloadFromValues(
     const text = textValue === null || textValue === undefined ? '' : String(textValue);
 
     if (rawValue === null || rawValue === undefined) {
-        return { text, htmlValue: text, kind: 'text' };
+        return { text, htmlValue: text, kind: 'text', rawValue };
     }
 
     if (isClipboardNumericColumn(columnDef)) {
@@ -314,15 +319,16 @@ function getClipboardCellPayloadFromValues(
                 htmlValue: localizeNumericDisplayText(text),
                 kind: 'number',
                 numericValue,
+                rawValue,
             };
         }
     }
 
     if (columnDef.inferredDateInteger || isTemporalType(columnDef.dataType)) {
-        return { text, htmlValue: text, kind: 'date' };
+        return { text, htmlValue: text, kind: 'date', rawValue };
     }
 
-    return { text, htmlValue: text, kind: 'text' };
+    return { text, htmlValue: text, kind: 'text', rawValue };
 }
 
 async function resolveRowValuesForClipboard(
@@ -449,7 +455,7 @@ export async function copyAllRowsAsync(
     const allRows = await resolveAllRowValuesForClipboard(table, resolver);
     const payload = buildClipboardPayloadFromRowValues(columns, allRows, withHeaders);
     const plainText = resolvePlainText(payload, plainTextFormat);
-    writeMultiFormatToClipboard(payload.html, plainText, payload.md, `${allRows.length} rows`);
+    writeMultiFormatToClipboard(clipboardHtml(payload, plainTextFormat), plainText, payload.md, `${allRows.length} rows`);
 }
 
 export async function copyAllRowsAsHtmlAsync(
@@ -545,7 +551,7 @@ export function copyAllRows(
         md: createMarkdownTable(headers, matrix, alignments)
     };
     const plainText = resolvePlainText(payload, plainTextFormat);
-    writeMultiFormatToClipboard(payload.html, plainText, payload.md, `${rows.length} rows`);
+    writeMultiFormatToClipboard(clipboardHtml(payload, plainTextFormat), plainText, payload.md, `${rows.length} rows`);
 }
 
 export function copyAllRowsAsHtml(table: TanStackTable): void {
@@ -587,7 +593,37 @@ interface SelectedClipboardPayload {
     md: string;
 }
 
+/** Column names for JSON/INSERT even when the copy was requested without a header row. */
+function payloadColumnNames(payload: SelectedClipboardPayload): string[] {
+    if (payload.headers.length > 0) return payload.headers;
+    const width = payload.matrix[0]?.length ?? 0;
+    return Array.from({ length: width }, (_, index) => `column_${index + 1}`);
+}
+
+function activeInsertTarget(): CopyFormatTarget | null {
+    const panel = getResultPanelWindow();
+    const resultSet = panel.resultSets?.[panel.getActiveGridIndex?.() ?? 0];
+    const source = resultSet?.editSource as Partial<CopyFormatTarget> | null | undefined;
+    return source && typeof source.table === 'string' ? (source as CopyFormatTarget) : null;
+}
+
+/** Text formats that must not carry an HTML table alongside (rich editors would paste the table). */
+const PLAIN_ONLY_FORMATS = new Set(['json', 'insert', 'inList']);
+
+export function clipboardHtml(payload: SelectedClipboardPayload, plainTextFormat?: string): string {
+    return plainTextFormat && PLAIN_ONLY_FORMATS.has(plainTextFormat) ? '' : payload.html;
+}
+
 export function resolvePlainText(payload: SelectedClipboardPayload, plainTextFormat?: string): string {
+    if (plainTextFormat === 'json') {
+        return formatCellsAsJson(payloadColumnNames(payload), payload.matrix);
+    }
+    if (plainTextFormat === 'inList') {
+        return formatCellsAsInList(payload.matrix);
+    }
+    if (plainTextFormat === 'insert') {
+        return formatCellsAsInsert(payloadColumnNames(payload), payload.matrix, activeInsertTarget());
+    }
     if (plainTextFormat === 'csv') {
         return createCsvTable(payload.headers, payload.matrix, ',');
     }
@@ -637,7 +673,7 @@ export function writeMultiFormatToClipboard(
     const clipboardSupported = typeof ClipboardItem !== 'undefined'
         && typeof navigator?.clipboard?.write === 'function';
 
-    if (!clipboardSupported) {
+    if (!clipboardSupported || !html) {
         writePlainTextToClipboard(plainText, `Copied ${description} to clipboard`);
         return;
     }
