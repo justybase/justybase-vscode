@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
+import { schemaTreeMenuEntries, type MenuContribution } from './helpers/schemaTreeMenu';
 
 interface ContextMenuItem {
   command: string;
@@ -9,8 +10,8 @@ interface ContextMenuItem {
 
 const manifest = JSON.parse(
   readFileSync(path.resolve(__dirname, '../..', 'package.json'), 'utf8'),
-) as { contributes: { menus: { 'view/item/context': ContextMenuItem[] } } };
-const contextMenu = manifest.contributes.menus['view/item/context'];
+) as { contributes: { menus: Record<string, MenuContribution[]> } };
+const contextMenu = schemaTreeMenuEntries(manifest.contributes.menus) as ContextMenuItem[];
 
 function getItems(command: string): ContextMenuItem[] {
   return contextMenu.filter((item) => item.command === command);

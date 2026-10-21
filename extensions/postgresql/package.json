@@ -37,13 +37,6 @@
         "krzysztof-d.justybaselite-netezza"
     ],
     "contributes": {
-        "submenus": [
-            {
-                "id": "justybase.postgresql.tableStructures",
-                "label": "PostgreSQL: Table Structures",
-                "icon": "$(symbol-structure)"
-            }
-        ],
         "commands": [
             {
                 "command": "justybase.postgresql.alterTableDesigner",
@@ -57,23 +50,16 @@
             }
         ],
         "menus": {
-            "view/item/context": [
-                {
-                    "submenu": "justybase.postgresql.tableStructures",
-                    "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == postgresql",
-                    "group": "3_maintenance@1"
-                }
-            ],
-            "justybase.postgresql.tableStructures": [
+            "justybase.schema.structure": [
                 {
                     "command": "justybase.postgresql.alterTableDesigner",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == postgresql",
-                    "group": "1_structure@1"
+                    "group": "1_design@10"
                 },
                 {
                     "command": "justybase.postgresql.createIndexWizard",
                     "when": "view == netezza.schema && (viewItem == netezza:TABLE || viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind == postgresql",
-                    "group": "2_index@1"
+                    "group": "3_index@10"
                 }
             ]
         }

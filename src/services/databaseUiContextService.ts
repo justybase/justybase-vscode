@@ -31,7 +31,15 @@ type CapabilityContextKey =
     | 'supportsTableStorageOptions'
     | 'supportsSqliteDatabaseMaintenance'
     | 'supportsSchemaValueSearch'
-    | 'supportsCallRoutine';
+    | 'supportsCallRoutine'
+    | 'supportsErDiagram'
+    | 'supportsDependencyAnalysis'
+    | 'supportsTableSizeReport'
+    | 'supportsTablePrivilegesReport'
+    | 'supportsTableMaintenanceReport'
+    | 'supportsLockReport'
+    | 'supportsInvalidObjectsReport'
+    | 'supportsMaterializedViewRefresh';
 
 const CAPABILITY_CONTEXT_KEYS: readonly CapabilityContextKey[] = [
     'supportsExplainPlan',
@@ -61,7 +69,15 @@ const CAPABILITY_CONTEXT_KEYS: readonly CapabilityContextKey[] = [
     'supportsTableStorageOptions',
     'supportsSqliteDatabaseMaintenance',
     'supportsSchemaValueSearch',
-    'supportsCallRoutine'
+    'supportsCallRoutine',
+    'supportsErDiagram',
+    'supportsDependencyAnalysis',
+    'supportsTableSizeReport',
+    'supportsTablePrivilegesReport',
+    'supportsTableMaintenanceReport',
+    'supportsLockReport',
+    'supportsInvalidObjectsReport',
+    'supportsMaterializedViewRefresh'
 ];
 
 export const DATABASE_UI_CONTEXT_PREFIX = 'justybase';
@@ -79,7 +95,12 @@ async function updateCapabilityContextSet(
     const databaseKind = connectionManager.getConnectionDatabaseKind(connectionName) ?? '';
     const updates: Promise<void>[] = [
         setContext(`${contextKeyPrefix}.hasConnection`, Boolean(connectionName)),
-        setContext(`${contextKeyPrefix}.databaseKind`, databaseKind)
+        setContext(`${contextKeyPrefix}.databaseKind`, databaseKind),
+        // Picks the dialect's label for the vacuumTable operation (Vacuum / Reorganize / Optimize / Move).
+        setContext(
+            `${contextKeyPrefix}.reclaimStyle`,
+            connectionManager.getConnectionCapabilities?.(connectionName)?.tableReclaimStyle ?? 'vacuum'
+        )
     ];
 
     for (const capabilityKey of CAPABILITY_CONTEXT_KEYS) {

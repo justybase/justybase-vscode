@@ -46,6 +46,22 @@ describe('databaseUiContextService', () => {
         };
     });
 
+    it('publishes the dialect name of the space-reclaim operation for menu labels', async () => {
+        const manager = {
+            ...mockConnectionManager,
+            getConnectionCapabilities: jest.fn((connectionName?: string) =>
+                connectionName === 'db2-conn' ? { tableReclaimStyle: 'reorg' } : {}
+            ),
+        };
+
+        await updateSchemaUiContexts(manager as unknown as ConnectionManager, { connectionName: 'db2-conn' });
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', `${DATABASE_UI_CONTEXT_PREFIX}.schema.reclaimStyle`, 'reorg');
+
+        await updateSchemaUiContexts(manager as unknown as ConnectionManager, { connectionName: 'pg-conn' });
+        expect(vscode.commands.executeCommand).toHaveBeenLastCalledWith('setContext', expect.any(String), expect.anything());
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', `${DATABASE_UI_CONTEXT_PREFIX}.schema.reclaimStyle`, 'vacuum');
+    });
+
     it('updates active connection, database kind and capability context keys', async () => {
         const activeEditor = {
             document: {

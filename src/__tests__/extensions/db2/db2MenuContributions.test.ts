@@ -37,10 +37,10 @@ describe('Db2 extension menu contributions', () => {
     expect(manifest.contributes.commands.map((entry) => entry.command)).toContain(command);
   });
 
-  it('exposes the quick index and partition flows in the table submenus', () => {
+  it('exposes the quick index and partition flows in the shared Structure/Maintenance submenus', () => {
     const submenuEntries = [
-      ...(manifest.contributes.menus['justybase.db2.tableStructures'] ?? []),
-      ...(manifest.contributes.menus['justybase.db2.maintenance'] ?? []),
+      ...(manifest.contributes.menus['justybase.schema.structure'] ?? []),
+      ...(manifest.contributes.menus['justybase.schema.maintenance'] ?? []),
     ];
     for (const command of [
       'justybase.db2.listIndexes',
