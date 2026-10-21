@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-10-04
-product_version: 3.19.1
+product_version: 3.19.2
 ---
 
 # Dependencies and impact analysis
