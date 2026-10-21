@@ -4478,6 +4478,12 @@ tfoot .aggregation-row td.pinned-cell {
 .console-wrapper {
     height: 100%;
     overflow: hidden;
+    background-color: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family), 'Consolas', 'Courier New', monospace;
+    font-size: var(--vscode-editor-font-size, 13px);
+    padding: 10px;
+    box-sizing: border-box;
 }
 
 .console-view {
@@ -4487,7 +4493,7 @@ tfoot .aggregation-row td.pinned-cell {
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
     font-size: 12px;
     line-height: 1.5;
@@ -4495,13 +4501,22 @@ tfoot .aggregation-row td.pinned-cell {
     color: var(--vscode-editor-foreground);
 }
 
+/* Flex children must keep their natural height: with many log cards the
+   container overflows and scrolls instead of squeezing every row. */
+.console-view > *,
+.console-view > details.log-run,
+.console-view > .console-line {
+    flex: 0 0 auto;
+}
+
 /* Console line — plain lifecycle rows (no card chrome, hover only) */
 .console-line {
     display: flex;
     align-items: baseline;
     gap: 8px;
-    padding: 1px 6px;
-    border-radius: 2px;
+    line-height: 1.5;
+    padding: 3px 8px;
+    border-radius: 4px;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -4513,6 +4528,7 @@ tfoot .aggregation-row td.pinned-cell {
 .console-line.separator {
     color: var(--vscode-descriptionForeground);
     font-style: italic;
+    font-weight: 400;
     margin: 8px 0 2px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--vscode-panel-border);
