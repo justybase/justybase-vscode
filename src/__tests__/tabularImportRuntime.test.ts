@@ -15,6 +15,22 @@ const spreadsheetTasks = require('@justybase/spreadsheet-tasks') as {
   XlsbWriter: new (filePath: string) => TestXlsxWriter;
 };
 const XlsxWriter = spreadsheetTasks.XlsxWriter;
+const AdmZip = require('adm-zip') as new (filePath: string) => {
+  readAsText(entryName: string): string;
+  updateFile(entryName: string, content: Buffer): void;
+  writeZip(filePath: string): void;
+};
+
+/** Renumbers the first worksheet's rows so the skipped positions become real gaps. */
+function moveWorksheetRows(filePath: string, rowNumbers: Record<number, number>): void {
+  const zip = new AdmZip(filePath);
+  const sheetPath = 'xl/worksheets/sheet1.xml';
+  const xml = zip.readAsText(sheetPath)
+    .replace(/<row r="(\d+)"/g, (_match, row: string) => `<row r="${rowNumbers[Number(row)]}"`)
+    .replace(/<c r="([A-Z]+)(\d+)"/g, (_match, column: string, row: string) => `<c r="${column}${rowNumbers[Number(row)]}"`);
+  zip.updateFile(sheetPath, Buffer.from(xml, 'utf8'));
+  zip.writeZip(filePath);
+}
 
 async function writeTwoSheetWorkbook(
   filePath: string,
@@ -118,6 +134,27 @@ describe('tabular-import-runtime regressions', () => {
     await expect(importer.getSampleRows(2)).resolves.toEqual([
       ['1', 'first'],
       ['2', 'second'],
+    ]);
+  });
+
+  it('skips worksheet row gaps before the header and between data rows', async () => {
+    const filePath = path.join(tempDir, 'row-gaps.xlsx');
+    const writer = new XlsxWriter(filePath);
+    writer.startSheet('Sheet1', 2, ['ID', 'NAME']);
+    writer.writeRow([1, 'Alice']);
+    writer.writeRow([2, 'Bob']);
+    writer.endSheet();
+    await writer.finalize();
+    // Header on row 3 (rows 1-2 are empty), data on rows 5 and 6 (row 4 is empty).
+    moveWorksheetRows(filePath, { 1: 3, 2: 5, 3: 6 });
+
+    const importer = createTabularDataImporter(filePath);
+    await importer.analyzeDataTypes();
+
+    expect(importer.getSourceHeaders()).toEqual(['ID', 'NAME']);
+    await expect(importer.getAllRows()).resolves.toEqual([
+      ['1', 'Alice'],
+      ['2', 'Bob'],
     ]);
   });
 

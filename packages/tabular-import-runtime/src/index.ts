@@ -46,12 +46,23 @@ interface ExcelReader {
   fieldCount?: number;
   getValue?: (columnIndex: number) => unknown;
   getSheetNames?(): string[];
-  _currentSheetIndex?: number;
-  _initSheet?: (index: number) => Promise<void> | boolean | void;
+  selectSheet(nameOrIndex: string | number): Promise<void>;
 }
 
 interface ExcelReaderFactory {
   create(filePath: string): ExcelReader;
+}
+
+/**
+ * spreadsheet-tasks 3.x yields an empty `_currentRow` for every missing row position,
+ * including leading gaps. Earlier releases never yielded those positions, so they are
+ * skipped here to keep header detection and row counts unchanged.
+ */
+async function readNextExcelRecord(reader: ExcelReader): Promise<boolean> {
+  while (await reader.read()) {
+    if (!Array.isArray(reader._currentRow) || reader._currentRow.length > 0) return true;
+  }
+  return false;
 }
 
 let readerFactory: ExcelReaderFactory | undefined;
@@ -257,10 +268,7 @@ export class TabularDataImporter {
       );
     }
 
-    reader._currentSheetIndex = index;
-    if (reader._initSheet) {
-      await reader._initSheet(index);
-    }
+    await reader.selectSheet(index);
   }
 
   private async openExcelRows(): Promise<string[][]> {
@@ -270,7 +278,7 @@ export class TabularDataImporter {
     try {
       await reader.open(this.filePath);
       await this.prepareExcelReader(reader);
-      while (await reader.read()) {
+      while (await readNextExcelRecord(reader)) {
         const current = this.getCurrentExcelRow(reader);
         rows.push(current.map(valueToString));
       }
@@ -288,7 +296,7 @@ export class TabularDataImporter {
       await reader.open(this.filePath);
       await this.prepareExcelReader(reader);
       let rowIndex = 0;
-      while (rows.length < limit && await reader.read()) {
+      while (rows.length < limit && await readNextExcelRecord(reader)) {
         const rawRow = this.getCurrentExcelRow(reader);
         const current = rawRow.map(valueToString);
         if (rowIndex === 0) {
@@ -485,7 +493,7 @@ export class TabularDataImporter {
       await reader.open(this.filePath);
       await this.prepareExcelReader(reader);
 
-      while (await reader.read()) {
+      while (await readNextExcelRecord(reader)) {
         const rawRow = this.getCurrentExcelRow(reader);
         const textRow = rawRow.map(valueToString);
         if (!firstRawRow) {

@@ -7,11 +7,14 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
+| @chevrotain/gast | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| @chevrotain/regexp-to-ast | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| @chevrotain/utils | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | @duckdb/node-api | 1.5.0-r.1 | MIT | [upstream](https://github.com/duckdb/duckdb-node-neo) |
 | @duckdb/node-bindings | 1.5.0-r.1 | MIT | [upstream](https://github.com/duckdb/duckdb-node-neo) |
 | @duckdb/node-bindings-linux-x64 | 1.5.0-r.1 | MIT | [upstream](https://github.com/duckdb/duckdb-node-neo) |
 | @isaacs/cliui | 8.0.2 | ISC | [upstream](yargs/cliui) |
-| @justybase/spreadsheet-tasks | 2.2.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
+| @justybase/spreadsheet-tasks | 3.0.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
 | @nodable/entities | 3.0.0 | MIT | [upstream](https://github.com/nodable/val-parsers) |
 | @pkgjs/parseargs | 0.11.0 | MIT | [upstream](https://github.com/pkgjs/parseargs) |
 | abort-controller | 3.0.0 | MIT | [upstream](https://github.com/mysticatea/abort-controller) |
@@ -41,6 +44,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | call-bind | 1.0.9 | MIT | [upstream](https://github.com/ljharb/call-bind) |
 | call-bind-apply-helpers | 1.0.2 | MIT | [upstream](https://github.com/ljharb/call-bind-apply-helpers) |
 | call-bound | 1.0.4 | MIT | [upstream](https://github.com/ljharb/call-bound) |
+| chevrotain | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | cipher-base | 1.0.7 | MIT | [upstream](https://github.com/crypto-browserify/cipher-base) |
 | color-convert | 2.0.1 | MIT | [upstream](Qix-/color-convert) |
 | color-name | 1.1.4 | MIT | [upstream](https://github.com/colorjs/color-name) |
@@ -153,64 +157,7 @@ The following published packages declare the listed SPDX license in their packag
 
 ## Included license texts
 
-### @duckdb/node-api@1.5.0-r.1, @duckdb/node-bindings@1.5.0-r.1, @duckdb/node-bindings-linux-x64@1.5.0-r.1
-
-```text
-Copyright 2018-2025 Stichting DuckDB Foundation
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
-### @isaacs/cliui@8.0.2
-
-```text
-Copyright (c) 2015, Contributors
-
-Permission to use, copy, modify, and/or distribute this software
-for any purpose with or without fee is hereby granted, provided
-that the above copyright notice and this permission notice
-appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
-OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE
-LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES
-OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
-WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
-ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-```
-
-### @justybase/spreadsheet-tasks@2.2.0
-
-```text
-MIT License
-
-Copyright (c) 2024 Krzysztof Dusko
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### @pkgjs/parseargs@0.11.0, b4a@1.8.1, bare-events@2.9.1, bare-fs@4.8.0, bare-path@3.1.1, bare-stream@2.13.3, bare-url@2.5.2, events-universal@1.0.1, text-decoder@1.2.7
+### @chevrotain/gast@13.2.0, @chevrotain/regexp-to-ast@13.2.0, @chevrotain/utils@13.2.0, @pkgjs/parseargs@0.11.0, b4a@1.8.1, bare-events@2.9.1, bare-fs@4.8.0, bare-path@3.1.1, bare-stream@2.13.3, bare-url@2.5.2, chevrotain@13.2.0, events-universal@1.0.1, text-decoder@1.2.7
 
 ```text
 Apache License
@@ -414,6 +361,63 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
+
+### @duckdb/node-api@1.5.0-r.1, @duckdb/node-bindings@1.5.0-r.1, @duckdb/node-bindings-linux-x64@1.5.0-r.1
+
+```text
+Copyright 2018-2025 Stichting DuckDB Foundation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### @isaacs/cliui@8.0.2
+
+```text
+Copyright (c) 2015, Contributors
+
+Permission to use, copy, modify, and/or distribute this software
+for any purpose with or without fee is hereby granted, provided
+that the above copyright notice and this permission notice
+appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE
+LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+### @justybase/spreadsheet-tasks@3.0.0
+
+```text
+MIT License
+
+Copyright (c) 2024 Krzysztof Dusko
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### abort-controller@3.0.0
