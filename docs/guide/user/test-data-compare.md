@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Partial
 last_verified: 2026-08-19
-product_version: 3.19.4
+product_version: 3.19.5
 ---
 
 # Test Data Generator and Schema Compare
