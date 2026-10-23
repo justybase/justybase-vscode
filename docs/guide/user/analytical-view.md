@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-10-16
-product_version: 3.19.4
+product_version: 3.19.5
 ---
 
 # Analytical View
