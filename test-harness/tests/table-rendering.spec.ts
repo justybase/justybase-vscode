@@ -251,6 +251,52 @@ test.describe('Table rendering', () => {
         expect(nativeSelection).toBe('');
     });
 
+    test('grouped leaf rows keep cell values under their own column headers', async ({ page }) => {
+        const groupedColumnPosition = 5;
+        const headers = page.locator('#gridContainer .grid-wrapper.active thead th[data-col-id]');
+        const groupedColId = await headers.nth(groupedColumnPosition).getAttribute('data-col-id');
+        await page.locator('#gridContainer tbody tr td:not(.row-number-cell)').nth(groupedColumnPosition).click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: 'Group by This Column' }).click();
+
+        const groupHeader = page.locator('#gridContainer tr.group-header').first();
+        await expect(groupHeader).toBeVisible();
+        const groupValue = (await groupHeader.innerText()).trim().match(/: (.*) \(\d+ rows?\)$/)?.[1];
+        expect(groupValue).toBeDefined();
+        // Headers keep the grouped column in place; leaf cells must follow the same order.
+        await expect(headers.nth(groupedColumnPosition)).toHaveAttribute('data-col-id', groupedColId!);
+
+        // First span is the zero-width indent; the second is the expand indicator.
+        await groupHeader.locator('span').nth(1).click();
+        const leafRow = page.locator('#gridContainer tbody tr:not(.group-header):has(td[data-cell-id])').first();
+        await expect(leafRow).toBeVisible();
+        await expect(leafRow.locator('td:not(.row-number-cell)').nth(groupedColumnPosition)).toHaveText(groupValue!);
+    });
+
+    test('group chip sort button orders groups ascending, descending and back to default', async ({ page }) => {
+        await page.locator('#gridContainer tbody tr td:not(.row-number-cell)').nth(5).click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: 'Group by This Column' }).click();
+
+        const sortButton = page.locator('#groupingPanel .group-chip .group-sort');
+        await expect(sortButton).toHaveCount(1);
+        await expect(sortButton).not.toHaveClass(/active/);
+        const groupValues = () => page.locator('#gridContainer tr.group-header').evaluateAll(rows =>
+            rows.map(row => (row.textContent ?? '').match(/: (.*) \(\d+ rows?\)/)?.[1] ?? ''));
+        const defaultOrder = await groupValues();
+        expect(defaultOrder.length).toBeGreaterThan(1);
+        const ascending = [...defaultOrder].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+        await sortButton.click();
+        await expect(page.locator('#groupingPanel .group-chip .group-sort')).toHaveClass(/active/);
+        await expect.poll(groupValues).toEqual(ascending);
+
+        await page.locator('#groupingPanel .group-chip .group-sort').click();
+        await expect.poll(groupValues).toEqual([...ascending].reverse());
+
+        await page.locator('#groupingPanel .group-chip .group-sort').click();
+        await expect(page.locator('#groupingPanel .group-chip .group-sort')).not.toHaveClass(/active/);
+        await expect.poll(groupValues).toEqual(defaultOrder);
+    });
+
     test('renders the grid container with table element', async ({ page }) => {
         const gridContainer = page.locator('#gridContainer');
         await expect(gridContainer).toBeVisible({ timeout: 10000 });
@@ -326,6 +372,50 @@ test.describe('Table rendering', () => {
         await page.locator('#gridContainer table thead th').nth(1).locator('.header-btn-sort').click();
         await expect.poll(async () => page.locator('#gridContainer .selected-cell').count()).toBe(0);
         await expect(page.locator('#rowViewContent .row-view-placeholder')).toContainText('Select 1 to 10 rows');
+    });
+
+    test('Row View drag selects a cell rectangle and copies it instead of native text selection', async ({ page }) => {
+        await page.evaluate(() => {
+            const target = window as unknown as { __copiedText?: string };
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: { writeText: async (text: string) => { target.__copiedText = text; } },
+            });
+        });
+        await page.locator('#gridContainer tbody tr[data-index="0"] td.row-number-cell').click();
+        await page.evaluate(() => {
+            (window as Window & { toggleRowView?: () => void }).toggleRowView?.();
+        });
+        const keys = page.locator('#rowViewContent .row-view-key');
+        const values = page.locator('#rowViewContent .row-view-val[data-rv-col="1"]');
+        await expect(keys).toHaveCount(8);
+        // The panel slides open with a width transition; measure cells only once it settles.
+        await expect.poll(() => page.locator('#rowViewPanel').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(400);
+
+        const from = await keys.nth(1).boundingBox();
+        const to = await values.nth(2).boundingBox();
+        if (!from || !to) {
+            throw new Error('Row View cells are not laid out');
+        }
+        await page.mouse.move(from.x + 10, from.y + from.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 });
+        await page.mouse.up();
+
+        await expect(page.locator('#rowViewContent .rv-selected')).toHaveCount(4);
+        expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+
+        const expected = (await Promise.all([1, 2].map(async index => [
+            (await keys.nth(index).getAttribute('data-rv-copy')) ?? '',
+            (await values.nth(index).getAttribute('data-rv-copy')) ?? (await values.nth(index).textContent()) ?? '',
+        ].join('\t')))).join('\n');
+        await page.keyboard.press('Control+c');
+        await expect.poll(() => page.evaluate(() => (window as unknown as { __copiedText?: string }).__copiedText)).toBe(expected);
+
+        await page.keyboard.press('Escape');
+        await expect(page.locator('#rowViewContent .rv-selected')).toHaveCount(0);
+        await page.keyboard.press('Control+a');
+        await expect(page.locator('#rowViewContent .rv-selected')).toHaveCount(16);
     });
 
     test('renders correct number of columns per data row', async ({ page }) => {
