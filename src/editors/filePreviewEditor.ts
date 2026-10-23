@@ -23,7 +23,18 @@ interface ExcelReaderWithInit {
     fieldCount: number;
     getValue(i: number): unknown;
     getSheetNames?(): string[];
-    _initSheet?(index: number): void | Promise<void>;
+    selectSheet?(nameOrIndex: string | number): Promise<void>;
+    _currentRow?: unknown[];
+}
+
+// spreadsheet-tasks 3.x yields an empty _currentRow for every missing row position,
+// including leading gaps. Earlier releases never yielded those positions, so they are
+// skipped here to keep the preview's header and row counts unchanged.
+async function readNextExcelRecord(reader: ExcelReaderWithInit): Promise<boolean> {
+    while (await reader.read()) {
+        if (!Array.isArray(reader._currentRow) || reader._currentRow.length > 0) return true;
+    }
+    return false;
 }
 
 interface ColumnInfo {
@@ -628,15 +639,15 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
 
             for (let sheetIdx = 0; sheetIdx < sheetNames.length; sheetIdx++) {
                 const r = reader as ExcelReaderWithInit;
-                if (sheetIdx > 0 && typeof r._initSheet === 'function') {
-                    await r._initSheet(sheetIdx);
+                if (sheetIdx > 0 && typeof r.selectSheet === 'function') {
+                    await r.selectSheet(sheetIdx);
                 }
 
                 const rows: unknown[][] = [];
                 let headerRow: string[] | null = null;
                 let totalRows = 0;
 
-                while (await reader.read()) {
+                while (await readNextExcelRecord(r)) {
                     totalRows++;
                     const row: unknown[] = [];
                     for (let i = 0; i < reader.fieldCount; i++) {

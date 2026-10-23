@@ -17,7 +17,19 @@ interface XlsbReaderLike {
     read(): Promise<boolean>;
     getValue(index: number): unknown;
     fieldCount: number;
+    _currentRow?: unknown[];
+    selectSheet(nameOrIndex: string | number): Promise<void>;
     close?(): Promise<void>;
+}
+
+// spreadsheet-tasks 3.x yields an empty _currentRow for every missing row position,
+// including leading gaps. Earlier releases never yielded those positions, so they are
+// skipped here to keep the CSV output unchanged.
+async function readNextXlsbRecord(reader: XlsbReaderLike): Promise<boolean> {
+    while (await reader.read()) {
+        if (!Array.isArray(reader._currentRow) || reader._currentRow.length > 0) return true;
+    }
+    return false;
 }
 
 interface SpreadsheetTasksModule {
@@ -150,27 +162,15 @@ function sanitizeSheetNameForCsv(sheetName: string): string {
 }
 
 async function convertSheetToCsv(reader: XlsbReaderLike, sheetIndex: number, csvPath: string): Promise<void> {
-    // The first sheet is active after open(); later sheets are initialized
-    // lazily through XlsbReader._initSheet (internal to @justybase/spreadsheet-tasks
-    // 2.1.0 — pinned in package.json). Fail loudly instead of silently writing
-    // the previous sheet's rows when a future version drops the method.
+    // The first sheet is active after open(); later sheets are selected through the
+    // public selectSheet() API, which throws for an out-of-range index.
     if (sheetIndex > 0) {
-        const initializable = reader as XlsbReaderLike & { _initSheet?(index: number): Promise<boolean> };
-        if (typeof initializable._initSheet !== 'function') {
-            throw new Error(
-                'Installed @justybase/spreadsheet-tasks does not support multi-sheet XLSB reading; ' +
-                'update the DuckDB + Files extension.',
-            );
-        }
-        const initialized = await initializable._initSheet(sheetIndex);
-        if (!initialized) {
-            throw new Error(`XLSB sheet ${sheetIndex} could not be read from the workbook.`);
-        }
+        await reader.selectSheet(sheetIndex);
     }
 
     const stream = fs.createWriteStream(csvPath, { encoding: 'utf8' });
     try {
-        while (await reader.read()) {
+        while (await readNextXlsbRecord(reader)) {
             const row: unknown[] = [];
             for (let index = 0; index < reader.fieldCount; index += 1) {
                 row.push(reader.getValue(index));

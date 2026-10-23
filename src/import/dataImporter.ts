@@ -106,12 +106,21 @@ interface IExcelReader {
   close(): Promise<void>;
   _currentRow: unknown[];
   getSheetNames?(): string[];
-  _currentSheetIndex?: number;
-  _initSheet?: (index: number) => Promise<void> | boolean | void;
+  selectSheet(nameOrIndex: string | number): Promise<void>;
 }
 
 interface IReaderFactory {
   create(path: string): IExcelReader;
+}
+
+// spreadsheet-tasks 3.x yields an empty _currentRow for every missing row position,
+// including leading gaps. Earlier releases never yielded those positions, so they are
+// skipped here to keep header detection and row counts unchanged.
+async function readNextExcelRecord(reader: IExcelReader): Promise<boolean> {
+  while (await reader.read()) {
+    if (!Array.isArray(reader._currentRow) || reader._currentRow.length > 0) return true;
+  }
+  return false;
 }
 
 let ReaderFactory: IReaderFactory | undefined;
@@ -544,10 +553,7 @@ export class NetezzaImporter {
       throw new Error(message);
     }
 
-    reader._currentSheetIndex = targetIndex;
-    if (typeof reader._initSheet === "function") {
-      await reader._initSheet(targetIndex);
-    }
+    await reader.selectSheet(targetIndex);
   }
 
   private normalizeSqlHeaders(headers: readonly string[]): string[] {
@@ -874,7 +880,7 @@ export class NetezzaImporter {
       let headerSkipped = !this.excelHasHeaderRow;
       let sourceRowsRead = 0;
 
-      while ((await reader.read()) && rows.length < limit) {
+      while ((await readNextExcelRecord(reader)) && rows.length < limit) {
         throwIfImportCancelled(this.isCancelled);
         sourceRowsRead++;
         if (sourceRowsRead <= this.skipRowCount) {
@@ -939,7 +945,7 @@ export class NetezzaImporter {
       const rows: string[][] = [];
 
       let sourceRowsRead = 0;
-      while (await reader.read()) {
+      while (await readNextExcelRecord(reader)) {
         throwIfImportCancelled(this.isCancelled);
         sourceRowsRead++;
         if (sourceRowsRead <= this.skipRowCount) {
@@ -1318,7 +1324,7 @@ export class NetezzaImporter {
         }
       };
 
-      while (await reader.read()) {
+      while (await readNextExcelRecord(reader)) {
         throwIfImportCancelled(this.isCancelled);
         sourceRowsRead++;
         if (sourceRowsRead <= this.skipRowCount) {
@@ -1780,7 +1786,7 @@ ${this.getExternalUsingClause()}
         let lastReportTime = 0;
         let lastReportedPercent = 0;
 
-        while (readerOpened && (await reader.read())) {
+        while (readerOpened && (await readNextExcelRecord(reader))) {
           throwIfImportCancelled(self.isCancelled);
           sourceRowsRead++;
           if (sourceRowsRead <= self.skipRowCount) {

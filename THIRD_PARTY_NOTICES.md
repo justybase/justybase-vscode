@@ -7,41 +7,41 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
-| @chevrotain/cst-dts-gen | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
-| @chevrotain/gast | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
-| @chevrotain/regexp-to-ast | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
-| @chevrotain/utils | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
-| @hono/node-server | 2.1.1 | MIT | [upstream](https://github.com/honojs/node-server) |
+| @chevrotain/cst-dts-gen | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| @chevrotain/gast | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| @chevrotain/regexp-to-ast | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| @chevrotain/utils | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| @hono/node-server | 2.1.5 | MIT | [upstream](https://github.com/honojs/node-server) |
 | @justybase/database-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/duckdb-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/metadata-core | 3.17.14 | Apache-2.0 | See npm package metadata |
-| @justybase/netezza-driver | 3.0.0 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
+| @justybase/netezza-driver | 3.4.3 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
 | @justybase/netezza-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/result-core | 3.17.14 | Apache-2.0 | See npm package metadata |
-| @justybase/spreadsheet-tasks | 2.2.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
+| @justybase/spreadsheet-tasks | 3.0.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
 | @justybase/sql-core | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/sqlite-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/ui-core | 3.17.14 | Apache-2.0 | See npm package metadata |
 | @justybase/ui-react | 3.17.14 | Apache-2.0 | See npm package metadata |
-| @modelcontextprotocol/sdk | 1.30.0 | MIT | [upstream](https://github.com/modelcontextprotocol/typescript-sdk) |
+| @modelcontextprotocol/sdk | 1.32.1 | MIT | [upstream](https://github.com/modelcontextprotocol/typescript-sdk) |
 | @msgpack/msgpack | 3.1.3 | ISC | [upstream](https://github.com/msgpack/msgpack-javascript) |
-| @tanstack/store | 0.11.1 | MIT | [upstream](https://github.com/TanStack/store) |
-| @tanstack/table-core | 9.2.4 | MIT | [upstream](https://github.com/TanStack/table) |
-| @tanstack/virtual-core | 3.17.8 | MIT | [upstream](https://github.com/TanStack/virtual) |
-| @xyflow/react | 12.11.5 | MIT | [upstream](https://github.com/xyflow/xyflow) |
-| @xyflow/system | 0.0.81 | MIT | [upstream](https://github.com/xyflow/xyflow) |
+| @tanstack/store | 0.11.2 | MIT | [upstream](https://github.com/TanStack/store) |
+| @tanstack/table-core | 9.3.1 | MIT | [upstream](https://github.com/TanStack/table) |
+| @tanstack/virtual-core | 3.19.6 | MIT | [upstream](https://github.com/TanStack/virtual) |
+| @xyflow/react | 12.12.0 | MIT | [upstream](https://github.com/xyflow/xyflow) |
+| @xyflow/system | 0.0.83 | MIT | [upstream](https://github.com/xyflow/xyflow) |
 | abort-controller | 3.0.0 | MIT | [upstream](https://github.com/mysticatea/abort-controller) |
-| adm-zip | 0.6.0 | MIT | [upstream](https://github.com/cthackers/adm-zip) |
+| adm-zip | 0.6.1 | MIT | [upstream](https://github.com/cthackers/adm-zip) |
 | ajv | 8.20.0 | MIT | [upstream](ajv-validator/ajv) |
 | ajv-formats | 3.0.1 | MIT | [upstream](https://github.com/ajv-validator/ajv-formats) |
 | archiver | 7.0.1 | MIT | [upstream](https://github.com/archiverjs/node-archiver) |
 | archiver-utils | 5.0.2 | MIT | [upstream](https://github.com/archiverjs/archiver-utils) |
 | async | 3.2.6 | MIT | [upstream](https://github.com/caolan/async) |
-| b4a | 1.8.1 | Apache-2.0 | [upstream](https://github.com/holepunchto/b4a) |
+| b4a | 1.9.0 | Apache-2.0 | [upstream](https://github.com/holepunchto/b4a) |
 | balanced-match | 4.0.4 | MIT | [upstream](https://github.com/juliangruber/balanced-match) |
-| brace-expansion | 5.0.9 | MIT | [upstream](https://github.com/juliangruber/brace-expansion) |
+| brace-expansion | 5.0.12 | MIT | [upstream](https://github.com/juliangruber/brace-expansion) |
 | buffer-crc32 | 1.0.0 | MIT | [upstream](https://github.com/brianloveswords/buffer-crc32) |
-| chevrotain | 12.0.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
+| chevrotain | 13.2.0 | Apache-2.0 | [upstream](https://github.com/Chevrotain/chevrotain) |
 | classcat | 5.0.5 | MIT | [upstream](jorgebucaran/classcat) |
 | compress-commons | 6.0.2 | MIT | [upstream](https://github.com/archiverjs/node-compress-commons) |
 | content-type | 1.0.5 | MIT | [upstream](jshttp/content-type) |
@@ -64,16 +64,16 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | events-universal | 1.0.1 | Apache-2.0 | [upstream](https://github.com/holepunchto/events-universal) |
 | fast-deep-equal | 3.1.3 | MIT | [upstream](https://github.com/epoberezkin/fast-deep-equal) |
 | fast-fifo | 1.3.2 | MIT | [upstream](https://github.com/mafintosh/fast-fifo) |
-| fast-uri | 3.1.6 | BSD-3-Clause | [upstream](https://github.com/fastify/fast-uri) |
+| fast-uri | 3.1.8 | BSD-3-Clause | [upstream](https://github.com/fastify/fast-uri) |
 | fzstd | 0.1.1 | MIT | [upstream](https://github.com/101arrowz/fzstd) |
-| glob | 13.0.6 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/node-glob) |
+| glob | 10.5.0 | ISC | [upstream](https://github.com/isaacs/node-glob) |
 | graceful-fs | 4.2.11 | ISC | [upstream](https://github.com/isaacs/node-graceful-fs) |
 | has-flag | 4.0.0 | MIT | [upstream](sindresorhus/has-flag) |
-| hono | 4.13.5 | MIT | [upstream](https://github.com/honojs/hono) |
-| hyparquet | 1.29.2 | MIT | [upstream](https://github.com/hyparam/hyparquet) |
-| hyparquet-compressors | 1.1.1 | MIT | [upstream](https://github.com/hyparam/hyparquet-compressors) |
-| hyparquet-writer | 0.16.6 | MIT | [upstream](https://github.com/hyparam/hyparquet-writer) |
-| hysnappy | 1.0.0 | MIT | [upstream](https://github.com/hyparam/hysnappy) |
+| hono | 4.13.13 | MIT | [upstream](https://github.com/honojs/hono) |
+| hyparquet | 1.31.4 | MIT | [upstream](https://github.com/hyparam/hyparquet) |
+| hyparquet-compressors | 1.1.2 | MIT | [upstream](https://github.com/hyparam/hyparquet-compressors) |
+| hyparquet-writer | 0.16.12 | MIT | [upstream](https://github.com/hyparam/hyparquet-writer) |
+| hysnappy | 1.1.1 | MIT | [upstream](https://github.com/hyparam/hysnappy) |
 | inherits | 2.0.4 | ISC | [upstream](https://github.com/isaacs/inherits) |
 | is-stream | 2.0.1 | MIT | [upstream](sindresorhus/is-stream) |
 | isarray | 2.0.5 | MIT | [upstream](https://github.com/juliangruber/isarray) |
@@ -84,37 +84,37 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | minimatch | 10.2.6 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/minimatch) |
 | minipass | 7.1.3 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/minipass) |
 | ms | 2.1.3 | MIT | [upstream](vercel/ms) |
-| mssql | 12.7.0 | MIT | [upstream](https://github.com/tediousjs/node-mssql) |
+| mssql | 12.7.9 | MIT | [upstream](https://github.com/tediousjs/node-mssql) |
 | normalize-path | 3.0.0 | MIT | [upstream](jonschlinkert/normalize-path) |
-| path-scurry | 2.0.2 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/path-scurry) |
+| path-scurry | 1.11.1 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/path-scurry) |
 | pend | 1.2.0 | MIT | [upstream](https://github.com/andrewrk/node-pend) |
 | process | 0.11.10 | MIT | [upstream](https://github.com/shtylman/node-process) |
 | process-nextick-args | 2.0.1 | MIT | [upstream](https://github.com/calvinmetcalf/process-nextick-args) |
-| react | 19.2.8 | MIT | [upstream](https://github.com/react/react) |
-| react-dom | 19.2.8 | MIT | [upstream](https://github.com/react/react) |
-| readable-stream | 4.7.0 | MIT | [upstream](https://github.com/nodejs/readable-stream) |
+| react | 19.3.1 | MIT | [upstream](https://github.com/react/react) |
+| react-dom | 19.3.1 | MIT | [upstream](https://github.com/react/react) |
+| readable-stream | 4.8.0 | MIT | [upstream](https://github.com/nodejs/readable-stream) |
 | readdir-glob | 1.1.3 | Apache-2.0 | [upstream](https://github.com/Yqnn/node-readdir-glob) |
 | safe-buffer | 5.1.2 | MIT | [upstream](https://github.com/feross/safe-buffer) |
-| scheduler | 0.27.0 | MIT | [upstream](https://github.com/facebook/react) |
+| scheduler | 0.28.0 | MIT | [upstream](https://github.com/react/react) |
 | semver | 6.3.1 | ISC | [upstream](https://github.com/npm/node-semver) |
 | streamx | 2.28.1 | MIT | [upstream](https://github.com/mafintosh/streamx) |
 | string_decoder | 1.3.0 | MIT | [upstream](https://github.com/nodejs/string_decoder) |
 | supports-color | 7.2.0 | MIT | [upstream](chalk/supports-color) |
-| tar-stream | 3.2.1 | MIT | [upstream](https://github.com/mafintosh/tar-stream) |
+| tar-stream | 3.2.2 | MIT | [upstream](https://github.com/mafintosh/tar-stream) |
 | text-decoder | 1.2.7 | Apache-2.0 | [upstream](https://github.com/holepunchto/text-decoder) |
 | tslib | 2.8.1 | 0BSD | [upstream](https://github.com/Microsoft/tslib) |
-| use-sync-external-store | 1.6.0 | MIT | [upstream](https://github.com/facebook/react) |
+| use-sync-external-store | 1.7.0 | MIT | [upstream](https://github.com/react/react) |
 | util-deprecate | 1.0.2 | MIT | [upstream](https://github.com/TooTallNate/util-deprecate) |
-| vscode-jsonrpc | 9.0.1 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| vscode-languageclient | 10.1.0 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| vscode-languageserver | 10.1.0 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| vscode-languageserver-protocol | 3.18.2 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| vscode-languageserver-textdocument | 1.0.14 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| vscode-languageserver-types | 3.18.0 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| ws | 8.21.3 | MIT | [upstream](https://github.com/websockets/ws) |
+| vscode-jsonrpc | 9.0.3 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| vscode-languageclient | 10.1.2 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| vscode-languageserver | 10.1.2 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| vscode-languageserver-protocol | 3.18.4 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| vscode-languageserver-textdocument | 1.0.15 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| vscode-languageserver-types | 3.18.4 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| ws | 8.22.0 | MIT | [upstream](https://github.com/websockets/ws) |
 | yauzl | 3.4.0 | MIT | [upstream](https://github.com/thejoshwolfe/yauzl) |
 | zip-stream | 6.0.1 | MIT | [upstream](https://github.com/archiverjs/node-zip-stream) |
-| zod | 4.4.3 | MIT | [upstream](https://github.com/colinhacks/zod) |
+| zod | 4.6.7 | MIT | [upstream](https://github.com/colinhacks/zod) |
 | zod-to-json-schema | 3.25.2 | ISC | [upstream](https://github.com/StefanTerdell/zod-to-json-schema) |
 | zrender | 6.1.0 | BSD-3-Clause | [upstream](https://github.com/ecomfe/zrender) |
 | zustand | 4.5.7 | MIT | [upstream](https://github.com/pmndrs/zustand) |
@@ -135,7 +135,7 @@ The following published packages declare the listed SPDX license in their packag
 
 ## Included license texts
 
-### @chevrotain/cst-dts-gen@12.0.0, @chevrotain/gast@12.0.0, @chevrotain/regexp-to-ast@12.0.0, @chevrotain/utils@12.0.0, b4a@1.8.1, chevrotain@12.0.0, events-universal@1.0.1, text-decoder@1.2.7
+### @chevrotain/cst-dts-gen@13.2.0, @chevrotain/gast@13.2.0, @chevrotain/regexp-to-ast@13.2.0, @chevrotain/utils@13.2.0, b4a@1.9.0, chevrotain@13.2.0, events-universal@1.0.1, text-decoder@1.2.7
 
 ```text
 Apache License
@@ -341,7 +341,7 @@ Apache License
    limitations under the License.
 ```
 
-### @hono/node-server@2.1.1
+### @hono/node-server@2.1.5
 
 ```text
 MIT License
@@ -367,7 +367,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @justybase/netezza-driver@3.0.0
+### @justybase/netezza-driver@3.4.3
 
 ```text
 Copyright (c) 2025, Krzysztof Duśko
@@ -577,7 +577,7 @@ Copyright (c) 2007-2009, Mathieu Fenniak
    limitations under the License.
 ```
 
-### @justybase/spreadsheet-tasks@2.2.0
+### @justybase/spreadsheet-tasks@3.0.0
 
 ```text
 MIT License
@@ -603,7 +603,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @modelcontextprotocol/sdk@1.30.0
+### @modelcontextprotocol/sdk@1.32.1
 
 ```text
 MIT License
@@ -639,7 +639,7 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-### @tanstack/store@0.11.1
+### @tanstack/store@0.11.2
 
 ```text
 MIT License
@@ -665,7 +665,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @tanstack/table-core@9.2.4
+### @tanstack/table-core@9.3.1
 
 ```text
 MIT License
@@ -691,7 +691,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @tanstack/virtual-core@3.17.8
+### @tanstack/virtual-core@3.19.6
 
 ```text
 MIT License
@@ -717,7 +717,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @xyflow/react@12.11.5, @xyflow/system@0.0.81
+### @xyflow/react@12.12.0, @xyflow/system@0.0.83
 
 ```text
 MIT License
@@ -769,7 +769,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### adm-zip@0.6.0
+### adm-zip@0.6.1
 
 ```text
 MIT License
@@ -953,7 +953,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### brace-expansion@5.0.9
+### brace-expansion@5.0.12
 
 ```text
 MIT License
@@ -1966,7 +1966,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### fast-uri@3.1.6
+### fast-uri@3.1.8
 
 ```text
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
@@ -2027,72 +2027,24 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### glob@13.0.6
+### glob@10.5.0
 
 ```text
-All packages under `src/` are licensed according to the terms in
-their respective `LICENSE` or `LICENSE.md` files.
+The ISC License
 
-The remainder of this project is licensed under the Blue Oak
-Model License, as follows:
+Copyright (c) 2009-2023 Isaac Z. Schlueter and Contributors
 
------
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
 
-# Blue Oak Model License
-
-Version 1.0.0
-
-## Purpose
-
-This license gives everyone as much permission to work with
-this software as possible, while protecting contributors
-from liability.
-
-## Acceptance
-
-In order to receive this license, you must agree to its
-rules.  The rules of this license are both obligations
-under that agreement and conditions to your license.
-You must not do anything with this software that triggers
-a rule that you cannot or will not follow.
-
-## Copyright
-
-Each contributor licenses you to do everything with this
-software that would otherwise infringe that contributor's
-copyright in it.
-
-## Notices
-
-You must ensure that everyone who gets a copy of
-any part of this software from you, with or without
-changes, also gets the text of this license or a link to
-<https://blueoakcouncil.org/license/1.0.0>.
-
-## Excuse
-
-If anyone notifies you in writing that you have not
-complied with [Notices](#notices), you can keep your
-license by taking all practical steps to comply within 30
-days after the notice.  If you do not do so, your license
-ends immediately.
-
-## Patent
-
-Each contributor licenses you to do everything with this
-software that would otherwise infringe any patent claims
-they can license or become able to license.
-
-## Reliability
-
-No contributor can revoke this license.
-
-## No Liability
-
-***As far as the law allows, this software comes as is,
-without any warranty or condition, and no contributor
-will be liable to anyone for any damages related to this
-software or this license, under any kind of legal claim.***
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
 ### graceful-fs@4.2.11
@@ -2129,7 +2081,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### hono@4.13.5
+### hono@4.13.13
 
 ```text
 MIT License
@@ -2155,7 +2107,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### hyparquet@1.29.2, hyparquet-compressors@1.1.1, hyparquet-writer@0.16.6, hysnappy@1.0.0
+### hyparquet@1.31.4, hyparquet-compressors@1.1.2, hyparquet-writer@0.16.12, hysnappy@1.1.1
 
 ```text
 The MIT License (MIT)
@@ -2386,7 +2338,7 @@ will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim._**
 ```
 
-### minipass@7.1.3, path-scurry@2.0.2
+### minipass@7.1.3, path-scurry@1.11.1
 
 ```text
 # Blue Oak Model License
@@ -2472,7 +2424,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### mssql@12.7.0
+### mssql@12.7.9
 
 ```text
 MIT License
@@ -2603,7 +2555,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### react@19.2.8, react-dom@19.2.8, scheduler@0.27.0, use-sync-external-store@1.6.0
+### react@19.3.1, react-dom@19.3.1, scheduler@0.28.0, use-sync-external-store@1.7.0
 
 ```text
 MIT License
@@ -2629,7 +2581,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### readable-stream@4.7.0, string_decoder@1.3.0
+### readable-stream@4.8.0, string_decoder@1.3.0
 
 ```text
 Node.js is licensed for use as follows:
@@ -2913,7 +2865,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### tar-stream@3.2.1
+### tar-stream@3.2.2
 
 ```text
 The MIT License (MIT)
@@ -2985,7 +2937,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### vscode-jsonrpc@9.0.1, vscode-languageclient@10.1.0, vscode-languageserver@10.1.0, vscode-languageserver-protocol@3.18.2, vscode-languageserver-textdocument@1.0.14, vscode-languageserver-types@3.18.0
+### vscode-jsonrpc@9.0.3, vscode-languageclient@10.1.2, vscode-languageserver@10.1.2, vscode-languageserver-protocol@3.18.4, vscode-languageserver-textdocument@1.0.15, vscode-languageserver-types@3.18.4
 
 ```text
 Copyright (c) Microsoft Corporation
@@ -3001,7 +2953,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### ws@8.21.3
+### ws@8.22.0
 
 ```text
 Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
@@ -3072,7 +3024,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-### zod@4.4.3
+### zod@4.6.7
 
 ```text
 MIT License
