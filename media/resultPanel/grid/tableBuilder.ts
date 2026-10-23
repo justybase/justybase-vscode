@@ -2236,6 +2236,10 @@ export function createResultSetGrid(
         // TanStack invokes a global filter once for every globally filterable column.
         // The predicate below scans the complete row, so one invocation per row is enough.
         getColumnCanGlobalFilter: (column: { id: string }) => column.id === globalFilterColumnId,
+        // TanStack defaults to 'reorder', which moves grouped columns to the front of
+        // getVisibleLeafColumns()/row cells while headers keep the user's column order,
+        // leaving cell values under the wrong headers. Keep grouped columns in place.
+        groupedColumnMode: false,
         state: getV9TableState(),
         onSortingChange: (updater) => {
             recordCurrentFilterHistory();
@@ -2253,6 +2257,10 @@ export function createResultSetGrid(
             invalidateRowNumberCache();
             invalidateAggregationCache();
             scheduleRender({ chrome: true });
+            // Group chips mirror the grouped columns' sort direction.
+            if (tableState.grouping.length > 0) {
+                renderGrouping();
+            }
             saveAllGridStates();
         },
         onGlobalFilterChange: (updater) => {

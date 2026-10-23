@@ -77,6 +77,8 @@ export function createGroupChip(colId: string, index: number, rs: ResultSet, tan
     chipContent.textContent = rs.columns[parseInt(colId)].name;
     chip.appendChild(chipContent);
 
+    chip.appendChild(createGroupSortButton(colId, rs, tanTable));
+
     const removeBtn = document.createElement('span');
     removeBtn.className = 'remove-group';
     removeBtn.textContent = '×';
@@ -89,6 +91,58 @@ export function createGroupChip(colId: string, index: number, rs: ResultSet, tan
     chip.appendChild(removeBtn);
 
     return chip;
+}
+
+/**
+ * Group order follows the grouped column's sort entry (in-memory grouped row model and
+ * disk-backed group queries alike), so the chip cycles that entry: none -> asc -> desc -> none.
+ * A newly added entry is placed first so it decides the group order over other sorts.
+ */
+function createGroupSortButton(colId: string, rs: ResultSet, tanTable: GridTanStackTable): HTMLSpanElement {
+    const sorting = tanTable.getState().sorting ?? [];
+    const direction = sorting.find(sort => sort.id === colId);
+    const isSorted = direction ? (direction.desc ? 'desc' : 'asc') : false;
+    const columnName = rs.columns[parseInt(colId)].name;
+
+    const sortBtn = document.createElement('span');
+    sortBtn.className = 'group-sort' + (isSorted ? ' active' : '');
+    sortBtn.setAttribute('role', 'button');
+    sortBtn.tabIndex = 0;
+    const sortArrowPath = isSorted === 'asc'
+        ? 'M8 3l4.5 6h-9L8 3z'
+        : isSorted === 'desc'
+            ? 'M8 13l4.5-6h-9L8 13z'
+            : 'M8 1L5 5h6L8 1zM8 15l3-4H5l3 4z';
+    sortBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="${sortArrowPath}"/></svg>`;
+    sortBtn.title = isSorted === 'asc'
+        ? `Groups sorted ascending by ${columnName}. Click to sort descending.`
+        : isSorted === 'desc'
+            ? `Groups sorted descending by ${columnName}. Click to clear the group sort.`
+            : `Groups in default order. Click to sort ascending by ${columnName}.`;
+    sortBtn.setAttribute('aria-label', sortBtn.title);
+
+    const cycleSort = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = tanTable.getState().sorting ?? [];
+        const existing = current.find(sort => sort.id === colId);
+        if (!existing) {
+            tanTable.setSorting([{ id: colId, desc: false }, ...current]);
+        } else if (!existing.desc) {
+            tanTable.setSorting(current.map(sort => sort.id === colId ? { id: colId, desc: true } : sort));
+        } else {
+            tanTable.setSorting(current.filter(sort => sort.id !== colId));
+        }
+    };
+    sortBtn.onclick = cycleSort;
+    sortBtn.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            cycleSort(e);
+        }
+    };
+    // Keep a press on the button from starting a chip drag.
+    sortBtn.onmousedown = (e) => e.stopPropagation();
+    return sortBtn;
 }
 
 function handleGroupChipDrop(targetColId: string, tanTable: GridTanStackTable): void {

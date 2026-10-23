@@ -61,6 +61,7 @@ import { renderRowCountInfo, reorderColumnByDrag, reorderColumnsForPinning } fro
 import { applyDatabaseFilter } from "./databaseFilters.js";
 import { closeRowView, syncRowViewToolbarButton } from "./rowView.js";
 import { renderRowViewComparison } from "./rowViewComparison.js";
+import { attachRowViewSelection } from "./rowViewSelection.js";
 import { refreshDiskQueryWindow } from "./diskBackedGrid.js";
 import {
   getActiveResultViewMode,
@@ -1006,6 +1007,10 @@ export function init(): void {
 
     // Setup handlers
     setupGlobalKeyboardShortcuts();
+    const rowViewContent = getElementById("rowViewContent");
+    if (rowViewContent) {
+      attachRowViewSelection(rowViewContent);
+    }
     setupStreamingMessageHandler();
     // Wire database grouping panel drag & drop
     const groupingDropZone = getElementById('groupingDropZone');

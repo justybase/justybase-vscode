@@ -936,6 +936,27 @@ body.group-dragging .grouping-panel {
     outline-offset: 2px;
 }
 
+.group-chip .group-sort {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    opacity: 0.55;
+    flex-shrink: 0;
+    border-radius: 3px;
+}
+
+.group-chip .group-sort.active {
+    opacity: 1;
+    color: var(--vscode-focusBorder, var(--ac));
+}
+
+.group-chip .group-sort:hover,
+.group-chip .group-sort:focus-visible {
+    opacity: 1;
+    background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+    outline: none;
+}
+
 .group-chip .remove-group {
     cursor: pointer;
     font-weight: bold;
@@ -3443,6 +3464,20 @@ tfoot {
 .row-view-table {
     display: grid;
     grid-template-columns: 1fr;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.row-view-content:focus { outline: none; }
+.row-view-key[data-rv-row],
+.row-view-val[data-rv-row] { cursor: cell; }
+.row-view-key.rv-selected,
+.row-view-val.rv-selected {
+    background: var(--ac-hl);
+    box-shadow: inset 0 0 0 1px rgba(59,130,246,.5);
+}
+.row-view-key.rv-selected.rv-anchor,
+.row-view-val.rv-selected.rv-anchor {
+    box-shadow: inset 0 0 0 2px var(--vscode-focusBorder, #3b82f6);
 }
 .row-view-section {
     display: grid;

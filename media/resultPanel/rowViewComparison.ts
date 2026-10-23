@@ -56,7 +56,7 @@ export function areRowViewValuesEqual(values: readonly unknown[]): boolean {
     return values.slice(1).every(value => stableValue(value, new WeakSet<object>()) === first);
 }
 
-function displayValue(value: unknown, column: TanStackColumn): { text: string; className: string } {
+function displayValue(value: unknown, column: TanStackColumn): { text: string; className: string; copyText?: string } {
     if (value === null || value === undefined) {
         return { text: 'NULL', className: 'null' };
     }
@@ -66,8 +66,8 @@ function displayValue(value: unknown, column: TanStackColumn): { text: string; c
         const normalized = typeof value === 'string' ? value.trim().toLowerCase() : value;
         const isTrue = normalized === true || normalized === 1 || normalized === 'true';
         return isTrue
-            ? { text: '✓ true', className: 'boolean-t' }
-            : { text: '✕ false', className: 'boolean-f' };
+            ? { text: '✓ true', className: 'boolean-t', copyText: 'true' }
+            : { text: '✕ false', className: 'boolean-f', copyText: 'false' };
     }
 
     let className = '';
@@ -82,7 +82,12 @@ function displayValue(value: unknown, column: TanStackColumn): { text: string; c
         inferredNumericKind: column.columnDef.inferredNumericKind,
         inferredDateInteger: column.columnDef.inferredDateInteger,
     });
-    return { text: formatted ?? String(value), className };
+    // Copy numbers without display grouping so pasted values stay numeric.
+    const copyText = className === 'number'
+        && (typeof value === 'number' || typeof value === 'bigint' || (typeof value === 'string' && /^-?\d+(\.\d+)?$/u.test(value.trim())))
+        ? String(value).trim()
+        : undefined;
+    return { text: formatted ?? String(value), className, copyText };
 }
 
 function getTypeLabel(dataType: string | undefined): string {
@@ -114,6 +119,9 @@ export function renderRowViewComparison(
 
         const key = document.createElement('div');
         key.className = 'row-view-key';
+        key.dataset.rvRow = String(columnIndex);
+        key.dataset.rvCol = '0';
+        key.dataset.rvCopy = String(column.columnDef.header ?? column.id);
         const name = document.createElement('span');
         name.className = 'row-view-key-name';
         name.textContent = String(column.columnDef.header ?? column.id);
@@ -136,6 +144,11 @@ export function renderRowViewComparison(
             const valueElement = document.createElement('span');
             valueElement.className = `row-view-val${formatted.className ? ` ${formatted.className}` : ''}`;
             valueElement.textContent = formatted.text;
+            valueElement.dataset.rvRow = String(columnIndex);
+            valueElement.dataset.rvCol = String(rowIndex + 1);
+            if (formatted.copyText !== undefined) {
+                valueElement.dataset.rvCopy = formatted.copyText;
+            }
             valueContainer.appendChild(valueElement);
         });
 
