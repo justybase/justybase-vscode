@@ -848,6 +848,18 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                     { label: 'CSV', value: 'csv' },
                     { label: 'CSV (Semicolon)', value: 'csv-semicolon' }
                 ]
+            },
+            {
+                id: 'results-default-excel-format',
+                label: 'Default Excel Format',
+                description: 'Format preselected in the results Export menu and used by Export & Open',
+                type: 'select',
+                configKey: 'results.defaultExcelFormat',
+                defaultValue: 'xlsb',
+                options: [
+                    { label: 'XLSB (faster, Excel only)', value: 'xlsb' },
+                    { label: 'XLSX (wider compatibility)', value: 'xlsx' }
+                ]
             }
         ]
     },

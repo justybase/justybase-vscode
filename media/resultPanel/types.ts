@@ -512,6 +512,7 @@ export interface ResultPanelGlobals {
     sources?: string[];
     pinnedSources?: Set<string>;
     defaultCopyFormat?: string;
+    defaultExcelFormat?: 'xlsb' | 'xlsx';
     maxDataResults?: number;
     /** Host-aligned stream cap for large in-memory results (see DISK_BACKED_WEBVIEW_STREAM_CAP). */
     diskBackedStreamCapEnabled?: boolean;

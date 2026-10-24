@@ -346,6 +346,7 @@ interface ResultPanelHostToWebviewMessageMap {
     refreshView: EmptyPayload;
     copySelection: { copyFormat?: 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon' };
     updateCopyFormat: { copyFormat: 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon' };
+    updateDefaultExcelFormat: { defaultExcelFormat: 'xlsb' | 'xlsx' };
     selectAll: EmptyPayload;
     cancelExecution: { sourceUri: string };
     appendRows: {
@@ -505,7 +506,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['sqlQueueAction', 'openRel
 
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['sqlQueueState',
     'hydrate', 'testBridge', 'setActiveSource', 'uxPerfSession', 'saveScrollState', 'refreshView',
-    'copySelection', 'updateCopyFormat', 'selectAll', 'cancelExecution', 'appendRows', 'streamingComplete',
+    'copySelection', 'updateCopyFormat', 'updateDefaultExcelFormat', 'selectAll', 'cancelExecution', 'appendRows', 'streamingComplete',
     'switchToResultSet', 'resultFormattingState', 'saveEdits', 'diskBackedActivate', 'rowCountUpdate',
     'rowWindow', 'diskQueryResult', 'databaseAggregationResult', 'databaseFilterValuesResult',
     'databaseFilterApplyResult', 'databaseGroupingResult', 'databaseGroupingPreviewResult',

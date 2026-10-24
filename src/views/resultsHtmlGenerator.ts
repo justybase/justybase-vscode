@@ -17,6 +17,8 @@ export interface ResultsHtmlOptions {
   resultGridFontFamily?: string;
   resultGridFontSize?: number;
   defaultCopyFormat?: string;
+  /** Default Excel format for the Export menu: `xlsb` (binary, faster) or `xlsx`. */
+  defaultExcelFormat?: 'xlsb' | 'xlsx';
   /** Enables the opt-in cross-product React Result Panel adapter. */
   sharedUiMode?: boolean;
 }
@@ -308,6 +310,7 @@ export class ResultsHtmlGenerator {
                 window.executingSources = new Set();
                 window.justybaseUseHostCopyShortcut = true;
                 window.defaultCopyFormat = ${JSON.stringify(options.defaultCopyFormat || 'markdown')};
+                window.defaultExcelFormat = ${JSON.stringify(options.defaultExcelFormat === 'xlsx' ? 'xlsx' : 'xlsb')};
                 
                 let grids = [];
                 let activeGridIndex = 0;

@@ -12,6 +12,7 @@ import { asHtml, getElementById } from './dom.js';
 import {
     callPanelMethod,
     getActiveSourceUri,
+    getResultPanelWindow,
     getResultSetAt,
     getResultSets,
     requireActiveSourceUri,
@@ -200,13 +201,33 @@ export function exportToCsv(): void {
 }
 
 /** Common formats are chips; `more` formats sit in the "More…" picker. */
-const EXPORT_FORMATS: ExportFormatOption[] = [
-    { id: 'xlsx', label: 'Excel', description: 'Excel workbook (.xlsx)' },
-    { id: 'csv', label: 'CSV', description: 'Comma separated values (.csv)' },
-    { id: 'json', label: 'JSON', description: 'Array of row objects (.json)' },
-    { id: 'markdown', label: 'Markdown', description: 'Markdown table with the SQL (.md, up to 1000 rows)' },
-    { id: 'sql', label: 'SQL INSERT', description: 'INSERT statements, data only (.sql)' },
-    { id: 'excel', label: 'Excel binary (.xlsb)', description: 'Binary Excel workbook (.xlsb) — fastest for large results', more: true },
+type ExcelExportFormat = 'xlsb' | 'xlsx';
+
+/** Host format id for each Excel flavour (`excel` = XLSB, `xlsx` = XLSX). */
+const EXCEL_FORMAT_IDS: Record<ExcelExportFormat, string> = {
+    xlsb: 'excel',
+    xlsx: 'xlsx',
+};
+
+/** Excel flavour preselected in the menu; overridable with `justybase.results.defaultExcelFormat`. */
+function getDefaultExcelFormat(): ExcelExportFormat {
+    return getResultPanelWindow().defaultExcelFormat === 'xlsx' ? 'xlsx' : 'xlsb';
+}
+
+const EXCEL_EXPORT_FORMATS: Record<ExcelExportFormat, ExportFormatOption> = {
+    xlsb: {
+        id: EXCEL_FORMAT_IDS.xlsb,
+        label: 'Excel',
+        description: 'Excel binary workbook (.xlsb) — smaller and faster, opens in Microsoft Excel',
+    },
+    xlsx: {
+        id: EXCEL_FORMAT_IDS.xlsx,
+        label: 'Excel',
+        description: 'Excel workbook (.xlsx) — wider compatibility (LibreOffice, Google Sheets)',
+    },
+};
+
+const MORE_EXPORT_FORMATS: ExportFormatOption[] = [
     { id: 'xml', label: 'XML', description: 'Extensible markup language (.xml)', more: true },
     { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format (.parquet)', more: true },
     { id: 'csv.gz', label: 'CSV.GZ', description: 'Gzip-compressed CSV (.csv.gz)', more: true },
@@ -214,7 +235,40 @@ const EXPORT_FORMATS: ExportFormatOption[] = [
     { id: 'xpt', label: 'SAS XPORT (.xpt)', description: 'SAS Transport Format v5 (.xpt)', more: true },
 ];
 
-const DEFAULT_EXPORT_FORMAT = 'xlsx';
+/**
+ * The configured Excel flavour is the main chip; the other one moves to
+ * "More…" so both remain reachable without asking before every export.
+ */
+function getExportFormats(): ExportFormatOption[] {
+    const configured = getDefaultExcelFormat();
+    const alternate: ExportFormatOption = configured === 'xlsb'
+        ? {
+            id: EXCEL_FORMAT_IDS.xlsx,
+            label: 'Excel workbook (.xlsx)',
+            description: 'Excel workbook (.xlsx) — wider compatibility (LibreOffice, Google Sheets)',
+            more: true,
+        }
+        : {
+            id: EXCEL_FORMAT_IDS.xlsb,
+            label: 'Excel binary (.xlsb)',
+            description: 'Excel binary workbook (.xlsb) — smallest and fastest, opens in Microsoft Excel',
+            more: true,
+        };
+
+    return [
+        EXCEL_EXPORT_FORMATS[configured],
+        { id: 'csv', label: 'CSV', description: 'Comma separated values (.csv)' },
+        { id: 'json', label: 'JSON', description: 'Array of row objects (.json)' },
+        { id: 'markdown', label: 'Markdown', description: 'Markdown table with the SQL (.md, up to 1000 rows)' },
+        { id: 'sql', label: 'SQL INSERT', description: 'INSERT statements, data only (.sql)' },
+        alternate,
+        ...MORE_EXPORT_FORMATS,
+    ];
+}
+
+function defaultExportFormat(): string {
+    return EXCEL_FORMAT_IDS[getDefaultExcelFormat()];
+}
 
 /**
  * Host destinations: save dialog, temp file opened externally, temp file put on
@@ -342,12 +396,12 @@ function activeResultHasTrailingLimit(): boolean {
  * the menu opens: the button never silently repeats an earlier export.
  */
 const exportMenuSelection: { format: string; rowScope: ExportRowScope } = {
-    format: DEFAULT_EXPORT_FORMAT,
+    format: 'excel',
     rowScope: 'loaded',
 };
 
 function resetExportMenuSelection(): void {
-    exportMenuSelection.format = DEFAULT_EXPORT_FORMAT;
+    exportMenuSelection.format = defaultExportFormat();
     exportMenuSelection.rowScope = 'loaded';
 }
 
@@ -384,7 +438,8 @@ function renderFormatSection(menu: HTMLElement): void {
     group.setAttribute('aria-label', 'Export format');
 
     const selected = exportMenuSelection.format;
-    EXPORT_FORMATS.filter(format => !format.more).forEach(format => {
+    const formats = getExportFormats();
+    formats.filter(format => !format.more).forEach(format => {
         group.appendChild(createExportChip(format.label, format.description, format.id === selected, () => {
             exportMenuSelection.format = format.id;
             renderExportMenu();
@@ -394,7 +449,7 @@ function renderFormatSection(menu: HTMLElement): void {
     const more = document.createElement('select');
     more.className = 'export-more-formats';
     more.setAttribute('aria-label', 'More export formats');
-    const moreFormats = EXPORT_FORMATS.filter(format => format.more);
+    const moreFormats = formats.filter(format => format.more);
     const selectedMore = moreFormats.some(format => format.id === selected);
     more.classList.toggle('is-selected', selectedMore);
     const placeholder = document.createElement('option');
@@ -419,7 +474,7 @@ function renderFormatSection(menu: HTMLElement): void {
     group.appendChild(more);
     section.appendChild(group);
 
-    const description = EXPORT_FORMATS.find(format => format.id === selected)?.description;
+    const description = formats.find(format => format.id === selected)?.description;
     if (description) {
         const hint = document.createElement('div');
         hint.className = 'export-menu-hint';

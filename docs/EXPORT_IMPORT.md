@@ -87,6 +87,10 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 | **Export & Open** | Export and immediately open in Excel |
 | **Copy as Excel** | Copy results to clipboard (paste directly into Excel) |
 
+The result-grid **Export** menu preselects the format from
+`justybase.results.defaultExcelFormat` (`xlsb` by default, `xlsx` for wider
+compatibility) and keeps the other flavour under **More…**.
+
 **Features:**
 - Multiple result sets → multiple sheets
 - Preserves numeric types

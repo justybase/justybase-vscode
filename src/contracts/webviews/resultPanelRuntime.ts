@@ -182,6 +182,7 @@ const hostRules: Record<string, FieldRule> = {
     refreshView: noPayload,
     copySelection: optional('copyFormat', oneOfField('copyFormat', ['tabbed', 'markdown', 'csv', 'csv-semicolon'])),
     updateCopyFormat: oneOfField('copyFormat', ['tabbed', 'markdown', 'csv', 'csv-semicolon']),
+    updateDefaultExcelFormat: oneOfField('defaultExcelFormat', ['xlsb', 'xlsx']),
     selectAll: noPayload,
     cancelExecution: stringSource,
     appendRows: all(

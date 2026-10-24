@@ -169,6 +169,16 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain("layout === 'table2' ? 'sidebar' : layout");
     });
 
+    it('injects the configured default Excel format for the export menu', () => {
+        const generator = new ResultsHtmlGenerator('test-csp');
+
+        expect(generator.generateHtml(SWITCHER_URIS)).toContain('window.defaultExcelFormat = "xlsb";');
+        expect(generator.generateHtml(SWITCHER_URIS, { defaultExcelFormat: 'xlsx' }))
+            .toContain('window.defaultExcelFormat = "xlsx";');
+        expect(generator.generateHtml(SWITCHER_URIS, { defaultExcelFormat: 'xlsx' }))
+            .not.toContain('window.defaultExcelFormat = "xlsb";');
+    });
+
     it('marks the shared Result Panel mode explicitly while keeping the legacy default', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
         const uris = {

@@ -252,6 +252,8 @@ function validateHostMessage(message: MessageRecord): boolean {
                 || ['tabbed', 'markdown', 'csv', 'csv-semicolon'].includes(String(message.copyFormat));
         case 'updateCopyFormat':
             return ['tabbed', 'markdown', 'csv', 'csv-semicolon'].includes(String(message.copyFormat));
+        case 'updateDefaultExcelFormat':
+            return message.defaultExcelFormat === 'xlsb' || message.defaultExcelFormat === 'xlsx';
         case 'cancelExecution':
             return hasString(message, 'sourceUri');
         case 'appendRows':

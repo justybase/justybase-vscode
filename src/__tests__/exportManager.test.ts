@@ -712,6 +712,32 @@ describe('ExportManager', () => {
             );
         });
 
+        it('should honour justybase.results.defaultExcelFormat for quick Excel actions', async () => {
+            const metadata: ExcelExportMetadata = {
+                sourceUri: 'file:///test.sql',
+                results: [
+                    {
+                        resultSetIndex: 0,
+                        rowIndices: [0],
+                        columnIds: ['0'],
+                        name: 'Test',
+                        isActive: true
+                    }
+                ]
+            };
+            (vscode.workspace.getConfiguration as jest.Mock).mockReturnValueOnce({
+                get: jest.fn(() => 'xlsx'),
+            });
+
+            await manager.openInExcel(metadata);
+
+            expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+                'netezza.exportCurrentResultToXlsxAndOpen',
+                expect.any(Array),
+                undefined
+            );
+        });
+
         it('should copy as Excel to clipboard', async () => {
             const metadata: ExcelExportMetadata = {
                 sourceUri: 'file:///test.sql',

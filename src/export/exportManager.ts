@@ -248,7 +248,18 @@ export class ExportManager {
         if (data && typeof data === 'object' && 'results' in data) {
             data = this.hydrateExportData(data as ExcelExportMetadata);
         }
-        vscode.commands.executeCommand('netezza.exportCurrentResultToXlsbAndOpen', data, sql);
+        const command = this.getDefaultExcelFormat() === 'xlsx'
+            ? 'netezza.exportCurrentResultToXlsxAndOpen'
+            : 'netezza.exportCurrentResultToXlsbAndOpen';
+        void vscode.commands.executeCommand(command, data, sql);
+    }
+
+    /** Excel format used by quick Excel actions; `justybase.results.defaultExcelFormat`, default `xlsb`. */
+    private getDefaultExcelFormat(): 'xlsb' | 'xlsx' {
+        const configured = vscode.workspace
+            .getConfiguration('justybase.results')
+            .get<string>('defaultExcelFormat', 'xlsb');
+        return configured === 'xlsx' ? 'xlsx' : 'xlsb';
     }
 
     public async openInFilePreview(data: unknown, _sql?: string): Promise<void> {
@@ -699,10 +710,12 @@ export class ExportManager {
         }
 
         // Let user choose format
-        const formatItems = [
-            { label: 'Excel (XLSX)', description: 'Modern Excel Format - Multiple Sheets', id: 'xlsx' },
-            { label: 'Excel (XLSB)', description: 'Binary Excel Format - Multiple Sheets', id: 'xlsb' }
-        ];
+        const defaultFormat = this.getDefaultExcelFormat();
+        const xlsbItem = { label: 'Excel (XLSB)', description: 'Binary Excel Format - Multiple Sheets', id: 'xlsb' };
+        const xlsxItem = { label: 'Excel (XLSX)', description: 'Modern Excel Format - Multiple Sheets', id: 'xlsx' };
+        const formatItems = defaultFormat === 'xlsb'
+            ? [xlsbItem, xlsxItem]
+            : [xlsxItem, xlsbItem];
 
         const selectedFormat = await vscode.window.showQuickPick(formatItems, {
             placeHolder: 'Select Excel format for multi-sheet export'

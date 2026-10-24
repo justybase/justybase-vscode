@@ -164,6 +164,7 @@ describe('result panel protocol', () => {
             sourcesJson: '[]',
             pinnedSourcesJson: '[]',
             copyFormat: 'markdown',
+            defaultExcelFormat: 'xlsb',
             isLog: false,
             columns: [{ name: 'id' }],
             resultSetId: 'result-1',

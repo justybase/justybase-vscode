@@ -178,14 +178,16 @@ Batch statements appear as separate tabs. Pinning protects a result from normal 
 
 **Copy** in the grid context menu copies the selection as tab-separated values without headers. **Copy as ▸** holds the other formats: tabbed with headers, Markdown table, CSV, JSON (an array of row objects), SQL INSERT statements, SQL IN list, and HTML table. **SQL IN list** turns the selected cells into a predicate list to paste after a column in a `WHERE` clause, for example `IN (1001, 1002, 'O''Brien')`. Numbers are written without quotes and text is quoted with `'` doubled. NULLs and duplicate values are left out. Lists longer than ten values are wrapped ten values per line. **Export Selection ▸** and **Export All Visible ▸** write Excel, CSV, or JSON files.
 
-The toolbar **Export** menu first asks for a format (Excel, CSV, JSON, Markdown, SQL INSERT; **More…** adds XLSB, XML, Parquet, CSV.GZ, CSV.ZST and SAS XPORT) and the rows (**Loaded rows**, or **ALL rows**, which re-runs the SQL without its LIMIT). Then choose where the result goes:
+The toolbar **Export** menu first asks for a format. **Excel** follows `justybase.results.defaultExcelFormat` (default **XLSB** — smaller and faster; set it to `xlsx` for wider compatibility, for example with LibreOffice or Google Sheets). The other Excel flavour stays available under **More…**, together with XML, Parquet, CSV.GZ, CSV.ZST and SAS XPORT. The second choice is the row scope (**Loaded rows**, or **ALL rows**, which re-runs the SQL without its LIMIT). Then choose where the result goes:
 
 | Action | Result |
 | --- | --- |
 | **Save as…** | Asks for a location and saves the file |
-| **Export & Open** | Saves to the temp folder and opens the file in its default application |
+| **Export & Open** | Saves to the OS temp folder (`%TEMP%\justybase-exports` on Windows) and opens the file in its default application |
 | **Export & Copy file** | Saves to the temp folder and puts the file itself on the clipboard, ready to paste into a mail, chat, or folder |
 | **Copy content** | Text formats only (CSV, JSON, Markdown, SQL INSERT, XML): puts the exported text on the clipboard without creating a file |
+
+The export-menu defaults are configurable: `justybase.results.defaultExcelFormat` picks the Excel flavour (`xlsb` by default, or `xlsx`) used by **Export & Open** and the quick Excel actions.
 
 The menu opens with the same defaults every time; it never silently repeats an earlier export choice.
 

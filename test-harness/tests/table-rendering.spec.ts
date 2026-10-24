@@ -166,8 +166,29 @@ test.describe('Table rendering', () => {
 
         await expect.poll(exportMessages).toEqual([
             { format: 'csv', destination: 'open' },
-            { format: 'xlsx', destination: 'temp' },
+            { format: 'excel', destination: 'temp' },
         ]);
+    });
+
+    test('uses the configured default Excel format in the export menu', async ({ page }) => {
+        const exportMessages = () => page.evaluate(() =>
+            ((window as unknown as { __postedMessages: Array<Record<string, unknown>> }).__postedMessages)
+                .filter(message => message.command === 'initiateExportWithSelection')
+                .map(message => ({ format: message.format, destination: message.destination })));
+
+        await page.evaluate(() => {
+            (window as unknown as { defaultExcelFormat?: string }).defaultExcelFormat = 'xlsx';
+        });
+
+        const menu = page.locator('#exportPrimaryMenu');
+        await page.locator('#exportBtn').click();
+        await expect(menu).toBeVisible();
+        await expect(menu.getByRole('radio', { name: 'Excel', exact: true })).toHaveAttribute('aria-checked', 'true');
+        await expect(menu.getByText(/Excel workbook \(\.xlsx\)/)).toBeVisible();
+        await expect(menu.locator('select.export-more-formats option[value="excel"]')).toHaveCount(1);
+
+        await menu.getByRole('menuitem', { name: /Export & Open/ }).click();
+        await expect.poll(exportMessages).toEqual([{ format: 'xlsx', destination: 'open' }]);
     });
 
     test('Copy as JSON from the cell context menu writes plain JSON', async ({ page }) => {

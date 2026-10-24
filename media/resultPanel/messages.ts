@@ -628,6 +628,9 @@ export function setupStreamingMessageHandler(): void {
         getResultPanelWindow().defaultCopyFormat = message.copyFormat;
       }
       break;
+    case 'updateDefaultExcelFormat':
+      getResultPanelWindow().defaultExcelFormat = message.defaultExcelFormat;
+      break;
     case 'selectAll':
       {
         const activeWrapper = asHtml(document.querySelector('.grid-wrapper.active'));

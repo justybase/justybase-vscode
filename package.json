@@ -4813,6 +4813,19 @@
           ],
           "markdownDescription": "Default plain text format for Ctrl+C in the results grid. `tabbed` uses tab-separated columns (plain text). `markdown` uses Markdown table syntax. `csv` uses comma-separated values. `csv-semicolon` uses semicolon-separated values (useful when comma is a decimal separator)."
         },
+        "justybase.results.defaultExcelFormat": {
+          "type": "string",
+          "default": "xlsb",
+          "enum": [
+            "xlsb",
+            "xlsx"
+          ],
+          "enumDescriptions": [
+            "Excel binary workbook (.xlsb) - smaller and faster, opens in Microsoft Excel",
+            "Excel workbook (.xlsx) - wider compatibility (LibreOffice, Google Sheets)"
+          ],
+          "markdownDescription": "Default Excel format preselected in the SQL Results **Export** menu and used by **Export & Open** and the quick Excel actions. `xlsb` is smaller and faster but opens only in Microsoft Excel; `xlsx` is more widely compatible."
+        },
         "justybase.filePreview.maxRows": {
           "type": "integer",
           "default": 20000,

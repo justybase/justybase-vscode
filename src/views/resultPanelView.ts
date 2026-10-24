@@ -379,6 +379,12 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                 const copyFormat = vscode.workspace.getConfiguration('justybase.results').get<string>('copyFormat', 'markdown') as 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon';
                 this._postMessageToWebview({ command: 'updateCopyFormat', copyFormat });
             }
+            if (affectsExtensionConfiguration(event, 'results.defaultExcelFormat')) {
+                this._postMessageToWebview({
+                    command: 'updateDefaultExcelFormat',
+                    defaultExcelFormat: this._getDefaultExcelFormat(),
+                });
+            }
         });
     }
 
@@ -3167,6 +3173,16 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         return resultsConfiguration?.get<number>('gridFontSize', 12) || 12;
     }
 
+    /** Default Excel format for the results export menu (`xlsb` unless the user chooses `xlsx`). */
+    private _getDefaultExcelFormat(): 'xlsb' | 'xlsx' {
+        const workspaceGetConfiguration = typeof vscode.workspace.getConfiguration === 'function'
+            ? vscode.workspace.getConfiguration.bind(vscode.workspace)
+            : undefined;
+        const configured = workspaceGetConfiguration?.('justybase.results')
+            ?.get<string>('defaultExcelFormat', 'xlsb');
+        return configured === 'xlsx' ? 'xlsx' : 'xlsb';
+    }
+
     private _getHtmlForWebview() {
         if (!this._htmlGenerator) return '';
         const uris = this._getScriptUris();
@@ -3174,6 +3190,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             resultGridFontFamily: this._getResultGridFontFamily(),
             resultGridFontSize: this._getResultGridFontSize(),
             defaultCopyFormat: vscode.workspace.getConfiguration('justybase.results').get<string>('copyFormat', 'markdown'),
+            defaultExcelFormat: this._getDefaultExcelFormat(),
             sharedUiMode: vscode.workspace.getConfiguration('justybase.ui').get<string>('mode', 'legacy') === 'shared',
         });
     }

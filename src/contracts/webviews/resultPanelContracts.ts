@@ -400,6 +400,7 @@ export type ResultPanelHostToWebviewMessage =
   | { command: 'refreshView' }
   | { command: 'copySelection'; copyFormat?: 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon' }
   | { command: 'updateCopyFormat'; copyFormat: 'tabbed' | 'markdown' | 'csv' | 'csv-semicolon' }
+  | { command: 'updateDefaultExcelFormat'; defaultExcelFormat: 'xlsb' | 'xlsx' }
   | { command: 'selectAll' }
     | { command: 'cancelExecution'; sourceUri: string }
     | {
@@ -676,6 +677,7 @@ export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['exploreOperationResult','
   'refreshView',
   'copySelection',
   'updateCopyFormat',
+  'updateDefaultExcelFormat',
   'selectAll',
   'cancelExecution',
   'appendRows',
