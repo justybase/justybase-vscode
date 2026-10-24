@@ -81,6 +81,7 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     'results.gridFontSize': { min: 9, max: 24 },
     'results.decimalScale': { min: 0, max: 12 },
     'filePreview.maxRows': { min: 100, max: 1000000 },
+    'filePreview.maxColumns': { min: 16, max: 16384 },
     'importWizard.validationSampleSize': { min: 5, max: 200 },
     'importWizard.backgroundValidationSampleSize': { min: 100, max: 50000 },
     'copilot.requestTimeout': { min: 5000, max: 300000 },
@@ -862,6 +863,14 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'filePreview.maxRows',
                 defaultValue: 20000
+            },
+            {
+                id: 'filepreview-max-columns',
+                label: 'Max Preview Columns',
+                description: 'Maximum columns to read for the spreadsheet preview (16–16,384)',
+                type: 'number',
+                configKey: 'filePreview.maxColumns',
+                defaultValue: 512
             },
             {
                 id: 'filepreview-csv-mode',

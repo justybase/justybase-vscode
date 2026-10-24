@@ -46,13 +46,19 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 
 **Spreadsheet view (`.csv`, `.tsv`, `.tab`, `.xlsx`, `.xlsb`):** these files open in a separate Excel-like viewer, not in the SQL result grid.
 - Columns are labelled `A`, `B`, `C`… and rows are numbered by their position in the file; the file's first row is shown as row 1
-- A name box shows the active cell address (for example `B7`) and a value bar shows its full text
+- The name box shows the active cell or the whole selection (`A1:B2`, `B:B`, `3:5`) and is editable: type a cell or range and press Enter to jump to it; Escape restores the previous reference. A value bar shows the active cell's full text
 - Click, Shift+click, drag, arrow keys and Ctrl+A select cells; clicking a row or column number selects that row or column
-- Excel-style navigation: Ctrl+arrow jumps to the edge of the current block of data (or to the next data cell, or to the sheet edge), and Ctrl+Shift+arrow extends the selection to the same cell
+- Drag across row or column headers to select several whole rows or columns; Ctrl+click or Ctrl+drag adds another row/column block to the selection
+- Right-click opens a menu with **Copy**, **Copy cell value**, **Select all** and **Find**. Copy writes the cell selection (all Ctrl+selected areas, as in Excel), unlike the webview's native context menu which only copies DOM text
+- **Import to Database…** opens the advanced import wizard for the current sheet: choose the connection, target database/schema and table name, review columns and types, then import. The wizard is available for CSV, TSV, XLSX and XLSB sources
+- Excel-style navigation: Ctrl+arrow jumps to the edge of the current block of data (or to the next data cell, or to the sheet edge), Ctrl+Shift+arrow extends the selection to the same cell; Enter/Tab move down/right (Shift reverses), and Ctrl+Home returns to `A1`
+- Text that is wider than its column spills into empty cells on the right, as in Excel; numbers stay clipped and right-aligned
+- The status bar shows the sheet size and, for the current selection, `Count`, `Sum` and `Average` of numeric cells (up to 200,000 cells per selection)
 - **Copy** (Ctrl+C or the toolbar button) writes the selection as tab-separated text, so it pastes into Excel or another spreadsheet with the same grid shape
 - Sheets appear as tabs at the bottom of the window
 - **Search sheet** (toolbar, Ctrl+F) searches every row of the current sheet, not only the rows on screen; Enter and Shift+Enter (or the arrow buttons) step through matches, and Escape clears the search
-- Drag the right edge of a column letter to resize that column; double-click the edge to restore the default width
+- Drag the right edge of a column letter to resize that column; double-click the edge to autofit the column to its content, and Alt+double-click to restore the default width
+- Very large sheets are streamed, not capped: the first page renders immediately, the rest arrives in the background, and the DOM only contains the visible rows. The status bar shows the loaded row count while the stream is running. Only columns are capped (`justybase.filePreview.maxColumns`), and the status bar says when the sheet has more columns than that limit
 - Sorting, filtering, grouping and Row View are not part of this viewer; open the file in the Data File Preview grid for those, or use **Add to Data Workspace** to query it
 
 **Features of the Data File Preview grid (Parquet and query results):**
@@ -192,7 +198,8 @@ SELECT * FROM DIMDATE LIMIT 5
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `justybase.filePreview.maxRows` | `20000` | Maximum rows to display in the Data File Preview (range 100–1000000). Larger values impact performance. |
+| `justybase.filePreview.maxRows` | `20000` | Maximum rows for Parquet and result-grid previews (range 100–1000000). The Excel/CSV spreadsheet view streams all rows and ignores this limit. |
+| `justybase.filePreview.maxColumns` | `512` | Maximum columns to read for the spreadsheet preview (range 16–16384). Wider sheets keep the remaining columns in exports and Data Workspaces. |
 
 ### From Editor Toolbar
 

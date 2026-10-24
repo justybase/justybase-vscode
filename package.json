@@ -4818,7 +4818,14 @@
           "default": 20000,
           "minimum": 100,
           "maximum": 1000000,
-          "description": "Maximum number of rows to display in the file preview (Parquet, XLSX, XLSB, CSV). Increasing this value may affect performance for large files."
+          "description": "Maximum number of rows for Parquet and result-grid previews. The Excel/CSV spreadsheet view streams all rows and ignores this limit."
+        },
+        "justybase.filePreview.maxColumns": {
+          "type": "integer",
+          "default": 512,
+          "minimum": 16,
+          "maximum": 16384,
+          "description": "Maximum number of columns to read for the spreadsheet preview (XLSX, XLSB, CSV). Wider sheets keep their remaining columns available through export or Add to Data Workspace."
         },
         "justybase.filePreview.csvPreviewMode": {
           "type": "string",

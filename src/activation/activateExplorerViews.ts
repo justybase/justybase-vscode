@@ -47,6 +47,9 @@ export function activateExplorerViews(
         vscode.window.registerCustomEditorProvider(
             FilePreviewEditor.viewType,
             new FilePreviewEditor(context.extensionUri, context, connectionManager),
+            // Rows stream into the webview over time; keeping it alive avoids losing the loaded page
+            // when the user switches editor tabs and comes back.
+            { webviewOptions: { retainContextWhenHidden: true } },
         ),
         vscode.commands.registerCommand('netezza.openInFilePreview', (resource?: vscode.Uri) => {
             const uri = resource ?? vscode.window.activeTextEditor?.document.uri;

@@ -6,14 +6,22 @@ export interface SpreadsheetSheet {
     columns: string[];
     /** Rows in display order; row 0 is the file's first row. */
     rows: unknown[][];
+    /** Data rows included in the payload; the file's first row is not counted. */
+    shownRows?: number;
+    /** True while the host is still streaming the remaining rows of this sheet. */
+    loading?: boolean;
+    /** True when the file has more columns than `justybase.filePreview.maxColumns`. */
+    columnsTruncated?: boolean;
 }
 
 export interface SpreadsheetPreviewData {
     fileName: string;
     fileInfo: string;
-    limitReached: boolean;
-    maxRows: number;
+    /** Short format label shown as a badge next to the file name, for example CSV. */
+    fileKind?: string;
     canAddToWorkspace: boolean;
+    /** True for formats the import wizard can read (CSV, TSV, XLSX, XLSB). */
+    canImportToDatabase?: boolean;
     sheets: SpreadsheetSheet[];
 }
 
@@ -32,7 +40,7 @@ export interface CellRange {
 export const ROW_HEIGHT = 20;
 export const HEADER_HEIGHT = 20;
 export const COLUMN_WIDTH = 96;
-export const ROW_NUMBER_WIDTH = 52;
+export const ROW_NUMBER_WIDTH = 44;
 export const MIN_COLUMN_WIDTH = 40;
 export const MAX_COLUMN_WIDTH = 800;
 
@@ -80,6 +88,108 @@ export function addressOf(sheet: SpreadsheetSheet, ref: CellRef): string {
     return `${column}${ref.row + 1}`;
 }
 
+/** Excel-style column label for a zero-based index: 0 → A, 25 → Z, 26 → AA. */
+export function columnName(index: number): string {
+    let n = index + 1;
+    let label = '';
+    while (n > 0) {
+        const rem = (n - 1) % 26;
+        label = String.fromCharCode(65 + rem) + label;
+        n = Math.floor((n - 1) / 26);
+    }
+    return label;
+}
+
+/**
+ * Excel-style reference for the current selection, as the name box shows it. A whole row or column
+ * selection (made from a header) uses `B:B` / `3:5`; a rectangular cell selection always uses
+ * `A1:B2`, even when it happens to cover every used row or column.
+ */
+export function rangeAddress(range: CellRange, kind?: 'rows' | 'columns'): string {
+    const startCol = columnName(range.startCol);
+    const endCol = columnName(range.endCol);
+    if (kind === 'columns') {
+        return `${startCol}:${endCol}`;
+    }
+    if (kind === 'rows') {
+        return `${range.startRow + 1}:${range.endRow + 1}`;
+    }
+    if (range.startRow === range.endRow && range.startCol === range.endCol) {
+        return `${startCol}${range.startRow + 1}`;
+    }
+    return `${startCol}${range.startRow + 1}:${endCol}${range.endRow + 1}`;
+}
+
+function columnIndexFromName(name: string): number {
+    let value = 0;
+    for (const character of name) {
+        value = value * 26 + (character.charCodeAt(0) - 64);
+    }
+    return value - 1;
+}
+
+const SINGLE_CELL_ADDRESS = /^([A-Z]{1,3})([1-9][0-9]*)$/;
+const CELL_RANGE_ADDRESS = /^([A-Z]{1,3})([1-9][0-9]*):([A-Z]{1,3})([1-9][0-9]*)$/;
+const COLUMN_RANGE_ADDRESS = /^([A-Z]{1,3}):([A-Z]{1,3})$/;
+const ROW_RANGE_ADDRESS = /^([1-9][0-9]*):([1-9][0-9]*)$/;
+
+/** Whole-row (`3:5`) or whole-column (`B:D`) notation of a typed or header-based selection. */
+export function classifyRangeAddress(text: string): 'rows' | 'columns' | null {
+    const address = text.trim().replace(/\$/g, '').toUpperCase();
+    if (COLUMN_RANGE_ADDRESS.test(address)) {
+        return 'columns';
+    }
+    if (ROW_RANGE_ADDRESS.test(address)) {
+        return 'rows';
+    }
+    return null;
+}
+
+/**
+ * Parses a name-box entry (`B7`, `$A$1:$B$2`, `A:C`, `1:5`) into a selection, clamped to the
+ * sheet. Returns null for anything that is not a cell or range reference.
+ */
+export function parseRangeAddress(sheet: SpreadsheetSheet, text: string): CellRange | null {
+    const address = text.trim().replace(/\$/g, '').toUpperCase();
+    if (!address) {
+        return null;
+    }
+    const maxRow = Math.max(0, sheet.rows.length - 1);
+    const maxCol = Math.max(0, sheet.columns.length - 1);
+    const row = (value: string): number => clamp(Number(value) - 1, 0, maxRow);
+    const col = (value: string): number => clamp(columnIndexFromName(value), 0, maxCol);
+
+    const cell = address.match(SINGLE_CELL_ADDRESS);
+    if (cell) {
+        const ref = { row: row(cell[2]), col: col(cell[1]) };
+        return { startRow: ref.row, endRow: ref.row, startCol: ref.col, endCol: ref.col };
+    }
+
+    const cells = address.match(CELL_RANGE_ADDRESS);
+    if (cells) {
+        return normalizeRange(
+            { row: row(cells[2]), col: col(cells[1]) },
+            { row: row(cells[4]), col: col(cells[3]) },
+        );
+    }
+
+    const columns = address.match(COLUMN_RANGE_ADDRESS);
+    if (columns) {
+        const first = col(columns[1]);
+        const last = col(columns[2]);
+        return { startRow: 0, endRow: maxRow, startCol: Math.min(first, last), endCol: Math.max(first, last) };
+    }
+
+    const rows = address.match(ROW_RANGE_ADDRESS);
+    if (rows) {
+        const first = row(rows[1]);
+        const last = row(rows[2]);
+        return { startRow: Math.min(first, last), endRow: Math.max(first, last), startCol: 0, endCol: maxCol };
+    }
+
+    return null;
+}
+
 /** Full display text of a cell; empty cells are blank, as in Excel. */
 export function cellText(value: unknown): string {
     if (value === null || value === undefined) {
@@ -93,6 +203,114 @@ const NUMERIC_TEXT = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/;
 /** CSV values arrive as text; numbers in them are right-aligned, as Excel does after opening a CSV. */
 export function isNumericValue(value: unknown): boolean {
     return typeof value === 'number' || (typeof value === 'string' && NUMERIC_TEXT.test(value.trim()));
+}
+
+/** Numeric value of a cell, or null when the cell is text, blank or not a finite number. */
+function numericValue(value: unknown): number | null {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string' && isNumericValue(value)) {
+        const parsed = Number(value.trim());
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+/** Non-empty cells of a selection plus the aggregates Excel shows in its status bar. */
+export interface SelectionStats {
+    /** Non-empty cells of any type. */
+    count: number;
+    numericCount: number;
+    sum: number;
+    /** Null when the selection contains no numbers. */
+    average: number | null;
+    /** True when the scan stopped at `MAX_STATS_CELLS`. */
+    truncated: boolean;
+}
+
+/** Caps the work done for Ctrl+A-sized selections; the status bar still reports a count. */
+export const MAX_STATS_CELLS = 200_000;
+
+/**
+ * Summarizes a selection the way Excel's status bar does: Count covers every non-empty cell,
+ * while Sum and Average only use numbers (including numeric text from a CSV).
+ */
+export function selectionStats(
+    sheet: SpreadsheetSheet,
+    range: CellRange,
+    limit = MAX_STATS_CELLS,
+): SelectionStats {
+    return selectionStatsForRanges(sheet, [range], limit);
+}
+
+/** Same as {@link selectionStats}, for a multi-area selection created with Ctrl+click. */
+export function selectionStatsForRanges(
+    sheet: SpreadsheetSheet,
+    ranges: CellRange[],
+    limit = MAX_STATS_CELLS,
+): SelectionStats {
+    const stats: SelectionStats = { count: 0, numericCount: 0, sum: 0, average: null, truncated: false };
+    let visited = 0;
+    scan: for (const range of ranges) {
+        for (let row = range.startRow; row <= range.endRow; row++) {
+            const source = sheet.rows[row] ?? [];
+            for (let col = range.startCol; col <= range.endCol; col++) {
+                if (visited >= limit) {
+                    stats.truncated = true;
+                    break scan;
+                }
+                visited++;
+                const value = source[col];
+                if (cellText(value) === '') {
+                    continue;
+                }
+                stats.count++;
+                const number = numericValue(value);
+                if (number !== null) {
+                    stats.numericCount++;
+                    stats.sum += number;
+                }
+            }
+        }
+    }
+    if (stats.numericCount > 0) {
+        stats.average = stats.sum / stats.numericCount;
+    }
+    return stats;
+}
+
+/** Locale-aware number for the status bar, with Excel-like grouping and bounded decimals. */
+export function formatStat(value: number, locale?: string): string {
+    return value.toLocaleString(locale, { maximumFractionDigits: 4 });
+}
+
+/** How far a text cell may paint over its empty right neighbours, as in Excel. */
+export const MAX_OVERFLOW_COLUMNS = 8;
+
+/**
+ * Number of cells to the right that a text cell may overflow into. Numbers never overflow,
+ * and the run stops at the first non-empty cell or at the last column of the sheet.
+ */
+export function overflowColumns(
+    sheet: SpreadsheetSheet,
+    row: number,
+    col: number,
+    limit = MAX_OVERFLOW_COLUMNS,
+): number {
+    const value = sheet.rows[row]?.[col];
+    if (cellText(value) === '' || isNumericValue(value)) {
+        return 0;
+    }
+    let span = 0;
+    while (
+        span < limit
+        && col + span + 1 < sheet.columns.length
+        && cellText(sheet.rows[row]?.[col + span + 1]) === ''
+    ) {
+        span++;
+    }
+    return span;
 }
 
 /**

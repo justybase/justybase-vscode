@@ -48,6 +48,12 @@ export interface FilePreviewData {
     rows: unknown[][];
     totalRows: number;
     limitReached: boolean;
+    /** True when the sheet has more columns than `justybase.filePreview.maxColumns`. */
+    columnsTruncated?: boolean;
+    /** True once the whole sheet has been read; false while the background stream is filling it. */
+    done?: boolean;
+    /** Actual worksheet name in the workbook (the display label may be the format for one-sheet files). */
+    sourceSheetName?: string;
     filePath: string;
     fileSizeBytes: number;
     formatLabel: string;
@@ -56,6 +62,201 @@ export interface FilePreviewData {
 }
 
 const SPREADSHEET_EXTENSIONS = new Set(['.xlsx', '.xlsb', '.csv', '.tsv', '.tab']);
+
+/**
+ * The spreadsheet view shows this many rows immediately, then the host streams the rest in
+ * `STREAM_CHUNK_ROWS` chunks; the webview virtualises rendering, so rows are not capped.
+ */
+export const INITIAL_SPREADSHEET_ROWS = 2000;
+const STREAM_CHUNK_ROWS = 2000;
+/** Default column ceiling for the spreadsheet preview; configurable through `maxColumns`. */
+const DEFAULT_MAX_COLUMNS = 512;
+/** Excel's own column limit, used to clamp the setting. */
+const EXCEL_MAX_COLUMNS = 16384;
+
+/** One worksheet read from an Excel file, already bounded for the preview. */
+export interface ExcelSheetPreview {
+    rows: unknown[][];
+    headerRow?: unknown[];
+    /** Data rows included in the preview (the header row is not counted). */
+    totalRows: number;
+    limitReached: boolean;
+    columnsTruncated: boolean;
+    cellsUsed: number;
+}
+
+/** Excel values are JSON-serialized into the webview; dates get a stable ISO representation. */
+function convertExcelValue(value: unknown): unknown {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    return value instanceof Date ? value.toISOString() : value;
+}
+
+/** Drops trailing empty cells so a sparse row does not inflate the preview width. */
+function trimTrailingEmptyCells(row: unknown[]): unknown[] {
+    let end = row.length;
+    while (end > 0) {
+        const value = row[end - 1];
+        if (value !== null && value !== undefined && value !== '') {
+            break;
+        }
+        end--;
+    }
+    if (end < row.length) {
+        row.length = end;
+    }
+    return row;
+}
+
+/**
+ * Reads one worksheet only until the preview limits are reached. The previous implementation kept
+ * reading the whole sheet just to count its rows, which made a large XLSB look like it would never open.
+ */
+export async function readExcelSheetPreview(
+    reader: ExcelReaderWithInit,
+    maxRows: number,
+    maxColumns: number,
+    cellBudget: number,
+): Promise<ExcelSheetPreview> {
+    const rows: unknown[][] = [];
+    let headerRow: unknown[] | undefined;
+    let limitReached = false;
+    let columnsTruncated = false;
+    let cellsUsed = 0;
+
+    while (await readNextExcelRecord(reader)) {
+        if (headerRow !== undefined && rows.length >= maxRows) {
+            limitReached = true;
+            break;
+        }
+
+        const width = Math.max(0, Math.min(reader.fieldCount, maxColumns));
+        if (reader.fieldCount > maxColumns) {
+            columnsTruncated = true;
+        }
+        const cells = Math.max(width, 1);
+        // The header row is always kept so the sheet still has a shape; data rows respect the budget.
+        if (headerRow !== undefined && cellsUsed + cells > cellBudget) {
+            limitReached = true;
+            break;
+        }
+
+        const row: unknown[] = [];
+        for (let i = 0; i < width; i++) {
+            row.push(convertExcelValue(reader.getValue(i)));
+        }
+        trimTrailingEmptyCells(row);
+        cellsUsed += cells;
+
+        if (headerRow === undefined) {
+            headerRow = row;
+        } else {
+            rows.push(row);
+        }
+    }
+
+    return {
+        rows,
+        headerRow,
+        totalRows: rows.length,
+        limitReached,
+        columnsTruncated,
+        cellsUsed,
+    };
+}
+
+/**
+ * Streams the remaining data rows of one already-selected Excel sheet. The first `alreadyLoaded`
+ * data rows (and the header) are skipped, so the same sheet can be continued after the initial page.
+ */
+export async function streamExcelSheetRows(
+    reader: ExcelReaderWithInit,
+    alreadyLoaded: number,
+    maxColumns: number,
+    onChunk: (rows: unknown[][], done: boolean, columnsTruncated: boolean) => void,
+    isCancelled: () => boolean = () => false,
+): Promise<void> {
+    let skip = 1 + Math.max(0, alreadyLoaded);
+    while (skip > 0) {
+        if (isCancelled() || !(await readNextExcelRecord(reader))) {
+            onChunk([], true, reader.fieldCount > maxColumns);
+            return;
+        }
+        skip--;
+    }
+
+    let columnsTruncated = reader.fieldCount > maxColumns;
+    let buffer: unknown[][] = [];
+    while (await readNextExcelRecord(reader)) {
+        if (isCancelled()) {
+            return;
+        }
+        const width = Math.max(0, Math.min(reader.fieldCount, maxColumns));
+        if (reader.fieldCount > maxColumns) {
+            columnsTruncated = true;
+        }
+        const row: unknown[] = [];
+        for (let i = 0; i < width; i++) {
+            row.push(convertExcelValue(reader.getValue(i)));
+        }
+        trimTrailingEmptyCells(row);
+        buffer.push(row);
+        if (buffer.length >= STREAM_CHUNK_ROWS) {
+            onChunk(buffer, false, columnsTruncated);
+            buffer = [];
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+    }
+    onChunk(buffer, true, columnsTruncated);
+}
+
+/** Streams the remaining records of a delimited file after the header and the already-loaded rows. */
+export async function streamDelimitedRows(
+    filePath: string,
+    delimiter: string,
+    encoding: BufferEncoding,
+    alreadyLoaded: number,
+    maxColumns: number,
+    onChunk: (rows: unknown[][], done: boolean, columnsTruncated: boolean) => void,
+    isCancelled: () => boolean = () => false,
+): Promise<void> {
+    let headerSkipped = false;
+    let skip = Math.max(0, alreadyLoaded);
+    let columnsTruncated = false;
+    let buffer: unknown[][] = [];
+
+    for await (const rawRecord of readDelimitedRecords(filePath, delimiter, undefined, encoding)) {
+        if (isCancelled()) {
+            return;
+        }
+        if (!headerSkipped) {
+            if (rawRecord.length === 1 && !rawRecord[0].trim()) {
+                continue;
+            }
+            headerSkipped = true;
+            continue;
+        }
+        if (rawRecord.length === 1 && !rawRecord[0].trim()) {
+            continue;
+        }
+        if (skip > 0) {
+            skip--;
+            continue;
+        }
+        if (rawRecord.length > maxColumns) {
+            columnsTruncated = true;
+        }
+        const record = rawRecord.length > maxColumns ? rawRecord.slice(0, maxColumns) : rawRecord;
+        buffer.push(record.map(value => (value === null || value === undefined ? null : value)));
+        if (buffer.length >= STREAM_CHUNK_ROWS) {
+            onChunk(buffer, false, columnsTruncated);
+            buffer = [];
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+    }
+    onChunk(buffer, true, columnsTruncated);
+}
 
 /** Excel column label for a zero-based index: 0 → A, 25 → Z, 26 → AA. */
 export function columnLetter(index: number): string {
@@ -133,10 +334,62 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
         };
 
         try {
-            const allData = await this._readFile(document.uri.fsPath);
+            const ext = path.extname(document.uri.fsPath).toLowerCase();
+            const isSpreadsheet = SPREADSHEET_EXTENSIONS.has(ext);
+            const allData = await this._readFileWithProgress(document.uri.fsPath);
             const first = allData[0];
             webviewPanel.title = `${first.formatLabel} Preview: ${path.basename(document.uri.fsPath)}`;
             webviewPanel.webview.html = this._buildHtml(webviewPanel, document.uri.fsPath, allData);
+
+            let disposed = false;
+            let streamStarted = false;
+            let streamFailed = false;
+            let streamCompletion: Promise<void> = Promise.resolve();
+
+            const postToWebview = (message: unknown): void => {
+                void Promise.resolve(webviewPanel.webview.postMessage(message)).catch(() => undefined);
+            };
+
+            const startStreaming = (): void => {
+                if (streamStarted || !isSpreadsheet || disposed) {
+                    return;
+                }
+                streamStarted = true;
+                streamCompletion = this._streamSpreadsheet(
+                    document.uri.fsPath,
+                    allData,
+                    (sheetIndex, rows, done, columnsTruncated) => {
+                        const sheet = allData[sheetIndex];
+                        if (!sheet) {
+                            return;
+                        }
+                        if (rows.length > 0) {
+                            sheet.rows.push(...rows);
+                        }
+                        sheet.totalRows = sheet.rows.length;
+                        sheet.columnsTruncated = sheet.columnsTruncated === true || columnsTruncated;
+                        sheet.done = done;
+                        postToWebview({
+                            command: 'sheetAppend',
+                            sheetIndex,
+                            rows,
+                            done,
+                            columnsTruncated: sheet.columnsTruncated === true,
+                        });
+                    },
+                    () => disposed,
+                ).catch(error => {
+                    streamFailed = true;
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.error('[FilePreview] Spreadsheet stream failed:', message);
+                    postToWebview({ command: 'sheetStreamError', message });
+                });
+            };
+
+            const waitForStream = async (): Promise<boolean> => {
+                await streamCompletion;
+                return !streamFailed;
+            };
 
             FilePreviewEditor._visiblePanels.add(webviewPanel);
             FilePreviewEditor._updateContextKeys(document.uri.fsPath);
@@ -151,11 +404,16 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
             });
 
             webviewPanel.onDidDispose(() => {
+                disposed = true;
                 FilePreviewEditor._visiblePanels.delete(webviewPanel);
                 FilePreviewEditor._updateContextKeys();
             });
 
-            webviewPanel.webview.onDidReceiveMessage(msg => {
+            webviewPanel.webview.onDidReceiveMessage(async msg => {
+                if (msg.command === 'ready') {
+                    startStreaming();
+                    return;
+                }
                 if (msg.command === 'info') {
                     vscode.window.showInformationMessage(msg.text);
                 } else if (msg.command === 'error') {
@@ -172,17 +430,36 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
                         void vscode.window.setStatusBarMessage('Copied to clipboard', 2000);
                     });
                 } else if (msg.command === 'initiateExport' || msg.command === 'handleClickExport') {
-                    void this._handleExport(allData, webviewPanel);
+                    if (await waitForStream()) {
+                        void this._handleExport(allData, webviewPanel);
+                    }
                 } else if (msg.command === 'exportCsv' || msg.command === 'exportJson' || msg.command === 'exportXml' || msg.command === 'exportSqlInsert' || msg.command === 'exportMarkdown') {
-                    void this._handleQuickExport(allData, msg.command as string);
+                    if (await waitForStream()) {
+                        void this._handleQuickExport(allData, msg.command as string);
+                    }
                 } else if (msg.command === 'openInExcel') {
-                    void this._handleExcelExport(allData, 'xlsb', webviewPanel);
+                    if (await waitForStream()) {
+                        void this._handleExcelExport(allData, 'xlsb', webviewPanel);
+                    }
                 } else if (msg.command === 'openInExcelXlsx') {
-                    void this._handleExcelExport(allData, 'xlsx', webviewPanel);
+                    if (await waitForStream()) {
+                        void this._handleExcelExport(allData, 'xlsx', webviewPanel);
+                    }
                 } else if (msg.command === 'copyAsExcel') {
-                    void this._handleExcelExport(allData, 'xlsb', webviewPanel, true);
+                    if (await waitForStream()) {
+                        void this._handleExcelExport(allData, 'xlsb', webviewPanel, true);
+                    }
                 } else if (msg.command === 'exportAllResultSetsToExcel') {
-                    void this._handleExcelExport(allData, 'xlsx', webviewPanel);
+                    if (await waitForStream()) {
+                        void this._handleExcelExport(allData, 'xlsx', webviewPanel);
+                    }
+                } else if (msg.command === 'importSheetToDatabase') {
+                    const index = Number(msg.sheetIndex);
+                    const sheetName = Number.isInteger(index) ? allData[index]?.sourceSheetName : undefined;
+                    void vscode.commands.executeCommand('netezza.importDataAdvanced', {
+                        filePath: document.uri.fsPath,
+                        sheetName,
+                    });
                 } else if (msg.command === 'addFileToDataWorkspace') {
                     void this._addFileToDataWorkspace(document.uri.fsPath);
                 }
@@ -633,16 +910,19 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
 
         const payload = JSON.stringify({
             fileName: path.basename(filePath),
-            fileInfo: `${fileSizeStr} · ${kind}`,
-            limitReached: allData.some(d => d.limitReached),
-            maxRows: this._getMaxRows(),
+            fileInfo: fileSizeStr,
+            fileKind: kind,
             canAddToWorkspace: ext === '.csv' || ext === '.xlsx',
+            canImportToDatabase: ['.csv', '.tsv', '.xlsx', '.xlsb'].includes(ext),
             sheets: allData.map(d => {
                 const grid = toSpreadsheetGrid(d);
                 return {
                     name: d.formatLabel || 'Sheet',
                     columns: grid.columns.map(c => c.name),
                     rows: grid.rows,
+                    shownRows: d.rows.length,
+                    loading: d.done === false,
+                    columnsTruncated: d.columnsTruncated === true,
                 };
             }),
         }).replace(/</g, '\\u003c');
@@ -691,6 +971,26 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
         return vscode.workspace.getConfiguration('justybase.filePreview').get<number>('maxRows', 20000);
     }
 
+    /** Large workbooks still take a moment to open; show a quiet status-bar indicator while reading. */
+    private async _readFileWithProgress(filePath: string): Promise<FilePreviewData[]> {
+        let isLarge = false;
+        try {
+            isLarge = fs.statSync(filePath).size > 1024 * 1024;
+        } catch {
+            // _readFile reports the real error with the file name.
+        }
+        if (!isLarge || typeof vscode.window.withProgress !== 'function') {
+            return this._readFile(filePath);
+        }
+        return vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Window,
+                title: `Opening ${path.basename(filePath)}…`,
+            },
+            () => this._readFile(filePath),
+        );
+    }
+
     private async _readFile(filePath: string): Promise<FilePreviewData[]> {
         const ext = path.extname(filePath).toLowerCase();
         const stats = await fs.promises.stat(filePath);
@@ -700,14 +1000,15 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
             case '.parquet':
                 return [await this._readParquet(filePath, stats.size, maxRows)];
             case '.xlsx':
-                return this._readExcel(filePath, stats.size, 'XLSX', maxRows);
+                return this._readExcel(filePath, stats.size, 'XLSX');
             case '.xlsb':
-                return this._readExcel(filePath, stats.size, 'XLSB', maxRows);
+                return this._readExcel(filePath, stats.size, 'XLSB');
             case '.csv':
             case '.tsv':
             case '.tab':
+                return [await this._readCsv(filePath, stats.size, maxRows, true)];
             case '.nzpreview':
-                return [await this._readCsv(filePath, stats.size, maxRows)];
+                return [await this._readCsv(filePath, stats.size, maxRows, false)];
             default:
                 throw new Error(`Unsupported file format: ${ext}`);
         }
@@ -727,9 +1028,10 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
         };
     }
 
-    private async _readExcel(filePath: string, fileSizeBytes: number, formatLabel: string, maxRows: number): Promise<FilePreviewData[]> {
+    private async _readExcel(filePath: string, fileSizeBytes: number, formatLabel: string): Promise<FilePreviewData[]> {
         const { ReaderFactory } = require('@justybase/spreadsheet-tasks');
         const reader = ReaderFactory.create(filePath);
+        const maxColumns = this._getMaxColumns();
 
         try {
             await reader.open(filePath);
@@ -741,47 +1043,39 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
             const results: FilePreviewData[] = [];
 
             for (let sheetIdx = 0; sheetIdx < sheetNames.length; sheetIdx++) {
+                const sheetLabel = sheetNames.length > 1 ? sheetNames[sheetIdx] : formatLabel;
                 const r = reader as ExcelReaderWithInit;
                 if (sheetIdx > 0 && typeof r.selectSheet === 'function') {
                     await r.selectSheet(sheetIdx);
                 }
 
-                const rows: unknown[][] = [];
-                let headerRow: string[] | null = null;
-                let rawHeaderRow: unknown[] | undefined;
-                let totalRows = 0;
+                // Only the first page is embedded in the HTML; the rest is streamed after the webview is ready.
+                const preview = await readExcelSheetPreview(
+                    r,
+                    INITIAL_SPREADSHEET_ROWS,
+                    maxColumns,
+                    Number.POSITIVE_INFINITY,
+                );
 
-                while (await readNextExcelRecord(r)) {
-                    totalRows++;
-                    const row: unknown[] = [];
-                    for (let i = 0; i < reader.fieldCount; i++) {
-                        row.push(this._convertExcelValue(reader.getValue(i)));
-                    }
-
-                    if (!headerRow) {
-                        rawHeaderRow = row;
-                        headerRow = row.map(v => (v === null || v === undefined ? '' : String(v)));
-                        continue;
-                    }
-
-                    if (rows.length < maxRows) {
-                        rows.push(row);
-                    }
-                }
-
-                const columns: ColumnInfo[] = headerRow
-                    ? headerRow.map(name => ({ name: name || `Column ${headerRow.indexOf(name) + 1}` }))
-                    : rows.length > 0
-                        ? rows[0].map((_, i) => ({ name: `Column ${i + 1}` }))
+                const columns: ColumnInfo[] = preview.headerRow
+                    ? preview.headerRow.map((value, index) => ({
+                        name: value === null || value === undefined || value === ''
+                            ? `Column ${index + 1}`
+                            : String(value),
+                    }))
+                    : preview.rows.length > 0
+                        ? preview.rows[0].map((_, i) => ({ name: `Column ${i + 1}` }))
                         : [{ name: 'Column 1' }];
 
-                const sheetLabel = sheetNames.length > 1 ? sheetNames[sheetIdx] : formatLabel;
                 results.push({
                     columns,
-                    rows,
-                    headerRow: rawHeaderRow,
-                    totalRows: totalRows > 0 ? totalRows - 1 : 0,
-                    limitReached: totalRows - 1 > maxRows,
+                    rows: preview.rows,
+                    headerRow: preview.headerRow,
+                    totalRows: preview.totalRows,
+                    limitReached: false,
+                    columnsTruncated: preview.columnsTruncated,
+                    done: !preview.limitReached,
+                    sourceSheetName: sheetNames[sheetIdx],
                     filePath,
                     fileSizeBytes,
                     formatLabel: sheetLabel,
@@ -796,43 +1090,147 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
         }
     }
 
-    private _convertExcelValue(val: unknown): unknown {
-        if (val === null || val === undefined) return null;
-        if (val instanceof Date) return val.toISOString();
-        return val;
+    private _getMaxColumns(): number {
+        const configured = vscode.workspace.getConfiguration('justybase.filePreview').get<number>('maxColumns', DEFAULT_MAX_COLUMNS);
+        if (!Number.isFinite(configured)) {
+            return DEFAULT_MAX_COLUMNS;
+        }
+        return Math.min(EXCEL_MAX_COLUMNS, Math.max(16, Math.floor(configured)));
     }
 
-    private async _readCsv(filePath: string, fileSizeBytes: number, maxRows: number): Promise<FilePreviewData> {
+    /** Streams the rest of the spreadsheet after the first page has been rendered by the webview. */
+    private async _streamSpreadsheet(
+        filePath: string,
+        data: FilePreviewData[],
+        onChunk: (sheetIndex: number, rows: unknown[][], done: boolean, columnsTruncated: boolean) => void,
+        isCancelled: () => boolean,
+    ): Promise<void> {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.xlsx' || ext === '.xlsb') {
+            await this._streamExcel(filePath, data, onChunk, isCancelled);
+        } else if (ext === '.csv' || ext === '.tsv' || ext === '.tab') {
+            await this._streamCsv(filePath, data, onChunk, isCancelled);
+        }
+    }
+
+    private async _streamExcel(
+        filePath: string,
+        data: FilePreviewData[],
+        onChunk: (sheetIndex: number, rows: unknown[][], done: boolean, columnsTruncated: boolean) => void,
+        isCancelled: () => boolean,
+    ): Promise<void> {
+        const { ReaderFactory } = require('@justybase/spreadsheet-tasks');
+        const reader = ReaderFactory.create(filePath);
+        const maxColumns = this._getMaxColumns();
+
+        try {
+            await reader.open(filePath);
+            for (let sheetIndex = 0; sheetIndex < data.length; sheetIndex++) {
+                const sheet = data[sheetIndex];
+                if (sheet.done) {
+                    continue;
+                }
+                if (isCancelled()) {
+                    return;
+                }
+                const r = reader as ExcelReaderWithInit;
+                if (typeof r.selectSheet === 'function') {
+                    await r.selectSheet(sheetIndex);
+                }
+                await streamExcelSheetRows(
+                    r,
+                    sheet.rows.length,
+                    maxColumns,
+                    (rows, done, columnsTruncated) => onChunk(sheetIndex, rows, done, columnsTruncated),
+                    isCancelled,
+                );
+            }
+        } finally {
+            if (reader && typeof reader.close === 'function') {
+                try { await reader.close(); } catch { /* ignore */ }
+            }
+        }
+    }
+
+    private async _streamCsv(
+        filePath: string,
+        data: FilePreviewData[],
+        onChunk: (sheetIndex: number, rows: unknown[][], done: boolean, columnsTruncated: boolean) => void,
+        isCancelled: () => boolean,
+    ): Promise<void> {
+        const sheet = data[0];
+        if (!sheet || sheet.done) {
+            return;
+        }
         const encoding = detectSourceEncoding(filePath);
         const delimiter = this._detectFileCsvDelimiter(filePath, encoding);
+        await streamDelimitedRows(
+            filePath,
+            delimiter,
+            encoding,
+            sheet.rows.length,
+            this._getMaxColumns(),
+            (rows, done, columnsTruncated) => onChunk(0, rows, done, columnsTruncated),
+            isCancelled,
+        );
+    }
+
+    private async _readCsv(filePath: string, fileSizeBytes: number, maxRows: number, streaming: boolean): Promise<FilePreviewData> {
+        const encoding = detectSourceEncoding(filePath);
+        const delimiter = this._detectFileCsvDelimiter(filePath, encoding);
+        const maxColumns = this._getMaxColumns();
+        const rowLimit = streaming
+            ? INITIAL_SPREADSHEET_ROWS
+            : Math.max(1, Math.floor(maxRows));
 
         const columns: ColumnInfo[] = [];
         const rows: unknown[][] = [];
         let totalRows = 0;
         let headerParsed = false;
         let headerRow: unknown[] | undefined;
+        let done = true;
+        let limitReached = false;
+        let columnsTruncated = false;
 
-        for await (const record of readDelimitedRecords(filePath, delimiter, undefined, encoding)) {
+        const takeColumns = (record: unknown[]): unknown[] => {
+            if (record.length > maxColumns) {
+                columnsTruncated = true;
+                return record.slice(0, maxColumns);
+            }
+            return record;
+        };
+
+        for await (const rawRecord of readDelimitedRecords(filePath, delimiter, undefined, encoding)) {
             if (!headerParsed) {
-                if (record.length === 1 && !record[0].trim()) {
+                if (rawRecord.length === 1 && !rawRecord[0].trim()) {
                     continue;
                 }
-                headerRow = record;
-                for (const name of record) {
-                    columns.push({ name: name || `Column ${columns.length + 1}` });
+                headerRow = takeColumns(rawRecord);
+                for (const name of headerRow) {
+                    const text = name === null || name === undefined ? '' : String(name);
+                    columns.push({ name: text || `Column ${columns.length + 1}` });
                 }
                 headerParsed = true;
                 continue;
             }
 
-            if (record.length === 1 && !record[0].trim()) {
+            if (rawRecord.length === 1 && !rawRecord[0].trim()) {
                 continue;
             }
 
-            totalRows++;
-            if (rows.length < maxRows) {
-                rows.push(record.map(v => (v === null || v === undefined ? null : v)));
+            // Reading one row past the page is enough to know whether more data follows.
+            if (rows.length >= rowLimit) {
+                if (streaming) {
+                    done = false;
+                } else {
+                    limitReached = true;
+                }
+                break;
             }
+
+            const record = takeColumns(rawRecord);
+            rows.push(record.map(v => (v === null || v === undefined ? null : v)));
+            totalRows = rows.length;
         }
 
         if (!headerParsed && rows.length > 0) {
@@ -846,7 +1244,9 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
             rows,
             headerRow,
             totalRows,
-            limitReached: totalRows > maxRows,
+            limitReached,
+            columnsTruncated,
+            done: streaming ? done : undefined,
             filePath,
             fileSizeBytes,
             formatLabel: 'CSV',

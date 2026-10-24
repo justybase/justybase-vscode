@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spreadsheet Preview Harness</title>
+    <link rel="stylesheet" href="/media/spreadsheetPreview.css">
+    <style>
+        :root {
+            --vscode-editor-foreground: #1f1f1f;
+            --vscode-foreground: #1f1f1f;
+            --vscode-input-background: #ffffff;
+            --vscode-input-foreground: #1f1f1f;
+            --vscode-input-border: #c8c8c8;
+            --vscode-toolbar-hoverBackground: rgba(0, 0, 0, 0.08);
+        }
+
+        body.vscode-dark {
+            --vscode-editor-foreground: #d4d4d4;
+            --vscode-foreground: #d4d4d4;
+            --vscode-input-background: #1f1f1f;
+            --vscode-input-foreground: #d4d4d4;
+            --vscode-input-border: #4a4a4a;
+            --vscode-toolbar-hoverBackground: rgba(255, 255, 255, 0.1);
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="vscode-light">
+<div id="app"></div>
+<script id="sheet-data" type="application/json">{"fileName":"sales.csv","fileInfo":"1.2 KB","fileKind":"CSV","canAddToWorkspace":true,"canImportToDatabase":true,"sheets":[{"name":"Data","columns":["A","B","C","D","E","F"],"rows":[["Region","Units","Revenue","Notes","",""],["North",120,1450.5,"long descriptive note that overflows",null,""],["South",95,"980.25","",null,""],["East",210,2210,"",null,""],["West",45,"560","",null,""]]},{"name":"Summary","columns":["A","B"],"rows":[["Total",5065.75],["Rows",4]]},{"name":"Limited","columns":["A","B","C"],"rows":[["Col A","Col B","Col C"],["1","2","3"],["4","5","6"]],"shownRows":2,"columnsTruncated":true},{"name":"Streaming","columns":["A","B"],"rows":[["Head A","Head B"],["one","two"]],"shownRows":1,"loading":true}]}</script>
+<script>
+    const theme = new URLSearchParams(location.search).get('theme');
+    document.body.className = theme === 'light' ? 'vscode-light' : 'vscode-dark';
+    window.__posted = [];
+    window.acquireVsCodeApi = () => ({ postMessage(message) { window.__posted.push(message); } });
+</script>
+<script src="/dist/media/spreadsheetPreview.js"></script>
+</body>
+</html>

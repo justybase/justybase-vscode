@@ -1,7 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { columnLetter, FilePreviewEditor, toSpreadsheetGrid } from '../editors/filePreviewEditor';
+import {
+    columnLetter,
+    FilePreviewEditor,
+    INITIAL_SPREADSHEET_ROWS,
+    readExcelSheetPreview,
+    streamDelimitedRows,
+    streamExcelSheetRows,
+    toSpreadsheetGrid,
+} from '../editors/filePreviewEditor';
 import { DataWorkspaceService } from '../services/dataWorkspaceService';
 
 describe('FilePreviewEditor Data Workspace action', () => {
@@ -51,6 +59,7 @@ describe('FilePreviewEditor Data Workspace action', () => {
         rows: unknown[][];
         totalRows: number;
         limitReached: boolean;
+        done?: boolean;
     }
 
     function createEditor(): FilePreviewEditor {
@@ -110,7 +119,7 @@ describe('FilePreviewEditor Data Workspace action', () => {
         }
     });
 
-    it('marks the preview as truncated when it exceeds the configured row limit', async () => {
+    it('keeps all CSV rows for the spreadsheet view even when the Parquet row setting is low', async () => {
         const csvPath = path.join('/tmp', `justybase-preview-limit-${process.pid}.csv`);
         fs.writeFileSync(csvPath, 'id\n1\n2\n3\n', 'utf8');
 
@@ -121,15 +130,51 @@ describe('FilePreviewEditor Data Workspace action', () => {
 
         try {
             const data = await readFile(csvPath);
-            expect(data[0].rows).toHaveLength(1);
+            expect(data[0].rows).toHaveLength(3);
             expect(data[0].totalRows).toBe(3);
-            expect(data[0].limitReached).toBe(true);
+            expect(data[0].limitReached).toBe(false);
+            expect(data[0].done).toBe(true);
         } finally {
             if (originalGetConfiguration) {
                 (vscode.workspace.getConfiguration as jest.Mock).mockImplementation(originalGetConfiguration);
             } else {
                 (vscode.workspace.getConfiguration as jest.Mock).mockReset();
             }
+            fs.rmSync(csvPath, { force: true });
+        }
+    });
+
+    it('reads only the initial page of a large CSV and lets the stream finish it', async () => {
+        const csvPath = path.join('/tmp', `justybase-preview-stream-${process.pid}.csv`);
+        const lines = ['id'];
+        for (let i = 1; i <= INITIAL_SPREADSHEET_ROWS + 5; i++) {
+            lines.push(String(i));
+        }
+        fs.writeFileSync(csvPath, lines.join('\n'), 'utf8');
+
+        try {
+            const data = await readFile(csvPath);
+            expect(data[0].rows).toHaveLength(INITIAL_SPREADSHEET_ROWS);
+            expect(data[0].done).toBe(false);
+
+            const streamed: unknown[][] = [];
+            let done = false;
+            await streamDelimitedRows(
+                csvPath,
+                ',',
+                'utf8',
+                data[0].rows.length,
+                512,
+                (rows, isDone) => {
+                    streamed.push(...rows);
+                    done = isDone;
+                },
+            );
+
+            expect(streamed).toHaveLength(5);
+            expect(streamed[0]).toEqual([String(INITIAL_SPREADSHEET_ROWS + 1)]);
+            expect(done).toBe(true);
+        } finally {
             fs.rmSync(csvPath, { force: true });
         }
     });
@@ -176,6 +221,34 @@ describe('FilePreviewEditor Data Workspace action', () => {
 });
 
 describe('FilePreviewEditor spreadsheet presentation', () => {
+    type ExcelReader = Parameters<typeof readExcelSheetPreview>[0];
+
+    /** Minimal reader that mimics how the real one grows `fieldCount` as rows are read. */
+    function makeReader(rows: unknown[][]): { reader: ExcelReader; reads: () => number } {
+        let index = -1;
+        let readCount = 0;
+        let current: unknown[] = [];
+        const reader: ExcelReader = {
+            open: async () => { },
+            close: async () => { },
+            fieldCount: 0,
+            _currentRow: [],
+            getValue: (i: number) => current[i] ?? null,
+            read: async () => {
+                readCount++;
+                index++;
+                current = rows[index] ?? [];
+                reader._currentRow = current;
+                if (index >= rows.length) {
+                    return false;
+                }
+                reader.fieldCount = Math.max(reader.fieldCount, current.length);
+                return true;
+            },
+        };
+        return { reader, reads: () => readCount };
+    }
+
     it('labels columns the way Excel does, including past Z', () => {
         expect(columnLetter(0)).toBe('A');
         expect(columnLetter(25)).toBe('Z');
@@ -216,6 +289,73 @@ describe('FilePreviewEditor spreadsheet presentation', () => {
         expect(grid.rows[0]).toEqual(['a', null, null]);
         expect(grid.rows[1]).toEqual([1, null, null]);
         expect(grid.rows[2]).toEqual([1, 2, 3]);
+    });
+
+    it('stops reading a sheet as soon as the preview row limit is reached', async () => {
+        const { reader, reads } = makeReader([
+            ['id', 'name'],
+            [1, 'a'],
+            [2, 'b'],
+            [3, 'c'],
+            [4, 'd'],
+        ]);
+
+        const preview = await readExcelSheetPreview(reader, 2, 512, 1_000_000);
+
+        expect(preview.headerRow).toEqual(['id', 'name']);
+        expect(preview.rows).toEqual([[1, 'a'], [2, 'b']]);
+        expect(preview.totalRows).toBe(2);
+        expect(preview.limitReached).toBe(true);
+        // Header + two preview rows + one look-ahead row that proves more data exists.
+        expect(reads()).toBe(4);
+    });
+
+    it('trims trailing empty cells and reports when the column limit was reached', async () => {
+        const { reader } = makeReader([
+            ['A', 'B', '', ''],
+            [1, 2, null, ''],
+            [3, 4, 5, 6],
+        ]);
+
+        const preview = await readExcelSheetPreview(reader, 10, 3, 1_000_000);
+
+        expect(preview.headerRow).toEqual(['A', 'B']);
+        expect(preview.rows[0]).toEqual([1, 2]);
+        expect(preview.rows[1]).toEqual([3, 4, 5]);
+        expect(preview.columnsTruncated).toBe(true);
+    });
+
+    it('stops adding rows when the shared preview cell budget is spent', async () => {
+        const { reader } = makeReader([
+            ['a', 'b'],
+            [1, 2],
+            [3, 4],
+            [5, 6],
+        ]);
+
+        const preview = await readExcelSheetPreview(reader, 10, 512, 5);
+
+        expect(preview.rows).toEqual([[1, 2]]);
+        expect(preview.cellsUsed).toBe(4);
+        expect(preview.limitReached).toBe(true);
+    });
+
+    it('streams the remaining Excel rows after the initial page without duplicating them', async () => {
+        const { reader } = makeReader([
+            ['h1', 'h2'],
+            [1, 'a'],
+            [2, 'b'],
+            [3, 'c'],
+            [4, 'd'],
+        ]);
+
+        const chunks: Array<{ rows: unknown[][]; done: boolean }> = [];
+        await streamExcelSheetRows(reader, 2, 512, (rows, done) => {
+            chunks.push({ rows, done });
+        });
+
+        expect(chunks.flatMap(chunk => chunk.rows)).toEqual([[3, 'c'], [4, 'd']]);
+        expect(chunks[chunks.length - 1]?.done).toBe(true);
     });
 
     it('keeps cell text that looks like markup from closing the data script block', () => {

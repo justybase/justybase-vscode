@@ -2,10 +2,12 @@ import {
     addressOf,
     buildSearchIndex,
     clampColumnWidth,
+    classifyRangeAddress,
     columnAt,
     columnStart,
     edgeScrollStep,
     findCells,
+    formatStat,
     isCellInRange,
     isNumericValue,
     jumpToEdge,
@@ -13,8 +15,13 @@ import {
     MIN_COLUMN_WIDTH,
     moveCell,
     normalizeRange,
+    overflowColumns,
+    parseRangeAddress,
+    rangeAddress,
     rangeToTsv,
     ROW_NUMBER_WIDTH,
+    selectionStats,
+    selectionStatsForRanges,
     stepMatch,
     tableWidth,
     visibleRowRange,
@@ -48,6 +55,41 @@ describe('spreadsheet preview model', () => {
         expect(isCellInRange(null, 0, 0)).toBe(false);
     });
 
+    it('labels the selection in the name box the way Excel does', () => {
+        expect(rangeAddress(normalizeRange({ row: 0, col: 0 }, { row: 0, col: 0 }))).toBe('A1');
+        expect(rangeAddress(normalizeRange({ row: 0, col: 0 }, { row: 1, col: 1 }))).toBe('A1:B2');
+        expect(rangeAddress(normalizeRange({ row: 1, col: 1 }, { row: 0, col: 0 }))).toBe('A1:B2');
+        expect(rangeAddress(normalizeRange({ row: 0, col: 0 }, { row: 3, col: 2 }))).toBe('A1:C4');
+        // Header selections use whole-column/row notation; a rectangle covering the same cells does not.
+        expect(rangeAddress(normalizeRange({ row: 0, col: 1 }, { row: 3, col: 1 }), 'columns')).toBe('B:B');
+        expect(rangeAddress(normalizeRange({ row: 2, col: 0 }, { row: 2, col: 2 }), 'rows')).toBe('3:3');
+        expect(rangeAddress(normalizeRange({ row: 0, col: 1 }, { row: 3, col: 1 }))).toBe('B1:B4');
+    });
+
+    it('recognizes whole-column and whole-row notation typed in the name box', () => {
+        expect(classifyRangeAddress('B:D')).toBe('columns');
+        expect(classifyRangeAddress('$B:$D')).toBe('columns');
+        expect(classifyRangeAddress('2:5')).toBe('rows');
+        expect(classifyRangeAddress('A1:B2')).toBeNull();
+        expect(classifyRangeAddress('B2')).toBeNull();
+    });
+
+    it('parses typed cell and range references from the name box', () => {
+        expect(parseRangeAddress(sheet, 'B2')).toEqual({ startRow: 1, endRow: 1, startCol: 1, endCol: 1 });
+        expect(parseRangeAddress(sheet, 'a1:c3')).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 2 });
+        expect(parseRangeAddress(sheet, '$B$2:$C$3')).toEqual({ startRow: 1, endRow: 2, startCol: 1, endCol: 2 });
+        expect(parseRangeAddress(sheet, 'C3:A1')).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 2 });
+        expect(parseRangeAddress(sheet, 'B:B')).toEqual({ startRow: 0, endRow: 3, startCol: 1, endCol: 1 });
+        expect(parseRangeAddress(sheet, '2:3')).toEqual({ startRow: 1, endRow: 2, startCol: 0, endCol: 2 });
+    });
+
+    it('clamps typed references to the sheet and rejects non-references', () => {
+        expect(parseRangeAddress(sheet, 'Z99')).toEqual({ startRow: 3, endRow: 3, startCol: 2, endCol: 2 });
+        expect(parseRangeAddress(sheet, 'A0')).toBeNull();
+        expect(parseRangeAddress(sheet, 'not a cell')).toBeNull();
+        expect(parseRangeAddress(sheet, '')).toBeNull();
+    });
+
     it('copies a range as tab-separated text with blank cells kept', () => {
         const range = normalizeRange({ row: 0, col: 0 }, { row: 1, col: 2 });
         expect(rangeToTsv(sheet, range)).toBe('id\tname\tnote\n1\tAda\t');
@@ -69,6 +111,73 @@ describe('spreadsheet preview model', () => {
         expect(isNumericValue('1 234')).toBe(false);
         expect(isNumericValue('')).toBe(false);
         expect(isNumericValue(null)).toBe(false);
+    });
+
+    it('summarizes a selection like the Excel status bar', () => {
+        const stats = selectionStats(sheet, normalizeRange({ row: 0, col: 0 }, { row: 3, col: 2 }));
+        expect(stats).toEqual({
+            count: 11,
+            numericCount: 3,
+            sum: 6,
+            average: 2,
+            truncated: false,
+        });
+    });
+
+    it('reports only a count for a selection without numbers', () => {
+        const stats = selectionStats(sheet, normalizeRange({ row: 0, col: 0 }, { row: 0, col: 2 }));
+        expect(stats.count).toBe(3);
+        expect(stats.numericCount).toBe(0);
+        expect(stats.average).toBeNull();
+    });
+
+    it('combines statistics across Ctrl-selected areas', () => {
+        const stats = selectionStatsForRanges(sheet, [
+            normalizeRange({ row: 0, col: 0 }, { row: 0, col: 1 }),
+            normalizeRange({ row: 1, col: 0 }, { row: 2, col: 0 }),
+        ]);
+        expect(stats).toEqual({
+            count: 4,
+            numericCount: 2,
+            sum: 3,
+            average: 1.5,
+            truncated: false,
+        });
+    });
+
+    it('stops scanning huge selections at the cell budget and says so', () => {
+        const stats = selectionStats(sheet, normalizeRange({ row: 0, col: 0 }, { row: 3, col: 2 }), 4);
+        expect(stats).toEqual({
+            count: 4,
+            numericCount: 1,
+            sum: 1,
+            average: 1,
+            truncated: true,
+        });
+    });
+
+    it('formats status-bar numbers with grouping and bounded decimals', () => {
+        expect(formatStat(4231.5, 'en-US')).toBe('4,231.5');
+        expect(formatStat(1 / 3, 'en-US')).toBe('0.3333');
+        expect(formatStat(-1234.56789, 'en-US')).toBe('-1,234.5679');
+        expect(formatStat(0, 'en-US')).toBe('0');
+    });
+
+    it('overflows text into empty right neighbours but never numbers', () => {
+        const overflowSheet: SpreadsheetSheet = {
+            name: 'Overflow',
+            columns: ['A', 'B', 'C', 'D'],
+            rows: [
+                ['wide text', null, '', 5],
+                ['x', '', '', ''],
+            ],
+        };
+        expect(overflowColumns(overflowSheet, 0, 0)).toBe(2);
+        expect(overflowColumns(overflowSheet, 0, 1)).toBe(0);
+        expect(overflowColumns(overflowSheet, 0, 3)).toBe(0);
+        expect(overflowColumns(overflowSheet, 0, 0, 1)).toBe(1);
+        expect(overflowColumns(overflowSheet, 1, 0)).toBe(3);
+        expect(overflowColumns(overflowSheet, 2, 0)).toBe(0);
     });
 
     it('limits DOM rows to the visible window plus overscan', () => {
