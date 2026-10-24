@@ -2333,6 +2333,74 @@ tfoot {
     margin: 4px 0;
 }
 
+/* Columns show/hide dropdown: same look as the toolbar menus, grid font for names */
+.column-visibility-dropdown {
+    position: fixed;
+    z-index: 10050;
+    min-width: 220px;
+    max-height: min(420px, calc(100vh - 80px));
+    overflow-y: auto;
+    background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+    border-radius: 5px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    padding: 4px 0;
+    color: var(--vscode-dropdown-foreground, var(--vscode-editor-foreground));
+    font-family: var(--justybase-results-grid-font-family, var(--vscode-font-family));
+    font-size: 11px;
+}
+.column-visibility-header {
+    padding: 6px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+.column-visibility-actions {
+    display: flex;
+    gap: 4px;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+.column-visibility-actions button {
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    padding: 2px 6px;
+}
+.column-visibility-actions button:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+.column-visibility-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+}
+.column-visibility-item:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+.column-visibility-item input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--vscode-focusBorder);
+}
+.column-visibility-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.column-visibility-type {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+}
+
 .export-primary-menu {
     min-width: 280px;
     max-width: min(360px, calc(100vw - 24px));

@@ -869,62 +869,6 @@ export function injectStyles(): void {
     .grouping-col-picker-popup .config-actions button:hover {
         background: var(--vscode-list-hoverBackground);
     }
-    .result-panel-right-bar {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-        padding: 4px;
-        background: var(--vscode-sideBar-background);
-        width: 36px;
-        flex-shrink: 0;
-    }
-    .result-panel-right-bar .bar-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        padding: 4px;
-        border: 1px solid transparent;
-        border-radius: 4px;
-        background: transparent;
-        color: var(--vscode-foreground);
-        cursor: pointer;
-        transition: all 0.15s ease;
-        position: relative;
-    }
-    .result-panel-right-bar .bar-btn:hover {
-        background: var(--vscode-list-hoverBackground);
-        border-color: var(--vscode-panel-border);
-    }
-    .result-panel-right-bar .bar-btn.active {
-        background: var(--vscode-button-background);
-        color: var(--vscode-button-foreground);
-    }
-    .result-panel-right-bar .bar-btn svg {
-        width: 16px;
-        height: 16px;
-    }
-    .result-panel-right-bar .bar-btn .tooltip {
-        position: absolute;
-        right: calc(100% + 8px);
-        top: 50%;
-        transform: translateY(-50%);
-        background: var(--vscode-editorWidget-background);
-        border: 1px solid var(--vscode-editorWidget-border);
-        color: var(--vscode-editorWidget-foreground);
-        padding: 4px 8px;
-        border-radius: 3px;
-        font-size: 11px;
-        white-space: nowrap;
-        display: none;
-        z-index: 100;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
-    .result-panel-right-bar .bar-btn:hover .tooltip {
-        display: block;
-    }
 `;
     document.head.appendChild(style);
 }

@@ -165,6 +165,7 @@ export class ResultsHtmlGenerator {
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">Analyze</div>
                                 <div class="split-btn__menu-item" data-action="query-duckdb">Query Locally (DuckDB)</div>
+                                <div class="split-btn__menu-item" data-action="database-grouping">Database Grouping…</div>
                                 <div class="split-btn__menu-separator"></div>
                                 <div class="split-btn__menu-item toolbar-more-menu__section-label">Storage</div>
                                 <div class="split-btn__menu-item" data-action="move-to-disk">Move to disk (SQLite)</div>
@@ -275,12 +276,6 @@ export class ResultsHtmlGenerator {
                                     <div>Drag columns and run grouping</div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="result-panel-right-bar" id="resultPanelRightBar">
-                            <button type="button" class="bar-btn" onclick="toggleDatabaseGroupingPanel()" id="groupingBarBtn" title="Database Grouping">
-                                <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M1 2h14v3H1V2zm0 5h14v3H1V7zm0 5h14v3H1v-3z"/><rect x="4" y="5" width="8" height="9" rx="1" fill="currentColor" opacity="0.3"/></svg>
-                                <span class="tooltip">Database Grouping</span>
-                            </button>
                         </div>
                     </div>
                 </div>

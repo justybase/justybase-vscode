@@ -2892,6 +2892,7 @@ getResultPanelWindow().handleToolbarMoreMenuClick = function (event: MouseEvent)
   if (action === "view-diff") { setViewMode("diff"); return; }
   if (action === "view-explore") { setViewMode("explore"); return; }
   if (action === "query-duckdb") { handleClickQueryLocallyDuckDB(); return; }
+  if (action === "database-grouping") { toggleDatabaseGroupingPanel(); return; }
   if (action === "formatting") {
     callPanelMethod('openResultFormattingPanel', { scope: "result" });
     return;
@@ -3327,52 +3328,24 @@ function setupWindowFunctions(): void {
     const allColumns = grid.tanTable.getAllLeafColumns?.() ?? grid.tanTable.getVisibleLeafColumns();
     const dropdown = document.createElement('div');
     dropdown.className = 'column-visibility-dropdown';
-    dropdown.style.position = 'fixed';
-    dropdown.style.zIndex = '10000';
-    dropdown.style.backgroundColor = 'var(--vscode-dropdown-background)';
-    dropdown.style.border = '1px solid var(--vscode-dropdown-border)';
-    dropdown.style.borderRadius = '4px';
-    dropdown.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    dropdown.style.maxHeight = '300px';
-    dropdown.style.overflowY = 'auto';
-    dropdown.style.minWidth = '180px';
-    dropdown.style.padding = '4px 0';
 
     // Header
     const headerDiv = document.createElement('div');
-    headerDiv.style.padding = '6px 12px';
-    headerDiv.style.fontWeight = '600';
-    headerDiv.style.fontSize = '12px';
-    headerDiv.style.borderBottom = '1px solid var(--vscode-panel-border)';
+    headerDiv.className = 'column-visibility-header';
     headerDiv.textContent = 'Columns';
     dropdown.appendChild(headerDiv);
 
     // Show All / Hide All
     const actionsDiv = document.createElement('div');
-    actionsDiv.style.display = 'flex';
-    actionsDiv.style.gap = '4px';
-    actionsDiv.style.padding = '4px 12px';
-    actionsDiv.style.borderBottom = '1px solid var(--vscode-panel-border)';
+    actionsDiv.className = 'column-visibility-actions';
 
     const showAllBtn = document.createElement('button');
+    showAllBtn.type = 'button';
     showAllBtn.textContent = 'Show All';
-    showAllBtn.style.fontSize = '11px';
-    showAllBtn.style.cursor = 'pointer';
-    showAllBtn.style.border = '1px solid var(--vscode-panel-border)';
-    showAllBtn.style.borderRadius = '2px';
-    showAllBtn.style.background = 'transparent';
-    showAllBtn.style.color = 'var(--vscode-foreground)';
-    showAllBtn.style.padding = '2px 6px';
 
     const hideAllBtn = document.createElement('button');
+    hideAllBtn.type = 'button';
     hideAllBtn.textContent = 'Hide All';
-    hideAllBtn.style.fontSize = '11px';
-    hideAllBtn.style.cursor = 'pointer';
-    hideAllBtn.style.border = '1px solid var(--vscode-panel-border)';
-    hideAllBtn.style.borderRadius = '2px';
-    hideAllBtn.style.background = 'transparent';
-    hideAllBtn.style.color = 'var(--vscode-foreground)';
-    hideAllBtn.style.padding = '2px 6px';
 
     actionsDiv.appendChild(showAllBtn);
     actionsDiv.appendChild(hideAllBtn);
@@ -3380,7 +3353,6 @@ function setupWindowFunctions(): void {
 
     // Column list
     const listDiv = document.createElement('div');
-    listDiv.style.padding = '2px 0';
 
     allColumns.forEach(function (col) {
         const colId = col.id;
@@ -3388,31 +3360,19 @@ function setupWindowFunctions(): void {
         const isVisible = col.getIsVisible();
 
         const item = document.createElement('div');
-        item.style.display = 'flex';
-        item.style.alignItems = 'center';
-        item.style.padding = '4px 12px';
-        item.style.cursor = 'pointer';
-        item.style.gap = '6px';
-        item.style.fontSize = '12px';
-
-        item.onmouseenter = function () { item.style.backgroundColor = 'var(--vscode-list-hoverBackground)'; };
-        item.onmouseleave = function () { item.style.backgroundColor = ''; };
+        item.className = 'column-visibility-item';
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = isVisible;
-        cb.style.margin = '0';
-        cb.style.cursor = 'pointer';
-        cb.style.accentColor = 'var(--vscode-focusBorder)';
 
         const label = document.createElement('span');
+        label.className = 'column-visibility-name';
         label.textContent = colDef && colDef.header ? colDef.header : colId;
-        label.style.flex = '1';
 
         const typeSpan = document.createElement('span');
+        typeSpan.className = 'column-visibility-type';
         typeSpan.textContent = colDef && colDef.dataType ? colDef.dataType : '';
-        typeSpan.style.fontSize = '10px';
-        typeSpan.style.opacity = '0.5';
 
         item.appendChild(cb);
         item.appendChild(label);
