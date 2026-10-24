@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: In progress
 last_verified: 2026-10-02
-product_version: 3.19.7
+product_version: 3.19.8
 ---
 
 # Wizard and designer roadmap
