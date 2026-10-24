@@ -271,11 +271,14 @@ The Advanced Import Wizard is intended for higher-confidence imports than a one-
 
 It provides:
 
-1. A source inspector with file format, delimiter, decimal style, validation sample size, and sheet details.
-2. A column-mapping editor for target names, inclusion, ordering, and selected database types.
-3. A preview grid with cell-level issue highlighting from validation.
-4. SQL Preview cards for `CREATE TABLE`, direct load SQL, or a generated execution plan when the adapter runs in workflow mode.
-5. Background validation progress so larger files can keep surfacing issues after the initial preview is already usable.
+1. A prominent import-target banner with the fully qualified destination table and an on-demand editor for connection, database, schema, table name, and create/append mode.
+2. A source card with the file format, worksheet, and preview-row controls; technical metadata is kept in a collapsed section.
+3. A column-mapping editor for target names, inclusion, ordering, and selected database types.
+4. A collapsible preview grid with cell-level issue highlighting from validation.
+5. Collapsed SQL Preview cards for `CREATE TABLE`, direct load SQL, or a generated execution plan when the adapter runs in workflow mode.
+6. Background validation progress so larger files can keep surfacing issues after the initial preview is already usable. The default sample is 20,000 rows; the parsed sample is cached per sheet/header selection, so column edits do not re-read the file, and only a bounded number of issue details is sent to the webview while the full count is reported.
+7. Type inference scans every row of the imported sheet, so a column that turns textual late in the file is still detected. The inference engine uses fast paths for plain integers, ISO dates/timestamps and already-textual columns, so a 700,000-row workbook is analyzed in seconds rather than minutes.
+8. Netezza imports show two phases: the external data transfer with a percentage and the number of bytes read from the source stream, then database processing. When the user can read `_V_LOAD_STATUS`, the wizard also shows rows inserted/rejected and bytes processed/downloaded in both phases; monitoring uses a separate connection, is polled every few seconds, and never fails the import if the view is unavailable. If the database is quiet, the panel keeps the known total and rows/bytes read into the stream visible and adds a waiting hint after a few seconds.
 
 For some dialects, the wizard may generate a workflow or plan document instead of direct load SQL. In those cases, the UI still shows the create step together with the next actions required to complete the staged import.
 

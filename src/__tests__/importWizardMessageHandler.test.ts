@@ -462,6 +462,183 @@ describe('ImportWizardMessageHandler', () => {
         }
     });
 
+    it('reports external transfer, database processing, and load status progress', async () => {
+        const { service, postMessage } = createWizardService();
+        service.executeImport.mockImplementation(async (
+            _id: string,
+            onProgress: (
+                message: string,
+                increment?: number,
+                logToOutput?: boolean,
+                detail?: { loadStatus?: Record<string, unknown>; bytesRead?: number; bytesTotal?: number },
+            ) => void,
+        ) => {
+            onProgress('Executing CREATE TABLE with EXTERNAL data...');
+            onProgress('Importing: 42% complete (420 / 1,000 rows)', undefined, false, {
+                bytesRead: 2048,
+                bytesTotal: 4096,
+            });
+            onProgress('Importing: 100% complete (1,000 / 1,000 rows)');
+            onProgress('Load status update', undefined, false, {
+                loadStatus: {
+                    planId: 24,
+                    rowsInserted: 84373,
+                    rowsRejected: 0,
+                    bytesDownloaded: 5399020,
+                },
+            });
+            return { success: true, message: 'ok' };
+        });
+        const handler = createHandlerWithService(service, postMessage);
+
+        const withProgress = jest.fn(async (_options: unknown, callback: (progress: { report: jest.Mock }, token: { isCancellationRequested: boolean }) => Promise<unknown>) =>
+            callback({ report: jest.fn() }, { isCancellationRequested: false }));
+        (vscode.window as unknown as { withProgress: jest.Mock }).withProgress = withProgress;
+
+        try {
+            await initializeWizard(handler);
+            await handler.handleMessage({ type: 'executeImport' });
+
+            const progressMessages = postMessage.mock.calls
+                .map(call => call[0])
+                .filter(message => message.type === 'executionProgress');
+            expect(progressMessages).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    progress: expect.objectContaining({
+                        phase: 'transfer',
+                        percent: 42,
+                        rowsProcessed: 420,
+                        totalRows: 1000,
+                        bytesRead: 2048,
+                        bytesTotal: 4096,
+                    }),
+                }),
+                expect.objectContaining({
+                    progress: expect.objectContaining({ phase: 'processing', percent: 100 }),
+                }),
+                expect.objectContaining({
+                    progress: expect.objectContaining({
+                        phase: 'processing',
+                        percent: 100,
+                        rowsProcessed: 1000,
+                        totalRows: 1000,
+                        bytesRead: 2048,
+                        loadStatus: expect.objectContaining({
+                            planId: 24,
+                            rowsInserted: 84373,
+                            bytesDownloaded: 5399020,
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            handler.dispose();
+        }
+    });
+
+    it('keeps transfer rows and load status in the same progress update', async () => {
+        const { service, postMessage } = createWizardService();
+        service.executeImport.mockImplementation(async (
+            _id: string,
+            onProgress: (
+                message: string,
+                increment?: number,
+                logToOutput?: boolean,
+                detail?: { loadStatus?: Record<string, unknown>; bytesRead?: number; bytesTotal?: number },
+            ) => void,
+        ) => {
+            onProgress('Executing CREATE TABLE with EXTERNAL data...');
+            onProgress('Importing: 10% complete (100 / 1,000 rows)', undefined, false, {
+                bytesRead: 1024,
+                bytesTotal: 4096,
+            });
+            onProgress('Load status update', undefined, false, {
+                loadStatus: {
+                    planId: 7,
+                    rowsInserted: 90,
+                    rowsRejected: 0,
+                    bytesDownloaded: 2048,
+                    bytesProcessed: 1024,
+                },
+            });
+            onProgress('Importing: 20% complete (200 / 1,000 rows)', undefined, false, {
+                bytesRead: 2048,
+                bytesTotal: 4096,
+            });
+            return { success: true, message: 'ok' };
+        });
+        const handler = createHandlerWithService(service, postMessage);
+
+        const withProgress = jest.fn(async (_options: unknown, callback: (progress: { report: jest.Mock }, token: { isCancellationRequested: boolean }) => Promise<unknown>) =>
+            callback({ report: jest.fn() }, { isCancellationRequested: false }));
+        (vscode.window as unknown as { withProgress: jest.Mock }).withProgress = withProgress;
+
+        try {
+            await initializeWizard(handler);
+            await handler.handleMessage({ type: 'executeImport' });
+
+            const progressMessages = postMessage.mock.calls
+                .map(call => call[0])
+                .filter(message => message.type === 'executionProgress');
+            const lastProgress = progressMessages[progressMessages.length - 1]?.progress;
+            expect(lastProgress).toEqual(expect.objectContaining({
+                phase: 'transfer',
+                percent: 20,
+                rowsProcessed: 200,
+                totalRows: 1000,
+                bytesRead: 2048,
+                bytesTotal: 4096,
+                loadStatus: expect.objectContaining({
+                    planId: 7,
+                    rowsInserted: 90,
+                    bytesDownloaded: 2048,
+                }),
+            }));
+        } finally {
+            handler.dispose();
+        }
+    });
+
+    it('shows the active preparation substep instead of a generic label', async () => {
+        const { service, postMessage } = createWizardService();
+        service.executeImport.mockImplementation(async (
+            _id: string,
+            onProgress: (message: string) => void,
+        ) => {
+            onProgress('Analyzing data types...');
+            onProgress('Connecting to database...');
+            onProgress('Creating target table...');
+            return { success: true, message: 'ok' };
+        });
+        const handler = createHandlerWithService(service, postMessage);
+
+        const withProgress = jest.fn(async (_options: unknown, callback: (progress: { report: jest.Mock }, token: { isCancellationRequested: boolean }) => Promise<unknown>) =>
+            callback({ report: jest.fn() }, { isCancellationRequested: false }));
+        (vscode.window as unknown as { withProgress: jest.Mock }).withProgress = withProgress;
+
+        try {
+            await initializeWizard(handler);
+            await handler.handleMessage({ type: 'executeImport' });
+
+            const progressMessages = postMessage.mock.calls
+                .map(call => call[0])
+                .filter(message => message.type === 'executionProgress');
+            expect(progressMessages).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    progress: expect.objectContaining({ phase: 'preparing', message: 'Analyzing column types…' }),
+                }),
+                expect.objectContaining({
+                    progress: expect.objectContaining({ phase: 'preparing', message: 'Connecting to the database…' }),
+                }),
+                expect.objectContaining({
+                    progress: expect.objectContaining({ phase: 'preparing', message: 'Creating the target table…' }),
+                }),
+            ]));
+        } finally {
+            handler.dispose();
+        }
+    });
+
     it('uses the configured background validation sample size', async () => {
         const { service, startBackgroundValidation, postMessage } = createWizardService();
         const connectionManager = {

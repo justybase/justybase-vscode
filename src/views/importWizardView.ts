@@ -110,7 +110,15 @@ export class ImportWizardView {
 
     public async loadSession(options: ImportWizardSessionOptions): Promise<void> {
         this.panel.title = 'Import data';
-        await this.messageHandler.initialize(options);
+        try {
+            await this.messageHandler.initialize(options);
+        } catch (error) {
+            await this.panel.webview.postMessage({
+                type: 'executionFailed',
+                message: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
     }
 
     public dispose(): void {

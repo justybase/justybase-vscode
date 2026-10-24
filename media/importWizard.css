@@ -437,11 +437,9 @@ body {
   flex: none;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 34px;
-  grid-template-rows: auto auto;
   align-items: center;
   column-gap: 13px;
-  row-gap: 16px;
-  padding: 22px 25px 0;
+  padding: 22px 25px;
   border: 0;
   border-bottom: 1px solid var(--vscode-panel-border);
   border-radius: 0;
@@ -501,73 +499,6 @@ body {
   border-color: var(--vscode-panel-border);
   background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
   color: var(--vscode-foreground);
-}
-
-.import-steps {
-  width: 100%;
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  list-style: none;
-  margin: 0;
-  padding: 0 0 15px;
-  border-bottom: 0;
-}
-
-.import-steps li {
-  display: flex;
-  align-items: center;
-  flex: 1 1 0;
-  min-width: 0;
-  gap: 9px;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.import-steps li:last-child { flex: 0 0 auto; }
-
-.import-step-number {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
-  flex: 0 0 24px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 50%;
-  background: var(--vscode-editor-background);
-  color: var(--vscode-descriptionForeground);
-  font-size: 10px;
-  line-height: 1;
-}
-
-.import-step-label {
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.import-step-connector {
-  min-width: 12px;
-  height: 1px;
-  flex: 1;
-  margin-left: 7px;
-  background: var(--vscode-panel-border);
-}
-
-.import-steps li.current { color: var(--vscode-foreground); }
-
-.import-steps li.current .import-step-number {
-  border-color: var(--vscode-textLink-foreground);
-  background: color-mix(in srgb, var(--vscode-textLink-foreground) 16%, var(--vscode-sideBar-background));
-  color: var(--vscode-textLink-foreground);
-}
-
-.import-steps li.complete .import-step-number {
-  border-color: var(--vscode-testing-iconPassed);
-  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 14%, var(--vscode-sideBar-background));
-  color: var(--vscode-testing-iconPassed);
 }
 
 .import-workflow-body {
@@ -934,19 +865,41 @@ body {
 .background-validation-progress { flex: none; margin: 0; padding: 10px 12px; border-radius: 7px; }
 .progress-label { font-size: 11px; }
 
+/* Import execution: phase 1 has a measurable external-transfer bar, phase 2 is indeterminate. */
+.execution-progress {
+  flex: none;
+  padding: 10px 25px;
+  border-top: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.execution-progress-percent {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-descriptionForeground);
+}
+
+.execution-progress.indeterminate .progress-bar {
+  width: 35% !important;
+  animation: import-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes import-indeterminate {
+  0% { margin-left: 0; }
+  50% { margin-left: 65%; }
+  100% { margin-left: 0; }
+}
+
 @media (max-width: 900px) {
   .import-workflow-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 700px) {
-  .import-workflow-header { grid-template-columns: 36px minmax(0, 1fr) 30px; column-gap: 9px; padding: 15px 14px 0; }
+  .import-workflow-header { grid-template-columns: 36px minmax(0, 1fr) 30px; column-gap: 9px; padding: 15px 14px; }
   .import-heading-icon { width: 34px; height: 34px; }
   .import-heading-copy h1 { font-size: 16px; }
   .import-heading-copy p { font-size: 9px; }
-  .import-steps { gap: 7px; }
-  .import-steps li { gap: 6px; font-size: 9px; }
-  .import-step-number { width: 21px; height: 21px; flex-basis: 21px; }
-  .import-step-connector { min-width: 8px; margin-left: 1px; }
   .import-workflow-body { padding: 12px; }
   .import-source-panel,
   .import-card { padding: 11px; }
@@ -968,4 +921,559 @@ body {
   .import-map-arrow { grid-column: 4; grid-row: 1 / span 2; }
   .import-status { max-width: 48%; font-size: 9px; }
   .import-workflow-footer { padding: 9px 12px; }
+}
+
+/* -------------------------------------------------------------------------
+   Redesigned review layout: the destination is the headline, the mapping is
+   the primary work area, and secondary details stay collapsed.
+   ------------------------------------------------------------------------- */
+
+.import-workflow-grid {
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.82fr);
+  align-items: start;
+}
+
+.import-target-banner {
+  flex: none;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 30%, var(--vscode-panel-border));
+  border-left: 3px solid var(--vscode-textLink-foreground);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 5%, var(--vscode-sideBar-background, var(--vscode-editor-background)));
+}
+
+.import-target-banner:not(.is-editing) {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--vscode-editor-background) 45%, transparent);
+}
+
+.import-target-headline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.import-target-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 30%, var(--vscode-panel-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 12%, var(--vscode-editor-background));
+  color: var(--vscode-textLink-foreground);
+}
+
+.import-target-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.import-target-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.import-target-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.import-target-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--vscode-foreground);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.import-target-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+.import-target-meta i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.import-target-edit {
+  flex: none;
+  min-height: 29px;
+  padding: 0 11px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.import-target-edit:hover:not(:disabled) {
+  border-color: var(--vscode-focusBorder);
+}
+
+.import-target-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid color-mix(in srgb, var(--vscode-panel-border) 72%, transparent);
+}
+
+.import-target-fields[hidden] {
+  display: none;
+}
+
+.import-target-fields > label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.import-target-fields input,
+.import-target-fields select {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.import-target-fields .import-create-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  grid-column: 1 / -1;
+  width: min(100%, 460px);
+  box-sizing: border-box;
+  margin-top: 1px;
+}
+
+.import-target-fields .import-create-toggle > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+}
+
+.import-create-toggle input:checked + .import-checkmark {
+  border-color: var(--vscode-textLink-foreground, #3794ff);
+  background: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--vscode-editor-background, #1e1e1e);
+}
+
+.import-target-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+}
+
+/* Compact source card in the secondary column. */
+.import-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.import-source-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 7px;
+  background: var(--vscode-editor-background);
+}
+
+.import-source-file .import-file-details {
+  flex: 1;
+}
+
+.import-source-card .import-source-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 0;
+  justify-content: initial;
+}
+
+.import-source-card .import-source-options label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.import-source-card .import-source-options select {
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.import-source-card .import-source-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.import-source-card .import-source-actions button {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Review card: warnings stay visible, SQL and technical data collapse. */
+.import-review-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-review-badge {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground) 45%, var(--vscode-panel-border));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 12%, transparent);
+  color: var(--vscode-editorWarning-foreground);
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.import-review-errors {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 45%, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+  color: var(--vscode-errorForeground);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.import-warning-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  color: var(--vscode-editorWarning-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.import-warning-list li + li {
+  margin-top: 3px;
+}
+
+.import-empty-note {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.import-validation-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+.import-validation-row.complete {
+  color: var(--vscode-testing-iconPassed);
+}
+
+.import-details {
+  padding-top: 9px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.import-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 27px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--vscode-foreground);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.import-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.import-details-hint {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.import-details > summary .review-chevron {
+  font-size: 14px;
+}
+
+.import-details:not([open]) > summary .review-chevron {
+  transform: rotate(-90deg);
+}
+
+.import-details-body {
+  padding-top: 8px;
+}
+
+.import-sql-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.import-sql-toolbar button {
+  min-height: 25px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.import-sql-preview .sql-card {
+  margin-top: 9px;
+}
+
+.import-sql-preview .sql-card pre {
+  max-height: 132px;
+}
+
+.import-technical-grid {
+  margin: 0;
+}
+
+/* Collapsible preview section. */
+.import-collapsible > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+
+.import-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.import-collapsible-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.import-collapsible-copy strong {
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.import-collapsible-copy small {
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.import-collapsible > summary .import-preview-count {
+  margin-left: auto;
+}
+
+.import-collapsible:not([open]) .review-chevron {
+  transform: rotate(-90deg);
+}
+
+.import-collapsible-body {
+  padding-top: 11px;
+}
+
+/* Cleaner mapping table: separators instead of nested boxes. */
+.import-mapping-head,
+.import-map-row {
+  grid-template-columns: 22px 34px minmax(110px, 1fr) 14px minmax(140px, 1.1fr) minmax(130px, 0.85fr);
+  gap: 8px;
+}
+
+.import-mapping-head {
+  padding: 0 8px 6px;
+  font-size: 9px;
+}
+
+.import-mapping-list {
+  gap: 0;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.import-map-row {
+  padding: 7px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.import-map-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.import-map-row .import-source-column {
+  font-size: 11px;
+}
+
+.import-map-row input.target-name,
+.import-map-row select.type-select {
+  height: 30px;
+  min-height: 30px;
+  font-size: 10px;
+}
+
+.import-map-row .move-buttons {
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
+}
+
+.import-map-row:hover .move-buttons,
+.import-map-row:focus-within .move-buttons {
+  opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .import-workflow-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .import-target-banner {
+    padding: 11px 12px;
+  }
+
+  .import-target-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .import-target-name {
+    font-size: 14px;
+  }
+
+  .import-source-card .import-source-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .import-mapping-head {
+    display: none;
+  }
+
+  .import-map-row {
+    grid-template-columns: 22px 30px minmax(0, 1fr) 12px minmax(0, 1.1fr);
+    gap: 5px;
+  }
+
+  .import-map-row .target-name {
+    grid-column: 5;
+    grid-row: 1;
+  }
+
+  .import-map-row .type-select {
+    grid-column: 5;
+    grid-row: 2;
+  }
+
+  .import-map-row .move-buttons {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    flex-direction: column;
+  }
+
+  .import-map-row > input[type="checkbox"] {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .import-map-row .import-source-column {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
+  .import-map-arrow {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+}
+
+/* Keep transfer metrics and database load status visible at the same time. */
+.execution-progress .progress-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.progress-detail-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.progress-detail-load {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.92;
+}
+
+/* A quiet phase (for example the database planning an external load) still needs
+   to show that the import is alive. Updated by a timer without re-rendering. */
+.progress-waiting {
+  margin-top: 3px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.progress-waiting:empty {
+  display: none;
 }

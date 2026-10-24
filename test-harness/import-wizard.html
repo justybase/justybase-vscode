@@ -11,9 +11,21 @@
             --vscode-editor-foreground: #cccccc;
             --vscode-button-background: #0e639c;
             --vscode-button-foreground: #ffffff;
+            --vscode-button-secondaryBackground: #3a3d41;
+            --vscode-button-secondaryForeground: #ffffff;
             --vscode-input-background: #3c3c3c;
             --vscode-input-foreground: #cccccc;
             --vscode-panel-border: #3c3c3c;
+            --vscode-textLink-foreground: #3794ff;
+            --vscode-descriptionForeground: #9d9d9d;
+            --vscode-editorWidget-background: #252526;
+            --vscode-sideBar-background: #252526;
+            --vscode-list-hoverBackground: #2a2d2e;
+            --vscode-focusBorder: #007fd4;
+            --vscode-editorWarning-foreground: #cca700;
+            --vscode-errorForeground: #f48771;
+            --vscode-testing-iconPassed: #73c991;
+            --vscode-toolbar-hoverBackground: #5a5d5e;
         }
         body { margin: 0; background: #1e1e1e; color: #ccc; font-family: sans-serif; }
     </style>
@@ -29,21 +41,128 @@
     </script>
     <script src="/dist/media/importWizard.js"></script>
     <script>
+        const columns = [
+            ['PRODUCTKEY', 'BIGINT'],
+            ['DATEKEY', 'BIGINT'],
+            ['MOVEMENTDATE', 'TIMESTAMP'],
+            ['UNITCOST', 'NUMERIC(16,2)'],
+            ['UNITSIN', 'BIGINT'],
+            ['UNITSOUT', 'BIGINT'],
+            ['UNITS_BALANCE', 'BIGINT'],
+        ].map(([name, type], index) => ({
+            sourceIndex: index,
+            sourceName: name,
+            targetName: name,
+            defaultTargetName: name,
+            included: true,
+            order: index,
+            inferredType: type,
+            selectedType: name === 'UNITCOST' ? 'INTEGER' : type,
+            overrideMode: name === 'UNITCOST' ? 'user' : 'inferred',
+        }));
+
         setTimeout(() => {
             window.postMessage({
                 type: 'sessionInitialized',
                 state: {
-                    targetTable: 'TEST_TABLE',
-                    targetDatabase: 'JUST_DATA',
-                    targetSchema: 'ADMIN',
-                    columns: [],
-                    previewRows: [],
+                    id: 'harness-session',
+                    filePath: '/tmp/justybase/sales.xlsb',
+                    sourceKind: 'file',
+                    sourceName: 'sales.xlsb',
+                    fileName: 'sales.xlsb',
+                    fileFormat: 'xlsb',
+                    sheetName: 'Sheet1',
+                    availableSheets: ['Sheet1', 'Sheet2'],
+                    canChangeSheet: true,
+                    connectionName: 'JustData',
+                    availableConnections: [
+                        { name: 'JustData', label: 'JustData (ADMIN)', database: 'JUST_DATA', databaseKind: 'netezza' },
+                    ],
+                    databaseKind: 'netezza',
+                    hasHeaders: true,
+                    createTable: true,
+                    canAppendToExistingTable: true,
+                    targetTable: 'JUST_DATA.ADMIN.QUERY_RESULTS_20261024_6031',
+                    targetLocation: {
+                        database: 'JUST_DATA',
+                        schema: 'ADMIN',
+                        tableName: 'QUERY_RESULTS_20261024_6031',
+                    },
+                    targetLocationCapabilities: {
+                        supportsDatabaseSelection: true,
+                        supportsSchemaSelection: true,
+                        enforceActiveDatabase: false,
+                    },
+                    availableDatabases: ['JUST_DATA', 'SANDBOX'],
+                    availableSchemas: ['ADMIN', 'PUBLIC'],
+                    previewRowCount: 10,
+                    validationSampleSize: 25,
+                    detectedDelimiter: undefined,
+                    decimalDelimiter: '.',
+                    sourceHeaders: columns.map(column => column.sourceName),
+                    columns,
+                    previewRows: [
+                        ['1001', '20260101', '2026-01-01 08:15:00', '12.50', '8', '0', '8'],
+                        ['1002', '20260101', '2026-01-01 09:30:00', '9.99', '3', '1', '2'],
+                        ['1003', '20260102', '2026-01-02 10:05:00', '125.00', '20', '4', '16'],
+                    ],
                     issues: [],
                     warnings: [],
-                    hasValidationErrors: false
-                }
+                    hasValidationErrors: false,
+                    executionPlan: {
+                        mode: 'direct',
+                        createTableSql: 'CREATE TABLE "JUST_DATA"."ADMIN"."QUERY_RESULTS_20261024_6031"\n(\n  "PRODUCTKEY" BIGINT,\n  "DATEKEY" BIGINT,\n  "MOVEMENTDATE" DATETIME,\n  "UNITCOST" INTEGER,\n  "UNITSIN" BIGINT,\n  "UNITSOUT" BIGINT,\n  "UNITS_BALANCE" BIGINT\n) DISTRIBUTE ON RANDOM;',
+                        loadSql: 'INSERT INTO "JUST_DATA"."ADMIN"."QUERY_RESULTS_20261024_6031"\n("PRODUCTKEY", "DATEKEY", "MOVEMENTDATE", "UNITCOST", "UNITSIN", "UNITSOUT", "UNITS_BALANCE")\nSELECT "PRODUCTKEY", "DATEKEY", "MOVEMENTDATE", "UNITCOST", "UNITSIN", "UNITSOUT", "UNITS_BALANCE"\nFROM EXTERNAL \'virtual_import_1.txt\'',
+                        warnings: [],
+                        nextSteps: [],
+                    },
+                    typeOptions: ['BIGINT', 'INTEGER', 'NUMERIC(16,2)', 'TIMESTAMP', 'NVARCHAR(255)'],
+                },
             }, '*');
         }, 100);
+
+        window.__showImportProgress = () => {
+            window.postMessage({ type: 'executionStarted' }, '*');
+            window.postMessage({
+                type: 'executionProgress',
+                progress: {
+                    phase: 'transfer',
+                    percent: 32,
+                    rowsProcessed: 248412,
+                    totalRows: 776286,
+                    bytesRead: 10485760,
+                    bytesTotal: 12582912,
+                    loadStatus: {
+                        planId: 46,
+                        rowsInserted: 173226,
+                        rowsRejected: 0,
+                        bytesDownloaded: 10485760,
+                        bytesProcessed: 7340032,
+                    },
+                },
+            }, '*');
+        };
+
+        window.__updateImportProgress = () => {
+            window.postMessage({
+                type: 'executionProgress',
+                progress: {
+                    phase: 'transfer',
+                    percent: 64,
+                    rowsProcessed: 300000,
+                    totalRows: 776286,
+                    bytesRead: 20971520,
+                    bytesTotal: 25165824,
+                    loadStatus: {
+                        planId: 46,
+                        rowsInserted: 210000,
+                        rowsRejected: 0,
+                        bytesDownloaded: 20971520,
+                        bytesProcessed: 14680064,
+                    },
+                },
+            }, '*');
+        };
     </script>
 </body>
 </html>
