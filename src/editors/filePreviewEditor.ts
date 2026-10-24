@@ -37,13 +37,13 @@ async function readNextExcelRecord(reader: ExcelReaderWithInit): Promise<boolean
     return false;
 }
 
-interface ColumnInfo {
+export interface ColumnInfo {
     name: string;
     type?: string;
     scale?: number;
 }
 
-interface FilePreviewData {
+export interface FilePreviewData {
     columns: ColumnInfo[];
     rows: unknown[][];
     totalRows: number;
@@ -51,11 +51,52 @@ interface FilePreviewData {
     filePath: string;
     fileSizeBytes: number;
     formatLabel: string;
+    /** Raw first row of the file (spreadsheet view shows it as data row 1). */
+    headerRow?: unknown[];
+}
+
+const SPREADSHEET_EXTENSIONS = new Set(['.xlsx', '.xlsb', '.csv', '.tsv', '.tab']);
+
+/** Excel column label for a zero-based index: 0 → A, 25 → Z, 26 → AA. */
+export function columnLetter(index: number): string {
+    let n = index + 1;
+    let label = '';
+    while (n > 0) {
+        const rem = (n - 1) % 26;
+        label = String.fromCharCode(65 + rem) + label;
+        n = Math.floor((n - 1) / 26);
+    }
+    return label;
+}
+
+/**
+ * Spreadsheet presentation: column letters as headers and the file's first row as data row 1,
+ * matching how Excel shows the same file. Export and workspace actions still use the raw data.
+ */
+export function toSpreadsheetGrid(data: FilePreviewData): { columns: ColumnInfo[]; rows: unknown[][] } {
+    let width = data.headerRow?.length ?? 0;
+    for (const row of data.rows) {
+        if (row.length > width) width = row.length;
+    }
+    width = Math.max(width, 1);
+
+    const pad = (row: unknown[]): unknown[] => row.length === width
+        ? row
+        : [...row, ...new Array<null>(width - row.length).fill(null)];
+    const dataRows = data.rows.map(pad);
+    const rows = data.headerRow ? [pad(data.headerRow), ...dataRows] : dataRows;
+    const columns = Array.from({ length: width }, (_, i) => ({ name: columnLetter(i) }));
+    return { columns, rows };
 }
 
 export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
     public static readonly viewType = 'netezza.filePreview';
     private static readonly _visiblePanels = new Set<vscode.WebviewPanel>();
+
+    private static readonly _previewOwnedContextKeys = new Set([
+        'netezza.resultsHasSelection',
+        'netezza.resultsCopyPrimed',
+    ]);
 
     private static _updateContextKeys(filePath?: string): void {
         const isOpen = FilePreviewEditor._visiblePanels.size > 0;
@@ -121,11 +162,15 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
                     console.error('[FilePreview]', msg.text);
                     vscode.window.showErrorMessage(msg.text);
                 } else if (msg.command === 'setContext') {
-                    vscode.commands.executeCommand('setContext', msg.key, msg.value);
-                } else if (msg.command === 'focusView') {
-                    vscode.commands.executeCommand('netezza.results.focus');
+                    // Selection/copy keys belong to the SQL Results view; forwarding them would let the
+                    // global ctrl+c binding copy from that view instead of this preview.
+                    if (!FilePreviewEditor._previewOwnedContextKeys.has(msg.key)) {
+                        vscode.commands.executeCommand('setContext', msg.key, msg.value);
+                    }
                 } else if (msg.command === 'copyToClipboard') {
-                    vscode.env.clipboard.writeText(msg.text);
+                    void vscode.env.clipboard.writeText(msg.text).then(() => {
+                        void vscode.window.setStatusBarMessage('Copied to clipboard', 2000);
+                    });
                 } else if (msg.command === 'initiateExport' || msg.command === 'handleClickExport') {
                     void this._handleExport(allData, webviewPanel);
                 } else if (msg.command === 'exportCsv' || msg.command === 'exportJson' || msg.command === 'exportXml' || msg.command === 'exportSqlInsert' || msg.command === 'exportMarkdown') {
@@ -415,6 +460,9 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
 
     private _buildHtml(webviewPanel: vscode.WebviewPanel, filePath: string, allData: FilePreviewData[]): string {
         const ext = path.extname(filePath).toLowerCase();
+        if (SPREADSHEET_EXTENSIONS.has(ext)) {
+            return this._buildSpreadsheetHtml(webviewPanel, filePath, allData);
+        }
         const formatLabel = ext === '.parquet' ? 'Parquet'
             : ext === '.xlsx' ? 'XLSX'
                 : ext === '.xlsb' ? 'XLSB'
@@ -561,6 +609,61 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
 </html>`;
     }
 
+    /**
+     * Excel-like view for XLSX, XLSB, CSV and TSV. It loads its own bundle, not the SQL result grid,
+     * and receives the data as a JSON block that cannot break out of the script tag.
+     */
+    private _buildSpreadsheetHtml(webviewPanel: vscode.WebviewPanel, filePath: string, allData: FilePreviewData[]): string {
+        const ext = path.extname(filePath).toLowerCase();
+        const kind = ext === '.xlsx' ? 'XLSX' : ext === '.xlsb' ? 'XLSB' : ext === '.csv' ? 'CSV' : 'TSV';
+        const cspSource = webviewPanel.webview.cspSource;
+        const styleUri = webviewPanel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'spreadsheetPreview.css')
+        );
+        const scriptUri = webviewPanel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'spreadsheetPreview.js')
+        );
+
+        const stats = fs.statSync(filePath);
+        const fileSizeStr = stats.size < 1024
+            ? `${stats.size} B`
+            : stats.size < 1024 * 1024
+                ? `${(stats.size / 1024).toFixed(1)} KB`
+                : `${(stats.size / (1024 * 1024)).toFixed(2)} MB`;
+
+        const payload = JSON.stringify({
+            fileName: path.basename(filePath),
+            fileInfo: `${fileSizeStr} · ${kind}`,
+            limitReached: allData.some(d => d.limitReached),
+            maxRows: this._getMaxRows(),
+            canAddToWorkspace: ext === '.csv' || ext === '.xlsx',
+            sheets: allData.map(d => {
+                const grid = toSpreadsheetGrid(d);
+                return {
+                    name: d.formatLabel || 'Sheet',
+                    columns: grid.columns.map(c => c.name),
+                    rows: grid.rows,
+                };
+            }),
+        }).replace(/</g, '\\u003c');
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource}; style-src ${cspSource} 'unsafe-inline';">
+    <title>${escHtml(kind)} Preview: ${escHtml(path.basename(filePath))}</title>
+    <link rel="stylesheet" href="${styleUri}">
+</head>
+<body>
+    <div id="app"></div>
+    <script id="sheet-data" type="application/json">${payload}</script>
+    <script src="${scriptUri}"></script>
+</body>
+</html>`;
+    }
+
     private _buildErrorHtml(errorMsg: string, filePath: string): string {
         return `<!DOCTYPE html>
 <html lang="en">
@@ -645,6 +748,7 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
 
                 const rows: unknown[][] = [];
                 let headerRow: string[] | null = null;
+                let rawHeaderRow: unknown[] | undefined;
                 let totalRows = 0;
 
                 while (await readNextExcelRecord(r)) {
@@ -655,6 +759,7 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
                     }
 
                     if (!headerRow) {
+                        rawHeaderRow = row;
                         headerRow = row.map(v => (v === null || v === undefined ? '' : String(v)));
                         continue;
                     }
@@ -674,6 +779,7 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
                 results.push({
                     columns,
                     rows,
+                    headerRow: rawHeaderRow,
                     totalRows: totalRows > 0 ? totalRows - 1 : 0,
                     limitReached: totalRows - 1 > maxRows,
                     filePath,
@@ -704,12 +810,14 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
         const rows: unknown[][] = [];
         let totalRows = 0;
         let headerParsed = false;
+        let headerRow: unknown[] | undefined;
 
         for await (const record of readDelimitedRecords(filePath, delimiter, undefined, encoding)) {
             if (!headerParsed) {
                 if (record.length === 1 && !record[0].trim()) {
                     continue;
                 }
+                headerRow = record;
                 for (const name of record) {
                     columns.push({ name: name || `Column ${columns.length + 1}` });
                 }
@@ -736,6 +844,7 @@ code{background:var(--vscode-textBlockQuote-background,rgba(128,128,128,0.1));pa
         return {
             columns,
             rows,
+            headerRow,
             totalRows,
             limitReached: totalRows > maxRows,
             filePath,

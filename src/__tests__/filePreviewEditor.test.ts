@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { FilePreviewEditor } from '../editors/filePreviewEditor';
+import { columnLetter, FilePreviewEditor, toSpreadsheetGrid } from '../editors/filePreviewEditor';
 import { DataWorkspaceService } from '../services/dataWorkspaceService';
 
 describe('FilePreviewEditor Data Workspace action', () => {
@@ -37,8 +37,9 @@ describe('FilePreviewEditor Data Workspace action', () => {
     }
 
     it('offers adding CSV and XLSX previews to a Data Workspace', () => {
-        expect(render(tempFile)).toContain('id="add-file-to-data-workspace"');
-        expect(render(tempFile.replace(/\.csv$/, '.xlsx'))).toContain('id="add-file-to-data-workspace"');
+        // The Excel-like view renders its toolbar in the bundle; the host passes the availability flag.
+        expect(render(tempFile)).toContain('"canAddToWorkspace":true');
+        expect(render(tempFile.replace(/\.csv$/, '.xlsx'))).toContain('"canAddToWorkspace":true');
     });
 
     it('does not show the file-source action for other preview formats', () => {
@@ -171,5 +172,114 @@ describe('FilePreviewEditor Data Workspace action', () => {
         expect(refreshSource).toHaveBeenCalledWith('Reporting', 'source-12345678');
         addFileSource.mockRestore();
         refreshSource.mockRestore();
+    });
+});
+
+describe('FilePreviewEditor spreadsheet presentation', () => {
+    it('labels columns the way Excel does, including past Z', () => {
+        expect(columnLetter(0)).toBe('A');
+        expect(columnLetter(25)).toBe('Z');
+        expect(columnLetter(26)).toBe('AA');
+        expect(columnLetter(701)).toBe('ZZ');
+        expect(columnLetter(702)).toBe('AAA');
+    });
+
+    it('shows the file first row as data row 1 under column letters', () => {
+        const grid = toSpreadsheetGrid({
+            columns: [{ name: 'id' }, { name: 'name' }],
+            rows: [[2, 'Grace']],
+            headerRow: ['id', 'name'],
+            totalRows: 1,
+            limitReached: false,
+            filePath: 'x.csv',
+            fileSizeBytes: 1,
+            formatLabel: 'CSV',
+        });
+
+        expect(grid.columns.map(c => c.name)).toEqual(['A', 'B']);
+        expect(grid.rows).toEqual([['id', 'name'], [2, 'Grace']]);
+    });
+
+    it('pads ragged rows to the widest row so every column has a letter', () => {
+        const grid = toSpreadsheetGrid({
+            columns: [],
+            rows: [[1], [1, 2, 3]],
+            headerRow: ['a'],
+            totalRows: 2,
+            limitReached: false,
+            filePath: 'x.csv',
+            fileSizeBytes: 1,
+            formatLabel: 'CSV',
+        });
+
+        expect(grid.columns).toHaveLength(3);
+        expect(grid.rows[0]).toEqual(['a', null, null]);
+        expect(grid.rows[1]).toEqual([1, null, null]);
+        expect(grid.rows[2]).toEqual([1, 2, 3]);
+    });
+
+    it('keeps cell text that looks like markup from closing the data script block', () => {
+        const csvFile = path.join('/tmp', `justybase-sheet-escape-${process.pid}.csv`);
+        fs.writeFileSync(csvFile, 'a\n1\n', 'utf8');
+        try {
+            const editor = new FilePreviewEditor(
+                vscode.Uri.file('/test-extension'),
+                { globalStorageUri: vscode.Uri.file('/tmp/workspace-preview-test') } as unknown as vscode.ExtensionContext,
+                {} as never,
+            );
+            const panel = {
+                webview: { cspSource: 'mock-csp', asWebviewUri: jest.fn((uri: unknown) => uri) },
+            } as unknown as vscode.WebviewPanel;
+            const html = (editor as unknown as {
+                _buildHtml(p: vscode.WebviewPanel, f: string, d: unknown[]): string;
+            })._buildHtml(panel, csvFile, [{
+                columns: [{ name: 'a' }],
+                rows: [['</script><img src=x onerror=alert(1)>']],
+                totalRows: 1,
+                limitReached: false,
+                filePath: csvFile,
+                fileSizeBytes: 10,
+                formatLabel: 'CSV',
+            }]);
+
+            expect(html.match(/<\/script>/g)?.length).toBe(2);
+            expect(html).toContain('\\u003c/script>\\u003cimg');
+        } finally {
+            fs.rmSync(csvFile, { force: true });
+        }
+    });
+
+    it('loads the separate Excel-like bundle for CSV and keeps the result grid for Parquet', () => {
+        const csvFile = path.join('/tmp', `justybase-sheet-preview-${process.pid}.csv`);
+        const parquetFile = csvFile.replace(/\.csv$/, '.parquet');
+        fs.writeFileSync(csvFile, 'id\n1\n', 'utf8');
+        fs.writeFileSync(parquetFile, 'placeholder', 'utf8');
+        const editor = new FilePreviewEditor(
+            vscode.Uri.file('/test-extension'),
+            { globalStorageUri: vscode.Uri.file('/tmp/workspace-preview-test') } as unknown as vscode.ExtensionContext,
+            {} as never,
+        );
+        const panel = {
+            webview: { cspSource: 'mock-csp', asWebviewUri: jest.fn((uri: unknown) => uri) },
+        } as unknown as vscode.WebviewPanel;
+        const build = (filePath: string): string => (editor as unknown as {
+            _buildHtml(panel: vscode.WebviewPanel, filePath: string, data: unknown[]): string;
+        })._buildHtml(panel, filePath, [{ columns: [{ name: 'id' }], rows: [[1]], totalRows: 1, limitReached: false, filePath, fileSizeBytes: 10, formatLabel: 'CSV' }]);
+
+        try {
+            const csvHtml = build(csvFile);
+            expect(csvHtml).toContain('spreadsheetPreview.js');
+            expect(csvHtml).toContain('spreadsheetPreview.css');
+            expect(csvHtml).not.toContain('resultPanel.js');
+            expect(csvHtml).toContain('<script id="sheet-data" type="application/json">');
+            expect(csvHtml).toContain('"sheets"');
+
+            const parquetHtml = build(parquetFile);
+            expect(parquetHtml).toContain('resultPanel.js');
+            expect(parquetHtml).not.toContain('spreadsheetPreview.js');
+        } finally {
+            fs.rmSync(csvFile, { force: true });
+            fs.rmSync(parquetFile, { force: true });
+        }
     });
 });

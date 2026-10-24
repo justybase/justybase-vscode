@@ -87,6 +87,7 @@ async function main() {
     './media/resultPanel/grid.ts',
     './media/resultPanel/selection.ts',
     './media/searchWorker.ts',
+    './media/spreadsheetPreview.ts',
     './media/editDataPanel.ts',
     './media/queryHistory.ts',
     './media/queryHistoryExtended.ts',

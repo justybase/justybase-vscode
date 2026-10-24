@@ -37,14 +37,26 @@ The **Data File Preview** opens tabular data files directly in VS Code as a full
 | Extension | Format | Notes |
 |-----------|--------|-------|
 | `.parquet` | Apache Parquet | Column names from Parquet schema |
-| `.xlsx` | Excel Workbook | First row treated as header |
-| `.xlsb` | Excel Binary Workbook | First row treated as header |
-| `.tsv` / `.tab` | Tab-Separated Values | Auto-detects tab delimiter |
+| `.xlsx` | Excel Workbook | Excel-like view: column letters, first row shown as data row 1 |
+| `.xlsb` | Excel Binary Workbook | Excel-like view: column letters, first row shown as data row 1 |
+| `.csv` | Delimited text | Excel-like view (see below); delimiter auto-detected |
+| `.tsv` / `.tab` | Tab-Separated Values | Excel-like view; auto-detects tab delimiter |
 | `.json` | JSON Array | Opens as text by default; use **Open with → Data File Preview** for grid view |
 | `.nzpreview` | JustyBase Preview (CSV) | Created by **Open in Previewer** |
 
-**Features:**
-- **Multi-sheet support** — each sheet appears as a separate tab in the data grid (for `.xlsx` and `.xlsb` files)
+**Spreadsheet view (`.csv`, `.tsv`, `.tab`, `.xlsx`, `.xlsb`):** these files open in a separate Excel-like viewer, not in the SQL result grid.
+- Columns are labelled `A`, `B`, `C`… and rows are numbered by their position in the file; the file's first row is shown as row 1
+- A name box shows the active cell address (for example `B7`) and a value bar shows its full text
+- Click, Shift+click, drag, arrow keys and Ctrl+A select cells; clicking a row or column number selects that row or column
+- Excel-style navigation: Ctrl+arrow jumps to the edge of the current block of data (or to the next data cell, or to the sheet edge), and Ctrl+Shift+arrow extends the selection to the same cell
+- **Copy** (Ctrl+C or the toolbar button) writes the selection as tab-separated text, so it pastes into Excel or another spreadsheet with the same grid shape
+- Sheets appear as tabs at the bottom of the window
+- **Search sheet** (toolbar, Ctrl+F) searches every row of the current sheet, not only the rows on screen; Enter and Shift+Enter (or the arrow buttons) step through matches, and Escape clears the search
+- Drag the right edge of a column letter to resize that column; double-click the edge to restore the default width
+- Sorting, filtering, grouping and Row View are not part of this viewer; open the file in the Data File Preview grid for those, or use **Add to Data Workspace** to query it
+
+**Features of the Data File Preview grid (Parquet and query results):**
+- **Multi-sheet support** — each sheet appears as a separate tab in the data grid
 - **Sorting** — click the sort icon on a column header to sort ascending/descending; **Shift+Click** adds another sort column (numbered badges show sort priority)
 - **Filtering** — global text filter across all columns with debounced search
 - **Grouping** — use **Group by column** or drag headers to the grouping panel; nested groups render as collapsible tree rows

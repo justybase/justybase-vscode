@@ -1,0 +1,378 @@
+/* Excel-like file preview (XLSX, XLSB, CSV, TSV). Independent of resultPanel.css. */
+
+:root {
+    --sheet-grid: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+    --sheet-header-bg: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #f3f3f3));
+    --sheet-header-fg: var(--vscode-descriptionForeground, #616161);
+    --sheet-select-bg: rgba(0, 120, 212, 0.18);
+    --sheet-select-header-bg: rgba(0, 120, 212, 0.22);
+    --sheet-accent: var(--vscode-focusBorder, #0078d4);
+    --sheet-row-height: 20px;
+    --sheet-header-height: 20px;
+    --sheet-row-number-width: 52px;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-font-family, "Segoe UI", system-ui, sans-serif);
+    font-size: 13px;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Toolbar: file name and a few actions, nothing else */
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    flex-shrink: 0;
+    min-height: 32px;
+    box-sizing: border-box;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--sheet-grid);
+}
+
+.file-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.file-info {
+    color: var(--sheet-header-fg);
+    font-size: 12px;
+}
+
+/* Whole-sheet search: always visible, pushed to the right of the toolbar */
+.search {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.search-input {
+    width: 200px;
+    height: 22px;
+    box-sizing: border-box;
+    border-radius: 2px;
+    padding: 0 6px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--vscode-input-foreground, var(--vscode-foreground));
+    background: var(--vscode-input-background, transparent);
+    border: 1px solid var(--vscode-input-border, var(--sheet-grid));
+    outline: none;
+}
+
+.search-input:focus {
+    border-color: var(--sheet-accent);
+}
+
+.search-count {
+    min-width: 72px;
+    font-size: 12px;
+    color: var(--sheet-header-fg);
+    text-align: center;
+    white-space: nowrap;
+}
+
+.toolbar button {
+    font: inherit;
+    font-size: 12px;
+    height: 22px;
+    min-width: 28px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    border-radius: 2px;
+    white-space: nowrap;
+    border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    cursor: pointer;
+}
+
+.toolbar button:hover {
+    background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.3));
+}
+
+.toolbar button:focus-visible {
+    outline: 1px solid var(--sheet-accent);
+    outline-offset: 1px;
+}
+
+/* Formula bar: address of the active cell and its full value */
+.formula-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    height: 26px;
+    padding: 0 6px;
+    border-bottom: 1px solid var(--sheet-grid);
+    font-size: 12px;
+}
+
+.name-box {
+    min-width: 56px;
+    padding: 0 6px;
+    line-height: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid var(--sheet-grid);
+    border-radius: 2px;
+    background: var(--vscode-input-background, transparent);
+}
+
+.fx {
+    padding: 0 6px;
+    font-style: italic;
+    color: var(--sheet-header-fg);
+    border-left: 1px solid var(--sheet-grid);
+}
+
+.value-bar {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 20px;
+}
+
+/* Grid */
+.scroller {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    position: relative;
+    outline: none;
+}
+
+.sheet-inner {
+    position: relative;
+}
+
+.head-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--sheet-header-bg);
+}
+
+/* Separate borders keep every row exactly ROW_HEIGHT tall; collapsed borders add up to 1px per row,
+   which drifts the scroll position away from the row the model computes. */
+table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+}
+
+.head-table,
+.body-table {
+    margin: 0;
+}
+
+/* Each cell has a 1px bottom border inside its fixed height, so the text line is one pixel shorter. */
+.head-table th,
+.body-table td,
+.body-table th {
+    height: var(--sheet-row-height);
+    padding: 0 4px;
+    line-height: calc(var(--sheet-row-height) - 1px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+}
+
+.head-table th {
+    height: var(--sheet-header-height);
+    line-height: calc(var(--sheet-header-height) - 1px);
+    font-weight: normal;
+    text-align: center;
+    color: var(--sheet-header-fg);
+    background: var(--sheet-header-bg);
+    border-right: 1px solid var(--sheet-grid);
+    border-bottom: 1px solid var(--sheet-grid);
+    user-select: none;
+    cursor: default;
+}
+
+.head-table th {
+    font-size: 12px;
+}
+
+.head-table th.sel {
+    background: var(--sheet-select-header-bg);
+    color: var(--vscode-foreground);
+    font-weight: 600;
+}
+
+/* Column resize handle on the right edge of each column letter */
+.head-table th {
+    position: relative;
+}
+
+.col-resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+}
+
+.col-resize:hover {
+    background: var(--sheet-accent);
+    opacity: 0.6;
+}
+
+body.resizing-columns,
+body.resizing-columns * {
+    cursor: col-resize !important;
+    user-select: none;
+}
+
+body.resizing-columns .col-resize {
+    background: var(--sheet-accent);
+    opacity: 0.6;
+}
+
+/* Body rows are absolutely placed inside a spacer as tall as the whole sheet */
+.body-spacer {
+    position: relative;
+}
+
+.body-table {
+    position: absolute;
+    left: 0;
+    top: 0;
+}
+
+.body-table td.cell {
+    border-right: 1px solid var(--sheet-grid);
+    border-bottom: 1px solid var(--sheet-grid);
+    background: var(--vscode-editor-background);
+    cursor: cell;
+}
+
+.body-table td.cell {
+    font-variant-numeric: tabular-nums;
+}
+
+.body-table td.cell.num {
+    text-align: right;
+}
+
+.body-table td.cell.sel {
+    background: var(--sheet-select-bg);
+}
+
+.body-table td.cell.hit {
+    background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33));
+}
+
+.body-table td.cell.hit-current {
+    background: var(--vscode-editor-findMatchBackground, rgba(255, 200, 0, 0.55));
+}
+
+.body-table td.cell.active {
+    background: var(--vscode-editor-background);
+    box-shadow: inset 0 0 0 2px var(--sheet-accent);
+}
+
+.body-table th.rowhdr {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: var(--sheet-row-number-width);
+    text-align: center;
+    font-weight: normal;
+    color: var(--sheet-header-fg);
+    background: var(--sheet-header-bg);
+    border-right: 1px solid var(--sheet-grid);
+    border-bottom: 1px solid var(--sheet-grid);
+    user-select: none;
+    cursor: default;
+}
+
+.body-table th.rowhdr.sel {
+    background: var(--sheet-select-header-bg);
+    color: var(--vscode-foreground);
+}
+
+.head-table th.corner {
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    background: var(--sheet-header-bg);
+    border-right: 1px solid var(--sheet-grid);
+    cursor: pointer;
+}
+
+/* Sheet tabs sit at the bottom, as in Excel */
+.sheet-tabs {
+    display: flex;
+    flex-shrink: 0;
+    align-items: stretch;
+    gap: 0;
+    padding-left: 4px;
+    border-top: 1px solid var(--sheet-grid);
+    background: var(--sheet-header-bg);
+    overflow-x: auto;
+}
+
+.sheet-tab {
+    font: inherit;
+    font-size: 12px;
+    padding: 2px 14px;
+    border: none;
+    border-right: 1px solid var(--sheet-grid);
+    border-top: 2px solid transparent;
+    background: transparent;
+    color: var(--sheet-header-fg);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sheet-tab:hover {
+    color: var(--vscode-foreground);
+}
+
+.sheet-tab.active {
+    background: var(--vscode-editor-background);
+    border-top-color: var(--sheet-accent);
+    color: var(--vscode-foreground);
+    font-weight: 600;
+}
+
+/* Status bar: quiet, one line, like Excel's bottom bar */
+.footer {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    font-size: 11px;
+    color: var(--sheet-header-fg);
+    background: var(--sheet-header-bg);
+    border-top: 1px solid var(--sheet-grid);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Narrow editor groups: drop the secondary file info rather than wrapping the toolbar into three lines */
+@media (max-width: 640px) {
+    .file-info {
+        display: none;
+    }
+}
