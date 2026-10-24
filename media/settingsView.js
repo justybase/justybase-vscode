@@ -8,9 +8,17 @@ let searchQuery = '';
 let cachedUserSnippets = [];
 let cachedPredefinedSnippets = [];
 
+// Sidebar grouping keeps the 13 sections scannable without changing the registry.
+const NAV_GROUPS = [
+    { id: 'core', title: 'Core', sections: ['general', 'editor', 'sql', 'codelens'] },
+    { id: 'data', title: 'Data', sections: ['query', 'ddl', 'schema', 'results', 'filepreview', 'importwizard'] },
+    { id: 'integrations', title: 'Integrations', sections: ['copilot', 'mcp', 'snippets'] }
+];
+
 // ── Render Sidebar Navigation ──
 function renderNav() {
     const nav = document.getElementById('sidebarNav');
+    if (!nav) return;
     const icons = {
         'general': '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H2a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V2a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
         'editor': '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
@@ -26,19 +34,50 @@ function renderNav() {
         'mcp': '<svg viewBox="0 0 24 24"><path d="M8 8.5 12 4l4 4.5"/><path d="M12 4v11"/><path d="M7 12H4v7h16v-7h-3"/><path d="M8 19v2h8v-2"/></svg>',
         'snippets': '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="8 10 12 14 16 10"/></svg>'
     };
-    nav.innerHTML = SECTIONS.map(s =>
-        '<div class="nav-item' + (s.id === currentSection ? ' active' : '') + '" data-section="' + escapeHtml(String(s.id)) + '">' +
-            '<span class="nav-icon">' + (icons[s.id] || '') + '</span>' +
-            '<span>' + escapeHtml(String(s.title || s.id)) + '</span>' +
-        '</div>'
-    ).join('');
+
+    const sectionIds = new Set(SECTIONS.map(section => String(section.id)));
+    const groupedIds = new Set(NAV_GROUPS.flatMap(group => group.sections));
+    const leftover = SECTIONS
+        .map(section => String(section.id))
+        .filter(id => !groupedIds.has(id));
+    const groups = [...NAV_GROUPS, { id: 'more', title: 'More', sections: leftover }];
+
+    let html = '';
+    for (const group of groups) {
+        const items = group.sections.filter(id => sectionIds.has(id));
+        if (items.length === 0) continue;
+        html += '<div class="nav-group">';
+        if (group.title) {
+            html += '<div class="nav-group-title">' + escapeHtml(group.title) + '</div>';
+        }
+        for (const id of items) {
+            const section = SECTIONS.find(candidate => String(candidate.id) === id);
+            const count = Array.isArray(section.settings) ? section.settings.length : 0;
+            const isActive = id === String(currentSection);
+            html += '<div class="nav-item' + (isActive ? ' active' : '') + '" data-section="' + escapeHtml(id) + '" role="button" tabindex="0" aria-current="' + (isActive ? 'true' : 'false') + '">' +
+                '<span class="nav-icon" aria-hidden="true">' + (icons[id] || '') + '</span>' +
+                '<span class="nav-label">' + escapeHtml(String(section.title || section.id)) + '</span>' +
+                '<span class="nav-count" title="' + count + ' settings">' + count + '</span>' +
+                '</div>';
+        }
+        html += '</div>';
+    }
+    nav.innerHTML = html;
 
     nav.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', () => {
+        const activate = () => {
             currentSection = item.dataset.section;
             renderNav();
             renderContent();
-            document.getElementById('mainContent').scrollTop = 0;
+            const main = document.getElementById('mainContent');
+            if (main) main.scrollTop = 0;
+        };
+        item.addEventListener('click', activate);
+        item.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                activate();
+            }
         });
     });
 }
@@ -55,7 +94,6 @@ function renderContent() {
     const sectionSettings = Array.isArray(section.settings) ? section.settings : [];
     const hasResettable = sectionSettings.some(s => s.configKey);
     let html = '<div class="section-header">' +
-        '<span class="section-icon"></span>' +
         '<span class="section-title">' + escapeHtml(String(section.title || section.id)) + '</span>';
     if (hasResettable) {
         html += '<button class="section-reset-btn" data-section-reset="' + escapeHtml(String(section.id)) + '" title="Reset all settings in this section to defaults">↺ Reset All</button>';
@@ -210,21 +248,21 @@ function renderSnippetsContent(userSnippets, predefined) {
 
     if (filteredPredefined.length > 0) {
         html += '<div class="snippet-subsection-title">Predefined <span class="count">(' + filteredPredefined.length + ' total' + (q ? ' matched' : '') + ')</span></div>';
-        html += '<div style="margin-bottom:16px;">';
+        html += '<div class="snippet-list">';
         for (const sn of visiblePredefined) {
             const prefixText = sn.prefix.length > 0 ? sn.prefix.join(', ') : '—';
-            html += '<div class="snippet-item" style="margin-bottom:6px;">' +
+            html += '<div class="snippet-item predefined">' +
                 '<div class="snippet-header">' +
                     '<span class="snippet-prefix">' + escapeHtml(prefixText) + '</span>' +
-                    '<span style="flex:1;font-size:12px;font-weight:500;">' + escapeHtml(sn.name) + '</span>' +
+                    '<span class="snippet-title">' + escapeHtml(sn.name) + '</span>' +
                 '</div>' +
-                '<div class="snippet-body" style="font-size:11px;color:var(--fg-dim);padding:6px 12px;">' +
+                '<div class="snippet-desc">' +
                     escapeHtml(sn.description) +
                 '</div>' +
             '</div>';
         }
         if (filteredPredefined.length > visiblePredefined.length && !q) {
-            html += '<div style="text-align:center;padding:8px;font-size:11px;color:var(--fg-muted);">+' + (filteredPredefined.length - 10) + ' more snippets. <a href="#" class="footer-link btn" data-action="openSnippetsFile" style="display:inline-flex;padding:2px 8px;">Open file</a></div>';
+            html += '<div class="snippet-more">+' + (filteredPredefined.length - 10) + ' more snippets. <a href="#" class="footer-link btn btn-compact" data-action="openSnippetsFile">Open file</a></div>';
         }
         html += '</div>';
     }
@@ -256,8 +294,8 @@ function renderSnippetItem(sn) {
         '</div>' +
         '<div class="snippet-actions">' +
             '<span class="snippet-status" id="snippet-status-' + sn.id + '"></span>' +
-            '<button class="btn btn-primary" data-snippet-save="' + sn.id + '" style="padding:3px 10px;font-size:11px;">Save</button>' +
-            '<button class="btn btn-danger" data-snippet-delete="' + sn.id + '" style="padding:3px 10px;font-size:11px;">Delete</button>' +
+            '<button class="btn btn-primary btn-compact" data-snippet-save="' + sn.id + '">Save</button>' +
+            '<button class="btn btn-danger btn-compact" data-snippet-delete="' + sn.id + '">Delete</button>' +
         '</div>' +
     '</div>';
 }
@@ -337,7 +375,7 @@ function renderControl(setting) {
             const limits = NUMERIC_LIMITS[setting.configKey] || {};
             const min = limits.min !== undefined ? ' min="' + limits.min + '"' : '';
             const max = limits.max !== undefined ? ' max="' + limits.max + '"' : '';
-            controlHtml = '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;">' +
+            controlHtml = '<div class="number-control">' +
                 '<input type="number" class="number-input" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" value="' + escapeHtml(String(numVal)) + '"' + min + max + '>' +
                 (showFormatted ? '<span class="number-formatted" id="fmt-' + escapeHtml(String(setting.id || '')) + '">' + escapeHtml(formatted) + '</span>' : '') +
             '</div>';
@@ -362,7 +400,7 @@ function renderControl(setting) {
     // Add reset button for settings with a configKey
     if (setting.configKey && setting.type !== 'textarea') {
         const defaultHint = setting.defaultValue !== undefined ? 'Reset to default: ' + formatSettingValue(setting.defaultValue) : 'Reset to default';
-        controlHtml += '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey)) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(String(defaultHint)) + '">↺</button>';
+        controlHtml += '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey)) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(String(defaultHint)) + '" aria-label="Reset ' + escapeHtml(String(setting.label || setting.id || 'setting')) + ' to default">↺</button>';
     }
     return controlHtml;
 }
@@ -372,9 +410,9 @@ function renderTextareaControl(setting) {
     const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + setting.defaultValue : '↺ Reset to default prompt';
     const promptType = setting.id.replace('copilot-prompt-', '');
     return '<textarea class="textarea-control" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" placeholder="Customize this prompt...">' + escapeHtml(val) + '</textarea>' +
-        '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">' +
+        '<div class="textarea-actions">' +
             '<button class="btn btn-test-prompt" data-prompt-id="' + setting.id + '" data-prompt-type="' + promptType + '" title="Send this prompt to AI with a test query">▶ Test Prompt</button>' +
-            '<button class="reset-btn" data-reset-key="' + setting.configKey + '" data-reset-id="' + setting.id + '" title="' + escapeHtml(defaultHint) + '">↺</button>' +
+            '<button class="reset-btn" data-reset-key="' + setting.configKey + '" data-reset-id="' + setting.id + '" title="' + escapeHtml(defaultHint) + '" aria-label="Reset ' + escapeHtml(String(setting.label || setting.id)) + ' to default">↺</button>' +
             '<span class="textarea-status" id="status-' + setting.id + '"></span>' +
         '</div>' +
         '<div class="prompt-test-result" id="test-result-' + setting.id + '"></div>';
@@ -386,8 +424,8 @@ function renderJsonControl(setting) {
     const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + formatSettingValue(setting.defaultValue) : '↺ Reset to default';
     return '<div class="json-control">' +
         '<textarea class="json-textarea" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" data-json-kind="' + escapeHtml(String(setting.jsonKind || '')) + '" spellcheck="false">' + escapeHtml(serialized) + '</textarea>' +
-        '<div class="json-toolbar"><span class="json-status" id="json-status-' + escapeHtml(String(setting.id || '')) + '">Valid JSON</span>' +
-        '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey || '')) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(defaultHint) + '">↺</button></div>' +
+        '<div class="json-toolbar"><span class="json-status" id="json-status-' + escapeHtml(String(setting.id || '')) + '" role="status" aria-live="polite">Valid JSON</span>' +
+        '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey || '')) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(defaultHint) + '" aria-label="Reset ' + escapeHtml(String(setting.label || setting.id || 'setting')) + ' to default">↺</button></div>' +
         '</div>';
 }
 
@@ -403,8 +441,8 @@ function escapeHtml(text) {
 }
 
 function renderQuickActions() {
-    return '<div style="margin-top: 20px;">' +
-        '<div class="section-header"><span class="section-icon"></span><span class="section-title">Quick Actions</span></div>' +
+    return '<div class="quick-actions">' +
+        '<div class="section-header"><span class="section-title">Quick Actions</span></div>' +
         '<div class="footer-links">' +
             '<button class="footer-link btn" data-action="openConnection">Connect to Database</button>' +
             '<button class="footer-link btn" data-action="refreshSchema">Refresh Schema</button>' +
@@ -485,7 +523,7 @@ function attachControlListeners() {
             const action = el.dataset.action;
             // Handle New Snippet locally instead of round-trip to host (#3)
             if (action === 'newSnippet') {
-                document.getElementById('newSnippetOverlay')?.classList.add('show');
+                openSnippetModal();
                 return;
             }
             vscode.postMessage({ command: action });
@@ -533,11 +571,13 @@ function attachControlListeners() {
                         settingsValues[id] = value;
                         vscode.postMessage({ command: 'updateSetting', key: key, value: value });
                     }
+                    el.removeAttribute('aria-invalid');
                     if (statusEl) {
                         statusEl.textContent = '✓ Valid JSON';
                         statusEl.className = 'json-status valid';
                     }
                 } catch (error) {
+                    el.setAttribute('aria-invalid', 'true');
                     if (statusEl) {
                         statusEl.textContent = '✗ ' + (error instanceof Error ? error.message : 'Invalid JSON');
                         statusEl.className = 'json-status invalid';
@@ -624,11 +664,15 @@ function validateJsonValue(value, kind) {
 }
 
 // ── Toast ──
-function showToast(msg) {
+let toastTimer;
+function showToast(msg, variant) {
     const toast = document.getElementById('toast');
+    if (!toast) return;
+    clearTimeout(toastTimer);
     toast.textContent = msg;
+    toast.classList.toggle('error', variant === 'error');
     toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 1800);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
 }
 
 // ── Search ──
@@ -647,7 +691,7 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
     if (searchQuery) {
         // Search across ALL sections
         const wrapper = document.getElementById('contentWrapper');
-        let html = '<div class="section-header"><span class="section-icon"></span><span class="section-title">Search Results</span></div>';
+        let html = '<div class="section-header"><span class="section-title">Search Results</span></div>';
 
         let foundAny = false;
         for (const section of SECTIONS) {
@@ -655,8 +699,8 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
             const matchingSettings = sectionSettings.filter(s => matchesFilter(s, searchQuery));
             if (matchingSettings.length > 0) {
                 foundAny = true;
-                html += '<div class="section-group" style="margin-bottom:20px;">';
-                html += '<div class="section-description" style="margin-bottom:6px;font-weight:600;color:var(--fg);">' + escapeHtml(String(section.title || section.id)) + '</div>';
+                html += '<div class="section-group">';
+                html += '<div class="section-group-title">' + escapeHtml(String(section.title || section.id)) + '</div>';
                 html += '<div class="settings-card">';
                 for (const setting of matchingSettings) {
                     html += renderSettingRow(setting);
@@ -666,9 +710,10 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
         }
 
         if (!foundAny) {
-            html += '<div style="text-align:center;padding:40px 20px;color:var(--fg-dim);">';
-            html += '<div style="font-size:20px;margin-bottom:8px;font-weight:500;">No settings found</div>';
-            html += '<div style="font-size:12px;margin-top:4px;">Try a different search term</div>';
+            html += '<div class="search-empty">';
+            html += '<div class="search-empty-icon" aria-hidden="true">🔍</div>';
+            html += '<div class="search-empty-title">No settings found</div>';
+            html += '<div class="search-empty-hint">Try a different search term</div>';
             html += '</div>';
         }
 
@@ -705,7 +750,7 @@ window.addEventListener('message', event => {
                     jsonStatusEl.className = 'json-status valid';
                 }
             } else {
-                showToast('✗ Save failed: ' + (msg.error || 'Unknown error'));
+                showToast('✗ Save failed: ' + (msg.error || 'Unknown error'), 'error');
                 vscode.postMessage({ command: 'getSettings' });
             }
             break;
@@ -716,7 +761,7 @@ window.addEventListener('message', event => {
             showToast('✓ Section reset (' + (msg.count || 0) + ' settings restored to default)');
             break;
         case 'operationFailed':
-            showToast('✗ Operation failed: ' + (msg.error || 'Unknown error'));
+            showToast('✗ Operation failed: ' + (msg.error || 'Unknown error'), 'error');
             vscode.postMessage({ command: 'getSettings' });
             break;
         case 'snippetsData':
@@ -727,11 +772,13 @@ window.addEventListener('message', event => {
         case 'snippetCreated':
             if (msg.success) {
                 showToast('✓ Snippet created');
-                document.getElementById('newSnippetOverlay')?.classList.remove('show');
-                document.getElementById('newSnippetName').value = '';
-                document.getElementById('newSnippetSql').value = '';
+                const nameInput = document.getElementById('newSnippetName');
+                const sqlInput = document.getElementById('newSnippetSql');
+                if (nameInput) nameInput.value = '';
+                if (sqlInput) sqlInput.value = '';
+                closeSnippetModal();
             } else {
-                showToast('✗ Failed: ' + (msg.error || 'Unknown error'));
+                showToast('✗ Failed: ' + (msg.error || 'Unknown error'), 'error');
             }
             break;
         case 'snippetUpdated':
@@ -752,7 +799,7 @@ window.addEventListener('message', event => {
             if (msg.success) {
                 showToast('✓ Snippet deleted');
             } else {
-                showToast('✗ Delete failed: ' + (msg.error || 'Error'));
+                showToast('✗ Delete failed: ' + (msg.error || 'Error'), 'error');
             }
             break;
         case 'testPromptResult':
@@ -782,24 +829,121 @@ renderNav();
 renderContent();
 vscode.postMessage({ command: 'getSettings' });
 
-// ── One-time modal init (outside attachControlListeners to avoid duplicates) ──
-(function initModal() {
-    const cancelBtn = document.getElementById("newSnippetCancel");
-    const createBtn = document.getElementById("newSnippetCreate");
-    const overlay = document.getElementById("newSnippetOverlay");
-    if (cancelBtn) cancelBtn.addEventListener("click", () => document.getElementById("newSnippetOverlay")?.classList.remove("show"));
-    if (createBtn) createBtn.addEventListener("click", () => {
-        const nameInput = document.getElementById("newSnippetName");
-        const sqlInput = document.getElementById("newSnippetSql");
-        if (nameInput && sqlInput) {
-            const name = nameInput.value.trim();
-            const sql = sqlInput.value.trim();
-            if (!name) { showToast("Name is required"); return; }
-            if (!sql) { showToast("SQL is required"); return; }
-            vscode.postMessage({ command: "createSnippet", value: { label: name, sql: sql } });
+// ── Modal ──
+let modalReturnFocus = null;
+
+function getFocusableElements(container) {
+    return Array.from(container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(element => !element.disabled && element.offsetParent !== null);
+}
+
+function openSnippetModal() {
+    const overlay = document.getElementById('newSnippetOverlay');
+    if (!overlay) return;
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    overlay.classList.add('show');
+    const nameInput = document.getElementById('newSnippetName');
+    if (nameInput) nameInput.focus();
+}
+
+function closeSnippetModal() {
+    const overlay = document.getElementById('newSnippetOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('show');
+    const returnTarget = modalReturnFocus;
+    modalReturnFocus = null;
+    if (returnTarget && document.contains(returnTarget)) returnTarget.focus();
+}
+
+document.addEventListener('keydown', event => {
+    const overlay = document.getElementById('newSnippetOverlay');
+    const isOpen = Boolean(overlay && overlay.classList.contains('show'));
+
+    if (isOpen && event.key === 'Escape') {
+        event.preventDefault();
+        closeSnippetModal();
+        return;
+    }
+
+    if (isOpen && event.key === 'Tab' && overlay) {
+        const focusable = getFocusableElements(overlay);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
         }
+        return;
+    }
+
+    const target = event.target;
+    const isTyping = target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+    if (!isTyping && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            event.preventDefault();
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+});
+
+// ── Init ──
+renderNav();
+renderContent();
+vscode.postMessage({ command: 'getSettings' });
+
+// ── One-time shell init (outside attachControlListeners to avoid duplicates) ──
+(function initShell() {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.setAttribute('aria-label', 'Search settings');
+    }
+
+    const toast = document.getElementById('toast');
+    if (toast) {
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.setAttribute('aria-atomic', 'true');
+    }
+
+    const overlay = document.getElementById('newSnippetOverlay');
+    const modal = overlay ? overlay.querySelector('.new-snippet-modal') : null;
+    if (modal) {
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', 'New custom snippet');
+    }
+
+    const cancelBtn = document.getElementById('newSnippetCancel');
+    const createBtn = document.getElementById('newSnippetCreate');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeSnippetModal);
+    if (createBtn) createBtn.addEventListener('click', () => {
+        const nameInput = document.getElementById('newSnippetName');
+        const sqlInput = document.getElementById('newSnippetSql');
+        if (!nameInput || !sqlInput) return;
+        const name = nameInput.value.trim();
+        const sql = sqlInput.value.trim();
+        if (!name) {
+            showToast('Name is required', 'error');
+            nameInput.focus();
+            return;
+        }
+        if (!sql) {
+            showToast('SQL is required', 'error');
+            sqlInput.focus();
+            return;
+        }
+        vscode.postMessage({ command: 'createSnippet', value: { label: name, sql } });
     });
-    if (overlay) overlay.addEventListener("click", (e) => {
-        if (e.target === overlay) overlay.classList.remove("show");
-    });
+    if (overlay) {
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) closeSnippetModal();
+        });
+    }
 })();

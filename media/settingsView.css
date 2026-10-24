@@ -1,21 +1,33 @@
 :root {
-    --bg: var(--vscode-editor-background);
-    --bg-surface: var(--vscode-editor-background);
-    --bg-sidebar: var(--vscode-sideBar-background, #1e1e2e);
-    --bg-card: var(--vscode-editor-background);
-    --bg-card-hover: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04));
-    --bg-input: var(--vscode-input-background, #3c3c4c);
+    color-scheme: light dark;
+
+    /* Surfaces, text, and accents are derived from the active VS Code theme so
+       the panel follows light, dark, and high-contrast themes automatically. */
+    --bg: var(--vscode-editor-background, #1e1e1e);
+    --bg-surface: var(--vscode-editor-background, #1e1e1e);
+    --bg-sidebar: var(--vscode-sideBar-background, var(--vscode-editor-background, #1e1e1e));
+    --bg-card: var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e));
+    --bg-card-hover: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+    --bg-input: var(--vscode-input-background, rgba(128, 128, 128, 0.15));
     --fg: var(--vscode-editor-foreground, #e0e0e0);
     --fg-dim: var(--vscode-descriptionForeground, #999);
     --fg-muted: var(--vscode-descriptionForeground, #888);
-    --border: var(--vscode-widget-border, #333);
-    --border-subtle: rgba(255,255,255,0.06);
-    --accent: #4ea4f6;
+    --border: var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+    --border-subtle: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    --border-subtle: color-mix(in srgb, var(--vscode-foreground, currentColor) 12%, transparent);
+    --accent: var(--vscode-focusBorder, #4ea4f6);
+    --accent-text: var(--vscode-textLink-foreground, #4ea4f6);
     --accent-bg: rgba(78, 164, 246, 0.12);
-    --toggle-on: #4ea4f6;
-    --toggle-off: #555;
-    --danger: #f44;
-    --section-bg: rgba(255,255,255,0.03);
+    --accent-bg: color-mix(in srgb, var(--vscode-focusBorder, #4ea4f6) 16%, transparent);
+    --button-bg: var(--vscode-button-background, #4ea4f6);
+    --button-fg: var(--vscode-button-foreground, #ffffff);
+    --toggle-on: var(--vscode-button-background, #4ea4f6);
+    --toggle-off: var(--vscode-input-background, rgba(128, 128, 128, 0.35));
+    --danger: var(--vscode-errorForeground, #f44);
+    --danger-bg: var(--vscode-inputValidation-errorBackground, rgba(255, 68, 68, 0.1));
+    --success: var(--vscode-testing-iconPassed, #73c991);
+    --warning: var(--vscode-editorWarning-foreground, #cca700);
+    --section-bg: rgba(128, 128, 128, 0.06);
     --card-radius: 10px;
     --transition: 0.15s ease;
 }
@@ -63,13 +75,13 @@ body {
     width: 24px;
     height: 24px;
     border-radius: 4px;
-    background: var(--accent);
+    background: var(--button-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 11px;
     font-weight: 700;
-    color: #fff;
+    color: var(--button-fg);
     flex-shrink: 0;
 }
 
@@ -82,15 +94,25 @@ body {
     padding: 6px 8px 6px 28px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 4px;
     font-size: 12px;
+    font-family: inherit;
     outline: none;
-    transition: border-color var(--transition);
+    transition: border-color var(--transition), box-shadow var(--transition);
 }
 
 .sidebar-search input:focus {
     border-color: var(--accent);
+}
+
+.sidebar-search input:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.sidebar-search input::placeholder {
+    color: var(--fg-muted);
 }
 
 .sidebar-search-wrapper {
@@ -114,10 +136,10 @@ body {
 .sidebar-search-wrapper::after {
     content: '';
     position: absolute;
-    left: 17px;
-    top: 14px;
-    width: 4px;
-    height: 1px;
+    left: 18px;
+    top: calc(50% + 3px);
+    width: 5px;
+    height: 1.5px;
     background: var(--fg-muted);
     opacity: 0.6;
     transform: rotate(45deg);
@@ -130,6 +152,20 @@ body {
     padding: 4px 6px;
 }
 
+.nav-group-title {
+    padding: 10px 10px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    user-select: none;
+}
+
+.nav-group:first-child .nav-group-title {
+    padding-top: 4px;
+}
+
 .nav-item {
     display: flex;
     align-items: center;
@@ -140,8 +176,9 @@ body {
     font-size: 12px;
     font-weight: 500;
     color: var(--fg-dim);
-    transition: all var(--transition);
+    transition: background var(--transition), color var(--transition);
     user-select: none;
+    outline: none;
 }
 
 .nav-item:hover {
@@ -149,9 +186,40 @@ body {
     color: var(--fg);
 }
 
+.nav-item:focus-visible {
+    background: var(--bg-card-hover);
+    color: var(--fg);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
 .nav-item.active {
     background: var(--accent-bg);
-    color: var(--accent);
+    color: var(--fg);
+    font-weight: 600;
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.nav-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nav-count {
+    margin-left: auto;
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--vscode-badge-background, rgba(128, 128, 128, 0.25));
+    color: var(--vscode-badge-foreground, var(--fg-dim));
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
 }
 
 .nav-icon {
@@ -192,6 +260,7 @@ body {
 .main {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     overflow-y: auto;
     padding: 0;
 }
@@ -209,10 +278,6 @@ body {
     gap: 10px;
     margin-bottom: 4px;
     padding-top: 4px;
-}
-
-.section-icon {
-    display: none;
 }
 
 .section-title {
@@ -236,19 +301,25 @@ body {
     font-family: inherit;
     cursor: pointer;
     transition: all var(--transition);
-    opacity: 0;
+    opacity: 0.55;
     white-space: nowrap;
 }
 
 .section-header:hover .section-reset-btn {
-    opacity: 0.6;
+    opacity: 0.9;
+}
+
+.section-reset-btn:focus-visible {
+    opacity: 1;
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .section-reset-btn:hover {
     opacity: 1 !important;
     color: var(--danger);
     border-color: var(--danger);
-    background: rgba(255, 68, 68, 0.08);
+    background: var(--danger-bg);
 }
 
 .section-reset-btn:active {
@@ -287,6 +358,39 @@ body {
     color: var(--fg);
     font-size: 13px;
     font-weight: 600;
+}
+
+.section-group {
+    margin-bottom: 20px;
+}
+
+.section-group-title {
+    margin-bottom: 6px;
+    font-weight: 600;
+    color: var(--fg);
+}
+
+.search-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--fg-dim);
+}
+
+.search-empty-icon {
+    font-size: 20px;
+    margin-bottom: 8px;
+    opacity: 0.7;
+}
+
+.search-empty-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+}
+
+.search-empty-hint {
+    font-size: 12px;
+    margin-top: 4px;
 }
 
 .mcp-status-card {
@@ -371,6 +475,10 @@ body {
     background: var(--bg-card-hover);
 }
 
+.setting-row:focus-within {
+    background: var(--bg-card-hover);
+}
+
 .setting-info {
     flex: 1;
     min-width: 0;
@@ -381,10 +489,6 @@ body {
     font-size: 13px;
     margin-bottom: 2px;
     color: var(--fg);
-}
-
-.setting-label-icon {
-    display: none;
 }
 
 .setting-desc {
@@ -401,7 +505,7 @@ body {
 }
 
 .setting-row-error {
-    background: rgba(244, 135, 113, 0.08);
+    background: var(--danger-bg);
 }
 
 /* Toggle Switch */
@@ -423,8 +527,9 @@ body {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     background: var(--toggle-off);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 9px;
-    transition: background var(--transition);
+    transition: background var(--transition), border-color var(--transition);
 }
 
 .toggle-slider::before {
@@ -432,42 +537,64 @@ body {
     position: absolute;
     width: 12px;
     height: 12px;
-    left: 3px;
-    bottom: 3px;
-    background: #fff;
+    left: 2px;
+    bottom: 2px;
+    background: var(--vscode-input-foreground, var(--fg));
     border-radius: 50%;
-    transition: transform var(--transition);
+    transition: transform var(--transition), background var(--transition);
+}
+
+.toggle:hover .toggle-slider {
+    border-color: var(--accent);
+}
+
+.toggle input:focus-visible + .toggle-slider {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .toggle input:checked + .toggle-slider {
     background: var(--toggle-on);
+    border-color: var(--toggle-on);
 }
 
 .toggle input:checked + .toggle-slider::before {
+    background: var(--button-fg);
     transform: translateX(14px);
 }
 
 /* Select */
 .select-control {
-    padding: 5px 28px 5px 10px;
-    background: var(--bg-input);
+    padding: 5px 26px 5px 10px;
+    background-color: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 6px;
     font-size: 12px;
     font-family: inherit;
     outline: none;
     cursor: pointer;
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+    background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+        calc(100% - 14px) calc(50% - 1px),
+        calc(100% - 9px) calc(50% - 1px);
+    background-size: 5px 5px, 5px 5px;
     background-repeat: no-repeat;
-    background-position: right 8px center;
     min-width: 130px;
+    text-overflow: ellipsis;
     transition: border-color var(--transition);
 }
 
 .select-control:focus {
     border-color: var(--accent);
+}
+
+.select-control:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 /* Number Input */
@@ -476,10 +603,11 @@ body {
     padding: 5px 8px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 6px;
     font-size: 12px;
     font-family: var(--vscode-editor-font-family, monospace);
+    font-variant-numeric: tabular-nums;
     outline: none;
     text-align: right;
     transition: border-color var(--transition);
@@ -494,6 +622,18 @@ body {
 
 .number-input:focus {
     border-color: var(--accent);
+}
+
+.number-input:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.number-control {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
 }
 
 .number-formatted {
@@ -511,7 +651,7 @@ body {
     padding: 5px 8px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 6px;
     font-size: 12px;
     font-family: inherit;
@@ -523,6 +663,11 @@ body {
     border-color: var(--accent);
 }
 
+.text-input:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .text-input::placeholder {
     color: var(--fg-muted);
 }
@@ -530,7 +675,7 @@ body {
 /* Button */
 .btn {
     padding: 5px 14px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-button-border, var(--border));
     border-radius: 6px;
     background: var(--bg-input);
     color: var(--fg);
@@ -538,7 +683,7 @@ body {
     font-family: inherit;
     font-weight: 500;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition), border-color var(--transition), color var(--transition);
     white-space: nowrap;
 }
 
@@ -547,14 +692,26 @@ body {
     border-color: var(--accent);
 }
 
+.btn:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .btn-primary {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
+    background: var(--button-bg);
+    color: var(--button-fg);
+    border-color: var(--button-bg);
 }
 
 .btn-primary:hover {
-    opacity: 0.9;
+    background: var(--vscode-button-hoverBackground, var(--button-bg));
+    filter: none;
+    opacity: 0.92;
 }
 
 .btn-danger {
@@ -563,7 +720,12 @@ body {
 }
 
 .btn-danger:hover {
-    background: rgba(255, 68, 68, 0.1);
+    background: var(--danger-bg);
+}
+
+.btn-compact {
+    padding: 3px 10px;
+    font-size: 11px;
 }
 
 /* Toast Notification */
@@ -572,17 +734,25 @@ body {
     bottom: 24px;
     right: 24px;
     padding: 10px 18px;
-    background: var(--accent);
-    color: #fff;
+    background: var(--button-bg);
+    color: var(--button-fg);
+    border: 1px solid var(--vscode-button-border, transparent);
     border-radius: 8px;
     font-size: 12px;
     font-weight: 500;
     opacity: 0;
     transform: translateY(10px);
-    transition: all 0.25s ease;
+    transition: opacity 0.25s ease, transform 0.25s ease;
     pointer-events: none;
     z-index: 1000;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+    max-width: min(420px, calc(100vw - 48px));
+}
+
+.toast.error {
+    background: var(--danger-bg);
+    color: var(--vscode-inputValidation-errorForeground, var(--fg));
+    border-color: var(--vscode-inputValidation-errorBorder, var(--danger));
 }
 
 .toast.show {
@@ -600,10 +770,18 @@ body {
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background, rgba(128, 128, 128, 0.35));
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground, rgba(128, 128, 128, 0.55));
+}
+::-webkit-scrollbar-thumb:active {
+    background: var(--vscode-scrollbarSlider-activeBackground, rgba(128, 128, 128, 0.7));
+}
 
 /* Footer links */
 .footer-links {
@@ -625,13 +803,22 @@ body {
     font-size: 12px;
     text-decoration: none;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
 
 .footer-link:hover {
     background: var(--bg-card-hover);
     color: var(--fg);
     border-color: var(--border);
+}
+
+.footer-link:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.quick-actions {
+    margin-top: 20px;
 }
 
 /* Textarea */
@@ -642,7 +829,7 @@ body {
     padding: 8px 10px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 6px;
     font-size: 11px;
     font-family: var(--vscode-editor-font-family, 'JetBrains Mono', 'Fira Code', monospace);
@@ -664,7 +851,7 @@ body {
     padding: 8px 10px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 6px;
     font-size: 11px;
     font-family: var(--vscode-editor-font-family, 'JetBrains Mono', 'Fira Code', monospace);
@@ -676,6 +863,12 @@ body {
 
 .json-textarea:focus {
     border-color: var(--accent);
+}
+
+.textarea-control:focus-visible,
+.json-textarea:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .json-toolbar {
@@ -734,21 +927,28 @@ body {
 }
 
 .textarea-status.saved {
-    color: #4caf50;
+    color: var(--success);
+}
+
+.textarea-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
 }
 
 /* Test Prompt Button */
 .btn-test-prompt {
     padding: 4px 10px;
-    border: 1px solid var(--accent);
+    border: 1px solid var(--accent-text);
     border-radius: 4px;
     background: transparent;
-    color: var(--accent);
+    color: var(--accent-text);
     font-size: 11px;
     font-family: inherit;
     font-weight: 500;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition), border-color var(--transition);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -759,6 +959,11 @@ body {
 
 .btn-test-prompt:active {
     transform: scale(0.96);
+}
+
+.btn-test-prompt:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .btn-test-prompt.loading {
@@ -831,7 +1036,7 @@ body {
     font-size: 13px;
     line-height: 1;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: opacity 0.2s ease, color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
     opacity: 0.4;
     flex-shrink: 0;
     margin-left: 4px;
@@ -840,7 +1045,7 @@ body {
 
 .reset-btn:hover {
     opacity: 1;
-    color: var(--accent);
+    color: var(--accent-text);
     background: var(--accent-bg);
     border-color: var(--accent);
 }
@@ -849,21 +1054,25 @@ body {
     transform: scale(0.9);
 }
 
-.setting-control:hover .reset-btn {
-    opacity: 0.6;
+.reset-btn:focus-visible {
+    opacity: 1;
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .setting-control .reset-btn {
-    opacity: 0;
-    transition: opacity 0.2s ease, color 0.15s ease, background 0.15s ease;
+    /* Keep the control discoverable for keyboard and touch users instead of
+       hiding it until pointer hover. */
+    opacity: 0.35;
 }
 
-.setting-row:hover .reset-btn {
-    opacity: 0.5;
+.setting-row:hover .reset-btn,
+.setting-control:hover .reset-btn {
+    opacity: 0.85;
 }
 
 .reset-btn.show {
-    opacity: 0.5;
+    opacity: 0.85;
 }
 
 /* Snippet UI */
@@ -872,10 +1081,15 @@ body {
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
     overflow: hidden;
+    background: var(--bg-card);
 }
 
 .snippet-item:last-child {
     margin-bottom: 0;
+}
+
+.snippet-item.predefined {
+    margin-bottom: 6px;
 }
 
 .snippet-header {
@@ -883,8 +1097,30 @@ body {
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    background: rgba(255,255,255,0.03);
+    background: var(--section-bg);
     border-bottom: 1px solid var(--border-subtle);
+}
+
+.snippet-list {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 16px;
+}
+
+.snippet-title {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.snippet-desc {
+    font-size: 11px;
+    color: var(--fg-dim);
+    padding: 6px 12px;
 }
 
 .snippet-header .snippet-name-input {
@@ -892,7 +1128,7 @@ body {
     padding: 4px 8px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 4px;
     font-size: 12px;
     font-family: inherit;
@@ -904,9 +1140,14 @@ body {
     border-color: var(--accent);
 }
 
+.snippet-header .snippet-name-input:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .snippet-prefix {
     font-size: 11px;
-    color: var(--accent);
+    color: var(--accent-text);
     font-family: var(--vscode-editor-font-family, monospace);
     background: var(--accent-bg);
     padding: 2px 6px;
@@ -924,7 +1165,7 @@ body {
     padding: 8px 10px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 4px;
     font-size: 11px;
     font-family: var(--vscode-editor-font-family, 'JetBrains Mono', 'Fira Code', monospace);
@@ -937,6 +1178,11 @@ body {
 
 .snippet-body .snippet-sql-textarea:focus {
     border-color: var(--accent);
+}
+
+.snippet-body .snippet-sql-textarea:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .snippet-actions {
@@ -962,7 +1208,17 @@ body {
 }
 
 .snippet-status.saved {
-    color: #4caf50;
+    color: var(--success);
+}
+
+.snippet-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px;
+    font-size: 11px;
+    color: var(--fg-muted);
 }
 
 .snippet-subsection-title {
@@ -992,7 +1248,8 @@ body {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(1px);
     z-index: 999;
 }
 
@@ -1001,14 +1258,15 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: var(--bg);
+    background: var(--vscode-editorWidget-background, var(--bg));
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 20px;
     width: 500px;
     max-width: 90vw;
     z-index: 1000;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.4));
+    outline: none;
 }
 
 .new-snippet-modal h3 {
@@ -1030,7 +1288,7 @@ body {
     padding: 6px 10px;
     background: var(--bg-input);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--vscode-input-border, var(--border));
     border-radius: 4px;
     font-size: 12px;
     font-family: inherit;
@@ -1053,4 +1311,100 @@ body {
     display: flex;
     gap: 8px;
     justify-content: flex-end;
+}
+
+/* ── Responsive layout ── */
+@media (max-width: 720px) {
+    body {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+        min-width: 0;
+        flex-direction: row;
+        align-items: center;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-header {
+        display: none;
+    }
+
+    .sidebar-search {
+        flex: 0 0 min(200px, 42vw);
+        padding: 6px 8px;
+    }
+
+    .sidebar-nav {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 6px 8px;
+    }
+
+    .nav-group {
+        display: contents;
+    }
+
+    .nav-group-title {
+        display: none;
+    }
+
+    .nav-item {
+        width: auto;
+        white-space: nowrap;
+    }
+
+    .nav-item.active {
+        box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .nav-count {
+        display: none;
+    }
+
+    .sidebar-footer {
+        display: none;
+    }
+
+    .content-wrapper {
+        padding: 16px 16px 40px;
+    }
+}
+
+@media (max-width: 560px) {
+    .setting-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .setting-control {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .text-input,
+    .select-control,
+    .json-control {
+        width: 100%;
+        max-width: none;
+    }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

@@ -1,6 +1,6 @@
 # Webview UX Conventions
 
-Last updated: 2026-08-31
+Last updated: 2026-10-24
 
 This document defines the baseline UX contract for extension webviews. High-traffic
 panels use TypeScript entry points and typed host-side contracts to different
@@ -147,6 +147,7 @@ Status values:
 | Table Designer | partial | present | present | present | n/a | Shared contracts plus inline validation banner, empty-columns card, and host error feedback. |
 | Analysis Panel | missing | present | partial | missing | present | Empty instructional states are clear, but loading/cancel/error behavior is still ad hoc. |
 | Copilot Profiles | partial | partial | present | n/a | n/a | Async profile load and error reporting exist, but empty/loading behavior is not yet standardized. |
+| Settings | partial | present | present | n/a | present | Registry-driven rows with inline save feedback, section/search empty states, keyboard navigation, visible reset actions, and a focus-trapped snippet dialog; first-load still renders defaults without an explicit loading indicator. |
 
 ## Completed contract focus and remaining work
 

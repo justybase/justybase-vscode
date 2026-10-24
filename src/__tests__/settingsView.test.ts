@@ -45,6 +45,18 @@ describe('SettingsView webview shell', () => {
         expect(css).toMatch(/\.text-input\s*\{[\s\S]*color:\s*var\(--fg\)/);
     });
 
+    it('derives panel accents and surfaces from VS Code theme variables', () => {
+        const css = fs.readFileSync(path.join(__dirname, '../../media/settingsView.css'), 'utf8');
+
+        expect(css).toContain('color-scheme: light dark;');
+        expect(css).toMatch(/--accent:\s*var\(--vscode-focusBorder/);
+        expect(css).toMatch(/--danger:\s*var\(--vscode-errorForeground/);
+        expect(css).toMatch(/--bg-sidebar:\s*var\(--vscode-sideBar-background/);
+        expect(css).toMatch(/--bg-card-hover:\s*var\(--vscode-list-hoverBackground/);
+        expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+        expect(css).not.toContain('rgba(255,255,255,0.03)');
+    });
+
     it('keeps the custom settings registry in parity with the extension manifest', () => {
         const WebviewPanelMock = (vscode as unknown as {
             WebviewPanel: new () => vscode.WebviewPanel;
