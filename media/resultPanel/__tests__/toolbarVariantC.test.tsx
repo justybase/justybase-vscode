@@ -63,6 +63,7 @@ beforeEach(() => {
     panelWindow.resultSets = [];
     panelWindow.activeSource = undefined;
     panelWindow.queryRowLimit = undefined;
+    panelWindow.defaultExcelFormat = undefined;
 });
 
 describe('onGlobalFilterKeydown (variant C: Escape clears)', () => {
@@ -278,7 +279,17 @@ describe('export menu (no remembered choice)', () => {
         chip('ALL rows').click();
         action('file').click();
 
-        expect(lastExportMessage()).toMatchObject({ format: 'xlsx', destination: 'file', rowScope: 'all' });
+        expect(lastExportMessage()).toMatchObject({ format: 'excel', destination: 'file', rowScope: 'all' });
+    });
+
+    it('uses the configured XLSX flavour as the default Excel format', () => {
+        getResultPanelWindow().defaultExcelFormat = 'xlsx';
+        withExportMenu();
+        handleExportPrimaryClick();
+        expect(chip('Excel').getAttribute('aria-checked')).toBe('true');
+        action('file').click();
+
+        expect(lastExportMessage()).toMatchObject({ format: 'xlsx', destination: 'file' });
     });
 
     it('stays closed when there is no exportable grid', () => {
