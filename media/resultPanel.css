@@ -578,7 +578,7 @@ body.vscode-dark {
 
 .result-limit-banner {
     display: none;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
     min-height: 28px;
     padding: 6px 10px;
@@ -606,6 +606,29 @@ body.vscode-dark {
 
 .result-limit-banner__text {
     flex: 1 1 auto;
+}
+
+.result-limit-banner__dismiss {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.75;
+}
+
+.result-limit-banner__dismiss:hover {
+    background: color-mix(in srgb, currentColor 16%, transparent);
+    opacity: 1;
+}
+
+.result-limit-banner__dismiss:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 1px;
 }
 
 .toolbar-secondary-control {

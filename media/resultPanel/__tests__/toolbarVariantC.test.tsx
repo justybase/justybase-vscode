@@ -332,7 +332,9 @@ describe('row count info (variant C)', () => {
     it('flags a reached row limit', () => {
         document.body.innerHTML = '<span id="rowCountInfo"></span>';
         getResultPanelWindow().queryRowLimit = 2;
-        getResultPanelWindow().resultSets = [minimalResultSet({ data: [[1], [2], [3]] })];
+        getResultPanelWindow().resultSets = [
+            minimalResultSet({ data: [[1], [2], [3]], isStreamingComplete: true }),
+        ];
 
         renderRowCountInfo(0);
 

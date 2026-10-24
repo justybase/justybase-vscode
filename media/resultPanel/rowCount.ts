@@ -19,6 +19,14 @@ export function isResultSetRowLimitReached(rs: ResultSet | null | undefined): bo
     if (rs.limitReached === true) {
         return true;
     }
+    // The fetched-row fallback only applies to a completed, in-memory result.
+    // While rows stream in (or when they live in a SQLite window) `data.length`
+    // is a moving buffer, and a stale `queryRowLimit` would make the warning
+    // appear and disappear on its own. The host sends the authoritative
+    // `limitReached` flag for those cases.
+    if (rs.isStreamingComplete !== true || rs.storageMode === 'sqlite') {
+        return false;
+    }
     const configuredLimit = Number(getResultPanelWindow().queryRowLimit);
     if (!Number.isFinite(configuredLimit) || configuredLimit <= 0) {
         return false;

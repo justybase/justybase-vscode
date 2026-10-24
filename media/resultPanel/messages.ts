@@ -538,12 +538,16 @@ export function setupStreamingMessageHandler(): void {
                     clearAllDiskGrouping();
                 }
                 handleDiskBackedActivate(message);
+                // Disk-backed results only expose a data window, so refresh the
+                // banner from the persisted limit flag instead of row counts.
+                updateResultLimitBanner();
                 break;
             case 'rowCountUpdate':
                 handleRowCountUpdate(message);
                 break;
             case 'rowWindow':
                 handleRowWindow(message);
+                updateResultLimitBanner();
                 break;
             case 'diskQueryResult':
                 handleDiskQueryResult(message);

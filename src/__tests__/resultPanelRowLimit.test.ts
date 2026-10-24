@@ -42,7 +42,8 @@ describe('result panel row limit helpers', () => {
                     {
                         columns: [{ name: 'id', type: 'int' }],
                         data: new Array(200000).fill([1]),
-                        limitReached: false
+                        limitReached: false,
+                        isStreamingComplete: true
                     }
                 ]
             }
