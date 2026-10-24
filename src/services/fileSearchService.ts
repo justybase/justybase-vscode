@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
+import ignore from 'ignore';
 import { stripComments, stripCommentsAndLiterals, type SourceSearchMode } from '../sql/sqlTextUtils';
 import type { FileSearchOptions, FileSearchResult, FileMatch } from '../contracts/webviews/fileSearchContracts';
+
+type FileScopeOptions = Pick<FileSearchOptions, 'includePattern' | 'excludePattern' | 'useExcludeSettings' | 'searchOnlyOpenEditors'>;
 
 function escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -30,23 +33,132 @@ function stripLineBasedOnMode(line: string, mode: SourceSearchMode): string {
     }
 }
 
-async function collectFileUris(fileTypes: ('sql' | 'py')[]): Promise<vscode.Uri[]> {
-    const patterns: string[] = [];
-    if (fileTypes.includes('sql')) patterns.push('**/*.sql');
-    if (fileTypes.includes('py')) patterns.push('**/*.py');
-    if (patterns.length === 0) return [];
+const DEFAULT_EXCLUDES = ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/.eggs/**'];
 
-    const allFiles = new Map<string, vscode.Uri>();
-    for (const pattern of patterns) {
-        const uris = await vscode.workspace.findFiles(
-            pattern,
-            '{**/node_modules/**,**/dist/**,**/.git/**,**/__pycache__/**,**/.venv/**,**/venv/**,**/.eggs/**}'
-        );
-        for (const uri of uris) {
-            allFiles.set(uri.toString(), uri);
+/**
+ * Splits a VS Code style pattern list ("*.sql, src/**") into trimmed, non-empty entries.
+ */
+export function splitGlobList(value: string): string[] {
+    return value.split(',').map(part => part.trim()).filter(part => part.length > 0);
+}
+
+/**
+ * Normalizes a user glob the way VS Code's files-to-include box does: a pattern without a
+ * path separator matches at any depth (`*.sql` matches every folder) and a trailing slash means "folder".
+ */
+function normalizeGlob(pattern: string): string {
+    let glob = pattern.replace(/\\/g, '/');
+    if (glob.endsWith('/')) glob += '**';
+    if (!glob.includes('/') && !glob.startsWith('**')) glob = `**/${glob}`;
+    return glob;
+}
+
+/**
+ * Picks the enabled keys (`true` values) out of one or more `files.exclude` / `search.exclude` maps.
+ * Conditional entries (`{ when: ... }`) are skipped because they cannot be expressed as a plain glob.
+ */
+export function excludeSettingsToGlobs(...settings: (Record<string, unknown> | undefined)[]): string[] {
+    return settings.flatMap(setting =>
+        Object.entries(setting ?? {})
+            .filter(([, enabled]) => enabled === true)
+            .map(([glob]) => glob)
+    );
+}
+
+/** Builds the exclude glob: a folder name also excludes its contents. */
+function buildExcludeGlob(excludePattern: string, extraExcludes: string[]): string {
+    const userExcludes = [...splitGlobList(excludePattern), ...extraExcludes].map(pattern => {
+        const glob = normalizeGlob(pattern);
+        return glob.endsWith('/**') ? [glob] : [glob, `${glob}/**`];
+    }).flat();
+    return `{${[...DEFAULT_EXCLUDES, ...userExcludes].join(',')}}`;
+}
+
+/**
+ * Turns the include/exclude text boxes into the single glob pair passed to `findFiles`.
+ * Empty include means every file.
+ */
+export function buildFileSearchGlobs(
+    includePattern: string,
+    excludePattern: string,
+    extraExcludes: string[] = []
+): { includeGlob: string; excludeGlob: string } {
+    const includes = splitGlobList(includePattern).map(normalizeGlob);
+    const includeGlob = includes.length === 0 ? '**/*' : includes.length === 1 ? includes[0] : `{${includes.join(',')}}`;
+    return { includeGlob, excludeGlob: buildExcludeGlob(excludePattern, extraExcludes) };
+}
+
+/**
+ * Builds a predicate over workspace-relative paths (forward slashes) from `.gitignore` files.
+ * Each entry applies only below its own directory, as git does.
+ */
+export function createIgnoreFilter(entries: { dir: string; content: string }[]): (relPath: string) => boolean {
+    const rules = entries.map(entry => ({
+        dir: entry.dir.replace(/^\.?\/?|\/+$/g, ''),
+        matcher: ignore().add(entry.content),
+    }));
+    return relPath => rules.some(({ dir, matcher }) => {
+        if (dir === '') return matcher.ignores(relPath);
+        if (!relPath.startsWith(`${dir}/`)) return false;
+        return matcher.ignores(relPath.slice(dir.length + 1));
+    });
+}
+
+/** Loads every `.gitignore` in the workspace and returns a filter over file URIs. */
+async function loadGitignoreFilter(): Promise<(uri: vscode.Uri) => boolean> {
+    const gitignoreUris = await vscode.workspace.findFiles('**/.gitignore', `{${DEFAULT_EXCLUDES.join(',')}}`);
+    const entries = await Promise.all(gitignoreUris.map(async uri => {
+        const dir = vscode.workspace.asRelativePath(uri, true).replace(/\/?\.gitignore$/, '');
+        const content = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+        return { dir, content };
+    }));
+    const filter = createIgnoreFilter(entries);
+    return uri => filter(vscode.workspace.asRelativePath(uri, true));
+}
+
+function readExcludeSettingGlobs(): string[] {
+    const filesExclude = vscode.workspace.getConfiguration('files').get<Record<string, unknown>>('exclude');
+    const searchExclude = vscode.workspace.getConfiguration('search').get<Record<string, unknown>>('exclude');
+    return excludeSettingsToGlobs(filesExclude, searchExclude);
+}
+
+function openTextFileUris(): Set<string> {
+    const open = new Set<string>();
+    for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+            if (tab.input instanceof vscode.TabInputText && tab.input.uri.scheme === 'file') {
+                open.add(tab.input.uri.toString());
+            }
         }
     }
-    return Array.from(allFiles.values());
+    return open;
+}
+
+/** Resolves the files a search or replace runs over, honouring every scope toggle. */
+async function collectFileUris(options: FileScopeOptions): Promise<vscode.Uri[]> {
+    const extraExcludes = options.useExcludeSettings ? readExcludeSettingGlobs() : [];
+    const { includeGlob, excludeGlob } = buildFileSearchGlobs(options.includePattern, options.excludePattern, extraExcludes);
+    let uris = await vscode.workspace.findFiles(includeGlob, excludeGlob);
+
+    if (options.useExcludeSettings && vscode.workspace.getConfiguration('search').get<boolean>('useIgnoreFiles', true)) {
+        const isIgnored = await loadGitignoreFilter();
+        uris = uris.filter(uri => !isIgnored(uri));
+    }
+
+    if (options.searchOnlyOpenEditors) {
+        const open = openTextFileUris();
+        uris = uris.filter(uri => open.has(uri.toString()));
+    }
+    return uris;
+}
+
+/**
+ * Adds a value to a recent-first pattern history: trims it, drops empties and duplicates, caps the length.
+ */
+export function pushPatternHistory(history: string[], value: string, max = 20): string[] {
+    const trimmed = value.trim();
+    if (!trimmed) return history;
+    return [trimmed, ...history.filter(item => item !== trimmed)].slice(0, max);
 }
 
 const CONCURRENCY = 6;
@@ -55,7 +167,7 @@ export async function fileSearch(
     options: FileSearchOptions,
     token: vscode.CancellationToken
 ): Promise<{ results: FileSearchResult[]; fileMatches: FileSearchResult[] }> {
-    const uris = await collectFileUris(options.fileTypes);
+    const uris = await collectFileUris(options);
     if (uris.length === 0) return { results: [], fileMatches: [] };
 
     const searchRegex = buildSearchRegex(options.term, options.caseSensitive, options.wholeWord, options.useRegex);
@@ -147,7 +259,7 @@ export async function replaceInFiles(
     options: FileSearchOptions,
     token: vscode.CancellationToken
 ): Promise<{ modifiedCount: number; matchCount: number; skippedDirtyCount: number }> {
-    const uris = await collectFileUris(options.fileTypes);
+    const uris = await collectFileUris(options);
     if (uris.length === 0) return { modifiedCount: 0, matchCount: 0, skippedDirtyCount: 0 };
 
     const replaceRegex = buildSearchRegex(options.term, options.caseSensitive, options.wholeWord, options.useRegex, true);

@@ -23,151 +23,141 @@ export class FileSearchHtmlGenerator {
         .search-header {
             flex-shrink: 0;
             border-bottom: 1px solid var(--vscode-panel-border);
-            padding: 8px;
+            padding: 8px 8px 10px;
         }
-        .input-group {
-            display: flex;
-            border: 1px solid var(--vscode-input-border);
-            background: var(--vscode-input-background);
-            border-radius: 2px;
-            height: 26px;
-            align-items: center;
-            overflow: hidden;
-        }
-        .input-group:focus-within {
-            border-color: var(--vscode-focusBorder);
-        }
-        .input-group input {
-            border: none;
-            flex: 1;
-            background: transparent;
-            color: var(--vscode-input-foreground);
-            padding: 0 6px;
-            height: 100%;
-            outline: none;
-            font-size: 13px;
-            font-family: var(--vscode-font-family);
-            min-width: 0;
-        }
-        .input-actions {
-            display: flex;
-            height: 100%;
-            flex-shrink: 0;
-        }
-        .search-toggle-btn {
-            border: none;
-            background: none;
-            color: var(--vscode-input-placeholderForeground);
-            cursor: pointer;
-            padding: 0 6px;
-            font-size: 12px;
-            font-family: var(--vscode-font-family);
-            height: 100%;
+        .search-row,
+        .replace-row {
             display: flex;
             align-items: center;
-            border-left: 1px solid var(--vscode-panel-border);
-            user-select: none;
-            transition: background 0.1s, color 0.1s;
-        }
-        .search-toggle-btn:hover {
-            background: var(--vscode-toolbar-hoverBackground);
-            color: var(--vscode-input-foreground);
-        }
-        .search-toggle-btn.active {
-            color: var(--vscode-button-foreground);
-            background: var(--vscode-button-background);
-            border-left-color: var(--vscode-button-background);
-        }
-        .search-toggle-btn + .search-toggle-btn {
-            border-left: 1px solid var(--vscode-panel-border);
-        }
-        .search-toggle-btn.active + .search-toggle-btn,
-        .search-toggle-btn + .search-toggle-btn.active {
-            border-left-color: var(--vscode-button-background);
-        }
-        .input-row {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            margin-bottom: 6px;
-        }
-        .input-row:last-child { margin-bottom: 0; }
-        .mode-toggle {
-            background: none;
-            border: none;
-            color: var(--vscode-icon-foreground);
-            cursor: pointer;
-            padding: 0 6px;
-            height: 26px;
-            display: flex;
-            align-items: center;
-            font-size: 12px;
-            border-radius: 2px;
-            flex-shrink: 0;
-        }
-        .mode-toggle:hover {
-            background: var(--vscode-toolbar-hoverBackground);
-        }
-        .mode-toggle.replace-open {
-            color: var(--vscode-focusBorder);
+            gap: 4px;
         }
         .replace-row {
             display: none;
-            margin-top: 6px;
+            margin-top: 4px;
+            padding-left: 24px;
         }
-        .replace-row.visible { display: block; }
-        .action-row {
-            display: flex;
-            gap: 4px;
-            margin-top: 6px;
-        }
-        .action-row button {
+        .replace-row.visible { display: flex; }
+        .mode-toggle {
+            width: 20px;
+            height: 26px;
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--vscode-foreground);
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border-radius: 3px;
+        }
+        .mode-toggle svg {
+            transition: transform 0.1s ease;
+        }
+        .mode-toggle.replace-open svg { transform: rotate(90deg); }
+        .mode-toggle:hover { background: var(--vscode-toolbar-hoverBackground); }
+        .input-group {
+            flex: 1;
+            min-width: 0;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            box-sizing: border-box;
+            background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border, transparent);
             border-radius: 2px;
+            padding-right: 3px;
+        }
+        .input-group:focus-within { border-color: var(--vscode-focusBorder); }
+        .input-group input {
+            flex: 1;
+            min-width: 0;
+            height: 100%;
+            border: none;
+            outline: none;
+            background: transparent;
+            color: var(--vscode-input-foreground);
+            padding: 0 6px;
+            font-size: 13px;
             font-family: var(--vscode-font-family);
+        }
+        .input-group input::placeholder { color: var(--vscode-input-placeholderForeground); }
+        .input-actions {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+        .search-toggle-btn {
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            background: transparent;
+            color: var(--vscode-icon-foreground);
+            opacity: 0.75;
+            cursor: pointer;
+            font-family: var(--vscode-font-family);
+            font-size: 13px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .search-toggle-btn:hover {
+            opacity: 1;
+            background: var(--vscode-toolbar-hoverBackground);
+        }
+        .search-toggle-btn.active {
+            opacity: 1;
+            background: var(--vscode-inputOption-activeBackground);
+            border-color: var(--vscode-inputOption-activeBorder, transparent);
+            color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+        }
+        .search-toggle-btn:focus-visible {
+            outline: 1px solid var(--vscode-focusBorder);
+            outline-offset: -1px;
+        }
+        /* Include/exclude scope buttons use a neutral pressed state, like the native filter icons */
+        .scope-toggle.active {
+            background: var(--vscode-toolbar-activeBackground, rgba(255, 255, 255, 0.1));
+            border-color: transparent;
+            color: var(--vscode-foreground);
+        }
+        .replace-all-btn,
+        .cancel-btn {
+            width: 22px;
+            height: 22px;
+        }
+        .glob-field {
+            margin-top: 8px;
+        }
+        .glob-label {
+            display: block;
             font-size: 12px;
-            padding: 3px 12px;
-            background-color: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: 1px solid var(--vscode-contrastBorder, transparent);
-        }
-        .action-row button:hover {
-            background-color: var(--vscode-button-secondaryHoverBackground);
-        }
-        .action-row button.primary {
-            background-color: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-        }
-        .action-row button.primary:hover {
-            background-color: var(--vscode-button-hoverBackground);
+            margin-bottom: 4px;
+            color: var(--vscode-foreground);
         }
         .options-row {
             display: flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 6px;
-            font-size: 12px;
             flex-wrap: wrap;
-        }
-        .options-row label {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            cursor: pointer;
-            user-select: none;
+            gap: 6px;
+            margin-top: 8px;
+            font-size: 12px;
         }
         .options-row select {
+            height: 22px;
             background: var(--vscode-dropdown-background);
             color: var(--vscode-dropdown-foreground);
             border: 1px solid var(--vscode-dropdown-border);
-            padding: 2px 4px;
+            padding: 0 4px;
             border-radius: 2px;
             cursor: pointer;
             font-size: 12px;
             font-family: var(--vscode-font-family);
         }
-        .options-row input[type="checkbox"] { cursor: pointer; }
-        .spacer { flex: 1; }
         #status {
             display: flex;
             align-items: center;
@@ -321,37 +311,51 @@ export class FileSearchHtmlGenerator {
 </head>
 <body>
     <div class="search-header">
-        <div class="input-row">
-            <button class="mode-toggle" id="modeToggle" title="Toggle Replace">&#9654;</button>
+        <div class="search-row">
+            <button class="mode-toggle" id="modeToggle" title="Toggle Replace" aria-label="Toggle Replace"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
             <div class="input-group">
-                <input type="text" id="searchInput" placeholder="Search" />
+                <input type="text" id="searchInput" placeholder="Search" aria-label="Search" />
                 <div class="input-actions">
-                    <button class="search-toggle-btn" id="btnCaseSensitive" title="Match Case">Aa</button>
-                    <button class="search-toggle-btn" id="btnWholeWord" title="Match Whole Word">ab</button>
-                    <button class="search-toggle-btn" id="btnRegex" title="Use Regular Expression">.*</button>
+                    <button class="search-toggle-btn" id="btnCaseSensitive" title="Match Case" aria-label="Match Case">Aa</button>
+                    <button class="search-toggle-btn" id="btnWholeWord" title="Match Whole Word" aria-label="Match Whole Word">ab</button>
+                    <button class="search-toggle-btn" id="btnRegex" title="Use Regular Expression" aria-label="Use Regular Expression">.*</button>
                 </div>
             </div>
+            <button class="search-toggle-btn cancel-btn" id="cancelBtn" title="Cancel search" aria-label="Cancel search" style="display:none;">&#10005;</button>
         </div>
         <div class="replace-row" id="replaceRow">
             <div class="input-group">
-                <input type="text" id="replaceInput" placeholder="Replace" />
+                <input type="text" id="replaceInput" placeholder="Replace" aria-label="Replace" />
+                <div class="input-actions">
+                    <button class="search-toggle-btn replace-all-btn" id="replaceAllBtn" title="Replace All" aria-label="Replace All" style="display:none;"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 4h9M9 1.5 11.5 4 9 6.5M14 12H5M7 9.5 4.5 12 7 14.5"/></svg></button>
+                </div>
             </div>
         </div>
-        <div class="action-row">
-            <button id="searchBtn" class="primary">Search</button>
-            <button id="replaceAllBtn" style="display:none;">Replace All</button>
-            <button id="cancelBtn" style="display:none;">Cancel</button>
+        <div class="glob-field">
+            <label class="glob-label" for="includeInput">Files to include</label>
+            <div class="input-group">
+                <input type="text" id="includeInput" value="*.sql" placeholder="e.g. *.sql, src/**" spellcheck="false" aria-label="Files to include" />
+                <div class="input-actions">
+                    <button class="search-toggle-btn scope-toggle" id="btnOpenEditors" title="Search only in open editors" aria-label="Search only in open editors" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1"/><line x1="2" y1="6" x2="14" y2="6"/></svg></button>
+                </div>
+            </div>
+        </div>
+        <div class="glob-field">
+            <label class="glob-label" for="excludeInput">Files to exclude</label>
+            <div class="input-group">
+                <input type="text" id="excludeInput" placeholder="e.g. *.txt, build" spellcheck="false" aria-label="Files to exclude" />
+                <div class="input-actions">
+                    <button class="search-toggle-btn scope-toggle active" id="btnUseExclude" title="Use Exclude Settings and Ignore Files" aria-label="Use Exclude Settings and Ignore Files" aria-pressed="true"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 3h12l-4.5 5.5V13l-3-1.5V8.5z"/></svg></button>
+                </div>
+            </div>
         </div>
         <div class="options-row">
-            <label><input type="checkbox" id="chkSql" checked /> .sql</label>
-            <label><input type="checkbox" id="chkPy" /> .py</label>
-            <div class="spacer"></div>
-            <select id="commentMode">
+            <select id="commentMode" title="Comment handling" aria-label="Comment handling">
                 <option value="raw" selected>Include comments</option>
                 <option value="noComments">Exclude comments</option>
                 <option value="noCommentsNoLiterals">Exclude comments &amp; strings</option>
             </select>
-            <select id="groupMode">
+            <select id="groupMode" title="Result layout" aria-label="Result layout">
                 <option value="flat">Flat</option>
                 <option value="grouped">Grouped</option>
             </select>
@@ -366,13 +370,14 @@ export class FileSearchHtmlGenerator {
             var vscode = acquireVsCodeApi();
             var searchInput = document.getElementById('searchInput');
             var replaceInput = document.getElementById('replaceInput');
-            var searchBtn = document.getElementById('searchBtn');
             var replaceAllBtn = document.getElementById('replaceAllBtn');
             var cancelBtn = document.getElementById('cancelBtn');
             var resultsList = document.getElementById('resultsList');
             var status = document.getElementById('status');
-            var chkSql = document.getElementById('chkSql');
-            var chkPy = document.getElementById('chkPy');
+            var includeInput = document.getElementById('includeInput');
+            var excludeInput = document.getElementById('excludeInput');
+            var btnOpenEditors = document.getElementById('btnOpenEditors');
+            var btnUseExclude = document.getElementById('btnUseExclude');
             var commentMode = document.getElementById('commentMode');
             var groupMode = document.getElementById('groupMode');
             var modeToggle = document.getElementById('modeToggle');
@@ -388,13 +393,9 @@ export class FileSearchHtmlGenerator {
             var isReplaceMode = false;
             var currentSessionId = '${this.sessionId}';
             var autoSearchDebounce = null;
-
-            function getFileTypes() {
-                var types = [];
-                if (chkSql.checked) types.push('sql');
-                if (chkPy.checked) types.push('py');
-                return types;
-            }
+            var patternHistory = { include: [], exclude: [] };
+            var historyCursor = { include: -1, exclude: -1 };
+            var historyDraft = { include: '', exclude: '' };
 
             function getOptions() {
                 return {
@@ -403,7 +404,10 @@ export class FileSearchHtmlGenerator {
                     mode: isReplaceMode ? 'replace' : 'find',
                     commentMode: commentMode.value,
                     groupMode: groupMode.value,
-                    fileTypes: getFileTypes(),
+                    includePattern: includeInput.value,
+                    excludePattern: excludeInput.value,
+                    useExcludeSettings: btnUseExclude.classList.contains('active'),
+                    searchOnlyOpenEditors: btnOpenEditors.classList.contains('active'),
                     caseSensitive: btnCaseSensitive.classList.contains('active'),
                     wholeWord: btnWholeWord.classList.contains('active'),
                     useRegex: btnRegex.classList.contains('active')
@@ -412,22 +416,19 @@ export class FileSearchHtmlGenerator {
 
             function setSearchingState(searching) {
                 isSearching = searching;
-                cancelBtn.style.display = searching ? 'inline-block' : 'none';
-                searchBtn.disabled = searching;
+                cancelBtn.style.display = searching ? 'flex' : 'none';
                 if (replaceAllBtn) replaceAllBtn.disabled = searching;
             }
 
             function updateReplaceUI() {
                 if (isReplaceMode) {
                     replaceRow.classList.add('visible');
-                    replaceAllBtn.style.display = 'inline-block';
+                    replaceAllBtn.style.display = 'flex';
                     modeToggle.classList.add('replace-open');
-                    modeToggle.textContent = '\u25BC';
                 } else {
                     replaceRow.classList.remove('visible');
                     replaceAllBtn.style.display = 'none';
                     modeToggle.classList.remove('replace-open');
-                    modeToggle.textContent = '\u25B6';
                 }
             }
 
@@ -600,11 +601,6 @@ export class FileSearchHtmlGenerator {
             function doSearch() {
                 var term = searchInput.value.trim();
                 if (!term) return;
-                var fileTypes = getFileTypes();
-                if (fileTypes.length === 0) {
-                    status.textContent = 'Select at least one file type.';
-                    return;
-                }
                 allResults = [];
                 allFileMatches = [];
                 resultsList.innerHTML = '<li class="searching-indicator"><span class="spinner"></span> Searching...</li>';
@@ -624,11 +620,6 @@ export class FileSearchHtmlGenerator {
             function doReplaceAll() {
                 var term = searchInput.value.trim();
                 if (!term) return;
-                var fileTypes = getFileTypes();
-                if (fileTypes.length === 0) {
-                    status.textContent = 'Select at least one file type.';
-                    return;
-                }
                 setSearchingState(true);
                 status.textContent = 'Replacing...';
                 vscode.postMessage({ type: 'replaceAll', options: getOptions() });
@@ -662,14 +653,41 @@ export class FileSearchHtmlGenerator {
                 }
             });
 
-            chkSql.addEventListener('change', function() {
-                saveState();
-                triggerAutoSearch();
+            [includeInput, excludeInput].forEach(function(input) {
+                var key = input === includeInput ? 'include' : 'exclude';
+                input.addEventListener('keyup', function(e) {
+                    if (e.key === 'Enter') doSearch();
+                });
+                input.addEventListener('input', function() {
+                    historyCursor[key] = -1;
+                    saveState();
+                    triggerAutoSearch();
+                });
+                input.addEventListener('keydown', function(e) {
+                    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                    var list = patternHistory[key];
+                    if (list.length === 0) return;
+                    e.preventDefault();
+                    var cursor = historyCursor[key];
+                    if (cursor === -1) historyDraft[key] = input.value;
+                    cursor = e.key === 'ArrowUp' ? Math.min(cursor + 1, list.length - 1) : Math.max(cursor - 1, -1);
+                    historyCursor[key] = cursor;
+                    input.value = cursor === -1 ? historyDraft[key] : list[cursor];
+                    saveState();
+                    triggerAutoSearch();
+                });
             });
-            chkPy.addEventListener('change', function() {
-                saveState();
-                triggerAutoSearch();
-            });
+
+            function bindScopeToggle(button) {
+                button.addEventListener('click', function() {
+                    var active = button.classList.toggle('active');
+                    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+                    saveState();
+                    triggerAutoSearch();
+                });
+            }
+            bindScopeToggle(btnOpenEditors);
+            bindScopeToggle(btnUseExclude);
 
             modeToggle.addEventListener('click', function() {
                 isReplaceMode = !isReplaceMode;
@@ -677,7 +695,6 @@ export class FileSearchHtmlGenerator {
                 saveState();
             });
 
-            searchBtn.addEventListener('click', doSearch);
             replaceAllBtn.addEventListener('click', doReplaceAll);
 
             searchInput.addEventListener('keyup', function(e) {
@@ -725,6 +742,9 @@ export class FileSearchHtmlGenerator {
                         resultsList.innerHTML = '<li class="hint">Enter a search term and press Enter or click Search.</li>';
                         status.textContent = '';
                         break;
+                    case 'history':
+                        patternHistory = { include: message.include || [], exclude: message.exclude || [] };
+                        break;
                     case 'replaceDone':
                         setSearchingState(false);
                         status.textContent = 'Replaced ' + message.matchCount + ' occurrence(s) in ' + message.modifiedCount + ' file(s)';
@@ -738,8 +758,10 @@ export class FileSearchHtmlGenerator {
                 if (stored.replaceText !== undefined) replaceInput.value = stored.replaceText;
                 if (stored.commentMode) commentMode.value = stored.commentMode;
                 if (stored.groupMode) groupMode.value = stored.groupMode;
-                if (stored.chkSql !== undefined) chkSql.checked = stored.chkSql;
-                if (stored.chkPy !== undefined) chkPy.checked = stored.chkPy;
+                if (stored.includePattern !== undefined) includeInput.value = stored.includePattern;
+                if (stored.excludePattern !== undefined) excludeInput.value = stored.excludePattern;
+                if (stored.useExcludeSettings !== undefined) setToggle(btnUseExclude, stored.useExcludeSettings);
+                if (stored.searchOnlyOpenEditors !== undefined) setToggle(btnOpenEditors, stored.searchOnlyOpenEditors);
                 if (stored.caseSensitive) btnCaseSensitive.classList.add('active');
                 if (stored.wholeWord) btnWholeWord.classList.add('active');
                 if (stored.useRegex) btnRegex.classList.add('active');
@@ -754,6 +776,11 @@ export class FileSearchHtmlGenerator {
                 }
             }
 
+            function setToggle(button, active) {
+                button.classList.toggle('active', !!active);
+                button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            }
+
             function saveState() {
                 vscode.setState({
                     sessionId: currentSessionId,
@@ -761,8 +788,10 @@ export class FileSearchHtmlGenerator {
                     replaceText: replaceInput.value,
                     commentMode: commentMode.value,
                     groupMode: groupMode.value,
-                    chkSql: chkSql.checked,
-                    chkPy: chkPy.checked,
+                    includePattern: includeInput.value,
+                    excludePattern: excludeInput.value,
+                    useExcludeSettings: btnUseExclude.classList.contains('active'),
+                    searchOnlyOpenEditors: btnOpenEditors.classList.contains('active'),
                     caseSensitive: btnCaseSensitive.classList.contains('active'),
                     wholeWord: btnWholeWord.classList.contains('active'),
                     useRegex: btnRegex.classList.contains('active'),
@@ -774,6 +803,7 @@ export class FileSearchHtmlGenerator {
 
             searchInput.addEventListener('input', saveState);
             replaceInput.addEventListener('input', saveState);
+            vscode.postMessage({ type: 'ready' });
         } catch (err) {
             var errDiv = document.createElement('div');
             errDiv.style.color = 'red';

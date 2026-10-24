@@ -1,6 +1,5 @@
 export type FileSearchCommentMode = 'raw' | 'noComments' | 'noCommentsNoLiterals';
 export type FileSearchGroupMode = 'flat' | 'grouped';
-export type FileSearchFileType = 'sql' | 'py';
 export type FileSearchMode = 'find' | 'replace';
 
 export interface FileSearchOptions {
@@ -9,10 +8,22 @@ export interface FileSearchOptions {
     mode: FileSearchMode;
     commentMode: FileSearchCommentMode;
     groupMode: FileSearchGroupMode;
-    fileTypes: FileSearchFileType[];
+    /** Comma-separated glob patterns, VS Code style (e.g. `*.sql, src/**`). Empty = all files. */
+    includePattern: string;
+    /** Comma-separated glob patterns, applied on top of the built-in excludes. */
+    excludePattern: string;
+    /** Adds `files.exclude`, `search.exclude` and (when enabled) `.gitignore` rules. */
+    useExcludeSettings: boolean;
+    /** Restricts the search to files that have an open text tab. */
+    searchOnlyOpenEditors: boolean;
     caseSensitive: boolean;
     wholeWord: boolean;
     useRegex: boolean;
+}
+
+export interface FileSearchPatternHistory {
+    include: string[];
+    exclude: string[];
 }
 
 export interface FileMatch {
@@ -36,7 +47,8 @@ export type FileSearchWebviewToHostMessage =
     | { type: 'cancel' }
     | { type: 'openFile'; fileUri: string; line: number }
     | { type: 'reset' }
-    | { type: 'replaceAll'; options: FileSearchOptions };
+    | { type: 'replaceAll'; options: FileSearchOptions }
+    | { type: 'ready' };
 
 export type FileSearchHostToWebviewMessage =
     | { type: 'results'; data: FileSearchResult[]; fileMatches: FileSearchResult[]; groupMode: FileSearchGroupMode }
@@ -44,7 +56,8 @@ export type FileSearchHostToWebviewMessage =
     | { type: 'error'; message: string }
     | { type: 'cancelled' }
     | { type: 'reset' }
-    | { type: 'replaceDone'; modifiedCount: number; matchCount: number };
+    | { type: 'replaceDone'; modifiedCount: number; matchCount: number }
+    | { type: 'history'; include: string[]; exclude: string[] };
 
 export type FileSearchInboundMessage = FileSearchWebviewToHostMessage;
 export type FileSearchOutboundMessage = FileSearchHostToWebviewMessage;
@@ -55,6 +68,7 @@ export const FILE_SEARCH_WEBVIEW_TO_HOST_TYPES = [
     'openFile',
     'reset',
     'replaceAll',
+    'ready',
 ] as const satisfies readonly FileSearchWebviewToHostMessage['type'][];
 
 export const FILE_SEARCH_HOST_TO_WEBVIEW_TYPES = [
@@ -64,6 +78,7 @@ export const FILE_SEARCH_HOST_TO_WEBVIEW_TYPES = [
     'cancelled',
     'reset',
     'replaceDone',
+    'history',
 ] as const satisfies readonly FileSearchHostToWebviewMessage['type'][];
 
 export const FILE_SEARCH_INBOUND_TYPES = FILE_SEARCH_WEBVIEW_TO_HOST_TYPES;

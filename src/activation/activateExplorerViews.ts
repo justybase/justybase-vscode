@@ -27,7 +27,7 @@ export function activateExplorerViews(
         connectionManager,
     );
     const queryHistoryProvider = new QueryHistoryView(context.extensionUri, context, connectionManager);
-    const fileSearchProvider = new FileSearchProvider(context.extensionUri);
+    const fileSearchProvider = new FileSearchProvider(context.extensionUri, context.globalState);
 
     context.subscriptions.push(
         resultPanelProvider,

@@ -253,12 +253,12 @@ export type {
 
 export type {
     FileSearchCommentMode,
-    FileSearchFileType,
     FileSearchGroupMode,
     FileSearchHostToWebviewMessage,
     FileSearchInboundMessage,
     FileSearchMode,
     FileSearchOptions,
+    FileSearchPatternHistory,
     FileSearchOutboundMessage,
     FileSearchResult,
     FileSearchWebviewToHostMessage,

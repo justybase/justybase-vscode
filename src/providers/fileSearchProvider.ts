@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
-import type { FileSearchInboundMessage, FileSearchOptions, FileSearchOutboundMessage } from '../contracts/webviews/fileSearchContracts';
+import type { FileSearchInboundMessage, FileSearchOptions, FileSearchOutboundMessage, FileSearchPatternHistory } from '../contracts/webviews/fileSearchContracts';
 import { FileSearchHtmlGenerator } from '../views/fileSearchHtmlGenerator';
-import { fileSearch, replaceInFiles } from '../services/fileSearchService';
+import { fileSearch, pushPatternHistory, replaceInFiles } from '../services/fileSearchService';
+
+const PATTERN_HISTORY_KEY = 'netezza.fileSearch.patternHistory';
 
 export class FileSearchProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'netezza.fileSearch';
@@ -15,7 +17,8 @@ export class FileSearchProvider implements vscode.WebviewViewProvider {
     private _revealedEditor: vscode.TextEditor | undefined;
 
     constructor(
-        private readonly _extensionUri: vscode.Uri
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _memento?: vscode.Memento
     ) {
         this._sessionId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
@@ -92,10 +95,34 @@ export class FileSearchProvider implements vscode.WebviewViewProvider {
             case 'replaceAll':
                 await this.runReplaceAll(data.options);
                 return;
+            case 'ready':
+                this.postPatternHistory();
+                return;
         }
     }
 
+    private getPatternHistory(): FileSearchPatternHistory {
+        const stored = this._memento?.get<FileSearchPatternHistory>(PATTERN_HISTORY_KEY);
+        return { include: stored?.include ?? [], exclude: stored?.exclude ?? [] };
+    }
+
+    private recordPatternHistory(options: FileSearchOptions): void {
+        if (!this._memento) return;
+        const history = this.getPatternHistory();
+        void this._memento.update(PATTERN_HISTORY_KEY, {
+            include: pushPatternHistory(history.include, options.includePattern),
+            exclude: pushPatternHistory(history.exclude, options.excludePattern),
+        });
+        this.postPatternHistory();
+    }
+
+    private postPatternHistory(): void {
+        const history = this.getPatternHistory();
+        this.postMessage({ type: 'history', include: history.include, exclude: history.exclude });
+    }
+
     private async runSearch(options: FileSearchOptions): Promise<void> {
+        this.recordPatternHistory(options);
         this.cancelSearch();
         this._abortController = new AbortController();
         const token = this._abortController.signal;
@@ -136,6 +163,7 @@ export class FileSearchProvider implements vscode.WebviewViewProvider {
             'Replace All'
         );
         if (confirmResult !== 'Replace All') return;
+        this.recordPatternHistory(options);
 
         this.cancelSearch();
         this._abortController = new AbortController();
