@@ -3,7 +3,8 @@ import {
     getActiveGridIndex,
     getAllGrids,
     getGrid,
-    getGlobalDragState
+    getGlobalDragState,
+    setGlobalDragState,
 } from './state.js';
 import { getCurrentExportFormattingMetadata } from './formatting.js';
 import { postHostMessage } from './protocol.js';
@@ -673,23 +674,59 @@ export function clearGroupDropTargets(): void {
 }
 
 if (typeof document !== 'undefined') {
+    // A drag session token guards the deferred reveal below: when the drag ends before the
+    // timer runs, the stale callback must not re-add the reveal class.
+    let groupDragSession = 0;
+
+    const isGroupDragState = (): boolean => {
+        const state = getGlobalDragState();
+        return state.isDragging && (state.dragType === 'column' || state.dragType === 'groupChip');
+    };
+
+    /** Hides the reveal panel and clears drop highlights without touching the drag payload. */
+    const clearGroupDragReveal = (): void => {
+        groupDragSession += 1;
+        document.body.classList.remove('group-dragging');
+        clearGroupDropTargets();
+    };
+
+    const endGroupDragSession = (): void => {
+        setGlobalDragState({ isDragging: false, dragType: null, draggedItem: null });
+        clearGroupDragReveal();
+    };
+
     // Reveal the (otherwise collapsed) grouping panel while a column is being dragged.
     document.addEventListener('dragstart', () => {
+        const session = ++groupDragSession;
         // Changing layout synchronously inside dragstart makes Chromium cancel the drag,
         // so reveal the panel on a later tick. Drag state is set by the element's own handler.
         setTimeout(() => {
-            const state = getGlobalDragState();
-            if (state.isDragging && (state.dragType === 'column' || state.dragType === 'groupChip')) {
+            if (session !== groupDragSession) return;
+            if (isGroupDragState()) {
                 document.body.classList.add('group-dragging');
             }
         }, 0);
     });
-    const endGroupDragging = (): void => {
-        document.body.classList.remove('group-dragging');
-        clearGroupDropTargets();
-    };
-    document.addEventListener('dragend', endGroupDragging);
-    document.addEventListener('drop', () => document.body.classList.remove('group-dragging'));
+
+    // Capture phase so drop handlers that stop propagation (group chips, schema items) cannot
+    // skip the cleanup. A drag source that is re-rendered mid-drag never fires dragend, so the
+    // drop cleanup must not rely on bubbling either.
+    document.addEventListener('dragend', endGroupDragSession, true);
+    document.addEventListener('drop', clearGroupDragReveal, true);
+
+    // A missed dragend leaves the body class (and the drag state) behind, which keeps the
+    // grouping panel expanded with a stale "drop a column header" hint. Any new press proves
+    // the previous drag is over unless a drag source still carries the in-flight marker.
+    document.addEventListener('pointerdown', () => {
+        if (!getGlobalDragState().isDragging && !document.body.classList.contains('group-dragging')) {
+            return;
+        }
+        if (document.querySelector('.dragging')) {
+            return;
+        }
+        endGroupDragSession();
+    }, true);
+    window.addEventListener('blur', endGroupDragSession);
 }
 
 export function onDragOverGroup(event: DragEvent): void {

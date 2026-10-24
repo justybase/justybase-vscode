@@ -26,6 +26,11 @@ export function createGroupChip(colId: string, index: number, rs: ResultSet, tan
     chip.dataset.groupIndex = String(index);
 
     chip.ondragstart = (e) => {
+        // Pressing a chip action (sort/remove) must not start a chip drag.
+        if (e.target instanceof Element && e.target.closest('.group-sort, .remove-group')) {
+            e.preventDefault();
+            return;
+        }
         const dataTransfer = e.dataTransfer;
         if (!dataTransfer) return;
         dataTransfer.setData('text/plain', colId);
@@ -88,6 +93,8 @@ export function createGroupChip(colId: string, index: number, rs: ResultSet, tan
         const newGrouping = currentGrouping.filter((id: string) => id !== colId);
         tanTable.setGrouping(newGrouping);
     };
+    // Keep a press on the button from starting a chip drag.
+    removeBtn.onmousedown = (e) => e.stopPropagation();
     chip.appendChild(removeBtn);
 
     return chip;

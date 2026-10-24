@@ -297,6 +297,46 @@ test.describe('Table rendering', () => {
         await expect.poll(groupValues).toEqual(defaultOrder);
     });
 
+    test('removing grouped columns leaves no stale grouping drop zone', async ({ page }) => {
+        const bodyCells = page.locator('#gridContainer tbody tr:not(.group-header) td:not(.row-number-cell)');
+        await bodyCells.nth(5).click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: 'Group by This Column' }).click();
+        await expect(page.locator('#groupingPanel .group-chip')).toHaveCount(1);
+
+        // Expand a group so a second column can be grouped from a leaf row.
+        await page.locator('#gridContainer tr.group-header').first().locator('span').nth(1).click();
+        await expect(bodyCells.first()).toBeVisible();
+        await bodyCells.nth(6).click({ button: 'right' });
+        await page.locator('.grid-context-menu-item', { hasText: 'Group by This Column' }).click();
+
+        const chips = page.locator('#groupingPanel .group-chip');
+        await expect(chips).toHaveCount(2);
+
+        // Reorder the chips natively. The drop lands on a chip (which stops propagation) and
+        // the re-render replaces the drag source, so its dragend can be lost.
+        const firstBox = await chips.nth(0).boundingBox();
+        const secondBox = await chips.nth(1).boundingBox();
+        if (!firstBox || !secondBox) {
+            throw new Error('Group chips are not laid out');
+        }
+        const dragY = secondBox.y + secondBox.height / 2;
+        await page.mouse.move(secondBox.x + 8, dragY);
+        await page.mouse.down();
+        await page.mouse.move(secondBox.x + 28, dragY, { steps: 3 });
+        await expect(page.locator('body')).toHaveClass(/group-dragging/);
+        await page.mouse.move(firstBox.x + 8, dragY, { steps: 5 });
+        await page.mouse.up();
+        await expect(page.locator('body')).not.toHaveClass(/group-dragging/);
+        await expect(chips).toHaveCount(2);
+
+        // Removing the grouped columns must hide the reveal zone again.
+        while (await chips.count() > 0) {
+            await chips.first().locator('.remove-group').click();
+        }
+        await expect(page.locator('#groupingPanel')).toBeHidden();
+        await expect(page.locator('body')).not.toHaveClass(/group-dragging/);
+    });
+
     test('renders the grid container with table element', async ({ page }) => {
         const gridContainer = page.locator('#gridContainer');
         await expect(gridContainer).toBeVisible({ timeout: 10000 });
