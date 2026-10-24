@@ -591,6 +591,7 @@ var VirtualCore = (() => {
           }
           this._flushHoldIfReady(true);
           this._writeAwaitingCommand();
+          this._retryClampedAdjustment();
         }
       });
       this._lastElementOffset = null;
@@ -969,7 +970,7 @@ var VirtualCore = (() => {
         });
       };
       this._retryClampedAdjustment = () => {
-        if (this._clampedAdjustment === null || !this.scrollElement || !this.options.enabled) {
+        if (this._clampedAdjustment === null || !this.scrollElement || !this.options.enabled || !this._canWriteScroll()) {
           return;
         }
         const { target, maxAtWrite } = this._clampedAdjustment;
@@ -1837,6 +1838,8 @@ var VirtualCore = (() => {
     // scroll as landed; an offset target never does, so its first scroll
     // event is read as the user's (see the scroll handler in `_willUpdate`).
     _startScroll(target, offset, behavior, kind) {
+      this.pendingScrollAnchor = null;
+      this._clampedAdjustment = null;
       const tail = this._iosGesture.tail();
       if (kind === "absolute" && tail !== null) {
         if (tail === "fling" && iosMomentumOverridesWrites()) {
