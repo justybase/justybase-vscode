@@ -642,12 +642,18 @@ jobs:
         include:
           - os: windows-latest
             target: win32-x64
+            npm_os: win32
+            npm_cpu: x64
             expected_binding_package: '@duckdb/node-bindings-win32-x64'
           - os: ubuntu-latest
             target: linux-x64
+            npm_os: linux
+            npm_cpu: x64
             expected_binding_package: '@duckdb/node-bindings-linux-x64'
           - os: macos-latest
             target: darwin-arm64
+            npm_os: darwin
+            npm_cpu: arm64
             expected_binding_package: '@duckdb/node-bindings-darwin-arm64'
 
     steps:
@@ -675,9 +681,11 @@ jobs:
       - name: Build shared workspace packages
         run: npm run build:designer-core
 
+      # Pin the target platform so the DuckDB native binding for this VSIX is always installed,
+      # independent of runner platform detection (the win32-x64 binding was skipped on Windows).
       - name: Install Access extension dependencies
         working-directory: extensions/access
-        run: npm ci
+        run: npm ci --os=${{ matrix.npm_os }} --cpu=${{ matrix.npm_cpu }}
 
       - name: Build Access extension
         run: npm run build:access
