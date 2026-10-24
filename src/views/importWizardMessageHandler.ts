@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import type {
+  ImportExecutionProgress,
   ImportWizardInboundMessage,
   ImportWizardOutboundMessage,
   ImportWizardPreviewKind,
 } from "../contracts/webviews";
+import type { ImportProgressDetail } from "@justybase/contracts";
 import type { ConnectionManager } from "../core/connectionManager";
 import { createClipboardImportSource, removeClipboardImportSource } from "../import/clipboardImportSource";
 import { getOutputChannel } from "../core/queryRunnerUtils";
@@ -88,7 +90,7 @@ function renderExecutionPlanDocument(state: ImportWizardState): string {
   return lines.join("\n");
 }
 
-const DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE = 5000;
+const DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE = 20000;
 const MIN_BACKGROUND_VALIDATION_SAMPLE_SIZE = 100;
 const MAX_BACKGROUND_VALIDATION_SAMPLE_SIZE = 50000;
 
@@ -100,6 +102,8 @@ export class ImportWizardMessageHandler {
   private clipboardSourceDirectory?: string;
   private isExecuting = false;
   private isTransitioning = false;
+  private lastExecutionProgress?: ImportExecutionProgress;
+  private lastExecutionProgressAt = 0;
   private disposed = false;
   private metadataSubscriptions: vscode.Disposable[] = [];
 
@@ -143,37 +147,63 @@ export class ImportWizardMessageHandler {
       }),
     );
 
-    const catalog = await this.deps.catalogService.loadCatalog(
-      options.connectionName,
-      options.connectionDetails.database,
-    );
     const state = await this.deps.service.createSession({
       ...options,
       availableConnections: availableConnections.filter((item) => item !== undefined),
-      availableDatabases: catalog.availableDatabases,
+      availableDatabases: [],
       availableSchemas: [],
     });
     this.sessionId = state.id;
     this.connectionName = options.connectionName;
-
-    const targetDatabase =
-      state.targetLocation.database?.trim() ||
-      options.connectionDetails.database?.trim();
-    const schemaCatalog = await this.deps.catalogService.loadCatalog(
-      options.connectionName,
-      targetDatabase,
-    );
-    await this.deps.service.setTargetCatalog(
-      state.id,
-      catalog.availableDatabases,
-      schemaCatalog.availableSchemas,
-    );
-
     this.subscribeToMetadataInvalidation();
 
     if (this.webviewReady) {
       await this.postState(true);
       this.startBackgroundValidation();
+    }
+
+    // A slow database must not keep the wizard on "Loading..." before it can render the preview.
+    void this.loadTargetCatalog(state.id, options);
+  }
+
+  private async loadTargetCatalog(
+    sessionId: string,
+    options: ImportWizardSessionOptions,
+  ): Promise<void> {
+    if (!options.connectionName) {
+      return;
+    }
+    try {
+      const catalog = await this.deps.catalogService.loadCatalog(
+        options.connectionName,
+        options.connectionDetails.database,
+      );
+      const state = this.deps.service.getSessionState(sessionId);
+      const targetDatabase =
+        state.targetLocation.database?.trim() ||
+        options.connectionDetails.database?.trim();
+      const schemaCatalog = targetDatabase
+        ? await this.deps.catalogService.loadCatalog(
+            options.connectionName,
+            targetDatabase,
+          )
+        : { availableDatabases: catalog.availableDatabases, availableSchemas: [] };
+
+      if (this.disposed || this.sessionId !== sessionId) {
+        return;
+      }
+      await this.deps.service.setTargetCatalog(
+        sessionId,
+        catalog.availableDatabases,
+        schemaCatalog.availableSchemas,
+      );
+      if (this.webviewReady) {
+        await this.postState();
+      }
+    } catch (error) {
+      getOutputChannel().appendLine(
+        `[Import] Could not load the target catalog: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -395,6 +425,7 @@ export class ImportWizardMessageHandler {
       ...currentOptions,
       connectionName,
       connectionDetails,
+      sheetName: currentState.sheetName,
       targetTable: currentState.targetLocation.tableName,
       hasHeaders: currentState.hasHeaders,
       createTable: currentState.createTable,
@@ -674,6 +705,133 @@ export class ImportWizardMessageHandler {
     await vscode.window.showTextDocument(document, { preview: false });
   }
 
+  /**
+   * Maps the importer's text progress to the two phases shown in the wizard:
+   * external data transfer (measurable) and database processing (indeterminate).
+   */
+  private mapExecutionProgress(
+    message: string,
+    detail?: ImportProgressDetail,
+  ): ImportExecutionProgress | undefined {
+    const previous = this.lastExecutionProgress;
+
+    if (detail?.loadStatus) {
+      return {
+        phase: previous?.phase === "processing" ? "processing" : "transfer",
+        percent: previous?.percent,
+        message: "Database load status",
+        rowsProcessed: previous?.rowsProcessed,
+        totalRows: previous?.totalRows,
+        bytesRead: previous?.bytesRead,
+        bytesTotal: previous?.bytesTotal,
+        loadStatus: detail.loadStatus,
+      };
+    }
+
+    const bytesRead = typeof detail?.bytesRead === "number" ? detail.bytesRead : undefined;
+    const bytesTotal = typeof detail?.bytesTotal === "number" && detail.bytesTotal > 0
+      ? detail.bytesTotal
+      : undefined;
+
+    const importing = /^Importing:\s*(\d+)% complete \(([\d,]+)\s*\/\s*([\d,]+) rows\)/i.exec(message);
+    if (importing) {
+      const percent = Math.max(0, Math.min(100, Number(importing[1])));
+      const rowsProcessed = Number(importing[2].replace(/,/g, ""));
+      const totalRows = Number(importing[3].replace(/,/g, ""));
+      const measuredPercent = totalRows > 0 ? percent : undefined;
+      const processing = previous?.phase === "processing"
+        || (measuredPercent !== undefined && measuredPercent >= 100);
+      return {
+        phase: processing ? "processing" : "transfer",
+        percent: processing ? 100 : measuredPercent,
+        message: processing ? "Database processing…" : "Transferring data to the database…",
+        rowsProcessed,
+        totalRows,
+        bytesRead: bytesRead ?? previous?.bytesRead,
+        bytesTotal: bytesTotal ?? previous?.bytesTotal,
+        loadStatus: previous?.loadStatus,
+      };
+    }
+
+    if (/Transfer complete[.;]?\s*Database processing/i.test(message)) {
+      return {
+        phase: "processing",
+        percent: 100,
+        message: "Database processing…",
+        rowsProcessed: previous?.rowsProcessed,
+        totalRows: previous?.totalRows,
+        bytesRead: bytesRead ?? previous?.bytesRead,
+        bytesTotal: bytesTotal ?? previous?.bytesTotal,
+        loadStatus: previous?.loadStatus,
+      };
+    }
+    if (/Executing CREATE TABLE with EXTERNAL data|Loading rows from external stream/i.test(message)) {
+      return {
+        phase: "transfer",
+        percent: 0,
+        message: "Transferring data to the database…",
+        loadStatus: previous?.loadStatus,
+      };
+    }
+    if (/^Analyzing source:\s*(\d+)%/i.test(message)) {
+      const percent = /^Analyzing source:\s*(\d+)%/i.exec(message)?.[1];
+      return { phase: "preparing", message: `Analyzing source… ${percent}%` };
+    }
+    if (/^Analyzing (data types|Excel file types)/i.test(message)) {
+      return { phase: "preparing", message: "Analyzing column types…" };
+    }
+    if (/^Analyzed\s+[\d,]+\s+rows/i.test(message)) {
+      return { phase: "preparing", message };
+    }
+    if (/^Analysis complete:/i.test(message)) {
+      return { phase: "preparing", message: "Type analysis complete" };
+    }
+    if (/^Connecting to database/i.test(message)) {
+      return { phase: "preparing", message: "Connecting to the database…" };
+    }
+    if (/^Preparing data stream/i.test(message)) {
+      return { phase: "preparing", message: "Preparing the data stream…" };
+    }
+    if (/^Creating target table/i.test(message)) {
+      return { phase: "preparing", message: "Creating the target table…" };
+    }
+    return undefined;
+  }
+
+  private shouldPostExecutionProgress(progress: ImportExecutionProgress): boolean {
+    const previous = this.lastExecutionProgress;
+    if (!previous) {
+      return true;
+    }
+
+    const statusChanged = Boolean(progress.loadStatus) && (
+      !previous.loadStatus
+      || previous.loadStatus.planId !== progress.loadStatus?.planId
+      || previous.loadStatus.rowsInserted !== progress.loadStatus?.rowsInserted
+      || previous.loadStatus.rowsRejected !== progress.loadStatus?.rowsRejected
+      || previous.loadStatus.bytesProcessed !== progress.loadStatus?.bytesProcessed
+      || previous.loadStatus.bytesDownloaded !== progress.loadStatus?.bytesDownloaded
+    );
+    if (statusChanged) {
+      return true;
+    }
+
+    if (previous.phase !== progress.phase || previous.percent !== progress.percent) {
+      return true;
+    }
+
+    if (previous.totalRows !== progress.totalRows) {
+      return true;
+    }
+
+    if (previous.message !== progress.message) {
+      return true;
+    }
+
+    return (previous.bytesRead !== progress.bytesRead || previous.rowsProcessed !== progress.rowsProcessed)
+      && Date.now() - this.lastExecutionProgressAt >= 500;
+  }
+
   private async executeImport(): Promise<void> {
     if (this.isExecuting || this.isTransitioning) {
       return;
@@ -681,6 +839,8 @@ export class ImportWizardMessageHandler {
     const sessionId = this.requireSessionId();
     const state = this.getState();
     this.isExecuting = true;
+    this.lastExecutionProgress = undefined;
+    this.lastExecutionProgressAt = 0;
 
     try {
       await this.deps.postMessage({ type: "executionStarted" });
@@ -711,7 +871,18 @@ export class ImportWizardMessageHandler {
         async (progress, token) =>
           this.deps.service.executeImport(
             sessionId,
-            (message, increment) => progress.report({ message, increment }),
+            (message, increment, _logToOutput, detail) => {
+              progress.report({ message, increment });
+              const mapped = this.mapExecutionProgress(message, detail);
+              if (mapped && this.shouldPostExecutionProgress(mapped)) {
+                this.lastExecutionProgress = mapped;
+                this.lastExecutionProgressAt = Date.now();
+                void this.deps.postMessage({
+                  type: "executionProgress",
+                  progress: mapped,
+                });
+              }
+            },
             () => this.disposed || token.isCancellationRequested,
             { ignoreValidationErrors },
           ),

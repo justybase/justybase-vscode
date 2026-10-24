@@ -29,6 +29,7 @@ import {
   destroyNetezzaImportStream,
   registerNetezzaImportStream,
 } from "./netezzaVirtualImport";
+import { resolveNetezzaLoadStatusDatabase, startNetezzaLoadStatusMonitor } from "./netezzaLoadStatusMonitor";
 import type {
   ImportColumnDescriptor,
   ImportColumnOptions,
@@ -377,6 +378,8 @@ export class NetezzaImporter {
   private rowsCount: number = 0;
   private widthMismatchCount: number = 0;
   private streamedRowsCount: number = 0;
+  private streamedBytesCount: number = 0;
+  private streamBytesTotal: number | undefined;
   private sampleRowsCache: string[][] | undefined;
   private sampleRowsCacheComplete = false;
   private sampleRowsPromise: Promise<string[][]> | undefined;
@@ -1807,6 +1810,8 @@ ${this.getExternalUsingClause()}
       const streamProgressWeight = 100 - progressOffset;
       let lastReportedPercent = progressOffset;
       self.streamedRowsCount = 0;
+      self.streamedBytesCount = 0;
+      self.streamBytesTotal = fs.statSync(self.filePath).size;
 
       try {
         for await (const row of self.readSourceRecords()) {
@@ -1824,19 +1829,28 @@ ${this.getExternalUsingClause()}
 
           totalRowsPushed++;
           self.streamedRowsCount = totalRowsPushed;
+          self.streamedBytesCount += Buffer.byteLength(lineStr);
 
           const now = Date.now();
           if (progressCallback && now - lastReportTime >= 1000) {
             const percent =
               self.rowsCount > 0
+                ? Math.floor((totalRowsPushed / self.rowsCount) * 100)
+                : 100;
+            const weightedPercent =
+              self.rowsCount > 0
                 ? progressOffset + Math.floor((totalRowsPushed / self.rowsCount) * streamProgressWeight)
                 : 100;
-            const increment = Math.max(0, percent - lastReportedPercent);
-            lastReportedPercent = Math.max(lastReportedPercent, percent);
+            const increment = Math.max(0, weightedPercent - lastReportedPercent);
+            lastReportedPercent = Math.max(lastReportedPercent, weightedPercent);
             progressCallback(
-              `Importing: ${percent}% complete (${totalRowsPushed.toLocaleString()} rows)`,
+              `Importing: ${percent}% complete (${totalRowsPushed.toLocaleString()} / ${self.rowsCount.toLocaleString()} rows)`,
               increment,
               false,
+              {
+                bytesRead: self.streamedBytesCount,
+                bytesTotal: self.streamBytesTotal,
+              },
             );
             lastReportTime = now;
           }
@@ -1848,7 +1862,10 @@ ${this.getExternalUsingClause()}
       }
     }
 
-    return Readable.from(generateRows(), { highWaterMark: 65536 });
+    return Readable.from(generateRows(), {
+      objectMode: false,
+      highWaterMark: 64 * 1024,
+    });
   }
 
   /**
@@ -1873,6 +1890,8 @@ ${this.getExternalUsingClause()}
       let readerOpened = false;
       let rowsPushed = 0;
       self.streamedRowsCount = 0;
+      self.streamedBytesCount = 0;
+      self.streamBytesTotal = undefined;
 
       try {
         await reader.open(self.filePath);
@@ -1916,6 +1935,7 @@ ${this.getExternalUsingClause()}
 
           rowsPushed++;
           self.streamedRowsCount = rowsPushed;
+          self.streamedBytesCount += Buffer.byteLength(lineStr);
 
           // Progress reporting
           const now = Date.now();
@@ -1930,6 +1950,7 @@ ${this.getExternalUsingClause()}
               `Importing: ${percent}% complete (${rowsPushed.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
               increment,
               false,
+              { bytesRead: self.streamedBytesCount },
             );
             lastReportTime = now;
           }
@@ -1948,7 +1969,10 @@ ${this.getExternalUsingClause()}
       }
     }
 
-    return Readable.from(generateRows(), { highWaterMark: 65536 });
+    return Readable.from(generateRows(), {
+      objectMode: false,
+      highWaterMark: 64 * 1024,
+    });
   }
 
   // Public getter for pipeName to register it
@@ -1977,6 +2001,14 @@ ${this.getExternalUsingClause()}
    */
   getStreamedRowsCount(): number {
     return this.streamedRowsCount;
+  }
+
+  /**
+   * Bytes already written into the virtual import stream. This tracks what the
+   * driver has actually pulled from the source, including stream backpressure.
+   */
+  getStreamedBytesCount(): number {
+    return this.streamedBytesCount;
   }
 
   /**
@@ -2222,6 +2254,7 @@ export async function importDataToNetezza(
   let connection: NzConnection | null = null;
   let importStream: Readable | undefined;
   let unregisterImportStream: (() => void) | undefined;
+  let loadMonitor: ReturnType<typeof startNetezzaLoadStatusMonitor> | undefined;
 
   try {
     // Validate parameters
@@ -2279,7 +2312,6 @@ export async function importDataToNetezza(
       importer.setSelectedSheet(columnOptions.sheetName);
     }
 
-    // Analyze data types
     await importer.analyzeDataTypes(progressCallback);
     importer.applyColumnOptions(columnOptions);
     importer.ensureLogDir();
@@ -2302,7 +2334,20 @@ export async function importDataToNetezza(
     connection =
       await createConnectedDatabaseConnectionFromDetails(connectionDetails);
 
-    try {
+    loadMonitor = progressCallback
+      ? startNetezzaLoadStatusMonitor({
+          connectionDetails,
+          targetTable,
+          databaseName: resolveNetezzaLoadStatusDatabase(targetTable, connectionDetails.database),
+          onStatus: status => progressCallback?.(
+            `Load status: ${status.rowsInserted?.toLocaleString() ?? 0} rows inserted, ${status.bytesDownloaded?.toLocaleString() ?? 0} bytes downloaded`,
+            undefined,
+            false,
+            { loadStatus: status },
+          ),
+        })
+      : undefined;
+
       progressCallback?.("Executing CREATE TABLE with EXTERNAL data...");
       // Create command for the CREATE TABLE AS SELECT ... FROM EXTERNAL
       // NzConnection should handle the external table protocol automatically
@@ -2313,24 +2358,71 @@ export async function importDataToNetezza(
 
       // Listen for import progress events
       const totalRows = importer.getRowsCount();
+      let transferCompleted = false;
       connection!.on("importProgress", (progressData: unknown) => {
+        const rawProgress = progressData as NetezzaImportProgressData;
         const progress = resolveNetezzaImportProgress(
-          progressData as NetezzaImportProgressData,
+          rawProgress,
           totalRows,
           importer.getStreamedRowsCount(),
         );
         progressCallback?.(
           `Importing: ${progress.percentComplete}% complete (${progress.estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
+          undefined,
+          false,
+          {
+            bytesRead: typeof rawProgress.bytesSent === "number" ? rawProgress.bytesSent : undefined,
+            bytesTotal: typeof rawProgress.totalSize === "number" && rawProgress.totalSize > 0
+              ? rawProgress.totalSize
+              : undefined,
+          },
         );
+        if (!transferCompleted && progress.percentComplete >= 100) {
+          transferCompleted = true;
+          progressCallback?.("Transfer complete. Database processing...");
+        }
       });
 
-      throwIfImportCancelled(isCancelled);
-      await cmd.execute();
+      // Seed the panel with the known total so the waiting hint can show
+      // "0 / N rows" before the database asks for the first data chunk.
+      if (totalRows > 0) {
+        progressCallback?.(
+          `Importing: 0% complete (0 / ${totalRows.toLocaleString()} rows)`,
+          undefined,
+          false,
+          { bytesRead: 0 },
+        );
+      }
+      const progressHeartbeat = progressCallback
+        ? setInterval(() => {
+          if (transferCompleted) {
+            return;
+          }
+          const rowsRead = importer.getStreamedRowsCount();
+          const bytesRead = importer.getStreamedBytesCount();
+          const percent = totalRows > 0
+            ? Math.max(0, Math.min(100, Math.floor((rowsRead / totalRows) * 100)))
+            : 0;
+          progressCallback(
+            `Importing: ${percent}% complete (${rowsRead.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
+            undefined,
+            false,
+            { bytesRead },
+          );
+        }, 2000)
+        : undefined;
 
-      progressCallback?.("Import completed successfully");
-    } finally {
-      await connection.close();
-    }
+      try {
+        throwIfImportCancelled(isCancelled);
+        await cmd.execute();
+
+        progressCallback?.("Import completed successfully");
+      } finally {
+        if (progressHeartbeat) {
+          clearInterval(progressHeartbeat);
+        }
+        await connection.close();
+      }
 
     const processingTime = (Date.now() - startTime) / 1000;
 
@@ -2365,6 +2457,7 @@ export async function importDataToNetezza(
       },
     };
   } finally {
+    loadMonitor?.stop();
     if (connection && connection._connected) {
       try {
         await connection.close();
@@ -2390,6 +2483,7 @@ export async function importDataToNetezzaAdvanced(
   let connection: NzConnection | null = null;
   let importStream: Readable | undefined;
   let unregisterImportStream: (() => void) | undefined;
+  let loadMonitor: ReturnType<typeof startNetezzaLoadStatusMonitor> | undefined;
 
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -2463,36 +2557,96 @@ export async function importDataToNetezzaAdvanced(
     connection =
       await createConnectedDatabaseConnectionFromDetails(connectionDetails);
 
-    try {
+    loadMonitor = progressCallback
+      ? startNetezzaLoadStatusMonitor({
+          connectionDetails,
+          targetTable,
+          databaseName: resolveNetezzaLoadStatusDatabase(targetTable, connectionDetails.database),
+          onStatus: status => progressCallback?.(
+            `Load status: ${status.rowsInserted?.toLocaleString() ?? 0} rows inserted, ${status.bytesDownloaded?.toLocaleString() ?? 0} bytes downloaded`,
+            undefined,
+            false,
+            { loadStatus: status },
+          ),
+        })
+      : undefined;
+
       const totalRows = importer.getRowsCount();
+      let transferCompleted = false;
       connection.on("importProgress", (progressData: unknown) => {
+        const rawProgress = progressData as NetezzaImportProgressData;
         const progress = resolveNetezzaImportProgress(
-          progressData as NetezzaImportProgressData,
+          rawProgress,
           totalRows,
           importer.getStreamedRowsCount(),
         );
         progressCallback?.(
           `Importing: ${progress.percentComplete}% complete (${progress.estimatedRows.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
+          undefined,
+          false,
+          {
+            bytesRead: typeof rawProgress.bytesSent === "number" ? rawProgress.bytesSent : undefined,
+            bytesTotal: typeof rawProgress.totalSize === "number" && rawProgress.totalSize > 0
+              ? rawProgress.totalSize
+              : undefined,
+          },
         );
+        if (!transferCompleted && progress.percentComplete >= 100) {
+          transferCompleted = true;
+          progressCallback?.("Transfer complete. Database processing...");
+        }
       });
 
-      if (!columnOptions?.appendToExistingTable) {
-        progressCallback?.("Creating target table...");
-        const createCommand = connection.createCommand(createSql);
-        createCommand.commandTimeout = timeout || 3600;
-        await createCommand.execute();
+      let progressHeartbeat: ReturnType<typeof setInterval> | undefined;
+
+      try {
+        if (!columnOptions?.appendToExistingTable) {
+          progressCallback?.("Creating target table...");
+          const createCommand = connection.createCommand(createSql);
+          createCommand.commandTimeout = timeout || 3600;
+          await createCommand.execute();
+        }
+
+        if (totalRows > 0) {
+          progressCallback?.(
+            `Importing: 0% complete (0 / ${totalRows.toLocaleString()} rows)`,
+            undefined,
+            false,
+            { bytesRead: 0 },
+          );
+        }
+          progressHeartbeat = progressCallback
+          ? setInterval(() => {
+            if (transferCompleted) {
+              return;
+            }
+            const rowsRead = importer.getStreamedRowsCount();
+            const bytesRead = importer.getStreamedBytesCount();
+            const percent = totalRows > 0
+              ? Math.max(0, Math.min(100, Math.floor((rowsRead / totalRows) * 100)))
+              : 0;
+            progressCallback(
+              `Importing: ${percent}% complete (${rowsRead.toLocaleString()} / ${totalRows.toLocaleString()} rows)`,
+              undefined,
+              false,
+              { bytesRead },
+            );
+          }, 2000)
+          : undefined;
+
+        progressCallback?.("Loading rows from external stream...");
+        const loadCommand = connection.createCommand(loadSql);
+        loadCommand.commandTimeout = timeout || 3600;
+        throwIfImportCancelled(isCancelled);
+        await loadCommand.execute();
+
+        progressCallback?.("Import completed successfully");
+      } finally {
+        if (progressHeartbeat) {
+          clearInterval(progressHeartbeat);
+        }
+        await connection.close();
       }
-
-      progressCallback?.("Loading rows from external stream...");
-      const loadCommand = connection.createCommand(loadSql);
-      loadCommand.commandTimeout = timeout || 3600;
-      throwIfImportCancelled(isCancelled);
-      await loadCommand.execute();
-
-      progressCallback?.("Import completed successfully");
-    } finally {
-      await connection.close();
-    }
 
     const processingTime = (Date.now() - startTime) / 1000;
     return {
@@ -2524,6 +2678,7 @@ export async function importDataToNetezzaAdvanced(
       message: error instanceof Error ? error.message : String(error),
     };
   } finally {
+    loadMonitor?.stop();
     unregisterImportStream?.();
     destroyNetezzaImportStream(importStream);
   }

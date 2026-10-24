@@ -4,6 +4,36 @@
 
 export type ImportWizardPreviewKind = 'create' | 'load' | 'plan';
 
+/** Two-phase import progress: external data transfer, then database processing. */
+export type ImportExecutionPhase = 'preparing' | 'transfer' | 'processing';
+
+export interface ImportLoadStatus {
+    planId?: number;
+    databaseName?: string;
+    tableName?: string;
+    schemaName?: string;
+    userName?: string;
+    bytesProcessed?: number;
+    rowsInserted?: number;
+    rowsRejected?: number;
+    bytesDownloaded?: number;
+}
+
+export interface ImportExecutionProgress {
+    phase: ImportExecutionPhase;
+    /** Transfer percentage 0-100; omitted when the phase is indeterminate. */
+    percent?: number;
+    message?: string;
+    rowsProcessed?: number;
+    totalRows?: number;
+    /** Bytes pulled from the source into the import stream. */
+    bytesRead?: number;
+    /** Expected stream size when known (CSV/TXT source size). */
+    bytesTotal?: number;
+    /** Best-effort `_V_LOAD_STATUS` row while the database processes the load. */
+    loadStatus?: ImportLoadStatus;
+}
+
 export type ImportWizardExecutionMode = 'direct' | 'workflow' | 'unsupported';
 export type ImportWizardOverrideMode = 'inferred' | 'user';
 export type ImportWizardIssueSeverity = 'error' | 'warning';
@@ -144,6 +174,7 @@ export type ImportWizardHostToWebviewMessage =
           summary?: ImportWizardValidationSummary;
       }
     | { type: 'executionStarted' }
+    | { type: 'executionProgress'; progress: ImportExecutionProgress }
     | { type: 'executionFinished'; result: ImportResult }
     | { type: 'executionFailed'; message: string }
     | { type: 'sessionTransitionStarted' }

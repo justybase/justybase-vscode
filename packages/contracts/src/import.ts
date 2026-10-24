@@ -28,11 +28,34 @@ export interface ImportColumnDescriptor {
   dataType: string;
 }
 
+/** A Netezza load status row from `_V_LOAD_STATUS`, when the view is accessible. */
+export interface ImportLoadStatus {
+  planId?: number;
+  databaseName?: string;
+  tableName?: string;
+  schemaName?: string;
+  userName?: string;
+  bytesProcessed?: number;
+  rowsInserted?: number;
+  rowsRejected?: number;
+  bytesDownloaded?: number;
+}
+
+export interface ImportProgressDetail {
+  /** Best-effort database load monitoring; absent when the view is unavailable. */
+  loadStatus?: ImportLoadStatus;
+  /** Bytes already read from the generated import stream. */
+  bytesRead?: number;
+  /** Total bytes expected in the generated import stream, when known. */
+  bytesTotal?: number;
+}
+
 /** Progress callback used by in-process product adapters. */
 export type ProgressCallback = (
   message: string,
   increment?: number,
   logToOutput?: boolean,
+  detail?: ImportProgressDetail,
 ) => void;
 
 export interface SnowflakeWorkflowDetails {

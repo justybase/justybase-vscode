@@ -1,4 +1,5 @@
 import type { ImportResult } from '../../import/dataImporter';
+import type { ImportLoadStatus } from '@justybase/contracts';
 import type {
     BackgroundValidationProgress,
     ImportExecutionPlan,
@@ -8,6 +9,24 @@ import type {
 } from '../../import/wizard/ImportWizardState';
 
 export type ImportWizardPreviewKind = 'create' | 'load' | 'plan';
+
+/** Two-phase import progress: external data transfer, then database processing. */
+export type ImportExecutionPhase = 'preparing' | 'transfer' | 'processing';
+
+export interface ImportExecutionProgress {
+    phase: ImportExecutionPhase;
+    /** Transfer percentage 0-100; omitted when the phase is indeterminate. */
+    percent?: number;
+    message?: string;
+    rowsProcessed?: number;
+    totalRows?: number;
+    /** Bytes pulled from the source into the import stream. */
+    bytesRead?: number;
+    /** Expected stream size when known (CSV/TXT source size). */
+    bytesTotal?: number;
+    /** Best-effort `_V_LOAD_STATUS` row while the database processes the load. */
+    loadStatus?: ImportLoadStatus;
+}
 
 export type ImportWizardWebviewToHostMessage =
     | { type: 'ready' }
@@ -49,6 +68,7 @@ export type ImportWizardHostToWebviewMessage =
         summary?: ImportWizardValidationSummary;
     }
     | { type: 'executionStarted' }
+    | { type: 'executionProgress'; progress: ImportExecutionProgress }
     | { type: 'executionFinished'; result: ImportResult }
     | { type: 'executionFailed'; message: string }
     | { type: 'sessionTransitionStarted' }
@@ -89,6 +109,7 @@ export const IMPORT_WIZARD_HOST_TO_WEBVIEW_TYPES = [
     'sqlPreviewUpdated',
     'backgroundValidationProgress',
     'executionStarted',
+    'executionProgress',
     'executionFinished',
     'executionFailed',
     'sessionTransitionStarted',

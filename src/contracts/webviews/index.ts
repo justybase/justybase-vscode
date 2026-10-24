@@ -120,6 +120,8 @@ export type {
 } from './editDataPanelContracts';
 
 export type {
+    ImportExecutionPhase,
+    ImportExecutionProgress,
     ImportWizardHostToWebviewMessage,
     ImportWizardInboundMessage,
     ImportWizardOutboundMessage,

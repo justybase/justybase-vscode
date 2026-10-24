@@ -700,11 +700,15 @@ describe('import/dataImporter', () => {
             } finally {
                 dateNow.mockRestore();
             }
-            expect(streamProgress.mock.calls.filter(([message]) => String(message).startsWith('Importing: ')))
+            const streamCalls = streamProgress.mock.calls.filter(([message]) => String(message).startsWith('Importing: '));
+            expect(streamCalls.map(([message, increment, logToOutput]) => [message, increment, logToOutput]))
                 .toEqual([
-                    ['Importing: 70% complete (1 rows)', 30, false],
-                    ['Importing: 100% complete (2 rows)', 30, false],
+                    ['Importing: 50% complete (1 / 2 rows)', 30, false],
+                    ['Importing: 100% complete (2 / 2 rows)', 30, false],
                 ]);
+            expect(streamCalls[0][3]).toEqual(expect.objectContaining({ bytesTotal: 10485786 }));
+            expect(streamCalls[0][3].bytesRead).toBeGreaterThan(0);
+            expect(streamCalls[1][3].bytesRead).toBeGreaterThan(streamCalls[0][3].bytesRead);
         });
 
         it('rejects an unterminated quoted field', async () => {
@@ -1068,3 +1072,4 @@ describe('import/dataImporter', () => {
     });
 });
 });
+

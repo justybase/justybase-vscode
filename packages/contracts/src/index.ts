@@ -46,6 +46,8 @@ export type {
 export type {
   ImportColumnOptions,
   ImportColumnDescriptor,
+  ImportLoadStatus,
+  ImportProgressDetail,
   ProgressCallback,
   SnowflakeWorkflowDetails,
   ImportResultDetails,
