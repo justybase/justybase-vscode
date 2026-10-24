@@ -5,7 +5,6 @@ import type {
 } from '@justybase/contracts';
 import { valueForcesTextImportType, valueLooksLikePesel } from './importTypeInferenceUtils';
 import {
-    getFormattedImportNumberPrecision,
     isDashZeroImportCell,
     parseFormattedImportNumber,
 } from './importNumberParsing';
@@ -21,6 +20,152 @@ export interface ColumnTypeChooserOptions {
  * values carry leading zeros, which would otherwise force text.
  */
 const PESEL_VALUE_SAMPLE_SIZE = 3;
+
+/** Trim only when the cell actually has edge whitespace (avoids re-allocating). */
+function isImportTrimWhitespace(code: number): boolean {
+    return code === 32
+        || (code >= 9 && code <= 13)
+        || code === 0xa0
+        || code === 0x1680
+        || (code >= 0x2000 && code <= 0x200b)
+        || code === 0x2028
+        || code === 0x2029
+        || code === 0x202f
+        || code === 0x205f
+        || code === 0x3000
+        || code === 0xfeff;
+}
+
+function trimImportCell(value: string): string {
+    const length = value.length;
+    if (length === 0) {
+        return value;
+    }
+    if (
+        !isImportTrimWhitespace(value.charCodeAt(0))
+        && !isImportTrimWhitespace(value.charCodeAt(length - 1))
+    ) {
+        return value;
+    }
+    return value.trim();
+}
+
+function hasImportCellWhitespace(value: string): boolean {
+    for (let index = 0; index < value.length; index += 1) {
+        if (isImportTrimWhitespace(value.charCodeAt(index))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** True when the value has at least two occurrences of `character`. */
+function hasRepeatedCharacter(value: string, character: string): boolean {
+    const first = value.indexOf(character);
+    return first >= 0 && value.indexOf(character, first + 1) >= 0;
+}
+
+/** True when the value contains exactly two occurrences of `character`. */
+function hasExactlyTwoCharacters(value: string, character: string): boolean {
+    const first = value.indexOf(character);
+    if (first < 0) {
+        return false;
+    }
+    const second = value.indexOf(character, first + 1);
+    if (second < 0) {
+        return false;
+    }
+    return value.indexOf(character, second + 1) < 0;
+}
+
+/**
+ * Matches a value that starts with a zero digit after any sign/currency
+ * prefix, e.g. `0123`, `0 123`, `$0 123`.
+ */
+const LEADING_ZERO_NUMBER_PATTERN = /^[\s\u00A0\u202F\u2009(+\-−–—$£€¥₹]*0[\s\u00A0\u202F\u2009'’ʼ]*\d/;
+
+/** `YYYY-MM-DD` with fixed digit positions. */
+function isPlainIsoDate(value: string): boolean {
+    if (value.length !== 10) {
+        return false;
+    }
+    for (let index = 0; index < 10; index += 1) {
+        if (index === 4 || index === 7) {
+            if (value.charCodeAt(index) !== 45) {
+                return false;
+            }
+            continue;
+        }
+        const code = value.charCodeAt(index);
+        if (code < 48 || code > 57) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** `YYYY-MM-DD HH:MM[:SS]` / `YYYY-MM-DDTHH:MM[:SS]` with fixed positions. */
+function isPlainIsoDateTime(value: string): boolean {
+    const length = value.length;
+    if (length !== 16 && length !== 19) {
+        return false;
+    }
+    for (let index = 0; index < length; index += 1) {
+        if (index === 4 || index === 7) {
+            if (value.charCodeAt(index) !== 45) {
+                return false;
+            }
+            continue;
+        }
+        if (index === 10) {
+            const separator = value.charCodeAt(index);
+            if (separator !== 32 && separator !== 84 && separator !== 124) {
+                return false;
+            }
+            continue;
+        }
+        if (index === 13) {
+            if (value.charCodeAt(index) !== 58) {
+                return false;
+            }
+            continue;
+        }
+        if (length === 19 && index === 16) {
+            if (value.charCodeAt(index) !== 58) {
+                return false;
+            }
+            continue;
+        }
+        const code = value.charCodeAt(index);
+        if (code < 48 || code > 57) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Plain `[-+]?digits` with no separators, currency or exponent. */
+function plainIntegerDigitCount(value: string): number {
+    const length = value.length;
+    if (length === 0) {
+        return 0;
+    }
+    let index = 0;
+    const first = value.charCodeAt(0);
+    if (first === 43 || first === 45 || first === 0x2212 || first === 0x2013 || first === 0x2014) {
+        index = 1;
+    }
+    if (index >= length) {
+        return 0;
+    }
+    for (let cursor = index; cursor < length; cursor += 1) {
+        const code = value.charCodeAt(cursor);
+        if (code < 48 || code > 57) {
+            return 0;
+        }
+    }
+    return length - index;
+}
 
 export class NetezzaDataType implements DatabaseImportDataType {
     constructor(
@@ -81,6 +226,9 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
         }
 
         this.firstTime = false;
+        if (this.currentType.dbType === 'NVARCHAR' && this.currentType.length === tmpLen) {
+            return this.currentType;
+        }
         return new NetezzaDataType('NVARCHAR', undefined, undefined, tmpLen);
     }
 
@@ -108,50 +256,71 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
     }
 
     private getType(strVal: string): NetezzaDataType {
-        const currentDbType = this.currentType.dbType;
-        const strLen = strVal.length;
-
         if (this.forceText) {
             return this.createTextType(strVal);
         }
 
+        const trimmed = trimImportCell(strVal);
+        const trimmedLength = trimmed.length;
+
         // Lone dash cells (`-`/`–` for zero) never influence the inferred type;
         // they are resolved to 0/dash at formatting time.
-        if (isDashZeroImportCell(strVal.trim())) {
+        if (trimmedLength <= 1 && isDashZeroImportCell(trimmed)) {
             return this.currentType;
         }
 
-        const trimmed = strVal.trim();
-        const valueIsPesel = valueLooksLikePesel(trimmed);
-        if (trimmed) {
+        // PESEL sampling only runs for the first few values of a column.
+        let valueIsPesel = false;
+        if (!this.peselSamplingDone && trimmedLength > 0) {
+            valueIsPesel = valueLooksLikePesel(trimmed);
             this.observePeselSample(valueIsPesel);
         }
         // PESEL-shaped values are identifiers: keep the column as text so
         // leading zeros survive. A PESEL while the TOP3 sample is still open,
         // or a sample where all three values validated, locks the column to
         // text; after a failed sample the normal rules apply.
-        const peselTextColumn = this.peselColumnDetected
-            || (valueIsPesel && !this.peselSamplingDone);
-        if (peselTextColumn) {
+        if (this.peselColumnDetected || (valueIsPesel && !this.peselSamplingDone)) {
             return this.createTextType(strVal);
         }
 
-        if (valueForcesTextImportType(strVal)) {
+        // Leading-zero values (`0123`, `0 123`) are identifiers, not numbers.
+        if (trimmedLength > 1 && trimmed.charCodeAt(0) === 48 && valueForcesTextImportType(trimmed)) {
             return this.createTextType(strVal);
         }
 
-        const strValNoSpace = strVal.replace(/\s/g, '');
+        if (this.inferBoolean && trimmedLength >= 4 && trimmedLength <= 10) {
+            const firstCode = trimmed.charCodeAt(0) | 0x20;
+            if (firstCode === 0x74 || firstCode === 0x66) {
+                const compact = hasImportCellWhitespace(trimmed)
+                    ? trimmed.replace(/\s/g, '')
+                    : trimmed;
+                if (/^(true|false)$/i.test(compact)) {
+                    this.firstTime = false;
+                    return this.currentType.dbType === 'BOOLEAN'
+                        ? this.currentType
+                        : new NetezzaDataType('BOOLEAN');
+                }
+            }
+        }
 
-        if (this.inferBoolean && /^(true|false)$/i.test(strValNoSpace)) {
-            this.firstTime = false;
-            return new NetezzaDataType('BOOLEAN');
+        const currentDbType = this.currentType.dbType;
+
+        // Once a column is text nothing can narrow it again: the date and
+        // number branches are all gated on a non-text current type, so the
+        // only remaining work is widening the NVARCHAR length.
+        if (currentDbType === 'NVARCHAR') {
+            return this.createTextType(strVal);
         }
 
         // Dotted dates are checked before numeric parsing: under a comma
         // decimal delimiter `17.06.2024` would otherwise lose its dots as
         // thousands separators and infer as an integer like `17062024`.
-        if ((currentDbType === 'DATETIME' || this.firstTime) && (strVal.match(/\./g) || []).length >= 2) {
-            const result = strVal.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+        if (
+            (currentDbType === 'DATETIME' || this.firstTime)
+            && trimmedLength >= 8
+            && hasRepeatedCharacter(trimmed, '.')
+        ) {
+            const result = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
             if (result) {
                 try {
                     const day = parseInt(result[1]);
@@ -170,7 +339,9 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
                             date.getDate() === day
                         ) {
                             this.firstTime = false;
-                            return new NetezzaDataType('DATETIME');
+                            return currentDbType === 'DATETIME'
+                                ? this.currentType
+                                : new NetezzaDataType('DATETIME');
                         }
                     }
                 } catch {
@@ -179,58 +350,78 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
             }
         }
 
-        const numericPrecision = ['BIGINT', 'NUMERIC'].includes(currentDbType)
-            ? getFormattedImportNumberPrecision(strVal, this.decimalDelimInCsv)
-            : null;
-        if (numericPrecision) {
-            const parsed = parseFormattedImportNumber(strVal, this.decimalDelimInCsv);
-            const fractionLen = parsed?.fractionDigits.length ?? numericPrecision.scale;
-            // Preserve leading zeros (`0123`, `0 123`): such values stay text
-            // so the zeros are not lost by a numeric conversion.
-            const rawLeading = strVal
-                .replace(/^[\s\u00A0\u202F\u2009(+\-−–—$£€¥₹]+/, '')
-                .replace(/[ \u00a0\u202F\u2009'’ʼ]/g, '');
-            if (parsed && /^0\d/.test(rawLeading)) {
-                return this.createTextType(strVal);
-            }
-            // Keep the historical length guard: overlong digit strings stay
-            // text instead of overflowing NUMERIC precision.
-            if (parsed && numericPrecision.precision <= 18) {
-                this.firstTime = false;
-                // Currency-marked values (`123 457 zł`, `£123,457`) are money:
-                // infer NUMERIC even without a decimal part.
-                if (
-                    fractionLen === 0
-                    && !parsed.wasCurrency
-                    && currentDbType === 'BIGINT'
-                    && parsed.integerDigits.length < 15
-                ) {
-                    return new NetezzaDataType('BIGINT');
+        if (currentDbType === 'BIGINT' || currentDbType === 'NUMERIC') {
+            // Fast path for plain integers: no separators, currency or
+            // exponent, so the formatted-number parser is not needed.
+            if (currentDbType === 'BIGINT') {
+                const digits = plainIntegerDigitCount(trimmed);
+                if (digits > 0 && digits < 15 && !(digits > 1 && trimmed.charCodeAt(trimmed.length - digits) === 48)) {
+                    this.firstTime = false;
+                    return this.currentType;
                 }
+            }
 
-                this.maxPrecision = Math.max(this.maxPrecision, numericPrecision.precision);
-                this.maxScale = Math.max(this.maxScale, numericPrecision.scale);
+            const parsed = parseFormattedImportNumber(trimmed, this.decimalDelimInCsv);
+            if (parsed) {
+                const precision = parsed.integerDigits.length + parsed.fractionDigits.length;
+                const scale = parsed.fractionDigits.length;
+                // Preserve leading zeros (`0123`, `0 123`): such values stay
+                // text so the zeros are not lost by a numeric conversion.
+                if (LEADING_ZERO_NUMBER_PATTERN.test(trimmed)) {
+                    return this.createTextType(strVal);
+                }
+                // Keep the historical length guard: overlong digit strings stay
+                // text instead of overflowing NUMERIC precision.
+                if (precision <= 18) {
+                    this.firstTime = false;
+                    // Currency-marked values (`123 457 zł`, `£123,457`) are money:
+                    // infer NUMERIC even without a decimal part.
+                    if (
+                        scale === 0
+                        && !parsed.wasCurrency
+                        && currentDbType === 'BIGINT'
+                        && parsed.integerDigits.length < 15
+                    ) {
+                        return this.currentType;
+                    }
 
-                const finalPrecision = Math.min(Math.max(this.maxPrecision, 16), 38);
-                const finalScale = Math.min(this.maxScale, 18);
+                    this.maxPrecision = Math.max(this.maxPrecision, precision);
+                    this.maxScale = Math.max(this.maxScale, scale);
 
-                return new NetezzaDataType('NUMERIC', finalPrecision, finalScale);
+                    const finalPrecision = Math.min(Math.max(this.maxPrecision, 16), 38);
+                    const finalScale = Math.min(this.maxScale, 18);
+
+                    if (
+                        this.currentType.dbType === 'NUMERIC'
+                        && this.currentType.precision === finalPrecision
+                        && this.currentType.scale === finalScale
+                    ) {
+                        return this.currentType;
+                    }
+                    return new NetezzaDataType('NUMERIC', finalPrecision, finalScale);
+                }
             }
         }
 
         if (
-            (currentDbType === 'DATE' || this.firstTime) &&
-            (strVal.match(/-/g) || []).length === 2 &&
-            strLen >= 8 &&
-            strLen <= 10
+            (currentDbType === 'DATE' || this.firstTime)
+            && trimmedLength >= 8
+            && trimmedLength <= 10
+            && hasExactlyTwoCharacters(trimmed, '-')
         ) {
-            const parts = strVal.split('-');
+            if (currentDbType === 'DATE' && isPlainIsoDate(trimmed)) {
+                this.firstTime = false;
+                return this.currentType;
+            }
+            const parts = trimmed.split('-');
             if (parts.length === 3 && parts.every(part => /^\d+$/.test(part))) {
                 try {
                     const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
                     if (!isNaN(date.getTime())) {
                         this.firstTime = false;
-                        return new NetezzaDataType('DATE');
+                        return currentDbType === 'DATE'
+                            ? this.currentType
+                            : new NetezzaDataType('DATE');
                     }
                 } catch {
                     // Invalid date, continue.
@@ -239,12 +430,16 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
         }
 
         if (
-            (currentDbType === 'DATETIME' || this.firstTime) &&
-            (strVal.match(/-/g) || []).length === 2 &&
-            strLen >= 12 &&
-            strLen <= 20
+            (currentDbType === 'DATETIME' || this.firstTime)
+            && trimmedLength >= 12
+            && trimmedLength <= 20
+            && hasExactlyTwoCharacters(trimmed, '-')
         ) {
-            const result = strVal.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[\s|T](\d{2}):(\d{2})(:?(\d{2}))?$/);
+            if (currentDbType === 'DATETIME' && isPlainIsoDateTime(trimmed)) {
+                this.firstTime = false;
+                return this.currentType;
+            }
+            const result = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[\s|T](\d{2}):(\d{2})(:?(\d{2}))?$/);
             if (result) {
                 try {
                     const sec = result[7] ? parseInt(result[7]) : 0;
@@ -258,7 +453,9 @@ export class ColumnTypeChooser implements DatabaseColumnTypeChooser {
                     );
                     if (!isNaN(date.getTime())) {
                         this.firstTime = false;
-                        return new NetezzaDataType('DATETIME');
+                        return currentDbType === 'DATETIME'
+                            ? this.currentType
+                            : new NetezzaDataType('DATETIME');
                     }
                 } catch {
                     // Invalid datetime, continue.

@@ -930,7 +930,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 description: 'Number of rows to validate in background (100–50000)',
                 type: 'number',
                 configKey: 'importWizard.backgroundValidationSampleSize',
-                defaultValue: 5000
+                defaultValue: 20000
             }
         ]
     },

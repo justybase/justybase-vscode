@@ -55,9 +55,18 @@ export class ImportPreviewService {
             kind: options.connectionDetails.dbType,
             hasHeaders: options.hasHeaders,
         });
+        // Type inference over a sample keeps the wizard responsive for large XLSX/XLSB/CSV files.
+        importer.setAnalysisRowLimit(options.analysisRowLimit ?? 5000);
 
         const availableSheets = await importer.getAvailableSheetNames();
-        if (availableSheets.length > 0 && !importer.getSelectedSheet()) {
+        const requestedSheet = options.sheetName?.trim();
+        const matchedSheet = requestedSheet
+            ? availableSheets.find(name => name === requestedSheet)
+                ?? availableSheets.find(name => name.toLowerCase() === requestedSheet.toLowerCase())
+            : undefined;
+        if (matchedSheet) {
+            importer.setSelectedSheet(matchedSheet);
+        } else if (availableSheets.length > 0 && !importer.getSelectedSheet()) {
             importer.setSelectedSheet(availableSheets[0]);
         }
 

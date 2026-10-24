@@ -49,6 +49,25 @@ export {
 // Helper to unblock event loop
 const delay = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** Zero-pad a two-digit date/time component without per-call closures. */
+function padTwoDigits(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+/**
+ * Minimum gap between analysis progress messages. Row-based reporting sent
+ * hundreds of webview updates per second on fast workbooks; a time budget keeps
+ * the UI responsive without flooding it.
+ */
+const ANALYSIS_REPORT_INTERVAL_MS = 200;
+
+/**
+ * Minimum gap between event-loop yields during analysis. Yielding on every
+ * fixed row count added hundreds of timer callbacks per second on fast
+ * workbooks; a time budget keeps the UI alive at a bounded cost.
+ */
+const ANALYSIS_YIELD_INTERVAL_MS = 100;
+
 export function readDelimitedTextPrefix(
   filePath: string,
   maxBytes = 64 * 1024,
@@ -358,7 +377,13 @@ export class NetezzaImporter {
   private rowsCount: number = 0;
   private widthMismatchCount: number = 0;
   private streamedRowsCount: number = 0;
+  private sampleRowsCache: string[][] | undefined;
+  private sampleRowsCacheComplete = false;
+  private sampleRowsPromise: Promise<string[][]> | undefined;
+  private sampleRowsGeneration = 0;
   private analysisProgressOffset = 0;
+  /** Cap for type inference; Infinity keeps the historical full-file analysis. */
+  private analysisRowLimit: number = Number.POSITIVE_INFINITY;
   private valuesToEscape: string[] = [];
   private selectedColumnIndexes: number[] = [];
   private forcedColumnTypes: Map<number, string> = new Map();
@@ -521,6 +546,10 @@ export class NetezzaImporter {
     this.rowsCount = 0;
     this.widthMismatchCount = 0;
     this.streamedRowsCount = 0;
+    this.sampleRowsCache = undefined;
+    this.sampleRowsCacheComplete = false;
+    this.sampleRowsPromise = undefined;
+    this.sampleRowsGeneration += 1;
     this.analysisProgressOffset = 0;
     this.excelHasHeaderRow = this.hasHeadersOverride ?? true;
     this.csvHasHeaderRow = this.hasHeadersOverride;
@@ -839,13 +868,14 @@ export class NetezzaImporter {
   }
 
   /**
-   * Format Excel cell value to string with proper date handling
+   * Format Excel cell value to string with proper date handling.
+   * `pad` lives at module scope: allocating a closure per date cell showed up
+   * in profiles of large workbooks.
    */
   private excelValueToString(val: unknown): string {
     if (val === null || val === undefined) return "";
     if (val instanceof Date) {
-      const pad = (n: number) => (n < 10 ? "0" + n : n);
-      return `${val.getUTCFullYear()}-${pad(val.getUTCMonth() + 1)}-${pad(val.getUTCDate())} ${pad(val.getUTCHours())}:${pad(val.getUTCMinutes())}:${pad(val.getUTCSeconds())}`;
+      return `${val.getUTCFullYear()}-${padTwoDigits(val.getUTCMonth() + 1)}-${padTwoDigits(val.getUTCDate())} ${padTwoDigits(val.getUTCHours())}:${padTwoDigits(val.getUTCMinutes())}:${padTwoDigits(val.getUTCSeconds())}`;
     }
     return String(val);
   }
@@ -862,7 +892,10 @@ export class NetezzaImporter {
    * Read Excel sample rows (streaming, limited to N data rows).
    * Opens the Excel reader, skips a detected header, and collects rows.
    */
-  private async readExcelSampleRows(limit: number): Promise<string[][]> {
+  private async readExcelSampleRows(
+    limit: number,
+    onProgress?: (rowsRead: number, targetRows: number) => void,
+  ): Promise<string[][]> {
     if (!ReaderFactory) {
       throw new Error("ReaderFactory module not available");
     }
@@ -876,6 +909,10 @@ export class NetezzaImporter {
           : [];
       await this.selectExcelReaderSheet(reader);
 
+      const targetRows = Math.min(
+        limit,
+        this.rowsCount > 0 ? this.rowsCount : limit,
+      );
       const rows: string[][] = [];
       let headerSkipped = !this.excelHasHeaderRow;
       let sourceRowsRead = 0;
@@ -884,7 +921,7 @@ export class NetezzaImporter {
         throwIfImportCancelled(this.isCancelled);
         sourceRowsRead++;
         if (sourceRowsRead <= this.skipRowCount) {
-          if (sourceRowsRead % 10000 === 0) {
+          if (sourceRowsRead % 2000 === 0) {
             await delay();
           }
           continue;
@@ -902,11 +939,13 @@ export class NetezzaImporter {
           }
         }
         rows.push(row);
-        if (sourceRowsRead % 10000 === 0) {
+        if (rows.length % 500 === 0) {
+          onProgress?.(rows.length, targetRows);
           await delay();
         }
       }
 
+      onProgress?.(rows.length, targetRows);
       return rows;
     } finally {
       if (reader && typeof reader.close === "function") {
@@ -1019,13 +1058,19 @@ export class NetezzaImporter {
    * Analyze file to determine column types (supports CSV, TXT, XLSX, XLSB)
    * Uses streaming approach for large files
    */
+  /** Limits type inference to the first N rows; the import wizard uses a sample for large files. */
+  public setAnalysisRowLimit(limit: number): void {
+    this.analysisRowLimit = Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : Number.POSITIVE_INFINITY;
+  }
+
   async analyzeDataTypes(
     progressCallback?: ProgressCallback,
   ): Promise<ColumnTypeChooser[]> {
     throwIfImportCancelled(this.isCancelled);
     progressCallback?.("Analyzing data types...");
     this.analysisProgressOffset = 0;
-
     if (this.isExcelFile) {
       return this.analyzeExcelTypes(progressCallback);
     }
@@ -1062,6 +1107,8 @@ export class NetezzaImporter {
     let sampleCount = 0;
     let rowCount = 0;
     let lastReportedAnalysisPercent = 0;
+    let lastAnalysisReportAt = 0;
+    let lastAnalysisYieldAt = 0;
 
     const applyRow = (row: string[]) => {
       for (let index = 0; index < Math.min(row.length, headers.length); index++) {
@@ -1154,9 +1201,22 @@ export class NetezzaImporter {
         processDataRow(row);
       }
 
-      if (rowCount % 10000 === 0) {
-        progressCallback?.(`Analyzed ${rowCount.toLocaleString()} rows...`, undefined, false);
-        await delay();
+      if (rowCount >= this.analysisRowLimit) {
+        progressCallback?.(`Stopped type analysis after ${rowCount.toLocaleString()} rows`);
+        break;
+      }
+
+      if (rowCount % 5000 === 0) {
+        const now = Date.now();
+        if (now - lastAnalysisYieldAt >= ANALYSIS_YIELD_INTERVAL_MS) {
+          lastAnalysisYieldAt = now;
+          if (now - lastAnalysisReportAt >= ANALYSIS_REPORT_INTERVAL_MS) {
+            lastAnalysisReportAt = now;
+            progressCallback?.(`Analyzed ${rowCount.toLocaleString()} rows...`, undefined, false);
+          }
+          // Yield so the webview can paint and cancellation is observed.
+          await delay();
+        }
       }
     }
 
@@ -1201,6 +1261,11 @@ export class NetezzaImporter {
       throw new Error("No data found in file");
     }
 
+    // Keep type inference bounded for the wizard; +1 leaves room for the header row.
+    if (Number.isFinite(this.analysisRowLimit) && rows.length > this.analysisRowLimit + 1) {
+      rows.length = this.analysisRowLimit + 1;
+    }
+
     // Detect decimal delimiter before analyzing types
     this.decimalDelimiter = this.detectDecimalDelimiter(rows);
     progressCallback?.(
@@ -1223,25 +1288,38 @@ export class NetezzaImporter {
     );
 
     // Process data rows, including the first row when no header is selected.
+    let dataRowIndex = 0;
+    let lastAnalysisReportAt = 0;
+    let lastAnalysisYieldAt = 0;
     for (let i = hasHeaders ? 1 : 0; i < rows.length; i++) {
       throwIfImportCancelled(this.isCancelled);
       const row = rows[i];
+      dataRowIndex++;
       if (row.length !== dataTypes.length) {
         this.widthMismatchCount++;
       }
-      for (let j = 0; j < row.length; j++) {
-        if (j < dataTypes.length && row[j] && row[j].trim()) {
-          dataTypes[j].refreshCurrentType(row[j].trim());
+      const columnCount = Math.min(row.length, dataTypes.length);
+      for (let j = 0; j < columnCount; j++) {
+        const cell = row[j]?.trim();
+        if (cell) {
+          dataTypes[j].refreshCurrentType(cell);
         }
       }
 
-      if (i % 10000 === 0) {
-        progressCallback?.(
-          `Analyzed ${i.toLocaleString()} rows...`,
-          undefined,
-          false,
-        );
-        await delay();
+      if (dataRowIndex % 5000 === 0) {
+        const now = Date.now();
+        if (now - lastAnalysisYieldAt >= ANALYSIS_YIELD_INTERVAL_MS) {
+          lastAnalysisYieldAt = now;
+          if (now - lastAnalysisReportAt >= ANALYSIS_REPORT_INTERVAL_MS) {
+            lastAnalysisReportAt = now;
+            progressCallback?.(
+              `Analyzed ${dataRowIndex.toLocaleString()} rows...`,
+              undefined,
+              false,
+            );
+          }
+          await delay();
+        }
       }
     }
 
@@ -1284,6 +1362,8 @@ export class NetezzaImporter {
       let firstRow: string[] | undefined;
       let firstRowHandled = false;
       let sourceRowsRead = 0;
+      let lastAnalysisReportAt = 0;
+      let lastAnalysisYieldAt = 0;
       const decimalSampleCells: string[] = [];
       const maxDecimalSamples = 100;
 
@@ -1317,9 +1397,11 @@ export class NetezzaImporter {
 
         initializeDataTypes();
 
-        for (let j = 0; j < Math.min(row.length, dataTypes.length); j++) {
-          if (row[j] && row[j].trim()) {
-            dataTypes[j].refreshCurrentType(row[j].trim());
+        const columnCount = Math.min(row.length, dataTypes.length);
+        for (let j = 0; j < columnCount; j++) {
+          const cell = row[j]?.trim();
+          if (cell) {
+            dataTypes[j].refreshCurrentType(cell);
           }
         }
       };
@@ -1328,13 +1410,20 @@ export class NetezzaImporter {
         throwIfImportCancelled(this.isCancelled);
         sourceRowsRead++;
         if (sourceRowsRead <= this.skipRowCount) {
-          if (sourceRowsRead % 10000 === 0) {
-            progressCallback?.(
-              `Analyzed ${rowsCount.toLocaleString()} rows...`,
-              undefined,
-              false,
-            );
-            await delay();
+          if (sourceRowsRead % 2000 === 0) {
+            const now = Date.now();
+            if (now - lastAnalysisYieldAt >= ANALYSIS_YIELD_INTERVAL_MS) {
+              lastAnalysisYieldAt = now;
+              if (now - lastAnalysisReportAt >= ANALYSIS_REPORT_INTERVAL_MS) {
+                lastAnalysisReportAt = now;
+                progressCallback?.(
+                  `Analyzed ${rowsCount.toLocaleString()} rows...`,
+                  undefined,
+                  false,
+                );
+              }
+              await delay();
+            }
           }
           continue;
         }
@@ -1366,13 +1455,25 @@ export class NetezzaImporter {
 
         processDataRow(row);
 
-        if (sourceRowsRead % 10000 === 0) {
-          progressCallback?.(
-            `Analyzed ${rowsCount.toLocaleString()} rows...`,
-            undefined,
-            false,
-          );
-          await delay();
+        if (rowsCount >= this.analysisRowLimit) {
+          progressCallback?.(`Stopped type analysis after ${rowsCount.toLocaleString()} rows`);
+          break;
+        }
+
+        if (sourceRowsRead % 2000 === 0) {
+          const now = Date.now();
+          if (now - lastAnalysisYieldAt >= ANALYSIS_YIELD_INTERVAL_MS) {
+            lastAnalysisYieldAt = now;
+            if (now - lastAnalysisReportAt >= ANALYSIS_REPORT_INTERVAL_MS) {
+              lastAnalysisReportAt = now;
+              progressCallback?.(
+                `Analyzed ${rowsCount.toLocaleString()} rows...`,
+                undefined,
+                false,
+              );
+            }
+            await delay();
+          }
         }
       }
 
@@ -1966,13 +2067,65 @@ ${this.getExternalUsingClause()}
   /**
    * Returns a preview sample of data rows (without header).
    */
-  async getSampleRows(limit: number = 5): Promise<string[][]> {
+  /**
+   * Return up to `limit` data rows from the source.
+   *
+   * The sample is cached until the sheet/header selection changes. Column
+   * renames, type edits, and repeated background validation runs reuse the
+   * same rows instead of re-reading (and re-parsing) the source file.
+   */
+  async getSampleRows(
+    limit: number = 5,
+    onProgress?: (rowsRead: number, targetRows: number) => void,
+  ): Promise<string[][]> {
     const sampleLimit = Math.max(1, Math.min(limit, 50000));
-
-    if (this.isExcelFile) {
-      return this.readExcelSampleRows(sampleLimit);
+    const cached = this.sampleRowsCache;
+    if (cached && (this.sampleRowsCacheComplete || cached.length >= sampleLimit)) {
+      return cached.slice(0, sampleLimit);
     }
 
+    // Share one in-flight read so a second validation request (for example after
+    // a fast column edit) does not start a duplicate parse of the same file.
+    if (this.sampleRowsPromise) {
+      await this.sampleRowsPromise.catch(() => undefined);
+      const shared = this.sampleRowsCache;
+      if (shared && (this.sampleRowsCacheComplete || shared.length >= sampleLimit)) {
+        return shared.slice(0, sampleLimit);
+      }
+    }
+
+    const generation = this.sampleRowsGeneration;
+    const promise = this.readSampleRows(sampleLimit, onProgress)
+      .then(rows => {
+        if (generation === this.sampleRowsGeneration) {
+          this.sampleRowsCache = rows;
+          this.sampleRowsCacheComplete =
+            rows.length < sampleLimit
+            || (this.rowsCount > 0 && rows.length >= this.rowsCount);
+        }
+        return rows;
+      })
+      .finally(() => {
+        if (this.sampleRowsPromise === promise) {
+          this.sampleRowsPromise = undefined;
+        }
+      });
+    this.sampleRowsPromise = promise;
+    return promise;
+  }
+
+  private async readSampleRows(
+    sampleLimit: number,
+    onProgress?: (rowsRead: number, targetRows: number) => void,
+  ): Promise<string[][]> {
+    if (this.isExcelFile) {
+      return this.readExcelSampleRows(sampleLimit, onProgress);
+    }
+
+    const targetRows = Math.min(
+      sampleLimit,
+      this.rowsCount > 0 ? this.rowsCount : sampleLimit,
+    );
     const rows: string[][] = [];
     let headerSkipped = false;
     for await (const row of this.readSourceRecords()) {
@@ -1982,10 +2135,15 @@ ${this.getExternalUsingClause()}
       }
       headerSkipped = true;
       rows.push(row);
+      if (rows.length % 500 === 0) {
+        onProgress?.(rows.length, targetRows);
+        await delay();
+      }
       if (rows.length >= sampleLimit) {
         break;
       }
     }
+    onProgress?.(rows.length, targetRows);
     return rows;
   }
 

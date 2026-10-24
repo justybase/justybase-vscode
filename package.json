@@ -4863,10 +4863,10 @@
         },
         "justybase.importWizard.backgroundValidationSampleSize": {
           "type": "integer",
-          "default": 5000,
+          "default": 20000,
           "minimum": 100,
           "maximum": 50000,
-          "description": "Number of rows to validate in background for large imports. Higher values provide more thorough validation but take longer."
+          "description": "Number of rows to validate in the background. Higher values provide more thorough validation but take longer. Default: 20000."
         }
       }
     },

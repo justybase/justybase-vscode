@@ -821,9 +821,50 @@ describe('import/dataImporter', () => {
 
             expect(reportProgress.mock.calls.filter(([message]) => String(message).startsWith('Importing: ')))
                 .toEqual([
-                    ['Importing: 50% complete (1 rows)', 50, false],
-                    ['Importing: 100% complete (2 rows)', 50, false],
+                    ['Importing: 50% complete (1 / 2 rows)', 50, false, { bytesRead: 4, bytesTotal: 12 }],
+                    ['Importing: 100% complete (2 / 2 rows)', 50, false, { bytesRead: 8, bytesTotal: 12 }],
                 ]);
+        });
+
+        it('caches sample rows until the header selection changes', async () => {
+            const csvPath = writeTempFile('sample-cache.csv', 'A\n1\n2\n3\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            await expect(importer.getSampleRows(2)).resolves.toEqual([['1'], ['2']]);
+            fs.rmSync(csvPath);
+            // A cached sample remains available even after the source disappears.
+            await expect(importer.getSampleRows(2)).resolves.toEqual([['1'], ['2']]);
+            // A larger request must go back to the source, which is now gone.
+            await expect(importer.getSampleRows(3)).rejects.toBeTruthy();
+
+            // Recreating the file and changing the header selection invalidates the cache.
+            fs.writeFileSync(csvPath, 'A\n1\n2\n3\n', 'utf-8');
+            importer.setHasHeaders(true);
+            await importer.analyzeDataTypes();
+            await expect(importer.getSampleRows(1)).resolves.toEqual([['1']]);
+        });
+
+        it('reports progress while reading the sample', async () => {
+            const csvPath = writeTempFile('sample-progress.csv', 'A\n1\n2\n3\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+
+            const progress = jest.fn();
+            await expect(importer.getSampleRows(2, progress)).resolves.toEqual([['1'], ['2']]);
+            expect(progress).toHaveBeenCalled();
+            expect(progress.mock.calls[progress.mock.calls.length - 1]).toEqual([2, 2]);
+        });
+
+        it('infers types from every CSV row instead of a leading sample', async () => {
+            const rows = Array.from({ length: 6000 }, (_, index) => `${index},value-${index}`);
+            rows[rows.length - 1] = 'not-a-number,value-last';
+            const csvPath = writeTempFile('full-analysis.csv', ['A,B', ...rows].join('\n'));
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            const types = await importer.analyzeDataTypes();
+
+            expect(importer.getRowsCount()).toBe(6000);
+            expect(types[0].currentType.dbType).toBe('NVARCHAR');
         });
 
         it('applies selected columns and forced types when generating SQL', async () => {
@@ -898,6 +939,17 @@ describe('import/dataImporter', () => {
 
         afterEach(() => {
             fs.rmSync(tempDir, { recursive: true, force: true });
+        });
+
+        it('infers types from every XLSX row instead of a leading sample', async () => {
+            const rows = Array.from({ length: 5100 }, (_, index) => [index + 1, `value-${index}`]);
+            rows[rows.length - 1] = ['not-a-number', 'value-last'];
+            const filePath = await writeXlsx('full-analysis.xlsx', ['ID', 'LABEL'], rows);
+            const importer = new NetezzaImporter(filePath, 'TEST_TABLE');
+            const types = await importer.analyzeDataTypes();
+
+            expect(importer.getRowsCount()).toBe(5100);
+            expect(types[0].currentType.dbType).toBe('NVARCHAR');
         });
 
         it.each([

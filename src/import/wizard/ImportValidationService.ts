@@ -4,7 +4,7 @@ import type {
     ImportWizardColumn,
     ImportWizardValidationSummary,
 } from './ImportWizardState';
-import { validateImportCellValue } from './importCellValidation';
+import { createImportCellValidator } from './importCellValidation';
 
 export class ImportValidationService {
     public validate(
@@ -51,16 +51,21 @@ export class ImportValidationService {
         }
 
         const rowLimit = Math.min(validationSampleSize, previewRows.length);
+        const validators = columns.map(column =>
+            column.included
+                ? createImportCellValidator(column.selectedType, decimalDelimiter)
+                : null,
+        );
         for (let rowIndex = 0; rowIndex < rowLimit; rowIndex += 1) {
             const row = previewRows[rowIndex] || [];
             for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-                const column = columns[columnIndex];
-                if (!column.included) {
+                const validator = validators[columnIndex];
+                if (!validator) {
                     continue;
                 }
 
                 const value = row[columnIndex] ?? '';
-                const validationMessage = validateImportCellValue(value, column.selectedType, decimalDelimiter);
+                const validationMessage = validator(value);
                 if (!validationMessage) {
                     continue;
                 }
@@ -68,7 +73,7 @@ export class ImportValidationService {
                 issues.push({
                     rowIndex,
                     columnIndex,
-                    sourceIndex: column.sourceIndex,
+                    sourceIndex: columns[columnIndex].sourceIndex,
                     severity: 'error',
                     message: validationMessage,
                     value,

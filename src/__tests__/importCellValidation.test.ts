@@ -1,4 +1,4 @@
-import { validateImportCellValue } from '../import/wizard/importCellValidation';
+import { createImportCellValidator, validateImportCellValue } from '../import/wizard/importCellValidation';
 
 describe('importCellValidation', () => {
     it('accepts empty values for every type', () => {
@@ -47,6 +47,19 @@ describe('importCellValidation', () => {
         expect(validateImportCellValue('03.02.2024 09:00:00', 'DATETIME2')).toBeNull();
         expect(validateImportCellValue('2024-02-03 25:00:00', 'TIMESTAMP_NTZ')).toBe('Expected a valid timestamp value.');
         expect(validateImportCellValue('nope', 'DATETIME')).toBe('Expected a valid timestamp value.');
+    });
+
+    it('creates reusable per-column validators', () => {
+        const integer = createImportCellValidator('INTEGER', '.');
+        expect(integer('42')).toBeNull();
+        expect(integer('4.2')).toBe('Expected an integer value.');
+
+        const numeric = createImportCellValidator('NUMERIC(18,2)', '.');
+        expect(numeric('1,234.50')).toBeNull();
+        expect(numeric('oops')).toBe('Expected a numeric value.');
+
+        const text = createImportCellValidator('VARCHAR(255)', '.');
+        expect(text('anything')).toBeNull();
     });
 
     it('accepts unconstrained text types', () => {

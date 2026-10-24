@@ -311,6 +311,44 @@ describe('BackgroundValidationService', () => {
         );
     });
 
+    it('counts every issue but stores a bounded number of details', async () => {
+        const rows = Array.from({ length: 2500 }, () => ['bad']);
+        const outcome = await startValidation(service, {
+            columns: [createColumn({ sourceIndex: 0, selectedType: 'INTEGER', targetName: 'id' })],
+            importer: createImporter(rows),
+            sampleSize: 2500,
+        });
+
+        expect(outcome.summary?.issues).toHaveLength(2000);
+        expect(outcome.summary?.hasErrors).toBe(true);
+        expect(outcome.summary?.warnings).toEqual(
+            expect.arrayContaining([expect.stringMatching(/Validation found 2[,.]?500 cell issues/)]),
+        );
+        const complete = outcome.events.find(event => event.progress.phase === 'complete');
+        expect(complete?.progress.issuesFound).toBe(2500);
+    });
+
+    it('caps the sample by the validation cell budget for very wide sheets', async () => {
+        const columns = Array.from({ length: 512 }, (_, index) =>
+            createColumn({
+                sourceIndex: index,
+                sourceName: `c${index}`,
+                targetName: `c${index}`,
+            }),
+        );
+        const importer = createImporter([]);
+        const outcome = await startValidation(service, {
+            columns,
+            importer,
+            sampleSize: 20000,
+        });
+
+        expect(importer.getSampleRows).toHaveBeenCalledWith(1953, expect.any(Function));
+        expect(outcome.summary?.warnings).toEqual(
+            expect.arrayContaining([expect.stringContaining('cell budget')]),
+        );
+    });
+
     it('cancels in-flight validation and marks the session inactive', async () => {
         const deferredRows = createDeferred<string[][]>();
         const outcomePromise = startValidation(service, {

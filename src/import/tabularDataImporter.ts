@@ -149,6 +149,11 @@ export class TabularDataImporter {
         return analyzedTypes;
     }
 
+    /** Caps type inference for large sources; the import wizard samples instead of scanning everything. */
+    public setAnalysisRowLimit(limit: number): void {
+        this.importer.setAnalysisRowLimit(limit);
+    }
+
     public applyColumnOptions(options?: ImportColumnOptions): void {
         this.ensureAnalyzed();
         this.selectedColumnIndexes = [];
@@ -274,8 +279,11 @@ export class TabularDataImporter {
         return this.importer.getCsvDelimiter();
     }
 
-    public async getSampleRows(limit: number = 5): Promise<string[][]> {
-        return this.importer.getSampleRows(limit);
+    public async getSampleRows(
+        limit: number = 5,
+        onProgress?: (rowsRead: number, targetRows: number) => void,
+    ): Promise<string[][]> {
+        return this.importer.getSampleRows(limit, onProgress);
     }
 
     public async getAllRows(): Promise<string[][]> {

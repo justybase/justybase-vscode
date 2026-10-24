@@ -33,12 +33,52 @@ export interface CanonicalImportNumber {
     plain: string;
 }
 
-const NBSP = '\u00A0';
-const NARROW_NBSP = '\u202F';
-const FIGURE_SPACE = '\u2009';
-const THOUSAND_SPACES = new Set([' ', '\t', NBSP, NARROW_NBSP, FIGURE_SPACE, '\u2007', '\u200A']);
-
 const DASH_ZERO_CELLS = new Set(['-', '–', '—', '−', '‒']);
+
+/**
+ * Pre-built grouping-character strippers. Building the character set on every
+ * cell dominated large imports, so the two possible decimal delimiters get a
+ * module-level regex each.
+ */
+const THOUSANDS_WITH_DOT_DECIMAL = /[ \t\u00A0\u202F\u2009\u2007\u200A'’ʼ,]/g;
+const THOUSANDS_WITH_COMMA_DECIMAL = /[ \t\u00A0\u202F\u2009\u2007\u200A'’ʼ.]/g;
+
+/** Characters that may appear in a plain formatted number (no units/currency). */
+function hasImportNumberEdgeCandidate(text: string): boolean {
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        // digits, '.', ',', '-', '+', '(', ')', space, tab
+        if (
+            (code >= 48 && code <= 57)
+            || code === 46
+            || code === 44
+            || code === 45
+            || code === 43
+            || code === 40
+            || code === 41
+            || code === 32
+            || code === 9
+        ) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+/** Allocation-free `/^\d+$/` (or `/^\d*$/` when `allowEmpty`). */
+function isAllImportDigits(text: string, allowEmpty = false): boolean {
+    if (text.length === 0) {
+        return allowEmpty;
+    }
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        if (code < 48 || code > 57) {
+            return false;
+        }
+    }
+    return true;
+}
 
 const TRAILING_UNIT_PATTERN =
     /^(.*?)[\s\u00A0\u202F\u2009]+(zł\.?|pln|usd|gbp|eur|chf|cad|aud|sek|nok|dkk|czk|huf|ron|kg|tys\.?|tysiąc|tysiac|thousands?|ths\.?)$/i;
@@ -130,16 +170,6 @@ function splitExponent(input: string): { mantissa: string; exponent: number } {
     return { mantissa, exponent: Number.isFinite(parsed) ? parsed : 0 };
 }
 
-function removeThousandChars(input: string, chars: Set<string>): string {
-    let out = '';
-    for (const ch of input) {
-        if (!chars.has(ch)) {
-            out += ch;
-        }
-    }
-    return out;
-}
-
 /**
  * Largest exponent magnitude worth expanding. Anything beyond this is
  * rejected by {@link parseFormattedImportNumber} before string allocation,
@@ -210,7 +240,9 @@ export function parseFormattedImportNumber(
         text = text.slice(1).trim();
     }
 
-    const edges = stripEdges(text);
+    const edges = hasImportNumberEdgeCandidate(text)
+        ? stripEdges(text)
+        : { text, wasPercent: false, wasCurrency: false };
     text = edges.text;
 
     // Sign may also follow a currency prefix, e.g. `$-123` / `-$123`.
@@ -225,7 +257,9 @@ export function parseFormattedImportNumber(
         return null;
     }
 
-    const { mantissa, exponent } = splitExponent(text);
+    const { mantissa, exponent } = text.indexOf('e') < 0 && text.indexOf('E') < 0
+        ? { mantissa: text, exponent: 0 }
+        : splitExponent(text);
     // Reject absurd exponents before expansion allocates huge digit strings.
     if (Math.abs(exponent) > MAX_IMPORT_EXPONENT) {
         return null;
@@ -242,25 +276,17 @@ export function parseFormattedImportNumber(
                 : ','
             : decimal;
 
-    const thousandChars = new Set<string>([...THOUSAND_SPACES, "'", '’', 'ʼ']);
-    if (effectiveDecimal === ',') {
-        thousandChars.add('.');
-    } else {
-        thousandChars.add(',');
-    }
-
-    const compact = removeThousandChars(mantissa, thousandChars);
+    const compact = mantissa.replace(
+        effectiveDecimal === ',' ? THOUSANDS_WITH_COMMA_DECIMAL : THOUSANDS_WITH_DOT_DECIMAL,
+        ''
+    );
     const parts = compact.split(effectiveDecimal);
     if (parts.length > 2) {
         return null;
     }
     let intRaw = (parts[0] ?? '').trim();
-    let fracRaw = parts.length === 2 ? (parts[1] ?? '').trim() : '';
-    // Trailing separator without fraction (`123,` / `123.`) means integer.
-    if (parts.length === 2 && !fracRaw) {
-        fracRaw = '';
-    }
-    if (!/^\d+$/.test(intRaw || '0') || (fracRaw && !/^\d+$/.test(fracRaw))) {
+    const fracRaw = parts.length === 2 ? (parts[1] ?? '').trim() : '';
+    if (!isAllImportDigits(intRaw || '0') || !isAllImportDigits(fracRaw, true)) {
         return null;
     }
     if (!intRaw) {
@@ -278,7 +304,7 @@ export function parseFormattedImportNumber(
     );
     const integerDigits = shifted.integerDigits.replace(/^0+(?=\d)/, '') || '0';
     const fractionDigits = shifted.fractionDigits;
-    if (!/^\d+$/.test(integerDigits) || (fractionDigits && !/^\d+$/.test(fractionDigits))) {
+    if (!isAllImportDigits(integerDigits) || !isAllImportDigits(fractionDigits, true)) {
         return null;
     }
     // Expansion can produce more digits than the raw mantissa (`1E+100`);

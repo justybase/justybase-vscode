@@ -68,6 +68,103 @@ function isRealTimestamp(value: string): boolean {
     return !Number.isNaN(parsed.getTime());
 }
 
+const INTEGER_BASE_TYPES = new Set(['INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT']);
+const NUMERIC_BASE_TYPES = new Set([
+    'NUMERIC',
+    'DECIMAL',
+    'REAL',
+    'DOUBLE',
+    'FLOAT',
+    'DOUBLE PRECISION',
+    'NUMBER',
+    'MONEY',
+    'SMALLMONEY',
+    'DECFLOAT',
+]);
+const BOOLEAN_BASE_TYPES = new Set(['BOOLEAN', 'BOOL', 'BIT']);
+const TIMESTAMP_BASE_TYPES = new Set(['TIMESTAMP', 'DATETIME', 'DATETIME2', 'TIMESTAMP_NTZ']);
+const BOOLEAN_PATTERN = /^(true|false|1|0|yes|no|y|n|t|f)$/i;
+
+export type ImportCellValidator = (value: string) => string | null;
+
+function isPlainInteger(value: string): boolean {
+    return /^[+-]?\d+$/.test(value);
+}
+
+function isPlainNumber(value: string, decimalDelimiter: string): boolean {
+    return decimalDelimiter === ','
+        ? /^[+-]?\d+(?:,\d+)?$/.test(value)
+        : /^[+-]?\d+(?:\.\d+)?$/.test(value);
+}
+
+function validateTrimmedValue(
+    trimmed: string,
+    baseType: string,
+    decimalDelimiter: string | undefined,
+): string | null {
+    if (INTEGER_BASE_TYPES.has(baseType)) {
+        if (isPlainInteger(trimmed)) {
+            return null;
+        }
+        const effectiveDecimalDelimiter = decimalDelimiter ?? detectImportDecimalDelimiter([trimmed]);
+        const parsed = parseFormattedImportNumber(trimmed, effectiveDecimalDelimiter);
+        return parsed && !parsed.fractionDigits ? null : 'Expected an integer value.';
+    }
+
+    if (NUMERIC_BASE_TYPES.has(baseType)) {
+        const effectiveDecimalDelimiter = decimalDelimiter ?? detectImportDecimalDelimiter([trimmed]);
+        if (isPlainNumber(trimmed, effectiveDecimalDelimiter)) {
+            return null;
+        }
+        return parseFormattedImportNumber(trimmed, effectiveDecimalDelimiter)
+            ? null
+            : 'Expected a numeric value.';
+    }
+
+    if (BOOLEAN_BASE_TYPES.has(baseType)) {
+        return BOOLEAN_PATTERN.test(trimmed) ? null : 'Expected a boolean value.';
+    }
+
+    if (baseType === 'DATE') {
+        return isRealDate(trimmed) ? null : 'Expected a valid date value.';
+    }
+
+    if (TIMESTAMP_BASE_TYPES.has(baseType)) {
+        return isRealTimestamp(trimmed) ? null : 'Expected a valid timestamp value.';
+    }
+
+    return null;
+}
+
+/**
+ * Create a reusable per-column validator. Large background samples validate
+ * tens of thousands of cells, so resolving the base type and decimal style once
+ * per column avoids repeating that work for every cell.
+ */
+export function createImportCellValidator(
+    typeName: string,
+    decimalDelimiter?: string,
+): ImportCellValidator {
+    const baseType = getBaseImportTypeName(typeName);
+    const isSupported =
+        INTEGER_BASE_TYPES.has(baseType)
+        || NUMERIC_BASE_TYPES.has(baseType)
+        || BOOLEAN_BASE_TYPES.has(baseType)
+        || baseType === 'DATE'
+        || TIMESTAMP_BASE_TYPES.has(baseType);
+    if (!isSupported) {
+        return () => null;
+    }
+
+    return (value: string) => {
+        const trimmed = String(value || '').trim();
+        if (!trimmed) {
+            return null;
+        }
+        return validateTrimmedValue(trimmed, baseType, decimalDelimiter);
+    };
+}
+
 /**
  * Validate a single wizard cell against the selected target type.
  *
@@ -79,49 +176,5 @@ export function validateImportCellValue(
     typeName: string,
     decimalDelimiter?: string,
 ): string | null {
-    const trimmed = String(value || '').trim();
-    if (!trimmed) {
-        return null;
-    }
-
-    const baseType = getBaseImportTypeName(typeName);
-    const effectiveDecimalDelimiter = decimalDelimiter ?? detectImportDecimalDelimiter([trimmed]);
-
-    if (['INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'].includes(baseType)) {
-        const parsed = parseFormattedImportNumber(trimmed, effectiveDecimalDelimiter);
-        return parsed && !parsed.fractionDigits ? null : 'Expected an integer value.';
-    }
-
-    if (
-        [
-            'NUMERIC',
-            'DECIMAL',
-            'REAL',
-            'DOUBLE',
-            'FLOAT',
-            'DOUBLE PRECISION',
-            'NUMBER',
-            'MONEY',
-            'SMALLMONEY',
-            'DECFLOAT',
-        ].includes(baseType)
-    ) {
-        return parseFormattedImportNumber(trimmed, effectiveDecimalDelimiter)
-            ? null
-            : 'Expected a numeric value.';
-    }
-
-    if (['BOOLEAN', 'BOOL', 'BIT'].includes(baseType)) {
-        return /^(true|false|1|0|yes|no|y|n|t|f)$/i.test(trimmed) ? null : 'Expected a boolean value.';
-    }
-
-    if (baseType === 'DATE') {
-        return isRealDate(trimmed) ? null : 'Expected a valid date value.';
-    }
-
-    if (['TIMESTAMP', 'DATETIME', 'DATETIME2', 'TIMESTAMP_NTZ'].includes(baseType)) {
-        return isRealTimestamp(trimmed) ? null : 'Expected a valid timestamp value.';
-    }
-
-    return null;
+    return createImportCellValidator(typeName, decimalDelimiter)(value);
 }

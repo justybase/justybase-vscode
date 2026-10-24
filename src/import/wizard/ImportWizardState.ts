@@ -114,12 +114,16 @@ export interface ImportWizardSessionOptions {
   sourceKind?: "file" | "clipboard";
   sourceName?: string;
   clipboardSourceDirectory?: string;
+  /** Worksheet to preselect for workbook sources. */
+  sheetName?: string;
   targetTable: string;
   hasHeaders?: boolean;
   createTable?: boolean;
   connectionDetails: ConnectionDetails;
   previewRowCount: number;
   validationSampleSize: number;
+  /** Rows used for type inference; keeps opening huge workbooks fast. */
+  analysisRowLimit?: number;
   connectionName?: string;
   availableConnections?: ImportWizardConnection[];
   availableDatabases?: string[];

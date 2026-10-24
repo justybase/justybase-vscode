@@ -85,7 +85,7 @@ Quoted CSV/TSV cells are parsed as logical records, so delimiters, doubled quote
 
 - Preview and DDL generation happen before a write confirmation.
 - Progress and cancellation are shown for long imports/exports.
-- Background validation is controlled by `justybase.importWizard.backgroundValidationEnabled` and `justybase.importWizard.backgroundValidationSampleSize`; disabling the setting skips both automatic and requested background validation.
+- Background validation is controlled by `justybase.importWizard.backgroundValidationEnabled` and `justybase.importWizard.backgroundValidationSampleSize` (default 20,000 rows); disabling the setting skips both automatic and requested background validation. The sample is cached for the current sheet/header selection, so repeated column edits do not re-read the file, and issue details are bounded while the total count is still reported.
 - Batch imports use the per-dialect transaction and drop-on-failure behavior; Netezza and PostgreSQL loads are single statements. A failed import never claims a partially written table is complete.
 - Access and local file operations use the embedded reader/runtime and have no warehouse transaction boundary.
 

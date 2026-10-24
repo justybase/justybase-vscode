@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ImportWizardSession } from '../import/wizard/ImportWizardSession';
 import { ImportPreviewService } from '../import/wizard/ImportPreviewService';
 import { ImportValidationService } from '../import/wizard/ImportValidationService';
+import type { ImportWizardSessionOptions } from '../import/wizard/ImportWizardState';
 import type { DatabaseImportWizardAdapter } from '../import/wizard/adapters/DatabaseImportWizardAdapter';
 
 interface TestWorkbookWriter {
@@ -91,7 +92,10 @@ describe.each(FORMATS)(
             fs.rmSync(tempDir, { recursive: true, force: true });
         });
 
-        function createSession(adapter: DatabaseImportWizardAdapter) {
+        function createSession(
+            adapter: DatabaseImportWizardAdapter,
+            overrides: Partial<ImportWizardSessionOptions> = {},
+        ) {
             return new ImportWizardSession(
                 {
                     filePath,
@@ -105,12 +109,27 @@ describe.each(FORMATS)(
                     connectionName: 'WAREHOUSE',
                     previewRowCount: 2,
                     validationSampleSize: 10,
+                    ...overrides,
                 },
                 adapter,
                 new ImportPreviewService(),
                 new ImportValidationService(),
             );
         }
+
+        it('starts on the worksheet requested by the caller', async () => {
+            const adapter = createFakeAdapter();
+            const session = createSession(adapter, { sheetName: 'Second' });
+
+            const state = await session.initialize();
+
+            expect(state.sheetName).toBe('Second');
+            expect(state.sourceHeaders).toEqual(['CODE', 'VALUE']);
+            expect(state.previewRows).toEqual([
+                ['9', 'Zulu'],
+                ['10', 'Yankee'],
+            ]);
+        });
 
         it('exposes both worksheets and starts on the first one', async () => {
             const adapter = createFakeAdapter();

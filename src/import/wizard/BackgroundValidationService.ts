@@ -6,7 +6,7 @@ import type {
   ImportWizardColumn,
   ImportWizardValidationSummary,
 } from "./ImportWizardState";
-import { validateImportCellValue } from "./importCellValidation";
+import { createImportCellValidator } from "./importCellValidation";
 import type { TabularDataImporter } from "../tabularDataImporter";
 
 export interface BackgroundValidationJob {
@@ -30,6 +30,18 @@ export interface BackgroundValidationResult {
 
 const YIELD_INTERVAL = 100;
 const MIN_PROGRESS_INTERVAL_MS = 200;
+/**
+ * The preview grid can only highlight the rows it displays. Keeping every
+ * issue from a 20k-row sample (up to 140k objects) would flood the webview for
+ * no visible benefit, so retain a bounded subset and report the total count.
+ */
+const MAX_STORED_VALIDATION_ISSUES = 2000;
+/**
+ * Wide sheets can multiply a 20k-row sample into millions of cells. Bound the
+ * work by a cell budget so the background pass stays responsive; narrow sheets
+ * still get the full configured row sample.
+ */
+const MAX_VALIDATION_CELLS = 1_000_000;
 
 export class BackgroundValidationService {
   private readonly activeJobs = new Map<
@@ -107,6 +119,12 @@ export class BackgroundValidationService {
       progressCallback,
     } = job;
     const decimalDelimiter = importer.getDecimalDelimiter();
+    const includedColumnCount = columns.filter((column) => column.included).length;
+    const cellBudgetRows = Math.max(
+      1,
+      Math.floor(MAX_VALIDATION_CELLS / Math.max(1, includedColumnCount)),
+    );
+    const effectiveSampleSize = Math.min(sampleSize, cellBudgetRows);
 
     const getTrackedEntry = ():
       | {
@@ -167,11 +185,24 @@ export class BackgroundValidationService {
       reportProgress({
         phase: "reading",
         rowsProcessed: 0,
-        totalRows: sampleSize,
+        totalRows: effectiveSampleSize,
         issuesFound: 0,
       });
 
-      const rawRows = await importer.getSampleRows(sampleSize);
+      let lastReadProgressAt = 0;
+      const rawRows = await importer.getSampleRows(effectiveSampleSize, (rowsRead, targetRows) => {
+        const now = Date.now();
+        if (rowsRead < targetRows && now - lastReadProgressAt < 250) {
+          return;
+        }
+        lastReadProgressAt = now;
+        reportProgress({
+          phase: "reading",
+          rowsProcessed: rowsRead,
+          totalRows: targetRows,
+          issuesFound: 0,
+        });
+      });
 
       const entry = getTrackedEntry();
       if (!entry || entry.cancelled) {
@@ -179,7 +210,7 @@ export class BackgroundValidationService {
           reportProgress({
             phase: "cancelled",
             rowsProcessed: 0,
-            totalRows: sampleSize,
+            totalRows: effectiveSampleSize,
             issuesFound: 0,
           });
         }
@@ -189,6 +220,12 @@ export class BackgroundValidationService {
       const totalRows = rawRows.length;
       const issues: ImportWizardCellIssue[] = [];
       const warnings: string[] = [];
+      const validators = columns.map((column) =>
+        column.included
+          ? createImportCellValidator(column.selectedType, decimalDelimiter)
+          : null,
+      );
+      let issueCount = 0;
       let lastProgressTime = Date.now();
 
       reportProgress({
@@ -206,7 +243,7 @@ export class BackgroundValidationService {
               phase: "cancelled",
               rowsProcessed: rowIndex,
               totalRows,
-              issuesFound: issues.length,
+              issuesFound: issueCount,
             });
           }
           return;
@@ -218,32 +255,32 @@ export class BackgroundValidationService {
           columnIndex < columns.length;
           columnIndex += 1
         ) {
-          const column = columns[columnIndex];
-          if (!column.included) {
+          const validator = validators[columnIndex];
+          if (!validator) {
             continue;
           }
 
+          const column = columns[columnIndex];
           const value = row[column.sourceIndex] ?? "";
-          const validationMessage = validateImportCellValue(
-            value,
-            column.selectedType,
-            decimalDelimiter,
-          );
+          const validationMessage = validator(value);
           if (!validationMessage) {
             continue;
           }
 
-          issues.push({
-            rowIndex,
-            columnIndex,
-            sourceIndex: column.sourceIndex,
-            severity: "error",
-            message: validationMessage,
-            value,
-          });
+          issueCount += 1;
+          if (issues.length < MAX_STORED_VALIDATION_ISSUES) {
+            issues.push({
+              rowIndex,
+              columnIndex,
+              sourceIndex: column.sourceIndex,
+              severity: "error",
+              message: validationMessage,
+              value,
+            });
+          }
         }
 
-        updateEntry(rowIndex + 1, issues.length);
+        updateEntry(rowIndex + 1, issueCount);
 
         if (rowIndex % YIELD_INTERVAL === 0) {
           const now = Date.now();
@@ -252,7 +289,7 @@ export class BackgroundValidationService {
               phase: "validating",
               rowsProcessed: rowIndex + 1,
               totalRows,
-              issuesFound: issues.length,
+              issuesFound: issueCount,
             });
             lastProgressTime = now;
           }
@@ -262,6 +299,16 @@ export class BackgroundValidationService {
 
       const columnWarnings = this.validateColumns(columns, adapter);
       warnings.push(...columnWarnings);
+      if (effectiveSampleSize < sampleSize) {
+        warnings.push(
+          `Deep validation sampled ${effectiveSampleSize.toLocaleString()} rows to stay within the ${MAX_VALIDATION_CELLS.toLocaleString()} cell budget.`,
+        );
+      }
+      if (issueCount > issues.length) {
+        warnings.push(
+          `Validation found ${issueCount.toLocaleString()} cell issues; only the first ${issues.length.toLocaleString()} are shown.`,
+        );
+      }
 
       const hasColumnErrors = columnWarnings.some(
         (w) => w.includes("must have") || w.includes("Duplicate"),
@@ -270,14 +317,14 @@ export class BackgroundValidationService {
       const summary: ImportWizardValidationSummary = {
         issues,
         warnings,
-        hasErrors: issues.length > 0 || hasColumnErrors,
+        hasErrors: issueCount > 0 || hasColumnErrors,
       };
 
       reportProgress({
         phase: "complete",
         rowsProcessed: totalRows,
         totalRows,
-        issuesFound: issues.length,
+        issuesFound: issueCount,
       }, summary);
     } finally {
       const entry = this.activeJobs.get(sessionId);

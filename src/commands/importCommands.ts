@@ -254,6 +254,7 @@ interface ImportCommandContext {
     targetTable: string;
     sourceKind?: 'file' | 'clipboard';
     sourceName?: string;
+    sheetName?: string;
     clipboardSourceDirectory?: string;
 }
 
@@ -732,13 +733,49 @@ async function resolveImportCommandContext(
     };
 }
 
+type AdvancedImportCommandTarget =
+    | string
+    | vscode.Uri
+    | { filePath?: string | vscode.Uri; sheetName?: string; connectionName?: string };
+
 async function resolveAdvancedImportCommandContext(
     connectionManager: ConnectionManager,
-    filePath?: string | vscode.Uri,
+    target?: AdvancedImportCommandTarget,
 ): Promise<ImportCommandContext | undefined> {
+    const isUri = (value: unknown): value is vscode.Uri =>
+        typeof value === 'object' && value !== null && 'fsPath' in value;
+
+    let filePath: string | vscode.Uri | undefined;
+    let sheetName: string | undefined;
+    let requestedConnection: string | undefined;
+    if (target && typeof target === 'object' && !isUri(target)) {
+        filePath = target.filePath;
+        sheetName = target.sheetName?.trim() || undefined;
+        requestedConnection = target.connectionName;
+    } else {
+        filePath = target;
+    }
+
     const editor = vscode.window.activeTextEditor;
     const documentUri = editor?.document?.uri?.toString();
-    const connectionName = connectionManager.getConnectionForExecution(documentUri);
+    let connectionName = requestedConnection
+        ?? connectionManager.getConnectionForExecution(documentUri)
+        ?? connectionManager.getActiveConnectionName()
+        ?? undefined;
+    if (!connectionName) {
+        // The preview has no active SQL editor; let the user pick the database connection.
+        const connectionNames = await connectionManager.getConnectionNames();
+        if (connectionNames.length === 0) {
+            throw new Error('No database connections configured. Add a connection before importing.');
+        }
+        connectionName = await vscode.window.showQuickPick(connectionNames, {
+            placeHolder: 'Select the target database connection',
+        });
+        if (!connectionName) {
+            return undefined;
+        }
+    }
+
     const connectionDetails = await connectionManager.getConnectionDetailsForImport(documentUri, connectionName);
     if (!connectionDetails) {
         throw new Error('Connection not configured. Please connect first.');
@@ -750,7 +787,8 @@ async function resolveAdvancedImportCommandContext(
     }
 
     const sourceName = sourceFile.split(/[\\/]/).pop() || 'data file';
-    const targetTable = suggestWizardTargetTable(connectionDetails.dbType, sourceName);
+    // A multi-sheet workbook suggests the current sheet's name, not just the file name.
+    const targetTable = suggestWizardTargetTable(connectionDetails.dbType, sheetName || sourceName);
 
     return {
         connectionName,
@@ -759,6 +797,7 @@ async function resolveAdvancedImportCommandContext(
         targetTable,
         sourceKind: 'file',
         sourceName,
+        sheetName,
     };
 }
 
@@ -809,6 +848,7 @@ async function openAdvancedImportWizard(
         filePath: resolvedContext.sourceFile,
         sourceKind: resolvedContext.sourceKind || 'file',
         sourceName: resolvedContext.sourceName,
+        sheetName: resolvedContext.sheetName,
         clipboardSourceDirectory: resolvedContext.clipboardSourceDirectory,
         targetTable: resolvedContext.targetTable,
         connectionDetails: resolvedContext.connectionDetails,
@@ -875,9 +915,9 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
             }
         }),
 
-        vscode.commands.registerCommand('netezza.importDataAdvanced', async (filePath?: string | vscode.Uri) => {
+        vscode.commands.registerCommand('netezza.importDataAdvanced', async (target?: AdvancedImportCommandTarget) => {
             try {
-                const resolvedContext = await resolveAdvancedImportCommandContext(connectionManager, filePath);
+                const resolvedContext = await resolveAdvancedImportCommandContext(connectionManager, target);
                 if (!resolvedContext) {
                     return;
                 }

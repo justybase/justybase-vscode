@@ -45,6 +45,7 @@ describe('ImportWizardService', () => {
         setSelectedSheet: jest.fn((sheetName?: string) => {
             importerState.selectedSheet = sheetName || 'Sheet1';
         }),
+        setAnalysisRowLimit: jest.fn(),
         analyzeDataTypes: jest.fn(async () => []),
         getSampleRows: jest.fn(async (limit: number) => [['1', 'Alice'], ['2', 'Bob']].slice(0, limit)),
         getSourceHeaders: jest.fn(() => ['ID', 'NAME']),
