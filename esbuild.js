@@ -91,6 +91,7 @@ async function main() {
     './media/editDataPanel.ts',
     './media/queryHistory.ts',
     './media/queryHistoryExtended.ts',
+    './media/joinKnowledge.ts',
     './media/sessionMonitor.ts',
     './media/securityPanel.ts',
     './media/importWizard.ts',

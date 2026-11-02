@@ -734,7 +734,7 @@ describe('providers/linterCodeActions', () => {
             {} as vscode.CancellationToken
         );
 
-        const elsifFix = actions.find(action => action.title === 'Replace ELSEIF/ELSE IF with ELSIF');
+        const elsifFix = actions.find(action => action.title === 'Replace ELSEIF with ELSIF');
         expect(elsifFix).toBeDefined();
         expect((elsifFix?.edit as unknown as MockWorkspaceEdit).replace).toHaveBeenCalledWith(
             document.uri,

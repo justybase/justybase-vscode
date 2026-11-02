@@ -97,7 +97,7 @@ export const ERROR_CODE_ACTIONS: Record<string, { title: string; fix: string }> 
         fix: 'UNION ALL'
     },
     'NZP012': {
-        title: 'Replace ELSEIF/ELSE IF with ELSIF',
+        title: 'Replace ELSEIF with ELSIF',
         fix: 'ELSIF'
     },
     'SQL018': {

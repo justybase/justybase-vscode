@@ -532,6 +532,87 @@
         "icon": "$(trash)"
       },
       {
+        "command": "netezza.confirmJoinKnowledgeRelation",
+        "title": "JustyBase: Confirm JOIN Relation"
+      },
+      {
+        "command": "netezza.blockJoinKnowledgeRelation",
+        "title": "JustyBase: Block JOIN Relation"
+      },
+      {
+        "command": "netezza.revertJoinKnowledgeOverride",
+        "title": "JustyBase: Revert JOIN Relation Decision"
+      },
+      {
+        "command": "netezza.pinSqlObject",
+        "title": "JustyBase: Pin SQL Object"
+      },
+      {
+        "command": "netezza.boostSqlObject",
+        "title": "JustyBase: Boost SQL Object"
+      },
+      {
+        "command": "netezza.demoteSqlObject",
+        "title": "JustyBase: Demote SQL Object"
+      },
+      {
+        "command": "netezza.excludeSqlObject",
+        "title": "JustyBase: Exclude SQL Object"
+      },
+      {
+        "command": "netezza.revertSqlObjectPreference",
+        "title": "JustyBase: Revert SQL Object Preference"
+      },
+      {
+        "command": "netezza.favoriteJoinKnowledgeRelation",
+        "title": "JustyBase: Toggle Favorite JOIN Relation"
+      },
+      {
+        "command": "netezza.favoriteJoinKnowledgeSuggestion",
+        "title": "JustyBase: Manage JOIN Suggestions…"
+      },
+      {
+        "command": "netezza.recordJoinKnowledgeAcceptance",
+        "title": "JustyBase: Remember Accepted JOIN Suggestion"
+      },
+      {
+        "command": "netezza.acceptJoinGhostSuggestion",
+        "title": "JustyBase: Remember Accepted JOIN Ghost Text"
+      },
+      {
+        "command": "netezza.recordSqlObjectAcceptance",
+        "title": "JustyBase: Remember Accepted FROM Suggestion"
+      },
+      {
+        "command": "netezza.exportJoinKnowledge",
+        "title": "JustyBase: Export JOIN Knowledge Decisions…"
+      },
+      {
+        "command": "netezza.importJoinKnowledge",
+        "title": "JustyBase: Import JOIN Knowledge Decisions…"
+      },
+      {
+        "command": "netezza.undoJoinKnowledgeImport",
+        "title": "JustyBase: Undo Last JOIN Knowledge Import"
+      },
+      {
+        "command": "netezza.learnJoinKnowledgeFromHistory",
+        "title": "JustyBase: Learn JOINs from Query History"
+      },
+      {
+        "command": "netezza.rebuildJoinKnowledgeIndex",
+        "title": "JustyBase: Rebuild JOIN Workspace Index"
+      },
+      {
+        "command": "netezza.showJoinKnowledgeStatus",
+        "title": "JustyBase: Show JOIN Knowledge Status"
+      },
+      {
+        "command": "netezza.openJoinKnowledge",
+        "title": "JustyBase: Open JOIN Knowledge Manager",
+        "icon": "$(heart)"
+      },
+      {
         "command": "netezza.cancelQuery",
         "title": "Cancel Query",
         "icon": "$(debug-stop)"
@@ -2037,6 +2118,10 @@
           "when": "false"
         },
         {
+          "command": "netezza.recordSqlObjectAcceptance",
+          "when": "false"
+        },
+        {
           "command": "netezza.explainQuery",
           "when": "justybase.active.capabilities.supportsExplainPlan"
         },
@@ -2230,6 +2315,11 @@
           "command": "netezza.analyzeQueryPerformance",
           "when": "editorLangId == sql",
           "group": "5_analysis"
+        },
+        {
+          "command": "netezza.favoriteJoinKnowledgeSuggestion",
+          "when": "editorLangId == sql",
+          "group": "6_knowledge"
         }
       ],
       "explorer/context": [
@@ -4250,6 +4340,22 @@
           "default": true,
           "description": "Allow lower-priority JOIN suggestions based on matching cached key and column names when no declared or configured relationship is available."
         },
+        "justybase.sql.joinKnowledgeIndex": {
+          "type": "boolean",
+          "default": false,
+          "description": "Learn from workspace .sql files: lower-priority JOIN suggestions and FROM-object usage bands. Off by default; manual decisions and catalog metadata are unaffected. Only identifiers, counters and timestamps are stored; no SQL text, literals or result values. Learning from executed queries is controlled by justybase.sql.learnFromExecutedQueries."
+        },
+        "justybase.sql.learnFromExecutedQueries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Learn from successful Netezza queries you run (and, once, from the query history): JOINs, FROM sources and columns you use repeatedly rank higher. Stored locally as identifiers, counters and timestamps only; no SQL text, literals or result values. Existing knowledge is kept when turned off; clear it in the JOIN knowledge manager."
+        },
+        "justybase.sql.joinKnowledgeIndexGitWindowDays": {
+          "type": "number",
+          "default": 365,
+          "minimum": 0,
+          "description": "Git history window used only to select which workspace .sql files are indexed. 0 means all files. Dirty, untracked and open files are always included; Git history itself is never parsed as evidence."
+        },
         "justybase.sql.autoJoinAliases": {
           "type": "boolean",
           "default": true,
@@ -4386,6 +4492,36 @@
               }
             }
           }
+        },
+        "justybase.sql.personalizeFromObjects": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply manual SQL-object preferences (pin, boost, demote, exclude) to FROM source completion. JOIN ranking and the two documented Stage 1 behavior changes are unaffected when this is disabled."
+        },
+        "justybase.sql.groupByGhostText": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "After `GROUP BY ` show the non-aggregated SELECT expressions as inline ghost text; press `Tab` to accept. Shown only when the SELECT at that level has an aggregate."
+        },
+        "justybase.sql.joinGhostText": {
+          "type": "string",
+          "enum": [
+            "off",
+            "afterJoin",
+            "afterJoinAndNewLine"
+          ],
+          "enumDescriptions": [
+            "Never show JOIN ghost text.",
+            "After JOIN show a target you confirmed, configured or starred; after JOIN <table> show its ON condition when exactly one is likely.",
+            "As afterJoin, and on an empty line that ends the FROM clause of a SELECT also offer the whole JOIN."
+          ],
+          "default": "afterJoin",
+          "markdownDescription": "Show a confident JOIN suggestion as inline ghost text; press `Tab` to accept. Targets are offered only for relations you configured, confirmed or starred (executed JOINs rank first but are not guessed as the next JOIN); ON conditions also come from catalog keys and executed queries. Nothing is shown when two suggestions are equally likely."
+        },
+        "justybase.sql.personalizeColumns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Order column completions by how broadly each column is used in workspace SQL files and successful executions (requires the JOIN Knowledge index). Only column order changes; no column is added or hidden."
         },
         "justybase.linter.rules": {
           "type": "object",
@@ -5184,6 +5320,9 @@
     "benchmark:data-grid": "jest --config Benchmark/jest.config.js --runInBand Benchmark/dataGridPerformanceBenchmark.test.ts",
     "benchmark:data-grid:live": "jest --config Benchmark/jest.config.js --runInBand Benchmark/dataGridPerformanceLiveBenchmark.test.ts",
     "benchmark:quality": "jest --config Benchmark/jest.config.js --runInBand Benchmark/qualityRulesBenchmark.test.ts",
+    "benchmark:join-knowledge": "jest --config Benchmark/jest.config.js --runInBand Benchmark/joinKnowledgeIndexBenchmark.test.ts",
+    "benchmark:join-ranking": "jest --config Benchmark/jest.config.js --runInBand Benchmark/joinRankingReplayBenchmark.test.ts",
+    "benchmark:join-ranking:live": "jest --config jest.live.config.js --runInBand src/__tests__/integration/liveStarReplay.live.integration.test.ts",
     "benchmark:lsp": "jest --config Benchmark/jest.config.js --runInBand Benchmark/lspFeatureBenchmark.test.ts",
     "benchmark:typing": "jest --config Benchmark/jest.config.js --runInBand Benchmark/typingResponsivenessBenchmark.test.ts",
     "test:playwright": "npm run build && npx playwright test --config=test-harness/playwright.config.ts",
@@ -5226,6 +5365,7 @@
     "test:extension-host:designer": "npm run build && node scripts/extensionHost/extensionHost.js --suite=designer --engine=sqlite",
     "test:extension-host:filter-performance": "npm run build && node scripts/extensionHost/extensionHost.js --suite=result-panel-filter-performance --engine=sqlite",
     "test:extension-host:authoring": "npm run build && node scripts/extensionHost/extensionHost.js --suite=authoring --engine=sqlite",
+    "test:extension-host:knowledge-index": "npm run build && node scripts/extensionHost/extensionHost.js --suite=knowledge-index --engine=sqlite",
     "test:lsp:columns": "npm run build && node scripts/lspColumnAuthoringE2E.mjs",
     "test:extension-host:screenshots": "npm run build && node scripts/extensionHost/extensionHost.js --engine=sqlite --screenshots",
     "test:extension-host:authoring:screenshots": "npm run build && node scripts/extensionHost/extensionHost.js --suite=authoring --engine=sqlite --screenshots",

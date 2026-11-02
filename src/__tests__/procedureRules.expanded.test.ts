@@ -306,16 +306,9 @@ RETURN 1;`
         });
     });
 
-    describe('NZP019 - Default for optional params', () => {
-        it('flags missing DEFAULT on last parameter', () => {
+    describe('NZP019 - Default for optional params (retired)', () => {
+        it('reports nothing: Netezza procedure arguments take no DEFAULT', () => {
             const sql = buildProcedure('RETURN 1;', 'p_id INTEGER, p_name VARCHAR');
-            const issues = ruleNZP019.check(sql);
-            expect(issues).toHaveLength(1);
-            expect(issues[0].ruleId).toBe('NZP019');
-        });
-
-        it('accepts DEFAULT on last parameter', () => {
-            const sql = buildProcedure('RETURN 1;', `p_id INTEGER, p_name VARCHAR DEFAULT 'x'`);
             expect(ruleNZP019.check(sql)).toHaveLength(0);
         });
     });
@@ -421,13 +414,11 @@ RETURN 1;`);
         });
     });
 
-    describe('NZP026 - Prefer PERFORM', () => {
-        it('flags SELECT function call without INTO', () => {
+    describe('NZP026 - Prefer PERFORM (retired)', () => {
+        it('reports nothing: Netezza rejects PERFORM', () => {
             const sql = buildProcedure(`SELECT do_work();
 RETURN 1;`);
-            const issues = ruleNZP026.check(sql);
-            expect(issues).toHaveLength(1);
-            expect(issues[0].ruleId).toBe('NZP026');
+            expect(ruleNZP026.check(sql)).toHaveLength(0);
         });
 
         it('does not flag SELECT ... INTO function call', () => {
@@ -504,17 +495,15 @@ RETURN 1;`);
         });
     });
 
-    describe('NZP030 - Named exception recommendation', () => {
-        it('flags SQLSTATE that has a named exception', () => {
+    describe('NZP030 - Named exception recommendation (retired)', () => {
+        it('reports nothing: Netezza rejects named exceptions', () => {
             const sql = buildProcedure(`BEGIN
 NULL;
 EXCEPTION
     WHEN SQLSTATE '02000' THEN
         RETURN 0;
 END;`);
-            const issues = ruleNZP030.check(sql);
-            expect(issues).toHaveLength(1);
-            expect(issues[0].message).toContain('NO_DATA_FOUND');
+            expect(ruleNZP030.check(sql)).toHaveLength(0);
         });
 
         it('does not flag unknown SQLSTATE values', () => {

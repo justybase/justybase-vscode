@@ -125,6 +125,8 @@ export interface BatchQueryRunOptions {
         connectionName: string;
         documentUri?: string;
         connection: DatabaseConnection;
+        /** Stable per successful execution; a repeated key is the same event. */
+        executionKey?: string;
     }) => Promise<void>;
     onStatementFailed?: (event: {
         sql: string;

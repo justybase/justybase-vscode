@@ -889,6 +889,39 @@ END_PROC;`;
                 connectionName: 'testConn',
                 documentUri: 'file:///test.sql',
                 connection: mockConn,
+                executionKey: expect.stringMatching(/:0$/),
+            });
+        });
+
+        it('invokes the success hook only for the statements that succeeded in a multi-statement batch', async () => {
+            const onStatementSucceeded = jest.fn().mockResolvedValue(undefined);
+            mockExecuteAndFetch
+                .mockResolvedValueOnce({ results: [], error: null, recordsAffected: 0 })
+                .mockResolvedValueOnce({ results: [], error: new Error('second statement failed') });
+
+            await expect(runQueriesSequentially(
+                mockContext,
+                ['CREATE TABLE A (ID INTEGER)', 'CREATE TABLE B (ID INTEGER)'],
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                0,
+                undefined,
+                [],
+                { onStatementSucceeded },
+            )).rejects.toThrow('second statement failed');
+
+            expect(onStatementSucceeded).toHaveBeenCalledTimes(1);
+            expect(onStatementSucceeded.mock.calls[0][0]).toMatchObject({
+                sql: 'CREATE TABLE A (ID INTEGER)',
+                connectionName: 'testConn',
             });
         });
 

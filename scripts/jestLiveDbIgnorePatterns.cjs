@@ -19,6 +19,7 @@ module.exports = [
   "allRowsTimeoutSession.live.integration.test.ts",
   "netezzaAdvancedFeatures.live.integration.test.ts",
   "nzplsqlProcedureMatrix.live.integration.test.ts",
+  "nzplsqlArtifacts.live.integration.test.ts",
   "netezzaDropSession.live.integration.test.ts",
   "cteToTempTable.live.integration.test.ts",
   "macroPreprocessor.live.integration.test.ts",
@@ -28,6 +29,7 @@ module.exports = [
   "netezzaSchemaRefresh.live.integration.test.ts",
   "databaseAnalysis.live.integration.test.ts",
   "netezzaCompletionKeywordLegality.live.integration.test.ts",
+  "netezzaCrossSchemaCompletion.live.integration.test.ts",
   "netezzaDoubleDotCompletion.live.integration.test.ts",
   "netezzaTimestampFilterFormats.live.integration.test.ts",
   "netezzaPrefetchSplit.live.integration.test.ts",
@@ -41,4 +43,5 @@ module.exports = [
   "schemaReports.live.integration.test.ts",
   "schemaTreeTableFolders.live.integration.test.ts",
   "sessionMonitorCancel.live.integration.test.ts",
+  "liveStarReplay.live.integration.test.ts",
 ];

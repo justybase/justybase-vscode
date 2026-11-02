@@ -24,7 +24,8 @@ function qualifyProcedureName(database: string, schema: string | undefined, proc
 }
 
 export const procedureTemplates: ProcedureTemplate[] = [
-    // Basic Templates
+    // Every template is verified on a live Netezza (CREATE + CALL); see
+    // nzplsqlArtifacts.live.integration.test.ts.
     {
         id: 'basic-simple',
         name: 'Basic - Simple Error Handling',
@@ -44,7 +45,7 @@ BEGIN
 
 EXCEPTION
     WHEN OTHERS THEN
-        RAISE NOTICE 'Error code: %, Message: %', SQLSTATE, SQLERRM;
+        RAISE NOTICE 'Error: %', SQLERRM;
         RETURN -1;
 
 END;
@@ -52,8 +53,8 @@ END_PROC;`
     },
     {
         id: 'basic-select-into',
-        name: 'Basic - SELECT INTO with NO_DATA_FOUND',
-        description: 'Procedure that fetches a single value with error handling',
+        name: 'Basic - SELECT INTO with NOT FOUND check',
+        description: 'Procedure that fetches a single value and handles a missing row',
         category: 'basic',
 template: (name: string, database: string, schema?: string) => `CREATE OR REPLACE PROCEDURE ${qualifyProcedureName(database, schema, name)}(INTEGER)
 RETURNS VARCHAR(100)
@@ -68,15 +69,17 @@ BEGIN
     FROM customers
     WHERE customer_id = arg1;
 
+    -- SELECT INTO does not raise when no row matches; check FOUND
+    IF NOT FOUND THEN
+        RAISE NOTICE 'Customer % not found', arg1;
+        RETURN 'NOT FOUND';
+    END IF;
+
     RETURN v_result;
 
 EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-        RAISE NOTICE 'Customer % not found', arg1;
-        RETURN 'NOT FOUND';
-
     WHEN OTHERS THEN
-        RAISE ERROR 'Unexpected error: %', SQLERRM;
+        RAISE NOTICE 'Unexpected error: %', SQLERRM;
         RETURN NULL;
 
 END;
@@ -100,19 +103,20 @@ DECLARE
     v_attempts INT := 0;
     v_result VARCHAR(200);
 BEGIN
-    LOOP
+    <<retry>> LOOP
         BEGIN
             -- Attempt operation
             UPDATE inventory SET qty = qty - arg2 WHERE product_id = arg1;
 
             v_result := 'Success';
-            EXIT;  -- Success - exit loop
+            -- EXIT needs the label: a plain EXIT only leaves this inner block
+            EXIT retry;
 
         EXCEPTION
             WHEN TRANSACTION_ABORTED THEN
                 v_attempts := v_attempts + 1;
                 IF v_attempts >= 3 THEN
-                    RAISE ERROR 'Failed after 3 attempts: %', SQLERRM;
+                    RAISE NOTICE 'Failed after 3 attempts: %', SQLERRM;
                     RETURN 'ERROR: Max retries exceeded';
                 END IF;
                 -- Try again
@@ -130,8 +134,8 @@ END_PROC;`
     },
     {
         id: 'advanced-division',
-        name: 'Advanced - Division by Zero Handling',
-        description: 'Procedure with specific DIVISION_BY_ZERO exception handling',
+        name: 'Advanced - Division by Zero Guard',
+        description: 'Procedure that checks the divisor before dividing',
         category: 'advanced',
 template: (name: string, database: string, schema?: string) => `CREATE OR REPLACE PROCEDURE ${qualifyProcedureName(database, schema, name)}(INTEGER)
 RETURNS NUMERIC(10,2)
@@ -140,25 +144,29 @@ LANGUAGE NZPLSQL
 AS BEGIN_PROC
 DECLARE
     arg1 ALIAS FOR $1;
-    v_avg_price NUMERIC(10,2);
+    v_total NUMERIC(10,2);
+    v_items INT;
 BEGIN
-    SELECT total_amount / total_items INTO v_avg_price
+    SELECT total_amount, total_items INTO v_total, v_items
     FROM orders
     WHERE order_id = arg1;
 
-    RETURN v_avg_price;
-
-EXCEPTION
-    WHEN DIVISION_BY_ZERO THEN
-        RAISE NOTICE 'Order has zero items - order_id: %', arg1;
-        RETURN 0;
-
-    WHEN NO_DATA_FOUND THEN
+    IF NOT FOUND THEN
         RAISE NOTICE 'Order % not found', arg1;
         RETURN NULL;
+    END IF;
 
+    -- Netezza has no DIVISION_BY_ZERO handler; check the divisor first
+    IF v_items = 0 THEN
+        RAISE NOTICE 'Order has zero items - order_id: %', arg1;
+        RETURN 0;
+    END IF;
+
+    RETURN v_total / v_items;
+
+EXCEPTION
     WHEN OTHERS THEN
-        RAISE ERROR 'Error: %', SQLERRM;
+        RAISE NOTICE 'Error: %', SQLERRM;
         RETURN NULL;
 
 END;
@@ -190,7 +198,7 @@ BEGIN
 
 EXCEPTION
     WHEN TRANSACTION_ABORTED THEN
-        RAISE ERROR 'Transaction conflict: %', SQLERRM;
+        RAISE NOTICE 'Transaction conflict: %', SQLERRM;
         RETURN 'ERROR: Conflict';
 
     WHEN OTHERS THEN
@@ -232,7 +240,7 @@ EXCEPTION
         IF SQLERRM LIKE '%already exists%' THEN
             RETURN 'ERROR: Duplicate customer';
         ELSE
-            RAISE ERROR 'Insert failed: %', SQLERRM;
+            RAISE NOTICE 'Insert failed: %', SQLERRM;
             RETURN 'ERROR: ' || SQLERRM;
         END IF;
 
@@ -242,7 +250,7 @@ END_PROC;`
     {
         id: 'advanced-netezza-safe',
         name: 'Advanced - Full Netezza Safe Insert',
-        description: 'Complete procedure with all Netezza-specific error handling patterns',
+        description: 'Complete procedure with the Netezza exception handlers (TRANSACTION_ABORTED and OTHERS)',
         category: 'advanced',
 template: (name: string, database: string, schema?: string) => `CREATE OR REPLACE PROCEDURE ${qualifyProcedureName(database, schema, name)}(INTEGER, VARCHAR(100))
 RETURNS VARCHAR(200)
@@ -272,60 +280,50 @@ BEGIN
     v_result := 'Customer ' || arg1 || ' added successfully';
     RETURN v_result;
 
+-- Netezza accepts only TRANSACTION_ABORTED and OTHERS as handlers;
+-- named conditions such as NO_DATA_FOUND and SQLSTATE codes are rejected.
 EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-        -- This error can occur in SELECT INTO
-        RAISE NOTICE 'No data found during validation';
-        RETURN 'ERROR: Validation failed';
-
-    WHEN DIVISION_BY_ZERO THEN
-        -- If there was logic with division
-        RAISE NOTICE 'Division by zero detected';
-        RETURN 'ERROR: Math error';
-
     WHEN TRANSACTION_ABORTED THEN
         -- Serialization conflict
-        RAISE ERROR 'Transaction aborted: %', SQLERRM;
+        RAISE NOTICE 'Transaction aborted: %', SQLERRM;
         RETURN 'ERROR: Transaction conflict';
 
     WHEN OTHERS THEN
-        -- All other errors
-        -- In Netezza this can be: table doesn't exist, column doesn't exist, etc.
-        RAISE NOTICE 'Unexpected error: SQLSTATE=%, Message=%', SQLSTATE, SQLERRM;
+        -- All other errors: table doesn't exist, column doesn't exist, etc.
+        -- SQLERRM holds the message; SQLSTATE is not available here.
+        RAISE NOTICE 'Unexpected error: %', SQLERRM;
         RETURN 'ERROR: ' || SQLERRM;
 
 END;
 END_PROC;`
     },
     {
-        id: 'advanced-hash-check',
-        name: 'Advanced - Hash-based Duplicate Detection',
-        description: 'Procedure using hash8() for fast duplicate checking',
+        id: 'advanced-row-loop',
+        name: 'Advanced - Row Loop with FOR IN SELECT',
+        description: 'Procedure that processes query rows one by one (Netezza has no explicit cursors)',
         category: 'advanced',
-template: (name: string, database: string, schema?: string) => `CREATE OR REPLACE PROCEDURE ${qualifyProcedureName(database, schema, name)}(INTEGER, VARCHAR(100))
-RETURNS VARCHAR(200)
+template: (name: string, database: string, schema?: string) => `CREATE OR REPLACE PROCEDURE ${qualifyProcedureName(database, schema, name)}(INTEGER)
+RETURNS INTEGER
 EXECUTE AS OWNER
 LANGUAGE NZPLSQL
 AS BEGIN_PROC
 DECLARE
     arg1 ALIAS FOR $1;
-    arg2 ALIAS FOR $2;
-    v_hash BIGINT;
-    v_count INT;
+    rec RECORD;
+    v_count INT := 0;
 BEGIN
-    -- Use hash8() for fast uniqueness checking
-    v_hash := hash8(CAST(arg1 AS VARCHAR));
+    -- DECLARE CURSOR / OPEN / FETCH are not supported; FOR ... IN SELECT
+    -- iterates the rows into a RECORD variable
+    FOR rec IN
+        SELECT customer_id, name
+        FROM customers
+        WHERE customer_id >= arg1
+    LOOP
+        RAISE NOTICE 'Customer %: %', rec.customer_id, rec.name;
+        v_count := v_count + 1;
+    END LOOP;
 
-    SELECT COUNT(*) INTO v_count
-    FROM customers
-    WHERE hash8(CAST(customer_id AS VARCHAR)) = v_hash;
-
-    IF v_count > 0 THEN
-        RAISE EXCEPTION 'Duplicate detected via hash for customer %', arg1;
-    END IF;
-
-    INSERT INTO customers VALUES (arg1, arg2, v_hash);
-    RETURN 'Customer added with hash verification';
+    RETURN v_count;
 
 END;
 END_PROC;`
@@ -346,13 +344,13 @@ BEGIN
     -- Insert into temp table
     INSERT INTO temp_customers SELECT * FROM new_data;
 
-    -- Check duplicates
+    -- Check duplicates (a sub-SELECT in FROM needs an alias)
     SELECT COUNT(*) INTO v_count
     FROM (
         SELECT 1 FROM temp_customers
         GROUP BY customer_id
         HAVING COUNT(*) > 1
-    );
+    ) duplicates;
 
     IF v_count > 0 THEN
         RAISE EXCEPTION 'Duplicates found in data';

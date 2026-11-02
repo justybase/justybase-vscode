@@ -6,7 +6,7 @@ export type SettingsWebviewMessage =
     | { command: 'resetSection'; key: string }
     | { command: 'getSettings' }
     | { command: 'testPrompt'; key: string; value: string }
-    | { command: 'openVSCodeSettings' | 'clearAutocompleteCache' | 'openConnection' | 'refreshSchema' | 'openSettings' | 'showMetadataStats' | 'openSnippetsFile' | 'getSnippets' }
+    | { command: 'openVSCodeSettings' | 'clearAutocompleteCache' | 'openConnection' | 'refreshSchema' | 'openSettings' | 'openJoinKnowledge' | 'showMetadataStats' | 'openSnippetsFile' | 'getSnippets' }
     | { command: 'createSnippet'; value: { label: string; sql: string } }
     | { command: 'updateSnippet'; value: { id: string; label: string; sql: string } }
     | { command: 'deleteSnippet'; value: string };
@@ -56,6 +56,7 @@ export function isSettingsWebviewMessage(value: unknown): value is SettingsWebvi
         case 'openConnection':
         case 'refreshSchema':
         case 'openSettings':
+        case 'openJoinKnowledge':
         case 'showMetadataStats':
         case 'openSnippetsFile':
         case 'getSnippets':

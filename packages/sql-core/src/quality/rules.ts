@@ -835,13 +835,15 @@ const ruleNZP011 = procedureRule(
 const ruleNZP012 = procedureRule(
   "NZP012",
   "Incorrect ELSIF Syntax",
-  "Use ELSIF (not ELSEIF or ELSE IF) in NZPLSQL",
-  0,
+  "Prefer ELSIF over its accepted synonym ELSEIF",
+  2,
   (sql) => {
     // ELSEIF is also actionable in an unfinished procedural fragment.
     const procedure = procedureBodyOrEmpty(sql) ?? { body: sql, startOffset: 0 };
-    return findMatches(procedure.body, /\b(ELSEIF|ELSE\s+IF)\b/gi)
-      .map((match) => procedureIssue("NZP012", "Use ELSIF instead of " + match[0] + " in NZPLSQL", 0, procedure.startOffset + match.index, procedure.startOffset + match.index + match[0].length));
+    // ELSEIF is an accepted synonym and ELSE IF opens a valid nested IF
+    // (both live-verified); only ELSEIF is normalized, as a style hint.
+    return findMatches(procedure.body, /\bELSEIF\b/gi)
+      .map((match) => procedureIssue("NZP012", "Prefer ELSIF over " + match[0] + " (both are accepted)", 2, procedure.startOffset + match.index, procedure.startOffset + match.index + match[0].length));
   },
 );
 
@@ -946,17 +948,9 @@ const ruleNZP018 = procedureRule(
 const ruleNZP019 = procedureRule(
   "NZP019",
   "Optional Parameter Without Default",
-  "Consider adding DEFAULT values for optional parameters",
+  "Retired: Netezza procedure arguments take no DEFAULT (live-verified CREATE error)",
   2,
-  (sql) => {
-    const declaration = /\bCREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+[^ (]+\s*\(([^)]*)\)/i.exec(sql);
-    if (!declaration || !declaration[1].includes(",")) return [];
-    const parameters = declaration[1].split(",");
-    const last = parameters.length > 0 ? parameters[parameters.length - 1]!.trim() : "";
-    if (!last || /\bDEFAULT\b/i.test(last)) return [];
-    const offset = declaration.index + declaration[0].indexOf(declaration[1]) + declaration[1].lastIndexOf(last);
-    return [procedureIssue("NZP019", "Consider adding DEFAULT value for last parameter if it's optional", 2, offset, offset + last.length)];
-  },
+  () => [],
 );
 
 const ruleNZP020 = procedureRule(
@@ -1026,15 +1020,9 @@ const ruleNZP025 = procedureRule(
 const ruleNZP026 = procedureRule(
   "NZP026",
   "Use PERFORM for Discarded Results",
-  "Use PERFORM instead of SELECT when result is not needed",
+  "Retired: Netezza rejects PERFORM (live-verified); SQL037 reports SELECT without INTO",
   2,
-  (sql) => {
-    const procedure = procedureBodyOrEmpty(sql);
-    if (!procedure) return [];
-    return findMatches(procedure.body, /\bSELECT\s+[a-z_][a-z0-9_]*\s*\([^)]*\)\s*;/gi)
-      .filter((match) => !/\bINTO\b/i.test(match[0]))
-      .map((match) => procedureIssue("NZP026", "Consider using PERFORM instead of SELECT when result is discarded", 2, procedure.startOffset + match.index, procedure.startOffset + match.index + 6));
-  },
+  () => [],
 );
 
 const ruleNZP027 = procedureRule(
@@ -1096,24 +1084,9 @@ const ruleNZP029 = procedureRule(
 const ruleNZP030 = procedureRule(
   "NZP030",
   "Use Named Exceptions",
-  "Use named exceptions instead of SQLSTATE codes",
+  "Retired: Netezza handlers are only OTHERS and TRANSACTION_ABORTED (live-verified)",
   2,
-  (sql) => {
-    const procedure = procedureBodyOrEmpty(sql);
-    if (!procedure) return [];
-    const names: Record<string, string> = {
-      "02000": "NO_DATA_FOUND",
-      "23505": "UNIQUE_VIOLATION",
-      "23503": "FOREIGN_KEY_VIOLATION",
-      "42P01": "UNDEFINED_TABLE",
-    };
-    return findMatches(procedure.body, /\bWHEN\s+SQLSTATE\s+'([0-9A-Z]{5})'/gi).flatMap((match) => {
-      const named = names[match[1].toUpperCase()];
-      return named
-        ? [procedureIssue("NZP030", "Use named exception " + named + " instead of SQLSTATE '" + match[1] + "'", 2, procedure.startOffset + match.index, procedure.startOffset + match.index + match[0].length)]
-        : [];
-    });
-  },
+  () => [],
 );
 
 export const netezzaProcedureQualityRules: readonly DatabaseSqlQualityRule[] = [

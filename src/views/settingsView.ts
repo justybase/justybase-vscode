@@ -39,6 +39,8 @@ interface SettingItem {
     actionLabel?: string;
     icon?: string;
     jsonKind?: 'array' | 'objectArray' | 'severityMap';
+    /** Template merged into the editor by the "Insert example" button. Omit to hide the button. */
+    jsonExample?: SettingValue;
 }
 
 interface SettingsSection {
@@ -122,7 +124,7 @@ const DEFAULT_LINTER_RULES: Record<string, string> = {
     NZP009: 'information',
     NZP010: 'information',
     NZP011: 'warning',
-    NZP012: 'error',
+    NZP012: 'information',
     NZP013: 'warning'
 };
 
@@ -357,14 +359,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: false
             },
             {
-                id: 'join-name-heuristics',
-                label: 'JOIN Name Heuristics',
-                description: 'Allow lower-priority JOIN suggestions based on matching cached key and column names when no declared or configured relationship is available',
-                type: 'toggle',
-                configKey: 'sql.joinNameHeuristics',
-                defaultValue: true
-            },
-            {
                 id: 'auto-join-aliases',
                 label: 'Generate JOIN Aliases',
                 description: 'Generate a unique table alias when accepting a JOIN completion',
@@ -401,20 +395,17 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
             {
                 id: 'join-aliases',
                 label: 'JOIN Table Alias Overrides',
-                description: 'JSON array of table-to-alias overrides used by JOIN completions',
+                description: 'JSON array of table-to-alias overrides used by JOIN completions. Use "Insert example" for the expected shape',
                 type: 'json',
                 configKey: 'sql.joinAliases',
                 defaultValue: [],
-                jsonKind: 'objectArray'
-            },
-            {
-                id: 'join-relations',
-                label: 'Virtual JOIN Relationships',
-                description: 'JSON array of table relationships and column mappings used by JOIN completions',
-                type: 'json',
-                configKey: 'sql.joinRelations',
-                defaultValue: [],
-                jsonKind: 'objectArray'
+                jsonKind: 'objectArray',
+                jsonExample: [
+                    {
+                        table: { database: 'ANALYTICS', schema: 'PUBLIC', table: 'ORDERS' },
+                        alias: 'ord'
+                    }
+                ]
             },
             {
                 id: 'long-query-threshold',
@@ -423,6 +414,109 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'longQueryAlertThreshold',
                 defaultValue: 10
+            }
+        ]
+    },
+    {
+        id: 'join-knowledge',
+        title: 'JOIN Knowledge',
+        description: 'Control how JOIN suggestions learn from your workspace, and review or adjust relation rankings.',
+        settings: [
+            {
+                id: 'open-join-knowledge',
+                label: 'Review JOIN suggestions and rankings',
+                description: 'Browse suggested table relationships and see why each one ranks where it does. You can also select a JOIN suggestion in the SQL completion list to remember it automatically. Manual confirmation remains a separate, stronger decision.',
+                type: 'button',
+                action: 'openJoinKnowledge',
+                actionLabel: 'Open JOIN Knowledge'
+            },
+            {
+                id: 'join-name-heuristics',
+                label: 'Suggest relationships from matching names',
+                description: 'Allow lower-priority suggestions based on matching cached key and column names when no declared or manually configured relationship is available.',
+                type: 'toggle',
+                configKey: 'sql.joinNameHeuristics',
+                defaultValue: true
+            },
+            {
+                id: 'join-knowledge-index',
+                label: 'Learn from SQL files in this workspace',
+                description: 'Use observed JOIN patterns from workspace SQL files as lower-priority signals, and track FROM-object usage. Off by default. Only identifiers, counters and timestamps are stored; SQL text, literal values and result data are not.',
+                type: 'toggle',
+                configKey: 'sql.joinKnowledgeIndex',
+                defaultValue: false
+            },
+            {
+                id: 'learn-from-executed-queries',
+                label: 'Learn from executed queries',
+                description: 'Rank JOINs, FROM sources and columns you use repeatedly in successful Netezza queries (and, once, in the query history) higher. Stored locally as identifiers, counters and timestamps only.',
+                type: 'toggle',
+                configKey: 'sql.learnFromExecutedQueries',
+                defaultValue: true
+            },
+            {
+                id: 'join-knowledge-index-git-window',
+                label: 'Limit indexed files to recent Git history (days)',
+                description: 'When workspace learning is enabled, use this Git history window to select SQL files. 0 includes all files; edited, untracked and open files are always included.',
+                type: 'number',
+                configKey: 'sql.joinKnowledgeIndexGitWindowDays',
+                defaultValue: 365
+            },
+            {
+                id: 'personalize-from-objects',
+                label: 'Personalize FROM-object suggestions',
+                description: 'Apply manual pin, boost, demote and exclude decisions to FROM-source completion. This does not change JOIN relation ranking.',
+                type: 'toggle',
+                configKey: 'sql.personalizeFromObjects',
+                defaultValue: true
+            },
+            {
+                id: 'personalize-columns',
+                label: 'Order columns by usage',
+                description: 'Put columns that your workspace SQL and successful queries use most broadly first. Requires the JOIN Knowledge index; no column is added or hidden.',
+                type: 'toggle',
+                configKey: 'sql.personalizeColumns',
+                defaultValue: true
+            },
+            {
+                id: 'join-ghost-text',
+                label: 'JOIN ghost text',
+                description: 'Show a confident JOIN target or ON condition as inline ghost text (Tab accepts). Nothing is shown when two suggestions are equally likely.',
+                type: 'select',
+                configKey: 'sql.joinGhostText',
+                defaultValue: 'afterJoin',
+                options: [
+                    { label: 'Off', value: 'off' },
+                    { label: 'After JOIN', value: 'afterJoin' },
+                    { label: 'After JOIN and on a new line after FROM', value: 'afterJoinAndNewLine' }
+                ]
+            },
+            {
+                id: 'group-by-ghost-text',
+                label: 'GROUP BY ghost text',
+                description: 'After GROUP BY, show the non-aggregated SELECT expressions as inline ghost text (Tab accepts).',
+                type: 'toggle',
+                configKey: 'sql.groupByGhostText',
+                defaultValue: true
+            },
+            {
+                id: 'join-relations',
+                label: 'Advanced: manually configured relationships',
+                description: 'Edit the raw JSON only if needed. For normal add, edit and remove actions, use Open JOIN Knowledge above.',
+                type: 'json',
+                configKey: 'sql.joinRelations',
+                defaultValue: [],
+                jsonKind: 'objectArray',
+                jsonExample: [
+                    {
+                        left: { database: 'ANALYTICS', schema: 'PUBLIC', table: 'CUSTOMER' },
+                        right: { database: 'ANALYTICS', schema: 'PUBLIC', table: 'ORDERS' },
+                        columns: [
+                            { left: 'TENANT_KEY', right: 'TENANT_ID' },
+                            { left: 'CUSTOMER_KEY', right: 'CUSTOMER_ID' }
+                        ]
+                    }
+                ]
             }
         ]
     },
@@ -1183,6 +1277,9 @@ export class SettingsView {
                         return;
                     case 'openSettings':
                         await vscode.commands.executeCommand('netezza.openSettings');
+                        return;
+                    case 'openJoinKnowledge':
+                        await vscode.commands.executeCommand('netezza.openJoinKnowledge');
                         return;
                     case 'showMetadataStats':
                         await vscode.commands.executeCommand('netezza.showMetadataCacheStats');

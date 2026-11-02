@@ -121,12 +121,41 @@ export class CompletionContextExtractor {
           }
           return persistentScopeText;
         })();
-        return this.getSemanticScope(
+        const definitions = this.getSemanticScope(
           document,
           scopeText,
           undefined,
           databaseKind,
         ).localDefinitions;
+        if (
+          databaseKind === "netezza" &&
+          normalizedCursorOffset !== undefined &&
+          !definitions.some((def) => isProcedureLocalDefinition(def)) &&
+          /\bBEGIN_PROC\b/i.test(normalizedText)
+        ) {
+          // A word typed where a procedure statement starts (`BEGIN V_|`) is
+          // not a statement on its own; parse it as an assignment instead.
+          const assignmentText = this.insertCompletionPlaceholder(
+            normalizedText,
+            normalizedCursorOffset,
+            " := NULL;",
+          );
+          const retried = this.getSemanticScope(document, assignmentText, undefined, databaseKind).localDefinitions;
+          if (retried.some((def) => isProcedureLocalDefinition(def))) {
+            return retried;
+          }
+          // An unfinished line (`IF |`) breaks any placeholder; drop the line
+          // so the DECLARE section still parses.
+          const lineStart = normalizedText.lastIndexOf("\n", Math.max(0, normalizedCursorOffset - 1)) + 1;
+          const lineEndIndex = normalizedText.indexOf("\n", normalizedCursorOffset);
+          const lineEnd = lineEndIndex < 0 ? normalizedText.length : lineEndIndex;
+          const withoutLine = `${normalizedText.slice(0, lineStart)}${" ".repeat(lineEnd - lineStart)}${normalizedText.slice(lineEnd)}`;
+          const withoutLineDefinitions = this.getSemanticScope(document, withoutLine, undefined, databaseKind).localDefinitions;
+          if (withoutLineDefinitions.some((def) => isProcedureLocalDefinition(def))) {
+            return withoutLineDefinitions;
+          }
+        }
+        return definitions;
       } catch {
         return [];
       }
@@ -851,6 +880,7 @@ export class CompletionContextExtractor {
   private insertCompletionPlaceholder(
     text: string,
     cursorOffset: number,
+    suffix = "",
   ): string {
     const clamped = Math.max(0, Math.min(cursorOffset, text.length));
     const quotedIdentifier = this.getQuotedIdentifierSpanAtOffset(text, clamped);
@@ -874,7 +904,7 @@ export class CompletionContextExtractor {
       }
     }
 
-    return `${text.substring(0, start)} ${this.PARSER_PLACEHOLDER} ${text.substring(end)}`;
+    return `${text.substring(0, start)} ${this.PARSER_PLACEHOLDER}${suffix} ${text.substring(end)}`;
   }
 
   private isNetezzaIdentifierCharacter(char: string): boolean {

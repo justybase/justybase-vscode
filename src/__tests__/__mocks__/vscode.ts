@@ -4,6 +4,11 @@
  */
 
 export const window = {
+  withProgress: jest.fn((_options: unknown, task: (progress: unknown, token: unknown) => unknown) =>
+    Promise.resolve(task(
+      { report: jest.fn() },
+      { isCancellationRequested: false, onCancellationRequested: jest.fn(() => ({ dispose: jest.fn() })) },
+    ))),
   showInformationMessage: jest.fn(),
   showWarningMessage: jest.fn(),
   showErrorMessage: jest.fn(),
@@ -159,6 +164,7 @@ export const languages = {
   registerSignatureHelpProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerFoldingRangeProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerCompletionItemProvider: jest.fn(() => ({ dispose: jest.fn() })),
+  registerInlineCompletionItemProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerCodeLensProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerDocumentSemanticTokensProvider: jest.fn(() => ({ dispose: jest.fn() })),
 };
@@ -492,6 +498,14 @@ export class CompletionItem {
     this.label = label;
     this.kind = kind;
   }
+}
+
+export class InlineCompletionItem {
+  constructor(
+    public insertText: string,
+    public range?: Range,
+    public command?: { title: string; command: string; arguments?: unknown[] },
+  ) { }
 }
 
 export class CompletionList {

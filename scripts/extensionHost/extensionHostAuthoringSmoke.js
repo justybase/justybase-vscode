@@ -10,6 +10,7 @@ const SCENARIO_NAMES = Object.freeze([
     'editor-lifecycle',
     'navigation-refactoring',
     'command-settings',
+    'knowledge-manager',
 ]);
 
 function fingerprint(value) {
@@ -170,6 +171,28 @@ async function run() {
     scenarioReports.push({
         name: SCENARIO_NAMES[2],
         checks: ['command-registry', 'signature-help', 'settings-webview'],
+    });
+
+    const contributions = coreExtension.packageJSON?.contributes?.views?.['netezza-explorer'] ?? [];
+    assert.ok(
+        Array.isArray(contributions) && !contributions.some(view => view?.id === 'netezza.joinKnowledge'),
+        'The JOIN Knowledge manager should not occupy the Explorer sidebar.',
+    );
+    const knowledgeOpenCommand = 'netezza.openJoinKnowledge';
+    assert.ok(
+        registeredCommands.has(knowledgeOpenCommand),
+        `The JOIN Knowledge settings command '${knowledgeOpenCommand}' is not registered.`,
+    );
+    const rememberAcceptedJoinCommand = 'netezza.recordJoinKnowledgeAcceptance';
+    assert.ok(
+        registeredCommands.has(rememberAcceptedJoinCommand),
+        `The accepted JOIN preference command '${rememberAcceptedJoinCommand}' is not registered.`,
+    );
+    await vscode.commands.executeCommand(knowledgeOpenCommand);
+    await sleep(500);
+    scenarioReports.push({
+        name: SCENARIO_NAMES[3],
+        checks: ['settings-command', 'editor-panel', 'no-explorer-view', 'accepted-join-command'],
     });
 
     const report = {

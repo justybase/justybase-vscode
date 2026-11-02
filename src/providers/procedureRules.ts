@@ -494,22 +494,24 @@ export const ruleNZP011: LintRule = {
 export const ruleNZP012: LintRule = {
     id: 'NZP012',
     name: 'Incorrect ELSIF Syntax',
-    description: 'Use ELSIF (not ELSEIF or ELSE IF) in NZPLSQL',
-    defaultSeverity: LintSeverity.Error,
+    description: 'Prefer ELSIF over its accepted synonym ELSEIF',
+    defaultSeverity: LintSeverity.Information,
     check(sql: string): LintIssue[] {
         const issues: LintIssue[] = [];
         const procBody = extractProcedureBody(sql);
 
         if (!procBody) return issues;
 
-        const wrongPattern = /\b(ELSEIF|ELSE\s+IF)\b/gi;
+        // ELSEIF is an accepted synonym and ELSE IF opens a valid nested IF
+        // (both live-verified); only ELSEIF is normalized, as a style hint.
+        const wrongPattern = /\bELSEIF\b/gi;
         const matches = findPatternMatches(procBody.body, wrongPattern);
 
         for (const match of matches) {
             const absoluteOffset = procBody.startOffset + match.index;
             issues.push({
                 ruleId: this.id,
-                message: `${this.id}: Use ELSIF instead of ${match[0]} in NZPLSQL`,
+                message: `${this.id}: Prefer ELSIF over ${match[0]} (both are accepted)`,
                 severity: this.defaultSeverity,
                 startOffset: absoluteOffset,
                 endOffset: absoluteOffset + match[0].length
@@ -755,41 +757,20 @@ export const ruleNZP018: LintRule = {
 };
 
 // ============================================================================
-// RULE NZP019: Missing DEFAULT for parameters
+// RULE NZP019: Optional Parameter Without Default (RETIRED for Netezza)
 // ============================================================================
+// Netezza procedure arguments are input types only; `DEFAULT` is rejected
+// at CREATE (live-verified), so the advice could not be followed.
+// The rule object stays registered so existing `NZP019: off` configuration
+// keeps resolving.
 export const ruleNZP019: LintRule = {
     id: 'NZP019',
     name: 'Optional Parameter Without Default',
-    description: 'Consider adding DEFAULT values for optional parameters',
+    description: 'Retired: Netezza procedure arguments take no DEFAULT (live-verified CREATE error)',
     defaultSeverity: LintSeverity.Information,
     onDemandOnly: PROCEDURE_ON_DEMAND_ONLY,
-    check(sql: string): LintIssue[] {
-        const issues: LintIssue[] = [];
-
-        const procPattern = /CREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\s+\w+\s*\(([\s\S]*?)\)/i;
-        const procMatch = procPattern.exec(sql);
-
-        if (!procMatch) return issues;
-
-        const params = procMatch[2];
-        const lines = params.split(',');
-
-        // Check if last parameter has DEFAULT
-        if (lines.length > 1) {
-            const lastParam = lines[lines.length - 1];
-            if (!/\bDEFAULT\b/i.test(lastParam)) {
-                const offset = procMatch.index + procMatch[0].indexOf(lastParam);
-                issues.push({
-                    ruleId: this.id,
-                    message: `${this.id}: Consider adding DEFAULT value for last parameter if it's optional`,
-                    severity: this.defaultSeverity,
-                    startOffset: offset,
-                    endOffset: offset + lastParam.length
-                });
-            }
-        }
-
-        return issues;
+    check(_sql: string): LintIssue[] {
+        return [];
     }
 };
 
@@ -944,37 +925,20 @@ export const ruleNZP025: LintRule = {
 };
 
 // ============================================================================
-// RULE NZP026: Use PERFORM for Discarded Results
+// RULE NZP026: Use PERFORM for Discarded Results (RETIRED for Netezza)
 // ============================================================================
+// Netezza rejects `PERFORM`, and a SELECT without INTO fails at CALL
+// (live-verified); SQL037 already reports the latter.
+// The rule object stays registered so existing `NZP026: off` configuration
+// keeps resolving.
 export const ruleNZP026: LintRule = {
     id: 'NZP026',
     name: 'Use PERFORM for Discarded Results',
-    description: 'Use PERFORM instead of SELECT when result is not needed',
+    description: 'Retired: Netezza rejects PERFORM (live-verified); SQL037 reports SELECT without INTO',
     defaultSeverity: LintSeverity.Information,
     onDemandOnly: PROCEDURE_ON_DEMAND_ONLY,
-    check(sql: string): LintIssue[] {
-        const issues: LintIssue[] = [];
-        const procBody = extractProcedureBody(sql);
-        if (!procBody) return issues;
-
-        // Find SELECT statements that call functions without INTO
-        const pattern = /\bSELECT\s+[a-z_][a-z0-9_]*\s*\([^)]*\)\s*;/gi;
-        const matches = findPatternMatches(procBody.body, pattern);
-
-        for (const match of matches) {
-            if (!/\bINTO\b/i.test(match[0])) {
-                const absoluteOffset = procBody.startOffset + match.index;
-                issues.push({
-                    ruleId: this.id,
-                    message: `${this.id}: Consider using PERFORM instead of SELECT when result is discarded`,
-                    severity: this.defaultSeverity,
-                    startOffset: absoluteOffset,
-                    endOffset: absoluteOffset + 6
-                });
-            }
-        }
-
-        return issues;
+    check(_sql: string): LintIssue[] {
+        return [];
     }
 };
 
@@ -1099,45 +1063,21 @@ export const ruleNZP029: LintRule = {
 };
 
 // ============================================================================
-// RULE NZP030: Using SQLSTATE vs Named Exceptions
+// RULE NZP030: Use Named Exceptions (RETIRED for Netezza)
 // ============================================================================
+// Netezza accepts only `WHEN OTHERS` and `WHEN TRANSACTION_ABORTED`; named
+// conditions and `WHEN SQLSTATE` are both rejected (live-verified), so
+// recommending a named exception led to code that does not compile.
+// The rule object stays registered so existing `NZP030: off` configuration
+// keeps resolving.
 export const ruleNZP030: LintRule = {
     id: 'NZP030',
     name: 'Use Named Exceptions',
-    description: 'Use named exceptions (NO_DATA_FOUND, etc.) instead of SQLSTATE codes',
+    description: 'Retired: Netezza handlers are only OTHERS and TRANSACTION_ABORTED (live-verified)',
     defaultSeverity: LintSeverity.Information,
     onDemandOnly: PROCEDURE_ON_DEMAND_ONLY,
-    check(sql: string): LintIssue[] {
-        const issues: LintIssue[] = [];
-        const procBody = extractProcedureBody(sql);
-        if (!procBody) return issues;
-
-        // Look for SQLSTATE '02000' (NO_DATA_FOUND) or other common codes
-        const sqlstatePattern = /\bWHEN\s+SQLSTATE\s+'(\d{5})'/gi;
-        const matches = findPatternMatches(procBody.body, sqlstatePattern);
-
-        const namedExceptions: { [key: string]: string } = {
-            '02000': 'NO_DATA_FOUND',
-            '23505': 'UNIQUE_VIOLATION',
-            '23503': 'FOREIGN_KEY_VIOLATION',
-            '42P01': 'UNDEFINED_TABLE'
-        };
-
-        for (const match of matches) {
-            const sqlstate = match[1];
-            if (namedExceptions[sqlstate]) {
-                const absoluteOffset = procBody.startOffset + match.index;
-                issues.push({
-                    ruleId: this.id,
-                    message: `${this.id}: Use named exception ${namedExceptions[sqlstate]} instead of SQLSTATE '${sqlstate}'`,
-                    severity: this.defaultSeverity,
-                    startOffset: absoluteOffset,
-                    endOffset: absoluteOffset + match[0].length
-                });
-            }
-        }
-
-        return issues;
+    check(_sql: string): LintIssue[] {
+        return [];
     }
 };
 

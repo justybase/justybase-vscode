@@ -18,10 +18,14 @@ import {
   isBareStatementStart,
   resolveExpressionClauseContext,
 } from "./completionExpressionAnalyzer";
-import { toKeywordItems } from "./completionRenderer";
+import { toFunctionItems, toKeywordItems } from "./completionRenderer";
 import { handleMacroVariableCompletion } from "./completionMacroVariableResolver";
 import { CompletionScopeResolver } from "./completionScopeResolver";
 import { buildSnippetCompletionItems } from "./completionSnippetResolver";
+import {
+  buildProcedureCompletionItems,
+  resolveProcedureCompletionContext,
+} from "./completionProcedureResolver";
 import type { CompletionMetadataProvider } from "./completionTypes";
 import { CompletionWildcardResolver } from "./completionWildcardResolver";
 
@@ -99,12 +103,15 @@ export class LspCompletionEngine {
       return items;
     }
     const seen = new Set(joinTargets.map((item) => item.label));
-    return [
-      ...joinTargets,
-      ...items
-        .filter((item) => !seen.has(item.label))
-        .map((item) => ({ ...item, sortText: `1_${item.sortText ?? item.label}` })),
-    ];
+    return finalizeCompletionItems(
+      [
+        ...joinTargets,
+        ...items
+          .filter((item) => !seen.has(item.label))
+          .map((item) => ({ ...item, sortText: `1_${item.sortText ?? item.label}` })),
+      ],
+      triggerKind,
+    );
   }
 
   private async provideBaseCompletionItems(
@@ -171,6 +178,30 @@ export class LspCompletionEngine {
       return finalizeCompletionItems(macroVariableItems, triggerKind);
     }
     if (insideLiteralOrComment) return [];
+
+    if (requestContext.databaseKind === "netezza") {
+      const typedPrefix = this.contextExtractor.extractCurrentIdentifierPrefix(requestContext.linePrefix);
+      const procedureContext = resolveProcedureCompletionContext(requestContext.statementPrefix, typedPrefix);
+      if (procedureContext) {
+        const items = buildProcedureCompletionItems(
+          procedureContext,
+          typedPrefix,
+          requestContext.position,
+          requestContext.localDefs,
+        );
+        if (procedureContext.functions) {
+          items.push(...toFunctionItems(
+            typedPrefix,
+            requestContext.position,
+            requestContext.sqlFunctionNames,
+            requestContext.sqlFunctionSignatures,
+          ));
+        } else if (procedureContext.variables) {
+          items.push(...buildSnippetCompletionItems("netezza", requestContext.statementPrefix, typedPrefix, requestContext.position));
+        }
+        return finalizeCompletionItems(items, triggerKind);
+      }
+    }
 
     const pathItems = await this.pathResolver.resolveRequestPathCompletions(
       requestContext,
@@ -319,14 +350,28 @@ function finalizeCompletionItems(
   items: CompletionItem[],
   triggerKind: CompletionTriggerKind,
 ): CompletionItem[] {
-  if (triggerKind !== CompletionTriggerKind.TriggerCharacter) {
-    return items;
-  }
-
-  return items.map((item) => ({
-    ...item,
-    commitCharacters: (item.commitCharacters ?? []).filter(
-      (character) => !/\s/.test(character),
-    ),
-  }));
+  return items.map((item) => {
+    const data = item.data as {
+      joinKnowledgeRelation?: Record<string, unknown>;
+    } | undefined;
+    const acceptedItem = data?.joinKnowledgeRelation && !item.command
+      ? {
+          ...item,
+          command: {
+            title: "Remember selected JOIN suggestion",
+            command: "netezza.recordJoinKnowledgeAcceptance",
+            arguments: [data.joinKnowledgeRelation],
+          },
+        }
+      : item;
+    if (triggerKind !== CompletionTriggerKind.TriggerCharacter) {
+      return acceptedItem;
+    }
+    return {
+      ...acceptedItem,
+      commitCharacters: (acceptedItem.commitCharacters ?? []).filter(
+        (character) => !/\s/.test(character),
+      ),
+    };
+  });
 }

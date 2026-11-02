@@ -81,6 +81,72 @@ describe('DesktopExecutionBackend', () => {
         expect(activeConnection.removeListener).toHaveBeenCalledWith('notice', notice);
     });
 
+    it('reports a successful statement once with its execution identity', async () => {
+        const activeConnection = connection();
+        const onStatementSucceeded = jest.fn().mockResolvedValue(undefined);
+        const executionPort = port({
+            executeWithStreaming: jest.fn().mockResolvedValue({
+                totalRows: 1,
+                limitReached: false,
+                status: 'success',
+            }),
+        });
+
+        await new DesktopExecutionBackend({ streamingManager: executionPort }).execute(
+            { ...target(activeConnection), onStatementSucceeded },
+            'SELECT 1',
+            { maxRows: 10, timeoutSeconds: 5 },
+            callbacks(),
+            undefined,
+            {
+                delivery: 'streaming',
+                context: { executionId: 'exec-1', statementIndex: 3, attempt: 0 },
+            } as never,
+        );
+
+        expect(onStatementSucceeded).toHaveBeenCalledTimes(1);
+        expect(onStatementSucceeded).toHaveBeenCalledWith(activeConnection, 'SELECT 1', 'exec-1:3');
+    });
+
+    it('does not report a failed statement as a success', async () => {
+        const activeConnection = connection();
+        const onStatementSucceeded = jest.fn().mockResolvedValue(undefined);
+        const executionPort = port({
+            executeAndFetch: jest.fn().mockResolvedValue({
+                results: [],
+                status: 'error',
+                error: new Error('syntax error'),
+            }),
+        });
+
+        await expect(new DesktopExecutionBackend({ streamingManager: executionPort }).execute(
+            { ...target(activeConnection), onStatementSucceeded },
+            'SELECT 1',
+            { maxRows: 10, timeoutSeconds: 5 },
+            callbacks(),
+        )).rejects.toThrow('syntax error');
+        expect(onStatementSucceeded).not.toHaveBeenCalled();
+    });
+
+    it('does not report a cancelled statement as a success', async () => {
+        const activeConnection = connection();
+        const onStatementSucceeded = jest.fn().mockResolvedValue(undefined);
+        const executionPort = port({
+            executeAndFetch: jest.fn().mockResolvedValue({
+                results: [],
+                status: 'cancelled',
+            }),
+        });
+
+        await expect(new DesktopExecutionBackend({ streamingManager: executionPort }).execute(
+            { ...target(activeConnection), onStatementSucceeded },
+            'SELECT 1',
+            { maxRows: 10, timeoutSeconds: 5 },
+            callbacks(),
+        )).rejects.toThrow('Query cancelled');
+        expect(onStatementSucceeded).not.toHaveBeenCalled();
+    });
+
     it('retains streamed partial progress when the runtime returns an error', async () => {
         const activeConnection = connection();
         const deliveredChunk = {

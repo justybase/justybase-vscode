@@ -1790,6 +1790,251 @@ END_PROC;`,
     callPhase: "runtime",
     notes: "GOTO is not supported.",
   },
+  // ==========================================================================
+  // Block and loop exits, product-artifact findings (live-verified 2026-10-27)
+  // ==========================================================================
+  {
+    id: "ctrl_exit_in_nested_block_leaves_block",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  c INT := 0;
+  g INT := 0;
+BEGIN
+  LOOP
+    g := g + 1;
+    EXIT WHEN g > 3;
+    BEGIN
+      c := c + 1;
+      RAISE NOTICE 'STEP_01 c=%', c;
+      EXIT;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'caught';
+    END;
+  END LOOP;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 c=1", "STEP_01 c=2", "STEP_01 c=3"],
+    notes: "A plain EXIT inside a nested BEGIN ... END leaves only that block; the loop goes on.",
+  },
+  {
+    id: "ctrl_exit_label_from_nested_block",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  g INT := 0;
+BEGIN
+  <<retry>> LOOP
+    g := g + 1;
+    EXIT retry WHEN g > 3;
+    BEGIN
+      RAISE NOTICE 'STEP_01 g=%', g;
+      EXIT retry;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'caught';
+    END;
+  END LOOP;
+  RAISE NOTICE 'STEP_02 after g=%', g;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 g=1", "STEP_02 after g=1"],
+    notes: "EXIT with the loop label leaves the loop from a nested block.",
+  },
+  {
+    id: "ctrl_else_if_nested",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  i INT := 2;
+BEGIN
+  IF i = 1 THEN
+    RAISE NOTICE 'STEP_01 one';
+  ELSE IF i = 2 THEN
+    RAISE NOTICE 'STEP_01 two';
+  END IF;
+  END IF;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 two"],
+    notes: "ELSE IF opens a nested IF (needs its own END IF); it is not an ELSIF misspelling.",
+  },
+  {
+    id: "args_default_rejected",
+    group: "arguments",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}(INT, INT DEFAULT 1) RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RAISE NOTICE 'STEP_01';
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "error",
+    call: "skip",
+    errorIncludes: "DEFAULT",
+    notes: "Procedure arguments take no DEFAULT.",
+  },
+  {
+    id: "sql_get_diagnostics_rejected",
+    group: "sql-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  n INT;
+BEGIN
+  UPDATE ${T} SET name = name WHERE id > 0;
+  GET DIAGNOSTICS n = ROW_COUNT;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    errorIncludes: "GET",
+    notes: "GET DIAGNOSTICS is rejected; read the ROW_COUNT variable instead.",
+  },
+  {
+    id: "sql_select_without_into_rejected",
+    group: "sql-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  SELECT now();
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "error",
+    callPhase: "runtime",
+    errorIncludes: "SELECT without INTO",
+    notes: "Reported as SQL037, not as a syntax error; PERFORM is no alternative (rejected).",
+  },
+  {
+    id: "sql_derived_table_needs_alias",
+    group: "sql-negative",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  SELECT COUNT(*) INTO v FROM (SELECT id FROM ${T});
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "error",
+    callPhase: "runtime",
+    errorIncludes: "must have an alias",
+    notes: "A sub-SELECT in FROM needs an alias; the failure appears only at CALL.",
+  },
+  {
+    id: "sql_quote_ident_literal",
+    group: "sql",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  s VARCHAR(200);
+BEGIN
+  s := 'SELECT ' || quote_literal('a') || ' AS ' || quote_ident('Col X');
+  RAISE NOTICE 'STEP_01 %', s;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: [`STEP_01 SELECT 'a' AS "Col X"`],
+  },
+  {
+    id: "decl_scalar_types",
+    group: "declarations",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v_integer INTEGER;
+  v_int INT;
+  v_int4 INT4;
+  v_int8 INT8;
+  v_bigint BIGINT;
+  v_smallint SMALLINT;
+  v_byteint BYTEINT;
+  v_real REAL;
+  v_float FLOAT;
+  v_double DOUBLE PRECISION;
+  v_numeric NUMERIC(10,2);
+  v_decimal DECIMAL(10,2);
+  v_varchar VARCHAR(20);
+  v_charvar CHARACTER VARYING(20);
+  v_char CHAR(5);
+  v_nchar NCHAR(5);
+  v_nvarchar NVARCHAR(20);
+  v_boolean BOOLEAN;
+  v_date DATE;
+  v_time TIME;
+  v_timestamp TIMESTAMP;
+  v_interval INTERVAL;
+BEGIN
+  v_date := CURRENT_DATE;
+  RAISE NOTICE 'STEP_01 %', v_integer;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 <NULL>"],
+    notes: "Declaration types offered by NZPLSQL completion.",
+  },
+  {
+    id: "hdr_returns_varchar_n",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS VARCHAR(20) LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 'ok';
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectRows: [["ok"]],
+  },
+  {
+    id: "hdr_returns_date",
+    group: "header",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS DATE LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN NULL;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+  },
+  {
+    id: "sql_call_in_proc",
+    group: "sql",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  CALL now();
+  RAISE NOTICE 'STEP_01 called';
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectNotices: ["STEP_01 called"],
+  },
 ];
 
 export function findProcedureMatrixCase(id: string): ProcedureMatrixCase | undefined {

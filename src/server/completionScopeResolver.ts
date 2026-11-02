@@ -27,6 +27,7 @@ import {
   buildExpressionFunctionItems,
   buildExpressionSpecialValueItems,
   isAliasNamePosition,
+  isNumericAggregateQualifierPosition,
   resolveExpressionClauseContext,
   resolveOperandContinuationKeywords,
 } from "./completionExpressionAnalyzer";
@@ -42,7 +43,7 @@ import { findLocalDefinition } from "./completionLocalDefinitionUtils";
 import {
   applyPrefixRange,
   toColumnItems,
-  toMetadataColumnItem,
+  toRankedMetadataColumnItems,
   toLocalVariableItems,
   toKeywordItems,
   toScopedColumnItems,
@@ -61,7 +62,32 @@ import { CompletionContextExtractor } from "./completionContextExtractor";
 import { CompletionMetadataResolver } from "./completionMetadataResolver";
 import { handleVariableCompletion } from "./completionVariableResolver";
 import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
+import {
+  buildJoinSortText,
+  canonicalizeRelation,
+  joinColumnPairExactness,
+  joinTableSchemaAgreement,
+  resolveJoinPredicateTier,
+  resolveJoinTargetTier,
+  scoreJoinCandidate,
+  JOIN_TARGET_REDUNDANT_TIER,
+  type JoinTargetRole,
+  type JoinTierSources,
+} from "@justybase/sql-core/joinKnowledge";
+import {
+  getConfirmedRelations,
+  getFavoriteRelations,
+  getColumnUsageBands,
+  getRelationEvidenceStrength,
+  hasRelationEvidence,
+  getRelationScoreAdjustment,
+  getRelationDecision,
+  getObservedRelations,
+  type ObservedJoinRelation,
+} from "./joinKnowledgeRanking";
 import { getUniqueTableAlias } from "../sql/tableAliasPolicy";
+import { isSelfNamedKeyColumn } from "../utils/relatedColumnNames";
+import { extractWorkspaceSql } from "../knowledge/workspaceSqlExtractor";
 import { extractGroupableSelectExpressions, extractSelectOutputAliases } from "./completionSelectList";
 import type {
   CompletionRequestContext,
@@ -80,6 +106,154 @@ function formatDirectJoinQualifier(source: DirectJoinSource, databaseKind?: Data
     return formatNetezzaIdentifier(createNetezzaUserIdentifier(source.qualifier, source.qualifierQuoted));
   }
   return formatIdentifierForSql(source.qualifier, databaseKind);
+}
+
+interface JoinScoreSource {
+  db?: string;
+  schema?: string;
+  table: string;
+}
+
+/**
+ * Within-tier JOIN score (`01-ranking-model.md` §1). Evidence strength is
+ * precomputed at snapshot build; the context factors here are in-memory
+ * comparisons only (no I/O, parsing or metadata calls).
+ */
+function relationRankingScore(input: {
+  relationKey: string | undefined;
+  /**
+   * Key canonicalized without the effective scope. Workspace and executed
+   * evidence written unqualified is stored under this key.
+   */
+  unscopedRelationKey?: string;
+  pairs: ReadonlyArray<{ left: string; right: string }>;
+  source: JoinScoreSource;
+  target: { database?: string; schema?: string; table: string };
+  proximity: number;
+  /** Catalog role of the target; inferred from key names when absent. */
+  targetRole?: JoinTargetRole;
+  alreadyJoined?: boolean;
+  defaults: { database?: string; schema?: string };
+}): number {
+  return scoreJoinCandidate({
+    evidence: getRelationEvidenceStrength(input.relationKey)
+      ?? getRelationEvidenceStrength(input.unscopedRelationKey),
+    columnPairExactness: joinColumnPairExactness(input.pairs, input.source.table, input.target.table),
+    tableSchemaAgreement: joinTableSchemaAgreement(
+      { database: input.source.db, schema: input.source.schema },
+      input.target,
+      input.defaults,
+    ),
+    contextSimilarity: input.proximity,
+    targetRole: input.targetRole
+      ?? inferJoinTargetRole(input.pairs, input.source.table, input.target.table),
+    alreadyJoined: input.alreadyJoined,
+    userAdjustment: getRelationScoreAdjustment(input.relationKey),
+  });
+}
+
+/**
+ * Role from key naming when no catalog FK says it: the side whose columns are
+ * named after their own table (`DIMPRODUCT.PRODUCTKEY`) is the parent.
+ */
+function inferJoinTargetRole(
+  pairs: ReadonlyArray<{ left: string; right: string }>,
+  sourceTable: string,
+  targetTable: string,
+): JoinTargetRole {
+  if (pairs.length === 0) {
+    return "peer";
+  }
+  const targetOwnsKey = pairs.every((pair) => isSelfNamedKeyColumn(pair.right, targetTable));
+  const sourceOwnsKey = pairs.every((pair) => isSelfNamedKeyColumn(pair.left, sourceTable));
+  return targetOwnsKey === sourceOwnsKey ? "peer" : targetOwnsKey ? "parent" : "child";
+}
+
+/** Table-name level signature of a relation, independent of direction. */
+function relationSignature(
+  leftTable: string,
+  rightTable: string,
+  pairs: ReadonlyArray<{ left: string; right: string }>,
+): string | undefined {
+  const left = leftTable.toUpperCase();
+  const right = rightTable.toUpperCase();
+  if (left === right || pairs.length === 0) {
+    return undefined;
+  }
+  const ordered = left < right;
+  const columns = pairs
+    .map((pair) => ordered
+      ? `${pair.left.toUpperCase()}=${pair.right.toUpperCase()}`
+      : `${pair.right.toUpperCase()}=${pair.left.toUpperCase()}`)
+    .sort();
+  return `${ordered ? left : right}|${ordered ? right : left}|${columns.join(",")}`;
+}
+
+/** Relations already written in the statement before the trailing `JOIN`. */
+function statementRelationSignatures(
+  statementBeforeJoin: string,
+  databaseKind: DatabaseKind | undefined,
+): Set<string> {
+  const signatures = new Set<string>();
+  if (!/\bON\b/i.test(statementBeforeJoin)) {
+    return signatures;
+  }
+  const extraction = extractWorkspaceSql(statementBeforeJoin, {
+    databaseKind,
+    fingerprint: () => "",
+    maxStatements: 1,
+  });
+  for (const { relation } of extraction.relations) {
+    const [first] = relation.columnPairs;
+    if (!first) continue;
+    const signature = relationSignature(
+      first.leftTable.table,
+      first.rightTable.table,
+      relation.columnPairs.map((pair) => ({ left: pair.leftColumn, right: pair.rightColumn })),
+    );
+    if (signature) signatures.add(signature);
+  }
+  return signatures;
+}
+
+/** Combined role of the matches forming one condition. */
+function combineTargetRoles(roles: ReadonlyArray<JoinTargetRole | undefined>): JoinTargetRole | undefined {
+  if (roles.length === 0 || roles.some((role) => role === undefined)) {
+    return undefined;
+  }
+  return roles.every((role) => role === roles[0]) ? roles[0] : "peer";
+}
+
+/** Evidence lookup key as written, without applying the effective scope. */
+function unscopedRelationKey(
+  left: { database?: string; schema?: string; table: string },
+  right: { database?: string; schema?: string; table: string },
+  pairs: ReadonlyArray<{ left: string; right: string }>,
+  databaseKind: DatabaseKind | undefined,
+): string | undefined {
+  if (!hasRelationEvidence()) {
+    return undefined;
+  }
+  return canonicalizeRelation({ left, right, columns: [...pairs] }, databaseKind)?.key;
+}
+
+/** `1` for the most recently written source, `1/2` for the one before, ... */
+function sourceProximity<T>(sources: readonly T[], source: T): number {
+  const index = sources.indexOf(source);
+  return index < 0 ? 0 : 1 / (sources.length - index);
+}
+
+function describeObservedSource(observed: ObservedJoinRelation): string {
+  return observed.source === "executed" ? "successful executions" : "workspace SQL";
+}
+
+function describeObservedJoin(observed: ObservedJoinRelation): string {
+  return `JOIN found in ${describeObservedSource(observed)} (${observed.breadth})`;
+}
+
+/** Executed evidence ranks in `0_4_`; workspace evidence stays in `0_5_`. */
+function observedTierSources(observed: ObservedJoinRelation): JoinTierSources {
+  return observed.source === "executed" ? { executed: true } : { workspace: true };
 }
 
 function normalizeRelationColumnName(name: string): string {
@@ -220,10 +394,17 @@ export class CompletionScopeResolver {
       joinCompletionSettings = DEFAULT_JOIN_COMPLETION_SETTINGS,
     } = request;
     const tokens = SqlLexer.tokenize(statementPrefix).tokens;
-    if (tokens[tokens.length - 1]?.tokenType.name !== "Join") {
+    const joinToken = tokens[tokens.length - 1];
+    if (joinToken?.tokenType.name !== "Join") {
       return undefined;
     }
     const sources = this.extractDirectJoinSources(statementPrefix, databaseKind);
+    const writtenRelations = statementRelationSignatures(
+      statementPrefix.slice(0, joinToken.startOffset),
+      databaseKind,
+    );
+    // `addJoinCompletion` shadows `sources` with its tier sources.
+    const directJoinSources = sources;
     const sourcesByDatabase = new Map<
       string,
       { database: string; sources: Array<{ schema?: string; table: string }> }
@@ -247,13 +428,18 @@ export class CompletionScopeResolver {
     }
 
     const relatedItems = new Map<string, CompletionItem>();
+    const relationDefaults = {
+      database: effectiveDb,
+      schema: effectiveSchema,
+    };
     const addJoinCompletion = (
       target: { database?: string; schema?: string; table: string },
       source: DirectJoinSource,
       pairs: Array<{ sourceColumn: string; targetColumn: string }>,
       detail: string,
-      priority: number,
+      sources: JoinTierSources,
       joinUsesDefaultSchema = false,
+      targetRole?: JoinTargetRole,
     ): void => {
       if (pairs.length === 0) return;
       const targetIdentity = {
@@ -261,6 +447,107 @@ export class CompletionScopeResolver {
         schema: target.schema ?? effectiveSchema,
         table: target.table,
       };
+      const sourceIdentity = {
+        database: source.db ?? effectiveDb,
+        schema: source.schema ?? effectiveSchema,
+        table: source.table,
+      };
+      const decision = getRelationDecision(
+        sourceIdentity,
+        targetIdentity,
+        pairs.map((pair) => ({
+          left: pair.sourceColumn,
+          right: pair.targetColumn,
+        })),
+        databaseKind,
+        relationDefaults,
+      );
+      // Block is applied before tiering: a blocked relation never reaches
+      // ranking, including a relation that is also present in workspace
+      // `joinRelations`. Reverting the block restores the configured entry.
+      if (decision.decision === "blocked") {
+        return;
+      }
+      const resolvedTier = resolveJoinTargetTier({
+        ...sources,
+        confirmed: sources.confirmed === true || decision.decision === "confirmed",
+      });
+      if (!resolvedTier.ranked) {
+        return;
+      }
+      const signature = relationSignature(
+        source.table,
+        target.table,
+        pairs.map((pair) => ({ left: pair.sourceColumn, right: pair.targetColumn })),
+      );
+      const tier = signature && writtenRelations.has(signature)
+        ? { ...resolvedTier, tier: JOIN_TARGET_REDUNDANT_TIER }
+        : resolvedTier;
+      const favorite = tier.source === "favorite"
+        || decision.decision === "favorite";
+      const detailText = favorite && tier.source !== "confirmed"
+        ? `${detail} • favorite`
+        : detail;
+      const relationData = {
+        left: sourceIdentity,
+        right: targetIdentity,
+        columns: pairs.map((pair) => ({
+          left: pair.sourceColumn,
+          right: pair.targetColumn,
+        })),
+        databaseKind,
+        effectiveDatabase: effectiveDb,
+        effectiveSchema: effectiveSchema,
+      };
+      const candidateKey = `${decision.key ?? `${sourceIdentity.table}>${targetIdentity.table}`}|${source.qualifier.toLocaleUpperCase()}`;
+      const existing = relatedItems.get(candidateKey);
+      // A target already present in the statement is rarely joined again;
+      // a self-relation needs two occurrences before it counts as joined.
+      const targetOccurrences = directJoinSources.filter((candidate) =>
+        matchesJoinTableIdentity(
+          targetIdentity,
+          { database: candidate.db, schema: candidate.schema, table: candidate.table },
+          effectiveDb,
+          effectiveSchema,
+        )).length;
+      const selfRelation = matchesJoinTableIdentity(
+        targetIdentity,
+        sourceIdentity,
+        effectiveDb,
+        effectiveSchema,
+      );
+      const scorePairs = pairs.map((pair) => ({ left: pair.sourceColumn, right: pair.targetColumn }));
+      const score = relationRankingScore({
+        relationKey: decision.key,
+        unscopedRelationKey: unscopedRelationKey(
+          { database: source.db, schema: source.schema, table: source.table },
+          target,
+          scorePairs,
+          databaseKind,
+        ),
+        pairs: scorePairs,
+        source,
+        target: targetIdentity,
+        proximity: sourceProximity(directJoinSources, source),
+        targetRole,
+        alreadyJoined: targetOccurrences >= (selfRelation ? 2 : 1),
+        defaults: relationDefaults,
+      });
+      if (existing) {
+        // A lower tier prefix wins regardless of insertion order. Reuse the
+        // existing label so alias allocation is stable.
+        const nextSortText = buildJoinSortText(tier.tier, existing.label, score);
+        if (nextSortText < String(existing.sortText ?? "")) {
+          existing.sortText = nextSortText;
+          existing.detail = detailText;
+          existing.data = {
+            ...(existing.data && typeof existing.data === "object" ? existing.data : {}),
+            joinKnowledgeRelation: relationData,
+            joinKnowledgeFavorite: favorite,
+          };
+        }
+        return;
+      }
       const configuredAlias = joinCompletionSettings.aliases.find((entry) =>
         matchesJoinTableIdentity(entry.table, targetIdentity, effectiveDb, effectiveSchema),
       )?.alias;
@@ -287,12 +574,16 @@ export class CompletionScopeResolver {
         `${formatDirectJoinQualifier(source, databaseKind)}.${formatIdentifierForSql(pair.sourceColumn, databaseKind)} = ${targetQualifier}.${formatIdentifierForSql(pair.targetColumn, databaseKind)}`,
       );
       const label = `${prefix} ON ${predicates.join(" AND ")}`;
-      relatedItems.set(label.toUpperCase(), {
+      relatedItems.set(candidateKey, {
         label,
         kind: CompletionItemKind.Class,
-        detail,
-        sortText: `${priority}_${label.toUpperCase()}`,
+        detail: detailText,
+        sortText: buildJoinSortText(tier.tier, label, score),
         insertText: label,
+        data: {
+          joinKnowledgeRelation: relationData,
+          joinKnowledgeFavorite: favorite,
+        },
       });
     };
 
@@ -311,7 +602,7 @@ export class CompletionScopeResolver {
             source,
             relation.columns.map((pair) => ({ sourceColumn: pair.left, targetColumn: pair.right })),
             "JOIN with configured relationship",
-            0,
+            { manual: true },
           );
         }
         if (matchesJoinTableIdentity(relation.right, sourceIdentity, effectiveDb, effectiveSchema)) {
@@ -320,7 +611,117 @@ export class CompletionScopeResolver {
             source,
             relation.columns.map((pair) => ({ sourceColumn: pair.right, targetColumn: pair.left })),
             "JOIN with configured relationship",
-            0,
+            { manual: true },
+          );
+        }
+      }
+    }
+
+    // Explicitly confirmed relations are available even when no catalog FK or
+    // cached key/name metadata exists. They rank below configured relations
+    // and above catalog FK.
+    for (const relation of getConfirmedRelations()) {
+      for (const source of sources) {
+        const sourceIdentity = {
+          database: source.db,
+          schema: source.schema,
+          table: source.table,
+        };
+        if (matchesJoinTableIdentity(relation.display.left, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.display.right,
+            source,
+            relation.display.columns.map((pair) => ({
+              sourceColumn: pair.left,
+              targetColumn: pair.right,
+            })),
+            "JOIN with confirmed relationship",
+            { confirmed: true },
+          );
+        }
+        if (matchesJoinTableIdentity(relation.display.right, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.display.left,
+            source,
+            relation.display.columns.map((pair) => ({
+              sourceColumn: pair.right,
+              targetColumn: pair.left,
+            })),
+            "JOIN with confirmed relationship",
+            { confirmed: true },
+          );
+        }
+      }
+    }
+
+    // Favorites are a persistent display preference, never confirmation. They
+    // share the `0_3_` preference band and remain below catalog FK.
+    for (const relation of getFavoriteRelations()) {
+      for (const source of sources) {
+        const sourceIdentity = {
+          database: source.db,
+          schema: source.schema,
+          table: source.table,
+        };
+        if (matchesJoinTableIdentity(relation.display.left, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.display.right,
+            source,
+            relation.display.columns.map((pair) => ({
+              sourceColumn: pair.left,
+              targetColumn: pair.right,
+            })),
+            "JOIN with favorite relationship",
+            { favorite: true },
+          );
+        }
+        if (matchesJoinTableIdentity(relation.display.right, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.display.left,
+            source,
+            relation.display.columns.map((pair) => ({
+              sourceColumn: pair.right,
+              targetColumn: pair.left,
+            })),
+            "JOIN with favorite relationship",
+            { favorite: true },
+          );
+        }
+      }
+    }
+
+    // Observed relations (successful executions, then workspace SQL) are
+    // evidence only. Both are filtered below their thresholds upstream.
+    for (const observed of getObservedRelations(databaseKind)) {
+      const relation = observed.relation;
+      for (const source of sources) {
+        const sourceIdentity = {
+          database: source.db,
+          schema: source.schema,
+          table: source.table,
+        };
+        if (matchesJoinTableIdentity(relation.display.left, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.display.right,
+            source,
+            relation.display.columns.map((pair) => ({
+              sourceColumn: pair.left,
+              targetColumn: pair.right,
+            })),
+            describeObservedJoin(observed),
+            observedTierSources(observed),
+          );
+        }
+        if (matchesJoinTableIdentity(relation.display.right, sourceIdentity, effectiveDb, effectiveSchema)) {
+          addJoinCompletion(
+            relation.display.left,
+            source,
+            relation.display.columns.map((pair) => ({
+              sourceColumn: pair.right,
+              targetColumn: pair.left,
+            })),
+            describeObservedJoin(observed),
+            observedTierSources(observed),
           );
         }
       }
@@ -343,6 +744,7 @@ export class CompletionScopeResolver {
             }>;
             relationType: "foreignKey" | "heuristic";
             constraintName?: string;
+            roles: Array<JoinTargetRole | undefined>;
           }>();
           for (const match of table.joinMatches ?? []) {
             const relationType = match.relationType ?? "heuristic";
@@ -353,13 +755,15 @@ export class CompletionScopeResolver {
                 candidate.schema.toUpperCase() === match.sourceSchema.toUpperCase()),
             );
             if (!source) continue;
-            const groupKey = `${source.qualifier.toUpperCase()}|${table.schema?.toUpperCase() ?? ""}|${table.name.toUpperCase()}|${relationType}|${match.constraintName?.toUpperCase() ?? ""}`;
+            const groupKey = `${source.qualifier.toUpperCase()}|${table.schema?.toUpperCase() ?? ""}|${table.name.toUpperCase()}|${relationType}|${match.constraintName?.toUpperCase() ?? ""}|${match.group ?? ""}`;
             const group = groupedMatches.get(groupKey) ?? {
               source,
               pairs: [],
               relationType,
               constraintName: match.constraintName,
+              roles: [],
             };
+            group.roles.push(match.targetRole);
             group.pairs.push({
               sourceColumn: match.sourceColumn,
               targetColumn: match.targetColumn,
@@ -367,7 +771,7 @@ export class CompletionScopeResolver {
             });
             groupedMatches.set(groupKey, group);
           }
-          for (const { source, pairs, relationType } of groupedMatches.values()) {
+          for (const { source, pairs, relationType, roles } of groupedMatches.values()) {
             const orderedPairs = relationType === "foreignKey"
               ? [...pairs].sort((left, right) =>
                 (left.ordinalPosition ?? Number.MAX_SAFE_INTEGER)
@@ -381,14 +785,17 @@ export class CompletionScopeResolver {
               relationType === "foreignKey"
                 ? "JOIN with declared foreign key"
                 : "JOIN with cached key/name match",
-              relationType === "foreignKey" ? 0 : 2,
+              relationType === "foreignKey" ? { catalogFk: true } : {},
               table.joinUsesDefaultSchema === true,
+              combineTargetRoles(roles),
             );
           }
         }
       }
     }
-    return [...relatedItems.values()];
+    return [...relatedItems.values()].sort((left, right) =>
+      (left.sortText ?? left.label).localeCompare(right.sortText ?? right.label),
+    );
   }
 
   private getUniqueJoinAlias(preferred: string, usedAliases: Set<string>): string {
@@ -462,6 +869,10 @@ export class CompletionScopeResolver {
     }
 
     const aliasBindings = this.resolveAliasBindingsFully(aliasBindingsToUse, databaseKind);
+    const clausePrefix = statement ? statement.sql.slice(0, statementOffset) : documentText.slice(0, cursorOffset);
+    const clause = isNumericAggregateQualifierPosition(clausePrefix)
+      ? "aggregate"
+      : resolveExpressionClauseContext(clausePrefix);
 
     const qualifiedSource = parseQualifierPathToSource(qualifier, databaseKind);
     if (qualifiedSource && qualifier.includes(".")) {
@@ -473,7 +884,11 @@ export class CompletionScopeResolver {
         databaseKind,
         this.buildMetadataColumnOptions(netezzaSchemasEnabled),
       );
-      return qualifiedColumns.map((column) => toMetadataColumnItem(column));
+      return toRankedMetadataColumnItems(
+        qualifiedColumns,
+        this.columnUsageBandsFor(qualifiedSource, effectiveDb, effectiveSchema, databaseKind),
+        { clause, table: qualifiedSource.table },
+      );
     }
 
     const localDefinition = findLocalDefinition(localDefs, qualifier);
@@ -543,7 +958,11 @@ export class CompletionScopeResolver {
         databaseKind,
         this.buildMetadataColumnOptions(netezzaSchemasEnabled),
       );
-      return columns.map((column) => toMetadataColumnItem(column));
+      return toRankedMetadataColumnItems(
+        columns,
+        this.columnUsageBandsFor(aliasBinding, effectiveDb, effectiveSchema, databaseKind),
+        { clause, table: aliasBinding.table },
+      );
     }
 
     const directColumns = await this.metadataResolver.getMetadataColumnsForSource(
@@ -557,7 +976,25 @@ export class CompletionScopeResolver {
         netezzaSchemasEnabled,
       },
     );
-    return directColumns.map((column) => toMetadataColumnItem(column));
+    return toRankedMetadataColumnItems(
+      directColumns,
+      this.columnUsageBandsFor({ table: qualifier }, effectiveDb, effectiveSchema, databaseKind),
+      { clause, table: qualifier },
+    );
+  }
+
+  /** Learned column bands for one source table; map lookups only. */
+  private columnUsageBandsFor(
+    source: { db?: string; schema?: string; table: string },
+    effectiveDb: string | undefined,
+    effectiveSchema: string | undefined,
+    databaseKind: DatabaseKind | undefined,
+  ): ReadonlyMap<string, number> | undefined {
+    return getColumnUsageBands(
+      { database: source.db, schema: source.schema, name: source.table },
+      databaseKind,
+      { database: effectiveDb, schema: effectiveSchema },
+    );
   }
 
   public async getSemanticScopeCompletions(
@@ -1128,6 +1565,57 @@ export class CompletionScopeResolver {
     const currentJoin = uniqueSources[uniqueSources.length - 1];
     if (!currentJoin || currentJoin.kind !== "join") return [];
 
+    const predicateTier = (sources: JoinTierSources): string => {
+      const resolved = resolveJoinPredicateTier(sources);
+      return resolved.ranked ? resolved.tier : "";
+    };
+    const relationDefaults = {
+      database: effectiveDb,
+      schema: effectiveSchema,
+    };
+    const relationIsBlocked = (
+      previousSource: DirectJoinSource,
+      currentSource: DirectJoinSource,
+      pairs: ReadonlyArray<{ left: string; right: string }>,
+    ): boolean => getRelationDecision(
+      {
+        database: previousSource.db ?? effectiveDb,
+        schema: previousSource.schema ?? effectiveSchema,
+        table: previousSource.table,
+      },
+      {
+        database: currentSource.db ?? effectiveDb,
+        schema: currentSource.schema ?? effectiveSchema,
+        table: currentSource.table,
+      },
+      pairs.map((pair) => ({ left: pair.left, right: pair.right })),
+      databaseKind,
+      relationDefaults,
+    ).decision === "blocked";
+    const previousSourcesForScore = uniqueSources.slice(0, -1);
+    const predicateScore = (
+      relationKey: string | undefined,
+      pairs: ReadonlyArray<{ left: string; right: string }>,
+      previousSource: DirectJoinSource,
+    ): number => relationRankingScore({
+      relationKey,
+      unscopedRelationKey: unscopedRelationKey(
+        { database: previousSource.db, schema: previousSource.schema, table: previousSource.table },
+        { database: currentJoin.db, schema: currentJoin.schema, table: currentJoin.table },
+        pairs,
+        databaseKind,
+      ),
+      pairs,
+      source: previousSource,
+      target: {
+        database: currentJoin.db,
+        schema: currentJoin.schema,
+        table: currentJoin.table,
+      },
+      proximity: sourceProximity(previousSourcesForScore, previousSource),
+      defaults: relationDefaults,
+    });
+
     const configuredItems: CompletionItem[] = [];
     for (const previousSource of uniqueSources.slice(0, -1)) {
       const previousIdentity = {
@@ -1154,17 +1642,206 @@ export class CompletionScopeResolver {
           pairs = relation.columns.map((pair) => ({ left: pair.right, right: pair.left }));
         }
         if (!pairs) continue;
+        if (relationIsBlocked(previousSource, currentJoin, pairs)) {
+          continue;
+        }
         const predicates = pairs.map((pair) =>
           `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
         );
         const text = predicates.join(" AND ");
+        const relationKey = canonicalizeRelation({
+          left: previousIdentity,
+          right: currentIdentity,
+          columns: pairs,
+        }, databaseKind, { database: effectiveDb, schema: effectiveSchema })?.key;
         configuredItems.push({
           label: text,
           kind: CompletionItemKind.Reference,
           detail: "Join condition (configured relationship)",
           insertText: text,
-          sortText: `0_0_${text.toUpperCase()}`,
+          sortText: buildJoinSortText(
+            predicateTier({ manual: true }),
+            text,
+            predicateScore(relationKey, pairs, previousSource),
+          ),
           textEdit: { range: { start: position, end: position }, newText: text },
+          data: {
+            joinKnowledgeRelation: {
+              left: previousIdentity,
+              right: currentIdentity,
+              columns: pairs.map((pair) => ({ left: pair.left, right: pair.right })),
+              databaseKind,
+              effectiveDatabase: effectiveDb,
+              effectiveSchema,
+            },
+          },
+        });
+      }
+    }
+
+    // Confirmed predicates are emitted from the snapshot so they remain usable
+    // without cached columns; configured relationships still win.
+    const confirmedItems: CompletionItem[] = [];
+    for (const relation of getConfirmedRelations()) {
+      for (const previousSource of uniqueSources.slice(0, -1)) {
+        const previousIdentity = {
+          database: previousSource.db,
+          schema: previousSource.schema,
+          table: previousSource.table,
+        };
+        const currentIdentity = {
+          database: currentJoin.db,
+          schema: currentJoin.schema,
+          table: currentJoin.table,
+        };
+        let pairs: Array<{ left: string; right: string }> | undefined;
+        if (
+          matchesJoinTableIdentity(relation.display.left, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.display.right, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.display.columns;
+        } else if (
+          matchesJoinTableIdentity(relation.display.right, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.display.left, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.display.columns.map((pair) => ({ left: pair.right, right: pair.left }));
+        }
+        if (!pairs) continue;
+        const text = pairs.map((pair) =>
+          `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
+        ).join(" AND ");
+        confirmedItems.push({
+          label: text,
+          kind: CompletionItemKind.Reference,
+          detail: "Join condition (confirmed relationship)",
+          insertText: text,
+          sortText: buildJoinSortText(
+            predicateTier({ confirmed: true }),
+            text,
+            predicateScore(relation.key, pairs, previousSource),
+          ),
+          textEdit: { range: { start: position, end: position }, newText: text },
+          data: {
+            joinKnowledgeRelation: {
+              left: previousIdentity,
+              right: currentIdentity,
+              columns: pairs.map((pair) => ({ left: pair.left, right: pair.right })),
+              databaseKind,
+              effectiveDatabase: effectiveDb,
+              effectiveSchema,
+            },
+          },
+        });
+      }
+    }
+
+    const favoriteItems: CompletionItem[] = [];
+    for (const relation of getFavoriteRelations()) {
+      for (const previousSource of uniqueSources.slice(0, -1)) {
+        const previousIdentity = {
+          database: previousSource.db,
+          schema: previousSource.schema,
+          table: previousSource.table,
+        };
+        const currentIdentity = {
+          database: currentJoin.db,
+          schema: currentJoin.schema,
+          table: currentJoin.table,
+        };
+        let pairs: Array<{ left: string; right: string }> | undefined;
+        if (
+          matchesJoinTableIdentity(relation.display.left, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.display.right, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.display.columns;
+        } else if (
+          matchesJoinTableIdentity(relation.display.right, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.display.left, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.display.columns.map((pair) => ({ left: pair.right, right: pair.left }));
+        }
+        if (!pairs) continue;
+        const text = pairs.map((pair) =>
+          `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
+        ).join(" AND ");
+        favoriteItems.push({
+          label: text,
+          kind: CompletionItemKind.Reference,
+          detail: "Join condition (favorite relationship)",
+          insertText: text,
+          sortText: buildJoinSortText(
+            predicateTier({ favorite: true }),
+            text,
+            predicateScore(relation.key, pairs, previousSource),
+          ),
+          textEdit: { range: { start: position, end: position }, newText: text },
+          data: {
+            joinKnowledgeRelation: {
+              left: previousIdentity,
+              right: currentIdentity,
+              columns: pairs.map((pair) => ({ left: pair.left, right: pair.right })),
+              databaseKind,
+              effectiveDatabase: effectiveDb,
+              effectiveSchema,
+            },
+            joinKnowledgeFavorite: true,
+          },
+        });
+      }
+    }
+
+    const workspaceItems: CompletionItem[] = [];
+    for (const observed of getObservedRelations(databaseKind)) {
+      const relation = observed.relation;
+      const detail = `Join condition (${describeObservedSource(observed)}; ${observed.breadth})`;
+      for (const previousSource of uniqueSources.slice(0, -1)) {
+        const previousIdentity = {
+          database: previousSource.db,
+          schema: previousSource.schema,
+          table: previousSource.table,
+        };
+        const currentIdentity = {
+          database: currentJoin.db,
+          schema: currentJoin.schema,
+          table: currentJoin.table,
+        };
+        let pairs: Array<{ left: string; right: string }> | undefined;
+        if (
+          matchesJoinTableIdentity(relation.display.left, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.display.right, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.display.columns;
+        } else if (
+          matchesJoinTableIdentity(relation.display.right, previousIdentity, effectiveDb, effectiveSchema)
+          && matchesJoinTableIdentity(relation.display.left, currentIdentity, effectiveDb, effectiveSchema)
+        ) {
+          pairs = relation.display.columns.map((pair) => ({ left: pair.right, right: pair.left }));
+        }
+        if (!pairs) continue;
+        const text = pairs.map((pair) =>
+          `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
+        ).join(" AND ");
+        workspaceItems.push({
+          label: text,
+          kind: CompletionItemKind.Reference,
+          detail,
+          insertText: text,
+          sortText: buildJoinSortText(
+            predicateTier(observedTierSources(observed)),
+            text,
+            predicateScore(relation.key, pairs, previousSource),
+          ),
+          textEdit: { range: { start: position, end: position }, newText: text },
+          data: {
+            joinKnowledgeRelation: {
+              left: previousIdentity,
+              right: currentIdentity,
+              columns: pairs.map((pair) => ({ left: pair.left, right: pair.right })),
+              databaseKind,
+              effectiveDatabase: effectiveDb,
+              effectiveSchema,
+            },
+          },
         });
       }
     }
@@ -1196,7 +1873,24 @@ export class CompletionScopeResolver {
     );
     const joinedColumns = columnsBySource[0] ?? [];
     const previousColumnsBySource = columnsBySource.slice(1);
-    if (joinedColumns.length === 0) return configuredItems;
+    if (joinedColumns.length === 0) {
+      const bestByText = new Map<string, CompletionItem>();
+      for (const item of [
+        ...configuredItems,
+        ...confirmedItems,
+        ...favoriteItems,
+        ...workspaceItems,
+      ]) {
+        const key = String(item.insertText ?? item.label).toUpperCase();
+        const existing = bestByText.get(key);
+        if (!existing || String(item.sortText) < String(existing.sortText)) {
+          bestByText.set(key, item);
+        }
+      }
+      return [...bestByText.values()].sort((left, right) =>
+        (left.sortText ?? left.label).localeCompare(right.sortText ?? right.label),
+      );
+    }
 
     const declaredItems: CompletionItem[] = [];
 
@@ -1255,23 +1949,49 @@ export class CompletionScopeResolver {
       if (declaredGroups.size > 0) {
         for (const pairs of declaredGroups.values()) {
           pairs.sort((left, right) => left.ordinal - right.ordinal);
+          const formattedPairs = pairs.map((pair) => ({ left: pair.left, right: pair.right }));
+          if (relationIsBlocked(previousSource, currentJoin, formattedPairs)) {
+            continue;
+          }
           const predicates = pairs.map((pair) =>
             `${formatDirectJoinQualifier(previousSource, databaseKind)}.${formatIdentifierForSql(pair.left, databaseKind)} = ${formatDirectJoinQualifier(currentJoin, databaseKind)}.${formatIdentifierForSql(pair.right, databaseKind)}`,
           );
           const text = predicates.join(" AND ");
+          const relationKey = canonicalizeRelation({
+            left: previousIdentity,
+            right: currentIdentity,
+            columns: formattedPairs,
+          }, databaseKind, { database: effectiveDb, schema: effectiveSchema })?.key;
           declaredItems.push({
             label: text,
             kind: CompletionItemKind.Reference,
             detail: "Join condition (declared foreign key)",
             insertText: text,
-            sortText: `0_0_${text.toUpperCase()}`,
+            sortText: buildJoinSortText(
+              predicateTier({ catalogFk: true }),
+              text,
+              predicateScore(relationKey, formattedPairs, previousSource),
+            ),
             textEdit: { range: { start: position, end: position }, newText: text },
+            data: {
+              joinKnowledgeRelation: {
+                left: previousIdentity,
+                right: currentIdentity,
+                columns: formattedPairs,
+                databaseKind,
+                effectiveDatabase: effectiveDb,
+                effectiveSchema,
+              },
+            },
           });
         }
         continue;
       }
       if (!joinCompletionSettings.nameHeuristicsEnabled) continue;
-      const sourceMatches = findJoinColumnMatches(previousColumns, joinedColumns);
+      const sourceMatches = findJoinColumnMatches(previousColumns, joinedColumns, {
+        left: previousSource.table,
+        right: currentJoin.table,
+      });
       const normalizedCounts = new Map<string, number>();
       for (const column of previousColumns) {
         const normalized = normalizeRelationColumnName(column.name);
@@ -1295,24 +2015,89 @@ export class CompletionScopeResolver {
     const keyItems: CompletionItem[] = [];
     const heuristicItems: CompletionItem[] = [];
     for (const match of matches) {
+      if (relationIsBlocked(match.leftSource, match.rightSource, [{
+        left: match.left.name,
+        right: match.right.name,
+      }])) {
+        continue;
+      }
       const left = `${formatDirectJoinQualifier(match.leftSource, databaseKind)}.${formatIdentifierForSql(match.left.name, databaseKind)}`;
       const right = `${formatDirectJoinQualifier(match.rightSource, databaseKind)}.${formatIdentifierForSql(match.right.name, databaseKind)}`;
       const text = `${left} = ${right}`;
+      const relationKey = canonicalizeRelation({
+        left: {
+          database: match.leftSource.db,
+          schema: match.leftSource.schema,
+          table: match.leftSource.table,
+        },
+        right: {
+          database: match.rightSource.db,
+          schema: match.rightSource.schema,
+          table: match.rightSource.table,
+        },
+        columns: [{ left: match.left.name, right: match.right.name }],
+      }, databaseKind, { database: effectiveDb, schema: effectiveSchema })?.key;
       const item: CompletionItem = {
         label: text,
         kind: CompletionItemKind.Reference,
         detail: match.isKeyMatch ? "Join condition (cached key/name match)" : "Join condition (name match)",
         insertText: text,
         // Join predicates outrank plain columns (2_) and local definitions (1_).
-        sortText: `0_${match.isKeyMatch ? "1" : "2"}_${text.toUpperCase()}`,
+        sortText: buildJoinSortText(
+          match.isKeyMatch
+            ? predicateTier({ cachedKey: true })
+            : predicateTier({ nameMatch: true }),
+          text,
+          predicateScore(
+            relationKey,
+            [{ left: match.left.name, right: match.right.name }],
+            match.leftSource,
+          ),
+        ),
         textEdit: {
           range: { start: position, end: position },
           newText: text,
         },
+        data: {
+          joinKnowledgeRelation: {
+            left: {
+              database: match.leftSource.db,
+              schema: match.leftSource.schema,
+              table: match.leftSource.table,
+            },
+            right: {
+              database: match.rightSource.db,
+              schema: match.rightSource.schema,
+              table: match.rightSource.table,
+            },
+            columns: [{ left: match.left.name, right: match.right.name }],
+            databaseKind,
+            effectiveDatabase: effectiveDb,
+            effectiveSchema,
+          },
+        },
       };
       (match.isKeyMatch ? keyItems : heuristicItems).push(item);
     }
-    return [...configuredItems, ...declaredItems, ...keyItems, ...heuristicItems];
+    const bestByText = new Map<string, CompletionItem>();
+    for (const item of [
+      ...configuredItems,
+      ...confirmedItems,
+      ...favoriteItems,
+      ...workspaceItems,
+      ...declaredItems,
+      ...keyItems,
+      ...heuristicItems,
+    ]) {
+      const key = String(item.insertText ?? item.label).toUpperCase();
+      const existing = bestByText.get(key);
+      if (!existing || String(item.sortText) < String(existing.sortText)) {
+        bestByText.set(key, item);
+      }
+    }
+    return [...bestByText.values()].sort((left, right) =>
+      (left.sortText ?? left.label).localeCompare(right.sortText ?? right.label),
+    );
   }
 
   private extractDirectJoinSources(
@@ -1427,10 +2212,11 @@ export class CompletionScopeResolver {
   ): Promise<ScopedColumnCandidate[]> {
     const columnsByName = new Map<
       string,
-      { column: string; qualifiers: Set<string>; description?: string }
+      { column: string; qualifiers: Set<string>; description?: string; usageBand?: number }
     >();
 
     for (const source of scopeSources) {
+      const usageBands = this.columnUsageBandsFor(source, effectiveDb, effectiveSchema, databaseKind);
       let sourceColumns: { name: string; description?: string }[];
       const localDefinition = findLocalDefinition(localDefs, source.table);
       if (localDefinition && localDefinition.columns.length > 0) {
@@ -1456,16 +2242,21 @@ export class CompletionScopeResolver {
         }
 
         const key = cleanColumn.toUpperCase();
+        const usageBand = usageBands?.get(key);
         const existing = columnsByName.get(key);
         if (!existing) {
           columnsByName.set(key, {
             column: cleanColumn,
             qualifiers: new Set([source.qualifier]),
             description: col.description,
+            ...(usageBand !== undefined ? { usageBand } : {}),
           });
           continue;
         }
         existing.qualifiers.add(source.qualifier);
+        if (usageBand !== undefined && (existing.usageBand === undefined || usageBand < existing.usageBand)) {
+          existing.usageBand = usageBand;
+        }
       }
     }
 
@@ -1474,6 +2265,7 @@ export class CompletionScopeResolver {
         column: entry.column,
         qualifiers: Array.from(entry.qualifiers),
         description: entry.description,
+        ...(entry.usageBand !== undefined ? { usageBand: entry.usageBand } : {}),
       }))
       .sort((a, b) => a.column.localeCompare(b.column));
   }

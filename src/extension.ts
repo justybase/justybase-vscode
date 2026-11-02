@@ -32,6 +32,7 @@ import { showSensitiveCopilotToolNotice } from './activation/sensitiveCopilotToo
 import { registerSqlLanguageFeatures } from './activation/sqlLanguageRegistration';
 import { getExtensionDocumentParseSession } from './core/extensionDocumentParseSession';
 import { startSqlLanguageClient, stopSqlLanguageClient } from './activation/lspRegistration';
+import { activateJoinKnowledge } from './activation/joinKnowledgeRegistration';
 import { activateCoreServices } from './activation/activateCoreServices';
 import { activateConnectionEvents } from './activation/activateConnectionEvents';
 import { MetadataPrefetchCoordinator } from './activation/MetadataPrefetchCoordinator';
@@ -401,6 +402,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     );
 
     registerSqlLanguageFeatures({ context, metadataCache, connectionManager });
+    await activateJoinKnowledge(context, {
+        getConnectionDatabaseKind: (name) => connectionManager.getConnectionDatabaseKind(name),
+    });
     void startSqlLanguageClient(context, metadataCache, connectionManager).catch((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger.warn(`Netezza extension: SQL language server failed to start: ${errorMessage}`);

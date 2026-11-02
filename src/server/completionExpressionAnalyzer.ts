@@ -510,3 +510,42 @@ function isExpressionEndingToken(tokenName: string): boolean {
     tokenName === "RBracket"
   );
 }
+
+/** Aggregates whose argument is a measure (numeric); MIN/MAX also take dates and text. */
+const NUMERIC_AGGREGATES = new Set(["SUM", "AVG"]);
+
+/**
+ * True when the token before `index` opens the argument of `SUM(`/`AVG(`
+ * (optionally `DISTINCT`/`ALL`): `index` is the first token of the argument.
+ */
+export function isNumericAggregateArgumentAt(tokens: readonly IToken[], index: number): boolean {
+  let cursor = index - 1;
+  const modifier = tokens[cursor]?.image.toUpperCase();
+  if (modifier === "DISTINCT" || modifier === "ALL") {
+    cursor -= 1;
+  }
+  return tokens[cursor]?.tokenType.name === "LParen"
+    && NUMERIC_AGGREGATES.has(tokens[cursor - 1]?.image.toUpperCase() ?? "");
+}
+
+/** The statement prefix ends inside `SUM(alias.` / `AVG(alias.partial`. */
+export function isNumericAggregateQualifierPosition(statementPrefix: string): boolean {
+  const tokens = SqlLexer.tokenize(statementPrefix).tokens;
+  let end = tokens.length;
+  if (tokens[end - 1] && tokens[end - 1].tokenType.name !== "Dot") {
+    end -= 1;
+  }
+  if (tokens[end - 1]?.tokenType.name !== "Dot") {
+    return false;
+  }
+  // Walk back over the qualifier chain (`alias.`, `schema.table.`).
+  let start = end - 1;
+  while (start > 0 && !["Dot", "LParen", "Comma"].includes(tokens[start - 1].tokenType.name)) {
+    start -= 1;
+    if (tokens[start - 1]?.tokenType.name !== "Dot") {
+      break;
+    }
+    start -= 1;
+  }
+  return isNumericAggregateArgumentAt(tokens, start);
+}

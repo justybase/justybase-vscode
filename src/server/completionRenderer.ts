@@ -9,6 +9,7 @@ import type { DatabaseKind } from "../contracts/database";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { LocalDefinition } from "../providers/types";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
+import { getRelatedColumnRole, isSelfNamedKeyColumn } from "../utils/relatedColumnNames";
 import {
   createNetezzaCatalogIdentifier,
   formatNetezzaIdentifier,
@@ -23,6 +24,18 @@ import {
   buildFunctionInlineDescription,
   buildFunctionSignatureDocumentation,
 } from "./functionCompletionUtils";
+import {
+  buildObjectSortText,
+  columnClausePrior,
+  OBJECT_BANDS,
+} from "@justybase/sql-core/joinKnowledge";
+import { classifySqlDataType } from "@justybase/sql-core/validation/visitor/typeComparisonUtils";
+import {
+  getObjectPreference,
+  getWorkspaceObjectBand,
+  isObjectPersonalizationEnabled,
+  hasObjectPreferences,
+} from "./joinKnowledgeRanking";
 
 /**
  * Completion item rendering helpers that keep construction consistent.
@@ -122,17 +135,79 @@ export function toKeywordItems(
     });
 }
 
+/**
+ * Two-digit usage band segment for one column list. Emitted only when at least
+ * one column of the list has learned usage, so lists without knowledge keep
+ * their previous `sortText` exactly; unused columns then sort as neutral `50`.
+ */
+function columnBandSegment(band: number | undefined, active: boolean): string {
+  if (!active) {
+    return "";
+  }
+  return `${String(band ?? OBJECT_BANDS.neutral).padStart(2, "0")}_`;
+}
+
+/** Where a qualified column list is requested, for the catalog prior. */
+export interface ColumnPriorContext {
+  clause: string | undefined;
+  table: string;
+}
+
+/** Metadata columns of one table, ordered by learned usage when available. */
+export function toRankedMetadataColumnItems(
+  columns: readonly MetadataColumnItem[],
+  usageBands: ReadonlyMap<string, number> | undefined,
+  prior?: ColumnPriorContext,
+): CompletionItem[] {
+  const active = usageBands !== undefined && usageBands.size > 0;
+  return columns.map((column) => {
+    const item = toMetadataColumnItem(column);
+    const priorSegment = prior ? columnPriorSegment(column, prior) : "";
+    if (active) {
+      const band = usageBands.get(column.name.replace(/^"|"$/g, "").toUpperCase());
+      item.sortText = `3_${columnBandSegment(band, true)}${priorSegment}${column.name}`;
+    } else if (priorSegment) {
+      item.sortText = `3_${priorSegment}${column.name}`;
+    }
+    return item;
+  });
+}
+
+/** PK/FK flags or names, a self-named key (`DIMPRODUCT.PRODUCTKEY`) or an `…ID`/`…KEY`/`…SK` name. */
+function isKeyLikeColumn(column: MetadataColumnItem, table: string): boolean {
+  return getRelatedColumnRole(column) !== "unknown"
+    || isSelfNamedKeyColumn(column.name, table)
+    || /(?:ID|KEY|SK)$/u.test(column.name.replace(/"/g, "").toUpperCase());
+}
+
+/** `0_`/`1_` catalog prior inside the usage band (`COLUMN_CLAUSE_PRIOR`), or empty. */
+function columnPriorSegment(column: MetadataColumnItem, prior: ColumnPriorContext): string {
+  const keys = columnClausePrior(prior.clause);
+  if (!keys) {
+    return "";
+  }
+  const keyLike = isKeyLikeColumn(column, prior.table);
+  const preferred = keys === "measure"
+    // Without a known type only keys move last, as in SELECT.
+    ? !keyLike && ["numeric", "unknown"].includes(classifySqlDataType(column.type))
+    : keyLike === (keys === "first");
+  return preferred ? "0_" : "1_";
+}
+
 export function toScopedColumnItems(
   scopedColumns: ScopedColumnCandidate[],
   typedPrefix: string,
   position: Position,
 ): CompletionItem[] {
   const items: CompletionItem[] = [];
+  const bandsActive = scopedColumns.some((scoped) => scoped.usageBand !== undefined);
 
   for (const scoped of scopedColumns) {
     const columnUpper = scoped.column.toUpperCase();
     const matchRank = getCompletionMatchRank(scoped.column, typedPrefix) ?? 9;
-    const sortPrefix = typedPrefix ? `${matchRank}_` : "";
+    // The usage band follows the match rank: learned usage reorders columns
+    // only among equally good prefix matches.
+    const sortPrefix = `${typedPrefix ? `${matchRank}_` : ""}${columnBandSegment(scoped.usageBand, bandsActive)}`;
     const singleSource = scoped.qualifiers.length <= 1;
 
     if (singleSource) {
@@ -315,9 +390,47 @@ export function filterMetadataItems(
     ranking?: MetadataCompletionRanking;
   },
 ): CompletionItem[] {
+  const preferencesActive = hasObjectPreferences()
+    && options?.ranking?.personalizeFromObjects === true;
   return items
     .filter((item) => matchesPrefix(item.name, prefix))
-    .map((item) => {
+    .flatMap((item) => {
+      const preference = options?.ranking?.role === "source"
+        && options.ranking.personalizeFromObjects === true
+        ? getObjectPreference(
+            {
+              database: item.database,
+              schema: item.schema,
+              name: item.name,
+            },
+            databaseKind,
+            {
+              database: options.ranking.effectiveDatabase,
+              schema: options.ranking.effectiveSchema,
+            },
+          )
+        : undefined;
+      if (preference?.kind === "exclude") {
+        return [];
+      }
+      const workspaceBand = options?.ranking?.role === "source"
+        && options.ranking.personalizeFromObjects === true
+        ? getWorkspaceObjectBand(
+            {
+              database: item.database,
+              schema: item.schema,
+              name: item.name,
+            },
+            databaseKind,
+            {
+              database: options.ranking.effectiveDatabase,
+              schema: options.ranking.effectiveSchema,
+            },
+          )
+        : undefined;
+      // Manual exclude > pin > manual boost > learned > manual demote > neutral.
+      const learnedBand = preference === undefined ? workspaceBand : undefined;
+
       const insertText = databaseKind === "netezza"
         ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(item.name))
         : formatIdentifierForSql(item.name, databaseKind);
@@ -333,20 +446,84 @@ export function filterMetadataItems(
           ? "Db2 location (CURRENT SERVER)"
           : item.detail;
       const completionRank = getCompletionMatchRank(item.name, prefix);
-      const matchRank = prefix && completionRank !== 0
-        ? `${completionRank ?? 9}_`
-        : "";
-      return attachCompletionDescription(
+      const sourceParts = options?.ranking?.role === "source"
+        ? getSourceScopeKind(
+            item,
+            databaseKind,
+            options.ranking.effectiveSchema,
+            options.ranking.defaultObjectType,
+          )
+        : undefined;
+      const matchRank = sourceParts
+        ? String(completionRank ?? 0)
+        : prefix && completionRank !== 0
+          ? `${completionRank ?? 9}_`
+          : "";
+      const sortText = sourceParts
+        ? buildObjectSortText({
+            scope: sourceParts.scope,
+            kind: sourceParts.kind,
+            matchRank: completionRank ?? 0,
+            name: item.name,
+            ...(preference?.kind === "boost" && preference.band !== undefined
+              ? { band: preference.band }
+              : {}),
+            ...(preference?.kind === "demote"
+              ? { band: OBJECT_BANDS.demote }
+              : {}),
+            ...(learnedBand !== undefined ? { band: learnedBand } : {}),
+            ...(preference?.kind === "pin" && preference.pinOrder !== undefined
+              ? { pinOrder: preference.pinOrder }
+              : {}),
+            emitNeutralBand: preferencesActive,
+          })
+        : `${sortPrefix}${matchRank}${item.name}`;
+      return [attachCompletionDescription(
         {
           label: item.name,
           kind: kindOverride || toCompletionKind(item.objectType),
           detail,
-          sortText: `${sortPrefix}${matchRank}${item.name}`,
+          sortText,
           insertText,
+          ...(item.database || item.schema
+            ? {
+                data: {
+                  database: item.database,
+                  schema: item.schema,
+                  objectType: item.objectType,
+                },
+              }
+            : {}),
+          // Selecting a personalized FROM source is half-weight preference
+          // evidence; it never creates a manual preference or a JOIN relation.
+          ...(sourceParts
+            && options?.ranking?.personalizeFromObjects === true
+            && isObjectPersonalizationEnabled()
+            ? {
+                command: {
+                  title: "Remember selected FROM suggestion",
+                  command: "netezza.recordSqlObjectAcceptance",
+                  arguments: [{
+                    object: {
+                      ...(item.database ? { database: item.database } : {}),
+                      ...(item.schema ? { schema: item.schema } : {}),
+                      name: item.name,
+                    },
+                    ...(databaseKind ? { databaseKind } : {}),
+                    ...(options.ranking.effectiveDatabase
+                      ? { effectiveDatabase: options.ranking.effectiveDatabase }
+                      : {}),
+                    ...(options.ranking.effectiveSchema
+                      ? { effectiveSchema: options.ranking.effectiveSchema }
+                      : {}),
+                  }],
+                },
+              }
+            : {}),
         },
         item.description,
-      );
-  });
+      )];
+    });
 }
 
 export type MetadataCompletionRole =
@@ -360,6 +537,8 @@ export interface MetadataCompletionRanking {
   effectiveDatabase?: string;
   effectiveSchema?: string;
   defaultObjectType?: NonNullable<MetadataObjectItem["objectType"]>;
+  /** Apply manual FROM-object preferences; false for INSERT/UPDATE/ALTER targets. */
+  personalizeFromObjects?: boolean;
 }
 
 function getMetadataSortPrefix(
@@ -397,31 +576,49 @@ function getSourceSortPrefix(
   effectiveSchema: string | undefined,
   defaultObjectType: NonNullable<MetadataObjectItem["objectType"]> | undefined,
 ): string {
+  const parts = getSourceScopeKind(
+    item,
+    databaseKind,
+    effectiveSchema,
+    defaultObjectType,
+  );
   // Netezza system views remain available but always follow user objects.
+  return parts ? `3_${parts.scope}${parts.kind}_` : "9_";
+}
+
+function getSourceScopeKind(
+  item: MetadataObjectItem,
+  databaseKind: DatabaseKind | undefined,
+  effectiveSchema: string | undefined,
+  defaultObjectType: NonNullable<MetadataObjectItem["objectType"]> | undefined,
+): { scope: "0" | "1"; kind: string } | undefined {
+  // Netezza system views deliberately stay in the fixed `9_` bucket, so
+  // object preferences never move them ahead of user objects.
   if (databaseKind === "netezza" && item.name.startsWith("_V_")) {
-    return "9_";
+    return undefined;
   }
 
   const isActiveSchema =
     !effectiveSchema ||
     !item.schema ||
     namesEqual(item.schema, effectiveSchema, databaseKind);
-  const scopePrefix = isActiveSchema ? "3_0" : "3_1";
+  const scope = isActiveSchema ? "0" : "1";
 
   switch (item.objectType ?? defaultObjectType) {
     case "table":
-      return `${scopePrefix}00_`;
+      return { scope, kind: "00" };
     case "view":
     case "materialized-view":
-      return `${scopePrefix}10_`;
+      return { scope, kind: "10" };
     case "synonym":
-      return item.schema?.toUpperCase() === "PUBLIC"
-        ? `${scopePrefix}30_`
-        : `${scopePrefix}20_`;
+      return {
+        scope,
+        kind: item.schema?.toUpperCase() === "PUBLIC" ? "30" : "20",
+      };
     case "procedure":
-      return `${scopePrefix}40_`;
+      return { scope, kind: "40" };
     default:
-      return `${scopePrefix}90_`;
+      return { scope, kind: "90" };
   }
 }
 
@@ -481,11 +678,13 @@ export function filterOracleSourceItems(
   items: MetadataObjectItem[],
   prefix: string,
   currentSchema?: string,
+  personalizeFromObjects = false,
 ): CompletionItem[] {
   return sortOracleCompletionItems(filterMetadataItems(items, prefix, undefined, "oracle", {
     ranking: {
       role: "source",
       effectiveSchema: currentSchema,
+      personalizeFromObjects,
     },
   }));
 }

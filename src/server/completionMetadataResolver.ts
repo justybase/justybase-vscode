@@ -76,6 +76,7 @@ export class CompletionMetadataResolver {
     databaseKind?: DatabaseKind,
     includeViews = false,
     effectiveSchema?: string,
+    personalizeFromObjects = false,
   ): Promise<CompletionItem[]> {
     if (databaseKind === "netezza") {
       context = normalizeNetezzaFromJoinContext(context);
@@ -97,6 +98,7 @@ export class CompletionMetadataResolver {
           includeViews,
           databaseKind,
           effectiveSchema,
+          { personalizeFromObjects, effectiveDatabase: effectiveDb },
         );
       }
       if (await this.shouldResolveSingleDotAsContainer(
@@ -123,6 +125,9 @@ export class CompletionMetadataResolver {
             effectiveDb,
             context.dbName,
             context.partial,
+            undefined,
+            undefined,
+            personalizeFromObjects,
           );
         }
         return this.getTableLikeCompletions(
@@ -133,6 +138,7 @@ export class CompletionMetadataResolver {
           false,
           databaseKind,
           effectiveSchema,
+          { personalizeFromObjects, effectiveDatabase: effectiveDb },
         );
       }
       if (shouldTreatSingleDotPathAsSchema(databaseKind)) {
@@ -147,6 +153,7 @@ export class CompletionMetadataResolver {
           includeViews,
           databaseKind,
           effectiveSchema,
+          { personalizeFromObjects, effectiveDatabase: effectiveDb },
         );
       }
       return [];
@@ -161,6 +168,7 @@ export class CompletionMetadataResolver {
         includeViews,
         databaseKind,
         effectiveSchema,
+        { personalizeFromObjects, effectiveDatabase: effectiveDb },
       );
     }
 
@@ -168,14 +176,27 @@ export class CompletionMetadataResolver {
       if (!supportsDoubleDotPath(databaseKind)) {
         return [];
       }
+      // Netezza `DB..TABLE` resolves in that database's DEFSCHEMA. Offering
+      // objects from other schemas would insert a name that silently rewrites
+      // the intended schema, so the list is constrained to the default schema.
+      const defaultSchema = await this.resolveNetezzaDoubleDotSchema(
+        documentUri,
+        context.dbName,
+        databaseKind,
+      );
       return this.getTableLikeCompletions(
         documentUri,
         context.dbName,
-        undefined,
+        defaultSchema,
         context.partial,
         includeViews,
         databaseKind,
         effectiveSchema,
+        {
+          includeNetezzaSystemViews: true,
+          personalizeFromObjects,
+          effectiveDatabase: effectiveDb,
+        },
       );
     }
 
@@ -195,6 +216,7 @@ export class CompletionMetadataResolver {
         effectiveSchema,
         partial,
         includeViews,
+        personalizeFromObjects,
       );
     }
 
@@ -239,6 +261,7 @@ export class CompletionMetadataResolver {
           includeViews,
           databaseKind,
           effectiveSchema,
+          { personalizeFromObjects, effectiveDatabase: effectiveDb },
         )),
       );
     }
@@ -330,9 +353,15 @@ export class CompletionMetadataResolver {
       if (!supportsDoubleDotPath(databaseKind)) {
         return [];
       }
+      const defaultSchema = await this.resolveNetezzaDoubleDotSchema(
+        documentUri,
+        context.dbName,
+        databaseKind,
+      );
       const views = await this.metadataProvider.getViews(
         documentUri,
         context.dbName,
+        defaultSchema,
       );
       return filterMetadataItems(
         views,
@@ -481,9 +510,15 @@ export class CompletionMetadataResolver {
       if (!supportsDoubleDotPath(databaseKind)) {
         return [];
       }
+      const defaultSchema = await this.resolveNetezzaDoubleDotSchema(
+        documentUri,
+        context.dbName,
+        databaseKind,
+      );
       const procedures = await this.metadataProvider.getProcedures(
         documentUri,
         context.dbName,
+        defaultSchema,
       );
       return filterMetadataItems(
         procedures,
@@ -643,6 +678,7 @@ export class CompletionMetadataResolver {
     effectiveSchema: string | undefined,
     partial: string,
     includeViews: boolean,
+    personalizeFromObjects = false,
   ): Promise<CompletionItem[]> {
     const schemas = await this.metadataProvider.getSchemas(documentUri, effectiveDb);
     result.push(
@@ -661,6 +697,7 @@ export class CompletionMetadataResolver {
           partial,
           includeViews,
           includeViews,
+          personalizeFromObjects,
         )),
       );
     }
@@ -938,6 +975,21 @@ export class CompletionMetadataResolver {
     '_V_SCHEMA',
   ] as const;
 
+  private async resolveNetezzaDoubleDotSchema(
+    documentUri: string,
+    database: string,
+    databaseKind: DatabaseKind | undefined,
+  ): Promise<string | undefined> {
+    if (databaseKind !== "netezza" || !this.metadataProvider.getNetezzaDefaultSchema) {
+      return undefined;
+    }
+    const schema = await this.metadataProvider.getNetezzaDefaultSchema(
+      documentUri,
+      database,
+    );
+    return schema?.trim() || undefined;
+  }
+
   private async getTableLikeCompletions(
     documentUri: string,
     database: string,
@@ -946,6 +998,12 @@ export class CompletionMetadataResolver {
     includeViews: boolean,
     databaseKind?: DatabaseKind,
     effectiveSchema?: string,
+    options?: {
+      includeNetezzaSystemViews?: boolean;
+      personalizeFromObjects?: boolean;
+      /** Active database; unqualified learned evidence resolves only there. */
+      effectiveDatabase?: string;
+    },
   ): Promise<CompletionItem[]> {
     const tables =
       schema === undefined
@@ -957,7 +1015,13 @@ export class CompletionMetadataResolver {
       undefined,
       databaseKind,
       {
-      ranking: { role: "source", effectiveSchema, defaultObjectType: "table" },
+      ranking: {
+        role: "source",
+        effectiveDatabase: options?.effectiveDatabase,
+        effectiveSchema,
+        defaultObjectType: "table",
+        personalizeFromObjects: options?.personalizeFromObjects === true,
+      },
       },
     );
 
@@ -973,7 +1037,13 @@ export class CompletionMetadataResolver {
         CompletionItemKind.Interface,
         databaseKind,
         {
-          ranking: { role: "source", effectiveSchema, defaultObjectType: "view" },
+          ranking: {
+            role: "source",
+            effectiveDatabase: options?.effectiveDatabase,
+            effectiveSchema,
+            defaultObjectType: "view",
+            personalizeFromObjects: options?.personalizeFromObjects === true,
+          },
         },
       );
 
@@ -981,7 +1051,10 @@ export class CompletionMetadataResolver {
       // These system views are not returned by the standard metadata provider because
       // they have OBJTYPE = 'SYSTEM VIEW' and reside in the SYSTEM database.
       // Source: NZ_SYSTEM_VIEWS in systemQueries.ts
-      if (databaseKind === 'netezza' && schema === undefined) {
+      if (
+        databaseKind === "netezza"
+        && (schema === undefined || options?.includeNetezzaSystemViews === true)
+      ) {
         for (const viewName of CompletionMetadataResolver.NETEZZA_SYSTEM_VIEWS) {
           if (matchesPrefix(viewName, partial)) {
             viewItems.push({
@@ -1008,6 +1081,7 @@ export class CompletionMetadataResolver {
     partial: string,
     includeViews = true,
     includePublicSynonyms = false,
+    personalizeFromObjects = false,
   ): Promise<CompletionItem[]> {
     const sourceObjects = includeViews
       ? this.metadataProvider.getSourceObjects
@@ -1051,7 +1125,12 @@ export class CompletionMetadataResolver {
       }
     }
 
-    return filterOracleSourceItems(Array.from(byName.values()), partial, schema);
+    return filterOracleSourceItems(
+      Array.from(byName.values()),
+      partial,
+      schema,
+      personalizeFromObjects,
+    );
   }
 
   private async matchesKnownDatabase(

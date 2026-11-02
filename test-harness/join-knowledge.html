@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="../media/joinKnowledge.css">
+  <title>JOIN Knowledge fixture</title>
+</head>
+<body>
+  <div id="app" class="jk-app">
+    <header class="jk-header">
+      <div>
+        <h1>JOIN Knowledge</h1>
+        <p class="jk-subtitle">Ranking sources, decisions and observed evidence</p>
+      </div>
+      <button id="refresh" class="jk-icon-button" title="Refresh" aria-label="Refresh">↻</button>
+    </header>
+    <div id="banner" class="jk-banner" hidden></div>
+    <div class="jk-toolbar">
+      <div role="tablist" aria-label="Knowledge domain" class="jk-tabs">
+        <button role="tab" id="tab-relations" data-tab="relations" aria-selected="true">JOIN relations</button>
+        <button role="tab" id="tab-objects" data-tab="objects" aria-selected="false">SQL objects</button>
+      </div>
+      <input id="search" type="search" placeholder="Filter by table, column or object" aria-label="Filter">
+      <select id="filter" aria-label="Filter by source or status">
+        <option value="all">All</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="favorite">Favorite</option>
+        <option value="blocked">Blocked</option>
+        <option value="executed">Executed evidence</option>
+        <option value="workspace">Workspace evidence</option>
+        <option value="below">Below threshold</option>
+        <option value="configured">Configured</option>
+      </select>
+    </div>
+    <div id="status" class="jk-status" aria-live="polite"></div>
+    <main class="jk-main">
+      <section id="list" class="jk-list" aria-label="Knowledge entries"></section>
+      <section id="detail" class="jk-detail" aria-label="Detail"></section>
+    </main>
+    <footer id="footer" class="jk-footer"></footer>
+  </div>
+  <script>
+    window.acquireVsCodeApi = () => ({
+      postMessage(message) {
+        window.__posted = window.__posted || [];
+        window.__posted.push(message);
+        if (message.type === 'ready' && window.__managerState) {
+          window.postMessage({ type: 'state', state: window.__managerState }, '*');
+        }
+      },
+      getState() {
+        return window.__managerPersisted;
+      },
+      setState(state) {
+        window.__managerPersisted = state;
+      },
+    });
+  </script>
+  <script src="../dist/media/joinKnowledge.js"></script>
+</body>
+</html>

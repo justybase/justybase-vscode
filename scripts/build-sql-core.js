@@ -15,6 +15,7 @@ const entries = [
   ['tokenLocation', 'validation/tokenLocation'],
   ['quality', 'quality/index'],
   ['authoring', 'authoring/index'],
+  ['joinKnowledge', 'joinKnowledge/index'],
   ['authoringTypes', 'authoring/types'],
   ['authoringBaseProfiles', 'authoring/baseProfiles'],
   ['baseParser', 'parser/BaseSqlParser'],

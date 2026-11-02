@@ -5,6 +5,8 @@ export interface JoinIndexColumn {
   name: string;
   normalizedName: string;
   isKey: boolean;
+  /** Column named after its own table (`DIMPRODUCT.PRODUCTKEY`). */
+  selfNamedKey?: boolean;
   joinReferences?: readonly DatabaseForeignKeyColumnReference[];
 }
 
@@ -29,6 +31,22 @@ export interface JoinTargetCandidate<T extends JoinIndexTable> {
 
 function same(left: string | undefined, right: string | undefined): boolean {
   return (left ?? "").toUpperCase() === (right ?? "").toUpperCase();
+}
+
+function compact(name: string): string {
+  return name.replace(/_/g, "");
+}
+
+/**
+ * Role-playing reference: `ORDERDATEKEY` ends with the target's own key
+ * `DATEKEY`. The key side must be self-named so arbitrary `..._ID` suffixes
+ * never pair up.
+ */
+function isRolePlayingReference(referencing: JoinIndexColumn, key: JoinIndexColumn): boolean {
+  if (!key.selfNamedKey || referencing.selfNamedKey) return false;
+  const referencingName = compact(referencing.normalizedName);
+  const keyName = compact(key.normalizedName);
+  return referencingName !== keyName && referencingName.endsWith(keyName);
 }
 
 /**
@@ -75,6 +93,7 @@ export function computeJoinTargetCandidates<T extends JoinIndexTable>(
             relationType: "foreignKey",
             constraintName: reference.constraintName,
             ordinalPosition: reference.ordinalPosition,
+            targetRole: "parent",
           });
         }
       }
@@ -95,24 +114,44 @@ export function computeJoinTargetCandidates<T extends JoinIndexTable>(
             relationType: "foreignKey",
             constraintName: reference.constraintName,
             ordinalPosition: reference.ordinalPosition,
+            targetRole: "child",
           });
         }
       }
       if (matches.length === 0 && isSameSchema) {
         for (const sourceColumn of sourceTable.columns) {
           for (const targetColumn of candidate.columns) {
-            if (
-              sourceColumn.normalizedName !== targetColumn.normalizedName ||
-              (!sourceColumn.isKey && !targetColumn.isKey)
-            ) {
+            if (sourceColumn.normalizedName === targetColumn.normalizedName) {
+              const sourceKey = sourceColumn.isKey || sourceColumn.selfNamedKey === true;
+              const targetKey = targetColumn.isKey || targetColumn.selfNamedKey === true;
+              if (!sourceKey && !targetKey) continue;
+              matches.push({
+                sourceTable: sourceTable.name,
+                sourceSchema: sourceTable.schema || undefined,
+                sourceColumn: sourceColumn.name,
+                targetColumn: targetColumn.name,
+                relationType: "heuristic",
+                targetRole: targetColumn.selfNamedKey && !sourceColumn.selfNamedKey
+                  ? "parent"
+                  : sourceColumn.selfNamedKey && !targetColumn.selfNamedKey
+                    ? "child"
+                    : "peer",
+              });
               continue;
             }
+            // Role-playing keys are separate alternatives, never one
+            // composite condition: ORDERDATEKEY and SHIPDATEKEY both
+            // reference DIMDATE.DATEKEY.
+            const outbound = isRolePlayingReference(sourceColumn, targetColumn);
+            if (!outbound && !isRolePlayingReference(targetColumn, sourceColumn)) continue;
             matches.push({
               sourceTable: sourceTable.name,
               sourceSchema: sourceTable.schema || undefined,
               sourceColumn: sourceColumn.name,
               targetColumn: targetColumn.name,
               relationType: "heuristic",
+              targetRole: outbound ? "parent" : "child",
+              group: `role:${sourceColumn.normalizedName}=${targetColumn.normalizedName}`,
             });
           }
         }

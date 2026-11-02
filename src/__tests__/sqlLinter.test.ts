@@ -1573,9 +1573,10 @@ END_PROC;`;
             expect(issues.length).toBe(1);
             expect(issues[0].ruleId).toBe('NZP012');
             expect(issues[0].message).toContain('ELSEIF');
+            expect(issues[0].severity).toBe(2); // LintSeverity.Information
         });
 
-        it('should detect ELSE IF', () => {
+        it('should not flag ELSE IF, which opens a valid nested IF', () => {
             const sql = `CREATE PROCEDURE test_proc() LANGUAGE NZPLSQL IS
 BEGIN_PROC
 BEGIN
@@ -1586,9 +1587,7 @@ BEGIN
     END IF;
 END
 END_PROC;`;
-            const issues = ruleNZP012.check(sql);
-            expect(issues.length).toBe(1);
-            expect(issues[0].message).toContain('ELSE IF');
+            expect(ruleNZP012.check(sql)).toHaveLength(0);
         });
 
         it('should not flag ELSIF', () => {

@@ -61,14 +61,19 @@ JustyBase includes **58 SQL code snippets** for rapid SQL development with Netez
 
 ### NZPLSQL Procedures & Functions
 
+Every NZPLSQL snippet and procedure wizard template is created and called on a
+live Netezza by `nzplsqlArtifacts.live.integration.test.ts`.
+
 | Prefix | Description |
 |--------|-------------|
 | `nzprocedure` | Complete stored procedure skeleton |
 | `nzifelse` | IF/ELSIF/ELSE block |
 | `nzforloop` | FOR loop with range |
 | `nzwhileloop` | WHILE loop |
-| `nzcursor` | Cursor declaration and loop |
-| `nzexception` | Exception handling block |
+| `nzcursor` | Row loop with `FOR rec IN SELECT` (Netezza has no explicit cursors) |
+| `nzforselect` | `FOR rec IN SELECT` loop (declare `rec RECORD`) |
+| `nzreftableproc` | Procedure returning a result set via `REFTABLENAME` and `RETURN REFTABLE` |
+| `nzexception` | `TRANSACTION_ABORTED` and `OTHERS` handlers (the only ones Netezza accepts) |
 | `nzraise` | RAISE NOTICE for debugging |
 | `nzraiseexception` | RAISE EXCEPTION |
 | `nzvar` | Variable declaration |

@@ -66,6 +66,7 @@ describe("CompletionPathResolver", () => {
       "netezza",
       true,
       "PUBLIC",
+      true,
     );
   });
 

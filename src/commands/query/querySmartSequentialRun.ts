@@ -32,6 +32,7 @@ import {
 } from '../../utils/accessErrorHandling';
 import type { DatabaseErrorDetails } from '@justybase/contracts';
 import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
+import { recordJoinKnowledgeSuccessfulStatement } from '../../knowledge/joinKnowledgeRuntime';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
@@ -267,7 +268,10 @@ async function executePreparedQuery(
             retryOnBrokenConnection: !options.wholeDocument,
             isExecutionCurrent: () => executionGate?.isCurrent() === true,
             confirmSafeExecute: confirmExpandedQuery,
-            onStatementSucceeded: event => deps.tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
+            onStatementSucceeded: async event => {
+                await deps.tableDdlSynchronizer?.handleStatementSucceeded(event);
+                await recordJoinKnowledgeSuccessfulStatement(event, connectionManager);
+            },
             onStatementFailed: event => {
                 if (isCancellationError(event.errorMessage)) hadCancellation = true;
                 else hadFailure = true;

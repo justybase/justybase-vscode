@@ -126,11 +126,12 @@ DECLARE
 
 CONTROL STRUCTURES:
 - IF condition THEN ... [ELSIF condition THEN ...] [ELSE ...] END IF;
-- CASE expression WHEN value THEN ... [ELSE ...] END CASE;
+- CASE exists only as an expression (v := CASE WHEN ... THEN ... ELSE ... END;); the CASE statement is not supported
 - [<<label>>] LOOP ... EXIT [label] [WHEN condition]; END LOOP;
 - [<<label>>] WHILE condition LOOP ... END LOOP;
 - [<<label>>] FOR i IN [REVERSE] 1..10 LOOP ... END LOOP;
-- FOR record IN SELECT ... LOOP ... END LOOP;
+- FOR record IN SELECT ... LOOP ... END LOOP; (declare record as RECORD; explicit cursors - DECLARE CURSOR, OPEN, FETCH - are not supported)
+- EXIT without a label inside a nested BEGIN ... END block leaves only that block; use EXIT label to leave the enclosing loop
 
 DYNAMIC SQL (EXECUTE IMMEDIATE):
 \`\`\`sql
@@ -158,7 +159,7 @@ BEGIN
   -- statements that may fail
 EXCEPTION
   WHEN TRANSACTION_ABORTED THEN
-    RAISE ERROR 'Transaction failed: %', SQLERRM;
+    RAISE NOTICE 'Transaction failed: %', SQLERRM;
   WHEN OTHERS THEN
     RAISE NOTICE 'Error caught: %', SQLERRM;
 END;
@@ -173,7 +174,11 @@ BUILT-IN VARIABLES:
 IMPORTANT NOTES:
 - Netezza does NOT support nested transactions (no SAVEPOINT)
 - BEGIN/END in NZPLSQL is for grouping, NOT transaction control
-- Netezza NZPLSQL does not support %TYPE/%ROWTYPE declarations
+- Declarations support %TYPE and %ROWTYPE (v t.col%TYPE; r t%ROWTYPE;)
+- Exception handlers: only WHEN TRANSACTION_ABORTED and WHEN OTHERS; SQLERRM is available, SQLSTATE is not
+- RAISE severities are DEBUG, NOTICE and EXCEPTION; arguments after the message must be variables or record fields, not expressions
+- Use the ROW_COUNT variable; GET DIAGNOSTICS is not supported
+- A sub-SELECT in FROM needs an alias
 - Avoid COMMIT/ROLLBACK in normal procedure logic; use AUTOCOMMIT ON blocks only for commands that require non-transactional execution
 - Use CALL procedure_name() or EXECUTE PROCEDURE procedure_name() to invoke
 - If EXECUTE AS is omitted, behavior defaults to OWNER

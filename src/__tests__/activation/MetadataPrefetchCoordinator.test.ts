@@ -16,25 +16,34 @@ describe('MetadataPrefetchCoordinator', () => {
             refreshIncompleteForeignKeyRelationships: jest.fn(async () => undefined),
             triggerConnectionPrefetch: jest.fn(),
             recordConnectionPrefetchSkipped: jest.fn(),
+            invalidateCurrentSchema: jest.fn(),
+            setCurrentSchema: jest.fn(),
         };
         const connectionManager = {
             getConnectionDatabaseKind: jest.fn(() => 'netezza'),
             getConnectionMetadata: jest.fn(() => undefined),
+            getConnectionForExecution: jest.fn(() => 'NZ'),
+            getActiveConnectionName: jest.fn(() => undefined),
+            getEffectiveDatabase: jest.fn(async () => 'DWH'),
+            createTransientConnectionForDocument: jest.fn(),
+            getDocumentPersistentConnection: jest.fn(),
         };
         const logger = {
             debug: jest.fn(),
             warn: jest.fn(),
         } as unknown as Logger;
         const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
+        const queryExecutor = jest.fn();
         const services = {
             metadataCache,
             connectionManager,
-            queryExecutor: jest.fn(),
+            queryExecutor,
         } as unknown as ExtensionServices;
         return {
             coordinator: new MetadataPrefetchCoordinator(context, services, logger),
             metadataCache,
             connectionManager,
+            queryExecutor,
             logger,
         };
     }
@@ -69,5 +78,26 @@ describe('MetadataPrefetchCoordinator', () => {
 
         expect(metadataCache.triggerConnectionPrefetch).not.toHaveBeenCalled();
         expect(metadataCache.refreshIncompleteForeignKeyRelationships).not.toHaveBeenCalled();
+    });
+
+    it('reads the current schema on a short-lived connection, never the document session', async () => {
+        const { coordinator, metadataCache, connectionManager, queryExecutor } = createCoordinator(true);
+        const transient = { close: jest.fn(async () => undefined) };
+        connectionManager.createTransientConnectionForDocument.mockResolvedValue(transient);
+        queryExecutor.mockResolvedValue({ columns: [{ name: 'CURRENT_SCHEMA' }], data: [['ADMIN']] });
+
+        coordinator.refreshCurrentSchemaForDocument('untitled:Untitled-2', true);
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+        expect(connectionManager.createTransientConnectionForDocument)
+            .toHaveBeenCalledWith('untitled:Untitled-2', 'NZ');
+        expect(queryExecutor).toHaveBeenCalledWith(expect.objectContaining({
+            query: 'SELECT CURRENT_SCHEMA',
+            silent: true,
+            connectionOverride: transient,
+        }));
+        expect(connectionManager.getDocumentPersistentConnection).not.toHaveBeenCalled();
+        expect(transient.close).toHaveBeenCalledTimes(1);
+        expect(metadataCache.setCurrentSchema).toHaveBeenCalledWith('NZ', 'DWH', 'ADMIN');
     });
 });

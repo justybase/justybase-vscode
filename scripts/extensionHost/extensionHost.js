@@ -5,10 +5,12 @@
  * The parent process owns all temporary files; the child only receives paths
  * and test configuration through its environment.
  */
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { runTests } = require('@vscode/test-electron');
 const { ExtensionHostScreenshotSession } = require('./extensionHostScreenshot');
 const {
@@ -21,6 +23,7 @@ const {
 const repositoryRoot = path.resolve(__dirname, '..', '..');
 const resultPanelSmokeTestPath = path.join(__dirname, 'extensionHostSmoke.js');
 const authoringSmokeTestPath = path.join(__dirname, 'extensionHostAuthoringSmoke.js');
+const knowledgeIndexSmokeTestPath = path.join(__dirname, 'extensionHostKnowledgeIndexSmoke.js');
 const filterPerformanceSmokeTestPath = path.join(__dirname, 'extensionHostFilterPerformanceSmoke.js');
 const designerSmokeTestPath = path.join(__dirname, 'designerSmoke.js');
 const requestedVersion = (process.env.RESULT_PANEL_VSCODE_TEST_VERSION || 'stable').trim();
@@ -34,8 +37,14 @@ function requestedEngine() {
 function requestedSuite() {
     const argument = process.argv.find(value => value.startsWith('--suite='));
     const suite = argument ? argument.slice('--suite='.length) : 'result-panel';
-    if (suite !== 'result-panel' && suite !== 'authoring' && suite !== 'result-panel-filter-performance' && suite !== 'designer') {
-        throw new Error('Extension Host suite must be result-panel, result-panel-filter-performance, authoring, or designer.');
+    if (
+        suite !== 'result-panel'
+        && suite !== 'authoring'
+        && suite !== 'knowledge-index'
+        && suite !== 'result-panel-filter-performance'
+        && suite !== 'designer'
+    ) {
+        throw new Error('Extension Host suite must be result-panel, result-panel-filter-performance, authoring, knowledge-index, or designer.');
     }
     return suite;
 }
@@ -77,6 +86,72 @@ function validateNetezzaEnvironment() {
     if (missing.length > 0) {
         throw new Error(`Netezza Extension Host test configuration is incomplete: ${missing.join(', ')}`);
     }
+}
+
+const KNOWLEDGE_FIXTURE_SQL = {
+    main: [
+        'SELECT * FROM USERS u',
+        'JOIN ORDERS o ON u.USER_ID = o.OWNER_ID;',
+    ].join('\n'),
+    alternate: [
+        'SELECT * FROM ACCOUNTS a',
+        'JOIN ORDERS o ON a.ACCOUNT_ID = o.OWNER_ID;',
+    ].join('\n'),
+    mainPair: [
+        'SELECT * FROM PRODUCTS p',
+        'JOIN ORDERS o ON p.PRODUCT_ID = o.PRODUCT_ID;',
+    ].join('\n'),
+    alternatePair: [
+        'SELECT * FROM DEPOTS d',
+        'JOIN ORDERS o ON d.DEPOT_ID = o.DEPOT_ID;',
+    ].join('\n'),
+};
+
+function runKnowledgeFixtureGit(directory, args) {
+    execFileSync('git', args, {
+        cwd: directory,
+        stdio: 'ignore',
+        env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'JustyBase Fixture',
+            GIT_AUTHOR_EMAIL: 'fixture@justybase.invalid',
+            GIT_COMMITTER_NAME: 'JustyBase Fixture',
+            GIT_COMMITTER_EMAIL: 'fixture@justybase.invalid',
+        },
+    });
+}
+
+/**
+ * The knowledge-index fixture is a real Git repository with two branches so the
+ * Extension Host can exercise a genuine HEAD switch instead of a simulated one.
+ * `main` observes USERS → ORDERS in two files and PRODUCTS → ORDERS in two
+ * more; `alternate` observes ACCOUNTS → ORDERS and DEPOTS → ORDERS instead.
+ * `c.sql` stays at a single observation on both branches, so it remains below
+ * threshold after every switch.
+ */
+function createKnowledgeIndexFixture(directory) {
+    fs.mkdirSync(directory, { recursive: true });
+    const write = (name, text) => fs.writeFileSync(path.join(directory, name), text, 'utf8');
+    write('a.sql', KNOWLEDGE_FIXTURE_SQL.main);
+    write('b.sql', KNOWLEDGE_FIXTURE_SQL.main);
+    write(
+        'c.sql',
+        'SELECT * FROM CUSTOMERS c JOIN ORDERS o ON c.CUSTOMER_ID = o.CUSTOMER_ID;',
+    );
+    write('d.sql', KNOWLEDGE_FIXTURE_SQL.mainPair);
+    write('e.sql', KNOWLEDGE_FIXTURE_SQL.mainPair);
+    runKnowledgeFixtureGit(directory, ['init', '--quiet']);
+    runKnowledgeFixtureGit(directory, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+    runKnowledgeFixtureGit(directory, ['add', 'a.sql', 'b.sql', 'c.sql', 'd.sql', 'e.sql']);
+    runKnowledgeFixtureGit(directory, ['commit', '--quiet', '-m', 'fixture: main branch']);
+    runKnowledgeFixtureGit(directory, ['checkout', '--quiet', '-b', 'alternate']);
+    write('a.sql', KNOWLEDGE_FIXTURE_SQL.alternate);
+    write('b.sql', KNOWLEDGE_FIXTURE_SQL.alternate);
+    write('d.sql', KNOWLEDGE_FIXTURE_SQL.alternatePair);
+    write('e.sql', KNOWLEDGE_FIXTURE_SQL.alternatePair);
+    runKnowledgeFixtureGit(directory, ['add', 'a.sql', 'b.sql', 'd.sql', 'e.sql']);
+    runKnowledgeFixtureGit(directory, ['commit', '--quiet', '-m', 'fixture: alternate branch']);
+    runKnowledgeFixtureGit(directory, ['checkout', '--quiet', 'main']);
 }
 
 function requestedRepeatCount() {
@@ -125,11 +200,13 @@ async function main() {
     }
     const smokeTestPath = suite === 'authoring'
         ? authoringSmokeTestPath
-        : suite === 'result-panel-filter-performance'
-            ? filterPerformanceSmokeTestPath
-            : suite === 'designer'
-                ? designerSmokeTestPath
-                : resultPanelSmokeTestPath;
+        : suite === 'knowledge-index'
+            ? knowledgeIndexSmokeTestPath
+            : suite === 'result-panel-filter-performance'
+                ? filterPerformanceSmokeTestPath
+                : suite === 'designer'
+                    ? designerSmokeTestPath
+                    : resultPanelSmokeTestPath;
     requirePath(path.join(repositoryRoot, 'package.json'), 'core manifest');
     requirePath(path.join(repositoryRoot, 'dist', 'extension.js'), 'core bundle (run npm run build first)');
     requirePath(smokeTestPath, 'Extension Host smoke test');
@@ -137,6 +214,10 @@ async function main() {
     const repeatCount = requestedRepeatCount();
 
     const workDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-extension-host-'));
+    const knowledgeIndexDirectory = path.join(workDirectory, 'join-knowledge-workspace');
+    if (suite === 'knowledge-index') {
+        createKnowledgeIndexFixture(knowledgeIndexDirectory);
+    }
     const artifactDirectory = process.env.JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR
         ? path.resolve(process.env.JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR)
         : captureScreenshots
@@ -147,21 +228,25 @@ async function main() {
         artifactDirectory,
         suite === 'result-panel'
             ? `${engine}-result-panel-report.json`
-            : suite === 'result-panel-filter-performance'
-                ? `${engine}-result-panel-filter-performance-report.json`
-                : suite === 'designer'
-                    ? 'designer-report.json'
-                    : 'authoring-report.json',
+            : suite === 'knowledge-index'
+                ? 'knowledge-index-report.json'
+                : suite === 'result-panel-filter-performance'
+                    ? `${engine}-result-panel-filter-performance-report.json`
+                    : suite === 'designer'
+                        ? 'designer-report.json'
+                        : 'authoring-report.json',
     );
     const tracePath = path.join(
         artifactDirectory,
         suite === 'result-panel'
             ? `${engine}-result-panel-trace.json`
-            : suite === 'result-panel-filter-performance'
-                ? `${engine}-result-panel-filter-performance-trace.json`
-                : suite === 'designer'
-                    ? 'designer-trace.json'
-                    : 'authoring-trace.json',
+            : suite === 'knowledge-index'
+                ? 'knowledge-index-trace.json'
+                : suite === 'result-panel-filter-performance'
+                    ? `${engine}-result-panel-filter-performance-trace.json`
+                    : suite === 'designer'
+                        ? 'designer-trace.json'
+                        : 'authoring-trace.json',
     );
     const sourceFilePath = path.join(workDirectory, 'fixture.sql');
     const databasePath = path.join(workDirectory, 'fixture.sqlite');
@@ -182,6 +267,7 @@ async function main() {
         ...process.env,
         NODE_ENV: 'test',
         JUSTYBASE_RESULT_PANEL_TRACE: '1',
+        JUSTYBASE_EXTENSION_HOST_LSP: suite === 'knowledge-index' ? '1' : '0',
         JUSTYBASE_EXTENSION_HOST_SUITE: suite,
         JUSTYBASE_EXTENSION_HOST_ENGINE: engine,
         JUSTYBASE_EXTENSION_HOST_WORK_DIR: workDirectory,
@@ -242,7 +328,11 @@ async function main() {
                 },
                 launchArgs: [
                     `--user-data-dir=${userDataDirectory}`,
+                    ...(suite === 'knowledge-index'
+                        ? [`--folder-uri=${pathToFileURL(knowledgeIndexDirectory).toString()}`]
+                        : []),
                     '--disable-extensions',
+                    '--disable-workspace-trust',
                     '--disable-gpu',
                     ...(captureScreenshots
                         ? [

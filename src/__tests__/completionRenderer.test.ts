@@ -14,6 +14,17 @@ import {
   toScopedColumnItems,
 } from "../server/completionRenderer";
 import { NETEZZA_FUNCTION_SIGNATURES } from "../dialects/netezza/sql/signatures";
+import { dedupeCompletionItems } from "../server/completionRanker";
+import {
+  __TEST_ONLY_resetJoinKnowledge,
+  setJoinKnowledgeSnapshot,
+} from "../server/joinKnowledgeRanking";
+import {
+  executedObjectBandForUsage,
+  JoinKnowledgeStore,
+  objectRefKey,
+  type JoinKnowledgeSnapshot,
+} from "@justybase/sql-core/joinKnowledge";
 
 describe("completionRenderer — documentation regression guard", () => {
   const position = Position.create(0, 10);
@@ -221,6 +232,281 @@ describe("completionRenderer — documentation regression guard", () => {
         .toBe("departments");
       expect(items.find((item) => item.label === "Sales Orders")?.insertText)
         .toBe('"Sales Orders"');
+    });
+
+    it("keeps same-named objects from different schemas distinct", () => {
+      const items = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+        { name: "ORDERS", database: "BAZA", schema: "PUBLIC", objectType: "table" },
+      ], "", undefined, "netezza");
+
+      const deduped = dedupeCompletionItems(items, "netezza");
+      expect(deduped).toHaveLength(2);
+      expect(deduped.map((item) => (item.data as { schema?: string }).schema))
+        .toEqual(["ADMIN", "PUBLIC"]);
+      // Acceptance still inserts only the object name; qualification is never
+      // rewritten by personalization.
+      expect(deduped.map((item) => item.insertText)).toEqual(["ORDERS", "ORDERS"]);
+    });
+
+    it("applies object preferences without changing insertText or crossing scope/kind", () => {
+      __TEST_ONLY_resetJoinKnowledge();
+      const store = new JoinKnowledgeStore();
+      const now = "2026-10-25T10:00:00.000Z";
+      store.appendObjectPreference({
+        kind: "pin",
+        object: { database: "BAZA", schema: "PUBLIC", name: "PINNED" },
+        pinOrder: 1,
+        databaseKind: "netezza",
+        now,
+        id: "p1",
+      });
+      store.appendObjectPreference({
+        kind: "boost",
+        object: { database: "BAZA", schema: "PUBLIC", name: "BOOSTED" },
+        band: 0,
+        databaseKind: "netezza",
+        now,
+        id: "p2",
+      });
+      store.appendObjectPreference({
+        kind: "demote",
+        object: { database: "BAZA", schema: "ADMIN", name: "DEMOTED" },
+        databaseKind: "netezza",
+        now,
+        id: "p3",
+      });
+      store.appendObjectPreference({
+        kind: "exclude",
+        object: { database: "BAZA", schema: "ADMIN", name: "HIDDEN" },
+        databaseKind: "netezza",
+        now,
+        id: "p4",
+      });
+      setJoinKnowledgeSnapshot(store.buildSnapshot(), {
+        personalizeFromObjects: true,
+      });
+
+      const items = filterMetadataItems([
+        { name: "PINNED", database: "BAZA", schema: "PUBLIC", objectType: "table" },
+        { name: "BOOSTED", database: "BAZA", schema: "PUBLIC", objectType: "table" },
+        { name: "NEUTRAL", database: "BAZA", schema: "ADMIN", objectType: "table" },
+        { name: "DEMOTED", database: "BAZA", schema: "ADMIN", objectType: "table" },
+        { name: "HIDDEN", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: true,
+        },
+      });
+      const byLabel = new Map(items.map((item) => [item.label, item]));
+
+      expect(byLabel.has("HIDDEN")).toBe(false);
+      expect(byLabel.get("PINNED")?.sortText).toBe("2_010_PINNED");
+      expect(byLabel.get("PINNED")?.insertText).toBe("PINNED");
+      // Boost/demote stay inside scope+kind+match rank.
+      expect(String(byLabel.get("BOOSTED")?.sortText)).toMatch(/^3_100_000_/u);
+      expect(String(byLabel.get("NEUTRAL")?.sortText)).toMatch(/^3_000_050_/u);
+      expect(String(byLabel.get("DEMOTED")?.sortText)).toMatch(/^3_000_090_/u);
+      const ordered = [...items]
+        .sort((left, right) => String(left.sortText).localeCompare(String(right.sortText)))
+        .map((item) => item.label);
+      expect(ordered.indexOf("PINNED")).toBe(0);
+      expect(ordered.indexOf("DEMOTED")).toBeGreaterThan(ordered.indexOf("NEUTRAL"));
+    });
+
+    it("applies learned workspace bands only inside the FROM tie group", () => {
+      __TEST_ONLY_resetJoinKnowledge();
+      const object = { database: "BAZA", schema: "ADMIN", name: "ORDERS" };
+      const workspace: JoinKnowledgeSnapshot["workspace"] = {
+        version: 1,
+        relations: [],
+        objects: [{
+          key: objectRefKey(object),
+          object,
+          usage: { select: 3, insert: 0, update: 0, delete: 0 },
+          distinctFiles: 3,
+          distinctQueries: 6,
+          belowThreshold: false,
+          band: 10,
+          firstSeenAt: "2026-10-25T10:00:00.000Z",
+          lastSeenAt: "2026-10-25T10:00:00.000Z",
+        }],
+        truncated: false,
+        generatedAt: "2026-10-25T10:00:00.000Z",
+      };
+      setJoinKnowledgeSnapshot({
+        version: 1,
+        relations: [],
+        objectPreferences: [],
+        workspace,
+      }, { personalizeFromObjects: true });
+
+      const items = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: true,
+        },
+      });
+      expect(items.map((item) => item.sortText)).toEqual(["3_000_010_ORDERS"]);
+
+      const disabled = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: false,
+        },
+      });
+      expect(disabled.map((item) => item.sortText)).toEqual(["3_000_ORDERS"]);
+
+      const nonSource = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: { role: "source", effectiveSchema: "ADMIN" },
+      });
+      expect(nonSource.map((item) => item.sortText)).toEqual(["3_000_ORDERS"]);
+
+      const store = new JoinKnowledgeStore();
+      store.appendObjectPreference({
+        kind: "boost",
+        object,
+        band: 3,
+        databaseKind: "netezza",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "manual-boost",
+      });
+      const manual = store.buildSnapshot();
+      setJoinKnowledgeSnapshot({ ...manual, workspace }, {
+        personalizeFromObjects: true,
+      });
+      const boosted = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: true,
+        },
+      });
+      expect(boosted.map((item) => item.sortText)).toEqual(["3_000_003_ORDERS"]);
+    });
+
+    it("applies executed object bands and merges them with workspace by the better band", () => {
+      __TEST_ONLY_resetJoinKnowledge();
+      const object = { database: "BAZA", schema: "ADMIN", name: "ORDERS" };
+      const store = new JoinKnowledgeStore();
+      for (const day of ["2026-10-25", "2026-10-26"]) {
+        store.recordExecutedStatement({
+          executionKey: `exec-${day}`,
+          databaseKind: "netezza",
+          relations: [],
+          objects: [{ object, kind: "select" }],
+          now: `${day}T10:00:00.000Z`,
+        });
+      }
+      setJoinKnowledgeSnapshot(store.buildSnapshot(), { personalizeFromObjects: true });
+      const expectedBand = executedObjectBandForUsage({ select: 2 }, 2, 2);
+      expect(expectedBand).toBeDefined();
+
+      const items = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: true,
+        },
+      });
+      expect(items.map((item) => item.sortText)).toEqual([
+        `3_000_0${String(expectedBand).padStart(2, "0")}_ORDERS`,
+      ]);
+
+      const workspace: JoinKnowledgeSnapshot["workspace"] = {
+        version: 1,
+        relations: [],
+        objects: [{
+          key: objectRefKey(object),
+          object,
+          usage: { select: 3, insert: 0, update: 0, delete: 0 },
+          distinctFiles: 3,
+          distinctQueries: 6,
+          belowThreshold: false,
+          band: 10,
+          firstSeenAt: "2026-10-25T10:00:00.000Z",
+          lastSeenAt: "2026-10-25T10:00:00.000Z",
+        }],
+        truncated: false,
+        generatedAt: "2026-10-25T10:00:00.000Z",
+      };
+      setJoinKnowledgeSnapshot({ ...store.buildSnapshot(), workspace }, {
+        personalizeFromObjects: true,
+      });
+      const merged = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: true,
+        },
+      });
+      expect(merged.map((item) => item.sortText)).toEqual(["3_000_010_ORDERS"]);
+    });
+
+    it("ignores object preferences when FROM personalization is disabled", () => {
+      __TEST_ONLY_resetJoinKnowledge();
+      const store = new JoinKnowledgeStore();
+      store.appendObjectPreference({
+        kind: "exclude",
+        object: { database: "BAZA", schema: "ADMIN", name: "ORDERS" },
+        databaseKind: "netezza",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "p1",
+      });
+      setJoinKnowledgeSnapshot(store.buildSnapshot(), {
+        personalizeFromObjects: false,
+      });
+
+      const items = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: {
+          role: "source",
+          effectiveSchema: "ADMIN",
+          personalizeFromObjects: true,
+        },
+      });
+      expect(items.map((item) => item.sortText)).toEqual(["3_000_ORDERS"]);
+    });
+
+    it("does not apply FROM object preferences to non-FROM target lists", () => {
+      __TEST_ONLY_resetJoinKnowledge();
+      const store = new JoinKnowledgeStore();
+      store.appendObjectPreference({
+        kind: "exclude",
+        object: { database: "BAZA", schema: "ADMIN", name: "ORDERS" },
+        databaseKind: "netezza",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "p1",
+      });
+      setJoinKnowledgeSnapshot(store.buildSnapshot(), {
+        personalizeFromObjects: true,
+      });
+
+      // INSERT/UPDATE/DELETE/ALTER target lists leave `personalizeFromObjects`
+      // unset, so exclude/pin must not touch them.
+      const items = filterMetadataItems([
+        { name: "ORDERS", database: "BAZA", schema: "ADMIN", objectType: "table" },
+      ], "", undefined, "netezza", {
+        ranking: { role: "source", effectiveSchema: "ADMIN" },
+      });
+      expect(items.map((item) => item.sortText)).toEqual(["3_000_ORDERS"]);
     });
 
     it("ranks Oracle schemas before relation sources and gives synonyms a distinct kind", () => {

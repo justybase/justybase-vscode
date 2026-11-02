@@ -875,8 +875,18 @@ body {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    flex-wrap: wrap;
     gap: 6px;
     min-height: 24px;
+}
+
+.json-example-btn {
+    color: var(--fg-muted);
+}
+
+.json-example-btn:hover {
+    color: var(--fg);
+    border-color: var(--accent);
 }
 
 .json-status {

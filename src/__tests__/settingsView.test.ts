@@ -75,7 +75,7 @@ describe('SettingsView webview shell', () => {
         );
         expect(configMatch).not.toBeNull();
         const config = JSON.parse(configMatch?.[1] ?? '{}') as {
-            sections: { id: string; settings: { configKey?: string }[] }[];
+            sections: { id: string; settings: { configKey?: string; action?: string }[] }[];
         };
         expect(config.sections.length).toBeGreaterThan(0);
         expect(config.sections.every(section => section.settings.length > 0)).toBe(true);
@@ -93,6 +93,63 @@ describe('SettingsView webview shell', () => {
             }).contributes.configuration.properties
         ).map(key => key.replace(/^justybase\./, ''));
         expect(configuredKeys).toEqual(new Set(manifestKeys));
+        const joinKnowledge = config.sections.find(section => section.id === 'join-knowledge');
+        expect(joinKnowledge?.settings.some(setting => setting.action === 'openJoinKnowledge')).toBe(true);
+        expect(joinKnowledge?.settings.map(setting => setting.configKey).filter(Boolean)).toEqual(
+            expect.arrayContaining([
+                'sql.joinNameHeuristics',
+                'sql.joinKnowledgeIndex',
+                'sql.joinKnowledgeIndexGitWindowDays',
+                'sql.personalizeFromObjects',
+                'sql.joinRelations',
+            ])
+        );
+    });
+
+    it('ships documented JOIN examples for the JSON settings', () => {
+        const WebviewPanelMock = (vscode as unknown as {
+            WebviewPanel: new () => vscode.WebviewPanel;
+        }).WebviewPanel;
+        const panel = new WebviewPanelMock();
+        (vscode.window.createWebviewPanel as jest.Mock).mockReturnValue(panel);
+        const context = {
+            extensionUri: vscode.Uri.file('/extension'),
+            extensionPath: '/extension'
+        } as vscode.ExtensionContext;
+
+        SettingsView.createOrShow(context.extensionUri, context);
+
+        const configMatch = panel.webview.html.match(
+            /<script id="settingsConfig" type="application\/json">([\s\S]*?)<\/script>/
+        );
+        const config = JSON.parse(configMatch?.[1] ?? '{}') as {
+            sections: {
+                settings: {
+                    configKey?: string;
+                    jsonKind?: string;
+                    jsonExample?: ({ columns?: unknown[] } & Record<string, unknown>)[];
+                }[];
+            }[];
+        };
+        const settings = config.sections.flatMap(section => section.settings);
+
+        const relations = settings.find(setting => setting.configKey === 'sql.joinRelations');
+        expect(relations?.jsonKind).toBe('objectArray');
+        expect(relations?.jsonExample).toHaveLength(1);
+        expect(relations?.jsonExample?.[0]).toMatchObject({
+            left: { database: 'ANALYTICS', schema: 'PUBLIC', table: 'CUSTOMER' },
+            right: { database: 'ANALYTICS', schema: 'PUBLIC', table: 'ORDERS' }
+        });
+        expect(relations?.jsonExample?.[0]?.columns).toHaveLength(2);
+        expect(() => validateJsonSettingValue(relations?.jsonExample, 'objectArray')).not.toThrow();
+
+        const aliases = settings.find(setting => setting.configKey === 'sql.joinAliases');
+        expect(aliases?.jsonKind).toBe('objectArray');
+        expect(aliases?.jsonExample?.[0]).toMatchObject({
+            table: { schema: 'PUBLIC', table: 'ORDERS' },
+            alias: 'ord'
+        });
+        expect(() => validateJsonSettingValue(aliases?.jsonExample, 'objectArray')).not.toThrow();
     });
 
     it('validates JSON-backed setting values before configuration updates', () => {

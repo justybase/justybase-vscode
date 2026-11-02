@@ -16,8 +16,30 @@ export interface JoinSourceIdentity {
   table: string;
 }
 
+function unquoteIdentifier(value: string | undefined): {
+  value: string;
+  quoted: boolean;
+} {
+  const trimmed = (value ?? "").trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return {
+      value: trimmed.slice(1, -1).replace(/""/gu, '"'),
+      quoted: true,
+    };
+  }
+  return { value: trimmed, quoted: false };
+}
+
 function sameIdentifier(left: string | undefined, right: string | undefined): boolean {
-  return (left ?? "").trim().toLocaleUpperCase() === (right ?? "").trim().toLocaleUpperCase();
+  const leftIdentifier = unquoteIdentifier(left);
+  const rightIdentifier = unquoteIdentifier(right);
+  if (leftIdentifier.quoted !== rightIdentifier.quoted) {
+    return false;
+  }
+  if (leftIdentifier.quoted) {
+    return leftIdentifier.value === rightIdentifier.value;
+  }
+  return leftIdentifier.value.toLocaleUpperCase() === rightIdentifier.value.toLocaleUpperCase();
 }
 
 export function matchesJoinTableIdentity(

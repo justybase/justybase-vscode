@@ -4,9 +4,11 @@ import { ResultPanelView } from '../views/resultPanelView';
 import { SchemaSearchProvider } from '../providers/schemaSearchProvider';
 import { FileSearchProvider } from '../providers/fileSearchProvider';
 import { QueryHistoryView } from '../views/queryHistoryView';
+import { JoinKnowledgeManagerView } from '../views/joinKnowledgeManagerView';
 import { FilePreviewEditor } from '../editors/filePreviewEditor';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { MetadataCache } from '../metadataCache';
+import { readJoinKnowledgeManagerFocus } from '../contracts/joinKnowledgeManager';
 
 export interface ExplorerViewsActivationResult {
     schemaSearchProvider: SchemaSearchProvider;
@@ -27,6 +29,7 @@ export function activateExplorerViews(
         connectionManager,
     );
     const queryHistoryProvider = new QueryHistoryView(context.extensionUri, context, connectionManager);
+    const joinKnowledgeProvider = new JoinKnowledgeManagerView(context.extensionUri);
     const fileSearchProvider = new FileSearchProvider(context.extensionUri, context.globalState);
 
     context.subscriptions.push(
@@ -36,6 +39,9 @@ export function activateExplorerViews(
         }),
         vscode.window.registerWebviewViewProvider(SchemaSearchProvider.viewType, schemaSearchProvider),
         vscode.window.registerWebviewViewProvider(QueryHistoryView.viewType, queryHistoryProvider),
+        vscode.commands.registerCommand('netezza.openJoinKnowledge', (focus?: unknown) => {
+            joinKnowledgeProvider.openInEditor(readJoinKnowledgeManagerFocus(focus));
+        }),
         vscode.window.registerWebviewViewProvider(FileSearchProvider.viewType, fileSearchProvider),
         vscode.commands.registerCommand('netezza.fileSearch.focus', () => {
             vscode.commands.executeCommand('workbench.view.extension.netezza-explorer');

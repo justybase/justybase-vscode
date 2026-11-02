@@ -36,6 +36,11 @@
       "require": "./dist/authoring/index.js",
       "default": "./dist/authoring/index.js"
     },
+    "./joinKnowledge": {
+      "types": "./dist/joinKnowledge/index.d.ts",
+      "require": "./dist/joinKnowledge/index.js",
+      "default": "./dist/joinKnowledge/index.js"
+    },
     "./authoring/*": {
       "types": "./dist/authoring/*.d.ts",
       "require": "./dist/authoring/*.js",

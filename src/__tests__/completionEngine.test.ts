@@ -23,6 +23,20 @@ import type { DatabaseKind } from "../contracts/database";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { JoinCompletionSettings } from "../lsp/protocol";
 import { DEFAULT_JOIN_COMPLETION_SETTINGS } from "../lsp/joinCompletionSettings";
+import {
+  __TEST_ONLY_resetJoinKnowledge,
+  setJoinKnowledgeOptions,
+  setJoinKnowledgeSnapshot,
+} from "../server/joinKnowledgeRanking";
+import {
+  canonicalizeRelation,
+  JOIN_PREDICATE_TIERS,
+  JOIN_TARGET_TIERS,
+  JoinKnowledgeStore,
+  objectRefKey,
+  type JoinKnowledgeSnapshot,
+  type WorkspaceIndexSnapshot,
+} from "@justybase/sql-core/joinKnowledge";
 import { db2Dialect } from "../../extensions/db2/src/db2Dialect";
 import { mssqlDialect } from "../../extensions/mssql/src/mssqlDialect";
 import { postgresqlDialect } from "../../extensions/postgresql/src/postgresqlDialect";
@@ -31,6 +45,7 @@ import { snowflakeDialect } from "../../extensions/snowflake/src/snowflakeDialec
 import { oracleDialect } from "../../extensions/oracle/src/oracleDialect";
 import { duckdbDialect } from "../../extensions/duckdb/src/duckdbDialect";
 import { verticaDialect } from "../../extensions/vertica/src/verticaDialect";
+import { NETEZZA_CROSS_SCHEMA_FIXTURE } from "./fixtures/netezzaCrossSchemaMetadata";
 
 class MockCompletionMetadataProvider implements CompletionMetadataProvider {
   public effectiveDatabase: string | undefined = "BAZA";
@@ -434,6 +449,15 @@ function createDocumentWithCursor(sqlWithCursor: string): {
   };
 }
 
+/** Two-digit within-tier JOIN score from `TIER_NN_LABEL` (`0_5_42_X` → 42). */
+function scoreOf(item: CompletionItem | undefined): number {
+  const match = /^(?:0_\d_|2_)(\d\d)_/.exec(String(item?.sortText ?? ""));
+  if (!match) {
+    throw new Error(`missing JOIN score in ${String(item?.sortText)}`);
+  }
+  return Number(match[1]);
+}
+
 function labels(items: CompletionItem[]): string[] {
   return items.map((item) => item.label);
 }
@@ -463,7 +487,85 @@ describe("LspCompletionEngine", () => {
     return engine.provideCompletionItems(document, position, triggerKind);
   }
 
+  function applyKnowledge(
+    store: JoinKnowledgeStore,
+    personalizeFromObjects = true,
+  ): void {
+    setJoinKnowledgeSnapshot(store.buildSnapshot(), { personalizeFromObjects });
+  }
+
+  function workspaceRelation(options: {
+    left?: string;
+    right?: string;
+    columns?: Array<[string, string]>;
+    files?: number;
+    queries?: number;
+    belowThreshold?: boolean;
+    band?: boolean;
+  } = {}): WorkspaceIndexSnapshot {
+    const left = options.left ?? "users";
+    const right = options.right ?? "orders";
+    const columns = options.columns ?? [["owner_id", "id"]];
+    const relation = canonicalizeRelation({
+      left: { database: "BAZA", schema: "public", table: left },
+      right: { database: "BAZA", schema: "public", table: right },
+      columns: columns.map(([leftColumn, rightColumn]) => ({
+        left: leftColumn,
+        right: rightColumn,
+      })),
+    }, "postgresql");
+    if (!relation) {
+      throw new Error("invalid workspace relation fixture");
+    }
+    return {
+      version: 1,
+      relations: [{
+        key: relation.key,
+        relation,
+        observations: (options.files ?? 2) * (options.queries ?? 1),
+        distinctFiles: options.files ?? 2,
+        distinctQueries: options.queries ?? 1,
+        belowThreshold: options.belowThreshold ?? false,
+        firstSeenAt: "2026-10-25T10:00:00.000Z",
+        lastSeenAt: "2026-10-25T10:00:00.000Z",
+      }],
+      objects: options.band === false
+        ? []
+        : [{
+            key: objectRefKey({
+              database: "BAZA",
+              schema: "public",
+              name: right,
+            }),
+            object: { database: "BAZA", schema: "public", name: right },
+            usage: { select: 3, insert: 0, update: 0, delete: 0 },
+            distinctFiles: 3,
+            distinctQueries: 6,
+            belowThreshold: false,
+            band: 10,
+            firstSeenAt: "2026-10-25T10:00:00.000Z",
+            lastSeenAt: "2026-10-25T10:00:00.000Z",
+          }],
+      truncated: false,
+      generatedAt: "2026-10-25T10:00:00.000Z",
+    };
+  }
+
+  function applyWorkspace(
+    workspace: WorkspaceIndexSnapshot,
+    personalizeFromObjects = true,
+  ): void {
+    const snapshot: JoinKnowledgeSnapshot = {
+      version: 1,
+      relations: [],
+      objectPreferences: [],
+      workspace,
+    };
+    setJoinKnowledgeSnapshot(snapshot, { personalizeFromObjects });
+  }
+
   beforeEach(() => {
+    __TEST_ONLY_resetJoinKnowledge();
     ensureBuiltInDialectsRegistered();
     registerDatabaseDialect(db2Dialect);
     registerDatabaseDialect(mssqlDialect);
@@ -489,6 +591,83 @@ describe("LspCompletionEngine", () => {
     });
     it.each(["SELECT /* unfinished |", "SELECT 'unfinished |"])("suppresses SQL completion inside %s", async (sql) => {
       expect(await complete(sql)).toEqual([]);
+    });
+  });
+
+  describe("NZPLSQL procedure completion", () => {
+    const PROC = `CREATE OR REPLACE PROCEDURE ADMIN.MY_PROC(INT)
+RETURNS INT4
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  V_TOTAL INT;
+  V_ARG ALIAS FOR $1;
+`;
+    const body = (statements: string) => `${PROC}BEGIN\n${statements}\nEND;\nEND_PROC;`;
+
+    async function ranked(sql: string): Promise<string[]> {
+      metadataProvider.databaseKind = "netezza";
+      metadataProvider.effectiveDatabase = "JUST_DATA";
+      const items = await complete(sql);
+      return [...items]
+        .sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)))
+        .map((item) => item.label);
+    }
+
+    it("offers block closers and procedural statements where a statement starts", async () => {
+      const labels = await ranked(body("  V_TOTAL := 1;\n  |"));
+      expect(labels.slice(0, 4)).toEqual(["END;", "EXCEPTION", "IF", "FOR"]);
+      expect(labels).toEqual(expect.arrayContaining(["RAISE NOTICE", "EXECUTE IMMEDIATE", "V_TOTAL", "V_ARG"]));
+      expect(labels).not.toContain("ALTER");
+    });
+
+    it("completes procedural keywords and variables from a typed prefix", async () => {
+      expect((await ranked(body("  V_TOTAL := 1;\n  RA|")))[0]).toBe("RAISE NOTICE");
+      expect((await ranked(body("  V_TOTAL := 1;\n  LO|")))[0]).toBe("LOOP");
+      expect(await ranked(body("  V_TOTAL := 1;\n  V_|"))).toEqual(["V_ARG", "V_TOTAL"]);
+    });
+
+    it("closes the innermost IF or loop first", async () => {
+      expect((await ranked(body("  IF V_TOTAL > 1 THEN\n    V_TOTAL := 2;\n    |"))).slice(0, 3))
+        .toEqual(["ELSIF", "ELSE", "END IF;"]);
+      expect((await ranked(body("  LOOP\n    V_TOTAL := 1;\n    |"))).slice(0, 3))
+        .toEqual(["END LOOP;", "EXIT WHEN", "EXIT"]);
+    });
+
+    it("offers only the RAISE levels and exception handlers Netezza accepts", async () => {
+      expect(await ranked(body("  RAISE |"))).toEqual(["NOTICE", "EXCEPTION", "DEBUG"]);
+      expect(await ranked(`${PROC}BEGIN\n  V_TOTAL := 1;\nEXCEPTION\n  WHEN |\nEND;\nEND_PROC;`))
+        .toEqual(["OTHERS", "TRANSACTION_ABORTED"]);
+      expect((await ranked(`${PROC}BEGIN\n  V_TOTAL := 1;\nEXCEPTION\n  WHEN OTHERS THEN\n    V_TOTAL := 0;\n  |\nEND;\nEND_PROC;`)).slice(0, 3))
+        .toEqual(["WHEN OTHERS THEN", "WHEN TRANSACTION_ABORTED THEN", "END;"]);
+    });
+
+    it("offers variables, FOUND and functions in a condition, and only variables as RAISE arguments", async () => {
+      const condition = await ranked(body("  IF |"));
+      expect(condition.slice(0, 3)).toEqual(["NOT FOUND", "FOUND", "ROW_COUNT"]);
+      expect(condition).toEqual(expect.arrayContaining(["V_TOTAL", "COALESCE"]));
+      expect(condition).not.toContain("ALTER");
+      expect(await ranked(body("  RAISE NOTICE 'total %', |"))).toEqual(["V_ARG", "V_TOTAL"]);
+    });
+
+    it("offers types in DECLARE and the procedure header", async () => {
+      const declare = "CREATE OR REPLACE PROCEDURE ADMIN.MY_PROC(INT) RETURNS INT4 LANGUAGE NZPLSQL AS\nBEGIN_PROC\nDECLARE\n  V_X ";
+      expect(await ranked(`${declare}VA|\nBEGIN\nEND;\nEND_PROC;`)).toEqual(["VARCHAR", "NVARCHAR", "INTERVAL", "VARRAY"]);
+      expect(await ranked(`${declare}|\nBEGIN\nEND;\nEND_PROC;`)).toEqual(expect.arrayContaining(["INTEGER", "RECORD", "ALIAS FOR"]));
+      expect((await ranked("CREATE OR REPLACE PROCEDURE ADMIN.MY_PROC(INT) RETURNS |"))[0]).toBe("INT4");
+      expect(await ranked("CREATE OR REPLACE PROCEDURE ADMIN.MY_PROC(INT) RETURNS INT4 |"))
+        .toEqual(["LANGUAGE NZPLSQL", "EXECUTE AS OWNER", "EXECUTE AS CALLER"]);
+    });
+
+    it("completes record fields instead of SQL keywords", async () => {
+      const sql = `${PROC}  REC RECORD;\nBEGIN\n  FOR REC IN SELECT ACCOUNTKEY, ACCOUNTNAME AS NAME FROM JUST_DATA..DIMACCOUNT LOOP\n    RAISE NOTICE '%', REC.|\n  END LOOP;\nEND;\nEND_PROC;`;
+      expect(await ranked(sql)).toEqual(["ACCOUNTKEY", "NAME"]);
+    });
+
+    it("keeps SQL completion inside SQL statements of the body", async () => {
+      const labels = await ranked(body("  SELECT ACCOUNTKEY INTO V_TOTAL FROM JUST_DATA..DIMACCOUNT WHERE |"));
+      expect(labels).toEqual(expect.arrayContaining(["ACCOUNTKEY", "V_TOTAL"]));
+      expect(labels).not.toContain("END IF;");
     });
   });
 
@@ -1245,7 +1424,7 @@ SELECT * FROM CTE1`);
       );
     });
 
-    it("returns Netezza table-like objects across schemas for DB.. completion", async () => {
+    it("falls back to all schemas when the Netezza default schema is unavailable", async () => {
       metadataProvider.setTables("JUST_DATA", ["DIMDATE", "DEPARTMENT"]);
       const items = await complete("SELECT * FROM JUST_DATA..|");
 
@@ -1259,6 +1438,128 @@ SELECT * FROM CTE1`);
       expect(metadataProvider.getViews).toHaveBeenCalledWith(
         expect.any(String),
         "JUST_DATA",
+      );
+    });
+
+    it("constrains Netezza DB.. completion to the database default schema", async () => {
+      metadataProvider.setDefaultSchema("JUST_DATA", "ADMIN");
+      metadataProvider.setTables("JUST_DATA", ["DIMDATE"], "PUBLIC");
+      metadataProvider.setTables("JUST_DATA", ["DEPARTMENT"], "ADMIN");
+      metadataProvider.setViews("JUST_DATA", ["PUBLIC_V"], "PUBLIC");
+      metadataProvider.setViews("JUST_DATA", ["ADMIN_V"], "ADMIN");
+
+      const items = await complete("SELECT * FROM JUST_DATA..|");
+
+      expect(labels(items)).toEqual(
+        expect.arrayContaining(["DEPARTMENT", "ADMIN_V"]),
+      );
+      expect(labels(items)).not.toContain("DIMDATE");
+      expect(labels(items)).not.toContain("PUBLIC_V");
+      expect(metadataProvider.getTables).toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+        "ADMIN",
+      );
+      expect(metadataProvider.getViews).toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+        "ADMIN",
+      );
+    });
+
+    it("resolves captured same-named Netezza objects by DB.. and DB.SCHEMA.", async () => {
+      const fixture = NETEZZA_CROSS_SCHEMA_FIXTURE;
+      metadataProvider.setDefaultSchema(fixture.database, fixture.defaultSchema);
+      metadataProvider.setTables(
+        fixture.database,
+        fixture.tablesBySchema.ADMIN.map((table) => String(table.OBJNAME)),
+        fixture.defaultSchema,
+      );
+      metadataProvider.setTables(
+        fixture.database,
+        fixture.tablesBySchema.PUBLIC.map((table) => String(table.OBJNAME)),
+        fixture.otherSchema,
+      );
+
+      const defaultItems = await complete(
+        `SELECT * FROM ${fixture.database}..|`,
+      );
+      const sharedDefault = defaultItems.filter(
+        (item) => item.label === fixture.sharedTable,
+      );
+      expect(sharedDefault).toHaveLength(1);
+      expect((sharedDefault[0].data as { schema?: string }).schema)
+        .toBe(fixture.defaultSchema);
+      expect(labels(defaultItems)).toContain("ADMIN_ONLY");
+      expect(labels(defaultItems)).not.toContain("PUBLIC_ONLY");
+
+      const otherItems = await complete(
+        `SELECT * FROM ${fixture.database}.${fixture.otherSchema}.|`,
+      );
+      const sharedOther = otherItems.filter(
+        (item) => item.label === fixture.sharedTable,
+      );
+      expect(sharedOther).toHaveLength(1);
+      expect((sharedOther[0].data as { schema?: string }).schema)
+        .toBe(fixture.otherSchema);
+      expect(labels(otherItems)).toContain("PUBLIC_ONLY");
+      expect(labels(otherItems)).not.toContain("ADMIN_ONLY");
+
+      const acceptedDefault = await complete(
+        `SELECT * FROM ${fixture.database}..CUST|`,
+      );
+      const defaultItem = acceptedDefault.find(
+        (item) => item.label === fixture.sharedTable,
+      );
+      expect(defaultItem?.insertText).toBe(fixture.sharedTable);
+      expect(defaultItem?.textEdit).toBeUndefined();
+
+      const acceptedQualified = await complete(
+        `SELECT * FROM ${fixture.database}.${fixture.otherSchema}.CUST|`,
+      );
+      const qualifiedItem = acceptedQualified.find(
+        (item) => item.label === fixture.sharedTable,
+      );
+      expect(qualifiedItem?.insertText).toBe(fixture.sharedTable);
+      expect(qualifiedItem?.textEdit).toBeUndefined();
+    });
+
+    it("keeps the DB.. prefix when accepting a Netezza object completion", async () => {
+      const items = await complete("SELECT * FROM JUST_DATA..DIM|");
+      const item = items.find((candidate) => candidate.label === "DIMACCOUNT");
+
+      expect(item).toBeDefined();
+      // The server inserts only the object name and never rewrites the typed
+      // DB.. prefix into another qualification form.
+      expect(item?.insertText).toBe("DIMACCOUNT");
+      expect(item?.textEdit).toBeUndefined();
+    });
+
+    it("keeps the DB.. source-layer fix when FROM personalization is disabled", async () => {
+      metadataProvider.setDefaultSchema("JUST_DATA", "ADMIN");
+      metadataProvider.setTables("JUST_DATA", ["DIMDATE"], "PUBLIC");
+      metadataProvider.setTables("JUST_DATA", ["DEPARTMENT"], "ADMIN");
+      const store = new JoinKnowledgeStore();
+      store.appendObjectPreference({
+        kind: "exclude",
+        object: { database: "JUST_DATA", schema: "ADMIN", name: "DEPARTMENT" },
+        databaseKind: "netezza",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "excluded-1",
+      });
+      applyKnowledge(store, false);
+
+      const items = await complete("SELECT * FROM JUST_DATA..|");
+
+      // The exclude is ignored, but the source-layer correction still applies:
+      // only the default schema is offered and same-named PUBLIC objects are
+      // never suggested under the unqualified DB.. prefix.
+      expect(labels(items)).toContain("DEPARTMENT");
+      expect(labels(items)).not.toContain("DIMDATE");
+      expect(metadataProvider.getTables).toHaveBeenCalledWith(
+        expect.any(String),
+        "JUST_DATA",
+        "ADMIN",
       );
     });
 
@@ -1620,6 +1921,80 @@ SELECT * FROM CTE1 A`);
       expect(labels(items)).toContain("ACCOUNTKEY");
       expect(metadataProvider.getSchemas).not.toHaveBeenCalled();
       expect(metadataProvider.getTables).not.toHaveBeenCalled();
+    });
+
+    describe("column ordering by learned usage", () => {
+      function applyColumnUsage(columns: Array<[string, number]>): void {
+        const objectKey = objectRefKey({ name: "ORDERS" });
+        setJoinKnowledgeSnapshot({
+          version: 1,
+          relations: [],
+          objectPreferences: [],
+          workspace: {
+            version: 1,
+            relations: [],
+            objects: [],
+            columns: columns.map(([column, files]) => ({
+              key: `${objectKey}\u0000${column}`,
+              object: { name: "ORDERS" },
+              column,
+              distinctFiles: files,
+              distinctQueries: files,
+              firstSeenAt: "2026-10-25T10:00:00.000Z",
+              lastSeenAt: "2026-10-25T10:00:00.000Z",
+            })),
+            truncated: false,
+            generatedAt: "2026-10-25T10:00:00.000Z",
+          },
+        });
+      }
+
+      function ordered(items: CompletionItem[], names: string[]): string[] {
+        return items
+          .filter((item) => names.includes(String(item.label)))
+          .sort((left, right) => String(left.sortText).localeCompare(String(right.sortText)))
+          .map((item) => String(item.label));
+      }
+
+      it("orders alias columns by the clause prior without column knowledge", async () => {
+        // SELECT lists values: key-like columns (…ID/…KEY/…SK, PK/FK) go last.
+        const items = await complete("SELECT o.| FROM ORDERS o");
+        expect(items.find((item) => item.label === "ID")?.sortText).toBe("3_1_ID");
+        // ON joins keys: key-like columns go first.
+        const on = await complete("SELECT * FROM USERS u JOIN ORDERS o ON o.| ");
+        expect(on.find((item) => item.label === "USER_ID")?.sortText).toBe("3_0_USER_ID");
+        // WHERE keeps the catalog order (keys first measured worse there).
+        const where = await complete("SELECT * FROM ORDERS o WHERE o.|");
+        expect(where.find((item) => item.label === "ID")?.sortText).toBe("3_ID");
+        // SUM(/AVG( arguments prefer non-key measures; without types keys go last.
+        const sum = await complete("SELECT SUM(o.|) FROM ORDERS o");
+        expect(sum.find((item) => item.label === "ID")?.sortText).toBe("3_1_ID");
+      });
+
+      it("orders alias columns by usage breadth after a qualifier", async () => {
+        applyColumnUsage([["USER_ID", 8], ["ORDER_ID", 2]]);
+        const items = await complete("SELECT o.| FROM ORDERS o");
+        expect(ordered(items, ["ID", "ORDER_ID", "USER_ID"])).toEqual(["USER_ID", "ORDER_ID", "ID"]);
+        expect(items.find((item) => item.label === "ID")?.sortText).toBe("3_50_1_ID");
+      });
+
+      it("orders unqualified scoped columns by usage after the match rank", async () => {
+        applyColumnUsage([["USER_ID", 8]]);
+        const items = await complete("SELECT * FROM ORDERS WHERE |");
+        expect(ordered(items, ["ID", "ORDER_ID", "USER_ID"])[0]).toBe("USER_ID");
+
+        // A typed prefix still decides first: learned usage only reorders equal matches.
+        const prefixed = await complete("SELECT * FROM ORDERS WHERE OR|");
+        expect(ordered(prefixed, ["ORDER_ID", "USER_ID"])).toEqual(["ORDER_ID"]);
+      });
+
+      it("ignores learned usage when personalizeColumns is off", async () => {
+        applyColumnUsage([["USER_ID", 8]]);
+        setJoinKnowledgeOptions({ personalizeColumns: false });
+        const items = await complete("SELECT o.| FROM ORDERS o");
+        // The catalog clause prior is not learned usage and stays.
+        expect(items.find((item) => item.label === "USER_ID")?.sortText).toBe("3_1_USER_ID");
+      });
     });
 
     it("completes columns and wildcard expansion for MSSQL temporary tables", async () => {
@@ -3081,7 +3456,7 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       expect(cachedKeyItem).toBeDefined();
       expect(String(cachedKeyItem?.insertText)).toContain("PK_USER_ID");
       expect(String(cachedKeyItem?.insertText)).toContain("FK_USER_ID");
-      expect(String(cachedKeyItem?.sortText)).toMatch(/^0_1_/);
+      expect(String(cachedKeyItem?.sortText)).toMatch(new RegExp(`^${JOIN_PREDICATE_TIERS.cachedKey}`));
       // Predicates must outrank plain in-scope columns once the editor sorts by sortText.
       const firstColumn = items.find((item) => item.detail === "Column in scope");
       expect(firstColumn).toBeDefined();
@@ -3256,6 +3631,55 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       expect(items[0]?.sortText).toMatch(/^0_/);
     });
 
+    it("applies a score inside the configured manual tier without promoting it", async () => {
+      const users = { database: "BAZA", schema: "ADMIN", table: "USERS" };
+      const orders = { database: "BAZA", schema: "ADMIN", table: "ORDERS" };
+      const payments = { database: "BAZA", schema: "ADMIN", table: "PAYMENTS" };
+      const ordersRelation = {
+        left: users,
+        right: orders,
+        columns: [{ left: "USER_ID", right: "OWNER_ID" }],
+      };
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        relations: [
+          ordersRelation,
+          {
+            left: users,
+            right: payments,
+            columns: [{ left: "USER_ID", right: "OWNER_ID" }],
+          },
+        ],
+      };
+      const identity = canonicalizeRelation(ordersRelation, "netezza");
+      expect(identity).toBeDefined();
+      const store = new JoinKnowledgeStore();
+      store.appendRelationScoreOverride({
+        relation: identity!.display,
+        databaseKind: "netezza",
+        adjustment: 3,
+        now: "2026-10-25T10:00:00.000Z",
+        id: "score-manual",
+      });
+      setJoinKnowledgeSnapshot(store.buildSnapshot());
+
+      const items = await complete(
+        "SELECT * FROM BAZA.ADMIN.USERS U JOIN |",
+        CompletionTriggerKind.TriggerCharacter,
+      );
+      const ordersItem = items.find((item) =>
+        item.label.includes("ORDERS") && item.detail === "JOIN with configured relationship"
+      );
+      const paymentsItem = items.find((item) =>
+        item.label.includes("PAYMENTS") && item.detail === "JOIN with configured relationship"
+      );
+      expect(ordersItem?.sortText).toMatch(/^0_0_\d\d_/);
+      expect(paymentsItem?.sortText).toMatch(/^0_0_\d\d_/);
+      // +3 moves the relation 30 points up inside the manual tier.
+      expect(scoreOf(paymentsItem) - scoreOf(ordersItem)).toBe(30);
+      expect(String(ordersItem?.sortText) < String(paymentsItem?.sortText)).toBe(true);
+    });
+
     it("suggests configured composite predicates after an empty ON", async () => {
       metadataProvider.joinCompletionSettings = {
         ...DEFAULT_JOIN_COMPLETION_SETTINGS,
@@ -3280,8 +3704,706 @@ WHEN MATCHED THEN UPDATE SET ACC|`);
       )).toBe(true);
     });
 
-    it("uses configured aliases and suffixes collisions", async () => {
-      metadataProvider.setCachedJoinTargets([
+    it("ranks configured JOIN targets above catalog FK targets", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [{
+          sourceTable: "users",
+          sourceSchema: "public",
+          sourceColumn: "owner_id",
+          targetColumn: "id",
+          relationType: "foreignKey",
+        }],
+      }]);
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        relations: [{
+          left: { database: "BAZA", schema: "public", table: "users" },
+          right: { database: "BAZA", schema: "public", table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        }],
+      };
+
+      const items = await complete("SELECT * FROM users u JOIN |");
+      const suggestion = items.find((item) => item.label.startsWith("public.orders"));
+      expect(suggestion?.detail).toBe("JOIN with configured relationship");
+      expect(suggestion?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.manual}`));
+      // The catalog FK duplicate is collapsed into the authoritative manual one.
+      expect(items.filter((item) => item.label.startsWith("public.orders"))).toHaveLength(1);
+    });
+
+    it("adds a confirmed relation without catalog metadata and ranks it above FK", async () => {
+      const store = new JoinKnowledgeStore();
+      store.appendRelationOverride({
+        kind: "confirm",
+        relation: {
+          left: { database: "BAZA", schema: "public", table: "users" },
+          right: { database: "BAZA", schema: "public", table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        },
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "confirmed-1",
+      });
+      applyKnowledge(store);
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+
+      const targets = await complete("SELECT * FROM users u JOIN |");
+      const target = targets.find((item) => item.detail === "JOIN with confirmed relationship");
+      expect(target?.insertText).toBe("public.orders O ON u.owner_id = O.id");
+      expect(target?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.confirmed}`));
+
+      const predicates = await complete("SELECT * FROM users u JOIN orders o ON |");
+      const predicate = predicates.find((item) => item.detail === "Join condition (confirmed relationship)");
+      expect(predicate?.insertText).toBe("u.owner_id = o.id");
+      expect(predicate?.sortText).toMatch(new RegExp(`^${JOIN_PREDICATE_TIERS.confirmed}`));
+    });
+
+    it("adds a favorite relation at 0_3_ without confirmation semantics", async () => {
+      const store = new JoinKnowledgeStore();
+      store.appendRelationOverride({
+        kind: "favorite",
+        relation: {
+          left: { database: "BAZA", schema: "public", table: "users" },
+          right: { database: "BAZA", schema: "public", table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        },
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "favorite-1",
+      });
+      applyKnowledge(store);
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+
+      const targets = await complete("SELECT * FROM users u JOIN |");
+      const target = targets.find(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("JOIN with favorite relationship"),
+      );
+      expect(target).toBeDefined();
+      expect(target?.sortText).toMatch(
+        new RegExp(`^${JOIN_TARGET_TIERS.favorite}\\d\\d_`),
+      );
+      expect(target?.sortText?.startsWith(JOIN_TARGET_TIERS.confirmed)).toBe(false);
+      expect(target?.data).toMatchObject({
+        joinKnowledgeFavorite: true,
+        joinKnowledgeRelation: {
+          left: { table: "users" },
+          right: { table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        },
+      });
+
+      const predicates = await complete("SELECT * FROM users u JOIN orders o ON |");
+      const predicate = predicates.find(
+        (item) => item.detail === "Join condition (favorite relationship)",
+      );
+      expect(predicate).toBeDefined();
+      expect(predicate?.sortText).toMatch(
+        new RegExp(`^${JOIN_PREDICATE_TIERS.favorite}\\d\\d_`),
+      );
+    });
+
+    it("keeps catalog FK ahead of a favorite duplicate", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [{
+          sourceTable: "users",
+          sourceSchema: "public",
+          sourceColumn: "owner_id",
+          targetColumn: "id",
+          relationType: "foreignKey",
+        }],
+      }]);
+      const store = new JoinKnowledgeStore();
+      store.appendRelationOverride({
+        kind: "favorite",
+        relation: {
+          left: { database: "BAZA", schema: "public", table: "users" },
+          right: { database: "BAZA", schema: "public", table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        },
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "favorite-fk-1",
+      });
+      applyKnowledge(store);
+
+      const items = await complete("SELECT * FROM users u JOIN |");
+      const matching = items.filter((item) => item.label.startsWith("public.orders"));
+      expect(matching).toHaveLength(1);
+      expect(matching[0].sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.catalogFk}`));
+    });
+
+    it("adds eligible workspace evidence at 0_5_ and hides below-threshold evidence", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      applyWorkspace(workspaceRelation({ files: 2, queries: 1 }));
+
+      const targets = await complete("SELECT * FROM users u JOIN |");
+      const target = targets.find(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("workspace SQL"),
+      );
+      expect(target).toBeDefined();
+      expect(target?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.workspace}`));
+      expect(target?.label).toBe("public.orders O ON u.owner_id = O.id");
+      expect(target?.data).toMatchObject({
+        joinKnowledgeRelation: {
+          left: { table: "users" },
+          right: { table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        },
+      });
+      expect(target?.labelDetails).toBeUndefined();
+      expect(target?.command).toMatchObject({
+        command: "netezza.recordJoinKnowledgeAcceptance",
+        arguments: [{
+          left: { table: "users" },
+          right: { table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        }],
+      });
+
+      const predicates = await complete("SELECT * FROM users u JOIN orders o ON |");
+      expect(predicates.some(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("workspace SQL"),
+      )).toBe(true);
+
+      applyWorkspace(workspaceRelation({ files: 1, queries: 1, belowThreshold: true }));
+      const hidden = await complete("SELECT * FROM users u JOIN |");
+      expect(hidden.some(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("workspace SQL"),
+      )).toBe(false);
+    });
+
+    it("adds eligible executed evidence at 0_4_ and hides below-threshold evidence", async () => {
+      metadataProvider.databaseKind = "netezza";
+      metadataProvider.effectiveDatabase = "BAZA";
+      metadataProvider.effectiveSchema = undefined;
+      const relation = canonicalizeRelation({
+        left: { database: "BAZA", table: "USERS" },
+        right: { database: "BAZA", table: "ORDERS" },
+        columns: [{ left: "ID", right: "ID" }],
+      }, "netezza");
+      expect(relation).toBeDefined();
+      const store = new JoinKnowledgeStore();
+      store.recordExecutedStatement({
+        executionKey: "exec-1",
+        databaseKind: "netezza",
+        relations: [relation!],
+        objects: [{ object: { database: "BAZA", name: "ORDERS" }, kind: "select" }],
+        now: "2026-10-25T10:00:00.000Z",
+      });
+      store.recordExecutedStatement({
+        executionKey: "exec-2",
+        databaseKind: "netezza",
+        relations: [relation!],
+        objects: [{ object: { database: "BAZA", name: "ORDERS" }, kind: "select" }],
+        now: "2026-10-26T10:00:00.000Z",
+      });
+      setJoinKnowledgeSnapshot(store.buildSnapshot(), { personalizeFromObjects: true });
+
+      const targets = await complete("SELECT * FROM USERS u JOIN |");
+      const target = targets.find(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("successful executions"),
+      );
+      expect(target).toBeDefined();
+      expect(target?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.executed}`));
+      expect(target?.label).toContain("ORDERS");
+
+      const predicates = await complete("SELECT * FROM USERS u JOIN ORDERS o ON |");
+      expect(predicates.some(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("successful executions"),
+      )).toBe(true);
+
+      const single = new JoinKnowledgeStore();
+      single.recordExecutedStatement({
+        executionKey: "exec-single",
+        databaseKind: "netezza",
+        relations: [relation!],
+        objects: [],
+        now: "2026-10-25T10:00:00.000Z",
+      });
+      setJoinKnowledgeSnapshot(single.buildSnapshot(), { personalizeFromObjects: true });
+      const hidden = await complete("SELECT * FROM USERS u JOIN |");
+      expect(hidden.some(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("successful executions"),
+      )).toBe(false);
+    });
+
+    it("applies a manual relation score without changing its evidence tier", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      const workspace = workspaceRelation({ band: false });
+      const identity = workspace.relations[0].relation;
+      const store = new JoinKnowledgeStore();
+      store.appendRelationScoreOverride({
+        relation: identity.display,
+        databaseKind: "postgresql",
+        adjustment: 3,
+        now: "2026-10-25T10:00:00.000Z",
+        id: "score-workspace",
+      });
+      setJoinKnowledgeSnapshot({ version: 1, relations: [], objectPreferences: [], workspace });
+      const baseTarget = (await complete("SELECT * FROM users u JOIN |"))
+        .find((item) => item.detail?.includes("workspace SQL"));
+      const basePredicate = (await complete("SELECT * FROM users u JOIN orders o ON |"))
+        .find((item) => item.detail?.includes("workspace SQL"));
+
+      setJoinKnowledgeSnapshot({
+        ...store.buildSnapshot(),
+        workspace,
+      });
+
+      const targets = await complete("SELECT * FROM users u JOIN |");
+      const target = targets.find((item) => item.detail?.includes("workspace SQL"));
+      expect(target?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.workspace}\\d\\d_`));
+      expect(scoreOf(baseTarget) - scoreOf(target)).toBe(30);
+
+      const predicates = await complete("SELECT * FROM users u JOIN orders o ON |");
+      const predicate = predicates.find((item) => item.detail?.includes("workspace SQL"));
+      expect(predicate?.sortText).toMatch(new RegExp(`^${JOIN_PREDICATE_TIERS.workspace}\\d\\d_`));
+      expect(scoreOf(basePredicate) - scoreOf(predicate)).toBe(30);
+    });
+
+    it("restores the unadjusted sortText when a relation score is reset", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      const workspace = workspaceRelation({ band: false });
+      const identity = workspace.relations[0].relation;
+      const store = new JoinKnowledgeStore();
+      store.appendRelationScoreOverride({
+        relation: identity.display,
+        databaseKind: "postgresql",
+        adjustment: 3,
+        now: "2026-10-25T10:00:00.000Z",
+        id: "score-reset",
+      });
+      setJoinKnowledgeSnapshot({ version: 1, relations: [], objectPreferences: [], workspace });
+      const unadjustedTarget = (await complete("SELECT * FROM users u JOIN |"))
+        .find((item) => item.detail?.includes("workspace SQL"));
+      const unadjustedPredicate = (await complete("SELECT * FROM users u JOIN orders o ON |"))
+        .find((item) => item.detail?.includes("workspace SQL"));
+      setJoinKnowledgeSnapshot({ ...store.buildSnapshot(), workspace });
+
+      let targets = await complete("SELECT * FROM users u JOIN |");
+      const scored = targets.find((item) => item.detail?.includes("workspace SQL"));
+      expect(scoreOf(unadjustedTarget) - scoreOf(scored)).toBe(30);
+
+      expect(store.revertRelationScoreOverride("score-reset", "2026-10-25T10:05:00.000Z"))
+        .toBe(true);
+      setJoinKnowledgeSnapshot({ ...store.buildSnapshot(), workspace });
+
+      targets = await complete("SELECT * FROM users u JOIN |");
+      const resetTarget = targets.find((item) => item.detail?.includes("workspace SQL"));
+      expect(resetTarget).toBeDefined();
+      expect(resetTarget?.sortText).toBe(unadjustedTarget?.sortText);
+
+      const predicates = await complete("SELECT * FROM users u JOIN orders o ON |");
+      const resetPredicate = predicates.find((item) => item.detail?.includes("workspace SQL"));
+      expect(resetPredicate).toBeDefined();
+      expect(resetPredicate?.sortText).toBe(unadjustedPredicate?.sortText);
+    });
+
+    describe("within-tier JOIN scoring", () => {
+      const NOW = "2026-10-26T12:00:00.000Z";
+
+      function evidence(
+        left: string,
+        right: string,
+        column: string,
+        files: number,
+        lastSeenAt: string,
+      ): WorkspaceIndexSnapshot["relations"][number] {
+        const identity = canonicalizeRelation({
+          left: { table: left },
+          right: { table: right },
+          columns: [{ left: column, right: column }],
+        }, "netezza");
+        if (!identity) {
+          throw new Error("invalid fixture");
+        }
+        return {
+          key: identity.key,
+          relation: identity,
+          observations: files,
+          distinctFiles: files,
+          distinctQueries: files,
+          belowThreshold: false,
+          firstSeenAt: lastSeenAt,
+          lastSeenAt,
+        };
+      }
+
+      function applyEvidence(relations: WorkspaceIndexSnapshot["relations"]): void {
+        setJoinKnowledgeSnapshot({
+          version: 1,
+          relations: [],
+          objectPreferences: [],
+          workspace: {
+            version: 1,
+            relations,
+            objects: [],
+            truncated: false,
+            generatedAt: NOW,
+          },
+        }, { now: NOW });
+      }
+
+      function targetOrder(items: CompletionItem[]): string[] {
+        return [...items]
+          .filter((item) => item.detail?.includes("workspace SQL"))
+          .sort((left, right) => String(left.sortText).localeCompare(String(right.sortText)))
+          .map((item) => String(
+            (item.data as { joinKnowledgeRelation?: { right?: { table?: string } } })
+              ?.joinKnowledgeRelation?.right?.table,
+          ).toUpperCase());
+      }
+
+      it("orders workspace targets by breadth and freshness instead of the alphabet", async () => {
+        applyEvidence([
+          evidence("ORDERS", "AUDIT_LOG", "ORDER_ID", 2, "2025-06-01T00:00:00.000Z"),
+          evidence("ORDERS", "CUSTOMERS", "CUSTOMER_ID", 8, "2026-10-20T00:00:00.000Z"),
+        ]);
+        const items = await complete("SELECT * FROM ORDERS o JOIN |", CompletionTriggerKind.TriggerCharacter);
+        expect(targetOrder(items)).toEqual(["CUSTOMERS", "AUDIT_LOG"]);
+        for (const item of items.filter((entry) => entry.detail?.includes("workspace SQL"))) {
+          expect(item.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.workspace}\\d\\d_`));
+        }
+      });
+
+      it("prefers relations of the most recently joined source", async () => {
+        applyEvidence([
+          evidence("ORDERS", "AUDIT_LOG", "ORDER_ID", 3, "2026-10-20T00:00:00.000Z"),
+          evidence("CUSTOMERS", "REGIONS", "REGION_ID", 3, "2026-10-20T00:00:00.000Z"),
+        ]);
+        const items = await complete(
+          "SELECT * FROM ORDERS o JOIN CUSTOMERS c ON c.CUSTOMER_ID = o.CUSTOMER_ID JOIN |",
+          CompletionTriggerKind.TriggerCharacter,
+        );
+        expect(targetOrder(items)).toEqual(["REGIONS", "AUDIT_LOG"]);
+      });
+
+      it("demotes a target that is already part of the statement without hiding it", async () => {
+        applyEvidence([
+          evidence("ORDERS", "CUSTOMERS", "CUSTOMER_ID", 8, "2026-10-20T00:00:00.000Z"),
+          evidence("ORDERS", "AUDIT_LOG", "ORDER_ID", 2, "2025-06-01T00:00:00.000Z"),
+        ]);
+        const items = await complete(
+          "SELECT * FROM ORDERS o JOIN CUSTOMERS c ON c.CUSTOMER_ID = o.CUSTOMER_ID JOIN |",
+          CompletionTriggerKind.TriggerCharacter,
+        );
+        // CUSTOMERS (from ORDERS) and ORDERS (reverse, from CUSTOMERS) are both
+        // already in the statement; they stay available below the new target.
+        expect(targetOrder(items)).toEqual(["AUDIT_LOG", "CUSTOMERS", "ORDERS"]);
+      });
+    });
+
+    it("attaches the FROM acceptance command and ranks accepted objects", async () => {
+      const before = await complete("SELECT * FROM |");
+      const orders = before.find((item) => item.label === "ORDERS");
+      expect(orders?.command).toEqual({
+        title: "Remember selected FROM suggestion",
+        command: "netezza.recordSqlObjectAcceptance",
+        arguments: [expect.objectContaining({
+          object: { database: "BAZA", name: "ORDERS" },
+          databaseKind: "netezza",
+          effectiveDatabase: "BAZA",
+        })],
+      });
+
+      const store = new JoinKnowledgeStore();
+      for (let index = 0; index < 6; index += 1) {
+        store.recordAcceptedObject({
+          object: { database: "BAZA", name: "ORDERS" },
+          databaseKind: "netezza",
+          now: "2026-10-25T10:00:00.000Z",
+        });
+      }
+      applyKnowledge(store);
+      const after = await complete("SELECT * FROM |");
+      const ranked = after.find((item) => item.label === "ORDERS");
+      const neutral = after.find((item) => item.label === "USERS");
+      expect(String(ranked?.sortText) < String(neutral?.sortText)).toBe(true);
+    });
+
+    it("does not attach the FROM acceptance command when personalization is off", async () => {
+      setJoinKnowledgeOptions({ personalizeFromObjects: false });
+      const items = await complete("SELECT * FROM |");
+      expect(items.find((item) => item.label === "ORDERS")?.command).toBeUndefined();
+    });
+
+    it("applies a learned FROM band recorded from unqualified workspace SQL", async () => {
+      setJoinKnowledgeSnapshot({
+        version: 1,
+        relations: [],
+        objectPreferences: [],
+        workspace: {
+          version: 1,
+          relations: [],
+          objects: [{
+            key: objectRefKey({ name: "ORDERS" }),
+            object: { name: "ORDERS" },
+            usage: { select: 4, insert: 0, update: 0, delete: 0 },
+            distinctFiles: 4,
+            distinctQueries: 4,
+            belowThreshold: false,
+            band: 10,
+            firstSeenAt: "2026-10-25T10:00:00.000Z",
+            lastSeenAt: "2026-10-25T10:00:00.000Z",
+          }],
+          truncated: false,
+          generatedAt: "2026-10-25T10:00:00.000Z",
+        },
+      });
+      const items = await complete("SELECT * FROM |");
+      const orders = items.find((item) => item.label === "ORDERS");
+      const users = items.find((item) => item.label === "USERS");
+      expect(orders?.sortText).toContain("10_ORDERS");
+      expect(String(orders?.sortText) < String(users?.sortText)).toBe(true);
+    });
+
+    it("suppresses blocked workspace evidence whose stored key is unscoped", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      const unscopedInput = {
+        left: { table: "users" },
+        right: { table: "orders" },
+        columns: [{ left: "owner_id", right: "id" }],
+      };
+      const unscoped = canonicalizeRelation(unscopedInput, "postgresql")!;
+      const store = new JoinKnowledgeStore();
+      store.appendRelationOverride({
+        kind: "block",
+        relation: unscopedInput,
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "block-unscoped",
+      });
+      const workspace = workspaceRelation();
+      workspace.relations[0] = {
+        ...workspace.relations[0],
+        key: unscoped.key,
+        relation: unscoped,
+      };
+      setJoinKnowledgeSnapshot({ ...store.buildSnapshot(), workspace });
+
+      const items = await complete("SELECT * FROM users u JOIN |");
+      expect(items.some((item) =>
+        typeof item.detail === "string" && item.detail.includes("workspace SQL"),
+      )).toBe(false);
+    });
+
+    it("shows workspace evidence without an effective database or schema", async () => {
+      metadataProvider.databaseKind = undefined as unknown as DatabaseKind;
+      metadataProvider.effectiveDatabase = undefined;
+      metadataProvider.effectiveSchema = undefined;
+      const relation = canonicalizeRelation({
+        left: { table: "USERS" },
+        right: { table: "ORDERS" },
+        columns: [{ left: "USER_ID", right: "OWNER_ID" }],
+      }, "netezza")!;
+      applyWorkspace({
+        version: 1,
+        relations: [{
+          key: relation.key,
+          relation,
+          observations: 2,
+          distinctFiles: 2,
+          distinctQueries: 2,
+          belowThreshold: false,
+          firstSeenAt: "2026-10-25T10:00:00.000Z",
+          lastSeenAt: "2026-10-25T10:00:00.000Z",
+        }],
+        objects: [],
+        truncated: false,
+        generatedAt: "2026-10-25T10:00:00.000Z",
+      });
+
+      const items = await complete("SELECT * FROM USERS u JOIN |");
+      const target = items.find(
+        (item) => typeof item.detail === "string"
+          && item.detail.includes("workspace SQL"),
+      );
+      expect(target).toBeDefined();
+      expect(target?.label).toContain("ORDERS O ON");
+      expect(target?.label).toContain("USER_ID");
+      expect(target?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.workspace}`));
+    });
+
+    it("keeps catalog FK ahead of workspace evidence for the same relation", async () => {
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [{
+          sourceTable: "users",
+          sourceSchema: "public",
+          sourceColumn: "owner_id",
+          targetColumn: "id",
+          relationType: "foreignKey",
+        }],
+      }]);
+      applyWorkspace(workspaceRelation({ files: 3, queries: 3 }));
+
+      const items = await complete("SELECT * FROM users u JOIN |");
+      const matching = items.filter((item) => item.label.startsWith("public.orders"));
+      expect(matching).toHaveLength(1);
+      expect(matching[0].sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.catalogFk}`));
+    });
+
+    it("lets a block win over a favorite", async () => {
+      const store = new JoinKnowledgeStore();
+      const relationInput = {
+        left: { database: "BAZA", schema: "public", table: "users" },
+        right: { database: "BAZA", schema: "public", table: "orders" },
+        columns: [{ left: "owner_id", right: "id" }],
+      };
+      store.appendRelationOverride({
+        kind: "favorite",
+        relation: relationInput,
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "favorite-block-1",
+      });
+      store.appendRelationOverride({
+        kind: "block",
+        relation: relationInput,
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:01:00.000Z",
+        id: "block-favorite-1",
+      });
+      applyKnowledge(store);
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+
+      const items = await complete("SELECT * FROM users u JOIN |");
+      expect(items.some((item) => item.label.startsWith("public.orders"))).toBe(false);
+    });
+
+    it("removes a blocked relation from target and predicate suggestions", async () => {
+      const store = new JoinKnowledgeStore();
+      store.appendRelationOverride({
+        kind: "block",
+        relation: {
+          left: { database: "BAZA", schema: "public", table: "users" },
+          right: { database: "BAZA", schema: "public", table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        },
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "blocked-1",
+      });
+      applyKnowledge(store);
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        relations: [{
+          left: { database: "BAZA", schema: "public", table: "users" },
+          right: { database: "BAZA", schema: "public", table: "orders" },
+          columns: [{ left: "owner_id", right: "id" }],
+        }],
+      };
+      metadataProvider.setCachedJoinTargets([{
+        name: "orders",
+        database: "BAZA",
+        schema: "public",
+        joinMatches: [{
+          sourceTable: "users",
+          sourceSchema: "public",
+          sourceColumn: "owner_id",
+          targetColumn: "id",
+          relationType: "foreignKey",
+        }],
+      }]);
+
+      const targets = await complete("SELECT * FROM users u JOIN |");
+      expect(targets.some((item) => item.label.startsWith("public.orders"))).toBe(false);
+      const predicates = await complete("SELECT * FROM users u JOIN orders o ON |");
+      expect(predicates.some((item) => item.detail === "Join condition (declared foreign key)")).toBe(false);
+      // Block is applied before tiering, so it also suppresses a configured
+      // workspace relation; reverting the block restores it.
+      expect(predicates.some((item) => item.detail === "Join condition (configured relationship)")).toBe(false);
+    });
+
+    it("restores a configured relation after a block is reverted", async () => {
+      const configuredRelation = {
+        left: { database: "BAZA", schema: "public", table: "users" },
+        right: { database: "BAZA", schema: "public", table: "orders" },
+        columns: [{ left: "owner_id", right: "id" }],
+      };
+      metadataProvider.databaseKind = "postgresql";
+      metadataProvider.effectiveSchema = "public";
+      metadataProvider.joinCompletionSettings = {
+        ...DEFAULT_JOIN_COMPLETION_SETTINGS,
+        relations: [configuredRelation],
+      };
+      const store = new JoinKnowledgeStore();
+      store.appendRelationOverride({
+        kind: "block",
+        relation: configuredRelation,
+        databaseKind: "postgresql",
+        now: "2026-10-25T10:00:00.000Z",
+        id: "blocked-revert-1",
+      });
+      applyKnowledge(store);
+
+      const blockedTargets = await complete("SELECT * FROM users u JOIN |");
+      expect(blockedTargets.some(
+        (item) => item.detail === "JOIN with configured relationship",
+      )).toBe(false);
+      const blockedPredicates = await complete(
+        "SELECT * FROM users u JOIN orders o ON |",
+      );
+      expect(blockedPredicates.some(
+        (item) => item.detail === "Join condition (configured relationship)",
+      )).toBe(false);
+
+      expect(store.revertRelationOverride(
+        "blocked-revert-1",
+        "2026-10-25T11:00:00.000Z",
+      )).toBe(true);
+      applyKnowledge(store);
+
+      const restoredTargets = await complete("SELECT * FROM users u JOIN |");
+      const target = restoredTargets.find(
+        (item) => item.detail === "JOIN with configured relationship",
+      );
+      expect(target).toBeDefined();
+      expect(target?.sortText).toMatch(new RegExp(`^${JOIN_TARGET_TIERS.manual}`));
+
+      const restoredPredicates = await complete(
+        "SELECT * FROM users u JOIN orders o ON |",
+      );
+      const predicate = restoredPredicates.find(
+        (item) => item.detail === "Join condition (configured relationship)",
+      );
+      expect(predicate).toBeDefined();
+      expect(predicate?.sortText).toMatch(
+        new RegExp(`^${JOIN_PREDICATE_TIERS.manual}`),
+      );
+    });
+
+    it("uses configured aliases and suffixes collisions", async () => {      metadataProvider.setCachedJoinTargets([
         {
           name: "ORDERS",
           database: "BAZA",

@@ -72,6 +72,7 @@ jest.mock('vscode', () => ({
     },
     languages: {
         registerCompletionItemProvider: jest.fn(() => ({ dispose: jest.fn() })),
+        registerInlineCompletionItemProvider: jest.fn(() => ({ dispose: jest.fn() })),
         registerInlayHintsProvider: jest.fn(() => ({ dispose: jest.fn() })),
         registerFoldingRangeProvider: jest.fn(() => ({ dispose: jest.fn() })),
         registerDefinitionProvider: jest.fn(() => ({ dispose: jest.fn() })),

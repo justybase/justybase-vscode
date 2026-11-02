@@ -204,7 +204,7 @@ Some diagnostic codes include automatic Quick Fixes:
 | **NZ010** | Add missing table alias in `FROM`/`JOIN` |
 | **NZ011** | Add `DISTRIBUTE ON RANDOM` to CTAS |
 | **NZ012** | Remove unsupported `AS` keyword from `UPDATE ... AS alias` |
-| **NZP012** | Normalize `ELSEIF` / `ELSE IF` to `ELSIF` |
+| **NZP012** | Normalize the accepted synonym `ELSEIF` to `ELSIF` (`ELSE IF` is a valid nested IF and is left alone) |
 
 Guided **parameterized template** quick fixes are also available for high-impact unsafe diagnostics
 (`NZ002`, `NZ003`, `NZ004`, `NZ011`, `NZ015`, `NZ020`, `NZP001`, `NZP002`, `NZP003`,

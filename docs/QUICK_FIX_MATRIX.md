@@ -89,24 +89,24 @@ This document is the P53 inventory for all currently implemented `NZ*` and `NZP*
 | `NZP009` | Missing Exception Handler | Information | No | UNSAFE | Medium | P55 template | Handler body must be chosen by user. |
 | `NZP010` | RAISE Without Severity | Information | No | UNSAFE | Low | P55 template | Severity level requires intent choice. |
 | `NZP011` | Missing INTO in SELECT | Warning | No | UNSAFE | Medium | P55 template | INTO target variables must be selected. |
-| `NZP012` | Incorrect ELSIF Syntax | Error | Yes | SAFE | High | P54 safe fix-all | `ELSEIF`/`ELSE IF` -> `ELSIF` is deterministic. |
+| `NZP012` | Incorrect ELSIF Syntax | Information | Yes | SAFE | Low | P54 safe fix-all | `ELSEIF` -> `ELSIF` is deterministic; both are accepted, and `ELSE IF` (nested IF) is not flagged. |
 | `NZP013` | Missing THEN Keyword | Error | No | UNSAFE | High | P55 template | THEN insertion points should be previewed. |
 | `NZP014` | Unconditional EXIT | Warning | No | UNSAFE | Medium | P55 template | `EXIT WHEN` condition requires user expression. |
 | `NZP015` | Parameter Naming Convention | Information | No | UNSAFE | Low | P55 template | Renaming must update all references safely. |
 | `NZP016` | Variable Naming Convention | Information | No | UNSAFE | Low | P55 template | Renaming requires scoped reference updates. |
 | `NZP017` | Unmatched CASE Statement | Error | No | UNSAFE | High | Manual/Copilot | CASE block closure is context-dependent. |
 | `NZP018` | SQL Injection Risk | Warning | No | UNSAFE | High | Manual/Copilot | Security fix requires parameterization strategy. |
-| `NZP019` | Optional Parameter Without Default | Information | No | UNSAFE | Low | P55 template | Default value selection is business-specific. |
+| `NZP019` | Optional Parameter Without Default (retired) | Information | No | — | — | — | Netezza procedure arguments take no `DEFAULT` (live-verified); no-op. |
 | `NZP020` | Implicit Type Conversion | Information | No | UNSAFE | Medium | P55 template | CAST target types must be validated. |
 | `NZP022` | OUT Parameter Without Assignment | Warning | No | UNSAFE | High | Manual/Copilot | Requires data-flow-aware repair. |
 | `NZP023` | Unclosed Cursor | Warning | No | UNSAFE | High | Manual/Copilot | Close location depends on control flow. |
 | `NZP024` | Missing RETURN Statement | Error | No | UNSAFE | High | P55 template | RETURN expression requires contract-aware choice. |
 | `NZP025` | Transaction Control in Procedure | Warning | No | UNSAFE | High | Manual/Copilot | Transaction strategy depends on caller contract. |
-| `NZP026` | Use PERFORM for Discarded Results | Information | No | UNSAFE | Medium | P55 template | Selective conversion is feasible with user review. |
+| `NZP026` | Use PERFORM for Discarded Results (retired) | Information | No | — | — | — | Netezza rejects `PERFORM` (live-verified); SQL037 reports SELECT without INTO; no-op. |
 | `NZP027` | Missing EXECUTE AS Clause | Information | No | UNSAFE | Medium | P55 template | `OWNER` vs `CALLER` must be selected explicitly. |
 | `NZP028` | VARRAY Assignment Without EXTEND | Warning | No | UNSAFE | Medium | P55 template | Requires insertion location and sizing review. |
 | `NZP029` | Deep Exception Nesting | Information | No | UNSAFE | Low | Manual/Copilot | Refactor-level change, not a local rewrite. |
-| `NZP030` | Use Named Exceptions | Information | No | UNSAFE | Low | P55 template | SQLSTATE mapping is partially deterministic; keep previewed. |
+| `NZP030` | Use Named Exceptions (retired) | Information | No | — | — | — | Netezza handlers are only `OTHERS` and `TRANSACTION_ABORTED` (live-verified); no-op. |
 
 > Note: `NZP021` is not currently implemented in `procedureRules.ts`, so it is not part of the active lint inventory.
 > Note: `NZP007`, `NZP009`, `NZP014`, `NZP015`, `NZP016`, `NZP018`, `NZP019`, `NZP020`, `NZP025`, `NZP026`, `NZP027`, `NZP028`, `NZP029`, and `NZP030` are on-demand procedure heuristics. They are not emitted by automatic Problems diagnostics.

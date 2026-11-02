@@ -47,6 +47,7 @@ import {
 import { registerSaveAccessFileAsConnectionCommand } from './saveAccessFileAsConnection';
 import { createConnectionQuickPickItems } from '../utils/connectionQuickPick';
 import { tryAcquireQueryExecution } from './query/queryExecutionGate';
+import { recordJoinKnowledgeSuccessfulStatement } from '../knowledge/joinKnowledgeRuntime';
 import { createQueryExecutionRecovery } from './query/queryExecutionRecovery';
 import { getRequiredDatabaseQueryProfileProvider } from '../core/connectionFactory';
 
@@ -130,7 +131,10 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
 
     const ddlBatchOptions: BatchQueryRunOptions = {
         confirmSafeExecute: sql => confirmSafeExecute([sql]),
-        onStatementSucceeded: event => tableDdlSynchronizer?.handleStatementSucceeded(event) ?? Promise.resolve(),
+        onStatementSucceeded: async event => {
+            await tableDdlSynchronizer?.handleStatementSucceeded(event);
+            await recordJoinKnowledgeSuccessfulStatement(event, connectionManager);
+        },
         onStatementFailed: event => {
             tableDdlSynchronizer?.handleExecutionFailure(event.connectionName, event.documentUri);
         },

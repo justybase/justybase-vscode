@@ -19,6 +19,17 @@ function loadSnippets(): Record<string, NetezzaSnippet> {
   >;
 }
 
+/** Dashboard refresh recipes, kept as examples next to their workbooks. */
+const RECIPES_DIRECTORY = path.resolve(__dirname, "../../fixtures/bank-dashboards/macros");
+const RECIPES: Readonly<Record<string, readonly string[]>> = {
+  bankdashboardupdate: ["sheet='Raw_Monthly'", "sheet='Raw_Products'"],
+  campaigndashboardupdate: ["sheet='Raw_Campaigns'"],
+  branchproductizationupdate: ["sheet='Raw_CrossSell'"],
+  externalsalesdashboard: ["sheet='superstore'", "product_name"],
+  externalfinancedashboard: ["sheet='Dataset'", "balance_after_transaction"],
+  fullreportingpipeline: ["%SQL(SELECT MAX(DATEKEY)"],
+};
+
 function snippetText(snippet: NetezzaSnippet): string {
   return snippet.body.join("\n");
 }
@@ -43,12 +54,6 @@ describe("Netezza SAS-like snippets", () => {
       "Macro EXPORT",
       "Macro EXPORT Update XLSX",
       "Macro EXPORT Update XLSB",
-      "Macro Bank Sales Dashboard Update",
-      "Macro Bank Campaign Dashboard Update",
-      "Macro Branch Productization Dashboard Update",
-      "Macro External Superstore Dashboard Update",
-      "Macro External Finance Dashboard Update",
-      "Macro Full Reporting Pipeline",
       "Macro Workflow",
     ]));
   });
@@ -74,31 +79,20 @@ describe("Netezza SAS-like snippets", () => {
     expect(exportText).toContain("update=${6:false}");
   });
 
-  it("contains complete refresh recipes for the three generated dashboards", () => {
-    const snippets = loadSnippets();
-
-    expect(snippetText(snippets["Macro Bank Sales Dashboard Update"]))
-      .toContain("sheet='Raw_Monthly'");
-    expect(snippetText(snippets["Macro Bank Sales Dashboard Update"]))
-      .toContain("sheet='Raw_Products'");
-    expect(snippetText(snippets["Macro Bank Campaign Dashboard Update"]))
-      .toContain("sheet='Raw_Campaigns'");
-    expect(snippetText(snippets["Macro Branch Productization Dashboard Update"]))
-      .toContain("sheet='Raw_CrossSell'");
+  it("keeps environment-specific dashboard recipes out of completion", () => {
+    const prefixes = Object.values(loadSnippets()).flatMap((snippet) => snippet.prefix);
+    expect(prefixes).not.toEqual(expect.arrayContaining(["nzbankdashboardupdate"]));
+    for (const recipe of Object.keys(RECIPES)) {
+      expect(prefixes).not.toContain(`nz${recipe}`);
+    }
   });
 
-  it("contains complete external PivotTable source contracts", () => {
-    const snippets = loadSnippets();
-
-    expect(snippetText(snippets["Macro External Superstore Dashboard Update"]))
-      .toContain("sheet='superstore'");
-    expect(snippetText(snippets["Macro External Superstore Dashboard Update"]))
-      .toContain("product_name");
-    expect(snippetText(snippets["Macro External Finance Dashboard Update"]))
-      .toContain("sheet='Dataset'");
-    expect(snippetText(snippets["Macro External Finance Dashboard Update"]))
-      .toContain("balance_after_transaction");
-    expect(snippetText(snippets["Macro Full Reporting Pipeline"]))
-      .toContain("%SQL(SELECT MAX(DATEKEY)");
+  it("contains complete dashboard refresh recipes as example files", () => {
+    for (const [recipe, fragments] of Object.entries(RECIPES)) {
+      const text = fs.readFileSync(path.join(RECIPES_DIRECTORY, `${recipe}.sql`), "utf8");
+      for (const fragment of fragments) {
+        expect(`${recipe}: ${text.includes(fragment)}`).toBe(`${recipe}: true`);
+      }
+    }
   });
 });

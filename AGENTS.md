@@ -312,7 +312,9 @@ Type-aware warnings **require** metadata with types. Without connection/cache, S
 - `RETURNS REFTABLE(t)` returns a result set via `CALL`; populate it with dynamic SQL against the special `REFTABLENAME` variable (`EXECUTE IMMEDIATE 'INSERT INTO ' || REFTABLENAME || …`), then `RETURN REFTABLE`.
 - Exception handlers: only `WHEN OTHERS` and `WHEN TRANSACTION_ABORTED` (`SQLSTATE`/named exceptions rejected). `SQLERRM` is available inside a handler; `SQLSTATE` is not.
 - `RAISE` severities: `DEBUG`, `NOTICE`, `EXCEPTION` only; a message string is required; trailing arguments must be variables/record fields (expressions, function calls and literals are rejected).
-- Unsupported: `PERFORM`, `EXECUTE IMMEDIATE … USING`, `EXECUTE IMMEDIATE … INTO`, `INSERT … RETURNING … INTO`, `CASE`, `CONTINUE`, `GOTO`, bare `NULL;`, `$$` bodies. `ELSEIF` is accepted as an `ELSIF` synonym.
+- Unsupported: `PERFORM`, `EXECUTE IMMEDIATE … USING`, `EXECUTE IMMEDIATE … INTO`, `INSERT … RETURNING … INTO`, `CASE`, `CONTINUE`, `GOTO`, `GET DIAGNOSTICS` (read `ROW_COUNT`), argument `DEFAULT`, bare `NULL;`, `$$` bodies. `ELSEIF` is accepted as an `ELSIF` synonym; `ELSE IF` is a valid nested IF.
+- A plain `EXIT` inside a nested `BEGIN … END` leaves only that block, not the loop; use `EXIT label`. A sub-SELECT in `FROM` needs an alias (fails only at `CALL`). `hash`/`hash4`/`hash8` belong to the optional SQL Extensions Toolkit.
+- Product NZPLSQL (snippets, procedure wizard templates, Copilot reference) is checked by `nzplsqlArtifacts.test.ts` and, live, by `nzplsqlArtifacts.live.integration.test.ts` (CREATE + CALL of every artifact).
 - Known parser limitation: qualified function/procedure calls in a `SELECT` list (`SCHEMA.PROC()`) are not parsed by the shared expression grammar; reference the routine unqualified or use `CALL`.
 
 When changing this grammar, update all of: `packages/sql-core/src/netezza/lexer.ts`, `.../parser.ts`, `packages/sql-core/src/validation/visitor/*`, `packages/sql-core/src/validation/procedureScopeBuilder.ts`, `src/dialects/netezza/sql/keywords.ts`, `dialects/netezza/syntaxes/netezza.tmLanguage.json`, and the live matrix corpus.

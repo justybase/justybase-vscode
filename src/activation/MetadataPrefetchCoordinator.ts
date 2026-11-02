@@ -12,6 +12,7 @@ import {
 import { MetadataRefreshDetailsPanel } from '../services/metadataRefreshDetailsPanel';
 import type { MetadataPrefetchRefreshDetails } from '../metadata/prefetch';
 import type { ExtensionServices } from './extensionServices';
+import type { NzConnection } from '../types';
 
 export class MetadataPrefetchCoordinator {
     private readonly metadataRefreshStatusBar: vscode.StatusBarItem;
@@ -280,19 +281,27 @@ export class MetadataPrefetchCoordinator {
         database: string,
         documentUri?: string,
     ): Promise<void> {
+        // The current schema is cached per connection and database, not per
+        // session, so it is read on a short-lived connection to the document's
+        // database. Using the document's persistent session would make a
+        // query the user starts at the same moment fail as busy.
+        let transientConnection: NzConnection | undefined;
         try {
-            const result = await this.services.queryExecutor(
-                this.context,
-                'SELECT CURRENT_SCHEMA',
-                true,
-                this.services.connectionManager,
+            if (documentUri) {
+                transientConnection = await this.services.connectionManager
+                    .createTransientConnectionForDocument(documentUri, connectionName);
+            }
+            const result = await this.services.queryExecutor({
+                context: this.context,
+                query: 'SELECT CURRENT_SCHEMA',
+                silent: true,
+                connectionManager: this.services.connectionManager,
                 connectionName,
                 documentUri,
-                undefined,
-                undefined,
-                5000,
-                false,
-            );
+                maxRows: 5000,
+                isUserQuery: false,
+                connectionOverride: transientConnection,
+            });
             const rows = queryResultToRows<{ CURRENT_SCHEMA?: string }>(result);
             const currentSchema = rows[0]?.CURRENT_SCHEMA?.trim();
             if (currentSchema) {
@@ -304,6 +313,8 @@ export class MetadataPrefetchCoordinator {
                     error instanceof Error ? error.message : String(error)
                 }`,
             );
+        } finally {
+            await transientConnection?.close().catch(() => undefined);
         }
     }
 

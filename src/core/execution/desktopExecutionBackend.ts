@@ -94,7 +94,8 @@ export interface DesktopExecutionTarget {
     readonly onNotice?: (message: unknown) => void;
     readonly onTiming?: (timing: unknown) => void;
     readonly onChunk?: (chunk: DesktopStreamingChunk) => void | Promise<void>;
-    readonly onStatementSucceeded?: (connection: NzConnection, sql: string) => Promise<void>;
+    /** `executionKey` identifies one successful execution (`executionId:statementIndex`). */
+    readonly onStatementSucceeded?: (connection: NzConnection, sql: string, executionKey?: string) => Promise<void>;
     readonly onDropSession?: (sessionId: string) => Promise<void>;
     readonly chunkSize: number;
     readonly cancelWithoutDocument?: (reason?: string) => Promise<void>;
@@ -149,6 +150,10 @@ export class DesktopExecutionBackend implements ExecutionBackend<DesktopExecutio
         context?: ExecutionBackendContext<DesktopExecutionTarget>,
     ): Promise<DatabaseQueryResult> {
         const connection = await this.ensureConnection(target);
+        const executionContext = context?.context;
+        const executionKey = executionContext
+            ? `${executionContext.executionId}:${executionContext.statementIndex}`
+            : undefined;
         const noticeHandler = target.onNotice;
         if (noticeHandler) connection.on('notice', noticeHandler);
 
@@ -176,8 +181,13 @@ export class DesktopExecutionBackend implements ExecutionBackend<DesktopExecutio
                     limitReached: result.limitReached,
                     rowsAffected: result.recordsAffected,
                 });
+                this.throwNonSuccessStatus(result.status, {
+                    totalRows: result.totalRows,
+                    limitReached: result.limitReached,
+                    rowsAffected: result.recordsAffected,
+                });
                 if (target.onStatementSucceeded && target.connection) {
-                    await target.onStatementSucceeded(target.connection, sql);
+                    await target.onStatementSucceeded(target.connection, sql, executionKey);
                 }
                 return {
                     totalRows: result.totalRows,
@@ -203,6 +213,11 @@ export class DesktopExecutionBackend implements ExecutionBackend<DesktopExecutio
                 limitReached: result.results.some(resultSet => resultSet.limitReached),
                 rowsAffected: result.recordsAffected,
             });
+            this.throwNonSuccessStatus(result.status, {
+                totalRows: totalRows(result.results),
+                limitReached: result.results.some(resultSet => resultSet.limitReached),
+                rowsAffected: result.recordsAffected,
+            });
 
             let deliveredRows = 0;
             for (const resultSet of result.results) {
@@ -211,7 +226,7 @@ export class DesktopExecutionBackend implements ExecutionBackend<DesktopExecutio
                 callbacks.onRows(resultSet.rows, deliveredRows);
             }
             if (target.onStatementSucceeded && target.connection) {
-                await target.onStatementSucceeded(target.connection, sql);
+                await target.onStatementSucceeded(target.connection, sql, executionKey);
             }
             return {
                 totalRows: totalRows(result.results),
@@ -277,5 +292,27 @@ export class DesktopExecutionBackend implements ExecutionBackend<DesktopExecutio
         if (error) {
             throw new ExecutionBackendError(error.message, error, metadata);
         }
+    }
+
+    /**
+     * A non-success status without an error must never reach the success hook.
+     * Cancellation and timeouts are usually error-backed, but the status is the
+     * authoritative terminal signal.
+     */
+    private throwNonSuccessStatus(
+        status: string | undefined,
+        metadata: { totalRows?: number; limitReached?: boolean; rowsAffected?: number },
+    ): void {
+        // Some callers/tests omit the optional status on a successful result;
+        // only an explicit non-success terminal state blocks the success hook.
+        if (status === undefined || status === 'success') {
+            return;
+        }
+        const message = status === 'cancelled'
+            ? 'Query cancelled'
+            : status === 'timeout'
+                ? 'Query timed out'
+                : 'Query failed';
+        throw new ExecutionBackendError(message, undefined, metadata);
     }
 }

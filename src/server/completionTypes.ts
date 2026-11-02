@@ -61,6 +61,8 @@ export interface ScopedColumnCandidate {
   column: string;
   qualifiers: string[];
   description?: string;
+  /** Learned column band `10`–`49` (best over the sources that define it). */
+  usageBand?: number;
 }
 
 export interface StatementBoundary {

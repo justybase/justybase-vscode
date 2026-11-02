@@ -1,4 +1,5 @@
 import {
+  CompletionTriggerKind,
   createConnection,
   InitializeParams,
   InitializeResult,
@@ -14,12 +15,22 @@ import {
 import {
   NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION,
   NETEZZA_GET_METADATA_REQUEST,
+  NETEZZA_JOIN_KNOWLEDGE_CHANGED_NOTIFICATION,
+  NETEZZA_JOIN_GHOST_SUGGESTION_REQUEST,
+  NETEZZA_JOIN_KNOWLEDGE_SUGGESTIONS_REQUEST,
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
   type DocumentContextChangedParams,
+  type JoinGhostSuggestion,
+  type JoinGhostSuggestionParams,
+  type JoinKnowledgeChangedParams,
+  type JoinKnowledgeSuggestionItem,
+  type JoinKnowledgeSuggestionsParams,
+  type JoinKnowledgeSuggestionsResponse,
   type MetadataCacheInvalidatedParams,
   type MetadataResponse,
 } from "../lsp/protocol";
 import { LspCompletionEngine } from "./completionEngine";
+import { computeJoinGhostSuggestion } from "./joinGhostSuggestion";
 import { LspInlayHintEngine } from "./inlayHintEngine";
 import { MetadataBridge } from "./metadataBridge";
 import { registerCompletionHandler } from "./handlers/completionHandler";
@@ -35,6 +46,11 @@ import {
   registerSignatureHelpHandler,
 } from "./handlers/signatureAndCodeActionHandlers";
 import { setMetadataQueryConcurrencyLimit } from "../metadata/metadataQueryLimiter";
+import {
+  applyJoinKnowledgeIndexDelta,
+  setJoinKnowledgeOptions,
+  setJoinKnowledgeSnapshot,
+} from "./joinKnowledgeRanking";
 
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -160,9 +176,70 @@ connection.onNotification(
 );
 
 connection.onNotification(
+  NETEZZA_JOIN_KNOWLEDGE_CHANGED_NOTIFICATION,
+  (params: JoinKnowledgeChangedParams) => {
+    setJoinKnowledgeOptions({
+      personalizeFromObjects: params.personalizeFromObjects,
+      joinNameHeuristics: params.joinNameHeuristics,
+      personalizeColumns: params.personalizeColumns,
+    });
+    if (params.snapshot) {
+      setJoinKnowledgeSnapshot(params.snapshot);
+    }
+    if (params.workspaceDelta) {
+      applyJoinKnowledgeIndexDelta(params.workspaceDelta);
+    }
+  },
+);
+
+connection.onRequest(
+  NETEZZA_JOIN_KNOWLEDGE_SUGGESTIONS_REQUEST,
+  async (params: JoinKnowledgeSuggestionsParams): Promise<JoinKnowledgeSuggestionsResponse> => {
+    const document = documents.get(params.documentUri);
+    if (!document) {
+      return { items: [] };
+    }
+    const items = await completionEngine.provideCompletionItems(
+      document,
+      params.position,
+      CompletionTriggerKind.Invoked,
+    );
+    const suggestions: JoinKnowledgeSuggestionItem[] = [];
+    for (const item of items) {
+      const data = item.data as {
+        joinKnowledgeRelation?: JoinKnowledgeSuggestionItem["relation"];
+        joinKnowledgeFavorite?: boolean;
+      } | undefined;
+      if (!data?.joinKnowledgeRelation) {
+        continue;
+      }
+      suggestions.push({
+        label: item.label,
+        ...(item.detail ? { detail: item.detail } : {}),
+        relation: data.joinKnowledgeRelation,
+        favorite: data.joinKnowledgeFavorite === true,
+      });
+    }
+    return { items: suggestions };
+  },
+);
+
+connection.onRequest(
+  NETEZZA_JOIN_GHOST_SUGGESTION_REQUEST,
+  async (params: JoinGhostSuggestionParams): Promise<JoinGhostSuggestion | null> => {
+    const document = documents.get(params.documentUri);
+    if (!document) {
+      return null;
+    }
+    return computeJoinGhostSuggestion(completionEngine, document, params.position, params.mode, {
+      groupBy: params.groupBy === true,
+    });
+  },
+);
+
+connection.onNotification(
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
-  (params?: MetadataCacheInvalidatedParams) => {
-    const affectedUris = params?.connectionName
+  (params?: MetadataCacheInvalidatedParams) => {    const affectedUris = params?.connectionName
       ? new Set(metadataBridge.clearConnection(params.connectionName))
       : undefined;
     if (!affectedUris) {

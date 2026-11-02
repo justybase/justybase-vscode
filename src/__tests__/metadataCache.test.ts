@@ -28,6 +28,7 @@ import {
   buildNetezzaDbSchemaCacheKey,
 } from "../metadata/helpers";
 import { buildColumnCacheKey } from "../metadata/columnRowMapping";
+import { NETEZZA_CROSS_SCHEMA_FIXTURE } from "./fixtures/netezzaCrossSchemaMetadata";
 
 // Mock vscode
 jest.mock("vscode");
@@ -482,6 +483,29 @@ describe("MetadataCache", () => {
       ).toContain("T2");
     });
 
+    it("getTablesAllSchemas keeps same-named objects from different schemas", () => {
+      const cacheWithSharedName = new MetadataCache(mockContext);
+      cacheWithSharedName.setTables(
+        "conn1",
+        "DB1.S1",
+        [{ OBJNAME: "SHARED", SCHEMA: "S1", label: "SHARED", objType: "TABLE" }],
+        new Map([["DB1.S1.SHARED", 1]]),
+      );
+      // Missing SCHEMA on the item: the per-schema cache key still identifies it.
+      cacheWithSharedName.setTables(
+        "conn1",
+        "DB1.S2",
+        [{ OBJNAME: "SHARED", label: "SHARED", objType: "TABLE" }],
+        new Map([["DB1.S2.SHARED", 2]]),
+      );
+
+      const all = cacheWithSharedName.getTablesAllSchemas("conn1", "DB1");
+      expect(all).toHaveLength(2);
+      expect(all?.map((item) => item.SCHEMA)).toEqual(
+        expect.arrayContaining(["S1", undefined]),
+      );
+    });
+
     it("getObjectsWithSchema should return objects with extra metadata", () => {
       const results = cache.getObjectsWithSchema("conn1", "DB1");
       expect(results.length).toBe(2);
@@ -921,18 +945,58 @@ describe("MetadataCache", () => {
       ).toBeUndefined();
     });
 
-    it("getTablesAllSchemas should deduplicate same-name tables across schemas", () => {
+    it("getTablesAllSchemas should keep same-name tables from different schemas", () => {
       const tables1: TableMetadata[] = [
-        { OBJNAME: "SHARED", label: "SHARED", objType: "TABLE", kind: 6 },
+        { OBJNAME: "SHARED", SCHEMA: "S1", label: "SHARED", objType: "TABLE", kind: 6 },
       ];
       const tables2: TableMetadata[] = [
-        { OBJNAME: "SHARED", label: "SHARED", objType: "TABLE", kind: 6 },
+        { OBJNAME: "SHARED", SCHEMA: "S2", label: "SHARED", objType: "TABLE", kind: 6 },
       ];
       cache.setTables("conn1", "DB1.S1", tables1, new Map());
       cache.setTables("conn1", "DB1.S2", tables2, new Map());
 
       const all = cache.getTablesAllSchemas("conn1", "DB1");
-      // Should deduplicate by name
+      expect(all?.length).toBe(2);
+      expect(all?.map((item) => item.SCHEMA)).toEqual(["S1", "S2"]);
+    });
+
+    it("keeps captured same-named Netezza objects from different schemas", () => {
+      const fixture = NETEZZA_CROSS_SCHEMA_FIXTURE;
+      cache.setTables(
+        "conn1",
+        `${fixture.database}.${fixture.defaultSchema}`,
+        [...fixture.tablesBySchema.ADMIN],
+        new Map(),
+      );
+      cache.setTables(
+        "conn1",
+        `${fixture.database}.${fixture.otherSchema}`,
+        [...fixture.tablesBySchema.PUBLIC],
+        new Map(),
+      );
+
+      const all = cache.getTablesAllSchemas("conn1", fixture.database);
+      expect(all).toHaveLength(4);
+      expect(
+        all
+          ?.filter((item) => item.OBJNAME === fixture.sharedTable)
+          .map((item) => item.SCHEMA)
+          .sort(),
+      ).toEqual([fixture.defaultSchema, fixture.otherSchema]);
+    });
+
+    it("getTablesAllSchemas should deduplicate the same schema object across layers", () => {
+      const shared: TableMetadata = {
+        OBJNAME: "SHARED",
+        SCHEMA: "S1",
+        label: "SHARED",
+        objType: "TABLE",
+        kind: 6,
+      };
+      cache.setTables("conn1", "DB1.S1", [shared], new Map());
+      cache.setTables("conn1", "DB1..", [{ ...shared }], new Map());
+
+      const all = cache.getTablesAllSchemas("conn1", "DB1");
       expect(all?.length).toBe(1);
     });
 

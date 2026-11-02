@@ -22,6 +22,7 @@ test behavior.
 | Integration | Local SQLite/DuckDB/Access and configured databases | matching `test:*:integration` script |
 | Browser | Bundled webview rendering and recovery | `npm run test:playwright` |
 | Extension Host | Real VS Code activation, commands, webview protocol | `npm run test:extension-host` |
+| Extension Host (JOIN index) | Real workspace indexing, completion tier, favorite/block, status counters | `npm run test:extension-host:knowledge-index` |
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
 or manual because they require credentials and controlled infrastructure.

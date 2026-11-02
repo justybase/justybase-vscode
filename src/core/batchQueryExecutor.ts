@@ -343,13 +343,14 @@ async function runBatchWithSharedOrchestrator(
                 }
                 : undefined,
             isCancellationRequested: () => isBatchCancellationRequested(params.documentUri),
-            onStatementSucceeded: async (freshConnection, sql) => {
+            onStatementSucceeded: async (freshConnection, sql, executionKey) => {
                 assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
                 await params.batchOptions.onStatementSucceeded?.({
                     sql,
                     connectionName: resolvedConnectionName,
                     documentUri: sourceDocumentUri,
                     connection: freshConnection,
+                    executionKey,
                 });
                 assertExecutionCurrent(params.batchOptions.isExecutionCurrent);
             },

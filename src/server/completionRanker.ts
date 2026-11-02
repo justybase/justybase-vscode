@@ -70,7 +70,9 @@ export function dedupeCompletionItems(
     const label = databaseKind === "netezza"
       ? item.label
       : item.label.toUpperCase();
-    const key = `${label}|${item.kind || ""}`;
+    // Metadata objects are unique per database/schema/name. Collapsing only by
+    // label hid same-named tables from different schemas.
+    const key = `${label}|${item.kind || ""}|${getCompletionItemIdentity(item)}`;
     if (seen.has(key)) {
       continue;
     }
@@ -78,4 +80,14 @@ export function dedupeCompletionItems(
     deduped.push(item);
   }
   return deduped;
+}
+
+function getCompletionItemIdentity(item: CompletionItem): string {
+  if (!item.data || typeof item.data !== "object" || Array.isArray(item.data)) {
+    return "";
+  }
+  const data = item.data as { database?: unknown; schema?: unknown };
+  const database = typeof data.database === "string" ? data.database : "";
+  const schema = typeof data.schema === "string" ? data.schema : "";
+  return database || schema ? `${database}\u0000${schema}` : "";
 }

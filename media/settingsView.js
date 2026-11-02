@@ -7,10 +7,12 @@ let settingsValues = {};
 let searchQuery = '';
 let cachedUserSnippets = [];
 let cachedPredefinedSnippets = [];
+// Example templates keyed by setting id; populated while rendering JSON controls.
+const JSON_EXAMPLES = {};
 
 // Sidebar grouping keeps the 13 sections scannable without changing the registry.
 const NAV_GROUPS = [
-    { id: 'core', title: 'Core', sections: ['general', 'editor', 'sql', 'codelens'] },
+    { id: 'core', title: 'Core', sections: ['general', 'editor', 'sql', 'codelens', 'join-knowledge'] },
     { id: 'data', title: 'Data', sections: ['query', 'ddl', 'schema', 'results', 'filepreview', 'importwizard'] },
     { id: 'integrations', title: 'Integrations', sections: ['copilot', 'mcp', 'snippets'] }
 ];
@@ -22,6 +24,7 @@ function renderNav() {
     const icons = {
         'general': '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H2a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V2a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
         'editor': '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+        'join-knowledge': '<svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8z"/></svg>',
         'sql': '<svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
         'codelens': '<svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
         'query': '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
@@ -422,11 +425,89 @@ function renderJsonControl(setting) {
     const value = settingsValues[setting.id] ?? setting.defaultValue ?? (setting.jsonKind === 'array' || setting.jsonKind === 'objectArray' ? [] : {});
     const serialized = JSON.stringify(value, null, 2);
     const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + formatSettingValue(setting.defaultValue) : '↺ Reset to default';
+    let exampleButton = '';
+    if (setting.jsonExample !== undefined) {
+        JSON_EXAMPLES[setting.id] = setting.jsonExample;
+        exampleButton = '<button class="btn btn-compact json-example-btn" data-example-id="' + escapeHtml(String(setting.id || '')) + '" title="Add an example entry to this JSON value" aria-label="Insert example for ' + escapeHtml(String(setting.label || setting.id || 'setting')) + '">Insert example</button>';
+    }
     return '<div class="json-control">' +
         '<textarea class="json-textarea" data-key="' + escapeHtml(String(setting.configKey || '')) + '" data-id="' + escapeHtml(String(setting.id || '')) + '" data-json-kind="' + escapeHtml(String(setting.jsonKind || '')) + '" spellcheck="false">' + escapeHtml(serialized) + '</textarea>' +
         '<div class="json-toolbar"><span class="json-status" id="json-status-' + escapeHtml(String(setting.id || '')) + '" role="status" aria-live="polite">Valid JSON</span>' +
+        exampleButton +
         '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey || '')) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(defaultHint) + '" aria-label="Reset ' + escapeHtml(String(setting.label || setting.id || 'setting')) + ' to default">↺</button></div>' +
         '</div>';
+}
+
+function setJsonStatus(id, state, text) {
+    const statusEl = document.getElementById('json-status-' + id);
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.className = 'json-status ' + state;
+}
+
+/** Adds template entries that are not already present; never removes user data. */
+function mergeJsonExample(current, example) {
+    if (Array.isArray(current) && Array.isArray(example)) {
+        const value = current.slice();
+        let added = 0;
+        for (const entry of example) {
+            const serialized = JSON.stringify(entry);
+            if (!value.some(existing => JSON.stringify(existing) === serialized)) {
+                value.push(entry);
+                added += 1;
+            }
+        }
+        return { value, added };
+    }
+    if (!Array.isArray(current) && !Array.isArray(example) &&
+        current && example && typeof current === 'object' && typeof example === 'object') {
+        const value = Object.assign({}, current);
+        let added = 0;
+        for (const [key, entry] of Object.entries(example)) {
+            if (!(key in value)) {
+                value[key] = entry;
+                added += 1;
+            }
+        }
+        return { value, added };
+    }
+    return { value: current, added: 0 };
+}
+
+function insertJsonExample(button) {
+    const id = button.dataset.exampleId;
+    const example = JSON_EXAMPLES[id];
+    const textarea = Array.from(document.querySelectorAll('.json-textarea'))
+        .find(el => el.dataset.id === id);
+    if (!example || !textarea) return;
+    const trimmed = textarea.value.trim();
+    let current;
+    try {
+        current = trimmed === ''
+            ? (Array.isArray(example) ? [] : {})
+            : JSON.parse(trimmed);
+        validateJsonValue(current, textarea.dataset.jsonKind);
+    } catch (error) {
+        textarea.setAttribute('aria-invalid', 'true');
+        setJsonStatus(id, 'invalid', '✗ Fix the JSON before inserting an example');
+        textarea.focus();
+        return;
+    }
+    const merged = mergeJsonExample(current, example);
+    if (merged.added === 0) {
+        setJsonStatus(id, 'pending', 'Example already present');
+        return;
+    }
+    const serialized = JSON.stringify(merged.value, null, 2);
+    textarea.value = serialized;
+    textarea.removeAttribute('aria-invalid');
+    settingsValues[id] = merged.value;
+    if (textarea.dataset.key) {
+        vscode.postMessage({ command: 'updateSetting', key: textarea.dataset.key, value: merged.value });
+    }
+    setJsonStatus(id, 'valid', '✓ Example inserted — edit names to match your schema');
+    textarea.focus();
+    textarea.setSelectionRange(serialized.length, serialized.length);
 }
 
 function formatSettingValue(value) {
@@ -585,6 +666,11 @@ function attachControlListeners() {
                 }
             }, 500);
         });
+    });
+
+    // JSON example templates — merge a documented shape into the current value.
+    document.querySelectorAll('.json-example-btn').forEach(el => {
+        el.addEventListener('click', () => insertJsonExample(el));
     });
 
     // Test Prompt buttons

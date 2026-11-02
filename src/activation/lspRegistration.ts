@@ -24,10 +24,20 @@ import {
   type ColumnCatalogTargetResponse,
   NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION,
   NETEZZA_GET_METADATA_REQUEST,
+  NETEZZA_JOIN_KNOWLEDGE_CHANGED_NOTIFICATION,
+  NETEZZA_JOIN_GHOST_SUGGESTION_REQUEST,
+  NETEZZA_JOIN_KNOWLEDGE_SUGGESTIONS_REQUEST,
   NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION,
   NETEZZA_UX_PERF_NOTIFICATION,
   type DocumentContextChangedParams,
   type CompletionKeywordCase,
+  type JoinKnowledgeChangedParams,
+  type JoinKnowledgeSuggestionItem,
+  type JoinGhostMode,
+  type JoinGhostSuggestion,
+  type JoinGhostSuggestionParams,
+  type JoinKnowledgeSuggestionsParams,
+  type JoinKnowledgeSuggestionsResponse,
   type MetadataCacheInvalidatedParams,
   type MetadataColumnItem,
   type MetadataContextResponse,
@@ -40,10 +50,16 @@ import {
 import { getUxPerfSession } from "../services/perf/uxPerfSession";
 import {
   getRelatedColumnRole,
+  isSelfNamedKeyColumn,
   normalizeRelatedColumnName,
 } from "../utils/relatedColumnNames";
 import { computeJoinTargetCandidates } from "../server/joinTargetMatcher";
 import { normalizeJoinCompletionSettings } from "../lsp/joinCompletionSettings";
+import {
+  getJoinKnowledgeService,
+  getWorkspaceIndexCoordinator,
+} from "../knowledge/joinKnowledgeRuntime";
+import type { JoinKnowledgeIndexDelta } from "@justybase/sql-core/joinKnowledge";
 
 interface LanguageClientLike {
   sendRequest?(method: string, params: unknown): Promise<unknown>;
@@ -188,7 +204,10 @@ export async function startSqlLanguageClient(
   metadataCache: MetadataCache,
   connectionManager: ConnectionManager,
 ): Promise<void> {
-  if (process.env.NODE_ENV === "test") {
+  if (
+    process.env.NODE_ENV === "test"
+    && process.env.JUSTYBASE_EXTENSION_HOST_LSP !== "1"
+  ) {
     return;
   }
 
@@ -300,6 +319,7 @@ export async function startSqlLanguageClient(
 
     await client.start();
     sqlLanguageClientReady = true;
+    notifyJoinKnowledgeChanged();
   })();
 
   try {
@@ -338,6 +358,116 @@ export function notifyDocumentContextChanged(documentUri: string): void {
   sendNotificationSafely(client, NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION, {
     documentUri,
   } satisfies DocumentContextChangedParams);
+}
+
+/** Push the current knowledge snapshot to the SQL language server. */
+export function notifyJoinKnowledgeChanged(): void {
+  const client = sqlLanguageClient;
+  const service = getJoinKnowledgeService();
+  if (!client || !service) {
+    return;
+  }
+  if (!sqlLanguageClientReady) {
+    // Activation can rebuild the index before the client finishes starting.
+    // The client start path always sends a fresh full snapshot on readiness.
+    return;
+  }
+  const configuration = vscode.workspace.getConfiguration("justybase.sql");
+  sendNotificationSafely(
+    client,
+    NETEZZA_JOIN_KNOWLEDGE_CHANGED_NOTIFICATION,
+    {
+      snapshot: service.getSnapshot(getWorkspaceIndexCoordinator()?.getSnapshot()),
+      personalizeFromObjects: configuration.get<boolean>(
+        "personalizeFromObjects",
+        true,
+      ),
+      joinNameHeuristics: configuration.get<boolean>(
+        "joinNameHeuristics",
+        true,
+      ),
+      personalizeColumns: configuration.get<boolean>(
+        "personalizeColumns",
+        true,
+      ),
+    } satisfies JoinKnowledgeChangedParams,
+  );
+}
+
+/** Ask the language server for the JOIN suggestions at one cursor position. */
+export async function requestJoinKnowledgeSuggestions(
+  documentUri: string,
+  position: { line: number; character: number },
+): Promise<JoinKnowledgeSuggestionItem[]> {
+  const client = sqlLanguageClient;
+  if (!client?.sendRequest) {
+    return [];
+  }
+  try {
+    const response = await client.sendRequest(
+      NETEZZA_JOIN_KNOWLEDGE_SUGGESTIONS_REQUEST,
+      { documentUri, position } satisfies JoinKnowledgeSuggestionsParams,
+    ) as JoinKnowledgeSuggestionsResponse | undefined;
+    return response?.items ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Ask the language server for a confident JOIN ghost at one cursor position. */
+export async function requestJoinGhostSuggestion(
+  documentUri: string,
+  position: { line: number; character: number },
+  mode: JoinGhostMode,
+  groupBy = false,
+): Promise<JoinGhostSuggestion | null> {
+  const client = sqlLanguageClient;
+  if (!client?.sendRequest || !sqlLanguageClientReady) {
+    return null;
+  }
+  try {
+    const response = await client.sendRequest(
+      NETEZZA_JOIN_GHOST_SUGGESTION_REQUEST,
+      { documentUri, position, mode, groupBy } satisfies JoinGhostSuggestionParams,
+    ) as JoinGhostSuggestion | null | undefined;
+    return response ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Publish only the affected workspace-index keys after an incremental parse. */
+export function notifyJoinKnowledgeIndexChanged(
+  delta: JoinKnowledgeIndexDelta,
+): void {
+  const client = sqlLanguageClient;
+  if (!client) {
+    return;
+  }
+  if (!sqlLanguageClientReady) {
+    // The next full snapshot on client readiness is authoritative.
+    return;
+  }
+  const configuration = vscode.workspace.getConfiguration("justybase.sql");
+  sendNotificationSafely(
+    client,
+    NETEZZA_JOIN_KNOWLEDGE_CHANGED_NOTIFICATION,
+    {
+      workspaceDelta: delta,
+      personalizeFromObjects: configuration.get<boolean>(
+        "personalizeFromObjects",
+        true,
+      ),
+      joinNameHeuristics: configuration.get<boolean>(
+        "joinNameHeuristics",
+        true,
+      ),
+      personalizeColumns: configuration.get<boolean>(
+        "personalizeColumns",
+        true,
+      ),
+    } satisfies JoinKnowledgeChangedParams,
+  );
 }
 
 /** Test hook: resolves the negative-cache fallback for table lookups. */
@@ -1118,6 +1248,7 @@ async function getCachedJoinTableIndex(
                     isPk: column.isPk,
                     isFk: column.isFk,
                   }) !== "unknown",
+                  selfNamedKey: isSelfNamedKeyColumn(column.ATTNAME, name),
                   joinReferences: column.joinReferences,
                 }];
               }),

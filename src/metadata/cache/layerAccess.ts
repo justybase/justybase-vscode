@@ -575,6 +575,9 @@ export class MetadataLayerAccess {
   /**
    * Get tables from all schemas for a given database.
    * Used for double-dot pattern (DB..) where schema is not specified.
+   *
+   * Same-named objects in different schemas must stay distinct: the collapse
+   * key includes the schema, never the bare object name.
    */
   getTablesAllSchemas(
     connectionName: string,
@@ -583,7 +586,7 @@ export class MetadataLayerAccess {
     const database = this.databaseIdentity(connectionName, dbName);
     const prefix = `${connectionName}|${database.cachePart}.`;
     const allTables: TableMetadata[] = [];
-    const seenNames = new Set<string>();
+    const seenObjects = new Set<string>();
     const staleKeys: string[] = [];
 
     for (const [key, entry] of this.deps.store.tableCache) {
@@ -592,14 +595,24 @@ export class MetadataLayerAccess {
           staleKeys.push(key);
           continue;
         }
+        const schemaFromKey = key.slice(prefix.length);
         for (const item of entry.data) {
           const name = extractLabel(item);
           if (!name) {
             continue;
           }
+          const itemSchema = typeof item.SCHEMA === "string" && item.SCHEMA.length > 0
+            ? item.SCHEMA
+            : (schemaFromKey && !schemaFromKey.startsWith(".") ? schemaFromKey : "");
           const nameKey = database.preserveCase ? name : name.toUpperCase();
-          if (!seenNames.has(nameKey)) {
-            seenNames.add(nameKey);
+          const schemaKey = database.preserveCase
+            ? itemSchema
+            : itemSchema.toUpperCase();
+          // An object may be present in the aggregated DB.. layer and the
+          // per-schema layer; identical schema+name is the same object.
+          const objectKey = `${schemaKey}\u0000${nameKey}`;
+          if (!seenObjects.has(objectKey)) {
+            seenObjects.add(objectKey);
             allTables.push(item);
           }
         }

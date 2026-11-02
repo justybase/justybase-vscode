@@ -476,8 +476,9 @@ Their source URLs and license notices are in
 [`fixtures/bank-dashboards/external/NOTICE.md`](../../fixtures/bank-dashboards/external/NOTICE.md).
 The XLSX updater preserves the native pivot/slicer parts and marks PivotTables
 for refresh. A ListObject update must keep the source column count and order;
-use the complete source-column contracts in the external snippets
-(`nzexternalsalesdashboard` and `nzexternalfinancedashboard`), then choose
+use the complete source-column contracts in the external recipes
+([`externalsalesdashboard.sql`](../../fixtures/bank-dashboards/macros/externalsalesdashboard.sql)
+and [`externalfinancedashboard.sql`](../../fixtures/bank-dashboards/macros/externalfinancedashboard.sql)), then choose
 **Data → Refresh All** in desktop Excel. Slicers and PivotCharts are Excel
 features and are not recalculated by the lightweight spreadsheet reader.
 
@@ -529,13 +530,13 @@ after `%`. Existing variables are suggested after `&`, `$`, or
 `${` even when the reference is inside an export argument.
 
 The snippet catalog includes complete examples for scalar/list SQL, arithmetic,
-conditionals, include/Python workflows, new XLSX/XLSB exports, XLSX/XLSB raw
-sheet updates, all three generated banking dashboards, and both external
-PivotTable source contracts. Useful prefixes include:
-`nzmacroexportupdatexlsx`, `nzmacroexportupdatexlsb`,
-`nzbankdashboardupdate`, `nzcampaigndashboardupdate`,
-`nzbranchproductizationupdate`, `nzexternalsalesdashboard`,
-`nzexternalfinancedashboard`, and `nzfullreportingpipeline`.
+conditionals, include/Python workflows, new XLSX/XLSB exports and XLSX/XLSB raw
+sheet updates (`nzmacroexportupdatexlsx`, `nzmacroexportupdatexlsb`,
+`nzmacroworkflow`). Refresh recipes for the three generated banking dashboards,
+both external PivotTable source contracts and the full reporting pipeline are
+example files in
+[`fixtures/bank-dashboards/macros/`](../../fixtures/bank-dashboards/macros/),
+so they do not crowd the completion list.
 
 The TextMate grammar highlights the directives, the parser and linter exclude
 macro bodies from ordinary SQL diagnostics, and directive-looking text inside

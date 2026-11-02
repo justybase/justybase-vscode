@@ -22,6 +22,7 @@
     "media/searchWorker.ts",
     "media/queryHistory.ts",
     "media/queryHistoryExtended.ts",
+    "media/joinKnowledge.ts",
     "media/editDataPanel.ts",
     "media/sessionMonitor.ts",
     "media/securityPanel.ts",

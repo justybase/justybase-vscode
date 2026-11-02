@@ -95,6 +95,7 @@ export class CompletionPathResolver {
         databaseKind,
         true,
         effectiveSchema,
+        true,
       );
       return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }
@@ -235,6 +236,7 @@ export class CompletionPathResolver {
         databaseKind,
         true,
         requestContext.effectiveSchema,
+        true,
       );
       return this.applyFilePathCompletionEdit(items, fromJoinContext, requestContext);
     }

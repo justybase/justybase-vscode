@@ -27,6 +27,20 @@ test.describe('Settings view rendering', () => {
         await expect(page.locator('#contentWrapper .setting-label')).toContainText('Tab Width');
     });
 
+    test('inserts a JSON example without discarding existing entries', async ({ page }) => {
+        await page.locator('.nav-item[data-section="editor"]').click();
+        const textarea = page.locator('.json-textarea');
+        const exampleButton = page.locator('.json-example-btn');
+        await expect(textarea).toHaveValue('[\n  "--flag"\n]');
+        await expect(exampleButton).toHaveText('Insert example');
+        await exampleButton.click();
+        await expect(textarea).toHaveValue('[\n  "--flag",\n  "--verbose"\n]');
+        await expect(page.locator('.json-status')).toContainText('Example inserted');
+        await exampleButton.click();
+        await expect(page.locator('.json-status')).toHaveText('Example already present');
+        await expect(textarea).toHaveValue('[\n  "--flag",\n  "--verbose"\n]');
+    });
+
     test('groups navigation sections and shows setting counts', async ({ page }) => {
         await expect(page.locator('.nav-group-title')).toHaveCount(2);
         await expect(page.locator('.nav-group-title').first()).toHaveText('Core');

@@ -1,12 +1,22 @@
 import type { DatabaseKind } from "../contracts/database";
 import type { QualificationProposal } from "../core/tableQualificationResolver";
+import type {
+  JoinKnowledgeIndexDelta,
+  JoinKnowledgeSnapshot,
+} from "@justybase/sql-core/joinKnowledge";
 
 export const NETEZZA_GET_METADATA_REQUEST = "netezza/getMetadata";
 export const NETEZZA_DOCUMENT_CONTEXT_CHANGED_NOTIFICATION =
   "netezza/documentContextChanged";
 export const NETEZZA_METADATA_CACHE_INVALIDATED_NOTIFICATION =
   "netezza/metadataCacheInvalidated";
+export const NETEZZA_JOIN_KNOWLEDGE_CHANGED_NOTIFICATION =
+  "netezza/joinKnowledgeChanged";
+export const NETEZZA_JOIN_KNOWLEDGE_SUGGESTIONS_REQUEST =
+  "netezza/getJoinKnowledgeSuggestions";
 export const NETEZZA_UX_PERF_NOTIFICATION = "netezza/uxPerf";
+/** Confident JOIN target or ON condition offered as inline ghost text. */
+export const NETEZZA_JOIN_GHOST_SUGGESTION_REQUEST = "netezza/joinGhostSuggestion";
 /** Catalog column a host can reveal for the SQL column at a position. */
 export const NETEZZA_COLUMN_CATALOG_TARGET_REQUEST = "netezza/columnCatalogTarget";
 
@@ -112,6 +122,68 @@ export interface MetadataCacheInvalidatedParams {
   connectionName?: string;
 }
 
+/** Knowledge snapshot for completion ranking; never contains SQL text. */
+export interface JoinKnowledgeChangedParams {
+  /** Full snapshot on manual changes, rebuild or index start/stop. */
+  snapshot?: JoinKnowledgeSnapshot;
+  /** Affected-key workspace update; merged without replacing manual decisions. */
+  workspaceDelta?: JoinKnowledgeIndexDelta;
+  /** FROM-object personalization master switch. */
+  personalizeFromObjects: boolean;
+  /** Heuristic JOIN buckets master switch (`justybase.sql.joinNameHeuristics`). */
+  joinNameHeuristics: boolean;
+  /** Learned column ordering switch (`justybase.sql.personalizeColumns`). */
+  personalizeColumns?: boolean;
+}
+
+export interface JoinKnowledgeSuggestionRelation {
+  left: { database?: string; schema?: string; table: string };
+  right: { database?: string; schema?: string; table: string };
+  columns: Array<{ left: string; right: string }>;
+  databaseKind?: string;
+  effectiveDatabase?: string;
+  effectiveSchema?: string;
+}
+
+export interface JoinKnowledgeSuggestionItem {
+  label: string;
+  detail?: string;
+  relation: JoinKnowledgeSuggestionRelation;
+  favorite: boolean;
+}
+
+export interface JoinKnowledgeSuggestionsParams {
+  documentUri: string;
+  position: { line: number; character: number };
+}
+
+export interface JoinKnowledgeSuggestionsResponse {
+  items: JoinKnowledgeSuggestionItem[];
+}
+
+/** `justybase.sql.joinGhostText`. */
+export type JoinGhostMode = "off" | "afterJoin" | "afterJoinAndNewLine";
+
+export interface JoinGhostSuggestionParams {
+  documentUri: string;
+  position: { line: number; character: number };
+  mode: JoinGhostMode;
+  /** `justybase.sql.groupByGhostText`: also offer the list after `GROUP BY `. */
+  groupBy?: boolean;
+}
+
+export interface JoinGhostSuggestion {
+  /**
+   * `target` completes the joined table, `predicate` the ON condition,
+   * `groupBy` the non-aggregated SELECT expressions after `GROUP BY `.
+   */
+  kind: "target" | "predicate" | "groupBy";
+  /** Text inserted at the cursor (may start with `JOIN ` or `ON `). */
+  insertText: string;
+  /** The JOIN relation; absent for `groupBy`. */
+  relation?: JoinKnowledgeSuggestionRelation;
+}
+
 export interface MetadataObjectItem {
   name: string;
   database?: string;
@@ -136,6 +208,13 @@ export interface MetadataObjectItem {
     relationType?: "foreignKey" | "heuristic";
     constraintName?: string;
     ordinalPosition?: number;
+    /**
+     * Target side of the relation: `parent` is referenced by the source (the
+     * "one" side, keeps the grain), `child` references the source (fans out).
+     */
+    targetRole?: "parent" | "child" | "peer";
+    /** Matches with the same group form one composite condition. */
+    group?: string;
   }>;
 }
 
