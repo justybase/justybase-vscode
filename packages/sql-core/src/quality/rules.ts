@@ -11,6 +11,7 @@ import {
   hasKeywordInRange as hasSourceKeywordInRange,
   indexOfStatementSemicolon,
   indexOfWhereClauseEnd,
+  isOffsetInSqlComment,
   removeCommentsAndStrings,
   splitSqlStatementsWithOffsets,
 } from "./sourceScan";
@@ -453,13 +454,38 @@ const ruleNZL006 = regexRule(
   }),
 );
 
-const ruleNZL008 = regexRule(
-  "NZL008",
-  "Empty In List",
-  "IN requires at least one value.",
-  0,
-  /\bIN\s*\(\s*\)/gi,
-);
+/**
+ * NZL008 scans the masked SQL, where string literals become spaces; a list
+ * holding only literals (`IN ('Monday')`) would otherwise look empty. Only
+ * report when the original parentheses contain whitespace and comments.
+ */
+const ruleNZL008: DatabaseSqlQualityRule = {
+  id: "NZL008",
+  name: "Empty In List",
+  description: "IN requires at least one value.",
+  defaultSeverity: 0,
+  check(sql) {
+    const masked = maskSql(sql);
+    const results: DatabaseSqlLintIssue[] = [];
+    for (const match of masked.matchAll(/\bIN\s*\(\s*\)/gi)) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const open = masked.indexOf("(", start);
+      if (!/^\s*$/.test(removeCommentsOnly(sql, open + 1, end - 1))) continue;
+      results.push(issue("NZL008", "IN requires at least one value.", 0, start, end));
+    }
+    return results;
+  },
+};
+
+/** Return `sql[start, end)` with comments blanked but literals preserved. */
+function removeCommentsOnly(sql: string, start: number, end: number): string {
+  let text = "";
+  for (let index = start; index < end; index += 1) {
+    text += isOffsetInSqlComment(sql, index) ? " " : sql[index];
+  }
+  return text;
+}
 
 /**
  * Netezza quality rules owned by sql-core. Parser-owned ids remain exported

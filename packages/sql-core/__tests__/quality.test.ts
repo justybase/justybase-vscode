@@ -47,6 +47,23 @@ describe("Netezza sql-core quality", () => {
       "SELECT ID FROM T WHERE ID IN ()",
     ).issues.find((issue) => issue.ruleId === "NZL008");
     expect(emptyIn?.severity).toBe(0);
+
+    expect(engine.analyzeQualityRulesOnly(
+      "SELECT ID FROM T WHERE ID IN ( /* nothing */ )",
+    ).issues.some((issue) => issue.ruleId === "NZL008")).toBe(true);
+  });
+
+  it.each([
+    "SELECT * FROM JUST_DATA..DIMDATE D WHERE D.ENGLISHDAYNAMEOFWEEK IN ('Monday')",
+    "SELECT * FROM JUST_DATA..DIMDATE D WHERE\n  D.ENGLISHDAYNAMEOFWEEK IN ('Monday')",
+    "SELECT * FROM T WHERE C IN ('a', 'b')",
+    "SELECT * FROM T WHERE C IN ('')",
+  ])("does not report NZL008 for an IN list of string literals: %s", (sql) => {
+    const engine = new QualityEngineCore(
+      new NetezzaSqlSemanticValidator(),
+      netezzaSqlQualityRules,
+    );
+    expect(engine.analyzeQualityRulesOnly(sql).issues.some((issue) => issue.ruleId === "NZL008")).toBe(false);
   });
 
   it("keeps the SQL046 diagnostic range on the complete AS token", () => {
