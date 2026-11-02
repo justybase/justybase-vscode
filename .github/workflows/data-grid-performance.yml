@@ -12,8 +12,6 @@ on:
       - 'test-harness/tests/data-grid-performance.spec.ts'
       - 'package.json'
       - 'package-lock.json'
-  schedule:
-    - cron: '30 2 * * 1'
   workflow_dispatch:
 
 permissions:

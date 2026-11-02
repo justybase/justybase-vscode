@@ -497,6 +497,8 @@ describe('Data Grid Performance Benchmark', () => {
                     connectionDetails: sqliteConnectionDetails,
                     previewRowCount: 100,
                     validationSampleSize: 100,
+                    // The wizard samples 5000 rows by default; the benchmark measures full-file analysis.
+                    analysisRowLimit: importDataset.rowCount,
                 }, adapter);
                 const summary = validationService.validate(
                     snapshot.columns,
