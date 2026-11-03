@@ -231,7 +231,6 @@ function renderMetadataPanel(): void {
     if (!tableData.metadata) {
         container.innerHTML = `
             <div class="empty-state">
-                <span style="font-size: 32px; margin-bottom: 12px;">📋</span>
                 <span>No metadata available</span>
             </div>
         `;
@@ -245,11 +244,11 @@ function renderMetadataPanel(): void {
     commentCard.className = 'metadata-card';
     commentCard.innerHTML = `
         <div class="metadata-card-header">
-            <h3><span class="icon">💬</span> Table Description</h3>
+            <h3>Table Description</h3>
             <button id="saveTableCommentBtn" class="small-btn primary">Save</button>
         </div>
         <div class="metadata-card-body">
-            <textarea id="tableCommentBox" class="comment-box" placeholder="Add a description for this table...">${tableComment || ''}</textarea>
+            <textarea id="tableCommentBox" class="comment-box" placeholder="Add a description for this table...">${escapeHtml(tableComment || '')}</textarea>
         </div>
     `;
     container.appendChild(commentCard);
@@ -268,13 +267,13 @@ function renderMetadataPanel(): void {
 
     const columnRows = columns.map(col => {
         const keyIndicators: string[] = [];
-        if (col.IS_PK == 1) keyIndicators.push('<span class="key-indicator pk" title="Primary Key">🔑</span>');
-        if (col.IS_FK == 1) keyIndicators.push('<span class="key-indicator fk" title="Foreign Key">🔗</span>');
-        const keyCell = keyIndicators.length > 0 ? keyIndicators.join(' ') : '<span style="opacity:0.3">—</span>';
+        if (col.IS_PK == 1) keyIndicators.push('<span class="key-badge pk" title="Primary Key">PK</span>');
+        if (col.IS_FK == 1) keyIndicators.push('<span class="key-badge fk" title="Foreign Key">FK</span>');
+        const keyCell = keyIndicators.length > 0 ? keyIndicators.join(' ') : '<span class="no-default">—</span>';
 
         const nullIndicator = col.IS_NOT_NULL == 1
-            ? '<span class="null-indicator required" title="NOT NULL">✓</span>'
-            : '<span class="null-indicator nullable" title="Nullable">○</span>';
+            ? '<span class="nn-flag required" title="NOT NULL">NN</span>'
+            : '<span class="nn-flag nullable" title="Nullable">—</span>';
 
         const defaultVal = col.COLDEFAULT
             ? `<span class="default-value">${escapeHtml(col.COLDEFAULT)}</span>`
@@ -282,12 +281,12 @@ function renderMetadataPanel(): void {
 
         return `
             <tr>
-                <td style="text-align:center; width:50px;">${keyCell}</td>
-                <td style="font-weight:500;">${escapeHtml(col.ATTNAME)}</td>
+                <td class="center">${keyCell}</td>
+                <td class="col-name">${escapeHtml(col.ATTNAME)}</td>
                 <td><span class="type-badge">${escapeHtml(col.FORMAT_TYPE)}</span></td>
-                <td style="text-align:center; width:60px;">${nullIndicator}</td>
+                <td class="center">${nullIndicator}</td>
                 <td>${defaultVal}</td>
-                <td style="padding:4px;">
+                <td class="comment-cell">
                     <input type="text" 
                         class="inline-edit col-comment" 
                         data-col="${escapeHtml(col.ATTNAME)}" 
@@ -295,7 +294,7 @@ function renderMetadataPanel(): void {
                         placeholder="Add comment..."
                     >
                 </td>
-                <td style="text-align:center; width:40px;">
+                <td class="center">
                     <button class="icon-btn delete-col-btn" data-col="${escapeHtml(col.ATTNAME)}" title="Drop Column">×</button>
                 </td>
             </tr>
@@ -304,16 +303,16 @@ function renderMetadataPanel(): void {
 
     columnsCard.innerHTML = `
         <div class="metadata-card-header">
-            <h3><span class="icon">📊</span> Columns <span style="opacity:0.6; font-weight:400; margin-left:8px;">(${columns.length})</span></h3>
+            <h3>Columns <span class="count">${columns.length}</span></h3>
         </div>
         <div class="metadata-grid-container">
             <table class="metadata-table">
                 <thead>
                     <tr>
-                        <th style="width:60px; text-align:center;">Key</th>
+                        <th class="center" style="width:60px;">Key</th>
                         <th style="width:180px;">Column Name</th>
                         <th style="width:140px;">Type</th>
-                        <th style="width:50px; text-align:center;">NN</th>
+                        <th class="center" style="width:50px;">NN</th>
                         <th style="width:120px;">Default</th>
                         <th style="min-width:200px;">Comment</th>
                         <th style="width:40px;"></th>
@@ -358,7 +357,7 @@ function renderMetadataPanel(): void {
     const addCard = document.createElement('div');
     addCard.className = 'add-column-form';
     addCard.innerHTML = `
-        <span class="form-label"><span class="icon">➕</span> Add Column</span>
+        <span class="form-label">Add Column</span>
         <input type="text" id="newColName" class="form-input" placeholder="Column name" style="width:140px;">
         <input type="text" id="newColType" class="form-input" placeholder="Type (e.g. INTEGER)" style="width:160px;">
         <button id="addColBtn" class="primary">Add Column</button>
