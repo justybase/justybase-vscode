@@ -137,7 +137,7 @@ Status values:
 | Schema Search | present | present | partial | present | partial | Initial and no-results empty states, result count, cancelled search preserves partial results, min-length validation, and Enter/Space on standard list rows. |
 | Session Monitor | present | present | present | n/a | n/a | Strongest dashboard-style implementation after Result Panel, with explicit loading, empty sections, and error messages. |
 | Test Data Generator | partial | present | partial | missing | partial | Uses generation flow affordances and some empty feedback, but state transitions are not yet standardized. |
-| Edit Data | present | present | present | partial | present | Strong data-entry panel with explicit loading/error handling and useful keyboard support. |
+| Edit Data | present | present | present | partial | present | Results-grid styling with a DataGrip-style editing model: inline cell editor, change markers, SQL preview, in-webview confirmations, lazy DDL tab, and full keyboard navigation. |
 | Security Panel | present | partial | present | missing | partial | Has loading and error signaling, but empty and keyboard coverage are still incomplete. |
 | Visual Query Builder | present | partial | present | missing | present | Async and error states exist, and some keyboard handling is deliberate, but empty-state semantics are still weak. |
 | ERD View | n/a | partial | n/a | n/a | n/a | Mostly static visualization; has some no-data feedback but little async/error state machinery. |

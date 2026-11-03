@@ -1,12 +1,9 @@
-import {
-    Virtualizer,
-    elementScroll,
-    observeElementRect,
-    observeElementOffset,
-} from '@tanstack/virtual-core';
-import type { TanStackCellContext } from '../shared/tanstackShims.js';
+/**
+ * Edit Data panel webview: wires the host protocol to the data grid, the
+ * Structure tab and the DDL tab.
+ */
 import type {
-    EditDataChanges,
+    EditDataLoadInfo,
     EditDataMetadata,
     EditDataPanelHostToWebviewMessage,
     EditDataPanelWebviewToHostMessage,
@@ -14,70 +11,43 @@ import type {
 } from './hostContracts.js';
 import { postToHost, asHostMessage } from './protocol.js';
 import { getElementById } from './dom.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, formatCount } from './utils.js';
+import { DataGrid } from './grid.js';
+import {
+    type EditorState,
+    type GridColumn,
+    buildChanges,
+    buildValuePredicate,
+    createState,
+    hasPendingChanges,
+    revertAll,
+    summarizeChanges,
+} from './state.js';
+import { confirmDialog, isDialogOpen, showDialog } from './dialog.js';
+import { renderStructure } from './structure.js';
+import { renderCodeBlock } from './sqlHighlight.js';
 
-interface EditDataTableState {
-    original: EditDataRow[];
-    working: EditDataRow[];
-    columns: string[];
-    metadata: EditDataMetadata | null;
-}
+type HostMessage = EditDataPanelHostToWebviewMessage;
+type WebviewMessage = EditDataPanelWebviewToHostMessage;
 
-interface TrackedChanges {
-    updates: Record<string | number, { rowId: string | number; changes: Record<string, unknown> }>;
-    deletes: Set<string | number>;
-    inserts: EditDataRow[];
-}
+let editorState: EditorState = createState([], []);
+let metadata: EditDataMetadata | null = null;
+let loadInfo: EditDataLoadInfo | null = null;
+let grid: DataGrid | null = null;
+let loading = false;
+let ddlText: string | null = null;
+let ddlRequested = false;
+let pendingPreview: ((statements: string[], error?: string) => void) | null = null;
+/** Filters the current grid was loaded with (inputs may have been edited since). */
+let appliedFilter = { whereClause: '', orderBy: '', columns: '' };
 
-interface EditDataTanStackCell {
-    column: { id: string; columnDef: { cell?: (context: TanStackCellContext<unknown>) => Node | string } };
-    getContext: () => TanStackCellContext<unknown>;
-}
+const post = (message: WebviewMessage) => postToHost(message);
 
-interface EditDataTanStackRow {
-    original: EditDataRow;
-    getVisibleCells: () => EditDataTanStackCell[];
-}
-
-interface EditDataTanStackHeader {
-    column: { id: string; columnDef: { header?: unknown } };
-    getSize: () => number;
-}
-
-interface EditDataTanStackTable {
-    getRowModel: () => { rows: EditDataTanStackRow[] };
-    getHeaderGroups: () => Array<{ headers: EditDataTanStackHeader[] }>;
-}
-
-let nextInsertId = -1;
-let tanTable: EditDataTanStackTable | null = null;
-let rowVirtualizer: Virtualizer<HTMLDivElement, Element> | null = null;
-
-const tableData: EditDataTableState = {
-    original: [],
-    working: [],
-    columns: [],
-    metadata: null,
-};
-
-const changes: TrackedChanges = {
-    updates: {},
-    deletes: new Set(),
-    inserts: [],
-};
-
-function resetChanges(): void {
-    changes.updates = {};
-    changes.deletes = new Set();
-    changes.inserts = [];
-}
-
-// Initialize
 window.addEventListener('message', event => {
-    const message = asHostMessage(event.data);
+    const message: HostMessage = asHostMessage(event.data);
     switch (message.command) {
         case 'setData':
-            initData(message.data, message.columns, message.metadata);
+            initData(message.data, message.columns, message.metadata, message.info);
             break;
         case 'setLoading':
             setLoading(message.loading, message.message);
@@ -85,649 +55,379 @@ window.addEventListener('message', event => {
         case 'setError':
             showError(message.text);
             break;
+        case 'saveFailed':
+            setLoading(false);
+            showError(`Changes were not saved: ${message.text}`);
+            break;
+        case 'sqlPreview':
+            pendingPreview?.(message.statements, message.error);
+            pendingPreview = null;
+            break;
+        case 'setDdl':
+            ddlText = message.ddl ?? null;
+            renderDdl(message.ddl, message.error);
+            break;
     }
 });
 
-document.addEventListener('DOMContentLoaded', () => {
-    const filterWhere = getElementById<HTMLInputElement>('filterWhere');
-    const filterColumns = getElementById<HTMLInputElement>('filterColumns');
-    const refreshBtn = getElementById<HTMLButtonElement>('refreshBtn');
-    const saveBtn = getElementById<HTMLButtonElement>('saveBtn');
-    const addRowBtn = getElementById<HTMLButtonElement>('addRowBtn');
-    const closeBtn = getElementById<HTMLButtonElement>('closeBtn');
-
-    const triggerRefresh = () => {
-        if (hasUnsavedChanges() && !confirm('You have unsaved changes. Discard them?')) {
-            return;
-        }
-
-        postToHost({
-            command: 'refresh',
-            whereClause: filterWhere?.value ?? '',
-            columns: filterColumns?.value ?? ''
-        });
+function readFilter() {
+    return {
+        whereClause: getElementById<HTMLInputElement>('filterWhere')?.value.trim() ?? '',
+        orderBy: getElementById<HTMLInputElement>('filterOrderBy')?.value.trim() ?? '',
+        columns: getElementById<HTMLInputElement>('filterColumns')?.value.trim() ?? '',
     };
+}
 
-    if (refreshBtn) refreshBtn.onclick = triggerRefresh;
+async function confirmDiscard(action: string): Promise<boolean> {
+    if (!hasPendingChanges(editorState)) return true;
+    const summary = summarizeChanges(editorState);
+    return confirmDialog({
+        title: 'Discard pending changes?',
+        message: `${summary.total} pending change${summary.total === 1 ? '' : 's'} will be lost if you ${action}.`,
+        confirmLabel: 'Discard changes',
+        danger: true,
+    });
+}
 
-    [filterWhere, filterColumns].forEach(el => {
-        if (el) {
-            el.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') triggerRefresh();
+async function refresh(): Promise<void> {
+    if (loading) return;
+    if (!(await confirmDiscard('reload the data'))) return;
+    post({ command: 'refresh', ...readFilter() });
+}
+
+function submit(): void {
+    if (loading) return;
+    grid?.commitEdit();
+    if (!hasPendingChanges(editorState)) {
+        post({ command: 'info', text: 'No changes to save.' });
+        return;
+    }
+    hideError();
+    setLoading(true, 'Saving changes…');
+    post({ command: 'save', changes: buildChanges(editorState), ...appliedFilter });
+}
+
+async function previewSql(): Promise<void> {
+    grid?.commitEdit();
+    if (!hasPendingChanges(editorState)) {
+        post({ command: 'info', text: 'No pending changes to preview.' });
+        return;
+    }
+    const result = await new Promise<{ statements: string[]; error?: string }>(resolve => {
+        pendingPreview = (statements, error) => resolve({ statements, error });
+        post({ command: 'previewSql', changes: buildChanges(editorState) });
+    });
+    if (result.error) {
+        showError(result.error);
+        return;
+    }
+    const sql = ['BEGIN;', ...result.statements.map(s => `${s};`), 'COMMIT;'].join('\n');
+    const choice = await showDialog({
+        title: `Pending changes · ${result.statements.length} statement${result.statements.length === 1 ? '' : 's'}`,
+        bodyHtml: `<p class="dialog__message">Submit runs these statements in a single transaction on <strong>${escapeHtml(loadInfo?.connectionName ?? '')}</strong>.</p>${renderCodeBlock(sql)}`,
+        buttons: [
+            { id: 'copy', label: 'Copy' },
+            { id: 'open', label: 'Open in editor' },
+            { id: 'cancel', label: 'Close' },
+            { id: 'submit', label: 'Submit', kind: 'primary' },
+        ],
+        cancelId: 'cancel',
+        wide: true,
+    });
+    if (choice === 'copy') post({ command: 'copyText', text: sql });
+    else if (choice === 'open') post({ command: 'openSqlInEditor', sql });
+    else if (choice === 'submit') submit();
+}
+
+async function revertAllChanges(): Promise<void> {
+    if (!hasPendingChanges(editorState)) return;
+    const ok = await confirmDialog({
+        title: 'Revert all pending changes?',
+        message: 'Edited values, inserted rows and deletions that have not been submitted will be discarded.',
+        confirmLabel: 'Revert all',
+        danger: true,
+    });
+    if (!ok) return;
+    revertAll(editorState);
+    grid?.setState(editorState);
+    updateChrome();
+}
+
+async function closePanel(): Promise<void> {
+    if (!(await confirmDiscard('close the editor'))) return;
+    post({ command: 'closePanel' });
+}
+
+function applyFilterFromValue(column: GridColumn, value: unknown): void {
+    const identifier = /^[A-Za-z_][A-Za-z0-9_]*$/.test(column.name) ? column.name : `"${column.name.replace(/"/g, '""')}"`;
+    const predicate = buildValuePredicate(column, value, identifier);
+    const where = getElementById<HTMLInputElement>('filterWhere');
+    if (!where) return;
+    const current = where.value.trim();
+    where.value = current ? `(${current}) AND ${predicate}` : predicate;
+    void refresh();
+}
+
+async function openValueEditor(column: GridColumn, value: unknown): Promise<string | null | undefined> {
+    const text = value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+    let textarea: HTMLTextAreaElement | null = null;
+    const choice = await showDialog({
+        title: `${column.name}${column.type ? ` · ${column.type}` : ''}`,
+        bodyHtml: `<textarea class="value-editor" spellcheck="false" ${column.readonly ? 'readonly' : ''}>${escapeHtml(text)}</textarea>`,
+        buttons: column.readonly
+            ? [{ id: 'cancel', label: 'Close' }]
+            : [
+                { id: 'null', label: 'Set NULL' },
+                { id: 'cancel', label: 'Cancel' },
+                { id: 'apply', label: 'Apply', kind: 'primary' },
+            ],
+        cancelId: 'cancel',
+        wide: true,
+        onRender: root => {
+            textarea = root.querySelector('textarea');
+            setTimeout(() => textarea?.focus(), 0);
+            textarea?.addEventListener('keydown', event => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    root.querySelector<HTMLButtonElement>('[data-dialog-button="apply"]')?.click();
+                }
             });
-        }
+        },
     });
+    if (choice === 'apply') return (textarea as HTMLTextAreaElement | null)?.value ?? text;
+    if (choice === 'null') return null;
+    return undefined;
+}
 
-    if (saveBtn) saveBtn.onclick = () => {
-        saveChanges();
-    };
-
-    if (addRowBtn) addRowBtn.onclick = () => {
-        addNewRow();
-    };
-
-    if (closeBtn) closeBtn.onclick = () => {
-        if (hasUnsavedChanges() && !confirm('You have unsaved changes. Close and discard them?')) {
-            return;
-        }
-        postToHost({ command: 'closePanel' });
-    };
-
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            const htmlTab = tab as HTMLElement;
-            setActiveTab(htmlTab.dataset.target);
+document.addEventListener('DOMContentLoaded', () => {
+    const container = getElementById('gridContainer');
+    if (container) {
+        grid = new DataGrid(container, {
+            onChange: updateChrome,
+            onSelectionChange: updateSelectionStatus,
+            onFilterByValue: applyFilterFromValue,
+            onOpenValueEditor: openValueEditor,
+            copyText: text => post({ command: 'copyText', text }),
         });
+    }
+
+    const on = (id: string, handler: () => void) => getElementById(id)?.addEventListener('click', handler);
+    on('refreshBtn', () => void refresh());
+    on('saveBtn', submit);
+    on('addRowBtn', () => grid?.addRow());
+    on('duplicateRowBtn', () => grid?.duplicateSelected());
+    on('deleteRowBtn', () => grid?.deleteSelected());
+    on('revertBtn', () => void revertAllChanges());
+    on('previewSqlBtn', () => void previewSql());
+    on('closeBtn', () => void closePanel());
+    on('clearFilterBtn', () => {
+        ['filterWhere', 'filterOrderBy', 'filterColumns'].forEach(id => {
+            const input = getElementById<HTMLInputElement>(id);
+            if (input) input.value = '';
+        });
+        void refresh();
     });
+    on('ddlRefreshBtn', () => requestDdl(true));
+    on('ddlCopyBtn', () => { if (ddlText) post({ command: 'copyText', text: ddlText }); });
+    on('ddlOpenBtn', () => { if (ddlText) post({ command: 'openSqlInEditor', sql: ddlText }); });
+
+    ['filterWhere', 'filterOrderBy', 'filterColumns'].forEach(id => {
+        const input = getElementById<HTMLInputElement>(id);
+        input?.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                void refresh();
+            } else if (event.key === 'Escape') {
+                input.value = appliedFilter[id === 'filterWhere' ? 'whereClause' : id === 'filterOrderBy' ? 'orderBy' : 'columns'];
+                updateFilterState();
+                grid?.focus();
+            }
+        });
+        input?.addEventListener('input', updateFilterState);
+    });
+
+    document.querySelectorAll<HTMLElement>('.tab').forEach(tab => {
+        tab.addEventListener('click', () => setActiveTab(tab.dataset.target));
+    });
+
+    document.addEventListener('keydown', event => {
+        if (isDialogOpen()) return;
+        const ctrl = event.ctrlKey || event.metaKey;
+        const inDataTab = getElementById('tab-data')?.classList.contains('active');
+        if (event.key === 'F5') {
+            event.preventDefault();
+            if (inDataTab) void refresh();
+            else if (getElementById('tab-ddl')?.classList.contains('active')) requestDdl(true);
+        } else if (ctrl && (event.key === 's' || event.key === 'S') && inDataTab) {
+            event.preventDefault();
+            submit();
+        } else if (event.altKey && event.key === 'Insert' && inDataTab) {
+            event.preventDefault();
+            grid?.addRow();
+        } else if (ctrl && !event.altKey && (event.key === 'd' || event.key === 'D') && inDataTab) {
+            event.preventDefault();
+            grid?.duplicateSelected();
+        }
+    });
+
+    updateChrome();
 });
 
 function setActiveTab(tabId: string | undefined): void {
     if (!tabId) return;
-    document.querySelectorAll('.tab').forEach(t => {
-        const htmlTab = t as HTMLElement;
-        if (htmlTab.dataset.target === tabId) htmlTab.classList.add('active');
-        else htmlTab.classList.remove('active');
+    document.querySelectorAll<HTMLElement>('.tab').forEach(tab => {
+        const active = tab.dataset.target === tabId;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
     });
+    document.querySelectorAll<HTMLElement>('.tab-content').forEach(content => {
+        content.classList.toggle('active', content.id === tabId);
+    });
+    if (tabId === 'tab-ddl') requestDdl(false);
+    if (tabId === 'tab-data') grid?.focus();
+}
 
-    document.querySelectorAll('.tab-content').forEach(c => {
-        const content = c as HTMLElement;
-        if (content.id === tabId) content.classList.add('active');
-        else content.classList.remove('active');
+function requestDdl(force: boolean): void {
+    if (ddlRequested && !force) return;
+    ddlRequested = true;
+    const content = getElementById('ddlContent');
+    if (content) content.innerHTML = '<div class="empty-state"><span class="spinner"></span>Generating DDL…</div>';
+    post({ command: 'requestDdl' });
+}
+
+function renderDdl(ddl: string | undefined, error: string | undefined): void {
+    const content = getElementById('ddlContent');
+    if (!content) return;
+    (['ddlCopyBtn', 'ddlOpenBtn'] as const).forEach(id => {
+        const button = getElementById<HTMLButtonElement>(id);
+        if (button) button.disabled = !ddl;
     });
+    if (error || !ddl) {
+        content.innerHTML = `<div class="empty-state empty-state--error">${escapeHtml(error || 'DDL is not available.')}</div>`;
+        return;
+    }
+    content.innerHTML = renderCodeBlock(ddl.trim());
 }
 
 function setLoading(isLoading: boolean, message?: string): void {
+    loading = isLoading;
+    document.body.classList.toggle('is-loading', isLoading);
     const status = getElementById('status');
-    if (!status) return;
-
-    if (message) {
-        status.textContent = message;
-    } else {
-        status.textContent = isLoading ? 'Loading...' : (tableData.working ? `${tableData.working.length} rows` : '');
+    if (status) {
+        status.innerHTML = isLoading ? `<span class="spinner"></span>${escapeHtml(message || 'Loading…')}` : '';
     }
-
-    document.querySelectorAll('button').forEach(b => {
-        (b as HTMLButtonElement).disabled = isLoading;
-    });
+    updateChrome();
 }
 
-function showError(msg: string): void {
-    const container = getElementById('gridContainer');
-    if (!container) return;
+function showError(message: string): void {
+    const banner = getElementById('errorBanner');
+    if (!banner) return;
+    banner.innerHTML = `<span class="error-banner__text">${escapeHtml(message)}</span><button type="button" class="icon-only ghost" title="Dismiss"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>`;
+    banner.hidden = false;
+    banner.querySelector('button')?.addEventListener('click', hideError);
+}
 
-    // Preserve already-loaded rows and surface the failure as a dismissible
-    // banner so a transient load error does not discard the working grid.
-    const hasData = tableData.columns.length > 0 || tableData.working.length > 0;
-    if (!hasData) {
-        container.innerHTML = `<div style="color: var(--vscode-errorForeground); padding: 20px;">Error: ${msg}</div>`;
-        return;
+function hideError(): void {
+    const banner = getElementById('errorBanner');
+    if (banner) {
+        banner.hidden = true;
+        banner.innerHTML = '';
     }
-
-    let banner = document.getElementById('editDataErrorBanner');
-    if (!banner) {
-        banner = document.createElement('div');
-        banner.id = 'editDataErrorBanner';
-        banner.style.cssText = 'color: var(--vscode-errorForeground); padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);';
-        container.prepend(banner);
-    }
-    banner.textContent = `Error: ${msg}`;
 }
 
 function initData(
     data: EditDataRow[],
     columns: string[],
-    metadata: EditDataMetadata | null,
+    nextMetadata: EditDataMetadata | null,
+    info: EditDataLoadInfo | undefined,
 ): void {
-    console.log('[editDataPanel] initData received:', { dataRows: data ? data.length : 0, columns: columns ? columns.length : 0, metadata: !!metadata });
-    console.log('[editDataPanel] Sample data (first row):', data && data[0] ? JSON.stringify(data[0]).substring(0, 200) : 'none');
+    metadata = nextMetadata;
+    loadInfo = info ?? loadInfo;
+    appliedFilter = readFilter();
+    editorState = createState(data || [], columns || [], metadata?.columns);
+    hideError();
 
-    tableData.original = JSON.parse(JSON.stringify(data));
-    tableData.working = JSON.parse(JSON.stringify(data));
-    tableData.columns = columns;
-    tableData.metadata = metadata;
+    const hasFilter = Boolean(appliedFilter.whereClause);
+    grid?.setState(editorState, hasFilter
+        ? 'No rows match the WHERE filter.'
+        : 'This table is empty. Use Add row (Alt+Insert) to insert one.');
 
-    document.getElementById('editDataErrorBanner')?.remove();
-    resetChanges();
-    nextInsertId = -1;
-
-    renderMetadataPanel();
-    renderTable();
-    setLoading(false);
+    const structure = getElementById('metadataContent');
+    if (structure) {
+        renderStructure(structure, metadata, post, showError);
+    }
+    updateFilterState();
+    updateChrome();
 }
 
-function hasUnsavedChanges() {
-    return Object.keys(changes.updates).length > 0 ||
-        changes.deletes.size > 0 ||
-        changes.inserts.length > 0;
-}
-
-// --- Metadata Panel ---
-function renderMetadataPanel(): void {
-    const container = getElementById('metadataContent');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    if (!tableData.metadata) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <span>No metadata available</span>
-            </div>
-        `;
-        return;
-    }
-
-    const { tableComment, columns } = tableData.metadata;
-
-    // 1. Table Comment Card
-    const commentCard = document.createElement('div');
-    commentCard.className = 'metadata-card';
-    commentCard.innerHTML = `
-        <div class="metadata-card-header">
-            <h3>Table Description</h3>
-            <button id="saveTableCommentBtn" class="small-btn primary">Save</button>
-        </div>
-        <div class="metadata-card-body">
-            <textarea id="tableCommentBox" class="comment-box" placeholder="Add a description for this table...">${escapeHtml(tableComment || '')}</textarea>
-        </div>
-    `;
-    container.appendChild(commentCard);
-
-    const saveTableCommentBtn = getElementById<HTMLButtonElement>('saveTableCommentBtn');
-    const tableCommentBox = getElementById<HTMLTextAreaElement>('tableCommentBox');
-    if (saveTableCommentBtn) {
-        saveTableCommentBtn.onclick = () => {
-            postToHost({ command: 'updateTableComment', comment: tableCommentBox?.value ?? '' });
-        };
-    }
-
-    // 2. Columns Card
-    const columnsCard = document.createElement('div');
-    columnsCard.className = 'metadata-card';
-
-    const columnRows = columns.map(col => {
-        const keyIndicators: string[] = [];
-        if (col.IS_PK == 1) keyIndicators.push('<span class="key-badge pk" title="Primary Key">PK</span>');
-        if (col.IS_FK == 1) keyIndicators.push('<span class="key-badge fk" title="Foreign Key">FK</span>');
-        const keyCell = keyIndicators.length > 0 ? keyIndicators.join(' ') : '<span class="no-default">—</span>';
-
-        const nullIndicator = col.IS_NOT_NULL == 1
-            ? '<span class="nn-flag required" title="NOT NULL">NN</span>'
-            : '<span class="nn-flag nullable" title="Nullable">—</span>';
-
-        const defaultVal = col.COLDEFAULT
-            ? `<span class="default-value">${escapeHtml(col.COLDEFAULT)}</span>`
-            : '<span class="no-default">—</span>';
-
-        return `
-            <tr>
-                <td class="center">${keyCell}</td>
-                <td class="col-name">${escapeHtml(col.ATTNAME)}</td>
-                <td><span class="type-badge">${escapeHtml(col.FORMAT_TYPE)}</span></td>
-                <td class="center">${nullIndicator}</td>
-                <td>${defaultVal}</td>
-                <td class="comment-cell">
-                    <input type="text" 
-                        class="inline-edit col-comment" 
-                        data-col="${escapeHtml(col.ATTNAME)}" 
-                        value="${escapeHtml(col.DESCRIPTION || '')}" 
-                        placeholder="Add comment..."
-                    >
-                </td>
-                <td class="center">
-                    <button class="icon-btn delete-col-btn" data-col="${escapeHtml(col.ATTNAME)}" title="Drop Column">×</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
-
-    columnsCard.innerHTML = `
-        <div class="metadata-card-header">
-            <h3>Columns <span class="count">${columns.length}</span></h3>
-        </div>
-        <div class="metadata-grid-container">
-            <table class="metadata-table">
-                <thead>
-                    <tr>
-                        <th class="center" style="width:60px;">Key</th>
-                        <th style="width:180px;">Column Name</th>
-                        <th style="width:140px;">Type</th>
-                        <th class="center" style="width:50px;">NN</th>
-                        <th style="width:120px;">Default</th>
-                        <th style="min-width:200px;">Comment</th>
-                        <th style="width:40px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${columnRows}
-                </tbody>
-            </table>
-        </div>
-    `;
-
-    container.appendChild(columnsCard);
-
-    // Bind Metadata Events - Comment updates
-    container.querySelectorAll('.col-comment').forEach(input => {
-        const htmlInput = input as HTMLInputElement;
-        htmlInput.onblur = () => {
-            const colName = htmlInput.dataset.col;
-            const newComment = htmlInput.value;
-            const original = columns.find(c => c.ATTNAME === colName);
-            if (original && colName && (original.DESCRIPTION || '') !== newComment) {
-                postToHost({ command: 'updateColumnComment', column: colName, comment: newComment });
-            }
-        };
-        htmlInput.onkeydown = (e) => {
-            if (e.key === 'Enter') htmlInput.blur();
-        };
-    });
-
-    container.querySelectorAll('.delete-col-btn').forEach(btn => {
-        const htmlBtn = btn as HTMLButtonElement;
-        htmlBtn.onclick = () => {
-            const colName = htmlBtn.dataset.col;
-            if (colName && confirm(`Are you sure you want to DROP column "${colName}"? This cannot be undone.`)) {
-                postToHost({ command: 'dropColumn', column: colName });
-            }
-        };
-    });
-
-    // 3. Add Column Card
-    const addCard = document.createElement('div');
-    addCard.className = 'add-column-form';
-    addCard.innerHTML = `
-        <span class="form-label">Add Column</span>
-        <input type="text" id="newColName" class="form-input" placeholder="Column name" style="width:140px;">
-        <input type="text" id="newColType" class="form-input" placeholder="Type (e.g. INTEGER)" style="width:160px;">
-        <button id="addColBtn" class="primary">Add Column</button>
-    `;
-    container.appendChild(addCard);
-
-    const addColBtn = getElementById<HTMLButtonElement>('addColBtn');
-    const newColName = getElementById<HTMLInputElement>('newColName');
-    const newColType = getElementById<HTMLInputElement>('newColType');
-    if (addColBtn) {
-        addColBtn.onclick = () => {
-            const name = newColName?.value ?? '';
-            const type = newColType?.value ?? '';
-            if (!name || !type) {
-                showError("Column Name and Type are required.");
-                return;
-            }
-            postToHost({ command: 'addColumn', name, type });
-        };
-    }
-}
-
-// --- Main Data Table ---
-
-function renderTable(): void {
-    console.log('[editDataPanel] renderTable called. tableData.working:', tableData.working ? tableData.working.length : 'null');
-    console.log('[editDataPanel] tableData.columns:', tableData.columns);
-
-    const container = getElementById('gridContainer');
-    console.log('[editDataPanel] gridContainer found:', !!container);
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    if (!tableData.working || tableData.working.length === 0) {
-        container.innerHTML = '<div class="empty-state">No data in table or loading failed</div>';
-        console.log('[editDataPanel] renderTable: No working data, showing empty state');
-        return;
-    }
-
-    console.log('[editDataPanel] renderTable: Libraries loaded, building table...');
-
-    const columnDefs = [
-        {
-            id: '__actions',
-            header: '',
-            size: 40,
-            cell: (info: TanStackCellContext) => {
-                const row = info.row.original as EditDataRow;
-                const btn = document.createElement('span');
-                btn.className = 'delete-btn';
-                btn.textContent = '×';
-                btn.title = 'Delete Row';
-                btn.onclick = (e) => {
-                    e.stopPropagation();
-                    toggleDeleteRow(row);
-                };
-                return btn;
-            }
-        },
-        ...tableData.columns.map(col => ({
-            accessorKey: col,
-            header: col,
-            cell: (info: TanStackCellContext) => {
-                const value = info.getValue();
-                const row = info.row.original as EditDataRow;
-                const rowId = row.ROWID ?? row.__tempId;
-                const isReadOnly = col === 'ROWID';
-
-                if (isReadOnly) {
-                    return `<span class="readonly-val">${value !== null && value !== undefined ? value : 'NULL'}</span>`;
-                }
-
-                const input = document.createElement('input');
-                input.value = value !== null && value !== undefined ? String(value) : '';
-                input.placeholder = 'NULL';
-
-                input.onblur = () => {
-                    if (isReadOnly || rowId === undefined) return;
-                    const newValue = input.value;
-                    updateCell(rowId, col, newValue, value);
-
-                    const parentTd = input.parentElement;
-                    if (parentTd) {
-                        if (isModified(rowId, col)) {
-                            parentTd.classList.add('cell-modified');
-                        } else {
-                            parentTd.classList.remove('cell-modified');
-                        }
-                    }
-                };
-                return input;
-            }
-        }))
+function updateFilterState(): void {
+    const current = readFilter();
+    const hasAny = Boolean(current.whereClause || current.orderBy || current.columns
+        || appliedFilter.whereClause || appliedFilter.orderBy || appliedFilter.columns);
+    const clear = getElementById('clearFilterBtn');
+    if (clear) clear.hidden = !hasAny;
+    const fields: [string, keyof typeof current][] = [
+        ['filterWhere', 'whereClause'], ['filterOrderBy', 'orderBy'], ['filterColumns', 'columns'],
     ];
-
-    try {
-        tanTable = TableCore.constructTable({
-            features: TableCore.webviewFeatures,
-            data: tableData.working,
-            columns: columnDefs,
-            defaultColumn: {
-                size: 150,
-                minSize: 50,
-                maxSize: 500
-            },
-            state: {
-                columnPinning: { start: [], end: [] },
-                columnSizing: { __actions: 40 },
-            },
-        }) as EditDataTanStackTable;
-        console.log('[editDataPanel] TanStack Table created successfully');
-
-        // Initialize Virtualizer
-        // wrapper is created below, so we need to move wrapper creation up or do this after wrapper creation
-    } catch (e) {
-        console.error('[editDataPanel] Error creating TanStack Table:', e);
-        const message = e instanceof Error ? e.message : String(e);
-        container.innerHTML = '<div class="empty-state">Error creating table: ' + message + '</div>';
-        return;
-    }
-
-    const wrapper = document.createElement('div');
-    wrapper.style.height = '100%';
-    wrapper.style.overflow = 'auto';
-    wrapper.style.position = 'relative';
-    container.appendChild(wrapper);
-
-    if (!tanTable) {
-        return;
-    }
-
-    // Create Virtualizer
-    try {
-        const { rows } = tanTable.getRowModel();
-        rowVirtualizer = new Virtualizer({
-            count: rows.length,
-            getScrollElement: () => wrapper,
-            estimateSize: () => 35, // Default row height
-            overscan: 5,
-            scrollToFn: elementScroll,
-            observeElementRect: observeElementRect,
-            observeElementOffset: observeElementOffset,
-            onChange: () => {
-                renderRows(tbody, rows);
-            }
-        });
-        rowVirtualizer._didMount();
-        rowVirtualizer._willUpdate();
-    } catch (e) {
-        console.error('[editDataPanel] Error creating Virtualizer:', e);
-    }
-
-    const tableEl = document.createElement('table');
-    const thead = document.createElement('thead');
-    const tbody = document.createElement('tbody');
-    tableEl.appendChild(thead);
-    tableEl.appendChild(tbody);
-    wrapper.appendChild(tableEl);
-
-    if (!tanTable) {
-        return;
-    }
-
-    // Render header
-    tanTable.getHeaderGroups().forEach((headerGroup) => {
-        const tr = document.createElement('tr');
-        headerGroup.headers.forEach((header) => {
-            const th = document.createElement('th');
-            th.textContent = typeof header.column.columnDef.header === 'string'
-                ? header.column.columnDef.header
-                : '';
-            th.style.width = `${header.getSize()}px`;
-
-            if (tableData.metadata) {
-                const colMeta = tableData.metadata.columns.find(c => c.ATTNAME === header.column.id);
-                if (colMeta) {
-                    if (colMeta.IS_PK == 1) th.textContent = '🔑 ' + th.textContent;
-                    if (colMeta.IS_FK == 1) th.textContent = '🔗 ' + th.textContent;
-                    th.title = colMeta.DESCRIPTION || '';
-                }
-            }
-            tr.appendChild(th);
-        });
-        thead.appendChild(tr);
+    fields.forEach(([id, key]) => {
+        const input = getElementById<HTMLInputElement>(id);
+        const field = input?.closest('.filter-field');
+        field?.classList.toggle('is-dirty', current[key] !== appliedFilter[key]);
+        field?.classList.toggle('is-applied', Boolean(appliedFilter[key]) && current[key] === appliedFilter[key]);
     });
-    console.log('[editDataPanel] Header rendered');
-
-    const { rows } = tanTable.getRowModel();
-    console.log('[editDataPanel] Row model rows:', rows.length);
-
-    // Initial render
-    renderRows(tbody, rows);
-
-    // Re-render on scroll - handled by Virtualizer onChange
-    // wrapper.addEventListener('scroll', () => {
-    //    renderRows(tbody, rows);
-    // });
 }
 
-function renderRows(tbody: HTMLElement, rows: EditDataTanStackRow[]): void {
-    if (!rowVirtualizer) return;
-
-    tbody.innerHTML = '';
-
-    const virtualRows = rowVirtualizer.getVirtualItems();
-    if (virtualRows.length === 0) return;
-
-    const padTop = virtualRows[0].start;
-    const totalHeight = rowVirtualizer.getTotalSize();
-    const padBottom = totalHeight - virtualRows[virtualRows.length - 1].end;
-
-    if (padTop > 0) {
-        const tr = document.createElement('tr');
-        tr.style.height = `${padTop}px`;
-        tbody.appendChild(tr);
-    }
-
-    virtualRows.forEach((virtualRow) => {
-        const row = rows[virtualRow.index];
-        if (!row) return;
-        const tr = document.createElement('tr');
-        tr.dataset.index = String(virtualRow.index);
-        tr.style.height = `${virtualRow.size}px`;
-
-        const rowData = row.original;
-        const rowId = rowData.ROWID ?? rowData.__tempId;
-
-        if (rowId !== undefined && changes.deletes.has(rowId)) tr.classList.add('row-deleted');
-        if (!rowData.ROWID) tr.classList.add('row-new');
-
-        row.getVisibleCells().forEach((cell) => {
-            const td = document.createElement('td');
-            if (rowId !== undefined && isModified(rowId, cell.column.id)) td.classList.add('cell-modified');
-            if (cell.column.id === 'ROWID') td.classList.add('readonly');
-
-            const cellRenderer = cell.column.columnDef.cell;
-            if (typeof cellRenderer !== 'function') {
-                tr.appendChild(td);
-                return;
-            }
-            const content = cellRenderer(cell.getContext());
-            if (content instanceof Node) {
-                td.appendChild(content);
-            } else {
-                td.innerHTML = content;
-            }
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-    });
-
-    if (padBottom > 0) {
-        const tr = document.createElement('tr');
-        tr.style.height = `${padBottom}px`;
-        tbody.appendChild(tr);
-    }
+function setDisabled(id: string, disabled: boolean): void {
+    const button = getElementById<HTMLButtonElement>(id);
+    if (button) button.disabled = disabled;
 }
 
-function updateCell(
-    rowId: string | number,
-    col: string,
-    newValue: unknown,
-    originalValue: unknown,
-): void {
-    if (col === 'ROWID' || col === '__actions') return;
+function updateChrome(): void {
+    const summary = summarizeChanges(editorState);
+    const pending = summary.total > 0;
+    const hasRows = (grid?.rowCount() ?? 0) > 0;
+    const hasColumns = editorState.columns.some(c => !c.readonly);
 
-    const row = tableData.working.find(r => (r.ROWID || r.__tempId) == rowId);
-    if (!row) return;
+    setDisabled('refreshBtn', loading);
+    setDisabled('addRowBtn', loading || !hasColumns);
+    setDisabled('duplicateRowBtn', loading || !hasRows);
+    setDisabled('deleteRowBtn', loading || !hasRows);
+    setDisabled('revertBtn', loading || !pending);
+    setDisabled('previewSqlBtn', loading || !pending);
+    setDisabled('saveBtn', loading || !pending);
 
-    row[col] = newValue;
+    const badge = getElementById('pendingCount');
+    if (badge) {
+        badge.hidden = !pending;
+        badge.textContent = String(summary.total);
+    }
+    document.body.classList.toggle('has-pending', pending);
 
-    if (!row.ROWID) {
-        const insertObj = changes.inserts.find(i => i.__tempId == rowId);
-        if (insertObj) {
-            insertObj[col] = newValue;
+    const left = getElementById('statusLeft');
+    if (left) {
+        const loaded = editorState.loadOrder.length - summary.inserted;
+        const parts: string[] = [`<strong>${formatCount(loaded)}</strong> row${loaded === 1 ? '' : 's'}`];
+        if (loadInfo && loaded >= loadInfo.rowLimit) {
+            parts.push(`<span class="status-warn" title="Only the first ${formatCount(loadInfo.rowLimit)} rows are loaded. Narrow the WHERE filter to reach the rest.">limit ${formatCount(loadInfo.rowLimit)} reached</span>`);
         }
-        return;
-    }
-
-    if (!changes.updates[rowId]) {
-        changes.updates[rowId] = { rowId, changes: {} };
-    }
-
-    const originalRow = tableData.original.find(r => r.ROWID == rowId);
-    const origVal = originalRow ? originalRow[col] : null;
-
-    const valEq = (a: unknown, b: unknown): boolean => {
-        if (a === b) return true;
-        if ((a === null || a === '') && (b === null || b === '')) return true;
-        return String(a) === String(b);
-    };
-
-    if (!valEq(newValue, origVal)) {
-        changes.updates[rowId].changes[col] = newValue;
-    } else {
-        delete changes.updates[rowId].changes[col];
-        if (Object.keys(changes.updates[rowId].changes).length === 0) {
-            delete changes.updates[rowId];
+        if (loadInfo) parts.push(`${formatCount(loadInfo.elapsedMs)} ms`);
+        if (editorState.sort) parts.push(`sorted by ${escapeHtml(editorState.sort.column)} ${editorState.sort.direction === 'asc' ? '▲' : '▼'} (loaded rows)`);
+        if (pending) {
+            const chips: string[] = [];
+            if (summary.modifiedRows) chips.push(`<span class="chip chip--modified">${summary.modifiedRows} updated</span>`);
+            if (summary.inserted) chips.push(`<span class="chip chip--new">${summary.inserted} inserted</span>`);
+            if (summary.deleted) chips.push(`<span class="chip chip--deleted">${summary.deleted} deleted</span>`);
+            parts.push(chips.join(''));
         }
+        left.innerHTML = parts.join('<span class="sep">·</span>');
     }
+    updateSelectionStatus();
 }
 
-function isModified(rowId: string | number | undefined, col: string): boolean {
-    if (!rowId) return false;
-    if (changes.updates[rowId] && changes.updates[rowId].changes[col] !== undefined) {
-        return true;
-    }
-    return false;
-}
-
-function toggleDeleteRow(row: EditDataRow): void {
-    const rowId = row.ROWID ?? row.__tempId;
-    if (rowId === undefined || rowId === null) {
-        return;
-    }
-
-    if (!row.ROWID) {
-        const idx = tableData.working.findIndex(r => r.__tempId == rowId);
-        if (idx !== -1) tableData.working.splice(idx, 1);
-        const insIdx = changes.inserts.findIndex(i => i.__tempId == rowId);
-        if (insIdx !== -1) changes.inserts.splice(insIdx, 1);
-        renderTable();
-        return;
-    }
-
-    if (changes.deletes.has(rowId)) {
-        changes.deletes.delete(rowId);
-    } else {
-        changes.deletes.add(rowId);
-    }
-    renderTable();
-}
-
-function addNewRow(): void {
-    const tempId = nextInsertId--;
-    const newRow: EditDataRow = { __tempId: tempId };
-    tableData.columns.forEach(c => {
-        if (c !== 'ROWID') newRow[c] = null;
-    });
-
-    tableData.working.unshift(newRow);
-    changes.inserts.push(newRow);
-    renderTable();
-}
-
-function saveChanges() {
-    /** @type {EditDataChanges} */
-    const payload = {
-        updates: Object.values(changes.updates),
-        deletes: Array.from(changes.deletes),
-        inserts: changes.inserts.map(i => {
-            const { __tempId, ...rest } = i;
-            return rest;
-        })
-    };
-
-    if (payload.updates.length === 0 && payload.deletes.length === 0 && payload.inserts.length === 0) {
-        postToHost({ command: 'info', text: 'No changes to save.' });
-        return;
-    }
-
-    // Include current filter state so after save we can reapply same filters
-    const filterWhere = getElementById<HTMLInputElement>('filterWhere');
-    const filterColumns = getElementById<HTMLInputElement>('filterColumns');
-
-    postToHost({
-        command: 'save',
-        changes: payload,
-        whereClause: filterWhere?.value ?? '',
-        columns: filterColumns?.value ?? ''
-    });
+function updateSelectionStatus(): void {
+    const right = getElementById('statusRight');
+    if (right) right.innerHTML = grid?.describeActive() ?? '';
+    const hasSelection = (grid?.getSelectedKeys().length ?? 0) > 0;
+    setDisabled('duplicateRowBtn', loading || !hasSelection);
+    setDisabled('deleteRowBtn', loading || !hasSelection);
 }

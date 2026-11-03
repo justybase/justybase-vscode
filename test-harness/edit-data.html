@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Data Panel Harness</title>
+    <style>
+        @font-face { font-family: 'JetBrains Mono'; src: url('/media/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; }
+        @font-face { font-family: 'JetBrains Mono'; src: url('/media/fonts/JetBrainsMono-Medium.woff2') format('woff2'); font-weight: 500; }
+        @font-face { font-family: 'JetBrains Mono'; src: url('/media/fonts/JetBrainsMono-Bold.woff2') format('woff2'); font-weight: 700; }
+        /* VS Code Dark Modern theme variable stubs (switch with ?theme=light) */
+        :root {
+            --vscode-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            --vscode-editor-background: #1f1f1f;
+            --vscode-editor-foreground: #cccccc;
+            --vscode-foreground: #cccccc;
+            --vscode-descriptionForeground: #9d9d9d;
+            --vscode-disabledForeground: #6e6e6e;
+            --vscode-panel-border: #2b2b2b;
+            --vscode-editorGroupHeader-tabsBackground: #181818;
+            --vscode-sideBar-background: #181818;
+            --vscode-list-hoverBackground: #2a2d2e;
+            --vscode-focusBorder: #0078d4;
+            --vscode-input-background: #313131;
+            --vscode-input-foreground: #cccccc;
+            --vscode-input-border: #3c3c3c;
+            --vscode-input-placeholderForeground: #989898;
+            --vscode-button-background: #0078d4;
+            --vscode-button-foreground: #ffffff;
+            --vscode-button-hoverBackground: #026ec1;
+            --vscode-badge-background: #616161;
+            --vscode-badge-foreground: #f8f8f8;
+            --vscode-tab-activeForeground: #ffffff;
+            --vscode-tab-inactiveForeground: #9d9d9d;
+            --vscode-toolbar-hoverBackground: rgba(90, 93, 94, 0.31);
+            --vscode-errorForeground: #f85149;
+            --vscode-editorWarning-foreground: #cca700;
+            --vscode-testing-iconPassed: #73c991;
+            --vscode-menu-background: #1f1f1f;
+            --vscode-menu-foreground: #cccccc;
+            --vscode-menu-border: #454545;
+            --vscode-menu-selectionBackground: #0078d4;
+            --vscode-menu-selectionForeground: #ffffff;
+            --vscode-menu-separatorBackground: #454545;
+            --vscode-editorWidget-background: #202020;
+            --vscode-editorWidget-border: #313131;
+            --vscode-widget-shadow: rgba(0, 0, 0, 0.36);
+            --vscode-textCodeBlock-background: #2b2b2b;
+            --vscode-editorLineNumber-foreground: #6e7681;
+            --vscode-symbolIcon-keywordForeground: #569cd6;
+            --vscode-inputValidation-errorBackground: #5a1d1d;
+            --vscode-inputValidation-errorBorder: #be1100;
+        }
+        :root.vscode-light {
+            --vscode-editor-background: #ffffff;
+            --vscode-editor-foreground: #3b3b3b;
+            --vscode-foreground: #3b3b3b;
+            --vscode-descriptionForeground: #717171;
+            --vscode-disabledForeground: #a0a0a0;
+            --vscode-panel-border: #e5e5e5;
+            --vscode-editorGroupHeader-tabsBackground: #f8f8f8;
+            --vscode-sideBar-background: #f8f8f8;
+            --vscode-list-hoverBackground: #f2f2f2;
+            --vscode-focusBorder: #005fb8;
+            --vscode-input-background: #ffffff;
+            --vscode-input-foreground: #3b3b3b;
+            --vscode-input-border: #cecece;
+            --vscode-input-placeholderForeground: #767676;
+            --vscode-button-background: #005fb8;
+            --vscode-button-hoverBackground: #0258a8;
+            --vscode-badge-background: #cccccc;
+            --vscode-badge-foreground: #3b3b3b;
+            --vscode-tab-activeForeground: #3b3b3b;
+            --vscode-tab-inactiveForeground: #868686;
+            --vscode-toolbar-hoverBackground: rgba(184, 184, 184, 0.31);
+            --vscode-errorForeground: #f85149;
+            --vscode-editorWarning-foreground: #bf8803;
+            --vscode-testing-iconPassed: #388a34;
+            --vscode-menu-background: #ffffff;
+            --vscode-menu-foreground: #3b3b3b;
+            --vscode-menu-border: #cecece;
+            --vscode-menu-separatorBackground: #d4d4d4;
+            --vscode-editorWidget-background: #f8f8f8;
+            --vscode-editorWidget-border: #e5e5e5;
+            --vscode-textCodeBlock-background: #f8f8f8;
+            --vscode-editorLineNumber-foreground: #6e7681;
+            --vscode-symbolIcon-keywordForeground: #0000ff;
+            --vscode-inputValidation-errorBackground: #f2dede;
+            --vscode-inputValidation-errorBorder: #be1100;
+        }
+    </style>
+    <link rel="stylesheet" href="/media/editDataPanel.css">
+    <script>
+        // VS Code sets theme variables on <html> and the theme class on <body>.
+        var themeClass = location.search.indexOf('theme=light') >= 0 ? 'vscode-light' : 'vscode-dark';
+        document.documentElement.classList.add(themeClass);
+        document.addEventListener('DOMContentLoaded', function () {
+            document.body.classList.add(themeClass);
+        });
+        window.__posted = [];
+        window.acquireVsCodeApi = function () {
+            return {
+                postMessage: function (message) {
+                    window.__posted.push(message);
+                    var reply = function (data) { setTimeout(function () { window.postMessage(data, '*'); }, 30); };
+                    if (message.command === 'requestDdl') {
+                        reply({ command: 'setDdl', ddl: 'CREATE TABLE JUST_DATA.ADMIN.CUSTOMER_ORDERS\n(\n    CUSTOMER_ID INTEGER NOT NULL,\n    NAME VARCHAR(100) NOT NULL,\n    EMAIL VARCHAR(255),\n    BALANCE NUMERIC(12,2) DEFAULT 0,\n    CREATED_AT TIMESTAMP,\n    IS_ACTIVE BOOLEAN,\n    REGION_ID INTEGER,\n    NOTES VARCHAR(1000),\n    CONSTRAINT PK_CUSTOMER_ORDERS PRIMARY KEY (CUSTOMER_ID)\n)\nDISTRIBUTE ON (CUSTOMER_ID)\nORGANIZE ON (CREATED_AT);\n\n-- Table comment\nCOMMENT ON TABLE JUST_DATA.ADMIN.CUSTOMER_ORDERS IS \'Customer master with balances\';' });
+                    } else if (message.command === 'previewSql') {
+                        var c = message.changes, s = [];
+                        if (c.deletes && c.deletes.length) s.push('DELETE FROM JUST_DATA.ADMIN.CUSTOMER_ORDERS WHERE ROWID IN (' + c.deletes.join(', ') + ')');
+                        (c.updates || []).forEach(function (u) { s.push('UPDATE JUST_DATA.ADMIN.CUSTOMER_ORDERS SET ' + Object.keys(u.changes).map(function (k) { return k + " = '" + u.changes[k] + "'"; }).join(', ') + ' WHERE ROWID = ' + u.rowId); });
+                        (c.inserts || []).forEach(function (i) { s.push('INSERT INTO JUST_DATA.ADMIN.CUSTOMER_ORDERS (' + Object.keys(i).join(', ') + ') VALUES (' + Object.keys(i).map(function (k) { return "'" + i[k] + "'"; }).join(', ') + ')'); });
+                        reply({ command: 'sqlPreview', statements: s });
+                    }
+                },
+                setState: function () {},
+                getState: function () { return undefined; }
+            };
+        };
+    </script>
+</head>
+<body>
+    <!-- EDIT_DATA_SHELL:BEGIN (generated from renderEditDataShell, guarded by editDataPanelHarness.test.ts) -->
+<div class="main-layout">
+                <header class="panel-header">
+                    <div class="object-path" title="NZ_DEV · JUST_DATA.ADMIN.CUSTOMER_ORDERS">
+                        <span class="object-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 6.5h13M1.5 10h13M6 6.5v7"/></svg></span>
+                        <span class="object-path__muted">JUST_DATA.ADMIN.</span><span class="object-path__name">CUSTOMER_ORDERS</span>
+                        <span class="object-path__conn">NZ_DEV</span>
+                    </div>
+                    <nav class="tabs-header" role="tablist">
+                        <button class="tab active" role="tab" data-target="tab-data">Data</button>
+                        <button class="tab" role="tab" data-target="tab-metadata">Structure</button>
+                        <button class="tab" role="tab" data-target="tab-ddl">DDL</button>
+                    </nav>
+                </header>
+
+                <section id="tab-data" class="tab-content active" role="tabpanel">
+                    <div class="toolbar">
+                        <div class="toolbar-group">
+                            <button id="refreshBtn" class="icon-only" title="Refresh (F5)"><svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
+                        </div>
+                        <div class="toolbar-group">
+                            <button id="addRowBtn" class="icon-only" title="Add row (Alt+Insert)"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
+                            <button id="duplicateRowBtn" class="icon-only" title="Duplicate row (Ctrl+D)"><svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button>
+                            <button id="deleteRowBtn" class="icon-only" title="Delete selected rows (Delete)"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
+                        </div>
+                        <div class="toolbar-group">
+                            <button id="revertBtn" title="Revert all pending changes"><svg viewBox="0 0 16 16"><path d="M3.5 6.5h6a3.5 3.5 0 0 1 0 7h-3"/><path d="M6 4L3.5 6.5 6 9"/></svg><span>Revert</span></button>
+                            <button id="previewSqlBtn" title="Preview the SQL that Submit will run"><svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span>Preview</span></button>
+                            <button id="saveBtn" class="primary" title="Submit changes in one transaction (Ctrl+S)"><svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3L13 4.5"/></svg><span>Submit</span><span id="pendingCount" class="pending-count" hidden></span></button>
+                        </div>
+                        <span class="toolbar-spacer"></span>
+                        <span id="status" class="status" aria-live="polite"></span>
+                        <button id="closeBtn" class="icon-only ghost" title="Close the editor"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+                    </div>
+                    <div class="filter-bar">
+                        <label class="filter-field filter-field--where">
+                            <span class="filter-field__label">WHERE</span>
+                            <input type="text" id="filterWhere" spellcheck="false" placeholder="e.g. ID > 100 AND STATUS = 'A'" title="Server-side filter, applied with Enter">
+                        </label>
+                        <label class="filter-field filter-field--order">
+                            <span class="filter-field__label">ORDER BY</span>
+                            <input type="text" id="filterOrderBy" spellcheck="false" placeholder="ROWID" title="Server-side sort, applied with Enter">
+                        </label>
+                        <label class="filter-field filter-field--columns">
+                            <span class="filter-field__label">COLUMNS</span>
+                            <input type="text" id="filterColumns" spellcheck="false" placeholder="*" title="Columns to select (ROWID is always included)">
+                        </label>
+                        <button id="clearFilterBtn" class="icon-only ghost" title="Clear filter and reload" hidden><svg viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></button>
+                    </div>
+                    <div id="errorBanner" class="error-banner" role="alert" hidden></div>
+                    <div id="gridContainer" class="grid-container" tabindex="0" aria-label="Table data"></div>
+                    <footer class="status-bar">
+                        <span id="statusLeft"></span>
+                        <span id="statusRight" class="status-bar__right"></span>
+                    </footer>
+                </section>
+
+                <section id="tab-metadata" class="tab-content" role="tabpanel">
+                    <div id="metadataContent" class="metadata-content">Loading metadata...</div>
+                </section>
+
+                <section id="tab-ddl" class="tab-content" role="tabpanel">
+                    <div class="toolbar">
+                        <div class="toolbar-group">
+                            <button id="ddlRefreshBtn" class="icon-only" title="Regenerate DDL"><svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
+                        </div>
+                        <div class="toolbar-group">
+                            <button id="ddlCopyBtn" title="Copy DDL"><svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg><span>Copy</span></button>
+                            <button id="ddlOpenBtn" title="Open DDL in a SQL editor"><svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5"/><path d="M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></svg><span>Open in editor</span></button>
+                        </div>
+                    </div>
+                    <div id="ddlContent" class="ddl-content"></div>
+                </section>
+            </div>
+            <div id="dialogHost"></div>
+            <div id="contextMenu" class="context-menu" role="menu" hidden></div>
+    <!-- EDIT_DATA_SHELL:END -->
+    <script src="/dist/media/editDataPanel.js"></script>
+    <script>
+        (function () {
+            var names = ['Anna Kowalska', 'Jan Nowak', 'Piotr Wójcik', 'Maria Wiśniewska', 'Tomasz Zieliński', 'Kasia Krawczyk', 'Michał Lewandowski', 'Agnieszka Kamińska'];
+            var rows = [];
+            var count = Number((location.search.match(/rows=(\d+)/) || [])[1] || 1200);
+            for (var i = 0; i < count; i++) {
+                var name = names[i % names.length];
+                rows.push({
+                    ROWID: 1700000 + i * 7,
+                    CUSTOMER_ID: 10001 + i,
+                    NAME: name,
+                    EMAIL: i % 9 === 4 ? null : name.toLowerCase().replace(/[^a-z]+/g, '.') + '@example.com',
+                    BALANCE: Math.round((Math.sin(i) + 1.2) * 482137) / 100,
+                    CREATED_AT: '2026-' + String(1 + (i % 12)).padStart(2, '0') + '-' + String(1 + (i % 28)).padStart(2, '0') + ' 0' + (i % 10) + ':15:00',
+                    IS_ACTIVE: i % 4 !== 1,
+                    REGION_ID: i % 7 === 3 ? null : 1 + (i % 5),
+                    NOTES: i % 3 === 0 ? null : (i % 5 === 0 ? 'VIP customer — contact account manager before changing credit limits' : 'Standard')
+                });
+            }
+            var meta = {
+                tableComment: 'Customer master with balances',
+                columns: [
+                    { ATTNAME: 'CUSTOMER_ID', FORMAT_TYPE: 'INTEGER', IS_NOT_NULL: 1, COLDEFAULT: null, DESCRIPTION: 'Business key', IS_PK: 1, IS_FK: 0 },
+                    { ATTNAME: 'NAME', FORMAT_TYPE: 'VARCHAR(100)', IS_NOT_NULL: 1, COLDEFAULT: null, DESCRIPTION: '', IS_PK: 0, IS_FK: 0 },
+                    { ATTNAME: 'EMAIL', FORMAT_TYPE: 'VARCHAR(255)', IS_NOT_NULL: 0, COLDEFAULT: null, DESCRIPTION: 'Primary contact', IS_PK: 0, IS_FK: 0 },
+                    { ATTNAME: 'BALANCE', FORMAT_TYPE: 'NUMERIC(12,2)', IS_NOT_NULL: 0, COLDEFAULT: '0', DESCRIPTION: '', IS_PK: 0, IS_FK: 0 },
+                    { ATTNAME: 'CREATED_AT', FORMAT_TYPE: 'TIMESTAMP', IS_NOT_NULL: 0, COLDEFAULT: 'NOW()', DESCRIPTION: '', IS_PK: 0, IS_FK: 0 },
+                    { ATTNAME: 'IS_ACTIVE', FORMAT_TYPE: 'BOOLEAN', IS_NOT_NULL: 0, COLDEFAULT: null, DESCRIPTION: '', IS_PK: 0, IS_FK: 0 },
+                    { ATTNAME: 'REGION_ID', FORMAT_TYPE: 'INTEGER', IS_NOT_NULL: 0, COLDEFAULT: null, DESCRIPTION: 'FK to REGIONS', IS_PK: 0, IS_FK: 1 },
+                    { ATTNAME: 'NOTES', FORMAT_TYPE: 'VARCHAR(1000)', IS_NOT_NULL: 0, COLDEFAULT: null, DESCRIPTION: '', IS_PK: 0, IS_FK: 0 }
+                ]
+            };
+            window.__editDataFixture = { rows: rows, meta: meta };
+            window.__loadFixture = function (data) {
+                window.postMessage({
+                    command: 'setData',
+                    data: data || rows,
+                    columns: ['ROWID', 'CUSTOMER_ID', 'NAME', 'EMAIL', 'BALANCE', 'CREATED_AT', 'IS_ACTIVE', 'REGION_ID', 'NOTES'],
+                    metadata: meta,
+                    info: { rowLimit: 50000, elapsedMs: 184, tableName: 'JUST_DATA.ADMIN.CUSTOMER_ORDERS', connectionName: 'NZ_DEV' }
+                }, '*');
+                window.postMessage({ command: 'setLoading', loading: false }, '*');
+            };
+            window.addEventListener('load', function () { window.__loadFixture(); });
+        })();
+    </script>
+</body>
+</html>

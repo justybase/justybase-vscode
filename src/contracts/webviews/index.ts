@@ -111,6 +111,7 @@ export type {
 export type {
     EditDataChanges,
     EditDataColumnMetadata,
+    EditDataLoadInfo,
     EditDataMetadata,
     EditDataPanelHostToWebviewMessage,
     EditDataPanelInboundMessage,

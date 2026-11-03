@@ -21,15 +21,16 @@ Every stateful panel documents and tests:
 
 | Aspect | Contract |
 | --- | --- |
-| State owner | One `EditDataProvider` panel per table; host state is created per panel in `src/views/editDataProvider.ts`. |
-| Persisted | Nothing durable. Uncommitted row edits live only in the webview and are lost on reload. |
-| Loading | `setLoading` toggles a global busy state and disables the toolbar. |
-| Empty | The grid renders an empty state when no rows match the filter. |
-| Error | `setError` replaces the grid for the failed load; Refresh retries. |
+| State owner | One `EditDataProvider` panel per table; host state is created per panel in `src/views/editDataProvider.ts`. The webview editing model (`media/editDataPanel/state.ts`) owns rows keyed by `r:<ROWID>` (loaded) or `n:<id>` (inserted). |
+| Persisted | Nothing durable. Pending edits, inserts and deletions live only in the webview; `retainContextWhenHidden` keeps them across hide/reveal, and a reload or panel close discards them after an in-webview confirmation. |
+| Loading | `setLoading` shows a progress bar and toolbar status and disables the data actions. |
+| Empty | The grid keeps its column headers and shows a table-empty or no-match message under them. |
+| Error | A failed first load shows the error banner over an empty grid; a later failure keeps the loaded rows and shows a dismissible banner. Refresh retries. |
 | Cancellation | None; changing the filter starts a new load and the previous generation is discarded. |
-| Race/identity | Per-panel `loadGeneration` guard discards stale load results (newer request wins). |
+| Race/identity | Per-panel `loadGeneration` guard discards stale load results (newer request wins). Client-side sorting reorders view keys only; change tracking is keyed by row identity. |
 | Disposal | `onDidDispose` marks the panel disposed and invalidates in-flight loads; `postMessage` failures are swallowed. |
-| Save | Reentrant save is rejected while one save is in flight; a failed batch attempts `ROLLBACK`. |
+| Save | The batch runs as `BEGIN … COMMIT` on the panel connection. Reentrant save is rejected while one save is in flight; a failed batch attempts `ROLLBACK`, posts `saveFailed` and keeps the pending edits in the webview (no reload). DML may reference only columns from the last load and integer ROWIDs. |
+| DDL | Requested lazily on first open of the DDL tab (`requestDdl` → `setDdl`); Refresh regenerates it. |
 | DDL safety | Column names and type expressions are validated before interpolation; invalid input is rejected. |
 | Unsaved changes | The in-panel Close action confirms before discarding edits; a failed reload keeps the working grid and shows a banner. The VS Code tab close cannot be vetoed. |
 | Evidence | `src/__tests__/editDataProvider.test.ts` (stale load, dispose, overlapping save, rollback, DDL validation, close). |

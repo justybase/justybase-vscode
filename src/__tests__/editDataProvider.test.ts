@@ -636,4 +636,122 @@ describe('EditDataProvider', () => {
             expect(rollback).toBe(true);
         });
     });
+
+    describe('Data editor workflow', () => {
+        const flush = async (): Promise<void> => {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        };
+
+        const openPanel = async (): Promise<void> => {
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ROWID' }, { name: 'NAME' }, { name: 'AMOUNT' }],
+                data: [[1, 'John', 5]],
+            });
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+            await EditDataProvider.createOrShow(mockContext.extensionUri, sampleItem, mockContext, mockConnectionManager);
+            await flush();
+        };
+
+        const postedCommands = (): Array<{ command: string; [key: string]: unknown }> =>
+            (mockWebview.postMessage as jest.Mock).mock.calls.map(call => call[0]);
+
+        it('runs the save batch on the panel connection, not the active one', async () => {
+            await openPanel();
+            (runQueriesSequentially as jest.Mock).mockResolvedValue([]);
+            await messageHandler!({ command: 'save', changes: { updates: [{ rowId: 1, changes: { NAME: 'X' } }] } });
+
+            const call = (runQueriesSequentially as jest.Mock).mock.calls[0];
+            expect(call[call.length - 1]).toEqual({ connectionName: 'TestConnection' });
+            expect(call[1]).toEqual([
+                'BEGIN',
+                "UPDATE testdb.public.users SET NAME = 'X' WHERE ROWID = 1",
+                'COMMIT',
+            ]);
+        });
+
+        it('keeps pending edits on a failed save instead of reloading', async () => {
+            await openPanel();
+            (runQueryRaw as jest.Mock).mockClear();
+            (runQueriesSequentially as jest.Mock).mockRejectedValue(new Error('constraint violated'));
+
+            await messageHandler!({ command: 'save', changes: { deletes: [1] } });
+            await flush();
+
+            const loads = (runQueryRaw as jest.Mock).mock.calls.filter(call => String(call[1]).startsWith('SELECT'));
+            expect(loads).toHaveLength(0);
+            expect(postedCommands()).toContainEqual({ command: 'saveFailed', text: 'constraint violated' });
+        });
+
+        it('reloads with the same filter and sort after a successful save', async () => {
+            await openPanel();
+            (runQueryRaw as jest.Mock).mockClear();
+            (runQueriesSequentially as jest.Mock).mockResolvedValue([]);
+
+            await messageHandler!({ command: 'save', changes: { deletes: [1] }, whereClause: 'ID > 1', orderBy: 'ORDER BY NAME DESC' });
+            await flush();
+
+            const query = String((runQueryRaw as jest.Mock).mock.calls[0][1]);
+            expect(query).toContain('WHERE ID > 1');
+            expect(query).toContain('ORDER BY NAME DESC LIMIT 50000');
+        });
+
+        it('rejects a non-numeric ROWID before building SQL', async () => {
+            await openPanel();
+            await messageHandler!({ command: 'save', changes: { deletes: ['1); DROP TABLE users; --'] } });
+
+            expect(runQueriesSequentially).not.toHaveBeenCalled();
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Invalid ROWID'));
+        });
+
+        it('rejects a column that was not part of the loaded projection', async () => {
+            await openPanel();
+            await messageHandler!({ command: 'save', changes: { updates: [{ rowId: 1, changes: { 'NAME = 1; --': 'x' } }] } });
+
+            expect(runQueriesSequentially).not.toHaveBeenCalled();
+            expect(postedCommands()).toContainEqual(expect.objectContaining({ command: 'saveFailed' }));
+        });
+
+        it('previews the exact statements a save would run', async () => {
+            await openPanel();
+            await messageHandler!({
+                command: 'previewSql',
+                changes: {
+                    deletes: [1],
+                    updates: [{ rowId: 1, changes: { AMOUNT: 7.5 } }],
+                    inserts: [{ NAME: "O'Hara" }],
+                },
+            });
+
+            expect(postedCommands()).toContainEqual({
+                command: 'sqlPreview',
+                statements: [
+                    'DELETE FROM testdb.public.users WHERE ROWID IN (1)',
+                    'UPDATE testdb.public.users SET AMOUNT = 7.5 WHERE ROWID = 1',
+                    "INSERT INTO testdb.public.users (NAME) VALUES ('O''Hara')",
+                ],
+            });
+            expect(runQueriesSequentially).not.toHaveBeenCalled();
+        });
+
+        it('sends load details for the status bar', async () => {
+            await openPanel();
+            const setData = postedCommands().find(message => message.command === 'setData');
+            expect(setData).toEqual(expect.objectContaining({
+                columns: ['ROWID', 'NAME', 'AMOUNT'],
+                info: expect.objectContaining({ rowLimit: 50000, tableName: 'testdb.public.users', connectionName: 'TestConnection' }),
+            }));
+        });
+
+        it('escapes the table identity in the panel markup', async () => {
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                { ...sampleItem, label: '<img src=x onerror=alert(1)>' },
+                mockContext,
+                mockConnectionManager,
+            );
+            expect(mockWebview.html).not.toContain('<img src=x');
+            expect(mockWebview.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+        });
+    });
 });

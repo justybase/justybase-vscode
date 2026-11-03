@@ -20,6 +20,14 @@ export interface EditDataRow {
     [key: string]: unknown;
 }
 
+/** Load details shown in the panel status bar. */
+export interface EditDataLoadInfo {
+    rowLimit: number;
+    elapsedMs: number;
+    tableName: string;
+    connectionName: string;
+}
+
 export interface EditDataChanges {
     updates?: { rowId: string | number; changes: Record<string, unknown> }[];
     deletes?: (string | number)[];
@@ -27,17 +35,22 @@ export interface EditDataChanges {
 }
 
 export type EditDataPanelWebviewToHostMessage =
-    | { command: 'refresh'; whereClause?: string; columns?: string }
+    | { command: 'refresh'; whereClause?: string; columns?: string; orderBy?: string }
     | {
         command: 'save';
         changes: EditDataChanges;
         whereClause?: string;
         columns?: string;
+        orderBy?: string;
     }
     | { command: 'updateTableComment'; comment: string }
     | { command: 'updateColumnComment'; column: string; comment: string }
     | { command: 'addColumn'; name: string; type: string }
     | { command: 'dropColumn'; column: string }
+    | { command: 'previewSql'; changes: EditDataChanges }
+    | { command: 'requestDdl' }
+    | { command: 'openSqlInEditor'; sql: string }
+    | { command: 'copyText'; text: string }
     | { command: 'closePanel' }
     | { command: 'error'; text: string }
     | { command: 'info'; text: string };
@@ -49,8 +62,12 @@ export type EditDataPanelHostToWebviewMessage =
         data: EditDataRow[];
         columns: string[];
         metadata: EditDataMetadata | null;
+        info?: EditDataLoadInfo;
     }
-    | { command: 'setError'; text: string };
+    | { command: 'setError'; text: string }
+    | { command: 'saveFailed'; text: string }
+    | { command: 'sqlPreview'; statements: string[]; error?: string }
+    | { command: 'setDdl'; ddl?: string; error?: string };
 
 export type EditDataPanelInboundMessage = EditDataPanelWebviewToHostMessage;
 export type EditDataPanelOutboundMessage = EditDataPanelHostToWebviewMessage;
@@ -62,6 +79,10 @@ export const EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
     'updateColumnComment',
     'addColumn',
     'dropColumn',
+    'previewSql',
+    'requestDdl',
+    'openSqlInEditor',
+    'copyText',
     'closePanel',
     'error',
     'info'
@@ -70,7 +91,10 @@ export const EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
 export const EDIT_DATA_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
     'setLoading',
     'setData',
-    'setError'
+    'setError',
+    'saveFailed',
+    'sqlPreview',
+    'setDdl'
 ] as const satisfies readonly EditDataPanelHostToWebviewMessage['command'][];
 
 export const EDIT_DATA_PANEL_INBOUND_COMMANDS = EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS;
