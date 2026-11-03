@@ -54,6 +54,14 @@ interface NetezzaObjectRow extends Record<string, unknown> {
     OBJID: number | string;
 }
 
+/**
+ * Procedure nodes in the schema tree are created without an OBJID, and the
+ * OBJID is part of the stable tree item id. Omit it so reveal() resolves them.
+ */
+function revealObjectId(objType: string | undefined, objectId: number | undefined): number | undefined {
+    return objType?.trim().toUpperCase() === 'PROCEDURE' ? undefined : objectId;
+}
+
 function escapeSqlLiteral(value: string): string {
     return value.replace(/'/g, "''");
 }
@@ -458,7 +466,7 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                             targetDb,
                             cachedObj.objType,
                             cachedObj.schema || normalizedSchema,
-                            cachedObj.objId,
+                            revealObjectId(cachedObj.objType, cachedObj.objId),
                             undefined,
                             targetConnectionName
                         );
@@ -522,7 +530,7 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                             resolvedDb,
                             resolvedType,
                             resolvedSchema,
-                            obj.OBJID,
+                            revealObjectId(resolvedType, obj.OBJID),
                             undefined,
                             targetConnectionName
                         );
@@ -615,7 +623,7 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                             targetDb,
                             obj.OBJTYPE,
                             obj.SCHEMA,
-                            objectId,
+                            revealObjectId(obj.OBJTYPE, objectId),
                             undefined,
                             targetConnectionName
                         );
@@ -680,7 +688,7 @@ export function registerRevealCommands(deps: SchemaCommandsDependencies): vscode
                                         dbName,
                                         obj.OBJTYPE,
                                         obj.SCHEMA,
-                                        objectId,
+                                        revealObjectId(obj.OBJTYPE, objectId),
                                         undefined,
                                         targetConnectionName
                                     );
