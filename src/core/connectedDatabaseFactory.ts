@@ -5,7 +5,7 @@ import {
   DatabaseKind,
   normalizeDatabaseKind,
 } from '../contracts/database';
-import type { DatabaseTunnelRuntime } from './databaseTunnel';
+import type { DatabaseTunnelEndpoint, DatabaseTunnelRuntime } from './databaseTunnel';
 import {
   getDatabaseDialectByKind,
 } from './factories/databaseDialectRegistry';
@@ -34,14 +34,17 @@ function buildDatabaseConnectionConfig(
   details: DatabaseConnectionDetails,
   dialect: DatabaseDialect,
   databaseOverride?: string,
-  endpoint?: { host: string; port: number },
+  endpoint?: DatabaseTunnelEndpoint,
 ): DatabaseConnectionConfig {
   return {
     host: endpoint?.host ?? details.host,
     port: endpoint?.port ?? details.port ?? dialect.defaultPort,
     database: databaseOverride ?? details.database,
     user: details.user,
-    password: details.password,
+    // With service login the driver only proves it owns this tunnel. The relay
+    // answers the database password challenge, and the service password stays
+    // with the tunnel, so it can never be sent to a database.
+    password: endpoint?.clientProof ?? details.password,
     options: details.options,
   };
 }
@@ -51,10 +54,14 @@ async function resolveTunnelEndpoint(
   dialect: DatabaseDialect,
   tokenOverride?: string,
   clearStoredToken = false,
-): Promise<{ host: string; port: number } | undefined> {
+): Promise<DatabaseTunnelEndpoint | undefined> {
   if (!details.tunnel) return undefined;
   if (!dialect.supportsRawTcpTunnel) {
     throw new Error(`Database dialect '${dialect.displayName}' does not support transparent TCP tunnels.`);
+  }
+  const usesServiceLogin = details.tunnel.auth === 'service-login';
+  if (usesServiceLogin && !dialect.supportsTunnelServiceLogin) {
+    throw new Error(`Database dialect '${dialect.displayName}' does not support service login through a tunnel.`);
   }
   if (dialect.kind === 'oracle' && typeof details.options?.connectString === 'string' && details.options.connectString.trim()) {
     throw new Error(
@@ -71,7 +78,12 @@ async function resolveTunnelEndpoint(
   if (!token) {
     throw new Error(`No token is configured for database tunnel '${details.tunnel.id}'.`);
   }
-  return databaseTunnelRuntime.ensureStarted(details.tunnel, token, details.name);
+  return databaseTunnelRuntime.ensureStarted(
+    details.tunnel,
+    token,
+    details.name,
+    usesServiceLogin ? details.user : undefined,
+  );
 }
 
 export async function createConnectedDatabaseConnectionFromDetails(

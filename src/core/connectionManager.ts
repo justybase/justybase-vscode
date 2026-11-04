@@ -14,6 +14,8 @@ import {
     resolveConnectionDatabaseKind
 } from './connectionFactory';
 import {
+    databaseTunnelSecretChangeMessage,
+    describeDatabaseTunnelSecret,
     isDatabaseTunnelRelayChanged,
     normalizeDatabaseTunnelConfig,
     sameDatabaseTunnelConfig,
@@ -233,6 +235,9 @@ function normalizeConnectionDetails(details: SharedConnectionDetails, inferLegac
         ...details,
         options,
         ...(tunnel ? { tunnel } : {}),
+        // The database login belongs to the service in this mode. Dropping the
+        // password here also clears one left by an earlier direct connection.
+        ...(tunnel?.auth === 'service-login' ? { password: undefined } : {}),
         dbType: normalizedKind,
         accentColor: normalizeConnectionAccentColor(details.accentColor)
     };
@@ -692,7 +697,7 @@ export class ConnectionManager {
                 ? await this.databaseTunnelRuntime.getToken(renamedDetails.tunnel.id)
                 : undefined;
             if (relayUrlChanged && !nextToken) {
-                throw new Error('A new bearer token is required when the database tunnel relay URL changes.');
+                throw new Error(databaseTunnelSecretChangeMessage(sourceTunnel, storedDetails.tunnel));
             }
             if (nextToken) {
                 await this.databaseTunnelRuntime.storeToken(storedDetails.tunnel.id, nextToken);
@@ -703,7 +708,7 @@ export class ConnectionManager {
             } else if (sourceToken) {
                 await this.databaseTunnelRuntime.storeToken(storedDetails.tunnel.id, sourceToken);
             } else {
-                throw new Error('A bearer token is required when a database tunnel is enabled.');
+                throw new Error(`A ${describeDatabaseTunnelSecret(storedDetails.tunnel)} is required when a database tunnel is enabled.`);
             }
         }
 

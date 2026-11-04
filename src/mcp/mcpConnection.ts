@@ -74,6 +74,13 @@ export async function resolveSelectedMcpConnection(
                 error: `Selected MCP connection "${selectedName}" was found, but its credentials are unavailable or access was denied.`
             };
         }
+        if (details.tunnel?.auth === 'service-login') {
+            // The MCP process has no access to the tunnel's service login, so
+            // this says why, instead of failing later with a login error.
+            return {
+                error: `Selected MCP connection "${selectedName}" signs in through a service relay, which MCP does not support. Select a direct Netezza connection.`
+            };
+        }
         return { connectionName: selectedName!, details };
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);

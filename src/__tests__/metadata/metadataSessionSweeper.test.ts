@@ -142,6 +142,42 @@ describe('MetadataSessionSweeper', () => {
     });
 
     describe('sweep', () => {
+        it('matches sessions against the relay database account with service login', async () => {
+            mockConfig['maxAgeMinutes'] = 20;
+            const connManager = createConnManager({
+                host: '127.0.0.1',
+                port: 15480,
+                database: 'SYSTEM',
+                user: 'analyst',
+                dbType: 'NetezzaSQL',
+                tunnel: {
+                    id: 't',
+                    serverUrl: 'https://service.example.test',
+                    targetId: 'netezza',
+                    localPort: 15480,
+                    auth: 'service-login',
+                },
+            });
+            const connection = createConnection({
+                'SELECT CURRENT_USER': createReader([['NZ_SERVICE', undefined]]),
+                'SELECT ID, USERNAME FROM _V_SESSION WHERE ID IN (100,101)': createReader([
+                    ['100', 'NZ_SERVICE'],
+                    ['101', 'SOMEONE_ELSE'],
+                ]),
+                'DROP SESSION 100': createReader([]),
+            });
+            mockCreateConnectedConnection.mockResolvedValue(connection);
+
+            metadataSessionSweeper.register(CONN, '100');
+            metadataSessionSweeper.register(CONN, '101');
+
+            nowSpy.mockReturnValue(BASE_TIME + 21 * 60_000);
+            metadataSessionSweeper.start(connManager);
+            await metadataSessionSweeper.sweep();
+
+            expect(dropSessionCalls(connection)).toEqual(['DROP SESSION 100']);
+        });
+
         it('drops only stale sessions verified in _V_SESSION with matching user', async () => {
             mockConfig['maxAgeMinutes'] = 20;
             const connManager = createConnManager();

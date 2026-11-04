@@ -16,6 +16,8 @@ JustyBase has two related choices: the connection selected for a SQL tab and the
 
 Open **JustyBase: Connect…**, select the database kind, fill in the connection form, and choose **Test** before saving. Profiles are stored by the extension; passwords go through the VS Code Secrets API. Rename profiles so production and non-production environments are immediately distinguishable.
 
+If your organization runs a service that holds the Netezza login, enable the tunnel and choose **Service login** as the sign-in mode. You then sign in with your login to that service and do not need a database login. See the [tunnel guide](../../database-tunnel.md).
+
 ## Select context per tab
 
 Use **Select Connection for SQL Tab** and **Select Database for SQL Tab** when a document needs a different scope from the global connection. The tab context is shown in the SQL editor and is used by completion, diagnostics, DDL, execution, and metadata lookup. `DB.SCHEMA.TABLE`, `DB..TABLE`, `SCHEMA.TABLE`, and quoted identifiers remain distinct object forms; do not remove qualification merely to make a suggestion appear.

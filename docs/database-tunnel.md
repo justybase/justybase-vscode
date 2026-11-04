@@ -159,6 +159,61 @@ never stored in the serializable connection profile or global state cache.
   String override is not compatible with the transparent tunnel because it
   can embed a different endpoint.
 
+## Service login: the relay holds the database login
+
+Use this for Netezza when your FastAPI service already has a login screen and
+JWTs, and holds the database credentials itself. Users sign in with their service
+login and never need the database login or password. The sample and integration
+guide are in
+[`samples/database-tunnel-service`](../samples/database-tunnel-service/). It adds
+two routes to the service and leaves its login screen and endpoints unchanged.
+
+In the connection form, enable the tunnel and set **Sign-in mode** to **Service
+login**:
+
+| Field | Example | Meaning |
+| --- | --- | --- |
+| Server URL | `https://svc.example.com/api/justybase` | Base URL, including the router's prefix |
+| Target ID | `netezza` | Must match a relay target |
+| Local TCP port | `15480` | Free port on the extension-host machine |
+| Service login | `analyst` | Replaces the User field |
+| Service password | | Stored in VS Code SecretStorage |
+| Database | `DEV` | Must be allowed by the target |
+
+The database password field is hidden, and the profile stores no database
+password. Leading and trailing spaces in the service password are removed when
+it is saved.
+
+How a connection opens:
+
+1. Core posts the service login to `{Server URL}/auth/token` and keeps the
+   returned JWT in memory. It logs in again 60 seconds before the JWT expires,
+   and once more if the server refuses a JWT.
+2. Each database connection opens `{Server URL}/tunnel/{Target ID}` with the JWT
+   and a random client proof created for this tunnel.
+3. The driver runs its normal handshake. The relay replaces the user, checks that
+   the driver's password equals the client proof, and answers the database's
+   password challenge itself.
+4. From then on the relay forwards raw bytes.
+
+Differences from a bearer token tunnel:
+
+- HTTPS is required. Plain HTTP is accepted only on localhost, and redirects are
+  not followed, so the service password cannot be sent somewhere else by accident.
+- Changing the relay URL or the sign-in mode requires entering the secret again.
+  A saved password is never reused as a bearer token, or the reverse.
+- Only Netezza is supported, because the relay must understand the handshake.
+- The MCP server cannot use these profiles and reports that when it starts.
+- TLS between the relay and the database is set per target, and a database with no
+  certificate is supported. `"tls": "off"` connects without TLS, so the traffic is not
+  encrypted. `"tls_verify": false` encrypts without checking the certificate, which is
+  **unsafe**, because anyone able to intercept the traffic can pose as the database.
+  Neither needs a certificate file. See the
+  [sample's README](../samples/database-tunnel-service/README.md) before using them.
+- The session runs as the service database account, so the database cannot tell
+  users apart. The profile's user name is the service login, while `CURRENT_USER`
+  shows the database account.
+
 ## Security and operations
 
 The relay bearer token authenticates the WebSocket, while the database
@@ -179,6 +234,13 @@ implement production identity management or auditing.
   the tunnel.
 - WebSocket `401/403`, `502`, or `426`: check the token, base URL, target id,
   and reverse-proxy `Upgrade`/`Connection` headers.
+- `The service rejected the login or password`: check the service login and
+  password. The same login should work on the service's own login screen.
+- `The relay could not log in to the database`: the service database account or
+  its TLS settings were refused. The details are in the `justybase.relay` log on
+  the server.
+- `Invalid client proof`: something other than this tunnel's connection reached
+  the local port.
 - Target unavailable: test the private host/port from the relay machine, not
   from the desktop.
 - Database authentication/TLS failure: check remote database credentials and
@@ -208,6 +270,15 @@ Required variables:
 PostgreSQL: POSTGRES_LIVE_TEST_HOST/PORT/DATABASE/USER/PASSWORD
             or PG_LIVE_TEST_HOST/PORT/DATABASE/USER/PASSWORD
 Netezza:    NZ_DEV_HOST/PORT/DATABASE/USER/PASSWORD
+```
+
+Service login has its own suites. The first uses a scripted Netezza server and
+needs no database, but it needs the sample's Python dependencies. The second needs
+`NZ_DEV_*`:
+
+```bash
+npm run test:database:tunnel:relay
+npm run test:netezza:tunnel:service-login:live
 ```
 
 To run one target independently:

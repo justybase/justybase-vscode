@@ -507,6 +507,63 @@ describe('LoginPanel', () => {
                     user: 'admin'
                 };
 
+                describe('service login tunnel', () => {
+                    const serviceTunnel = {
+                        id: 'tunnel-1',
+                        serverUrl: 'https://service.example.test',
+                        targetId: 'netezza',
+                        localPort: 15480,
+                        auth: 'service-login' as const,
+                    };
+                    const serviceData: ConnectionDetails = {
+                        ...validData,
+                        host: '127.0.0.1',
+                        port: 15480,
+                        dbType: 'netezza',
+                        tunnel: serviceTunnel,
+                    };
+
+                    it('accepts a Netezza profile without a database password', async () => {
+                        await messageHandler!({ command: 'save', data: { ...serviceData, tunnelToken: 'service-password' } });
+
+                        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+                        expect(mockConnectionManager.saveConnection).toHaveBeenCalledWith(
+                            expect.objectContaining({ user: 'admin', tunnel: serviceTunnel }),
+                            'service-password',
+                            false,
+                            undefined,
+                        );
+                    });
+
+                    it('rejects a dialect the relay cannot log in for', async () => {
+                        await messageHandler!({
+                            command: 'save',
+                            data: { ...serviceData, dbType: 'postgresql', tunnelToken: 'service-password' },
+                        });
+
+                        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+                            expect.stringContaining('does not support service login'),
+                        );
+                        expect(mockConnectionManager.saveConnection).not.toHaveBeenCalled();
+                    });
+
+                    it('rejects plain HTTP to a remote service', async () => {
+                        await messageHandler!({
+                            command: 'save',
+                            data: {
+                                ...serviceData,
+                                tunnel: { ...serviceTunnel, serverUrl: 'http://service.example.test' },
+                                tunnelToken: 'service-password',
+                            },
+                        });
+
+                        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+                            expect.stringContaining('requires an HTTPS URL'),
+                        );
+                        expect(mockConnectionManager.saveConnection).not.toHaveBeenCalled();
+                    });
+                });
+
                 it('should reject empty name', async () => {
                     await messageHandler!({ command: 'save', data: { ...validData, name: '  ' } });
                     expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Connection Name is required'));

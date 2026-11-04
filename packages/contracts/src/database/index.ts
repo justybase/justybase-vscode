@@ -297,6 +297,8 @@ export interface DatabaseDialect {
   advancedFeatures?: DatabaseAdvancedFeatures;
   /** Whether the driver speaks a transparent TCP protocol suitable for a core tunnel. */
   supportsRawTcpTunnel?: boolean;
+  /** Whether a relay can supply the database login for this dialect's protocol. */
+  supportsTunnelServiceLogin?: boolean;
   getConnectionConstructor(): DatabaseConnectionStaticConstructor;
   createConnection(config: DatabaseConnectionConfig): DatabaseConnection;
 }

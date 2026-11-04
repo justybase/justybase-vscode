@@ -36,6 +36,7 @@ export const netezzaDialect: DatabaseDialect = {
   displayName: "Netezza",
   defaultPort: 5480,
   supportsRawTcpTunnel: true,
+  supportsTunnelServiceLogin: true,
   capabilities: createDatabaseCapabilities({
     supportsExplainPlan: true,
     supportsExplainGraph: true,

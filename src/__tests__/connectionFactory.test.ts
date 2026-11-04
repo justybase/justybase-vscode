@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import {
+  createConnectedDatabaseConnectionFromDetails,
   createDatabaseConnection,
   getDatabaseCapabilities,
   getDatabaseDialect,
@@ -97,6 +98,33 @@ describe("connectionFactory", () => {
       clientType: 11,
     });
     expect(connection).toBe(mockConnection);
+  });
+
+  it("refuses service login for a dialect that does not declare support", async () => {
+    const dialect = getDatabaseDialect("netezza");
+    expect(dialect.supportsTunnelServiceLogin).toBe(true);
+    const flag = jest.replaceProperty(dialect, "supportsTunnelServiceLogin", undefined);
+
+    try {
+      await expect(
+        createConnectedDatabaseConnectionFromDetails({
+          host: "127.0.0.1",
+          port: 15480,
+          database: "db",
+          user: "analyst",
+          dbType: "netezza",
+          tunnel: {
+            id: "t",
+            serverUrl: "https://service.example.test",
+            targetId: "netezza",
+            localPort: 15480,
+            auth: "service-login",
+          },
+        }),
+      ).rejects.toThrow("does not support service login");
+    } finally {
+      flag.restore();
+    }
   });
 
   it("exposes registered dialect metadata and capabilities", () => {

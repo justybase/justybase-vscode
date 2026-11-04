@@ -150,7 +150,12 @@ class MetadataSessionSweeper {
         let connection: DatabaseConnection | undefined;
         try {
             connection = await createConnectedDatabaseConnectionFromDetails(details);
-            const liveSessions = await this.findLiveSessions(connection, staleIds, details.user);
+            // With service login the profile user is the service login, while
+            // sessions belong to the database account the relay signs in with.
+            const expectedUser = details.tunnel?.auth === 'service-login'
+                ? await this.readCurrentUser(connection)
+                : details.user;
+            const liveSessions = await this.findLiveSessions(connection, staleIds, expectedUser);
             for (const sid of staleIds) {
                 if (liveSessions.has(sid)) {
                     await this.dropSession(connection, sid, connectionName);
@@ -170,6 +175,21 @@ class MetadataSessionSweeper {
                 } catch {
                     // Best-effort close
                 }
+            }
+        }
+    }
+
+    private async readCurrentUser(connection: DatabaseConnection): Promise<string | undefined> {
+        const cmd = connection.createCommand('SELECT CURRENT_USER');
+        cmd.commandTimeout = SWEEPER_COMMAND_TIMEOUT_SECONDS;
+        const reader = await cmd.executeReader();
+        try {
+            return await reader.read() ? String(reader.getValue(0) ?? '') || undefined : undefined;
+        } finally {
+            try {
+                await reader.close();
+            } catch {
+                // Best-effort close
             }
         }
     }

@@ -59,7 +59,9 @@ Install the core extension for Netezza and the companion extension required by t
 
 For the shared raw TCP tunnel deployment, including the FastAPI relay, named
 target allowlist, reverse-proxy configuration, and live database checks, see
-the [global database tunnel guide](../../database-tunnel.md).
+the [global database tunnel guide](../../database-tunnel.md). The same guide
+describes Netezza service login, where a relay in your own service holds the
+database login and users sign in with their service login.
 
 ## How to report a parity gap
 

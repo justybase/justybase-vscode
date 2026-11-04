@@ -147,6 +147,8 @@ export interface DatabaseDialect {
   advancedFeatures?: DatabaseAdvancedFeatures;
   /** Whether the driver speaks a transparent TCP protocol suitable for the core tunnel. */
   supportsRawTcpTunnel?: boolean;
+  /** Whether a relay can supply the database login for this dialect's protocol. */
+  supportsTunnelServiceLogin?: boolean;
   getConnectionConstructor(): import("@justybase/contracts").DatabaseConnectionStaticConstructor;
   createConnection(
     config: import("@justybase/contracts").DatabaseConnectionConfig,

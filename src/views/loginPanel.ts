@@ -12,7 +12,11 @@ import { resolveConnectionDatabaseKind } from '../core/connectionFactory';
 import { allAvailableDialects } from '../dialects';
 import { createStandardConnectionForm } from '../core/connectionFormBuilder';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
-import { isDatabaseTunnelRelayChanged, normalizeDatabaseTunnelConfig } from '../core/databaseTunnel';
+import {
+    databaseTunnelSecretChangeMessage,
+    isDatabaseTunnelRelayChanged,
+    normalizeDatabaseTunnelConfig,
+} from '../core/databaseTunnel';
 import { getConnectionAccentOptions } from '../utils/connectionAccent';
 import { getDialectIconWebviewUri } from '../utils/dialectIcons';
 import { detectFileDataFormat } from '../services/fileConnectionProfileService';
@@ -22,6 +26,7 @@ interface LoginPanelDialectDefinition {
     displayName: string;
     defaultPort?: number;
     supportsRawTcpTunnel?: boolean;
+    supportsTunnelServiceLogin?: boolean;
     connectionForm: DatabaseConnectionFormSchema;
 }
 
@@ -37,6 +42,7 @@ function getLoginPanelDialects(): LoginPanelDialectDefinition[] {
         displayName: dialect.displayName,
         defaultPort: dialect.defaultPort,
         supportsRawTcpTunnel: dialect.supportsRawTcpTunnel,
+        supportsTunnelServiceLogin: dialect.supportsTunnelServiceLogin,
         connectionForm: dialect.connectionForm ?? buildFallbackConnectionForm(dialect.defaultPort)
     }));
 }
@@ -425,7 +431,7 @@ export class LoginPanel {
 
         const existing = await this.connectionManager.getConnection(originalName);
         if (existing?.tunnel && isDatabaseTunnelRelayChanged(existing.tunnel, data.tunnel)) {
-            return 'A new bearer token is required when the database tunnel relay URL changes.';
+            return databaseTunnelSecretChangeMessage(existing.tunnel, data.tunnel);
         }
 
         return undefined;
@@ -515,6 +521,9 @@ export class LoginPanel {
         if (data.tunnel) {
             if (!dialect.supportsRawTcpTunnel) {
                 return `${dialect.displayName} does not support transparent TCP tunnels`;
+            }
+            if (data.tunnel.auth === 'service-login' && !dialect.supportsTunnelServiceLogin) {
+                return `${dialect.displayName} does not support service login through a tunnel`;
             }
             try {
                 normalizeDatabaseTunnelConfig(data.tunnel);
@@ -1005,13 +1014,21 @@ export class LoginPanel {
                                     <label for="tunnelLocalPort">Local TCP port <span class="required-marker">*</span></label>
                                     <input type="number" id="tunnelLocalPort" min="1" max="65535" value="15432">
                                 </div>
+                                <div class="form-group field-full" id="tunnelAuthGroup">
+                                    <label for="tunnelAuth">Sign-in mode</label>
+                                    <select id="tunnelAuth">
+                                        <option value="bearer-token">Bearer token (you enter the database login)</option>
+                                        <option value="service-login">Service login (the relay holds the database login)</option>
+                                    </select>
+                                    <div id="tunnelAuthHint" class="form-hint"></div>
+                                </div>
                                 <div class="form-group field-full">
-                                    <label for="tunnelToken">Bearer token</label>
+                                    <label for="tunnelToken" id="tunnelTokenLabel">Bearer token</label>
                                     <input type="password" id="tunnelToken" placeholder="Token (blank keeps the saved token)">
                                     <div class="form-hint">Stored separately in VS Code SecretStorage; it is not the database password.</div>
                                     <label class="checkbox-label" for="tunnelClearToken">
                                         <input type="checkbox" id="tunnelClearToken">
-                                        <span>Remove the saved bearer token</span>
+                                        <span id="tunnelClearTokenLabel">Remove the saved bearer token</span>
                                     </label>
                                 </div>
                             </div>
@@ -1364,8 +1381,10 @@ export class LoginPanel {
                         tunnelEndpointSnapshot = undefined;
                         if (host) host.readOnly = false;
                         if (port) port.readOnly = false;
+                        synchronizeTunnelAuthUiState(kind);
                         return;
                     }
+                    synchronizeTunnelAuthUiState(kind);
 
                     if (!targetId.value) targetId.value = 'reports';
                     if (!localPort.value) localPort.value = '15432';
@@ -1395,6 +1414,56 @@ export class LoginPanel {
                     }
                 }
 
+                function synchronizeTunnelAuthUiState(kind) {
+                    const authGroup = document.getElementById('tunnelAuthGroup');
+                    const auth = document.getElementById('tunnelAuth');
+                    const hint = document.getElementById('tunnelAuthHint');
+                    const tokenLabel = document.getElementById('tunnelTokenLabel');
+                    const token = document.getElementById('tunnelToken');
+                    const clearLabel = document.getElementById('tunnelClearTokenLabel');
+                    const enabled = document.getElementById('tunnelEnabled');
+                    if (!authGroup || !auth || !tokenLabel || !token || !clearLabel || !enabled) {
+                        return;
+                    }
+
+                    const dialect = getDialect(kind);
+                    const available = Boolean(dialect.supportsRawTcpTunnel && dialect.supportsTunnelServiceLogin);
+                    authGroup.style.display = available ? 'block' : 'none';
+                    if (!available) auth.value = 'bearer-token';
+
+                    const serviceLogin = enabled.checked && auth.value === 'service-login';
+                    tokenLabel.textContent = serviceLogin ? 'Service password' : 'Bearer token';
+                    token.placeholder = serviceLogin
+                        ? 'Password (blank keeps the saved password)'
+                        : 'Token (blank keeps the saved token)';
+                    clearLabel.textContent = serviceLogin
+                        ? 'Remove the saved service password'
+                        : 'Remove the saved bearer token';
+                    if (hint) {
+                        hint.textContent = serviceLogin
+                            ? 'Sign in with your login to the service. You do not need the database login or password.'
+                            : '';
+                    }
+
+                    // The database login fields do not apply in service login mode.
+                    const userLabel = document.querySelector('label[for="user"]');
+                    if (userLabel) {
+                        if (!userLabel.dataset.directText) userLabel.dataset.directText = userLabel.innerHTML;
+                        userLabel.innerHTML = serviceLogin
+                            ? 'Service login <span class="required-marker">*</span>'
+                            : userLabel.dataset.directText;
+                    }
+                    const password = document.getElementById('password');
+                    const passwordGroup = password && password.closest('.form-group');
+                    if (password && passwordGroup) {
+                        passwordGroup.style.display = serviceLogin ? 'none' : '';
+                        if (serviceLogin) {
+                            password.value = '';
+                            passwordDirty = false;
+                        }
+                    }
+                }
+
                 function loadDatabaseTunnelFields(tunnel) {
                     const disclosure = document.getElementById('tunnelDisclosure');
                     const enabled = document.getElementById('tunnelEnabled');
@@ -1412,6 +1481,8 @@ export class LoginPanel {
                     localPort.value = tunnel ? String(tunnel.localPort || 15432) : '15432';
                     token.value = '';
                     if (clearToken) clearToken.checked = false;
+                    const auth = document.getElementById('tunnelAuth');
+                    if (auth) auth.value = tunnel && tunnel.auth === 'service-login' ? 'service-login' : 'bearer-token';
                     tunnelEndpointSnapshot = undefined;
                 }
 
@@ -1496,6 +1567,12 @@ export class LoginPanel {
                 const tunnelEnabledElement = document.getElementById('tunnelEnabled');
                 if (tunnelEnabledElement) {
                     tunnelEnabledElement.addEventListener('change', () => {
+                        synchronizeDatabaseTunnelUiState(document.getElementById('dbType').value);
+                    });
+                }
+                const tunnelAuthElement = document.getElementById('tunnelAuth');
+                if (tunnelAuthElement) {
+                    tunnelAuthElement.addEventListener('change', () => {
                         synchronizeDatabaseTunnelUiState(document.getElementById('dbType').value);
                     });
                 }
@@ -1649,13 +1726,21 @@ export class LoginPanel {
                             targetId: tunnelTargetId.value,
                             localPort: Number(tunnelLocalPort.value)
                         };
+                        const tunnelAuth = document.getElementById('tunnelAuth');
+                        if (dialect.supportsTunnelServiceLogin && tunnelAuth && tunnelAuth.value === 'service-login') {
+                            data.tunnel.auth = 'service-login';
+                            delete data.password;
+                        }
                         const tokenValue = tunnelToken.value.trim();
                         data.tunnelToken = tokenValue || undefined;
                         const clearTunnelToken = document.getElementById('tunnelClearToken');
                         const relayChanged = Boolean(
                             existingTunnel
-                            && normalizeTunnelServerUrlForComparison(existingTunnel.serverUrl)
-                                !== normalizeTunnelServerUrlForComparison(tunnelServerUrl.value)
+                            && (
+                                normalizeTunnelServerUrlForComparison(existingTunnel.serverUrl)
+                                    !== normalizeTunnelServerUrlForComparison(tunnelServerUrl.value)
+                                || (existingTunnel.auth === 'service-login') !== (data.tunnel.auth === 'service-login')
+                            )
                             && !tokenValue,
                         );
                         data.clearTunnelToken = Boolean(

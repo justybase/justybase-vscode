@@ -106,6 +106,31 @@ describe('MCP Netezza-only connection gate', () => {
         }
     });
 
+    it('explains that a service login profile cannot be used', async () => {
+        const connectionManager = createConnectionManager('netezza');
+        (connectionManager.getConnection as jest.Mock).mockResolvedValue({
+            name: 'service-profile',
+            host: '127.0.0.1',
+            port: 15480,
+            database: 'DEV',
+            user: 'analyst',
+            dbType: 'netezza',
+            tunnel: {
+                id: 't',
+                serverUrl: 'https://service.example.test',
+                targetId: 'netezza',
+                localPort: 15480,
+                auth: 'service-login',
+            },
+        });
+
+        const resolution = await resolveSelectedMcpConnection(connectionManager, 'service-profile');
+
+        expect(resolution).toEqual({
+            error: expect.stringContaining('signs in through a service relay'),
+        });
+    });
+
     it('lists only saved Netezza connection names for the panel', async () => {
         const connectionManager = {
             getConnections: jest.fn().mockResolvedValue([

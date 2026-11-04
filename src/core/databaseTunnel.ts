@@ -1,6 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import * as net from 'node:net';
 import type { SecretStorage } from 'vscode';
 import type { DatabaseTunnelConfig } from '../contracts/database';
+import { assertServiceLoginUrl, TunnelServiceLogin } from './tunnelServiceLogin';
 
 const TUNNEL_SECRET_PREFIX = 'justybase.database.tunnel.token.';
 const LOOPBACK_HOST = '127.0.0.1';
@@ -8,6 +10,9 @@ const DEFAULT_LOCAL_PORT = 15432;
 const MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const QUEUE_RESUME_BYTES = 1024 * 1024;
 const WS_OPEN = 1;
+const CLIENT_PROOF_HEADER = 'X-JustyBase-Client-Proof';
+const CLIENT_PROOF_BYTES = 32;
+const UPGRADE_REFUSED_PATTERN = /Unexpected server response: 40[13]\b/;
 
 type WebSocketMessageData = string | Buffer | ArrayBuffer | readonly Buffer[];
 
@@ -25,7 +30,7 @@ interface WebSocketLike {
 }
 
 interface WebSocketConstructor {
-    new (url: string, options: { headers: { Authorization: string }; handshakeTimeout: number }): WebSocketLike;
+    new (url: string, options: { headers: Record<string, string>; handshakeTimeout: number }): WebSocketLike;
 }
 
 // Keep this as a literal CommonJS require so esbuild includes ws in the core
@@ -44,9 +49,15 @@ interface ActiveTunnel {
     state: DatabaseTunnelState;
     activeConnections: Set<RelayConnection>;
     listenPromise?: Promise<void>;
+    startPromise?: Promise<void>;
     closePromise?: Promise<void>;
     stopRequested: boolean;
     error?: string;
+    /** Present only with service login. The JWT stays inside, in memory. */
+    serviceLogin?: TunnelServiceLogin;
+    serviceLoginUser?: string;
+    /** Per-tunnel nonce the local driver must show to the relay. */
+    clientProof?: string;
 }
 
 export type DatabaseTunnelState = 'stopped' | 'listening' | 'error';
@@ -62,6 +73,8 @@ export interface DatabaseTunnelStatus extends DatabaseTunnelConfig {
 export interface DatabaseTunnelEndpoint {
     host: typeof LOOPBACK_HOST;
     port: number;
+    /** Sent by the driver as its password when the relay supplies the database login. */
+    clientProof?: string;
 }
 
 export interface DatabaseTunnelRuntime {
@@ -69,6 +82,7 @@ export interface DatabaseTunnelRuntime {
         config: DatabaseTunnelConfig,
         token: string,
         connectionName?: string,
+        serviceLoginUser?: string,
     ): Promise<DatabaseTunnelEndpoint>;
     stop(id: string): Promise<void>;
     stopAll(): Promise<void>;
@@ -97,6 +111,14 @@ export function normalizeDatabaseTunnelConfig(config: DatabaseTunnelConfig): Dat
         throw new Error('Database tunnel local port must be an integer between 1 and 65535.');
     }
 
+    if (config.auth !== undefined && config.auth !== 'bearer-token' && config.auth !== 'service-login') {
+        throw new Error('Database tunnel sign-in mode is not supported.');
+    }
+    if (config.auth === 'service-login') {
+        assertServiceLoginUrl(serverUrl);
+        return { id, serverUrl, targetId, localPort, auth: 'service-login' };
+    }
+
     return { id, serverUrl, targetId, localPort };
 }
 
@@ -109,7 +131,8 @@ export function sameDatabaseTunnelConfig(
     return normalizedLeft.id === normalizedRight.id
         && normalizedLeft.serverUrl === normalizedRight.serverUrl
         && normalizedLeft.targetId === normalizedRight.targetId
-        && normalizedLeft.localPort === normalizedRight.localPort;
+        && normalizedLeft.localPort === normalizedRight.localPort
+        && normalizedLeft.auth === normalizedRight.auth;
 }
 
 export function isDatabaseTunnelRelayChanged(
@@ -117,8 +140,27 @@ export function isDatabaseTunnelRelayChanged(
     right: DatabaseTunnelConfig | undefined,
 ): boolean {
     if (!left || !right) return false;
-    return normalizeDatabaseTunnelConfig(left).serverUrl
-        !== normalizeDatabaseTunnelConfig(right).serverUrl;
+    const normalizedLeft = normalizeDatabaseTunnelConfig(left);
+    const normalizedRight = normalizeDatabaseTunnelConfig(right);
+    // A saved secret belongs to one relay and one sign-in mode. Reusing it after
+    // a change could send a service password as a bearer token, or the reverse.
+    return normalizedLeft.serverUrl !== normalizedRight.serverUrl
+        || normalizedLeft.auth !== normalizedRight.auth;
+}
+
+/** Name of the secret this tunnel keeps in SecretStorage, for user-facing messages. */
+export function describeDatabaseTunnelSecret(config: DatabaseTunnelConfig | undefined): string {
+    return config?.auth === 'service-login' ? 'service password' : 'bearer token';
+}
+
+export function databaseTunnelSecretChangeMessage(
+    previous: DatabaseTunnelConfig | undefined,
+    next: DatabaseTunnelConfig | undefined,
+): string {
+    const secret = describeDatabaseTunnelSecret(next);
+    return previous?.auth === next?.auth
+        ? `A new ${secret} is required when the database tunnel relay URL changes.`
+        : `A new ${secret} is required when the database tunnel sign-in mode changes.`;
 }
 
 function getWebSocketConstructor(): WebSocketConstructor {
@@ -177,10 +219,16 @@ export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
         config: DatabaseTunnelConfig,
         token: string,
         connectionName?: string,
+        serviceLoginUser?: string,
     ): Promise<DatabaseTunnelEndpoint> {
         const normalized = normalizeDatabaseTunnelConfig(config);
         const trimmedToken = token.trim();
         if (!trimmedToken) throw new Error('Database tunnel token is required.');
+        const usesServiceLogin = normalized.auth === 'service-login';
+        const loginUser = usesServiceLogin ? serviceLoginUser?.trim() : undefined;
+        if (usesServiceLogin && !loginUser) {
+            throw new Error('A service login is required for this database tunnel.');
+        }
 
         const existing = this.active.get(normalized.id);
         if (
@@ -188,10 +236,17 @@ export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
             && !existing.stopRequested
             && sameDatabaseTunnelConfig(existing.config, normalized)
             && existing.token === trimmedToken
-            && existing.state === 'listening'
+            && existing.serviceLoginUser === loginUser
         ) {
-            existing.connectionName = connectionName ?? existing.connectionName;
-            return { host: LOOPBACK_HOST, port: normalized.localPort };
+            // Connections opened together share one start. Without this the
+            // second would stop the first while it is still logging in.
+            if (existing.state !== 'listening' && existing.startPromise) {
+                await existing.startPromise;
+            }
+            if (existing.state === 'listening') {
+                existing.connectionName = connectionName ?? existing.connectionName;
+                return this.buildEndpoint(existing);
+            }
         }
         if (existing) await this.stop(normalized.id);
 
@@ -205,21 +260,44 @@ export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
             state: 'stopped',
             activeConnections: new Set(),
             stopRequested: false,
+            ...(loginUser
+                ? {
+                    serviceLogin: new TunnelServiceLogin(normalized.serverUrl, loginUser, trimmedToken),
+                    serviceLoginUser: loginUser,
+                    clientProof: randomBytes(CLIENT_PROOF_BYTES).toString('base64url'),
+                }
+                : {}),
         };
         this.active.set(normalized.id, active);
 
+        active.startPromise = this.startListening(active);
+        await active.startPromise;
+        return this.buildEndpoint(active);
+    }
+
+    private buildEndpoint(active: ActiveTunnel): DatabaseTunnelEndpoint {
+        return {
+            host: LOOPBACK_HOST,
+            port: active.config.localPort,
+            ...(active.clientProof ? { clientProof: active.clientProof } : {}),
+        };
+    }
+
+    private async startListening(active: ActiveTunnel): Promise<void> {
         try {
             active.listenPromise = this.listen(active);
             await active.listenPromise;
+            // Log in now, so a wrong password is a clear error here rather than
+            // a closed socket when the driver connects.
+            await active.serviceLogin?.getToken();
             if (active.stopRequested) {
                 throw new Error('Database tunnel was stopped while it was starting.');
             }
             active.state = 'listening';
-            return { host: LOOPBACK_HOST, port: normalized.localPort };
         } catch (error: unknown) {
             active.state = 'error';
             active.error = errorMessage(error);
-            if (this.active.get(normalized.id) === active) this.active.delete(normalized.id);
+            if (this.active.get(active.config.id) === active) this.active.delete(active.config.id);
             await this.closeServer(active);
             throw new Error(`Could not start database tunnel: ${active.error}`, { cause: error });
         }
@@ -409,21 +487,30 @@ export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
         socket.on('close', () => finish());
         socket.on('end', () => finish());
 
-        try {
+        const connectWebSocket = async (allowRetry: boolean): Promise<void> => {
+            const token = active.serviceLogin ? await active.serviceLogin.getToken() : active.token;
+            if (closed) return;
+
+            const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+            if (active.clientProof) headers[CLIENT_PROOF_HEADER] = active.clientProof;
+
             const WebSocket = getWebSocketConstructor();
-            websocket = new WebSocket(buildTunnelUrl(active.config.serverUrl, active.config.targetId), {
-                headers: { Authorization: `Bearer ${active.token}` },
+            const current = new WebSocket(buildTunnelUrl(active.config.serverUrl, active.config.targetId), {
+                headers,
                 handshakeTimeout: 15_000,
             });
-            websocket.on('open', () => {
+            websocket = current;
+            let opened = false;
+            current.on('open', () => {
                 if (closed) return;
+                opened = true;
                 pingTimer = setInterval(() => {
-                    if (websocket?.readyState === WS_OPEN) websocket.ping();
+                    if (current.readyState === WS_OPEN) current.ping();
                 }, 30_000);
                 socket.resume();
                 pumpSocketQueue();
             });
-            websocket.on('message', (data, isBinary) => {
+            current.on('message', (data, isBinary) => {
                 if (closed) return;
                 if (!isBinary) {
                     finish(new Error('Database tunnel accepts binary WebSocket frames only.'));
@@ -444,11 +531,31 @@ export class DatabaseTunnelManager implements DatabaseTunnelRuntime {
                 }
                 pumpWebsocketQueue();
             });
-            websocket.on('error', error => finish(error));
-            websocket.on('close', () => finish());
-        } catch (error: unknown) {
-            finish(error);
-        }
+            current.on('error', error => {
+                if (current !== websocket) return;
+                // The server may have revoked a JWT that had not expired yet.
+                // Log in once more. The driver has sent nothing so far, because
+                // the local socket stays paused until the WebSocket opens.
+                if (
+                    allowRetry
+                    && !opened
+                    && active.serviceLogin
+                    && UPGRADE_REFUSED_PATTERN.test(errorMessage(error))
+                ) {
+                    active.serviceLogin.invalidate(token);
+                    websocket = undefined;
+                    current.terminate();
+                    connectWebSocket(false).catch(retryError => finish(retryError));
+                    return;
+                }
+                finish(error);
+            });
+            current.on('close', () => {
+                if (current === websocket) finish();
+            });
+        };
+
+        connectWebSocket(true).catch(error => finish(error));
     }
 
     private async closeServer(active: ActiveTunnel): Promise<void> {

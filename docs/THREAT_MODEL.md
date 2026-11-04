@@ -13,7 +13,8 @@ The extension handles data that must be treated as sensitive:
 | Asset | Where it lives |
 | --- | --- |
 | Database credentials (passwords, tokens, key-pair secrets) | VS Code SecretStorage, process environment for MCP |
-| Connection profiles and tunnel relay tokens | SecretStorage + non-secret global-state fast-start cache |
+| Connection profiles and tunnel relay tokens or service passwords | SecretStorage + non-secret global-state fast-start cache |
+| Service JWT and tunnel client proof | Extension-host memory only |
 | SQL text, result rows, schema/metadata | Editor, result-panel webviews, disk-backed result spill, logs |
 | Test-only reports, traces, screenshots | `artifacts/` (gitignored), sanitized projection |
 | Packaged artifacts (VSIX) and native runtimes | Build output, release assets |
@@ -28,6 +29,8 @@ VS Code (trusted host) ── postMessage ──▶ webviews (untrusted DOM)
 VS Code (trusted host) ── stdio/HTTP ───▶ MCP server process (user SQL input)
 VS Code (trusted host) ── paths ────────▶ local file runtimes (SQLite/Access/DuckDB)
 VS Code (trusted host) ── SQL ──────────▶ database (read-only vs write)
+VS Code (trusted host) ── login, WSS ───▶ service relay holding database credentials
+Local processes ────────── TCP ─────────▶ tunnel loopback listener
 VS Code (trusted host) ── artifacts ────▶ reports/traces/screenshots on disk
 ```
 
@@ -191,6 +194,42 @@ contain SQL and result values and must never be published without review.
   (`src/mcp/mcpServerEntry.ts`).
 - The server refuses to start for non-Netezza connections.
 
+## T-relay — Service login relay
+
+**Threat:** with service login the relay supplies the database login, so reaching
+a tunnel can be enough to get a logged-in session on a shared database account.
+A service password could also leak to the wrong server or to the database.
+
+**Controls:**
+
+- A loopback listener is reachable by any local process, so each tunnel has a
+  random client proof. It reaches the relay in the WebSocket header and in the
+  driver's password, and the relay compares them before logging in to the database
+  (`samples/database-tunnel-service/justybase_relay/netezza_auth.py`).
+- The service password is never given to the driver. Without a relay that
+  performs this exchange, the database sees only the client proof.
+- Service login requires HTTPS, except on loopback; rejects credentials in the URL;
+  and does not follow redirects (`src/core/tunnelServiceLogin.ts`).
+- Changing the relay URL or sign-in mode requires a new secret, so a saved secret
+  is not sent to another relay or used as a different kind of credential.
+- Server errors that could name the service account are logged, not sent to the
+  client. The target's password is not in its `repr`.
+- The relay verifies the database's TLS certificate by default and never falls back
+  to plain traffic after a certificate failure. Skipping the check needs an explicit
+  `tls_verify: false` on the target, which logs a warning when the service starts and
+  cannot be combined with `ca_file` or `tls: off`.
+- The relay refuses handshake frames outside the known list, and stops forwarding
+  client input after a database error that precedes the login.
+
+**Residual risk:** an authorized user has the full rights of the service database
+account, and the relay does not inspect SQL. The database cannot tell users apart,
+and a JWT is checked only when a connection opens, so an open session survives
+expiry or revocation. A process running as the same user could read the client
+proof from extension-host memory, which is the same exposure as other secrets
+(see T1). With `tls_verify: false`, or with `tls: off`, a network attacker between
+the relay and the database can pose as the database. The service must limit the account's rights, restrict `authorize`, and
+keep JWTs short-lived.
+
 ## Verification map
 
 | Boundary | Evidence |
@@ -201,6 +240,7 @@ contain SQL and result values and must never be published without review.
 | DDL / writes | `src/__tests__/tableCommands.test.ts`, `npm run test:designer-core`, `npm run test:extension-host:designer` |
 | Artifacts | `scripts/extensionHost/extensionHostSmoke.js` sanitization assertions |
 | Secrets | `src/__tests__/connectionManager.test.ts`, `npm run lint` |
+| Service login relay | `src/__tests__/tunnelServiceLogin.test.ts`, `npm run test:database:tunnel`, `npm run test:database:tunnel:relay`, `npm run test:netezza:tunnel:service-login:live`, `pytest` in `samples/database-tunnel-service` |
 
 ## Open work
 

@@ -362,6 +362,118 @@ describe('ConnectionManager', () => {
             }
         });
 
+        describe('service login tunnels', () => {
+            const createRuntime = () => {
+                const tokens = new Map<string, string>();
+                const runtime: DatabaseTunnelRuntime = {
+                    ensureStarted: jest.fn(async () => ({ host: '127.0.0.1' as const, port: 15480 })),
+                    stop: jest.fn(async () => undefined),
+                    stopAll: jest.fn(async () => undefined),
+                    getToken: jest.fn(async (id: string) => tokens.get(id)),
+                    storeToken: jest.fn(async (id: string, token: string) => {
+                        tokens.set(id, token);
+                    }),
+                    deleteToken: jest.fn(async (id: string) => {
+                        tokens.delete(id);
+                    }),
+                    isActive: jest.fn(() => false),
+                    getStatuses: jest.fn(() => []),
+                };
+                return { tokens, runtime };
+            };
+            const serviceTunnel = {
+                id: 'service-login-test',
+                serverUrl: 'https://service.example.test/api/justybase',
+                targetId: 'netezza',
+                localPort: 15480,
+                auth: 'service-login' as const,
+            };
+            const serviceProfile: ConnectionDetails = {
+                name: 'ServiceProfile',
+                host: '127.0.0.1',
+                port: 15480,
+                database: 'DEV',
+                user: 'analyst',
+                dbType: 'netezza',
+                tunnel: serviceTunnel,
+            };
+
+            it('keeps the service password only in the tunnel secret', async () => {
+                const { tokens, runtime } = createRuntime();
+                const manager = new ConnectionManager(mockContext, runtime);
+                await manager.ensureFullyLoaded();
+
+                try {
+                    await manager.saveConnection(
+                        { ...serviceProfile, password: 'stale-database-password' },
+                        'service-password',
+                    );
+
+                    expect(tokens.get(serviceTunnel.id)).toBe('service-password');
+                    const saved = await manager.getConnection('ServiceProfile');
+                    expect(saved?.password).toBeUndefined();
+                    expect(saved?.tunnel?.auth).toBe('service-login');
+                    expect(JSON.stringify((mockContext.globalState.update as jest.Mock).mock.calls)).not.toContain('service-password');
+                    expect(JSON.stringify((mockContext.secrets.store as jest.Mock).mock.calls)).not.toContain('stale-database-password');
+                } finally {
+                    await manager.dispose();
+                }
+            });
+
+            it('names the service password when it is missing', async () => {
+                const { runtime } = createRuntime();
+                const manager = new ConnectionManager(mockContext, runtime);
+                await manager.ensureFullyLoaded();
+
+                try {
+                    await expect(manager.saveConnection(serviceProfile)).rejects.toThrow(
+                        'A service password is required when a database tunnel is enabled.',
+                    );
+                } finally {
+                    await manager.dispose();
+                }
+            });
+
+            it('asks for a new secret when the sign-in mode changes, and never reuses the old one', async () => {
+                const { tokens, runtime } = createRuntime();
+                const manager = new ConnectionManager(mockContext, runtime);
+                await manager.ensureFullyLoaded();
+                const bearerTunnel = { ...serviceTunnel, auth: undefined };
+
+                try {
+                    await manager.saveConnection({ ...serviceProfile, tunnel: bearerTunnel }, 'static-token');
+
+                    await expect(manager.saveConnection(serviceProfile)).rejects.toThrow(
+                        'A new service password is required when the database tunnel sign-in mode changes.',
+                    );
+                    expect(tokens.get(serviceTunnel.id)).toBe('static-token');
+
+                    await manager.saveConnection(serviceProfile, 'service-password');
+                    expect(tokens.get(serviceTunnel.id)).toBe('service-password');
+                } finally {
+                    await manager.dispose();
+                }
+            });
+
+            it('refuses plain HTTP to a remote service', async () => {
+                const { runtime } = createRuntime();
+                const manager = new ConnectionManager(mockContext, runtime);
+                await manager.ensureFullyLoaded();
+
+                try {
+                    await expect(manager.saveConnection(
+                        {
+                            ...serviceProfile,
+                            tunnel: { ...serviceTunnel, serverUrl: 'http://service.example.test' },
+                        },
+                        'service-password',
+                    )).rejects.toThrow('requires an HTTPS URL');
+                } finally {
+                    await manager.dispose();
+                }
+            });
+        });
+
         it('gives a renamed tunnel profile its own id and token', async () => {
             const tokens = new Map<string, string>();
             const stop = jest.fn(async () => undefined);

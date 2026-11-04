@@ -3,9 +3,11 @@ import type { DatabaseKind } from './database/kind';
 
 /**
  * Configuration for a transparent TCP tunnel managed by the desktop core.
- * The bearer token deliberately does not belong to this serializable contract;
- * it is kept in the host's SecretStorage.
+ * The bearer token or service password deliberately does not belong to this
+ * serializable contract; it is kept in the host's SecretStorage.
  */
+export type DatabaseTunnelAuth = 'bearer-token' | 'service-login';
+
 export interface DatabaseTunnelConfig {
   /** Stable opaque id used to locate the token in SecretStorage. */
   id: string;
@@ -15,6 +17,12 @@ export interface DatabaseTunnelConfig {
   targetId: string;
   /** Loopback TCP port opened by the desktop client. */
   localPort: number;
+  /**
+   * How the relay is authenticated. Absent means a static bearer token. With
+   * 'service-login' the host logs in with the profile user and a service
+   * password to get a JWT, and the relay supplies the database credentials.
+   */
+  auth?: DatabaseTunnelAuth;
 }
 
 export interface ConnectionDetails {
