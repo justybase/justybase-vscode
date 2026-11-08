@@ -1,3 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- The root TS program reaches this file through tests without the media tsconfig globals.
+/// <reference path="./webview-globals.d.ts" />
+
 // Utils module - Utility functions for result panel
 import {
     getResultFormattingPayload,
