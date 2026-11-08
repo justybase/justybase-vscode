@@ -246,6 +246,7 @@ var VirtualCore = (() => {
     }
     return _iosMomentumOverridesWritesResult = isIOSWebKit() && typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("overflow-anchor: auto");
   };
+  var momentumOverridesWrites = () => !isIOSWebKit() || iosMomentumOverridesWrites();
   var _resetIOSDetectionForTests = () => {
     _isIOSResult = void 0;
     _iosMomentumOverridesWritesResult = void 0;
@@ -330,7 +331,7 @@ var VirtualCore = (() => {
       };
       this._openTail = (moved, awaitingFling) => {
         const win = this.host.getWindow();
-        if (!isIOSWebKit() || win == null) return;
+        if (win == null) return;
         this.end();
         const tail = {
           phase: "tail",
@@ -509,9 +510,12 @@ var VirtualCore = (() => {
     adjustments = 0,
     behavior
   }, instance) => {
-    var _a, _b;
-    (_b = (_a = instance.scrollElement) == null ? void 0 : _a.scrollTo) == null ? void 0 : _b.call(_a, {
-      [instance.options.horizontal ? "left" : "top"]: offset + adjustments,
+    var _a;
+    const { scrollElement, options } = instance;
+    const adjustedOffset = offset + adjustments;
+    const isRtlElement = options.horizontal && options.isRtl && scrollElement !== null && "ownerDocument" in scrollElement;
+    (_a = scrollElement == null ? void 0 : scrollElement.scrollTo) == null ? void 0 : _a.call(scrollElement, {
+      [options.horizontal ? "left" : "top"]: isRtlElement ? -adjustedOffset : adjustedOffset,
       behavior
     });
   };
@@ -606,6 +610,9 @@ var VirtualCore = (() => {
       this.observer = /* @__PURE__ */ (() => {
         let _ro = null;
         let _frames = null;
+        let delivering = false;
+        let observeQueued = false;
+        const pendingObservations = /* @__PURE__ */ new Set();
         const get = () => {
           if (_ro) {
             return _ro;
@@ -628,10 +635,20 @@ var VirtualCore = (() => {
                   this._noteClampMax();
                   this._flushHoldIfReady(true);
                   this._retryClampedAdjustment();
+                  this.measureElement(null);
                 }
               }
             };
-            this.options.useAnimationFrameWithResizeObserver ? frames.schedule(run) : run();
+            if (this.options.useAnimationFrameWithResizeObserver) {
+              frames.schedule(run);
+            } else {
+              delivering = true;
+              try {
+                run();
+              } finally {
+                delivering = false;
+              }
+            }
           });
         };
         const measureEntry = (entry) => {
@@ -657,16 +674,34 @@ var VirtualCore = (() => {
             var _a;
             (_a = get()) == null ? void 0 : _a.disconnect();
             _frames == null ? void 0 : _frames.cancel();
+            pendingObservations.clear();
+            observeQueued = false;
             _ro = null;
             _frames = null;
           },
           observe: (target) => {
-            var _a;
-            return (_a = get()) == null ? void 0 : _a.observe(target, { box: "border-box" });
+            const observer = get();
+            if (!observer) return;
+            if (!delivering) {
+              observer.observe(target, { box: "border-box" });
+              return;
+            }
+            pendingObservations.add(target);
+            if (!observeQueued) {
+              observeQueued = true;
+              _frames == null ? void 0 : _frames.schedule(() => {
+                observeQueued = false;
+                pendingObservations.forEach((node) => {
+                  if (node.isConnected) _ro == null ? void 0 : _ro.observe(node, { box: "border-box" });
+                });
+                pendingObservations.clear();
+              });
+            }
           },
           unobserve: (target) => {
             var _a;
-            return (_a = get()) == null ? void 0 : _a.unobserve(target);
+            pendingObservations.delete(target);
+            (_a = get()) == null ? void 0 : _a.unobserve(target);
           }
         };
       })();
@@ -1229,17 +1264,21 @@ var VirtualCore = (() => {
           this.getMeasurements(),
           this.getSize(),
           this.getScrollOffset(),
-          this.options.lanes
+          this.options.lanes,
+          // scrollOffset is measured in the scroll element and the layout total
+          // from the list start, so the list ends scrollMargin further down.
+          this._getLayoutTotalSize() + this.options.scrollMargin
         ],
-        (measurements, outerSize, scrollOffset, lanes) => {
+        (measurements, outerSize, scrollOffset, lanes, listEnd) => {
           if (measurements.length === 0 || outerSize === 0) {
             this.range = null;
             return null;
           }
+          const maxScrollOffset = Math.max(listEnd - outerSize, 0);
           this.range = calculateRangeImpl(
             measurements,
             outerSize,
-            scrollOffset,
+            Math.min(scrollOffset, maxScrollOffset),
             lanes,
             // Pass the typed array so binary search + forward-walk can read
             // start/end directly from Float64Array, skipping the Proxy traps.
@@ -1506,7 +1545,13 @@ var VirtualCore = (() => {
         const property = this.options.horizontal ? "overflow-x" : "overflow-y";
         const value = style.getPropertyValue(property);
         const priority = style.getPropertyPriority(property);
+        const crossSize = () => this.options.horizontal ? scroller.clientHeight : scroller.clientWidth;
+        const crossSizeBefore = crossSize();
         style.setProperty(property, "hidden", "important");
+        if (crossSize() !== crossSizeBefore) {
+          style.setProperty(property, value, priority);
+          return;
+        }
         const stop = {
           // False when the app replaced the hidden value: the fling may not
           // have stopped.
@@ -1536,7 +1581,7 @@ var VirtualCore = (() => {
       };
       this.getVirtualDistanceFromEnd = () => {
         return Math.max(
-          this._getLayoutTotalSize() - this.getSize() - this.getScrollOffset(),
+          this._getLayoutTotalSize() + this.options.scrollMargin - this.getSize() - this.getScrollOffset(),
           0
         );
       };
@@ -1565,7 +1610,7 @@ var VirtualCore = (() => {
         index = Math.max(0, Math.min(index, this.options.count - 1));
         const size = this.getSize();
         const scrollOffset = this.getScrollOffset();
-        const item = this.measurementsCache[index];
+        const item = this.getMeasurements()[index];
         if (!item) return;
         if (align === "auto") {
           if (item.end >= scrollOffset + size - this.options.scrollPaddingEnd) {
@@ -1842,7 +1887,7 @@ var VirtualCore = (() => {
       this._clampedAdjustment = null;
       const tail = this._iosGesture.tail();
       if (kind === "absolute" && tail !== null) {
-        if (tail === "fling" && iosMomentumOverridesWrites()) {
+        if (tail === "fling" && momentumOverridesWrites()) {
           this._stopMomentum(() => {
             const state = this.scrollState;
             if ((state == null ? void 0 : state.phase) !== "queued" || // A finger came down: it owns the scroll until it lifts.

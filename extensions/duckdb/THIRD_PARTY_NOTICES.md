@@ -14,7 +14,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @duckdb/node-bindings | 1.5.0-r.1 | MIT | [upstream](https://github.com/duckdb/duckdb-node-neo) |
 | @duckdb/node-bindings-linux-x64 | 1.5.0-r.1 | MIT | [upstream](https://github.com/duckdb/duckdb-node-neo) |
 | @isaacs/cliui | 8.0.2 | ISC | [upstream](yargs/cliui) |
-| @justybase/spreadsheet-tasks | 3.0.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
+| @justybase/spreadsheet-tasks | 3.2.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
 | @nodable/entities | 3.0.0 | MIT | [upstream](https://github.com/nodable/val-parsers) |
 | @pkgjs/parseargs | 0.11.0 | MIT | [upstream](https://github.com/pkgjs/parseargs) |
 | abort-controller | 3.0.0 | MIT | [upstream](https://github.com/mysticatea/abort-controller) |
@@ -394,7 +394,7 @@ WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
 ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-### @justybase/spreadsheet-tasks@3.0.0
+### @justybase/spreadsheet-tasks@3.2.0
 
 ```text
 MIT License
