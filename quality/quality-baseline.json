@@ -8,9 +8,9 @@
     "lines": 73
   },
   "lint": {
-    "total": 52,
+    "total": 27,
     "areas": {
-      "media": 52,
+      "media": 27,
       "packages": 0,
       "extensions": 0
     }

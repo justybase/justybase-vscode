@@ -71,7 +71,7 @@ function renderColumnsTable(): void {
         return;
     }
 
-    dom.columnsTableBody.innerHTML = state.columns.map((col, index) => {
+    dom.columnsTableBody.innerHTML = state.columns.map((col) => {
         // Auto-detect strategy based on column type
         const strategy = detectStrategy(col.type);
         columnStrategies.set(col.name, {
@@ -320,7 +320,7 @@ function bindEvents(): void {
         e.stopPropagation();
         const sql = dom.sqlPreview?.textContent;
         if (sql && !sql.includes('Click "Generate Preview"')) {
-            postToHost({ command: 'copyToClipboard', sql });
+            postToHost({ command: 'copyToClipboard', sql } satisfies TestDataGeneratorWebviewToHostMessage);
         }
     });
 
@@ -329,7 +329,7 @@ function bindEvents(): void {
         e.stopPropagation();
         const sql = dom.sqlPreview?.textContent;
         if (sql && !sql.includes('Click "Generate Preview"')) {
-            postToHost({ command: 'openInEditor', sql });
+            postToHost({ command: 'openInEditor', sql } satisfies TestDataGeneratorWebviewToHostMessage);
         }
     });
 
@@ -337,7 +337,7 @@ function bindEvents(): void {
         e.preventDefault();
         e.stopPropagation();
         const config = getGenerationConfig();
-        postToHost({ command: 'generateData', config });
+        postToHost({ command: 'generateData', config } satisfies TestDataGeneratorWebviewToHostMessage);
     });
 
     console.log('Event listeners bound successfully');
@@ -399,8 +399,12 @@ function generatePreview(): void {
         sql += 'COMMIT;';
     }
 
-    dom.sqlPreview && (dom.sqlPreview.textContent = sql);
-    dom.previewInfo && (dom.previewInfo.textContent = `Preview: ${Math.min(config.rowCount, 100)} rows shown`);
+    if (dom.sqlPreview) {
+        dom.sqlPreview.textContent = sql;
+    }
+    if (dom.previewInfo) {
+        dom.previewInfo.textContent = `Preview: ${Math.min(config.rowCount, 100)} rows shown`;
+    }
 }
 
 function generateValuePreview(column: ColumnGenerationConfig, rowIndex: number): string {

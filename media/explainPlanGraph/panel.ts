@@ -36,7 +36,7 @@ const nodePositions = new Map<number, CanvasPoint>();
 let heatmapEnabled = true;
 let nodeDragState: NodeDragState | null = null;
 let panDragState: PanDragState | null = null;
-let transformState: TransformState = {
+const transformState: TransformState = {
     scale: 1,
     panX: 48,
     panY: 36

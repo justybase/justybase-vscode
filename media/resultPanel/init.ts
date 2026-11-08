@@ -2,7 +2,6 @@
 import { ensureSearchWorkerDataAsync, GLOBAL_FILTER_WORKER_ROW_THRESHOLD } from "./searchWorkerBridge.js";
 import { injectStyles } from "./styles.js";
 import {
-  setActiveGridIndex,
   initializeWindowState,
   setSearchWorker,
   setSearchMatches,
@@ -20,7 +19,6 @@ import {
   getPendingEdits,
   clearPendingEdits,
   getPendingDeletes,
-  clearPendingDeletes,
   resetEditSession,
   addPendingEdit,
   markRowForDelete,
@@ -47,7 +45,6 @@ import {
   renderDocIndicator,
   renderResultSetTabs,
   switchToResultSet,
-  updateLogsTabSpinner,
 } from "./tabs.js";
 import { subscribeRunningUiRefresh } from "./runningUiDelay.js";
 import {
@@ -55,16 +52,13 @@ import {
   updateLoadingState,
   dismissLoadingOverlay,
   scrollToColumn,
-  populateColumnSearchList,
 } from "./grid.js";
 import { renderRowCountInfo, reorderColumnByDrag, reorderColumnsForPinning } from "./filter.js";
 import { applyDatabaseFilter } from "./databaseFilters.js";
 import { closeRowView, syncRowViewToolbarButton } from "./rowView.js";
 import { renderRowViewComparison } from "./rowViewComparison.js";
 import { attachRowViewSelection } from "./rowViewSelection.js";
-import { refreshDiskQueryWindow } from "./diskBackedGrid.js";
 import {
-  getActiveResultViewMode,
   initializeAnalysisModeControls,
   setActiveResultViewMode,
   syncAnalysisView,
@@ -81,7 +75,6 @@ import {
   openRangeChartForActiveResult,
 } from "./rangeChart.js";
 import {
-  clearLogs,
   openInExcel,
   openInExcelXlsx,
   copyAsExcel,
@@ -99,7 +92,6 @@ import {
   toggleExportPrimaryMenu,
   handleExportPrimaryClick,
   handleClickQueryLocallyDuckDB,
-  setGlobalDragStateForExport,
   exportAllVisibleToCsv,
   exportAllVisibleToJson,
   exportAllVisibleToXml,
@@ -440,7 +432,6 @@ function applyGlobalFilter(value: string): void {
   globalFilterApplyCount += 1;
   lastGlobalFilterApplyAt = performance.now();
   const activeIndex = getActiveGridIndex();
-  const viewMode = getActiveResultViewMode(activeIndex);
   const activeResult = getResultSetAt(activeIndex) ?? null;
   const executionTimestamp = activeResult
     ? activeResult.executionTimestamp
@@ -1510,7 +1501,7 @@ function copyGridAsImage() {
   const tmpCtx = getCanvasContext(tmpCanvas);
   const maxTotalW = 800;
 
-  columns.forEach(function (col, ci) {
+  columns.forEach(function (col) {
     tmpCtx.font = fontBold;
     const headerW = tmpCtx.measureText(col.columnDef.header || col.id).width + 30 + pad * 3;
     let maxW = headerW;
@@ -1659,7 +1650,7 @@ function copyGridAsImage() {
       try {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         vscode.postMessage({ command: "info", text: "Grid copied as image (" + visRows + " rows)" });
-      } catch (e) {
+      } catch {
         vscode.postMessage({ command: "info", text: "Failed to copy image" });
       }
     }, "image/png");
@@ -3273,7 +3264,6 @@ function setupWindowFunctions(): void {
   };
   panel.selectAll = function () {
     const activeIndex = getActiveGridIndex();
-    const viewMode = getActiveResultViewMode(activeIndex);
     const grid = getGrid(activeIndex);
     if (grid && grid.selectAll) {
       grid.selectAll();

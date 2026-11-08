@@ -43,7 +43,10 @@ export default tseslint.config(
         // without weakening the blocking core-extension rules.
         files: ['media/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
         rules: {
-            '@typescript-eslint/no-unused-vars': 'warn',
+            '@typescript-eslint/no-unused-vars': ['warn', {
+                argsIgnorePattern: '^_',
+                caughtErrorsIgnorePattern: '^_',
+            }],
             'prefer-const': 'warn',
             'no-var': 'warn',
             'no-case-declarations': 'warn',

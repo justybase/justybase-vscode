@@ -1,5 +1,3 @@
-/// <reference path="./webview-globals.d.ts" />
-
 // Utils module - Utility functions for result panel
 import {
     getResultFormattingPayload,
@@ -432,7 +430,7 @@ function roundDecimalParts(
     const nextDigit = discarded[0];
     const remainder = discarded.slice(1);
     const discardedHasValue = hasNonZeroDigits(discarded);
-    let shouldRoundUp = false;
+    let shouldRoundUp: boolean;
 
     switch (roundingMode) {
         case 'ceil':

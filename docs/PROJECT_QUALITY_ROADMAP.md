@@ -47,7 +47,7 @@ baseline changes.
 | React web tests | 1 suite and 3 tests pass | `npm run test:web` |
 | Browser tests | 30 Playwright tests pass | `npm run test:playwright` |
 | Extension Host | Deterministic SQLite Result Panel scenario passes | `xvfb-run -a npm run test:extension-host` |
-| Extended lint | 52 warnings, all in `media` (current frozen ratchet after the Web Editor retirement) | `npm run lint:extended:check` |
+| Extended lint | 27 warnings, all in `media` (current frozen ratchet after the webview cleanup) | `npm run lint:extended:check` |
 | Dependency audit | No known production or development vulnerabilities reported | `npm audit --audit-level=high` |
 | Documentation | 68 generated pages and current catalog/link checks pass | `npm run docs:check` |
 
@@ -86,7 +86,7 @@ backward compatibility at the closest production boundary.
 | QG01 | P0 | M | Build/CI maintainer | done | Added the ignored, schema-versioned quality report (`quality/quality-report.v1.schema.json`) and reproducible artifact command (`npm run quality:report`). Evidence: `scripts/quality-report.mjs`, `scripts/quality-tools.test.mjs`. Verified 2026-08-31. |
 | QG02 | P0 | S | Repository maintainer | done | Applied the risk-based definition of done, state/failure matrix, and cleanup evidence to the PR template and contributor guide. Evidence: `.github/pull_request_template.md`, `CONTRIBUTING.md`. Verified 2026-08-31. |
 | QG03 | P0 | M | Test maintainer | done | Enforced global floors of 71% statements, 58% branches, 76% functions, and 72% lines (raised to 72/59/77/73 on 2026-10-02), plus 80% changed-line/70% changed-branch coverage for high-risk `src/` roots. Evidence: `jest.config.js`, `scripts/quality-gate.mjs`, CI unit job. Verified 2026-08-31. |
-| QG04 | P0 | M | Frontend maintainer | done | Reduced the extended-lint baseline from 162 to 70 warnings and then to the current 52 warnings after the Web Editor retirement (52 `media`, 0 `packages`, 0 `extensions`) while keeping the ratchet blocking. The Phase 1B target of 100 warnings is met. Evidence: `quality/quality-baseline.json`, `npm run lint:extended:check`. Verified 2026-08-31. |
+| QG04 | P0 | M | Frontend maintainer | done | Reduced the extended-lint baseline from 162 to 70 warnings and then to the current 27 warnings after the webview cleanup (27 `media`, 0 `packages`, 0 `extensions`) while keeping the ratchet blocking. The Phase 1B target of 100 warnings is met. Evidence: `quality/quality-baseline.json`, `npm run lint:extended:check`. Verified 2026-11-08. |
 | QG05 | P1 | S recurring | Repository maintainer | planned | Review this scorecard monthly. A `done` item must include evidence links, verification date, and any follow-up risk; stale or contradicted status returns to `planned`. |
 
 Long-term exit criteria are at least 80% global line coverage, 70% branch
