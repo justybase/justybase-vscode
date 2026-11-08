@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Partial
 last_verified: 2026-08-19
-product_version: 3.20.2
+product_version: 3.20.3
 ---
 
 # SQL Console, notebooks and macros
