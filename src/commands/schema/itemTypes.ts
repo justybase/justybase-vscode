@@ -10,4 +10,6 @@ export interface SchemaItemData {
     parentName?: string;
     objectDescription?: string;
     objId?: number;
+    /** Column data type shown by the schema tree (columns only). */
+    dataType?: string;
 }

@@ -511,6 +511,72 @@ export function columnCommentSql(kind: string | undefined, ref: MenuObjectRef, c
     }
 }
 
+/** Column identifier quoted for the target dialect. */
+export function columnIdentifierSql(kind: string | undefined, column: string): string {
+    return formatIdentifierForSql(column, kind);
+}
+
+/** Table-qualified column reference used by copy and SQL-preview actions. */
+export function qualifiedColumnSql(kind: string | undefined, ref: MenuObjectRef, column: string): string {
+    return `${qualifiedMenuName(kind, ref)}.${formatIdentifierForSql(column, kind)}`;
+}
+
+/** `SELECT * FROM table WHERE column = value`; the literal NULL maps to IS NULL. */
+export function filterColumnByValueSql(
+    kind: string | undefined,
+    ref: MenuObjectRef,
+    column: string,
+    value: string,
+): string {
+    const col = formatIdentifierForSql(column, kind);
+    const predicate = value.trim().toUpperCase() === 'NULL'
+        ? `${col} IS NULL`
+        : `${col} = ${plainSqlLiteral(value, kind)}`;
+    return `SELECT * FROM ${qualifiedMenuName(kind, ref)} WHERE ${predicate};`;
+}
+
+export function sortColumnSql(
+    kind: string | undefined,
+    ref: MenuObjectRef,
+    column: string,
+    descending: boolean,
+): string {
+    return `SELECT * FROM ${qualifiedMenuName(kind, ref)} ORDER BY ${formatIdentifierForSql(column, kind)} ${descending ? 'DESC' : 'ASC'};`;
+}
+
+export function selectDistinctColumnSql(
+    kind: string | undefined,
+    ref: MenuObjectRef,
+    column: string,
+): string {
+    return `SELECT DISTINCT ${formatIdentifierForSql(column, kind)} FROM ${qualifiedMenuName(kind, ref)};`;
+}
+
+function isNumericColumnType(dataType: string | undefined): boolean {
+    return /\b(INT|INTEGER|SMALLINT|BIGINT|TINYINT|SERIAL|BIGSERIAL|DECIMAL|NUMERIC|NUMBER|FLOAT|DOUBLE|REAL|MONEY|BYTEINT)\b/i.test(dataType ?? '');
+}
+
+/** Generic column profile: counts, nulls, distinct values, min/max, and AVG for numeric types. */
+export function profileColumnSql(
+    kind: string | undefined,
+    ref: MenuObjectRef,
+    column: string,
+    dataType?: string,
+): string {
+    const col = formatIdentifierForSql(column, kind);
+    const aggregates = [
+        'COUNT(*) AS ROW_COUNT',
+        `COUNT(${col}) AS NON_NULL_COUNT`,
+        `COUNT(DISTINCT ${col}) AS DISTINCT_COUNT`,
+        `MIN(${col}) AS MIN_VALUE`,
+        `MAX(${col}) AS MAX_VALUE`,
+    ];
+    if (isNumericColumnType(dataType)) {
+        aggregates.push(`AVG(${col}) AS AVG_VALUE`);
+    }
+    return `SELECT ${aggregates.join(', ')} FROM ${qualifiedMenuName(kind, ref)};`;
+}
+
 /** Additional tree context a DROP needs beyond the object name. */
 export interface DropObjectContext {
     /** Owning table for triggers and indexes, when the dialect needs `ON table`. */

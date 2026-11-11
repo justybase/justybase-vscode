@@ -1,20 +1,48 @@
 import {
     alterColumnSql,
     callRoutineSql,
+    columnIdentifierSql,
     countRowsSql,
     createIndexSql,
     createTableFromSql,
     createTableLikeSql,
     duplicateRowsSql,
+    filterColumnByValueSql,
     isSafeSqlDataType,
     isSafeSqliteAddColumnDefault,
     postgresTableStorageSql,
+    profileColumnSql,
+    qualifiedColumnSql,
     quoteIdentifierListForKind,
     schemaValueSearchSql,
+    selectDistinctColumnSql,
+    sortColumnSql,
     supportsSchemaValueSearch,
 } from '../commands/schema/menuSql';
 
 describe('schema menu SQL generators', () => {
+    it('builds column copy and table-scoped query SQL for the schema tree', () => {
+        const netezza = { database: 'SALES', schema: 'ADMIN', name: 'ORDERS' };
+        const postgres = { database: 'shop', schema: 'public', name: 'orders' };
+
+        expect(columnIdentifierSql('postgresql', 'Order Id')).toBe('"Order Id"');
+        expect(qualifiedColumnSql('netezza', netezza, 'ORDER_ID')).toBe('SALES.ADMIN.ORDERS.ORDER_ID');
+        expect(qualifiedColumnSql('postgresql', postgres, 'Order Id')).toBe('public.orders."Order Id"');
+        expect(filterColumnByValueSql('postgresql', postgres, 'status', "O'Reilly"))
+            .toBe(`SELECT * FROM public.orders WHERE status = 'O''Reilly';`);
+        expect(filterColumnByValueSql('netezza', netezza, 'ORDER_ID', 'NULL'))
+            .toBe('SELECT * FROM SALES.ADMIN.ORDERS WHERE ORDER_ID IS NULL;');
+        expect(sortColumnSql('netezza', netezza, 'ORDER_ID', false))
+            .toBe('SELECT * FROM SALES.ADMIN.ORDERS ORDER BY ORDER_ID ASC;');
+        expect(sortColumnSql('netezza', netezza, 'ORDER_ID', true))
+            .toBe('SELECT * FROM SALES.ADMIN.ORDERS ORDER BY ORDER_ID DESC;');
+        expect(selectDistinctColumnSql('netezza', netezza, 'ORDER_ID'))
+            .toBe('SELECT DISTINCT ORDER_ID FROM SALES.ADMIN.ORDERS;');
+        expect(profileColumnSql('netezza', netezza, 'AMOUNT', 'NUMERIC(12,2)'))
+            .toBe('SELECT COUNT(*) AS ROW_COUNT, COUNT(AMOUNT) AS NON_NULL_COUNT, COUNT(DISTINCT AMOUNT) AS DISTINCT_COUNT, MIN(AMOUNT) AS MIN_VALUE, MAX(AMOUNT) AS MAX_VALUE, AVG(AMOUNT) AS AVG_VALUE FROM SALES.ADMIN.ORDERS;');
+        expect(profileColumnSql('netezza', netezza, 'STATUS', 'VARCHAR(20)')).not.toContain('AVG(');
+    });
+
     it('builds a count query and groups duplicate keys', () => {
         expect(countRowsSql('"sales"."orders"')).toBe('SELECT COUNT(*) AS row_count FROM "sales"."orders";');
         expect(duplicateRowsSql('"sales"."orders"', '"account_id", "order_no"')).toBe(

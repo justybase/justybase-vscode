@@ -166,7 +166,11 @@ ${sql}`,
         // Copy Name
         vscode.commands.registerCommand('netezza.copyName', (item: SchemaItemData) => {
             if (item && getItemObjectName(item) && item.dbName) {
-                const name = getFullName(item, connectionManager);
+                // Column nodes stay unqualified for the schema-tree Copy Name action;
+                // qualified names have their own command.
+                const name = item.contextValue === 'column'
+                    ? getItemObjectName(item)
+                    : getFullName(item, connectionManager);
                 vscode.env.clipboard.writeText(name);
                 vscode.window.showInformationMessage('Copied to clipboard');
             }

@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { SchemaCommandsDependencies } from './types';
 import { registerCopyCommands } from './copyCommands';
+import { registerColumnCommands } from './columnCommands';
 import { registerDataCommands } from './dataCommands';
 import { registerReportCommands } from './reportCommands';
 import { registerObjectNoteCommands } from './objectNoteCommands';
@@ -25,6 +26,7 @@ import { registerUtilityCommands } from './utilityCommands';
 export function registerSchemaCommands(deps: SchemaCommandsDependencies): vscode.Disposable[] {
     return [
         ...registerCopyCommands(deps),
+        ...registerColumnCommands(deps),
         ...registerDataCommands(deps),
         ...registerReportCommands(deps),
         ...registerObjectNoteCommands(deps),
