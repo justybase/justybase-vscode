@@ -78,7 +78,7 @@ function isTruthyFlag(value: unknown): boolean {
     return value === true || value === 1 || value === '1' || value === 't' || value === 'true';
 }
 
-export function buildColumns(columnNames: string[], metadata: EditDataColumnMetadata[] | undefined): GridColumn[] {
+export function buildColumns(columnNames: string[], metadata: EditDataColumnMetadata[] | undefined, readOnly = false): GridColumn[] {
     const byName = new Map<string, EditDataColumnMetadata>();
     (metadata || []).forEach(meta => byName.set(String(meta.ATTNAME).toUpperCase(), meta));
     return columnNames.map(name => {
@@ -93,7 +93,7 @@ export function buildColumns(columnNames: string[], metadata: EditDataColumnMeta
             isFk: isTruthyFlag(meta?.IS_FK),
             notNull: isTruthyFlag(meta?.IS_NOT_NULL),
             comment: String(meta?.DESCRIPTION || ''),
-            readonly: isRowId,
+            readonly: isRowId || readOnly,
         };
     });
 }
@@ -103,7 +103,12 @@ function rowKeyFor(row: EditDataRow, fallbackIndex: number): string {
     return rowId === null || rowId === undefined ? `x:${fallbackIndex}` : `r:${String(rowId)}`;
 }
 
-export function createState(data: EditDataRow[], columnNames: string[], metadata?: EditDataColumnMetadata[]): EditorState {
+export function createState(
+    data: EditDataRow[],
+    columnNames: string[],
+    metadata?: EditDataColumnMetadata[],
+    options?: { readOnly?: boolean },
+): EditorState {
     const rows = new Map<string, WorkingRow>();
     const order: string[] = [];
     data.forEach((row, index) => {
@@ -121,7 +126,7 @@ export function createState(data: EditDataRow[], columnNames: string[], metadata
         order.push(key);
     });
     return {
-        columns: buildColumns(columnNames, metadata),
+        columns: buildColumns(columnNames, metadata, options?.readOnly === true),
         rows,
         order,
         loadOrder: [...order],

@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import type {
     EditDataChanges,
+    EditDataObjectKind,
     EditDataPanelInboundMessage,
-    EditDataPanelOutboundMessage
+    EditDataPanelOutboundMessage,
+    EditDataProperty,
 } from '../contracts/webviews';
 import { runQuery, runQueryRaw, runQueriesSequentially, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
@@ -10,6 +12,7 @@ import { getTableMetadata, toWebviewFormat } from '../providers/tableMetadataPro
 import type { MetadataQueryKind } from '../metadata/metadataQueryDiagnostics';
 import { runWithMetadataQueryConcurrencyLimit } from '../metadata/metadataQueryLimiter';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
+import { splitCommaSeparatedTopLevel } from '../core/parenAwareText';
 
 /** Maximum number of rows fetched into the editor. */
 export const EDIT_DATA_ROW_LIMIT = 50000;
@@ -53,7 +56,19 @@ export interface EditDataItem {
     dbName: string;
     schema: string;
     connectionName: string;
+    objType?: string;
+    rawLabel?: string;
+    owner?: string;
     [key: string]: unknown;
+}
+
+/** Tab that receives focus when the panel opens. */
+export type EditDataInitialTab = 'data' | 'structure' | 'ddl';
+
+export interface EditDataPanelOptions {
+    initialTab?: EditDataInitialTab;
+    /** Overrides the object-derived default (tables are editable, views/procedures are not). */
+    readOnly?: boolean;
 }
 
 interface EditDataQueryOptions {
@@ -72,9 +87,65 @@ interface EditDataPanelState {
     saveInFlight: boolean;
     /** Column names returned by the last load; DML may only reference these. */
     knownColumns: Set<string>;
+    objectType: string;
+    objectKind: EditDataObjectKind;
+    readOnly: boolean;
+    /** Catalog name used for DDL (the procedure signature for routines). */
+    ddlObjectName: string;
+    properties: EditDataProperty[];
 }
 
 const panelStates = new WeakMap<vscode.WebviewPanel, EditDataPanelState>();
+
+/** Messages that change catalog or data state; rejected in read-only panels. */
+const READ_ONLY_BLOCKED_COMMANDS: ReadonlySet<EditDataPanelInboundMessage['command']> = new Set([
+    'save',
+    'previewSql',
+    'updateTableComment',
+    'updateColumnComment',
+    'addColumn',
+    'dropColumn',
+]);
+
+function normalizeObjectType(item: EditDataItem): string {
+    const contextValue = typeof item.contextValue === 'string' ? item.contextValue : '';
+    const raw = item.objType
+        || contextValue.replace(/^(?:netezza|favoritesObject):/, '')
+        || 'TABLE';
+    return raw.split(':')[0].toUpperCase();
+}
+
+function objectKindFor(objectType: string): EditDataObjectKind {
+    if (objectType === 'PROCEDURE' || objectType === 'FUNCTION' || objectType === 'AGGREGATE') {
+        return 'procedure';
+    }
+    return objectType.includes('VIEW') ? 'view' : 'table';
+}
+
+/** Splits a catalog signature such as `MY_PROC(INT, VARCHAR)` into positional argument types. */
+function parseProcedureArguments(signature: string): { position: number; type: string }[] {
+    const open = signature.indexOf('(');
+    const close = signature.lastIndexOf(')');
+    if (open < 0 || close <= open) {
+        return [];
+    }
+    return splitCommaSeparatedTopLevel(signature.slice(open + 1, close).trim())
+        .map((argument, index) => ({ position: index + 1, type: argument.trim() }))
+        .filter(argument => argument.type.length > 0);
+}
+
+function buildProcedureProperties(item: EditDataItem, objectType: string, signature: string): EditDataProperty[] {
+    const properties: EditDataProperty[] = [
+        { label: 'Kind', value: objectType },
+        { label: 'Database', value: item.dbName },
+        { label: 'Schema', value: item.schema },
+        { label: 'Signature', value: signature },
+    ];
+    if (item.owner) {
+        properties.push({ label: 'Owner', value: item.owner });
+    }
+    return properties;
+}
 
 export class EditDataProvider {
     public static readonly viewType = 'netezza.editData';
@@ -83,7 +154,8 @@ export class EditDataProvider {
         extensionUri: vscode.Uri,
         item: EditDataItem,
         context: vscode.ExtensionContext,
-        connectionManager: ConnectionManager
+        connectionManager: ConnectionManager,
+        options: EditDataPanelOptions = {}
     ) {
         if (!item || !item.label || !item.dbName || !item.schema) {
             vscode.window.showErrorMessage('Invalid table selection');
@@ -94,11 +166,17 @@ export class EditDataProvider {
         const schema = item.schema;
         const database = item.dbName;
         const fullTableName = `${database}.${schema}.${tableName}`;
+        const objectType = normalizeObjectType(item);
+        const objectKind = objectKindFor(objectType);
+        // External tables are inspected, never mutated from this panel.
+        const readOnly = options.readOnly ?? (objectKind !== 'table' || objectType === 'EXTERNAL TABLE');
+        const ddlObjectName = String(item.rawLabel || item.label);
+        const detailView = options.initialTab === 'structure' || readOnly;
 
         // Create Webview Panel
         const panel = vscode.window.createWebviewPanel(
             EditDataProvider.viewType,
-            `Edit: ${tableName}`,
+            `${detailView ? 'Details' : 'Edit'}: ${tableName}`,
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -115,6 +193,10 @@ export class EditDataProvider {
             schema,
             table: tableName,
             connectionName: item.connectionName,
+            objectType,
+            objectKind,
+            readOnly,
+            initialTab: options.initialTab ?? 'data',
         });
 
         const state: EditDataPanelState = {
@@ -122,6 +204,13 @@ export class EditDataProvider {
             disposed: false,
             saveInFlight: false,
             knownColumns: new Set(),
+            objectType,
+            objectKind,
+            readOnly,
+            ddlObjectName,
+            properties: objectKind === 'procedure'
+                ? buildProcedureProperties(item, objectType, ddlObjectName)
+                : [],
         };
         panelStates.set(panel, state);
         panel.onDidDispose(() => {
@@ -134,12 +223,17 @@ export class EditDataProvider {
             void this._loadData(panel, database, schema, tableName, item.connectionName, context, connectionManager, options);
         };
 
-        reload();
-
         // Message Handling
         panel.webview.onDidReceiveMessage(async (message: EditDataPanelInboundMessage) => {
             try {
+                if (state.readOnly && READ_ONLY_BLOCKED_COMMANDS.has(message.command)) {
+                    vscode.window.showWarningMessage(`${objectType} ${fullTableName} is read-only in this panel.`);
+                    return;
+                }
                 switch (message.command) {
+                    case 'ready':
+                        reload();
+                        break;
                     case 'save': {
                         const saved = await this._handleSave(
                             panel,
@@ -173,7 +267,7 @@ export class EditDataProvider {
                         break;
                     }
                     case 'requestDdl':
-                        await this._loadDdl(panel, connectionManager, item.connectionName, database, schema, tableName);
+                        await this._loadDdl(panel, connectionManager, item.connectionName, database, schema, state.ddlObjectName, state.objectType);
                         break;
                     case 'openSqlInEditor': {
                         const doc = await vscode.workspace.openTextDocument({ content: message.sql, language: 'sql' });
@@ -271,7 +365,8 @@ export class EditDataProvider {
         connectionName: string,
         database: string,
         schema: string,
-        table: string,
+        objectName: string,
+        objectType: string,
     ): Promise<void> {
         try {
             const connectionDetails = await connectionManager.getConnection(connectionName);
@@ -281,11 +376,11 @@ export class EditDataProvider {
             }
             // Loaded lazily: DDL generation pulls in the dialect DDL providers.
             const { generateDDL } = await import('../ddlGenerator');
-            const result = await generateDDL(connectionDetails, database, schema, table, 'TABLE');
+            const result = await generateDDL(connectionDetails, database, schema, objectName, objectType);
             if (result.success && result.ddlCode) {
                 this._postMessage(panel, { command: 'setDdl', ddl: result.ddlCode });
             } else {
-                this._postMessage(panel, { command: 'setDdl', error: result.error || 'DDL is not available for this table.' });
+                this._postMessage(panel, { command: 'setDdl', error: result.error || `DDL is not available for this ${objectType.toLowerCase()}.` });
             }
         } catch (e: unknown) {
             this._postMessage(panel, { command: 'setDdl', error: e instanceof Error ? e.message : String(e) });
@@ -304,12 +399,41 @@ export class EditDataProvider {
     ) {
         const fullTableName = `${db}.${schema}.${table}`;
         const state = panelStates.get(panel);
+        const objectKind = state?.objectKind ?? 'table';
+        const readOnly = state?.readOnly ?? false;
         const generation = state ? ++state.loadGeneration : 0;
         const isStale = (): boolean => Boolean(state && (state.disposed || state.loadGeneration !== generation));
         if (state?.disposed) return;
         const startedAt = Date.now();
         try {
             this._postMessage(panel, { command: 'setLoading', loading: true, message: 'Fetching data...' });
+
+            if (objectKind === 'procedure') {
+                const signature = state?.ddlObjectName ?? table;
+                if (isStale()) return;
+                this._postMessage(panel, {
+                    command: 'setData',
+                    data: [],
+                    columns: [],
+                    metadata: {
+                        tableComment: '',
+                        columns: [],
+                        objectKind: 'procedure',
+                        properties: state?.properties ?? [],
+                        arguments: parseProcedureArguments(signature),
+                    },
+                    info: {
+                        rowLimit: 0,
+                        elapsedMs: Date.now() - startedAt,
+                        tableName: fullTableName,
+                        connectionName,
+                    },
+                    readOnly: true,
+                });
+                return;
+            }
+
+            const databaseKind = connectionManager.getConnectionDatabaseKind?.(connectionName);
 
             // Use centralized tableMetadataProvider for metadata queries
             const queryRunner = (query: string, queryKind: MetadataQueryKind = 'table-columns') =>
@@ -335,25 +459,29 @@ export class EditDataProvider {
                     }),
                 );
 
-            // Prepare Query
-            let selectList = 'ROWID, *';
+            const editable = objectKind === 'table' && !readOnly;
+
+            // Prepare Query. ROWID only exists on regular tables; views are read through a plain projection.
+            let selectList = editable ? 'ROWID, *' : '*';
             if (options.columns && options.columns.trim()) {
                 const cols = options.columns.trim();
-                // Ensure ROWID is included if not present
-                if (!/\bROWID\b/i.test(cols)) {
-                    selectList = 'ROWID, ' + cols;
-                } else {
-                    selectList = cols;
-                }
+                selectList = editable && !/\bROWID\b/i.test(cols) ? 'ROWID, ' + cols : cols;
             }
 
-            let query = `SELECT ${selectList} FROM ${fullTableName}`;
             const where = stripLeadingKeyword(options.whereClause, /^WHERE\s+/i);
+            const orderBy = stripLeadingKeyword(options.orderBy, /^ORDER\s+BY\s+/i);
+            let query = `SELECT ${selectList} FROM ${fullTableName}`;
             if (where) {
                 query += ` WHERE ${where}`;
             }
-            const orderBy = stripLeadingKeyword(options.orderBy, /^ORDER\s+BY\s+/i);
-            query += ` ORDER BY ${orderBy || 'ROWID'} LIMIT ${EDIT_DATA_ROW_LIMIT}`;
+            if (editable) {
+                query += ` ORDER BY ${orderBy || 'ROWID'} LIMIT ${EDIT_DATA_ROW_LIMIT}`;
+            } else {
+                if (orderBy) {
+                    query += ` ORDER BY ${orderBy}`;
+                }
+                query += ` LIMIT ${EDIT_DATA_ROW_LIMIT}`;
+            }
 
             const [dataResult, metadata] = await Promise.all([
                 runQueryRaw(
@@ -363,7 +491,11 @@ export class EditDataProvider {
                     connectionManager,
                     connectionName
                 ),
-                getTableMetadata(queryRunner, db, schema, table)
+                getTableMetadata(queryRunner, db, schema, table, databaseKind, {
+                    objectType: state?.objectType && state.objectType.toUpperCase() !== 'TABLE'
+                        ? state.objectType
+                        : undefined,
+                })
             ]);
 
             // Convert to webview format (uppercase keys for JS compatibility)
@@ -388,11 +520,12 @@ export class EditDataProvider {
             } else if (options.columns && options.columns.trim()) {
                 const cols = options.columns.trim().split(',').map(c => c.trim()).filter(c => c);
                 const hasRowId = cols.some(c => c.toUpperCase() === 'ROWID');
-                columns = hasRowId ? cols : ['ROWID', ...cols];
+                columns = editable && !hasRowId ? ['ROWID', ...cols] : cols;
             } else if (columnsMeta.length > 0) {
-                columns = ['ROWID', ...columnsMeta.map((c: { ATTNAME: string }) => c.ATTNAME)];
+                const metaColumns = columnsMeta.map((c: { ATTNAME: string }) => c.ATTNAME);
+                columns = editable ? ['ROWID', ...metaColumns] : metaColumns;
             }
-            if (columns.includes('ROWID')) {
+            if (editable && columns.includes('ROWID')) {
                 columns = ['ROWID', ...columns.filter(c => c !== 'ROWID')];
             }
 
@@ -404,7 +537,8 @@ export class EditDataProvider {
                 columns,
                 metadata: {
                     tableComment,
-                    columns: columnsMeta
+                    columns: columnsMeta,
+                    objectKind,
                 },
                 info: {
                     rowLimit: EDIT_DATA_ROW_LIMIT,
@@ -412,6 +546,7 @@ export class EditDataProvider {
                     tableName: fullTableName,
                     connectionName,
                 },
+                readOnly,
             });
         } catch (err: unknown) {
             if (isStale()) return;
@@ -593,7 +728,16 @@ export class EditDataProvider {
     private static _getHtmlForWebview(
         webview: vscode.Webview,
         extensionUri: vscode.Uri,
-        target: { database: string; schema: string; table: string; connectionName: string },
+        target: {
+            database: string;
+            schema: string;
+            table: string;
+            connectionName: string;
+            objectType?: string;
+            objectKind?: EditDataObjectKind;
+            readOnly?: boolean;
+            initialTab?: EditDataInitialTab;
+        },
     ) {
         const asset = (...segments: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...segments));
         const mainScriptUri = asset('dist', 'media', 'editDataPanel.js');
@@ -620,7 +764,7 @@ export class EditDataProvider {
                 :root { --grid-font: ${gridFont.family}; --grid-font-size: ${gridFont.size}px; }
             </style>
             <link href="${styleUri}" rel="stylesheet">
-            <title>Edit Data: ${esc(fullName)}</title>
+            <title>${target.initialTab === 'structure' || target.readOnly ? 'Details' : 'Edit Data'}: ${esc(fullName)}</title>
         </head>
         <body>
             ${renderEditDataShell(target)}
@@ -642,25 +786,52 @@ function escapeHtml(value: string): string {
 /**
  * Static panel skeleton. Kept separate from the CSP/asset wrapper so the
  * browser harness can render exactly the same markup.
+ *
+ * Defaults render the editable table view; `objectType`, `readOnly` and
+ * `initialTab` switch the same panel into the read-only object-details mode
+ * used for tables, views and procedures.
  */
-export function renderEditDataShell(target: { database: string; schema: string; table: string; connectionName: string }): string {
+export function renderEditDataShell(target: {
+    database: string;
+    schema: string;
+    table: string;
+    connectionName: string;
+    objectType?: string;
+    objectKind?: EditDataObjectKind;
+    readOnly?: boolean;
+    initialTab?: EditDataInitialTab;
+}): string {
     const esc = escapeHtml;
-    return `<div class="main-layout">
-                <header class="panel-header">
-                    <div class="object-path" title="${esc(`${target.connectionName} · ${target.database}.${target.schema}.${target.table}`)}">
-                        <span class="object-icon" aria-hidden="true">${ICONS.table}</span>
-                        <span class="object-path__muted">${esc(target.database)}.${esc(target.schema)}.</span><span class="object-path__name">${esc(target.table)}</span>
-                        <span class="object-path__conn">${esc(target.connectionName)}</span>
-                    </div>
-                    <nav class="tabs-header" role="tablist">
-                        <button class="tab active" role="tab" data-target="tab-data">Data</button>
-                        <button class="tab" role="tab" data-target="tab-metadata">Structure</button>
-                        <button class="tab" role="tab" data-target="tab-ddl">DDL</button>
-                    </nav>
-                </header>
-
-                <section id="tab-data" class="tab-content active" role="tabpanel">
-                    <div class="toolbar">
+    const objectType = (target.objectType ?? 'TABLE').toUpperCase();
+    const objectKind: EditDataObjectKind = target.objectKind
+        ?? (objectType === 'PROCEDURE' ? 'procedure' : objectType.includes('VIEW') ? 'view' : 'table');
+    const isProcedure = objectKind === 'procedure';
+    const readOnly = target.readOnly ?? false;
+    const initialTab = target.initialTab ?? 'data';
+    const activeTab = initialTab === 'structure' || isProcedure && initialTab === 'data'
+        ? 'tab-metadata'
+        : initialTab === 'ddl'
+            ? 'tab-ddl'
+            : 'tab-data';
+    const tabClass = (id: string): string => id === activeTab ? 'tab active' : 'tab';
+    const tabPanelClass = (id: string): string => id === activeTab ? 'tab-content active' : 'tab-content';
+    const objectIcon = objectKind === 'procedure' ? ICONS.procedure : objectKind === 'view' ? ICONS.view : ICONS.table;
+    const tabs = isProcedure
+        ? `<button class="${tabClass('tab-metadata')}" role="tab" data-target="tab-metadata">Structure</button>
+                        <button class="${tabClass('tab-ddl')}" role="tab" data-target="tab-ddl">DDL</button>`
+        : `<button class="${tabClass('tab-data')}" role="tab" data-target="tab-data">Data</button>
+                        <button class="${tabClass('tab-metadata')}" role="tab" data-target="tab-metadata">Structure</button>
+                        <button class="${tabClass('tab-ddl')}" role="tab" data-target="tab-ddl">DDL</button>`;
+    const dataToolbar = readOnly
+        ? `<div class="toolbar">
+                        <div class="toolbar-group">
+                            <button id="refreshBtn" class="icon-only" title="Refresh (F5)">${ICONS.refresh}</button>
+                        </div>
+                        <span class="toolbar-spacer"></span>
+                        <span id="status" class="status" aria-live="polite"></span>
+                        <button id="closeBtn" class="icon-only ghost" title="Close the editor">${ICONS.close}</button>
+                    </div>`
+        : `<div class="toolbar">
                         <div class="toolbar-group">
                             <button id="refreshBtn" class="icon-only" title="Refresh (F5)">${ICONS.refresh}</button>
                         </div>
@@ -677,7 +848,11 @@ export function renderEditDataShell(target: { database: string; schema: string; 
                         <span class="toolbar-spacer"></span>
                         <span id="status" class="status" aria-live="polite"></span>
                         <button id="closeBtn" class="icon-only ghost" title="Close the editor">${ICONS.close}</button>
-                    </div>
+                    </div>`;
+    const dataPanel = isProcedure
+        ? ''
+        : `<section id="tab-data" class="${tabPanelClass('tab-data')}" role="tabpanel">
+                    ${dataToolbar}
                     <div class="filter-bar">
                         <label class="filter-field filter-field--where">
                             <span class="filter-field__label">WHERE</span>
@@ -685,27 +860,41 @@ export function renderEditDataShell(target: { database: string; schema: string; 
                         </label>
                         <label class="filter-field filter-field--order">
                             <span class="filter-field__label">ORDER BY</span>
-                            <input type="text" id="filterOrderBy" spellcheck="false" placeholder="ROWID" title="Server-side sort, applied with Enter">
+                            <input type="text" id="filterOrderBy" spellcheck="false" placeholder="${readOnly ? 'optional' : 'ROWID'}" title="Server-side sort, applied with Enter">
                         </label>
                         <label class="filter-field filter-field--columns">
                             <span class="filter-field__label">COLUMNS</span>
-                            <input type="text" id="filterColumns" spellcheck="false" placeholder="*" title="Columns to select (ROWID is always included)">
+                            <input type="text" id="filterColumns" spellcheck="false" placeholder="*" title="Columns to select${readOnly ? '' : ' (ROWID is always included)'}">
                         </label>
                         <button id="clearFilterBtn" class="icon-only ghost" title="Clear filter and reload" hidden>${ICONS.clear}</button>
                     </div>
                     <div id="errorBanner" class="error-banner" role="alert" hidden></div>
-                    <div id="gridContainer" class="grid-container" tabindex="0" aria-label="Table data"></div>
+                    <div id="gridContainer" class="grid-container" tabindex="0" aria-label="${readOnly ? 'Object data' : 'Table data'}"></div>
                     <footer class="status-bar">
                         <span id="statusLeft"></span>
                         <span id="statusRight" class="status-bar__right"></span>
                     </footer>
-                </section>
+                </section>`;
 
-                <section id="tab-metadata" class="tab-content" role="tabpanel">
+    return `<div class="main-layout">
+                <header class="panel-header">
+                    <div class="object-path" title="${esc(`${target.connectionName} · ${target.database}.${target.schema}.${target.table}`)}">
+                        <span class="object-icon" aria-hidden="true">${objectIcon}</span>
+                        <span class="object-path__muted">${esc(target.database)}.${esc(target.schema)}.</span><span class="object-path__name">${esc(target.table)}</span>
+                        <span class="object-path__conn">${esc(target.connectionName)}</span>
+                    </div>
+                    <nav class="tabs-header" role="tablist">
+                        ${tabs}
+                    </nav>
+                </header>
+
+                ${dataPanel}
+
+                <section id="tab-metadata" class="${tabPanelClass('tab-metadata')}" role="tabpanel">
                     <div id="metadataContent" class="metadata-content">Loading metadata...</div>
                 </section>
 
-                <section id="tab-ddl" class="tab-content" role="tabpanel">
+                <section id="tab-ddl" class="${tabPanelClass('tab-ddl')}" role="tabpanel">
                     <div class="toolbar">
                         <div class="toolbar-group">
                             <button id="ddlRefreshBtn" class="icon-only" title="Regenerate DDL">${ICONS.refresh}</button>
@@ -725,6 +914,8 @@ export function renderEditDataShell(target: { database: string; schema: string; 
 /** 16px stroke icons (codicon-like) rendered inline so they follow currentColor. */
 const ICONS = {
     table: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 6.5h13M1.5 10h13M6 6.5v7"/></svg>',
+    view: '<svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
+    procedure: '<svg viewBox="0 0 16 16"><path d="M5 2.5h6M5 13.5h6"/><path d="M3.5 2.5v11M12.5 2.5v11"/><path d="M6.5 6.5 8 8l-1.5 1.5M9.5 6.5 8 8l1.5 1.5"/></svg>',
     refresh: '<svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>',
     add: '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>',
     duplicate: '<svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>',

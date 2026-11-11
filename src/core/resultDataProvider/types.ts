@@ -18,6 +18,12 @@ export interface DiskBackedResultsSettings {
     idleSpillMinutes: number;
     /** Minimum row count for idle spill eligibility. */
     idleSpillRowThreshold: number;
+    /**
+     * Total on-disk budget for every disk-backed result store in this window.
+     * When a spill would cross it, the result stays in memory and the user is
+     * warned once. Omitted values fall back to the default budget.
+     */
+    diskBudgetBytes?: number;
 }
 
 export interface IResultRowSource {
@@ -57,6 +63,12 @@ export const DISK_BACKED_DEFAULT_MEMORY_ROW_THRESHOLD = 25_000;
 export const DISK_BACKED_DEFAULT_MEMORY_BYTE_THRESHOLD = 128 * 1024 * 1024;
 /** Hard upper bound before disk-backed storage must activate. */
 export const DISK_BACKED_DEFAULT_ROW_THRESHOLD = 500_000;
+/** Default total on-disk budget shared by every disk-backed result store. */
+export const DISK_BACKED_DEFAULT_BUDGET_BYTES = 2048 * 1024 * 1024;
+/** Lower rail for the on-disk budget (256 MiB). */
+export const DISK_BACKED_MIN_BUDGET_BYTES = 256 * 1024 * 1024;
+/** Upper rail for the on-disk budget (16 GiB). */
+export const DISK_BACKED_MAX_BUDGET_BYTES = 16 * 1024 * 1024 * 1024;
 /** Max rows streamed into webview before stream cap (preview-only phase). */
 export const DISK_BACKED_WEBVIEW_STREAM_CAP = 250_000;
 /** Rows kept visible in the webview while a large result is still streaming. */

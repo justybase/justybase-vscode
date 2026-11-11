@@ -1,4 +1,4 @@
-import { formatNetezzaSql, formatSqlWithProfile } from '@justybase/sql-core';
+import { formatNetezzaSql, formatSqlWithProfile, findProtectedFormatRanges } from '@justybase/sql-core';
 import { getDatabaseSqlAuthoring } from '../core/sqlAuthoringRegistry';
 import { formatSql } from '../services/sqlFormatting';
 
@@ -321,5 +321,110 @@ describe('sqlFormatting delegation parity with @justybase/sql-core', () => {
         expect(formatSql(sql, { ...options, databaseKind: kind })).toBe(
             formatSqlWithProfile(sql, profile, options),
         );
+    });
+});
+
+describe('formatting protection for non-reformattable statements', () => {
+    const options = { tabWidth: 4, keywordCase: 'upper' as const, linesBetweenQueries: 2 };
+
+    it('keeps a quoted NZPLSQL procedure body byte-for-byte', () => {
+        const procedure = [
+            'create or replace procedure ADMIN.P_TEST(v_id int)',
+            'returns int',
+            'language NZPLSQL',
+            'as',
+            "'BEGIN_PROC",
+            'DECLARE',
+            '    l_count integer;',
+            'BEGIN',
+            "    select count(*) into l_count from ADMIN.DIMACCOUNT where id = v_id;",
+            '    RETURN l_count;',
+            'END;',
+            "END_PROC;'",
+        ].join('\n');
+        const sql = `select 1 from t;\n${procedure}\nselect 2 from t;`;
+
+        const output = formatSql(sql, options);
+
+        expect(output).toContain(procedure);
+        expect(output).toContain('SELECT');
+    });
+
+    it('keeps an unquoted BEGIN_PROC body with inner semicolons intact', () => {
+        const procedure = [
+            'CREATE OR REPLACE PROCEDURE p()',
+            'RETURNS INT',
+            'LANGUAGE NZPLSQL',
+            'AS BEGIN_PROC',
+            'DECLARE a INT;',
+            'BEGIN',
+            '  a := 1;',
+            '  RETURN a;',
+            'END;',
+            'END_PROC',
+        ].join('\n');
+
+        const output = formatSql(`-- leading comment\n${procedure}\nSELECT 1 FROM dual;`, options);
+
+        expect(output).toContain(procedure);
+    });
+
+    it('keeps external table DDL unchanged', () => {
+        const ddl = [
+            'create external table admin.ext (id int, name varchar(10))',
+            "USING (DATAOBJECT ('/data/ext' ) DELIMITER ',' QUOTEDVALUE 'DOUBLE' ESCAPECHAR '\\')",
+        ].join('\n');
+
+        const output = formatSql(`create external table admin.ext (id int, name varchar(10))\nUSING (DATAOBJECT ('/data/ext' ) DELIMITER ',' QUOTEDVALUE 'DOUBLE' ESCAPECHAR '\\');\nselect * from admin.ext;`, options);
+
+        expect(output).toContain(ddl);
+    });
+
+    it('keeps dollar-quoted function bodies and inline literals unchanged', () => {
+        const fn = [
+            'create function f() returns int as $$',
+            'declare x int;',
+            'begin',
+            '  x := 1;',
+            '  return x;',
+            'end;',
+            '$$ language plpgsql;',
+        ].join('\n');
+
+        const output = formatSql(`select $tag$ a  b $tag$ as v;\n${fn}\nselect 2;`, options);
+
+        expect(output).toContain('$tag$ a  b $tag$');
+        expect(output).toContain(fn);
+    });
+
+    it('formats ordinary statements that only mention external words', () => {
+        const output = formatSql('select external_id, name from ext_objects where external_id = 1', options);
+
+        expect(output).toContain('SELECT');
+        expect(output).toContain('FROM ext_objects');
+        expect(output).toContain('external_id = 1');
+        expect(output).not.toContain('select external_id');
+    });
+
+    it('reports protected ranges with their reason', () => {
+        const sql = "select 1;\nselect $$body$$;\ncreate external table x (a int) using (dataobject ('/y'));";
+        const ranges = findProtectedFormatRanges(sql);
+
+        expect(ranges.map(range => range.reason)).toEqual(['dollarQuoted', 'externalTable']);
+        expect(sql.slice(ranges[0].start, ranges[0].end)).toContain('$$body$$');
+    });
+
+    it('does not treat a string literal containing BEGIN_PROC as protected', () => {
+        const ranges = findProtectedFormatRanges("select 'BEGIN_PROC' as note from t");
+
+        expect(ranges).toEqual([]);
+    });
+
+    it('is idempotent when a string literal contains parentheses', () => {
+        const once = formatSql("select ')' as a, b from t", options);
+        const twice = formatSql(once, options);
+
+        expect(twice).toBe(once);
+        expect(once).toContain("')' AS a");
     });
 });

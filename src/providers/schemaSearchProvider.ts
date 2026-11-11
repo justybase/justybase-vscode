@@ -6,19 +6,26 @@ import type {
     SchemaSearchInboundMessage,
     SchemaSearchOutboundMessage,
     SchemaSearchResultItem,
-    SchemaSearchSourceMode
+    SchemaSearchSourceMode,
+    SchemaSearchSourceOptions
 } from '../contracts/webviews';
 import { createConnectedDatabaseConnectionFromDetails, getDatabaseMetadataProvider } from '../core/connectionFactory';
 import { SchemaSearchHtmlGenerator } from '../views/schemaSearchHtmlGenerator';
 import { MetadataCache } from '../metadataCache';
 import { ConnectionManager, ConnectionDetails } from '../core/connectionManager';
 import { compareSearchResultsByObjectPriority } from '../metadata/objectTypeSortPriority';
-import { searchInCodeWithMode } from '../sql/sqlTextUtils';
+import { searchSourceText, type SourceSearchOptions } from './sourceSearchMatcher';
 import { logWithFallback } from '../utils/logger';
 import { SchemaObjectSearchService, buildEscapedLikePattern } from '../services/schemaObjectSearchService';
 import { SchemaRecentObjectsService } from '../services/schemaRecentObjects';
 
 export { buildEscapedLikePattern };
+
+/** Netezza returns MATCH_OFFSET as a number or a numeric string. */
+function toMatchOffset(value: unknown): number | undefined {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
 
 interface SearchQueryRow {
     NAME?: string;
@@ -106,10 +113,10 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
                     await this.search(data.value, data.connectionName);
                     return;
                 case 'searchSource':
-                    await this.searchSourceCode(data.value, data.mode || 'noCommentsNoLiterals', undefined, undefined, undefined, undefined, data.connectionName);
+                    await this.searchSourceCode(data.value, data.mode || 'noCommentsNoLiterals', undefined, undefined, undefined, undefined, data.connectionName, data);
                     return;
                 case 'searchCombined':
-                    await this.doCombinedSearch(data.value, data.mode || 'raw', data.connectionName);
+                    await this.doCombinedSearch(data.value, data.mode || 'raw', data.connectionName, data);
                     return;
                 case 'requestConnections':
                     await this.postAvailableConnections();
@@ -712,6 +719,7 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
     /**
      * Search in VIEW/PROCEDURE source code with configurable mode
      * @param mode Search mode: 'raw', 'noComments', 'noCommentsNoLiterals'
+     * @param matchOptions Optional case/whole-word/regex controls
      */
     private async searchSourceCode(
         term: string,
@@ -720,7 +728,8 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
         _combined?: boolean,
         preloadedDatabases?: string[],
         sentIdsParam?: Set<string>,
-        selectedConnectionName?: string
+        selectedConnectionName?: string,
+        matchOptions?: SchemaSearchSourceOptions
     ) {
         if (!term || term.length < 2) {
             this.postMessage({ type: 'error', message: 'Search term must be at least 2 characters.' });
@@ -757,7 +766,6 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
                 this.postMessage({ type: 'searching', message: `Searching in ${modeDesc}...` });
             }
 
-            const safeTerm = term.toUpperCase();
             const likeTerm = buildEscapedLikePattern(term);
 
             const results: SchemaSearchResultItem[] = [];
@@ -774,12 +782,24 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
 
             const connectionKind = this.getConnectionKind(connectionName);
             const metadataProvider = getDatabaseMetadataProvider(connectionKind);
-            const useServerSideFilter = mode === 'raw';
+            // Case/whole-word/regex need the raw definition text; only the plain
+            // raw mode can be filtered (and snippet-ed) on the server.
+            const needsInMemoryMatch = Boolean(
+                matchOptions?.caseSensitive || matchOptions?.wholeWord || matchOptions?.regex
+            );
+            const useServerSideFilter = mode === 'raw' && !needsInMemoryMatch;
+            const matcherOptions: SourceSearchOptions = {
+                mode,
+                caseSensitive: matchOptions?.caseSensitive,
+                wholeWord: matchOptions?.wholeWord,
+                regex: matchOptions?.regex
+            };
             const MAX_CONCURRENCY = 8;
             const sourceSearchOptions = {
                 rawTerm: term,
                 likePattern: likeTerm,
-                useServerSideFilter
+                useServerSideFilter,
+                includeSnippet: useServerSideFilter
             };
 
             // 1. Search in VIEW definitions across all databases
@@ -801,31 +821,39 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
                     );
 
                     if (viewResult && viewResult.data && searchId === this.currentSearchId) {
-                        const views = queryResultToRows<{ NAME: string; SCHEMA: string; DATABASE: string; SOURCE?: string } & { [key: string]: unknown }>(viewResult);
+                        const views = queryResultToRows<{ NAME: string; SCHEMA: string; DATABASE: string; SOURCE?: string; SNIPPET?: string; MATCH_OFFSET?: number | string } & { [key: string]: unknown }>(viewResult);
                         const batchResults: SchemaSearchResultItem[] = [];
                         for (const view of views) {
-                            // For RAW mode with server-side filter, all results match
-                            // For other modes, check in-memory
-                            if (useServerSideFilter || (view.SOURCE && searchInCodeWithMode(view.SOURCE, safeTerm, mode))) {
-                                const key = this.buildResultDedupKey(view, 'VIEW');
+                            // Server-side mode already filtered and snippet-ed the rows;
+                            // every other mode matches against the fetched definition.
+                            const inMemoryMatch = useServerSideFilter
+                                ? undefined
+                                : (view.SOURCE ? searchSourceText(view.SOURCE, term, matcherOptions) : undefined);
+                            if (!useServerSideFilter && !inMemoryMatch?.matched) {
+                                continue;
+                            }
+                            const key = this.buildResultDedupKey(view, 'VIEW');
 
-                                if (!key) {
-                                    continue;
-                                }
+                            if (!key) {
+                                continue;
+                            }
 
-                                if (!sentIds.has(key)) {
-                                    batchResults.push({
-                                        NAME: view.NAME,
-                                        SCHEMA: view.SCHEMA,
-                                        DATABASE: view.DATABASE,
-                                        TYPE: 'VIEW',
-                                        PARENT: '',
-                                        DESCRIPTION: `Found in view ${modeDesc}`,
-                                        MATCH_TYPE: 'SOURCE_CODE',
-                                        connectionName: connectionName!
-                                    });
-                                    sentIds.add(key);
-                                }
+                            if (!sentIds.has(key)) {
+                                batchResults.push({
+                                    NAME: view.NAME,
+                                    SCHEMA: view.SCHEMA,
+                                    DATABASE: view.DATABASE,
+                                    TYPE: 'VIEW',
+                                    PARENT: '',
+                                    DESCRIPTION: `Found in view ${modeDesc}`,
+                                    MATCH_TYPE: 'SOURCE_CODE',
+                                    SNIPPET: useServerSideFilter ? view.SNIPPET : inMemoryMatch?.snippet,
+                                    MATCH_OFFSET: useServerSideFilter
+                                        ? toMatchOffset(view.MATCH_OFFSET)
+                                        : inMemoryMatch?.offset,
+                                    connectionName: connectionName!
+                                });
+                                sentIds.add(key);
                             }
                         }
                         return batchResults;
@@ -864,35 +892,43 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
                         'Routine source search'
                     );
                     if (procResult && procResult.data && searchId === this.currentSearchId) {
-                        const procs = queryResultToRows<{ NAME: string; SCHEMA: string; DATABASE: string; SOURCE?: string; TYPE?: string } & { [key: string]: unknown }>(procResult);
+                        const procs = queryResultToRows<{ NAME: string; SCHEMA: string; DATABASE: string; SOURCE?: string; TYPE?: string; SNIPPET?: string; MATCH_OFFSET?: number | string } & { [key: string]: unknown }>(procResult);
                         const batchResults: SchemaSearchResultItem[] = [];
                         for (const proc of procs) {
-                            // For RAW mode with server-side filter, all results match
-                            // For other modes, check in-memory
-                            if (useServerSideFilter || (proc.SOURCE && searchInCodeWithMode(proc.SOURCE, safeTerm, mode))) {
-                                const normalizedType = typeof proc.TYPE === 'string' && proc.TYPE.trim().length > 0
-                                    ? proc.TYPE.trim().toUpperCase()
-                                    : 'PROCEDURE';
-                                const typeLabel = normalizedType.toLowerCase();
-                                const key = this.buildResultDedupKey(proc, normalizedType);
+                            // Server-side mode already filtered and snippet-ed the rows;
+                            // every other mode matches against the fetched definition.
+                            const inMemoryMatch = useServerSideFilter
+                                ? undefined
+                                : (proc.SOURCE ? searchSourceText(proc.SOURCE, term, matcherOptions) : undefined);
+                            if (!useServerSideFilter && !inMemoryMatch?.matched) {
+                                continue;
+                            }
+                            const normalizedType = typeof proc.TYPE === 'string' && proc.TYPE.trim().length > 0
+                                ? proc.TYPE.trim().toUpperCase()
+                                : 'PROCEDURE';
+                            const typeLabel = normalizedType.toLowerCase();
+                            const key = this.buildResultDedupKey(proc, normalizedType);
 
-                                if (!key) {
-                                    continue;
-                                }
+                            if (!key) {
+                                continue;
+                            }
 
-                                if (!sentIds.has(key)) {
-                                    batchResults.push({
-                                        NAME: proc.NAME,
-                                        SCHEMA: proc.SCHEMA,
-                                        DATABASE: proc.DATABASE,
-                                        TYPE: normalizedType,
-                                        PARENT: '',
-                                        DESCRIPTION: `Found in ${typeLabel} ${modeDesc}`,
-                                        MATCH_TYPE: 'SOURCE_CODE',
-                                        connectionName: connectionName!
-                                    });
-                                    sentIds.add(key);
-                                }
+                            if (!sentIds.has(key)) {
+                                batchResults.push({
+                                    NAME: proc.NAME,
+                                    SCHEMA: proc.SCHEMA,
+                                    DATABASE: proc.DATABASE,
+                                    TYPE: normalizedType,
+                                    PARENT: '',
+                                    DESCRIPTION: `Found in ${typeLabel} ${modeDesc}`,
+                                    MATCH_TYPE: 'SOURCE_CODE',
+                                    SNIPPET: useServerSideFilter ? proc.SNIPPET : inMemoryMatch?.snippet,
+                                    MATCH_OFFSET: useServerSideFilter
+                                        ? toMatchOffset(proc.MATCH_OFFSET)
+                                        : inMemoryMatch?.offset,
+                                    connectionName: connectionName!
+                                });
+                                sentIds.add(key);
                             }
                         }
                         return batchResults;
@@ -925,7 +961,12 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async doCombinedSearch(term: string, mode: SchemaSearchSourceMode, selectedConnectionName?: string) {
+    private async doCombinedSearch(
+        term: string,
+        mode: SchemaSearchSourceMode,
+        selectedConnectionName?: string,
+        matchOptions?: SchemaSearchSourceOptions
+    ) {
         const searchId = ++this.currentSearchId;
 
         // Optimization: Fetch databases once and share
@@ -943,7 +984,7 @@ export class SchemaSearchProvider implements vscode.WebviewViewProvider {
         const sentIds = new Set<string>();
         await Promise.all([
             this.search(term, selectedConnectionName, searchId, true, databases, sentIds),
-            this.searchSourceCode(term, mode, searchId, true, databases, sentIds, selectedConnectionName)
+            this.searchSourceCode(term, mode, searchId, true, databases, sentIds, selectedConnectionName, matchOptions)
         ]);
     } // End of doCombinedSearch
 }

@@ -9,9 +9,26 @@ export interface EditDataColumnMetadata {
     [key: string]: unknown;
 }
 
+export type EditDataObjectKind = 'table' | 'view' | 'procedure';
+
+/** Read-only definition row shown for objects that do not expose columns (procedures). */
+export interface EditDataProperty {
+    label: string;
+    value: string;
+}
+
+/** Positional procedure argument parsed from the catalog signature. */
+export interface EditDataArgument {
+    position: number;
+    type: string;
+}
+
 export interface EditDataMetadata {
     tableComment: string;
     columns: EditDataColumnMetadata[];
+    objectKind?: EditDataObjectKind;
+    properties?: EditDataProperty[];
+    arguments?: EditDataArgument[];
 }
 
 export interface EditDataRow {
@@ -35,6 +52,7 @@ export interface EditDataChanges {
 }
 
 export type EditDataPanelWebviewToHostMessage =
+    | { command: 'ready' }
     | { command: 'refresh'; whereClause?: string; columns?: string; orderBy?: string }
     | {
         command: 'save';
@@ -63,6 +81,7 @@ export type EditDataPanelHostToWebviewMessage =
         columns: string[];
         metadata: EditDataMetadata | null;
         info?: EditDataLoadInfo;
+        readOnly?: boolean;
     }
     | { command: 'setError'; text: string }
     | { command: 'saveFailed'; text: string }
@@ -73,6 +92,7 @@ export type EditDataPanelInboundMessage = EditDataPanelWebviewToHostMessage;
 export type EditDataPanelOutboundMessage = EditDataPanelHostToWebviewMessage;
 
 export const EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
+    'ready',
     'refresh',
     'save',
     'updateTableComment',

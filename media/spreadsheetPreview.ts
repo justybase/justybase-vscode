@@ -40,6 +40,7 @@ import {
     type SpreadsheetPreviewData,
     type SpreadsheetSheet,
 } from './spreadsheetPreview/model.js';
+import { createMenuIcon, type MenuIconName } from './shared/menuIcons.js';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -256,11 +257,14 @@ function iconButton(icon: string, label: string, onClick: () => void): HTMLButto
     return node;
 }
 
-function menuItem(action: string, label: string, shortcut: string, onSelect: () => void): HTMLButtonElement {
+function menuItem(action: string, label: string, shortcut: string, onSelect: () => void, icon?: MenuIconName): HTMLButtonElement {
     const item = el('button', 'context-menu-item');
     item.type = 'button';
     item.dataset.action = action;
     item.setAttribute('role', 'menuitem');
+    if (icon) {
+        item.appendChild(createMenuIcon(icon, 'context-menu-icon'));
+    }
     item.appendChild(el('span', 'context-menu-label', label));
     if (shortcut) {
         item.appendChild(el('span', 'context-menu-shortcut', shortcut));
@@ -368,18 +372,18 @@ function buildLayout(host: HTMLElement): Elements {
     contextMenu.setAttribute('role', 'menu');
     contextMenu.setAttribute('aria-label', 'Cell actions');
     contextMenu.append(
-        menuItem('copy', 'Copy', 'Ctrl+C', copySelection),
-        menuItem('copy-cell', 'Copy cell value', '', copyContextCell),
+        menuItem('copy', 'Copy', 'Ctrl+C', copySelection, 'copy'),
+        menuItem('copy-cell', 'Copy cell value', '', copyContextCell, 'table'),
         menuItem('select-all', 'Select all', 'Ctrl+A', () => {
             const sheet = currentSheet();
             if (sheet) {
                 selectAll(sheet);
             }
-        }),
+        }, 'rows'),
         menuItem('find', 'Find…', 'Ctrl+F', () => {
             els.searchInput.focus();
             els.searchInput.select();
-        }),
+        }, 'search'),
     );
     document.body.appendChild(contextMenu);
 

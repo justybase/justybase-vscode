@@ -690,8 +690,7 @@ body.resizing-columns .col-resize {
 .context-menu-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 24px;
+    gap: 8px;
     width: 100%;
     height: 26px;
     box-sizing: border-box;
@@ -704,6 +703,28 @@ body.resizing-columns .col-resize {
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
+}
+
+.context-menu-item .context-menu-icon {
+    display: inline-flex;
+    flex: 0 0 16px;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--sheet-header-fg);
+}
+
+.context-menu-item:hover .context-menu-icon,
+.context-menu-item:focus .context-menu-icon {
+    color: inherit;
+}
+
+.context-menu-item .context-menu-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .context-menu-item:hover,

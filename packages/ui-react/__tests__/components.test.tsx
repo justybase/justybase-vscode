@@ -559,6 +559,13 @@ describe('shared React presentation', () => {
     const beta = screen.getByRole('cell', { name: 'beta' });
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
     expect(screen.getByRole('menu', { name: 'Actions for row 1' })).toBeInTheDocument();
+    const menuItems = screen.getAllByRole('menuitem');
+    expect(menuItems.length).toBeGreaterThan(5);
+    for (const menuEntry of menuItems) {
+      const icon = menuEntry.querySelector('.ui-menu-icon');
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+      expect(icon?.querySelector('svg')).not.toBeNull();
+    }
     fireEvent.click(screen.getByRole('menuitem', { name: 'Filter by this value' }));
     expect(onViewChange).toHaveBeenLastCalledWith({ columnFilters: { NAME: 'beta' } });
 

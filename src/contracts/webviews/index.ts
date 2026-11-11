@@ -119,14 +119,17 @@ export type {
 } from './fileConnectionPanelContracts';
 
 export type {
+    EditDataArgument,
     EditDataChanges,
     EditDataColumnMetadata,
     EditDataLoadInfo,
     EditDataMetadata,
+    EditDataObjectKind,
     EditDataPanelHostToWebviewMessage,
     EditDataPanelInboundMessage,
     EditDataPanelOutboundMessage,
     EditDataPanelWebviewToHostMessage,
+    EditDataProperty,
     EditDataRow
 } from './editDataPanelContracts';
 
@@ -183,6 +186,7 @@ export type {
     SchemaSearchResultItem,
     SchemaSearchSortMode,
     SchemaSearchSourceMode,
+    SchemaSearchSourceOptions,
     SchemaSearchUiSourceMode,
     SchemaSearchWebviewToHostMessage
 } from './schemaSearchContracts';

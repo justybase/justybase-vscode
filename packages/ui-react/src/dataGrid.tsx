@@ -11,6 +11,7 @@ import {
 import type { DataGridCellMetadata } from './resultGridFormatting';
 import type { DataGridClipboardFormat } from './dataGridClipboard';
 import type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
+import { MenuIcon } from './menuIcons';
 
 export { formatDataGridCellValue } from './resultGridFormatting';
 export type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
@@ -1647,26 +1648,26 @@ export function DataGrid({
     </div>
     {showContextMenu && contextMenu && contextRow && contextColumn && <div ref={contextMenuElementRef} className="ui-data-grid-context-menu" role="menu" aria-label={`Actions for row ${contextMenu.rowIndex + 1}`} style={{ left: contextMenuPosition.left, top: contextMenuPosition.top }} onClick={event => event.stopPropagation()}>
       <strong>{contextColumn.name}</strong>
-      <button type="button" role="menuitem" onClick={() => copyContextValue(contextMenu, contextRow)}>Copy value</button>
-      <button type="button" role="menuitem" onClick={() => copyContextRow(contextRow)}>Copy row</button>
-      <button type="button" role="menuitem" onClick={() => copyContextRowAs('tsv')}>Copy row as TSV</button>
-      <button type="button" role="menuitem" onClick={() => copyContextRowAs('markdown')}>Copy row as Markdown</button>
-      <button type="button" role="menuitem" onClick={() => copyContextRowAs('json')}>Copy row as JSON</button>
-      <button type="button" role="menuitem" onClick={() => copyContextRowAs('sql')}>Copy SQL INSERT</button>
-      {onExportSelection && <button type="button" role="menuitem" onClick={() => exportSelection('csv')}>Export selection as CSV</button>}
-      {onExportSelection && <button type="button" role="menuitem" onClick={() => exportSelection('json')}>Export selection as JSON</button>}
+      <button type="button" role="menuitem" onClick={() => copyContextValue(contextMenu, contextRow)}><MenuIcon name="copy" />Copy value</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRow(contextRow)}><MenuIcon name="rows" />Copy row</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('tsv')}><MenuIcon name="file-spreadsheet" />Copy row as TSV</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('markdown')}><MenuIcon name="file-text" />Copy row as Markdown</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('json')}><MenuIcon name="braces" />Copy row as JSON</button>
+      <button type="button" role="menuitem" onClick={() => copyContextRowAs('sql')}><MenuIcon name="database" />Copy SQL INSERT</button>
+      {onExportSelection && <button type="button" role="menuitem" onClick={() => exportSelection('csv')}><MenuIcon name="download" />Export selection as CSV</button>}
+      {onExportSelection && <button type="button" role="menuitem" onClick={() => exportSelection('json')}><MenuIcon name="download" />Export selection as JSON</button>}
       <hr />
-      <button type="button" role="menuitem" onClick={() => filterContextValue(contextMenu, contextRow)}>Filter by this value</button>
-      <button type="button" role="menuitem" onClick={() => clearContextFilter(contextMenu.columnIndex)}>Clear Filter</button>
-      <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, false)}>Sort ascending</button>
-      <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, true)}>Sort descending</button>
-      <button type="button" role="menuitem" onClick={() => toggleContextGrouping(contextMenu.columnIndex)}>{activeView.grouping.some(key => columnMatchesKey(contextColumn, contextMenu.columnIndex, key)) ? 'Ungroup This Column' : 'Group by This Column'}</button>
-      <button type="button" role="menuitem" onClick={() => hideContextColumn(contextMenu.columnIndex)}>Hide Column</button>
+      <button type="button" role="menuitem" onClick={() => filterContextValue(contextMenu, contextRow)}><MenuIcon name="filter" />Filter by this value</button>
+      <button type="button" role="menuitem" onClick={() => clearContextFilter(contextMenu.columnIndex)}><MenuIcon name="filter-x" />Clear Filter</button>
+      <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, false)}><MenuIcon name="arrow-up" />Sort ascending</button>
+      <button type="button" role="menuitem" onClick={() => sortContextValue(contextMenu.columnIndex, true)}><MenuIcon name="arrow-down" />Sort descending</button>
+      <button type="button" role="menuitem" onClick={() => toggleContextGrouping(contextMenu.columnIndex)}><MenuIcon name="layers" />{activeView.grouping.some(key => columnMatchesKey(contextColumn, contextMenu.columnIndex, key)) ? 'Ungroup This Column' : 'Group by This Column'}</button>
+      <button type="button" role="menuitem" onClick={() => hideContextColumn(contextMenu.columnIndex)}><MenuIcon name="eye-off" />Hide Column</button>
       <hr />
-      <button type="button" role="menuitem" onClick={() => selectContextRow(contextMenu)}>View full row</button>
-      {onViewCell && <button type="button" role="menuitem" onClick={() => viewContextCell(contextMenu)}>View Cell Value</button>}
-      {onOpenResultFormatting && <button type="button" role="menuitem" onClick={() => { onOpenResultFormatting(); setContextMenu(undefined); }}>Result Formatting…</button>}
-      {onEditRow && <button type="button" role="menuitem" onClick={() => { onEditRow(contextMenu); setContextMenu(undefined); }}>Edit row…</button>}
+      <button type="button" role="menuitem" onClick={() => selectContextRow(contextMenu)}><MenuIcon name="panel-right" />View full row</button>
+      {onViewCell && <button type="button" role="menuitem" onClick={() => viewContextCell(contextMenu)}><MenuIcon name="eye" />View Cell Value</button>}
+      {onOpenResultFormatting && <button type="button" role="menuitem" onClick={() => { onOpenResultFormatting(); setContextMenu(undefined); }}><MenuIcon name="wrench" />Result Formatting…</button>}
+      {onEditRow && <button type="button" role="menuitem" onClick={() => { onEditRow(contextMenu); setContextMenu(undefined); }}><MenuIcon name="pencil" />Edit row…</button>}
     </div>}
   </div>;
 }

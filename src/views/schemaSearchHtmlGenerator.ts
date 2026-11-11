@@ -259,6 +259,15 @@ export class SchemaSearchHtmlGenerator {
                 gap: 4px;
                 line-height: 1.35;
             }
+            .snippet-line {
+                margin-top: 2px;
+                font-family: var(--vscode-editor-font-family, monospace);
+                font-size: 11px;
+                color: var(--vscode-descriptionForeground);
+                white-space: pre-wrap;
+                word-break: break-word;
+                opacity: 0.9;
+            }
             .meta-separator {
                 opacity: 0.45;
                 user-select: none;
@@ -439,6 +448,18 @@ export class SchemaSearchHtmlGenerator {
                     <option value="noComments">Source: No Comments</option>
                     <option value="noCommentsNoLiterals">Source: No Comments / Strings</option>
                 </select>
+            </label>
+            <label title="Match case exactly (source modes only)">
+                <input type="checkbox" id="caseSensitiveToggle" />
+                Case
+            </label>
+            <label title="Match whole words only (source modes only)">
+                <input type="checkbox" id="wholeWordToggle" />
+                Word
+            </label>
+            <label title="Treat the search text as a regular expression (source modes only)">
+                <input type="checkbox" id="regexToggle" />
+                Regex
             </label>
             <label>
                 Layout:
@@ -795,6 +816,17 @@ export class SchemaSearchHtmlGenerator {
                     }
                 }
 
+                function getSourceSearchOptions() {
+                    const caseSensitive = document.getElementById('caseSensitiveToggle');
+                    const wholeWord = document.getElementById('wholeWordToggle');
+                    const regex = document.getElementById('regexToggle');
+                    const options = {};
+                    if (caseSensitive && caseSensitive.checked) options.caseSensitive = true;
+                    if (wholeWord && wholeWord.checked) options.wholeWord = true;
+                    if (regex && regex.checked) options.regex = true;
+                    return options;
+                }
+
                 function startSearch(term) {
                     allResults = [];
                     hadStreamingResults = false;
@@ -805,10 +837,11 @@ export class SchemaSearchHtmlGenerator {
 
                     const sourceMode = sourceModeSelect.value;
                     const connectionName = connectionSelect.value || undefined;
+                    const sourceOptions = getSourceSearchOptions();
                     if (sourceMode === 'objectsRaw') {
-                        postToHost({ type: 'searchCombined', value: term, mode: 'raw', connectionName });
+                        postToHost({ type: 'searchCombined', value: term, mode: 'raw', connectionName, ...sourceOptions });
                     } else if (sourceMode && sourceMode !== '') {
-                        postToHost({ type: 'searchSource', value: term, mode: /** @type {SchemaSearchSourceMode} */ (sourceMode), connectionName });
+                        postToHost({ type: 'searchSource', value: term, mode: /** @type {SchemaSearchSourceMode} */ (sourceMode), connectionName, ...sourceOptions });
                     } else {
                         postToHost({ type: 'search', value: term, connectionName });
                     }
@@ -1172,6 +1205,9 @@ export class SchemaSearchHtmlGenerator {
                             if (item.DESCRIPTION === 'Result from Cache') {
                                 badgesHtml += '<span class="cache-badge">Cached</span>';
                             }
+                            const snippetHtml = item.SNIPPET
+                                ? '<div class="snippet-line" title="' + escapeHtml(item.SNIPPET) + '">' + escapeHtml(item.SNIPPET) + '</div>'
+                                : '';
 
                             row.innerHTML = \`
                                 <div class="result-row-main">
@@ -1179,6 +1215,7 @@ export class SchemaSearchHtmlGenerator {
                                     \${badgesHtml}
                                 </div>
                                 <div class="result-meta">\${metaHtml}</div>
+                                \${snippetHtml}
                             \`;
 
                             attachResultRowKeyboard(row, item);

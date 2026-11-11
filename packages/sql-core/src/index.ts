@@ -1,6 +1,7 @@
 export * from "./parser/runtime";
 export * from "./statements";
 export * from "./format";
+export * from "./format/protection";
 export * from "./formatterProfiles";
 export * from "./authoring";
 export * from "./authoringContext";

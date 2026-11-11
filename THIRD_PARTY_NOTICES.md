@@ -15,7 +15,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @justybase/database-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/duckdb-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/metadata-core | 3.17.14 | Apache-2.0 | See npm package metadata |
-| @justybase/netezza-driver | 3.4.3 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
+| @justybase/netezza-driver | 3.5.0 | Apache-2.0 | [upstream](https://github.com/justybase/justybase_netezza_node_driver) |
 | @justybase/netezza-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/result-core | 3.17.14 | Apache-2.0 | See npm package metadata |
 | @justybase/spreadsheet-tasks | 3.2.0 | MIT | [upstream](https://github.com/justybase/justybase_spreadsheet_tasks) |
@@ -23,13 +23,13 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | @justybase/sqlite-runtime | 3.16.8 | Apache-2.0 | See npm package metadata |
 | @justybase/ui-core | 3.17.14 | Apache-2.0 | See npm package metadata |
 | @justybase/ui-react | 3.17.14 | Apache-2.0 | See npm package metadata |
-| @modelcontextprotocol/sdk | 1.32.1 | MIT | [upstream](https://github.com/modelcontextprotocol/typescript-sdk) |
+| @modelcontextprotocol/sdk | 1.32.2 | MIT | [upstream](https://github.com/modelcontextprotocol/typescript-sdk) |
 | @msgpack/msgpack | 3.1.3 | ISC | [upstream](https://github.com/msgpack/msgpack-javascript) |
 | @tanstack/store | 0.11.2 | MIT | [upstream](https://github.com/TanStack/store) |
 | @tanstack/table-core | 9.3.1 | MIT | [upstream](https://github.com/TanStack/table) |
-| @tanstack/virtual-core | 3.19.6 | MIT | [upstream](https://github.com/TanStack/virtual) |
-| @xyflow/react | 12.12.0 | MIT | [upstream](https://github.com/xyflow/xyflow) |
-| @xyflow/system | 0.0.83 | MIT | [upstream](https://github.com/xyflow/xyflow) |
+| @tanstack/virtual-core | 3.19.11 | MIT | [upstream](https://github.com/TanStack/virtual) |
+| @xyflow/react | 12.12.1 | MIT | [upstream](https://github.com/xyflow/xyflow) |
+| @xyflow/system | 0.0.84 | MIT | [upstream](https://github.com/xyflow/xyflow) |
 | abort-controller | 3.0.0 | MIT | [upstream](https://github.com/mysticatea/abort-controller) |
 | adm-zip | 0.6.1 | MIT | [upstream](https://github.com/cthackers/adm-zip) |
 | ajv | 8.20.0 | MIT | [upstream](ajv-validator/ajv) |
@@ -48,32 +48,33 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | core-util-is | 1.0.3 | MIT | [upstream](https://github.com/isaacs/core-util-is) |
 | crc-32 | 1.2.2 | Apache-2.0 | [upstream](https://github.com/SheetJS/js-crc32) |
 | crc32-stream | 6.0.0 | MIT | [upstream](https://github.com/archiverjs/node-crc32-stream) |
-| d3-color | 3.1.0 | ISC | [upstream](https://github.com/d3/d3-color) |
-| d3-dispatch | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-dispatch) |
-| d3-drag | 3.0.0 | ISC | [upstream](https://github.com/d3/d3-drag) |
-| d3-ease | 3.0.1 | BSD-3-Clause | [upstream](https://github.com/d3/d3-ease) |
-| d3-interpolate | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-interpolate) |
-| d3-selection | 3.0.0 | ISC | [upstream](https://github.com/d3/d3-selection) |
-| d3-timer | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-timer) |
-| d3-transition | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-transition) |
-| d3-zoom | 3.0.0 | ISC | [upstream](https://github.com/d3/d3-zoom) |
+| d3-color | 3.1.1 | ISC | [upstream](https://github.com/d3/d3-color) |
+| d3-dispatch | 3.0.2 | ISC | [upstream](https://github.com/d3/d3-dispatch) |
+| d3-drag | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-drag) |
+| d3-ease | 3.0.2 | BSD-3-Clause | [upstream](https://github.com/d3/d3-ease) |
+| d3-interpolate | 3.0.2 | ISC | [upstream](https://github.com/d3/d3-interpolate) |
+| d3-selection | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-selection) |
+| d3-timer | 3.0.2 | ISC | [upstream](https://github.com/d3/d3-timer) |
+| d3-transition | 3.0.2 | ISC | [upstream](https://github.com/d3/d3-transition) |
+| d3-zoom | 3.0.1 | ISC | [upstream](https://github.com/d3/d3-zoom) |
 | debug | 4.4.3 | MIT | [upstream](https://github.com/debug-js/debug) |
 | echarts | 6.1.0 | Apache-2.0 | [upstream](https://github.com/apache/echarts) |
-| elkjs | 0.12.0 | EPL-2.0 OR GPL-3.0-or-later | [upstream](https://github.com/kieler/elkjs) |
+| elkjs | 0.12.1 | EPL-2.0 OR GPL-3.0-or-later | [upstream](https://github.com/kieler/elkjs) |
 | event-target-shim | 5.0.1 | MIT | [upstream](https://github.com/mysticatea/event-target-shim) |
 | events-universal | 1.0.1 | Apache-2.0 | [upstream](https://github.com/holepunchto/events-universal) |
 | fast-deep-equal | 3.1.3 | MIT | [upstream](https://github.com/epoberezkin/fast-deep-equal) |
 | fast-fifo | 1.3.2 | MIT | [upstream](https://github.com/mafintosh/fast-fifo) |
-| fast-uri | 3.1.8 | BSD-3-Clause | [upstream](https://github.com/fastify/fast-uri) |
+| fast-uri | 3.1.9 | BSD-3-Clause | [upstream](https://github.com/fastify/fast-uri) |
 | fzstd | 0.1.1 | MIT | [upstream](https://github.com/101arrowz/fzstd) |
 | glob | 10.5.0 | ISC | [upstream](https://github.com/isaacs/node-glob) |
 | graceful-fs | 4.2.11 | ISC | [upstream](https://github.com/isaacs/node-graceful-fs) |
 | has-flag | 4.0.0 | MIT | [upstream](sindresorhus/has-flag) |
 | hono | 4.13.13 | MIT | [upstream](https://github.com/honojs/hono) |
-| hyparquet | 1.31.4 | MIT | [upstream](https://github.com/hyparam/hyparquet) |
-| hyparquet-compressors | 1.1.2 | MIT | [upstream](https://github.com/hyparam/hyparquet-compressors) |
-| hyparquet-writer | 0.16.12 | MIT | [upstream](https://github.com/hyparam/hyparquet-writer) |
+| hyparquet | 1.31.5 | MIT | [upstream](https://github.com/hyparam/hyparquet) |
+| hyparquet-compressors | 1.1.3 | MIT | [upstream](https://github.com/hyparam/hyparquet-compressors) |
+| hyparquet-writer | 0.16.13 | MIT | [upstream](https://github.com/hyparam/hyparquet-writer) |
 | hysnappy | 1.1.1 | MIT | [upstream](https://github.com/hyparam/hysnappy) |
+| ignore | 7.0.14 | MIT | [upstream](https://github.com/kaelzhang/node-ignore) |
 | inherits | 2.0.4 | ISC | [upstream](https://github.com/isaacs/inherits) |
 | is-stream | 2.0.1 | MIT | [upstream](sindresorhus/is-stream) |
 | isarray | 2.0.5 | MIT | [upstream](https://github.com/juliangruber/isarray) |
@@ -84,7 +85,7 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | minimatch | 10.2.6 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/minimatch) |
 | minipass | 7.1.3 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/minipass) |
 | ms | 2.1.3 | MIT | [upstream](vercel/ms) |
-| mssql | 12.7.9 | MIT | [upstream](https://github.com/tediousjs/node-mssql) |
+| mssql | 12.7.14 | MIT | [upstream](https://github.com/tediousjs/node-mssql) |
 | normalize-path | 3.0.0 | MIT | [upstream](jonschlinkert/normalize-path) |
 | path-scurry | 1.11.1 | BlueOak-1.0.0 | [upstream](https://github.com/isaacs/path-scurry) |
 | pend | 1.2.0 | MIT | [upstream](https://github.com/andrewrk/node-pend) |
@@ -109,9 +110,9 @@ It is generated from the locked runtime dependency graph and packaged bundle sou
 | vscode-languageclient | 10.1.2 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
 | vscode-languageserver | 10.1.2 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
 | vscode-languageserver-protocol | 3.18.4 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| vscode-languageserver-textdocument | 1.0.15 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
+| vscode-languageserver-textdocument | 1.0.16 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
 | vscode-languageserver-types | 3.18.4 | MIT | [upstream](https://github.com/Microsoft/vscode-languageserver-node) |
-| ws | 8.22.0 | MIT | [upstream](https://github.com/websockets/ws) |
+| ws | 8.22.1 | MIT | [upstream](https://github.com/websockets/ws) |
 | yauzl | 3.4.0 | MIT | [upstream](https://github.com/thejoshwolfe/yauzl) |
 | zip-stream | 6.0.1 | MIT | [upstream](https://github.com/archiverjs/node-zip-stream) |
 | zod | 4.6.7 | MIT | [upstream](https://github.com/colinhacks/zod) |
@@ -132,6 +133,7 @@ The following published packages declare the listed SPDX license in their packag
 - @justybase/sqlite-runtime@3.16.8 — Apache-2.0
 - @justybase/ui-core@3.17.14 — Apache-2.0
 - @justybase/ui-react@3.17.14 — Apache-2.0
+- ignore@7.0.14 — MIT
 
 ## Included license texts
 
@@ -367,7 +369,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @justybase/netezza-driver@3.4.3
+### @justybase/netezza-driver@3.5.0
 
 ```text
 Copyright (c) 2025, Krzysztof Duśko
@@ -603,7 +605,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @modelcontextprotocol/sdk@1.32.1
+### @modelcontextprotocol/sdk@1.32.2
 
 ```text
 MIT License
@@ -691,7 +693,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @tanstack/virtual-core@3.19.6
+### @tanstack/virtual-core@3.19.11
 
 ```text
 MIT License
@@ -717,7 +719,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @xyflow/react@12.12.0, @xyflow/system@0.0.83
+### @xyflow/react@12.12.1, @xyflow/system@0.0.84
 
 ```text
 MIT License
@@ -1301,10 +1303,10 @@ Apache License
    limitations under the License.
 ```
 
-### d3-color@3.1.0
+### d3-color@3.1.1, d3-dispatch@3.0.2, d3-drag@3.0.1, d3-interpolate@3.0.2, d3-selection@3.0.1, d3-timer@3.0.2, d3-transition@3.0.2, d3-zoom@3.0.1
 
 ```text
-Copyright 2010-2022 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
@@ -1319,28 +1321,10 @@ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 ```
 
-### d3-dispatch@3.0.1, d3-drag@3.0.0, d3-interpolate@3.0.1, d3-selection@3.0.0, d3-timer@3.0.1, d3-transition@3.0.1, d3-zoom@3.0.0
+### d3-ease@3.0.2
 
 ```text
-Copyright 2010-2021 Mike Bostock
-
-Permission to use, copy, modify, and/or distribute this software for any purpose
-with or without fee is hereby granted, provided that the above copyright notice
-and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
-REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
-FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
-INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
-OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
-TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
-THIS SOFTWARE.
-```
-
-### d3-ease@3.0.1
-
-```text
-Copyright 2010-2021 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 Copyright 2001 Robert Penner
 All rights reserved.
 
@@ -1620,7 +1604,7 @@ The following files embed [d3.js](https://github.com/d3/d3) BSD 3-Clause:
 See `/licenses/LICENSE-d3` for details of the license.
 ```
 
-### elkjs@0.12.0
+### elkjs@0.12.1
 
 ```text
 # Eclipse Public License - v 2.0
@@ -1966,7 +1950,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### fast-uri@3.1.8
+### fast-uri@3.1.9
 
 ```text
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
@@ -2107,7 +2091,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### hyparquet@1.31.4, hyparquet-compressors@1.1.2, hyparquet-writer@0.16.12, hysnappy@1.1.1
+### hyparquet@1.31.5, hyparquet-compressors@1.1.3, hyparquet-writer@0.16.13, hysnappy@1.1.1
 
 ```text
 The MIT License (MIT)
@@ -2424,7 +2408,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### mssql@12.7.9
+### mssql@12.7.14
 
 ```text
 MIT License
@@ -2937,7 +2921,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### vscode-jsonrpc@9.0.3, vscode-languageclient@10.1.2, vscode-languageserver@10.1.2, vscode-languageserver-protocol@3.18.4, vscode-languageserver-textdocument@1.0.15, vscode-languageserver-types@3.18.4
+### vscode-jsonrpc@9.0.3, vscode-languageclient@10.1.2, vscode-languageserver@10.1.2, vscode-languageserver-protocol@3.18.4, vscode-languageserver-textdocument@1.0.16, vscode-languageserver-types@3.18.4
 
 ```text
 Copyright (c) Microsoft Corporation
@@ -2953,7 +2937,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### ws@8.22.0
+### ws@8.22.1
 
 ```text
 Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>

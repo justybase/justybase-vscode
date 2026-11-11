@@ -51,9 +51,11 @@ import {
 } from '../core/resultDataProvider/types';
 import {
     getDiskBackedResultsSettings,
+    getDiskBudgetBytes,
     getEffectiveSpillThreshold,
     isDiskBackedResultsAvailable,
 } from '../core/resultDataProvider/diskBackedSettings';
+import { renderDiskBackedStorageReport } from '../core/resultDataProvider/diskBackedStoreRegistry';
 import { ResultFormattingSettingsStore } from '../results/resultFormattingSettingsStore';
 import { createPerformanceTimer, formatPerformanceEvent } from '../services/perf/performanceEvents';
 import { getUxPerfSession } from '../services/perf/uxPerfSession';
@@ -772,7 +774,9 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
   }
 
     public getPerformanceStatsReport(): string | undefined {
-        return this._performanceStore?.renderReport();
+        const samples = this._performanceStore?.renderReport();
+        const storage = renderDiskBackedStorageReport(getDiskBudgetBytes());
+        return samples ? `${samples}\n\n${storage}` : storage;
     }
 
     public async clearPerformanceStats(): Promise<void> {

@@ -1,5 +1,9 @@
 import { NETEZZA_SQL_AUTHORING } from "./authoring";
 import type { DatabaseSqlFormatterProfile } from "@justybase/contracts";
+import {
+  findProtectedFormatRanges,
+  maskProtectedRanges,
+} from "./format/protection";
 
 export type SqlKeywordCase = "upper" | "lower" | "preserve";
 
@@ -85,6 +89,23 @@ export function formatSqlWithProfile(
     return sql;
   }
 
+  // NZPLSQL bodies, dollar-quoted strings and external-table DDL are masked out
+  // so the formatter can never reflow protected bytes. The mask is a single
+  // statement-scoped token, so statement boundaries still format normally.
+  const protectedRanges = findProtectedFormatRanges(sql);
+  if (protectedRanges.length > 0) {
+    const { masked, restore } = maskProtectedRanges(sql, protectedRanges);
+    return restore(formatSqlWithProfileCore(masked, formatterProfile, options));
+  }
+
+  return formatSqlWithProfileCore(sql, formatterProfile, options);
+}
+
+function formatSqlWithProfileCore(
+  sql: string,
+  formatterProfile: DatabaseSqlFormatterProfile,
+  options: NetezzaFormatOptions,
+): string {
   const SQL_KEYWORDS = formatterProfile.keywords;
   const CLAUSE_KEYWORDS = formatterProfile.clauseKeywords;
   const NEWLINE_BEFORE_KEYWORDS = formatterProfile.newlineBeforeKeywords;
@@ -865,10 +886,26 @@ function alignClauseListColumns(sql: string): string {
 
 function countParenDelta(line: string): number {
   let delta = 0;
-  for (const char of line) {
-    if (char === "(") {
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote) {
+      if (character === quote) {
+        if (line[index + 1] === quote) {
+          index += 1;
+          continue;
+        }
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "(") {
       delta += 1;
-    } else if (char === ")") {
+    } else if (character === ")") {
       delta -= 1;
     }
   }

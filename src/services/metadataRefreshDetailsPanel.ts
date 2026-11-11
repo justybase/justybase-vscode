@@ -69,64 +69,480 @@ export function getMetadataRefreshDetailsHtml(): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-  body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); margin: 0; padding: 18px; }
-  h1 { font-size: 1.25em; margin: 0 0 6px; }
-  h2 { font-size: 1em; margin: 20px 0 8px; }
-  .hint { color: var(--vscode-descriptionForeground); margin: 0 0 18px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 0 0 14px; }
-  .controls label { display: flex; align-items: center; gap: 6px; }
-  select { color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); padding: 3px 6px; }
-  .refresh { border: 1px solid var(--vscode-panel-border); border-radius: 5px; padding: 12px; margin: 12px 0 22px; }
-  .summary { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
-  .connection { font-weight: 600; }
-  .progress { color: var(--vscode-textLink-foreground); font-weight: 600; }
-  .message { color: var(--vscode-descriptionForeground); width: 100%; }
-  .query { border-left: 3px solid var(--vscode-panel-border); padding: 8px 10px; margin: 8px 0; background: var(--vscode-textCodeBlock-background); }
-  .query.running { border-left-color: var(--vscode-testing-iconPassed); }
-  .query.queued, .query.planned { border-left-color: var(--vscode-editorWarning-foreground); }
-  .query.failed { border-left-color: var(--vscode-errorForeground); }
-  .query.slow { border-left-color: var(--vscode-editorWarning-foreground); }
-  .query.skipped { opacity: .68; }
-  .query-header { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-  .copy-sql { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 3px; padding: 2px 7px; cursor: pointer; white-space: nowrap; }
-  .copy-sql:hover { background: var(--vscode-button-secondaryHoverBackground); }
-  .meta { color: var(--vscode-descriptionForeground); font-size: .9em; }
-  .state { font-weight: 600; text-transform: uppercase; margin-right: 8px; }
-  pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); font-size: .9em; }
-  .error { color: var(--vscode-errorForeground); margin-top: 6px; }
-  .empty { color: var(--vscode-descriptionForeground); font-style: italic; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 8px; margin: 12px 0; }
-  .stat { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 7px 9px; }
-  .stat-label { color: var(--vscode-descriptionForeground); font-size: .85em; }
-  .stat-value { display: block; margin-top: 3px; font-weight: 600; }
-  .repeat-refresh { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 3px; padding: 4px 9px; cursor: pointer; margin-top: 8px; }
-  .repeat-refresh:hover { background: var(--vscode-button-hoverBackground); }
-  .snapshot { color: var(--vscode-descriptionForeground); font-size: .9em; margin: 8px 0; }
-  .skip-note { color: var(--vscode-descriptionForeground); background: var(--vscode-textCodeBlock-background); border-left: 3px solid var(--vscode-editorWarning-foreground); padding: 6px 9px; margin: 8px 0; font-size: .9em; }
-  .snapshot.ok { color: var(--vscode-testing-iconPassed); }
-  .snapshot.degraded { color: var(--vscode-editorWarning-foreground); }
-  .snapshot.incomplete { color: var(--vscode-editorWarning-foreground); }
-  .missing { margin: 6px 0 0 18px; padding: 0; font-family: var(--vscode-editor-font-family); font-size: .88em; }
+  :root {
+    --surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    --border: var(--vscode-widget-border, var(--vscode-panel-border, rgba(128, 128, 128, .35)));
+    --muted: var(--vscode-descriptionForeground);
+    --ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+    --warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange));
+    --bad: var(--vscode-errorForeground, var(--vscode-charts-red));
+    --accent: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .shell { max-width: 1180px; margin: 0 auto; padding: 0 20px 56px; }
+
+  /* ---------- header ---------- */
+  .hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 22px 0 16px;
+  }
+  .hero h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+  }
+  .hint {
+    margin: 6px 0 0;
+    max-width: 74ch;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .live {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 26px;
+    padding: 0 11px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .live.busy { color: var(--accent); border-color: var(--accent); }
+  .live.busy .dot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .live.done { color: var(--ok); border-color: var(--ok); }
+  .live.done .dot { background: var(--ok); }
+  .live.warn { color: var(--warn); border-color: var(--warn); }
+  .live.warn .dot { background: var(--warn); }
+
+  /* ---------- toolbar ---------- */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    padding: 10px 0;
+    margin-bottom: 16px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--vscode-editor-background);
+  }
+  .field { display: inline-flex; align-items: center; gap: 7px; }
+  .field-label {
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  select {
+    color: var(--vscode-dropdown-foreground);
+    background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border, var(--border));
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    max-width: 260px;
+  }
+  select:hover { border-color: var(--vscode-focusBorder); }
+  select:focus-visible, button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+  /* ---------- card ---------- */
+  .card {
+    margin: 0 0 18px;
+    padding: 16px 18px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .card[data-state="failed"] { border-color: var(--bad); }
+  .card[data-state="incomplete"] { border-color: var(--warn); }
+  .card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+  }
+  .card-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .card-title .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .card[data-state="running"] .card-title .dot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .card[data-state="complete"] .card-title .dot { background: var(--ok); }
+  .card[data-state="failed"] .card-title .dot { background: var(--bad); }
+  .card[data-state="incomplete"] .card-title .dot { background: var(--warn); }
+  .card[data-state="skipped"] .card-title .dot { background: var(--muted); }
+  .card-title .name {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    height: 19px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .chip.running { color: var(--accent); }
+  .chip.complete { color: var(--ok); }
+  .chip.failed { color: var(--bad); }
+  .chip.incomplete { color: var(--warn); }
+  .chip.skipped { color: var(--muted); }
+  .card-actions { display: flex; align-items: center; gap: 10px; }
+  .percent {
+    font-family: var(--vscode-editor-font-family);
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .percent.idle { color: var(--muted); font-size: 13px; }
+
+  .progress {
+    position: relative;
+    height: 6px;
+    margin: 12px 0 0;
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .progress > .bar {
+    position: relative;
+    display: block;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--vscode-progressBar-background, var(--accent));
+    transition: width .3s ease;
+  }
+  .card[data-state="complete"] .progress > .bar { background: var(--ok); }
+  .card[data-state="failed"] .progress > .bar { background: var(--bad); }
+  .card[data-state="incomplete"] .progress > .bar { background: var(--warn); }
+  .card[data-state="skipped"] .progress > .bar { background: var(--muted); }
+  .card[data-state="running"] .progress > .bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+    animation: shimmer 1.6s linear infinite;
+  }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) {
+    .card[data-state="running"] .progress > .bar::after,
+    .live.busy .dot,
+    .card[data-state="running"] .card-title .dot { animation: none; }
+  }
+
+  .card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 9px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  .card-meta .stage {
+    font-family: var(--vscode-editor-font-family);
+    color: var(--vscode-foreground);
+    opacity: .85;
+  }
+  .card-message { margin: 4px 0 0; font-size: 12.5px; }
+
+  /* ---------- buttons ---------- */
+  button {
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .btn-primary {
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-button-background);
+    border: 1px solid var(--vscode-button-border, transparent);
+    padding: 5px 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .btn-primary:hover { background: var(--vscode-button-hoverBackground); }
+  .btn-ghost {
+    color: var(--vscode-button-secondaryForeground);
+    background: var(--vscode-button-secondaryBackground);
+    border: 1px solid transparent;
+    padding: 3px 9px;
+    white-space: nowrap;
+  }
+  .btn-ghost:hover { background: var(--vscode-button-secondaryHoverBackground); }
+
+  /* ---------- stats ---------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin: 16px 0 4px;
+  }
+  .stat {
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+  }
+  .stat-label {
+    display: block;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .stat-value {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 13px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- banners ---------- */
+  .banner {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    margin: 12px 0 0;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: 6px;
+    font-size: 12px;
+    background: var(--vscode-editor-background);
+  }
+  .banner .glyph { flex: 0 0 auto; font-weight: 700; line-height: 1.45; }
+  .banner.ok { border-left-color: var(--ok); }
+  .banner.ok .glyph { color: var(--ok); }
+  .banner.warn { border-left-color: var(--warn); }
+  .banner.warn .glyph { color: var(--warn); }
+  .banner.info { border-left-color: var(--accent); }
+  .banner.info .glyph { color: var(--accent); }
+  .banner .banner-text { min-width: 0; }
+
+  .missing {
+    margin: 8px 0 0;
+    padding: 0 0 0 18px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  /* ---------- query groups ---------- */
+  .group { margin-top: 18px; }
+  .group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .group-head h2 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .group-head .count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--vscode-badge-background, var(--border));
+    color: var(--vscode-badge-foreground, var(--vscode-foreground));
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .query {
+    margin: 0 0 8px;
+    padding: 9px 11px 10px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+  }
+  .query.running { border-left-color: var(--accent); }
+  .query.queued, .query.planned { border-left-color: var(--warn); }
+  .query.failed { border-left-color: var(--bad); }
+  .query.slow { border-left-color: var(--warn); }
+  .query.completed { border-left-color: var(--ok); }
+  .query.skipped { border-left-color: var(--muted); opacity: .75; }
+
+  .query-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+  }
+  .state {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--vscode-badge-foreground, var(--vscode-foreground));
+    background: var(--vscode-badge-background, var(--border));
+  }
+  .query.running .state { color: var(--accent); background: transparent; border: 1px solid var(--accent); }
+  .query.completed .state { color: var(--ok); background: transparent; border: 1px solid var(--ok); }
+  .query.failed .state { color: var(--bad); background: transparent; border: 1px solid var(--bad); }
+  .query.queued .state, .query.planned .state { color: var(--warn); background: transparent; border: 1px solid var(--warn); }
+
+  .kind {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .target {
+    font-family: var(--vscode-editor-font-family);
+    font-size: 11.5px;
+    overflow-wrap: anywhere;
+  }
+  .timings { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .query-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .timing {
+    color: var(--muted);
+    font-family: var(--vscode-editor-font-family);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .timing.slow { color: var(--warn); }
+  .copy-sql { flex: 0 0 auto; }
+
+  pre {
+    margin: 8px 0 0;
+    padding: 7px 9px;
+    border-radius: 4px;
+    background: var(--vscode-textCodeBlock-background);
+    color: var(--vscode-foreground);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 150px;
+    overflow: auto;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 11.5px;
+    line-height: 1.55;
+    tab-size: 4;
+  }
+  .error {
+    margin-top: 7px;
+    padding: 6px 9px;
+    border-radius: 4px;
+    border-left: 3px solid var(--bad);
+    background: var(--vscode-inputValidation-errorBackground, var(--vscode-textCodeBlock-background));
+    color: var(--vscode-errorForeground, var(--vscode-foreground));
+    font-family: var(--vscode-editor-font-family);
+    font-size: 11.5px;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- empty ---------- */
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin: 40px 0;
+    padding: 34px 20px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    color: var(--muted);
+    text-align: center;
+  }
+  .empty .empty-title { color: var(--vscode-foreground); font-weight: 600; }
+  .empty .empty-body { font-size: 12px; max-width: 52ch; }
 </style>
 </head>
 <body>
-<h1>Schema refresh diagnostics</h1>
-<p class="hint">Executed, running, queued and planned catalog SQL. Planned statements may be skipped when a cache layer is already valid or when no external table exists.</p>
-<div class="controls">
-  <label>Connection <select id="connection-filter"><option value="all">All connections</option></select></label>
-  <label>Status <select id="status-filter"><option value="all">All</option><option value="running">Running</option><option value="failed">Failed</option><option value="timeout">Timeout</option><option value="slow">Slow (&gt; 5 s)</option><option value="completed">Completed</option><option value="queued">Queued</option><option value="planned">Planned</option><option value="skipped">Skipped</option></select></label>
-  <label>Sort <select id="sort-order"><option value="duration-desc">Execution time (longest first)</option><option value="started-desc">Started most recently</option><option value="queue-desc">Queue wait (longest first)</option><option value="duration-asc">Execution time (shortest first)</option></select></label>
+<div class="shell">
+  <header class="hero">
+    <div>
+      <h1>Schema refresh diagnostics</h1>
+      <p class="hint">Executed, running, queued and planned catalog SQL. Planned statements may be skipped when a cache layer is already valid or when no external table exists.</p>
+    </div>
+    <div class="live" id="live-badge" title="Live refresh activity">
+      <span class="dot"></span><span id="live-label">Idle</span>
+    </div>
+  </header>
+  <div class="toolbar">
+    <label class="field"><span class="field-label">Connection</span><select id="connection-filter" aria-label="Connection"><option value="all">All connections</option></select></label>
+    <label class="field"><span class="field-label">Status</span><select id="status-filter" aria-label="Status"><option value="all">All</option><option value="running">Running</option><option value="failed">Failed</option><option value="timeout">Timeout</option><option value="slow">Slow (&gt; 5 s)</option><option value="completed">Completed</option><option value="queued">Queued</option><option value="planned">Planned</option><option value="skipped">Skipped</option></select></label>
+    <label class="field"><span class="field-label">Sort</span><select id="sort-order" aria-label="Sort"><option value="duration-desc">Execution time (longest first)</option><option value="started-desc">Started most recently</option><option value="queue-desc">Queue wait (longest first)</option><option value="duration-asc">Execution time (shortest first)</option></select></label>
+  </div>
+  <main id="content"><div class="empty"><span class="empty-title">No diagnostics yet</span><span class="empty-body">No schema refresh has started in this VS Code session.</span></div></main>
 </div>
-<main id="content"><p class="empty">No schema refresh has started in this VS Code session.</p></main>
 <script>
   const content = document.getElementById('content');
   const vscode = acquireVsCodeApi();
   const statusFilter = document.getElementById('status-filter');
   const connectionFilter = document.getElementById('connection-filter');
   const sortOrder = document.getElementById('sort-order');
+  const liveBadge = document.getElementById('live-badge');
+  const liveLabel = document.getElementById('live-label');
   const slowQueryThresholdMs = 5000;
   let currentDetails = [];
   let renderedConnectionSignature = null;
+  let copiedQueryId = null;
+  let copiedAt = 0;
   const labels = {
     running: 'Running now', queued: 'Queued', planned: 'Planned next',
     completed: 'Executed', failed: 'Failed', skipped: 'Skipped'
@@ -140,6 +556,7 @@ export function getMetadataRefreshDetailsHtml(): string {
     running: 'running', queued: 'queued', planned: 'planned',
     completed: 'completed', failed: 'failed', skipped: 'skipped'
   };
+  const groupStates = ['running', 'queued', 'planned', 'failed', 'completed', 'skipped'];
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
   const formatTime = (timestamp) => timestamp ? new Date(timestamp).toLocaleTimeString() : '';
   const durationMs = (query, now) => {
@@ -153,18 +570,28 @@ export function getMetadataRefreshDetailsHtml(): string {
     : milliseconds + ' ms';
   const isSlow = (query, now) => durationMs(query, now) > slowQueryThresholdMs;
   const isTimeout = (query) => /timeout|timed out/i.test(query.error || '');
+  const plural = (count, singular, pluralForm) => count + ' ' + (count === 1 ? singular : pluralForm);
   const formatQuery = (query) => {
     const now = Date.now();
     const durationValue = durationMs(query, now);
-    const duration = durationValue > 0 ? ' · SQL ' + formatDuration(durationValue) : '';
-    const queue = query.queueWaitMs ? ' · queue wait ' + query.queueWaitMs + ' ms' : '';
-    const rows = typeof query.rowsRead === 'number' ? ' · ' + query.rowsRead + ' rows' : '';
+    const slow = isSlow(query, now);
     const target = [query.context.database, query.context.schema, query.context.table].filter(Boolean).join('.') || 'connection scope';
-    const slow = isSlow(query, now) ? ' slow' : '';
-    return '<article class="query ' + escapeHtml(query.state) + slow + '">'
-      + '<div class="query-header"><div><span class="state">' + escapeHtml(stateLabel[query.state] || query.state) + '</span>'
-      + '<span class="meta">' + escapeHtml(query.context.kind || 'catalog') + ' · ' + escapeHtml(target) + duration + queue + rows + '</span></div>'
-      + '<button class="copy-sql" type="button" data-copy-sql-id="' + escapeHtml(query.id) + '">Copy SQL</button></div>'
+    const timings = [];
+    if (durationValue > 0) {
+      timings.push('<span class="timing' + (slow ? ' slow' : '') + '">SQL ' + escapeHtml(formatDuration(durationValue)) + '</span>');
+    }
+    if (query.queueWaitMs) timings.push('<span class="timing">queue ' + escapeHtml(String(query.queueWaitMs)) + ' ms</span>');
+    if (typeof query.rowsRead === 'number') timings.push('<span class="timing">' + escapeHtml(plural(query.rowsRead, 'row', 'rows')) + '</span>');
+    const justCopied = copiedQueryId === query.id && Date.now() - copiedAt < 1600;
+    return '<article class="query ' + escapeHtml(query.state) + (slow ? ' slow' : '') + '">'
+      + '<div class="query-top">'
+      + '<span class="state">' + escapeHtml(stateLabel[query.state] || query.state) + '</span>'
+      + '<span class="kind">' + escapeHtml(query.context.kind || 'catalog') + '</span>'
+      + '<span class="target">' + escapeHtml(target) + '</span>'
+      + '<span class="query-right">'
+      + (timings.length ? '<span class="timings">' + timings.join('') + '</span>' : '')
+      + '<button class="btn-ghost copy-sql" type="button" data-copy-sql-id="' + escapeHtml(query.id) + '">' + (justCopied ? 'Copied' : 'Copy SQL') + '</button>'
+      + '</span></div>'
       + '<pre>' + escapeHtml(query.sql) + '</pre>'
       + (query.error ? '<div class="error">' + escapeHtml(query.error) + '</div>' : '')
       + '</article>';
@@ -183,25 +610,32 @@ export function getMetadataRefreshDetailsHtml(): string {
   };
   const renderGroup = (queries, state) => {
     const entries = queries.filter(query => query.state === state);
-    return entries.length ? '<h2>' + labels[state] + ' (' + entries.length + ')</h2>' + entries.map(formatQuery).join('') : '';
+    if (!entries.length) return '';
+    return '<div class="group">'
+      + '<div class="group-head"><h2>' + labels[state] + '</h2><span class="count">' + entries.length + '</span></div>'
+      + entries.map(formatQuery).join('')
+      + '</div>';
   };
   const renderSnapshot = (snapshot) => {
     if (!snapshot) return '';
     const fkStatus = (snapshot.unavailableRelationshipCount || snapshot.failedRelationshipCount)
-      ? '<div class="snapshot degraded">Foreign-key metadata: unavailable in '
+      ? '<div class="banner warn"><span class="glyph">!</span><span class="banner-text">Foreign-key metadata: unavailable in '
         + escapeHtml(String(snapshot.unavailableRelationshipCount || 0)) + ' databases; failed reads in '
         + escapeHtml(String(snapshot.failedRelationshipCount || 0)) + ' databases.'
-        + (snapshot.complete ? ' Tables and columns remain cached.' : '') + '</div>'
+        + (snapshot.complete ? ' Tables and columns remain cached.' : '') + '</span></div>'
       : '';
     if (snapshot.complete && snapshot.degraded) {
       const unavailableCount = snapshot.unavailableColumnCount || 0;
       const removedCount = snapshot.removedStaleObjectCount || 0;
       const examples = (snapshot.unavailableColumnKeys || []).map(key => '<li>' + escapeHtml(key) + '</li>').join('');
-      return fkStatus + '<div class="snapshot degraded">Snapshot complete with warnings — explicit empty column layers: '
-        + escapeHtml(String(unavailableCount)) + '; stale objects removed: ' + escapeHtml(String(removedCount)) + '</div>'
+      return fkStatus + '<div class="banner warn"><span class="glyph">!</span><span class="banner-text"><strong>Snapshot complete with warnings</strong> &mdash; '
+        + escapeHtml(plural(unavailableCount, 'explicit empty column layer', 'explicit empty column layers')) + '; '
+        + escapeHtml(plural(removedCount, 'stale object removed', 'stale objects removed')) + '</span></div>'
         + (examples ? '<ul class="missing">' + examples + '</ul>' : '');
     }
-    if (snapshot.complete) return fkStatus + '<div class="snapshot ok">Snapshot complete: all prefetched object layers have columns.</div>';
+    if (snapshot.complete) {
+      return fkStatus + '<div class="banner ok"><span class="glyph">&#10003;</span><span class="banner-text">Snapshot complete: all prefetched object layers have columns.</span></div>';
+    }
     const parts = [];
     if (snapshot.missingStages && snapshot.missingStages.length) {
       const stageText = snapshot.missingStages.map(stage => stage === 'objects'
@@ -211,7 +645,8 @@ export function getMetadataRefreshDetailsHtml(): string {
     }
     if (snapshot.missingColumnCount) parts.push('missing column layers: ' + snapshot.missingColumnCount);
     const examples = (snapshot.missingColumnKeys || []).map(key => '<li>' + escapeHtml(key) + '</li>').join('');
-    return fkStatus + '<div class="snapshot incomplete">Snapshot incomplete' + (parts.length ? ' — ' + escapeHtml(parts.join('; ')) : '') + '</div>'
+    return fkStatus + '<div class="banner warn"><span class="glyph">!</span><span class="banner-text"><strong>Snapshot incomplete</strong>'
+      + (parts.length ? ' &mdash; ' + escapeHtml(parts.join('; ')) : '') + '</span></div>'
       + (examples ? '<ul class="missing">' + examples + '</ul>' : '');
   };
   const renderStats = (refresh, queries) => {
@@ -245,39 +680,69 @@ export function getMetadataRefreshDetailsHtml(): string {
     ];
     return '<div class="stats">' + values.map(value => '<div class="stat"><span class="stat-label">' + value[0] + '</span><span class="stat-value">' + escapeHtml(value[1]) + '</span></div>').join('') + '</div>';
   };
+  const chipState = (refresh) => {
+    if (refresh.skipReason) return 'skipped';
+    if (refresh.completedAt) return refresh.snapshot && refresh.snapshot.complete === false ? 'incomplete' : 'complete';
+    return 'running';
+  };
+  const chipLabel = (state) => state === 'complete' ? 'Complete' : state === 'incomplete' ? 'Incomplete' : state === 'skipped' ? 'Skipped' : 'Running';
+  const renderCard = (refresh) => {
+    const allQueries = [...refresh.queries];
+    const queries = getFilteredSortedQueries(allQueries);
+    const state = chipState(refresh);
+    const showPercent = !refresh.skipReason;
+    return '<section class="card" data-state="' + state + '">'
+      + '<div class="card-head">'
+      + '<div class="card-title"><span class="dot"></span><h2 class="name">' + escapeHtml(refresh.connectionName) + '</h2>'
+      + '<span class="chip ' + state + '">' + chipLabel(state) + '</span></div>'
+      + '<div class="card-actions">'
+      + (showPercent
+        ? '<span class="percent">' + escapeHtml(refresh.percent) + '%</span>'
+        : '<span class="percent idle">no SQL</span>')
+      + '<button class="btn-primary" type="button" data-repeat-full-refresh="' + escapeHtml(refresh.connectionName) + '">Repeat full metadata refresh</button>'
+      + '</div></div>'
+      + (showPercent
+        ? '<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + escapeHtml(refresh.percent) + '"><span class="bar" style="width:' + escapeHtml(refresh.percent) + '%"></span></div>'
+        : '')
+      + '<div class="card-meta"><span class="stage">' + escapeHtml(refresh.stage) + '</span><span>·</span><span>updated ' + escapeHtml(formatTime(refresh.updatedAt)) + '</span>'
+      + '<span>·</span><span>' + escapeHtml(plural(allQueries.length, 'statement', 'statements')) + '</span></div>'
+      + (refresh.skipReason ? '' : '<p class="card-message">' + escapeHtml(refresh.message) + '</p>')
+      + (refresh.skipReason
+        ? '<div class="banner info skip-note"><span class="glyph">i</span><span class="banner-text">' + escapeHtml(skipLabels[refresh.skipReason] || refresh.message) + '</span></div>'
+        : renderStats(refresh, allQueries))
+      + renderSnapshot(refresh.snapshot)
+      + groupStates.map(groupState => renderGroup(queries, groupState)).join('')
+      + (!refresh.skipReason && allQueries.length && !queries.length
+        ? '<div class="banner info"><span class="glyph">i</span><span class="banner-text">No statement matches the current status filter.</span></div>'
+        : '')
+      + '</section>';
+  };
+  const renderLiveBadge = (details) => {
+    if (!liveBadge || !liveLabel) return;
+    const running = details.filter(refresh => !refresh.completedAt && !refresh.skipReason).length;
+    const failed = details.filter(refresh => refresh.completedAt && refresh.snapshot && refresh.snapshot.complete === false).length;
+    liveBadge.className = 'live ' + (running ? 'busy' : failed ? 'warn' : details.length ? 'done' : '');
+    liveLabel.textContent = running
+      ? 'Refreshing ' + plural(running, 'connection', 'connections')
+      : failed ? plural(failed, 'connection needs attention', 'connections need attention')
+      : details.length ? 'Up to date' : 'Idle';
+  };
+  const renderEmpty = (title, body) => {
+    content.innerHTML = '<div class="empty"><span class="empty-title">' + escapeHtml(title) + '</span><span class="empty-body">' + escapeHtml(body) + '</span></div>';
+  };
   const render = (details) => {
     syncConnectionFilter(details);
+    renderLiveBadge(details || []);
     if (!details || details.length === 0) {
-      content.innerHTML = '<p class="empty">No schema refresh has started in this VS Code session.</p>';
+      renderEmpty('No diagnostics yet', 'No schema refresh has started in this VS Code session.');
       return;
     }
     const visible = getVisibleConnections(details);
     if (!visible.length) {
-      content.innerHTML = '<p class="empty">No schema refresh details are tracked for the selected connection.</p>';
+      renderEmpty('No connection selected', 'No schema refresh details are tracked for the selected connection.');
       return;
     }
-    content.innerHTML = visible.map(refresh => {
-      const allQueries = [...refresh.queries];
-      const queries = getFilteredSortedQueries(allQueries);
-      return '<section class="refresh">'
-        + '<div class="summary"><span class="connection">' + escapeHtml(refresh.connectionName) + '</span>'
-        + '<span class="progress">' + escapeHtml(refresh.percent) + '%</span>'
-        + '<span class="meta">' + escapeHtml(refresh.stage) + ' · updated ' + escapeHtml(formatTime(refresh.updatedAt)) + '</span>'
-        + '<span class="message">' + escapeHtml(refresh.message) + '</span></div>'
-        + (refresh.skipReason
-          ? '<div class="skip-note">' + escapeHtml(skipLabels[refresh.skipReason] || refresh.message) + '</div>'
-          : '')
-        + '<button class="repeat-refresh" type="button" data-repeat-full-refresh="' + escapeHtml(refresh.connectionName) + '">Repeat full metadata refresh</button>'
-        + (refresh.skipReason ? '' : renderStats(refresh, allQueries))
-        + renderSnapshot(refresh.snapshot)
-        + renderGroup(queries, 'running')
-        + renderGroup(queries, 'queued')
-        + renderGroup(queries, 'planned')
-        + renderGroup(queries, 'failed')
-        + renderGroup(queries, 'completed')
-        + renderGroup(queries, 'skipped')
-        + '</section>';
-    }).join('');
+    content.innerHTML = visible.map(renderCard).join('');
   };
   const syncConnectionFilter = (details) => {
     const names = details.map(refresh => refresh.connectionName);
@@ -316,10 +781,14 @@ export function getMetadataRefreshDetailsHtml(): string {
       const queryId = copyButton.getAttribute('data-copy-sql-id');
       const query = currentDetails.flatMap(refresh => refresh.queries).find(entry => entry.id === queryId);
       if (query) {
-        const button = copyButton;
-        const copied = () => {
-          button.textContent = 'Copied';
-          setTimeout(() => { button.textContent = 'Copy SQL'; }, 1400);
+        const markCopied = () => {
+          copiedQueryId = queryId;
+          copiedAt = Date.now();
+          copyButton.textContent = 'Copied';
+          setTimeout(() => {
+            if (copiedQueryId === queryId) copiedQueryId = null;
+            copyButton.textContent = 'Copy SQL';
+          }, 1400);
         };
         const fallbackCopy = () => {
           const textarea = document.createElement('textarea');
@@ -331,10 +800,10 @@ export function getMetadataRefreshDetailsHtml(): string {
           textarea.select();
           const copiedToClipboard = document.execCommand('copy');
           textarea.remove();
-          if (copiedToClipboard) copied();
+          if (copiedToClipboard) markCopied();
         };
         if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-          navigator.clipboard.writeText(query.sql).then(copied, fallbackCopy);
+          navigator.clipboard.writeText(query.sql).then(markCopied, fallbackCopy);
         } else {
           fallbackCopy();
         }
@@ -347,7 +816,10 @@ export function getMetadataRefreshDetailsHtml(): string {
       if (connectionName) vscode.postMessage({ type: 'repeat-full-refresh', connectionName });
     }
   });
-  setInterval(() => render(currentDetails), 1000);
+  const hasLiveWork = (details) => details.some(refresh => !refresh.completedAt && !refresh.skipReason && !isTerminal(refresh));
+  setInterval(() => {
+    if (hasLiveWork(currentDetails)) render(currentDetails);
+  }, 1000);
   window.addEventListener('message', event => {
     if (event.data && event.data.type === 'refresh-state') {
       currentDetails = mergeRefreshDetails(event.data.details || []);

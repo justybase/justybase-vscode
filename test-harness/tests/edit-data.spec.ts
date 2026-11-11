@@ -11,6 +11,19 @@ async function posted(page: Page): Promise<Posted[]> {
     return page.evaluate(() => (window as unknown as { __posted: Posted[] }).__posted);
 }
 
+type DetailsFixture = {
+    command: 'setData';
+    data: Record<string, unknown>[];
+    columns: string[];
+    metadata: Record<string, unknown>;
+    readOnly: boolean;
+};
+
+async function loadDetails(page: Page, fixture: DetailsFixture, readySelector: string): Promise<void> {
+    await page.evaluate((message) => window.postMessage(message, '*'), fixture);
+    await page.waitForSelector(readySelector, { state: 'attached' });
+}
+
 const cell = (page: Page, row: number, col: number) =>
     page.locator(`.data-grid tr[data-index="${row}"] td[data-col="${col}"]`);
 
@@ -119,5 +132,66 @@ test.describe('Edit Data panel webview', () => {
         await page.click('.tab[data-target="tab-ddl"]');
         await expect(page.locator('#ddlContent .code-text')).toContainText('CREATE TABLE JUST_DATA.ADMIN.CUSTOMER_ORDERS');
         await expect(page.locator('#ddlCopyBtn')).toBeEnabled();
+    });
+
+    test('renders views read-only with inspector-only structure', async ({ page }) => {
+        await open(page);
+        await loadDetails(page, {
+            command: 'setData',
+            data: [{ CUSTOMER_ID: 1, NAME: 'Anna' }],
+            columns: ['CUSTOMER_ID', 'NAME'],
+            metadata: {
+                tableComment: 'Reporting view',
+                objectKind: 'view',
+                columns: [
+                    { ATTNAME: 'CUSTOMER_ID', FORMAT_TYPE: 'INTEGER', IS_NOT_NULL: 1, COLDEFAULT: null, DESCRIPTION: 'Business key', IS_PK: 0, IS_FK: 0 },
+                    { ATTNAME: 'NAME', FORMAT_TYPE: 'VARCHAR(100)', IS_NOT_NULL: 0, COLDEFAULT: null, DESCRIPTION: '', IS_PK: 0, IS_FK: 0 },
+                ],
+            },
+            readOnly: true,
+        }, '.struct-grid tbody tr[data-name]');
+
+        await page.click('.tab[data-target="tab-metadata"]');
+        await expect(page.locator('#tableCommentBox')).toHaveAttribute('readonly', '');
+        await expect(page.locator('#saveTableCommentBtn')).toHaveCount(0);
+        await expect(page.locator('#revertTableCommentBtn')).toHaveCount(0);
+        await expect(page.locator('#showAddColumnBtn')).toHaveCount(0);
+        await expect(page.locator('.col-comment-readonly')).toHaveText('Business key');
+        await expect(page.locator('input.col-comment')).toHaveCount(0);
+        await expect(page.locator('.drop-col-btn')).toHaveCount(0);
+
+        await page.click('.tab[data-target="tab-data"]');
+        await cell(page, 0, 1).dblclick();
+        await expect(page.locator('input.cell-editor')).toHaveCount(0);
+        await page.keyboard.press('Control+s');
+        expect((await posted(page)).some(m => m.command === 'save')).toBe(false);
+    });
+
+    test('renders procedure definition and arguments without column editing', async ({ page }) => {
+        await open(page);
+        await loadDetails(page, {
+            command: 'setData',
+            data: [],
+            columns: [],
+            metadata: {
+                tableComment: '',
+                objectKind: 'procedure',
+                columns: [],
+                properties: [
+                    { label: 'Kind', value: 'PROCEDURE' },
+                    { label: 'Signature', value: 'LOAD_CUSTOMERS(INT)' },
+                    { label: 'Owner', value: 'ADMIN' },
+                ],
+                arguments: [{ position: 1, type: 'INT' }],
+            },
+            readOnly: true,
+        }, '.struct-property');
+
+        await page.click('.tab[data-target="tab-metadata"]');
+        await expect(page.locator('.struct-property')).toHaveCount(3);
+        await expect(page.locator('.struct-properties')).toContainText('LOAD_CUSTOMERS(INT)');
+        await expect(page.locator('.struct-grid tbody tr[data-name]')).toHaveCount(1);
+        await expect(page.locator('#tableCommentBox')).toHaveCount(0);
+        await expect(page.locator('#showAddColumnBtn')).toHaveCount(0);
     });
 });

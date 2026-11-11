@@ -3558,12 +3558,42 @@ tfoot {
 
 /* Row View — modern grid layout (inspired by TableV2 rvp) */
 .row-view-table {
+    --rv-key-width: 42%;
+    position: relative;
     display: grid;
     grid-template-columns: 1fr;
     user-select: none;
     -webkit-user-select: none;
 }
 .row-view-content:focus { outline: none; }
+.row-view-splitter {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--rv-key-width);
+    z-index: 3;
+    width: 9px;
+    transform: translateX(-4px);
+    cursor: col-resize;
+    touch-action: none;
+}
+.row-view-splitter::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 1px;
+    background: color-mix(in srgb, var(--vscode-panel-border, var(--border-color)) 70%, transparent);
+}
+.row-view-splitter:hover::after,
+.row-view-splitter:focus-visible::after,
+.row-view-table.row-view-resizing .row-view-splitter::after {
+    width: 2px;
+    background: var(--vscode-focusBorder, #3b82f6);
+}
+.row-view-splitter:focus-visible { outline: none; }
+.row-view-table.row-view-resizing { cursor: col-resize; }
 .row-view-key[data-rv-row],
 .row-view-val[data-rv-row] { cursor: cell; }
 .row-view-key.rv-selected,
@@ -3577,7 +3607,7 @@ tfoot {
 }
 .row-view-section {
     display: grid;
-    grid-template-columns: minmax(110px, 42%) 1fr;
+    grid-template-columns: minmax(110px, var(--rv-key-width, 42%)) minmax(0, 1fr);
     padding: 1px 8px;
     border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 55%, transparent);
     align-items: baseline;
@@ -5342,6 +5372,35 @@ body.sidebar-layout .main-split-view {
     content: '›';
     margin-left: auto;
     opacity: 0.7;
+}
+
+/* Result-tab context menu: same icon rhythm as the grid menu. */
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.context-menu-item .context-menu-icon {
+    display: inline-flex;
+    flex: 0 0 16px;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.context-menu-item:hover .context-menu-icon {
+    color: inherit;
+}
+
+.context-menu-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Analytical view: master/detail group statistics. Compact density matches the result grid. */

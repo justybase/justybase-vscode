@@ -54,6 +54,22 @@ describeIfSqlite('SqliteResultStore', () => {
         expect(fs.existsSync(dbPath)).toBe(false);
     });
 
+    it('reports the on-disk size of its database and sidecar files', () => {
+        const dbPath = path.join(os.tmpdir(), `justybase-size-${Date.now()}.db`);
+        tempPaths.push(dbPath, `${dbPath}-wal`, `${dbPath}-shm`);
+
+        const store = SqliteResultStore.create([{ name: 'id', type: 'INTEGER' }], 100, dbPath);
+        store.insertRows([[1], [2], [3]]);
+        store.finalizeBulkInsert();
+
+        const bytes = store.getDiskBytes();
+        expect(bytes).toBeGreaterThan(0);
+        expect(bytes).toBeGreaterThanOrEqual(fs.statSync(dbPath).size);
+
+        store.dispose();
+        expect(store.getDiskBytes()).toBe(0);
+    });
+
     it('truncates rows and finalizes bulk insert mode', () => {
         const dbPath = path.join(os.tmpdir(), `justybase-truncate-${Date.now()}.db`);
         tempPaths.push(dbPath);

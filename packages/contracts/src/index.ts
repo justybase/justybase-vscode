@@ -8,6 +8,14 @@ export type { DatabaseDialectTraits, DatabaseIdentifierTraits, DatabaseQualifica
 export type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle } from './database';
 export { UnsupportedDesignerOperationError } from './database';
 export { DATABASE_DESIGNER_CAPABILITY_MANIFESTS, DESIGNER_CAPABILITY_KEYS, DESIGNER_OPERATIONS, getDatabaseDesignerCapabilities, getDesignerCapability, resolveDatabaseDesignerCapabilities } from './database';
+export type { ProviderBackedCapabilityKey, ProviderBackedFeatureKey } from './database';
+export {
+  PROVIDER_BACKED_CAPABILITIES,
+  PROVIDER_BACKED_CAPABILITY_KEYS,
+  findCapabilityDrift,
+  isProviderBackedCapability,
+  resolveProviderBackedCapabilities,
+} from './database';
 export type * from './webviews';
 
 export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnInfo, DatabaseDdlKeyInfo, DatabaseTableDdlMetadata, DatabaseDdlResult, DatabaseTableDefinitionMetadata, DatabaseProcedureInfo, DatabaseExternalTableInfo, DatabaseSynonymInfo, DatabaseExternalTableDdlMetadata, DatabaseBatchDDLOptions, DatabaseBatchDDLResult, DatabaseImportDataType, DatabaseColumnTypeChooser, DatabaseImportTypeMapper, DatabaseTuningAdvisor, DatabaseTuningAdvisorInput, DatabaseMaintenanceProvider, DatabaseMaintenanceTarget, DatabaseMaintenanceServices, DatabaseRecreateTableResult, DatabasePartitionInfo, DatabaseCreatePartitionOptions, DatabaseAttachPartitionOptions, DatabaseIndexInfo, DatabaseCreateIndexOptions, DatabaseSessionMonitorServices, DatabaseSessionMonitorProvider, DatabaseCopilotReferenceProvider, DatabaseReferenceTopic, DatabaseExplainOptions, DatabaseExplainProvider, DatabaseQueryProfileProvider, DatabaseStageLocation, DatabaseInlineFileFormatOptions, DatabaseCopyIntoTableOptions, DatabaseCopyIntoStageOptions, DatabaseStageWorkflowProvider, DatabaseImportWizardInput, DatabaseImportExecutionPlan, DatabaseImportWizardProvider } from './database';

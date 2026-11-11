@@ -479,6 +479,48 @@ test.describe('Table rendering', () => {
         await expect(page.locator('#rowViewContent .rv-selected')).toHaveCount(16);
     });
 
+    test('Row View name column widens from the splitter and keeps that width across reopens', async ({ page }) => {
+        await page.locator('#gridContainer tbody tr[data-index="0"] td.row-number-cell').click();
+        await page.evaluate(() => {
+            (window as Window & { toggleRowView?: () => void }).toggleRowView?.();
+        });
+        await expect.poll(() => page.locator('#rowViewPanel').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(400);
+
+        const key = page.locator('#rowViewContent .row-view-key').first();
+        const splitter = page.locator('#rowViewContent .row-view-splitter');
+        const before = (await key.boundingBox())?.width ?? 0;
+        const handle = await splitter.boundingBox();
+        if (!handle) {
+            throw new Error('Row View splitter is not laid out');
+        }
+        const startX = handle.x + handle.width / 2;
+        const y = handle.y + Math.min(40, handle.height / 2);
+        await page.mouse.move(startX, y);
+        await page.mouse.down();
+        await page.mouse.move(startX + 70, y, { steps: 8 });
+        await page.mouse.up();
+
+        const widened = (await key.boundingBox())?.width ?? 0;
+        expect(widened).toBeGreaterThan(before + 40);
+        const stored = Number(await page.evaluate(() => window.localStorage.getItem('justybase.row-view.key-column-width.v1')));
+        expect(stored).toBeGreaterThan(45);
+
+        // Reopening Row View re-renders its content; the stored width must return.
+        await page.evaluate(() => {
+            (window as Window & { toggleRowView?: () => void }).toggleRowView?.();
+        });
+        await page.evaluate(() => {
+            (window as Window & { toggleRowView?: () => void }).toggleRowView?.();
+        });
+        await expect.poll(async () => (await key.boundingBox())?.width ?? 0).toBeGreaterThan(before + 40);
+
+        // Double-click fits the column to the longest visible name, so nothing stays clipped.
+        await splitter.dblclick();
+        await expect.poll(async () => (await key.boundingBox())?.width ?? 0).not.toBe(widened);
+        await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll('#rowViewContent .row-view-key-name'))
+            .some(element => (element as HTMLElement).scrollWidth > (element as HTMLElement).clientWidth + 1))).toBe(false);
+    });
+
     test('renders correct number of columns per data row', async ({ page }) => {
         const tbody = page.locator('#gridContainer table tbody');
         // Find first actual data row (has row-number-cell)

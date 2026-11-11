@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { registerCoreCommands } from "../commands/coreCommands";
 import type { CoreCommandsContext } from "../commands/coreCommands";
+import { EditDataProvider } from "../views/editDataProvider";
 
 jest.mock("vscode", () => ({
   commands: {
@@ -291,6 +292,27 @@ describe("registerCoreCommands", () => {
     await command();
 
     expect(ctx.resultPanelProvider.clearPerformanceStats).not.toHaveBeenCalled();
+  });
+
+  it("opens object details on the Structure tab", async () => {
+    const item = {
+      label: "CUSTOMER_ORDERS",
+      dbName: "JUST_DATA",
+      schema: "ADMIN",
+      connectionName: "NZ_DEV",
+      objType: "TABLE",
+    };
+
+    const command = getCommand("netezza.showObjectDetails");
+    await command(item);
+
+    expect(EditDataProvider.createOrShow).toHaveBeenCalledWith(
+      ctx.context.extensionUri,
+      item,
+      ctx.context,
+      ctx.connectionManager,
+      { initialTab: "structure" },
+    );
   });
 
   it("shows connection target and current marker in the global connection picker", async () => {    (ctx.connectionManager.getConnections as jest.Mock).mockResolvedValue([

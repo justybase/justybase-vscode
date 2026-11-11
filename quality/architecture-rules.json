@@ -117,6 +117,13 @@
       "reason": "Shared result analysis is a React presentation component consumed by product adapters.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/menuIcons.tsx",
+      "target": "react",
+      "reason": "The shared context-menu icon renderer is the React counterpart of the webview menu icons.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     }
   ],
   "layers": {

@@ -5,6 +5,7 @@ import { getLogger } from '../utils/logger';
 import { getExtensionConfiguration } from '../compatibility/configuration';
 import {
     getDiskBackedResultsSettings,
+    getDiskBudgetBytes,
     getEffectiveSpillThreshold,
     isDiskBackedResultsAvailable,
 } from '../core/resultDataProvider/diskBackedSettings';
@@ -27,6 +28,22 @@ import {
 
 /** SQL truncation length for log entries */
 const SQL_TRUNCATION_LENGTH = 200;
+
+/** Human-readable size used by the disk-budget warning. */
+function formatApproxBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        return '0 B';
+    }
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+    }
+    const rounded = value >= 100 || unitIndex === 0 ? Math.round(value) : Math.round(value * 10) / 10;
+    return `${rounded} ${units[unitIndex]}`;
+}
 
 function estimateValueBytes(value: unknown, depth = 0): number {
     if (value === null || value === undefined) return 1;
@@ -1614,6 +1631,29 @@ export class ResultStateManager {
             || (bufferedBytes ?? 0) >= (settings.memoryByteThreshold ?? Number.POSITIVE_INFINITY);
     }
 
+    private _diskBudgetWarningShown = false;
+
+    /**
+     * A result that would cross the shared on-disk budget stays in memory. The
+     * user is warned once per window so a streaming batch cannot spam messages.
+     */
+    private _reportDiskBudgetExceeded(projectedBytes: number, budgetBytes: number): void {
+        const message = 'Result kept in memory: disk-backed results would use '
+            + `${formatApproxBytes(projectedBytes)} of a ${formatApproxBytes(budgetBytes)} budget.`;
+        getLogger().warn(`[ResultStateManager] ${message}`);
+        if (this._diskBudgetWarningShown) {
+            return;
+        }
+        this._diskBudgetWarningShown = true;
+        try {
+            void vscode.window?.showWarningMessage?.(
+                `JustyBase: ${message} Raise justybase.results.diskBackedResults.diskBudgetMb or close large results to free space.`,
+            );
+        } catch {
+            // The VS Code test mock does not implement window messages.
+        }
+    }
+
     /**
      * Force-spill a result set to SQLite regardless of the spill threshold.
      * Delegates to spillResultSetToDisk with force=true.
@@ -1656,6 +1696,13 @@ export class ResultStateManager {
 
         const settings = getDiskBackedResultsSettings();
         const rowsToSpill = targetResultSet.data;
+        const budgetBytes = getDiskBudgetBytes(settings);
+        const projectedBytes = diskBackedStoreRegistry.totalDiskBytes()
+            + Math.max(0, targetResultSet.bufferedBytes ?? 0);
+        if (projectedBytes > budgetBytes) {
+            this._reportDiskBudgetExceeded(projectedBytes, budgetBytes);
+            return null;
+        }
         let store: SqliteResultStore | null = null;
 
         try {

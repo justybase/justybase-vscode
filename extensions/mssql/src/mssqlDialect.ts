@@ -21,8 +21,10 @@ export const mssqlDialect: DatabaseDialect = {
   defaultPort: 1433,
   supportsRawTcpTunnel: true,
   capabilities: createDatabaseCapabilities({
-    supportsExplainPlan: true,
-    supportsExplainGraph: true,
+    // T-SQL has no plain EXPLAIN statement; enable this once a SET SHOWPLAN
+    // provider exists (see PROVIDER_BACKED_CAPABILITIES).
+    supportsExplainPlan: false,
+    supportsExplainGraph: false,
     supportsTuningAdvisor: true,
     supportsProcedures: true,
     supportsTableMaintenance: true,

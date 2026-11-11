@@ -1103,6 +1103,18 @@ export class SqliteResultStore implements IResultRowSource {
         }
     }
 
+    public getDiskBytes(): number {
+        let total = 0;
+        for (const suffix of ['', '-wal', '-shm']) {
+            try {
+                total += fs.statSync(`${this.dbPath}${suffix}`).size;
+            } catch {
+                // The sidecar file may not exist yet; treat it as zero.
+            }
+        }
+        return total;
+    }
+
     public dispose(): void {
         if (this._disposed) {
             return;

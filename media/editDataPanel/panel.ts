@@ -35,6 +35,7 @@ let metadata: EditDataMetadata | null = null;
 let loadInfo: EditDataLoadInfo | null = null;
 let grid: DataGrid | null = null;
 let loading = false;
+let readOnly = false;
 let ddlText: string | null = null;
 let ddlRequested = false;
 let pendingPreview: ((statements: string[], error?: string) => void) | null = null;
@@ -47,7 +48,7 @@ window.addEventListener('message', event => {
     const message: HostMessage = asHostMessage(event.data);
     switch (message.command) {
         case 'setData':
-            initData(message.data, message.columns, message.metadata, message.info);
+            initData(message.data, message.columns, message.metadata, message.info, message.readOnly === true);
             break;
         case 'setLoading':
             setLoading(message.loading, message.message);
@@ -96,7 +97,7 @@ async function refresh(): Promise<void> {
 }
 
 function submit(): void {
-    if (loading) return;
+    if (loading || readOnly) return;
     grid?.commitEdit();
     if (!hasPendingChanges(editorState)) {
         post({ command: 'info', text: 'No changes to save.' });
@@ -208,6 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
             onFilterByValue: applyFilterFromValue,
             onOpenValueEditor: openValueEditor,
             copyText: text => post({ command: 'copyText', text }),
+            get readOnly() { return readOnly; },
         });
     }
 
@@ -260,17 +262,27 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (getElementById('tab-ddl')?.classList.contains('active')) requestDdl(true);
         } else if (ctrl && (event.key === 's' || event.key === 'S') && inDataTab) {
             event.preventDefault();
-            submit();
+            if (!readOnly) submit();
         } else if (event.altKey && event.key === 'Insert' && inDataTab) {
             event.preventDefault();
-            grid?.addRow();
+            if (!readOnly) grid?.addRow();
         } else if (ctrl && !event.altKey && (event.key === 'd' || event.key === 'D') && inDataTab) {
             event.preventDefault();
-            grid?.duplicateSelected();
+            if (!readOnly) grid?.duplicateSelected();
         }
     });
 
     updateChrome();
+
+    // The host can open the panel on Structure or DDL; honor the pre-rendered
+    // active tab so the lazy DDL fetch starts without a user click.
+    const initialTab = document.querySelector<HTMLElement>('.tab.active')?.dataset.target;
+    if (initialTab && initialTab !== 'tab-data') {
+        setActiveTab(initialTab);
+    }
+
+    // Grid and tab handlers are ready: ask the host for the initial payload.
+    post({ command: 'ready' });
 });
 
 function setActiveTab(tabId: string | undefined): void {
@@ -340,21 +352,24 @@ function initData(
     columns: string[],
     nextMetadata: EditDataMetadata | null,
     info: EditDataLoadInfo | undefined,
+    nextReadOnly: boolean,
 ): void {
     metadata = nextMetadata;
     loadInfo = info ?? loadInfo;
+    readOnly = nextReadOnly;
+    document.body.classList.toggle('is-readonly', readOnly);
     appliedFilter = readFilter();
-    editorState = createState(data || [], columns || [], metadata?.columns);
+    editorState = createState(data || [], columns || [], metadata?.columns, { readOnly });
     hideError();
 
     const hasFilter = Boolean(appliedFilter.whereClause);
     grid?.setState(editorState, hasFilter
         ? 'No rows match the WHERE filter.'
-        : 'This table is empty. Use Add row (Alt+Insert) to insert one.');
+        : readOnly ? 'This object has no rows.' : 'This table is empty. Use Add row (Alt+Insert) to insert one.');
 
     const structure = getElementById('metadataContent');
     if (structure) {
-        renderStructure(structure, metadata, post, showError);
+        renderStructure(structure, metadata, post, showError, { readOnly });
     }
     updateFilterState();
     updateChrome();

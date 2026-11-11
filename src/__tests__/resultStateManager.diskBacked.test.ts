@@ -7,6 +7,8 @@ jest.mock('../utils/logger', () => ({
     }),
 }));
 
+let mockDiskBudgetBytes = Number.POSITIVE_INFINITY;
+
 jest.mock('../core/resultDataProvider/diskBackedSettings', () => ({
     getDiskBackedResultsSettings: () => ({
         enabled: true,
@@ -15,6 +17,7 @@ jest.mock('../core/resultDataProvider/diskBackedSettings', () => ({
         insertBatchSize: 100,
     }),
     getEffectiveSpillThreshold: () => 5,
+    getDiskBudgetBytes: () => mockDiskBudgetBytes,
     isDiskBackedResultsAvailable: () => {
         try {
              
@@ -76,6 +79,37 @@ describeIfSqlite('ResultStateManager disk-backed migration', () => {
     afterEach(() => {
         manager.disposeAllDiskStores();
         manager.dispose();
+        mockDiskBudgetBytes = Number.POSITIVE_INFINITY;
+    });
+
+    it('keeps rows in memory when the on-disk budget is exhausted', () => {
+        mockDiskBudgetBytes = 1;
+        const sourceUri = 'file:///disk-budget.sql';
+        manager.startExecution(sourceUri);
+
+        manager.appendStreamingChunk(sourceUri, {
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[1], [2], [3]],
+            isFirstChunk: true,
+            isLastChunk: false,
+            totalRowsSoFar: 3,
+            limitReached: false,
+        }, 'SELECT * FROM t');
+
+        const migrateResult = manager.appendStreamingChunk(sourceUri, {
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[4], [5]],
+            isFirstChunk: false,
+            isLastChunk: false,
+            totalRowsSoFar: 5,
+            limitReached: false,
+        }, 'SELECT * FROM t');
+
+        expect(migrateResult.type).not.toBe('diskBackedActivate');
+        const resultSet = manager.resultsMap.get(sourceUri)![1];
+        expect(resultSet.storageMode ?? 'memory').toBe('memory');
+        expect(resultSet.data).toHaveLength(5);
+        expect(resultSet.diskStoreId).toBeUndefined();
     });
 
     it('migrates to SQLite and clears host data when threshold is reached', () => {

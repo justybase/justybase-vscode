@@ -341,6 +341,13 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             EditDataProvider.createOrShow(context.extensionUri, item, context, connectionManager);
         }),
 
+        // Object details (Structure tab first; views and procedures open read-only)
+        vscode.commands.registerCommand('netezza.showObjectDetails', (item: EditDataItem) => {
+            EditDataProvider.createOrShow(context.extensionUri, item, context, connectionManager, {
+                initialTab: 'structure',
+            });
+        }),
+
         // Toggle Keep Connection for current tab
         vscode.commands.registerCommand('netezza.toggleKeepConnectionForTab', () => {
             const editor = vscode.window.activeTextEditor;

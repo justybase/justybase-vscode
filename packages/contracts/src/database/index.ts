@@ -126,6 +126,14 @@ export type { DatabaseAdvancedFeatures, DatabaseDdlProvider, DatabaseDdlColumnIn
 export type { DatabaseDesignerCapabilities, DatabaseDesignerCapability, DatabaseDesignerCapabilityKey, DatabaseDesignerColumn, DatabaseDesignerConstraint, DatabaseDesignerDefinition, DatabaseDesignerDiagnostic, DatabaseDesignerIndex, DatabaseDesignerNativeDefinition, DatabaseDesignerPartition, DatabaseDesignerProvider, DatabaseDesignerRelationalIndex, DatabaseDesignerRequirement, DatabaseDesignerRuntimeContext, DatabaseDesignerTarget, DatabaseDesignerTrigger, DatabaseDesignerTriggerCapability, DatabaseDesignerViewCapability, DatabaseDesignerRoutineCapability, DatabaseObjectSnapshot, DatabaseSchemaChangePlan, DatabaseSchemaChangeStatement, DatabaseViewDesignerDefinition, DatabaseTableDesignerDefinition, DesignerCapabilityReasonCode, DesignerNativeFeature, DesignerOperation, DesignerSupportLevel, DesignerRoutineBodyStyle, DesignerTriggerBodyStyle, DesignerTriggerEvent, DesignerTriggerLevel, DesignerTriggerTiming, DesignerViewReplaceStyle };
 export { UnsupportedDesignerOperationError };
 export { DATABASE_DESIGNER_CAPABILITY_MANIFESTS, DESIGNER_CAPABILITY_KEYS, DESIGNER_OPERATIONS, getDatabaseDesignerCapabilities, getDesignerCapability, resolveDatabaseDesignerCapabilities } from './designerCapabilities';
+export {
+  PROVIDER_BACKED_CAPABILITIES,
+  PROVIDER_BACKED_CAPABILITY_KEYS,
+  findCapabilityDrift,
+  isProviderBackedCapability,
+  resolveProviderBackedCapabilities,
+} from './capabilityManifest';
+export type { ProviderBackedCapabilityKey, ProviderBackedFeatureKey } from './capabilityManifest';
 
 export interface DatabaseCapabilities {
   supportsExplainPlan: boolean;

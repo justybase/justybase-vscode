@@ -856,6 +856,14 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: 10000
             },
             {
+                id: 'results-disk-budget-mb',
+                label: 'Disk Budget (MB)',
+                description: 'Total on-disk budget shared by all disk-backed results (256–16384 MB). Results stay in memory when it is exhausted',
+                type: 'number',
+                configKey: 'results.diskBackedResults.diskBudgetMb',
+                defaultValue: 2048
+            },
+            {
                 id: 'results-grid-font',
                 label: 'Grid Font Family',
                 description: 'Font family used in the results data grid',

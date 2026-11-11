@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: {
     '^@justybase/contracts$': '<rootDir>/../contracts/src',
     '^@justybase/ui-core$': '<rootDir>/../ui-core/src',
+    '^@justybase/ui-core/(.*)$': '<rootDir>/../ui-core/src/$1',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],

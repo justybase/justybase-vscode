@@ -1,4 +1,4 @@
-import type { DatabaseAdvancedFeatures, DatabaseReferenceTopic } from '../../contracts/database';
+import type { DatabaseAdvancedFeatures, DatabaseExplainOptions, DatabaseReferenceTopic } from '../../contracts/database';
 import { NetezzaReferenceProvider } from './copilot/NetezzaReferenceProvider';
 import {
     buildTableDDLFromCache,
@@ -54,6 +54,11 @@ export const netezzaAdvancedFeatures: DatabaseAdvancedFeatures = {
         generateDDL
     },
     importTypeMapper: netezzaImportTypeMapper,
+    explain: {
+        buildQuery(sql: string, options?: DatabaseExplainOptions): string {
+            return options?.verbose ? `EXPLAIN VERBOSE ${sql}` : `EXPLAIN ${sql}`;
+        }
+    },
     tuningAdvisor: netezzaTuningAdvisor,
     maintenance: netezzaMaintenanceProvider,
     sessionMonitor: netezzaSessionMonitorProvider,

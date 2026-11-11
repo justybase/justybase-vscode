@@ -26,6 +26,7 @@ import {
     typeBadge,
 } from './state.js';
 import { escapeHtml, formatCount } from './utils.js';
+import { createMenuIcon, type MenuIconName } from '../shared/menuIcons.js';
 
 export const ROW_HEIGHT = 22;
 const MIN_COL_WIDTH = 56;
@@ -40,6 +41,8 @@ export interface GridCallbacks {
     onFilterByValue(column: GridColumn, value: unknown): void;
     onOpenValueEditor(column: GridColumn, value: unknown): Promise<string | null | undefined>;
     copyText(text: string): void;
+    /** Views and procedures are inspected, never edited. */
+    readOnly?: boolean;
 }
 
 interface CellPosition {
@@ -49,6 +52,7 @@ interface CellPosition {
 
 interface MenuItem {
     label: string;
+    icon?: MenuIconName;
     shortcut?: string;
     disabled?: boolean;
     danger?: boolean;
@@ -100,6 +104,10 @@ export class DataGrid {
 
     // ---- Public commands -------------------------------------------------
 
+    private get readOnly(): boolean {
+        return this.callbacks.readOnly === true;
+    }
+
     getActive(): { row: WorkingRow; column: GridColumn; index: number } | null {
         if (!this.state || !this.active) return null;
         const key = this.state.order[this.active.row];
@@ -122,7 +130,7 @@ export class DataGrid {
     }
 
     addRow(): void {
-        if (!this.state) return;
+        if (!this.state || this.readOnly) return;
         this.commitEdit();
         const at = this.active ? this.active.row : -1;
         const key = insertRow(this.state, at);
@@ -131,7 +139,7 @@ export class DataGrid {
     }
 
     duplicateSelected(): void {
-        if (!this.state) return;
+        if (!this.state || this.readOnly) return;
         this.commitEdit();
         const keys = this.getSelectedKeys();
         let last: string | null = null;
@@ -140,7 +148,7 @@ export class DataGrid {
     }
 
     deleteSelected(): void {
-        if (!this.state) return;
+        if (!this.state || this.readOnly) return;
         this.commitEdit();
         const keys = this.getSelectedKeys();
         if (keys.length === 0) return;
@@ -151,7 +159,7 @@ export class DataGrid {
     }
 
     revertSelected(): void {
-        if (!this.state) return;
+        if (!this.state || this.readOnly) return;
         this.commitEdit();
         this.getSelectedKeys().forEach(k => revertRow(this.state!, k));
         const key = this.state.order[Math.min(this.active?.row ?? 0, this.state.order.length - 1)];
@@ -160,7 +168,7 @@ export class DataGrid {
 
     setActiveNull(): void {
         const cell = this.getActive();
-        if (!cell || !this.state || cell.column.readonly) return;
+        if (!cell || !this.state || this.readOnly || cell.column.readonly) return;
         if (setCellValue(this.state, cell.row.key, cell.column.name, null)) this.changed();
     }
 
@@ -733,48 +741,77 @@ export class DataGrid {
             return r && (r.status !== 'clean' || r.modified.size > 0);
         });
 
-        const items: (MenuItem | 'separator')[] = [
-            { label: 'Edit value', shortcut: 'Enter', disabled: !editable, action: () => this.beginEdit() },
-            { label: 'Open value editor…', shortcut: 'Shift+Enter', disabled: !editable, action: () => void this.openValueEditor() },
-            { label: 'Set NULL', shortcut: 'Ctrl+Alt+N', disabled: !editable || value === null, action: () => this.setActiveNull() },
-            { label: 'Revert value', shortcut: 'Ctrl+Z', disabled: !active.row.modified.has(active.column.name), action: () => {
-                if (revertCell(this.state!, active.row.key, active.column.name)) this.changed();
-            } },
+        const items: (MenuItem | 'separator')[] = [];
+        if (!this.readOnly) {
+            items.push(
+                { label: 'Edit value', icon: 'pencil', shortcut: 'Enter', disabled: !editable, action: () => this.beginEdit() },
+                { label: 'Open value editor…', icon: 'maximize', shortcut: 'Shift+Enter', disabled: !editable, action: () => void this.openValueEditor() },
+                { label: 'Set NULL', icon: 'circle-slash', shortcut: 'Ctrl+Alt+N', disabled: !editable || value === null, action: () => this.setActiveNull() },
+                { label: 'Revert value', icon: 'undo', shortcut: 'Ctrl+Z', disabled: !active.row.modified.has(active.column.name), action: () => {
+                    if (revertCell(this.state!, active.row.key, active.column.name)) this.changed();
+                } },
+                'separator',
+            );
+        }
+        items.push(
+            { label: 'Copy value', icon: 'copy', shortcut: 'Ctrl+C', action: () => this.callbacks.copyText(value === null || value === undefined ? '' : formatDisplayValue(value)) },
+            { label: many ? `Copy ${keys.length} rows` : 'Copy row', icon: 'rows', action: () => this.copyRows(keys) },
+            { label: many ? `Copy ${keys.length} rows with header` : 'Copy row with header', icon: 'table', action: () => this.copyRows(keys, true) },
             'separator',
-            { label: 'Copy value', shortcut: 'Ctrl+C', action: () => this.callbacks.copyText(value === null || value === undefined ? '' : formatDisplayValue(value)) },
-            { label: many ? `Copy ${keys.length} rows` : 'Copy row', action: () => this.copyRows(keys) },
-            { label: many ? `Copy ${keys.length} rows with header` : 'Copy row with header', action: () => this.copyRows(keys, true) },
-            'separator',
-            { label: `Filter by ${active.column.name} ${value === null || value === undefined ? 'IS NULL' : '= value'}`, action: () => this.callbacks.onFilterByValue(active.column, value) },
-            'separator',
-            { label: 'Add row', shortcut: 'Alt+Insert', action: () => this.addRow() },
-            { label: many ? `Duplicate ${keys.length} rows` : 'Duplicate row', shortcut: 'Ctrl+D', action: () => this.duplicateSelected() },
-            { label: allDeleted ? (many ? `Restore ${keys.length} rows` : 'Restore row') : (many ? `Delete ${keys.length} rows` : 'Delete row'), shortcut: 'Delete', danger: !allDeleted, action: () => this.deleteSelected() },
-            { label: many ? `Revert ${keys.length} rows` : 'Revert row', disabled: !anyPending, action: () => this.revertSelected() },
-        ];
+            { label: `Filter by ${active.column.name} ${value === null || value === undefined ? 'IS NULL' : '= value'}`, icon: 'filter', action: () => this.callbacks.onFilterByValue(active.column, value) },
+        );
+        if (!this.readOnly) {
+            items.push(
+                'separator',
+                { label: 'Add row', icon: 'plus', shortcut: 'Alt+Insert', action: () => this.addRow() },
+                { label: many ? `Duplicate ${keys.length} rows` : 'Duplicate row', icon: 'copy', shortcut: 'Ctrl+D', action: () => this.duplicateSelected() },
+                { label: allDeleted ? (many ? `Restore ${keys.length} rows` : 'Restore row') : (many ? `Delete ${keys.length} rows` : 'Delete row'), icon: allDeleted ? 'undo' : 'trash', shortcut: 'Delete', danger: !allDeleted, action: () => this.deleteSelected() },
+                { label: many ? `Revert ${keys.length} rows` : 'Revert row', icon: 'undo', disabled: !anyPending, action: () => this.revertSelected() },
+            );
+        }
         this.showMenu(event.clientX, event.clientY, items);
     }
 
     private showMenu(x: number, y: number, items: (MenuItem | 'separator')[]): void {
         const menu = document.getElementById('contextMenu');
         if (!menu) return;
-        menu.innerHTML = items.map((item, i) => item === 'separator'
-            ? '<div class="context-menu__sep" role="separator"></div>'
-            : `<button type="button" role="menuitem" class="context-menu__item${item.danger ? ' danger' : ''}" data-menu="${i}" ${item.disabled ? 'disabled' : ''}>
-                    <span>${escapeHtml(item.label)}</span>${item.shortcut ? `<kbd>${escapeHtml(item.shortcut)}</kbd>` : ''}
-               </button>`).join('');
+        menu.replaceChildren(...items.map((item, i) => {
+            if (item === 'separator') {
+                const separator = document.createElement('div');
+                separator.className = 'context-menu__sep';
+                separator.setAttribute('role', 'separator');
+                return separator;
+            }
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `context-menu__item${item.danger ? ' danger' : ''}`;
+            button.dataset.menu = String(i);
+            button.disabled = Boolean(item.disabled);
+            button.setAttribute('role', 'menuitem');
+            if (item.icon) {
+                button.appendChild(createMenuIcon(item.icon, 'context-menu__icon'));
+            }
+            const label = document.createElement('span');
+            label.className = 'context-menu__label';
+            label.textContent = item.label;
+            button.appendChild(label);
+            if (item.shortcut) {
+                const shortcut = document.createElement('kbd');
+                shortcut.textContent = item.shortcut;
+                button.appendChild(shortcut);
+            }
+            button.addEventListener('click', () => {
+                if (item.disabled) return;
+                this.hideMenu();
+                item.action();
+                this.focus();
+            });
+            return button;
+        }));
         menu.hidden = false;
         const rect = menu.getBoundingClientRect();
         menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
         menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
-        menu.querySelectorAll<HTMLButtonElement>('[data-menu]').forEach(button => {
-            button.addEventListener('click', () => {
-                const item = items[Number(button.dataset.menu)];
-                this.hideMenu();
-                if (item && item !== 'separator' && !item.disabled) item.action();
-                this.focus();
-            });
-        });
     }
 
     hideMenu(): void {

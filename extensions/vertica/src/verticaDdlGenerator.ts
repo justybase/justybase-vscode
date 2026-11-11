@@ -6,6 +6,7 @@ import type {
     DatabaseDdlColumnInfo,
     DatabaseDdlKeyInfo,
     DatabaseDdlResult,
+    DatabaseExplainOptions,
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '@justybase/contracts';
 import { getErrorMessage } from '@justybase/database-utils/connectionUtils';
@@ -257,6 +258,11 @@ function buildTableDdlFromCacheInternal(
 
 export const verticaAdvancedFeatures: DatabaseAdvancedFeatures = {
     importTypeMapper: verticaImportTypeMapper,
+    explain: {
+        buildQuery(sql: string, options?: DatabaseExplainOptions): string {
+            return options?.verbose ? `EXPLAIN VERBOSE ${sql}` : `EXPLAIN ${sql}`;
+        }
+    },
     tuningAdvisor: verticaTuningAdvisor,
     copilotReferenceProvider: verticaCopilotReferenceProvider,
     sessionMonitor: verticaSessionMonitorProvider,

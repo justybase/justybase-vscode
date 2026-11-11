@@ -26,6 +26,7 @@ import {
     type ResultSet,
 } from './types.js';
 import { UxPerfMark, isUxPerfSessionActive } from './uxPerf.js';
+import { createMenuIcon, type MenuIconName } from '../shared/menuIcons.js';
 
 const vscode = { postMessage: postHostMessage };
 
@@ -316,7 +317,7 @@ function showContextMenu(e: MouseEvent, index: number): void {
     if (canRefresh) {
         const refreshItem = createMenuItem('Refresh This Result', () => {
             callPanelMethod('refreshResultAt', index);
-        });
+        }, 'refresh');
         menu.appendChild(refreshItem);
     }
 
@@ -328,7 +329,7 @@ function showContextMenu(e: MouseEvent, index: number): void {
                 sourceUri: requireActiveSourceUri(),
                 resultSetIndex: index,
             });
-        });
+        }, 'database');
         menu.appendChild(migrateItem);
     }
 
@@ -341,7 +342,7 @@ function showContextMenu(e: MouseEvent, index: number): void {
                 sql: rs.sql || ''
             });
         }
-    });
+    }, 'sparkles');
     menu.appendChild(copilotItem);
 
     // Separator
@@ -359,7 +360,7 @@ function showContextMenu(e: MouseEvent, index: number): void {
             resultSetIndex: index,
             resultSetId: rs.resultSetId
         });
-    });
+    }, 'x');
     menu.appendChild(closeResultItem);
 
     // Close All Results option
@@ -368,7 +369,7 @@ function showContextMenu(e: MouseEvent, index: number): void {
             command: 'closeAllResults',
             sourceUri: requireActiveSourceUri()
         });
-    });
+    }, 'x-circle');
     menu.appendChild(closeAllItem);
 
     document.body.appendChild(menu);
@@ -385,15 +386,21 @@ function showContextMenu(e: MouseEvent, index: number): void {
     document.addEventListener('contextmenu', closeMenu);
 }
 
-function createMenuItem(text: string, onClick: () => void): HTMLDivElement {
+function createMenuItem(text: string, onClick: () => void, icon?: MenuIconName): HTMLDivElement {
     const item = document.createElement('div');
     item.className = 'context-menu-item';
-    item.textContent = text;
     item.style.padding = '8px 12px';
     item.style.cursor = 'pointer';
     item.style.color = 'var(--vscode-menu-foreground)';
     item.style.fontSize = '12px';
     item.style.userSelect = 'none';
+    if (icon) {
+        item.appendChild(createMenuIcon(icon, 'context-menu-icon'));
+    }
+    const label = document.createElement('span');
+    label.className = 'context-menu-label';
+    label.textContent = text;
+    item.appendChild(label);
 
     item.addEventListener('mouseover', () => {
         item.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';

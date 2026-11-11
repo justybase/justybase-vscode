@@ -45,6 +45,17 @@ export interface DatabaseSourceSearchQueryOptions {
   rawTerm: string;
   likePattern: string;
   useServerSideFilter: boolean;
+  /**
+   * Ask the dialect to return a short window around the first match
+   * (`SNIPPET`) and its zero-based offset (`MATCH_OFFSET`). Dialects that do
+   * not support server-side snippets ignore this flag; the caller computes the
+   * snippet in memory instead.
+   */
+  includeSnippet?: boolean;
+  /** Characters returned before the match (default 40). */
+  snippetLead?: number;
+  /** Total snippet length in characters (default 160). */
+  snippetLength?: number;
 }
 
 /** Table sub-folders shown under a table in the schema tree. */

@@ -22,7 +22,7 @@ The Schema view is a lazy tree: connection → database → schema → object gr
 1. Connect and expand the database you need.
 2. Expand a schema and choose Tables, Views, Procedures, External Tables, or another object group.
 3. Expand an object for columns and type/nullability metadata.
-4. Use context actions to copy a qualified name, generate DDL, view/edit data, add a comment, compare schema, or add the object to favorites.
+4. Use context actions or inline actions to copy a qualified name, generate DDL, open object details, view/edit data, add a comment, compare schema, or add the object to favorites.
 5. Use **Filter Visible Objects** in the Schema view toolbar to narrow already loaded object lists by name. This is local and does not run Schema Search; use the clear action to restore the full lists.
 6. Use **Refresh Selected Metadata** after a targeted DDL change. Use **Refresh Schema** after a broad migration or catalog refresh.
 
@@ -32,7 +32,7 @@ Right-clicking a table, view, procedure or other object opens the same menu layo
 
 | Position | Entries |
 | --- | --- |
-| Top | Select Top 1000, Edit Data, Count Rows, Call Routine, Refresh Materialized View |
+| Top | Object Details, Select Top 1000, Edit Data, Count Rows, Call Routine, Refresh Materialized View |
 | Copy | Copy Name, Create DDL Code |
 | **Data ▸** | Export Table Data, Migration Studio, Search Values, Find Duplicate Rows, Create Table From This, Create Table Like (Structure Only), Create View in Another Database, Generate Test Data |
 | **Structure ▸** | Object Designer, columns, keys and constraints, indexes and partitions (Db2, PostgreSQL and MySQL add their designers here) |
@@ -43,6 +43,16 @@ Right-clicking a table, view, procedure or other object opens the same menu layo
 | Last | Truncate, Drop, Drop Constraint |
 
 Destructive actions always sit in the last group, separated from everyday entries. A database node also offers **Lock waits** and **Invalid objects** where the dialect provides them. The per-dialect list is in the [database support matrix](guide/reference/database-support/).
+
+## Object details
+
+Object rows expose inline actions for refresh, copying the metadata comment, favorite, and **Object Details** (the magnifier). The magnifier opens the object panel on the **Structure** tab, showing the header with `database.schema.object` and the connection name.
+
+- **Tables** keep the editable Data toolbar, Structure editor (comments, add/drop column), and DDL tabs.
+- **Views** open read-only: data, columns, and comments can be inspected, but inline comment editing and column mutations are hidden.
+- **Procedures** open on Structure with definition properties and positional argument types instead of columns, and expose only Structure and DDL tabs. DDL uses the procedure signature, so overloads open the correct definition.
+
+Editing remains available from the regular **View/Edit Data** command for tables.
 
 ## DDL and navigation
 

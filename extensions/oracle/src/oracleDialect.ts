@@ -22,8 +22,10 @@ export const oracleDialect: DatabaseDialect = {
   defaultPort: 1521,
   supportsRawTcpTunnel: true,
   capabilities: createDatabaseCapabilities({
-    supportsExplainPlan: true,
-    supportsExplainGraph: true,
+    // Oracle needs `EXPLAIN PLAN FOR` plus plan-table reads; enable this once a
+    // dedicated provider exists (see PROVIDER_BACKED_CAPABILITIES).
+    supportsExplainPlan: false,
+    supportsExplainGraph: false,
     supportsTuningAdvisor: true,
     supportsProcedures: true,
     supportsTableMaintenance: true,

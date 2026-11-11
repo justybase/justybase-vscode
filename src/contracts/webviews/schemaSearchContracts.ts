@@ -14,7 +14,21 @@ export interface SchemaSearchResultItem {
     PARENT: string;
     DESCRIPTION: string;
     MATCH_TYPE: string;
+    /** Short window around a source-code match (source search only). */
+    SNIPPET?: string;
+    /** Zero-based offset of the match inside the object definition. */
+    MATCH_OFFSET?: number;
     connectionName?: string;
+}
+
+/** Optional matching controls for source-code search. */
+export interface SchemaSearchSourceOptions {
+    /** Match case exactly instead of case-insensitively. */
+    caseSensitive?: boolean;
+    /** Match whole words only. */
+    wholeWord?: boolean;
+    /** Treat the search text as a regular expression. */
+    regex?: boolean;
 }
 
 export interface SchemaSearchConnectionOption {
@@ -52,8 +66,8 @@ export interface SchemaSearchPersistedState {
 
 export type SchemaSearchWebviewToHostMessage =
     | { type: 'search'; value: string; connectionName?: string }
-    | { type: 'searchSource'; value: string; mode: SchemaSearchSourceMode; connectionName?: string }
-    | { type: 'searchCombined'; value: string; mode: SchemaSearchSourceMode; connectionName?: string }
+    | ({ type: 'searchSource'; value: string; mode: SchemaSearchSourceMode; connectionName?: string } & SchemaSearchSourceOptions)
+    | ({ type: 'searchCombined'; value: string; mode: SchemaSearchSourceMode; connectionName?: string } & SchemaSearchSourceOptions)
     | { type: 'requestConnections' }
     | { type: 'requestRecents'; connectionName?: string }
     | ({ type: 'navigate' } & SchemaSearchNavigateTarget)

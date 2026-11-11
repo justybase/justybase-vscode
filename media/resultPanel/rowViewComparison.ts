@@ -1,4 +1,5 @@
 import { formatCellValue } from './utils.js';
+import { attachRowViewColumnResize, ROW_VIEW_KEY_MAX_PERCENT, ROW_VIEW_KEY_MIN_PERCENT } from './rowViewColumnResize.js';
 import type { TanStackColumn } from './types.js';
 
 function binaryBytes(value: unknown): Uint8Array | undefined {
@@ -155,6 +156,18 @@ export function renderRowViewComparison(
         section.append(key, valueContainer);
         table.appendChild(section);
     });
+
+    const splitter = document.createElement('div');
+    splitter.className = 'row-view-splitter';
+    splitter.setAttribute('role', 'separator');
+    splitter.setAttribute('aria-orientation', 'vertical');
+    splitter.setAttribute('aria-label', 'Resize the column-name column');
+    splitter.setAttribute('aria-valuemin', String(ROW_VIEW_KEY_MIN_PERCENT));
+    splitter.setAttribute('aria-valuemax', String(ROW_VIEW_KEY_MAX_PERCENT));
+    splitter.tabIndex = 0;
+    splitter.title = 'Drag to resize the column-name column. Double-click to fit the longest name.';
+    table.appendChild(splitter);
+    attachRowViewColumnResize(table, splitter);
 
     content.appendChild(table);
 }

@@ -45,7 +45,9 @@ describe("completionRenderer — documentation regression guard", () => {
       const items = toScopedColumnItems(scoped, "PROD", position);
       expect(items).toHaveLength(1);
       expect(items[0].documentation).toBe("Foreign key to DIMPRODUCT");
-      expect(items[0].labelDetails?.description).toBe("Foreign key to DIMPRODUCT");
+      // The comment is appended to the row detail instead of replacing it.
+      expect(items[0].detail).toBe("Column in scope · Foreign key to DIMPRODUCT");
+      expect(items[0].labelDetails).toBeUndefined();
     });
 
     it("omits documentation when description is undefined", () => {
@@ -134,7 +136,7 @@ describe("completionRenderer — documentation regression guard", () => {
       expect(item.documentation).toBeUndefined();
     });
 
-    it("still sets detail (type) alongside documentation", () => {
+    it("keeps the data type visible next to the column comment", () => {
       const col: MetadataColumnItem = {
         name: "ORDER_ID",
         type: "INTEGER",
@@ -142,9 +144,10 @@ describe("completionRenderer — documentation regression guard", () => {
         isPk: true,
       };
       const item = toMetadataColumnItem(col);
-      expect(item.detail).toBe("INTEGER");
+      expect(item.detail).toBe("INTEGER · Primary key");
       expect(item.documentation).toBe("Primary key");
-      expect(item.labelDetails?.description).toBe("Primary key");
+      // labelDetails would make VS Code hide `detail` from the suggest row.
+      expect(item.labelDetails).toBeUndefined();
     });
   });
 
@@ -173,7 +176,21 @@ describe("completionRenderer — documentation regression guard", () => {
       const items = filterMetadataItems(tables, "FACT");
       expect(items).toHaveLength(1);
       expect(items[0].documentation).toBe("Daily sales facts");
-      expect(items[0].labelDetails?.description).toBe("Daily sales facts");
+      expect(items[0].detail).toBe("Daily sales facts");
+      expect(items[0].labelDetails).toBeUndefined();
+    });
+
+    it("keeps the object type, schema and row estimate visible next to the comment", () => {
+      const tables: MetadataObjectItem[] = [{
+        name: "FACT_SALES",
+        objectType: "table",
+        detail: "Table (PUBLIC)",
+        description: "Daily sales facts",
+        rowCount: 776,
+      }];
+      const items = filterMetadataItems(tables, "FACT");
+      expect(items[0].detail).toBe("Table (PUBLIC) · ~776 rows · Daily sales facts");
+      expect(items[0].documentation).toBe("Daily sales facts");
     });
 
     it("omits documentation when description is undefined", () => {

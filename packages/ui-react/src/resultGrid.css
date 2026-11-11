@@ -418,6 +418,9 @@ body,
 }
 
 .ui-data-grid-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-height: 25px;
   padding: 4px 6px;
   border: 0;
@@ -425,6 +428,20 @@ body,
   background: transparent;
   font: inherit;
   text-align: left;
+}
+
+.ui-data-grid-context-menu .ui-menu-icon {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--justybase-grid-muted);
+}
+
+.ui-data-grid-context-menu button:hover .ui-menu-icon {
+  color: inherit;
 }
 
 .ui-data-grid-context-menu button:hover { background: var(--justybase-grid-hover); }

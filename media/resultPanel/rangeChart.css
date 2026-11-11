@@ -245,7 +245,7 @@
 
 .grid-context-menu-item.has-submenu::after {
     content: '›';
-    float: right;
+    margin-left: auto;
     opacity: 0.7;
 }
 

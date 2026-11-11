@@ -701,6 +701,11 @@
         "icon": "$(edit)"
       },
       {
+        "command": "netezza.showObjectDetails",
+        "title": "Object Details",
+        "icon": "$(search)"
+      },
+      {
         "command": "netezza.createTableDesigner",
         "title": "Visual Table Designer",
         "icon": "$(add)"
@@ -2733,6 +2738,11 @@
           "group": "inline@2"
         },
         {
+          "command": "netezza.showObjectDetails",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|MATERIALIZED VIEW|EXTERNAL TABLE|PROCEDURE)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /^favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|EXTERNAL TABLE|PROCEDURE)(:[a-z]+)?$/",
+          "group": "inline@3"
+        },
+        {
           "command": "netezza.favorites.addFolder",
           "when": "view == netezza.schema && viewItem == favoritesRoot",
           "group": "inline@1"
@@ -2861,6 +2871,11 @@
           "command": "netezza.viewEditData",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE) && justybase.schemaDatabaseKind != db2 && justybase.schemaDatabaseKind != clickhouse",
           "group": "0_query@2"
+        },
+        {
+          "command": "netezza.showObjectDetails",
+          "when": "view == netezza.schema && viewItem =~ /^netezza:(TABLE|VIEW|MATERIALIZED VIEW|EXTERNAL TABLE|PROCEDURE)(:[a-z]+)?$/ || view == netezza.schema && viewItem =~ /^favoritesObject:(TABLE|VIEW|MATERIALIZED VIEW|EXTERNAL TABLE|PROCEDURE)(:[a-z]+)?$/",
+          "group": "0_query@1"
         },
         {
           "command": "netezza.createTableDesigner",
@@ -5001,6 +5016,13 @@
           "maximum": 5000000,
           "description": "Minimum row count for idle spill eligibility."
         },
+        "justybase.results.diskBackedResults.diskBudgetMb": {
+          "type": "integer",
+          "default": 2048,
+          "minimum": 256,
+          "maximum": 16384,
+          "description": "Total on-disk budget in MB shared by all disk-backed result stores. When a spill would cross it, the result stays in memory and a warning is shown."
+        },
         "justybase.results.gridFontFamily": {
           "type": "string",
           "default": "Menlo, Monaco, Consolas, 'Courier New', monospace",
@@ -5616,7 +5638,7 @@
     "@justybase/database-runtime": "*",
     "@justybase/duckdb-runtime": "*",
     "@justybase/metadata-core": "*",
-    "@justybase/netezza-driver": "^3.4.4",
+    "@justybase/netezza-driver": "^3.5.0",
     "@justybase/netezza-runtime": "*",
     "@justybase/result-core": "*",
     "@justybase/spreadsheet-tasks": "^3.2.0",

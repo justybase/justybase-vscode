@@ -2,7 +2,8 @@ import type {
     DatabaseConnection,
     DatabaseConnectionConfig,
     DatabaseConnectionStaticConstructor,
-    DatabaseDialect
+    DatabaseDialect,
+    DatabaseExplainOptions
 } from '@justybase/contracts';
 import { createDatabaseCapabilities, getDatabaseDesignerCapabilities } from '@justybase/contracts';
 import { duckdbDialectTraits } from '@justybase/dialect-utils/traits/duckdb';
@@ -89,6 +90,11 @@ export const duckdbDialect: DatabaseDialect = {
     advancedFeatures: {
         ddl: duckdbDdlProvider,
         importTypeMapper: duckdbImportTypeMapper,
+        explain: {
+            buildQuery(sql: string, options?: DatabaseExplainOptions): string {
+                return options?.analyze ? `EXPLAIN ANALYZE ${sql}` : `EXPLAIN ${sql}`;
+            }
+        },
         tuningAdvisor: duckdbTuningAdvisor,
         maintenance: duckdbMaintenanceProvider,
         copilotReferenceProvider: duckdbCopilotReferenceProvider,
