@@ -85,6 +85,12 @@ describe('MetadataCache disk restart integration', () => {
 
         expect(restarted.getColumns(RESTART_CONN, `${SMALL_DB}.${SCHEMA}.DIM_ACCOUNT`)).toBeUndefined();
         expect(restarted.isLargeTableCatalog(RESTART_CONN, SMALL_DB)).toBe(false);
+        expect(
+            restarted
+                .getTables(RESTART_CONN, `${SMALL_DB}.${SCHEMA}`)
+                ?.find((table) => table.OBJNAME === 'DIM_ACCOUNT')
+                ?.rowCount,
+        ).toBe(18484);
 
         await restarted.ensureColumnsLoadedForTableKey(
             RESTART_CONN,

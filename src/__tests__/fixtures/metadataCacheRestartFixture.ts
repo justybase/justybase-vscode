@@ -165,6 +165,7 @@ export function populateSmallCatalog(cache: MetadataCache, connectionName = REST
                 label: 'DIM_ACCOUNT',
                 objType: 'TABLE',
                 kind: 6,
+                rowCount: 18484,
             },
             {
                 OBJNAME: 'SEQ_ACCOUNT',
