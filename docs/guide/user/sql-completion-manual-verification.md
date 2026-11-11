@@ -4,7 +4,7 @@ description: Understand SQL completion behavior, configure JOIN relationships, a
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-09-26
+last_verified: 2026-11-11
 product_version: 3.20.3
 ---
 
@@ -20,6 +20,7 @@ The JustyBase SQL editor provides SQL completion through the language server. Th
 - Object targets after statements such as `SELECT ... FROM`, `INSERT INTO`, `UPDATE`, `DELETE`, `CREATE`, `ALTER`, `DROP`, `CALL`, `EXEC`, and `EXECUTE` where the active dialect provides the corresponding path.
 - Database, schema, and table paths, including Netezza `DATABASE..TABLE` paths and dialect-specific two- or three-part names.
 - Tables, views, and other relation-like sources provided by the active dialect.
+- Table and view suggestions include the cached catalog row estimate in the detail line, for example `Table (ADMIN) · ~18,484 rows`. The `~` marks a `reltuples` optimizer estimate, not an exact `COUNT(*)`. Objects without a cached estimate show only their type.
 - Columns for a table or view, qualified columns after `alias.`, and partial qualified names such as `alias.CUST`.
 - Table aliases and projected names resolved from the current statement, visible CTEs, nested queries, local definitions, and local or temporary tables tracked by the editor.
 - `SELECT` and `INSERT` context suggestions, wildcard expansion, and scope-aware filtering. The parser keeps nested query scopes separate and only exposes CTEs that are visible at the cursor.
