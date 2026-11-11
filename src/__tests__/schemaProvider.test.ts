@@ -888,6 +888,64 @@ describe('SchemaProvider', () => {
             expect(children[0].tooltip).toContain('User table');
         });
 
+        it('maps _V_TABLE.RELTUPLES from a live type-group load into the cache and the tree item', async () => {
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [
+                    { name: 'OBJNAME' },
+                    { name: 'SCHEMA' },
+                    { name: 'OBJID' },
+                    { name: 'DESCRIPTION' },
+                    { name: 'OWNER' },
+                    { name: 'RELTUPLES' }
+                ],
+                data: [
+                    ['FACT200K', 'PUBLIC', 7, 'Fact table', 'ADMIN', 18484]
+                ]
+            });
+
+            (queryResultToRows as jest.Mock).mockReturnValue([
+                {
+                    OBJNAME: 'FACT200K',
+                    SCHEMA: 'PUBLIC',
+                    OBJID: 7,
+                    DESCRIPTION: 'Fact table',
+                    OWNER: 'ADMIN',
+                    RELTUPLES: 18484
+                }
+            ]);
+
+            const children = await schemaProvider.getChildren(typeGroupItem);
+
+            expect(children[0].rowCount).toBe(18484);
+            expect(children[0].description).toContain('~18,484');
+            expect(mockMetadataCache.setTables).toHaveBeenCalledWith(
+                'TestConnection',
+                'TESTDB.PUBLIC',
+                expect.arrayContaining([
+                    expect.objectContaining({ label: 'FACT200K', rowCount: 18484 })
+                ]),
+                expect.any(Map),
+                undefined,
+            );
+        });
+
+        it('shows the cached row estimate without another catalog query', async () => {
+            mockMetadataCache.getObjectsByType.mockReturnValue([
+                {
+                    schema: 'PUBLIC',
+                    objId: 7,
+                    description: 'Fact table',
+                    item: { label: 'FACT200K', objType: 'TABLE', kind: 7, rowCount: 18484 }
+                }
+            ]);
+
+            const children = await schemaProvider.getChildren(typeGroupItem);
+
+            expect(children[0].rowCount).toBe(18484);
+            expect(children[0].description).toContain('~18,484');
+            expect(runQueryRaw).not.toHaveBeenCalled();
+        });
+
         it('should scope Snowflake dynamic table objects to the Snowflake provider', async () => {
             const dynamicTableItem = new SchemaItem(
                 'DYNAMIC TABLE',

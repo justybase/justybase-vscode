@@ -56,7 +56,7 @@ import {
     tableMatchesSchemaFilter,
 } from './schemaFilterUtils';
 import { buildNetezzaSynonymTargetQuery } from '../metadata/synonymColumns';
-import { formatEstimatedRowCount } from '../metadata/estimatedRowCount';
+import { formatEstimatedRowCount, normalizeEstimatedRowCount } from '../metadata/estimatedRowCount';
 import {
     isNetezzaQuotedIdentifier,
     unquoteNetezzaIdentifier,
@@ -1281,7 +1281,7 @@ export class SchemaProvider
 
     private mapCachedTableObjectsToSchemaItems(
         cachedObjects: {
-            item: { label?: string | { label: string } };
+            item: { label?: string | { label: string }; rowCount?: number };
             schema?: string;
             objId?: number;
             description?: string;
@@ -1312,7 +1312,7 @@ export class SchemaProvider
             const it = obj.item;
             const rawObjectName =
                 typeof it.label === 'string' ? it.label : it.label?.label || 'unknown';
-            return new SchemaItem(
+            const item = new SchemaItem(
                 rawObjectName,
                 isExpandableType(objType)
                     ? vscode.TreeItemCollapsibleState.Collapsed
@@ -1331,6 +1331,8 @@ export class SchemaProvider
                 obj.owner,
                 rawObjectName,
             );
+            item.applyRowCount(normalizeEstimatedRowCount(it.rowCount));
+            return item;
         });
     }
 
@@ -2837,6 +2839,7 @@ export class SchemaProvider
                           detail?: string;
                           OWNER?: string;
                           label?: string | { label: string };
+                          RELTUPLES?: unknown;
                     }>(result)
                     : [];
 
@@ -2853,6 +2856,7 @@ export class SchemaProvider
                             objectsBySchema.set(schemaKey, { tables: [] });
                         }
                         const entry = objectsBySchema.get(schemaKey)!;
+                        const rowCount = normalizeEstimatedRowCount(obj.RELTUPLES);
 
                         entry.tables.push({
                             OBJNAME: obj.OBJNAME,
@@ -2871,6 +2875,7 @@ export class SchemaProvider
                             detail: obj.SCHEMA ? `${objType} (${obj.SCHEMA})` : objType,
                             sortText: obj.OBJNAME,
                             tableDefinition: clickHouseTableDefinitionFromRow(obj),
+                            ...(rowCount !== undefined ? { rowCount } : {}),
                         });
                     }
 
@@ -2933,6 +2938,7 @@ export class SchemaProvider
                         OWNER?: string;
                         label?: string | { label: string };
                         rowCount?: number;
+                        RELTUPLES?: unknown;
                     }) => {
                         const expandableTypes = [
                             'TABLE',
@@ -2973,7 +2979,9 @@ export class SchemaProvider
                             obj.OWNER, // owner
                             rawObjectName,
                         );
-                        item.applyRowCount(obj.rowCount);
+                        item.applyRowCount(
+                            normalizeEstimatedRowCount(obj.rowCount ?? obj.RELTUPLES),
+                        );
                         return item;
                     },
                 );
