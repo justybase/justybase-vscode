@@ -61,6 +61,7 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
   private readonly proceduresByDbSchema = new Map<string, string[]>();
   private readonly columnsByTable = new Map<string, string[]>();
   private readonly relationColumnsByTable = new Map<string, MetadataColumnItem[]>();
+  private readonly rowCountsByTable = new Map<string, number>();
   private joinTargets: MetadataObjectItem[] = [];
 
   readonly getContext = jest.fn(async (_documentUri: string) => ({
@@ -103,6 +104,9 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
           schema: schema ? this.normalize(schema) : undefined,
           objectType: "table",
           detail: "Table",
+          ...(this.getRowCount(database, name, schema) !== undefined
+            ? { rowCount: this.getRowCount(database, name, schema) }
+            : {}),
         }),
       );
     },
@@ -121,6 +125,9 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
           schema: schema ? this.normalize(schema) : undefined,
           objectType: "view",
           detail: "View",
+          ...(this.getRowCount(database, name, schema) !== undefined
+            ? { rowCount: this.getRowCount(database, name, schema) }
+            : {}),
         }),
       );
     },
@@ -215,6 +222,15 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
 
   public setViews(database: string, views: string[], schema?: string): void {
     this.viewsByDbSchema.set(this.objectKey(database, schema), [...views]);
+  }
+
+  public setRowCount(
+    database: string,
+    table: string,
+    rowCount: number,
+    schema?: string,
+  ): void {
+    this.rowCountsByTable.set(this.columnKey(database, table, schema), rowCount);
   }
 
   private seedDefaultMetadata(): void {
@@ -337,6 +353,30 @@ class MockCompletionMetadataProvider implements CompletionMetadataProvider {
       }
     }
     return this.columnsByTable.get(this.columnKey(database, table)) ?? [];
+  }
+
+  private getRowCount(
+    database: string,
+    table: string,
+    schema?: string,
+  ): number | undefined {
+    const exact = this.rowCountsByTable.get(
+      this.columnKey(database, table, schema),
+    );
+    if (exact !== undefined) {
+      return exact;
+    }
+    if (schema) {
+      return this.rowCountsByTable.get(this.columnKey(database, table));
+    }
+    const prefix = `${this.normalize(database)}|`;
+    const suffix = `|${this.normalize(table)}`;
+    for (const [key, rowCount] of this.rowCountsByTable.entries()) {
+      if (key.startsWith(prefix) && key.endsWith(suffix)) {
+        return rowCount;
+      }
+    }
+    return this.rowCountsByTable.get(this.columnKey(database, table));
   }
 }
 
@@ -6154,6 +6194,24 @@ SELECT M.| FROM MIXED M`);
         "OrderLines",
         "Sales",
       );
+    });
+  });
+
+  describe("completion row estimates", () => {
+    it("shows the cached row estimate in table suggestion detail", async () => {
+      metadataProvider.setRowCount("BAZA", "ORDERS", 18484);
+
+      const items = await complete("SELECT * FROM ORD|");
+      const orders = items.find((item) => item.label === "ORDERS");
+
+      expect(orders?.detail).toBe("Table · ~18,484 rows");
+    });
+
+    it("leaves the detail unchanged when no estimate is cached", async () => {
+      const items = await complete("SELECT * FROM ORD|");
+      const orders = items.find((item) => item.label === "ORDERS");
+
+      expect(orders?.detail).toBe("Table");
     });
   });
 
