@@ -59,6 +59,15 @@ export interface SaveEditsRequest {
     deleteRowIndices?: number[];
 }
 
+/** Catalog-backed column action requested from the result-grid context menu. */
+export interface ColumnActionRequest {
+    sourceUri: string;
+    resultSetIndex: number;
+    action: 'copyQualifiedName' | 'addToSelect' | 'commentOnColumn' | 'findReferences' | 'toggleFavorite';
+    columnName: string;
+    editSource?: { db?: string; schema?: string; table: string };
+}
+
 export interface AllRowsExportRequest {
     sourceUri: string;
     resultSetIndex: number;
@@ -206,6 +215,7 @@ export interface MessageHandlerCallbacks {
         filters: import('../results/explore/exploreFilters').ExploreFilterModel,
     ) => Promise<string>;
     onOpenExploreSqlInEditor?: (sql: string, label?: string) => Promise<void>;
+    onColumnAction?: (request: ColumnActionRequest) => Promise<void> | void;
 }
 
 export type SelectionStats = SelectionStatsPayload;
@@ -702,6 +712,16 @@ export class ResultPanelMessageHandler {
 
             case 'insertCellContent':
                 this._handleInsertCellContent(message.text, message.dataType, message.sqlText);
+                return;
+
+            case 'columnAction':
+                void this._callbacks.onColumnAction?.({
+                    sourceUri: message.sourceUri,
+                    resultSetIndex: message.resultSetIndex,
+                    action: message.action,
+                    columnName: message.columnName,
+                    editSource: message.editSource,
+                });
                 return;
 
             case 'updateResultFormatting':

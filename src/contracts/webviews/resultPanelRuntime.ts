@@ -169,6 +169,13 @@ const webviewRules: Record<string, FieldRule> = {
     previewExploreComposer: all(stringSource, resultIndex, requestIndex, message => message.composer !== undefined),
     previewExploreFilteredSql: all(stringSource, resultIndex, requestIndex, message => message.filters !== undefined),
     openExploreSqlInEditor: stringField('sql'),
+    columnAction: all(
+        stringSource,
+        resultIndex,
+        oneOfField('action', ['copyQualifiedName', 'addToSelect', 'commentOnColumn', 'findReferences', 'toggleFavorite']),
+        stringValueField('columnName'),
+        optional('editSource', objectField('editSource')),
+    ),
 };
 
 const hostRules: Record<string, FieldRule> = {

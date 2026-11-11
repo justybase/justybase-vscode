@@ -224,6 +224,12 @@ function validateWebviewMessage(message: MessageRecord): boolean {
                 && isIndex(message.requestId) && message.filters !== undefined;
         case 'openExploreSqlInEditor':
             return hasString(message, 'sql');
+        case 'columnAction':
+            return hasString(message, 'sourceUri') && isIndex(message.resultSetIndex)
+                && hasString(message, 'columnName')
+                && ['copyQualifiedName', 'addToSelect', 'commentOnColumn', 'findReferences', 'toggleFavorite']
+                    .includes(String(message.action))
+                && (message.editSource === undefined || isRecord(message.editSource));
         default:
             return false;
     }

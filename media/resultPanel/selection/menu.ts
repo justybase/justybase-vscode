@@ -3,15 +3,45 @@ import { canCreateRangeChart } from '../rangeChart.js';
 import { callPanelMethod, getResultPanelWindow } from '../types.js';
 import type { TanStackColumn, TanStackTable } from '../types.js';
 import { formatCellValue } from '../utils.js';
+import { postHostMessage } from '../protocol.js';
+import { showColumnFilterDropdown } from '../filter.js';
+import { setActiveResultViewMode } from '../analysis.js';
+import { focusExploreColumn } from '../explore/focusColumn.js';
 import { createChartRangeSubmenuItem, createContextMenuItem, createSubmenuItem, removeOpenSubmenus } from './contextMenu.js';
 import { panelGetIsEditMode, parseDatasetIndex } from './interaction.js';
 import type { SelectionModel } from './model.js';
 import { getCellDescriptorFromTd, triggerRender } from './render.js';
+import { promptForMenuValue } from './valuePrompt.js';
 
 export interface SelectionMenuDeps {
     table: TanStackTable;
     wrapper: HTMLElement;
     model: SelectionModel;
+}
+
+interface ResultEditSource {
+    db?: string;
+    schema?: string;
+    table: string;
+}
+
+function asEditSource(value: unknown): ResultEditSource | undefined {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    if (typeof record.table !== 'string' || !record.table.trim()) return undefined;
+    return {
+        db: typeof record.db === 'string' ? record.db : undefined,
+        schema: typeof record.schema === 'string' ? record.schema : undefined,
+        table: record.table,
+    };
+}
+
+function createMenuSeparator(): HTMLElement {
+    const separator = document.createElement('div');
+    separator.style.height = '1px';
+    separator.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
+    separator.style.margin = '2px 0';
+    return separator;
 }
 
 export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, clickedCell: HTMLElement | null, isRowMenu = false): void {
@@ -81,12 +111,83 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
     if (colId && column) {
         const menuColId = colId;
         const menuColumn = column;
+        const resultPanel = getResultPanelWindow();
+        const activeResultIndex = resultPanel.getActiveGridIndex?.() ?? 0;
+        const activeResult = resultPanel.resultSets?.[activeResultIndex];
+        const activeSource = resultPanel.activeSource;
+        const columnIndex = Number.parseInt(menuColId, 10);
+        const columnName = (Number.isInteger(columnIndex) ? activeResult?.columns?.[columnIndex]?.name : undefined)
+            ?? (typeof menuColumn.columnDef.header === 'string' ? menuColumn.columnDef.header : menuColId);
+        const editSource = asEditSource(activeResult?.editSource);
+        const canUseCatalogActions = Boolean(activeSource && editSource);
+
+        const postColumnAction = (
+            action: 'copyQualifiedName' | 'addToSelect' | 'commentOnColumn' | 'findReferences' | 'toggleFavorite',
+        ): void => {
+            if (!activeSource) return;
+            postHostMessage({
+                command: 'columnAction',
+                sourceUri: activeSource,
+                resultSetIndex: activeResultIndex,
+                action,
+                columnName,
+                editSource,
+            });
+        };
+
+        // Copy Name
+        const copyNameItem = createContextMenuItem('Copy Name', function () {
+            postHostMessage({ command: 'copyToClipboard', text: columnName });
+            menu.remove();
+        }, 'copy');
+        menu.appendChild(copyNameItem);
+
+        // Copy Qualified Name (only when the result is bound to one table)
+        if (canUseCatalogActions) {
+            const copyQualifiedItem = createContextMenuItem('Copy Qualified Name', function () {
+                postColumnAction('copyQualifiedName');
+                menu.remove();
+            }, 'clipboard-copy');
+            menu.appendChild(copyQualifiedItem);
+        }
+
+        // Add to SELECT
+        const addToSelectItem = createContextMenuItem('Add to SELECT', function () {
+            postColumnAction('addToSelect');
+            menu.remove();
+        }, 'plus');
+        menu.appendChild(addToSelectItem);
+
+        // Filter by Value (prompts instead of reusing the clicked cell)
+        const filterByValueItem = createContextMenuItem('Filter by Value...', function () {
+            menu.remove();
+            void promptForMenuValue(`Filter ${columnName} by value`).then(function (value) {
+                if (value === undefined) return;
+                const trimmed = value.trim();
+                const currentFilters = table.getState().columnFilters || [];
+                const withoutCurrent = currentFilters.filter(function (f) { return f.id !== menuColId; });
+                table.setColumnFilters(withoutCurrent.concat([{
+                    id: menuColId,
+                    value: {
+                        _isConditionFilter: true,
+                        conditions: [{
+                            type: trimmed.length === 0 || trimmed.toUpperCase() === 'NULL' ? 'isEmpty' : 'equals',
+                            value: trimmed,
+                        }],
+                        logic: 'and',
+                    },
+                }]));
+                triggerRender(deps.wrapper);
+            });
+        }, 'search');
+        menu.appendChild(filterByValueItem);
+
         // Sort Ascending
         const sortAscItem = createContextMenuItem('Sort Ascending', function () {
             table.setSorting([{ id: menuColId, desc: false }]);
             menu.remove();
             triggerRender(deps.wrapper);
-        });
+        }, 'arrow-up');
         menu.appendChild(sortAscItem);
 
         // Sort Descending
@@ -94,15 +195,48 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             table.setSorting([{ id: menuColId, desc: true }]);
             menu.remove();
             triggerRender(deps.wrapper);
-        });
+        }, 'arrow-down');
         menu.appendChild(sortDescItem);
 
+        // Select Distinct (the column filter dropdown lists every distinct value)
+        const selectDistinctItem = createContextMenuItem('Select Distinct', function () {
+            menu.remove();
+            showColumnFilterDropdown(menuColumn, table, clickedCell ?? deps.wrapper, activeResultIndex);
+        }, 'check-square');
+        menu.appendChild(selectDistinctItem);
+
+        // Profile Column (switch to Explore and highlight the matching card)
+        const profileColumnItem = createContextMenuItem('Profile Column', function () {
+            menu.remove();
+            setActiveResultViewMode('explore');
+            if (Number.isInteger(columnIndex)) {
+                focusExploreColumn(columnIndex);
+            }
+        }, 'bar-chart');
+        menu.appendChild(profileColumnItem);
+
+        if (canUseCatalogActions) {
+            const commentItem = createContextMenuItem('Comment on Column...', function () {
+                postColumnAction('commentOnColumn');
+                menu.remove();
+            }, 'message-square');
+            menu.appendChild(commentItem);
+
+            const referencesItem = createContextMenuItem('Find References', function () {
+                postColumnAction('findReferences');
+                menu.remove();
+            }, 'git-branch');
+            menu.appendChild(referencesItem);
+
+            const favoriteItem = createContextMenuItem('Add to favorites', function () {
+                postColumnAction('toggleFavorite');
+                menu.remove();
+            }, 'star');
+            menu.appendChild(favoriteItem);
+        }
+
         // Separator
-        const colSep1 = document.createElement('div');
-        colSep1.style.height = '1px';
-        colSep1.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        colSep1.style.margin = '2px 0';
-        menu.appendChild(colSep1);
+        menu.appendChild(createMenuSeparator());
 
         // Filter by this value (uses raw value, condition filter format)
         if (cellValue && cellValue !== '' && cellValue !== 'NULL') {
@@ -118,7 +252,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
                 }]));
                 menu.remove();
                 triggerRender(deps.wrapper);
-            });
+            }, 'filter');
             menu.appendChild(filterValueItem);
         }
 
@@ -128,13 +262,9 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             table.setColumnFilters(currentFilters.filter(function (f) { return f.id !== menuColId; }));
             menu.remove();
             triggerRender(deps.wrapper);
-        });
+        }, 'filter-x');
         menu.appendChild(clearFilterItem);
 
-        const resultPanel = getResultPanelWindow();
-        const activeResultIndex = resultPanel.getActiveGridIndex?.() ?? 0;
-        const activeResult = resultPanel.resultSets?.[activeResultIndex];
-        const activeSource = resultPanel.activeSource;
         const canFindRelatedRows = Boolean(
             activeSource
             && activeResult?.isEditable
@@ -149,16 +279,12 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             const relatedRowsItem = createContextMenuItem('Find Related Rows', function () {
                 callPanelMethod('openRelatedRows', relatedRowIndex, Number(menuColId));
                 menu.remove();
-            });
+            }, 'link');
             menu.appendChild(relatedRowsItem);
         }
 
         // Separator
-        const colSep2 = document.createElement('div');
-        colSep2.style.height = '1px';
-        colSep2.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        colSep2.style.margin = '2px 0';
-        menu.appendChild(colSep2);
+        menu.appendChild(createMenuSeparator());
 
         // Group by This Column
         const groupItem = createContextMenuItem('Group by This Column', function () {
@@ -170,7 +296,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             }
             menu.remove();
             triggerRender(deps.wrapper);
-        });
+        }, 'layers');
         menu.appendChild(groupItem);
 
         // Hide Column
@@ -178,15 +304,11 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
             menuColumn.toggleVisibility(false);
             menu.remove();
             triggerRender(deps.wrapper);
-        });
+        }, 'eye-off');
         menu.appendChild(hideItem);
 
         // Separator before copy/export
-        const colSep3 = document.createElement('div');
-        colSep3.style.height = '1px';
-        colSep3.style.backgroundColor = 'var(--vscode-menu-separatorBackground)';
-        colSep3.style.margin = '2px 0';
-        menu.appendChild(colSep3);
+        menu.appendChild(createMenuSeparator());
     }
 
     // ─── Row Actions (when right-click on row number) ───
@@ -196,7 +318,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
                 getResultPanelWindow().copySelection!(false, 'tabbed');
             }
             menu.remove();
-        });
+        }, 'rows');
         menu.appendChild(copyRowItem);
 
         const copyRowMdItem = createContextMenuItem('Copy Row as MD', function () {
@@ -204,13 +326,13 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
                 getResultPanelWindow().copySelectionAsMd!(true);
             }
             menu.remove();
-        });
+        }, 'file-text');
         menu.appendChild(copyRowMdItem);
 
         const rowViewItem = createContextMenuItem('Open in Row View', function () {
             callPanelMethod('toggleRowView');
             menu.remove();
-        });
+        }, 'panel-right');
         menu.appendChild(rowViewItem);
 
         // Delete Row(s) — only in edit mode
@@ -233,7 +355,7 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
                     callPanelMethod('markRowForDelete', ri);
                 });
                 menu.remove();
-            });
+            }, 'trash');
             deleteRowItem.style.color = 'var(--vscode-errorForeground)';
             menu.appendChild(deleteRowItem);
         }
@@ -249,18 +371,18 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
     const copyItem = createContextMenuItem('Copy', function () {
         callPanelMethod('copySelection', false, 'tabbed');
         menu.remove();
-    });
+    }, 'copy');
     menu.appendChild(copyItem);
 
     menu.appendChild(createSubmenuItem('Copy as', [
-        { label: 'Tabbed with headers', onClick: () => callPanelMethod('copySelection', true, 'tabbed') },
-        { label: 'Markdown table', onClick: () => callPanelMethod('copySelectionAsMd', true) },
-        { label: 'CSV', onClick: () => callPanelMethod('copySelection', true, 'csv') },
-        { label: 'JSON', onClick: () => callPanelMethod('copySelection', true, 'json') },
-        { label: 'SQL INSERT statements', onClick: () => callPanelMethod('copySelection', true, 'insert') },
-        { label: 'SQL IN list', onClick: () => callPanelMethod('copySelection', false, 'inList') },
-        { label: 'HTML table', onClick: () => callPanelMethod('copySelectionAsHtml') },
-    ], menu));
+        { label: 'Tabbed with headers', icon: 'file-spreadsheet', onClick: () => callPanelMethod('copySelection', true, 'tabbed') },
+        { label: 'Markdown table', icon: 'file-text', onClick: () => callPanelMethod('copySelectionAsMd', true) },
+        { label: 'CSV', icon: 'table', onClick: () => callPanelMethod('copySelection', true, 'csv') },
+        { label: 'JSON', icon: 'braces', onClick: () => callPanelMethod('copySelection', true, 'json') },
+        { label: 'SQL INSERT statements', icon: 'database', onClick: () => callPanelMethod('copySelection', true, 'insert') },
+        { label: 'SQL IN list', icon: 'list', onClick: () => callPanelMethod('copySelection', false, 'inList') },
+        { label: 'HTML table', icon: 'code', onClick: () => callPanelMethod('copySelectionAsHtml') },
+    ], menu, 'copy'));
 
     const cellDescriptor = clickedCell ? getCellDescriptorFromTd(table, clickedCell) : null;
     if (cellDescriptor) {
@@ -268,14 +390,14 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
         const viewValueItem = createContextMenuItem('View Cell Value', function () {
             callPanelMethod('openValueViewer', descriptor);
             menu.remove();
-        });
+        }, 'eye');
         menu.appendChild(viewValueItem);
     }
 
     const formattingItem = createContextMenuItem('Result Formatting...', function () {
         callPanelMethod('openResultFormattingPanel', { scope: 'result' });
         menu.remove();
-    });
+    }, 'wrench');
     menu.appendChild(formattingItem);
 
     const hasSelection = selectedCells.size > 0;
@@ -300,17 +422,17 @@ export function showContextMenu(deps: SelectionMenuDeps, x: number, y: number, c
 
     if (hasSelection) {
         menu.appendChild(createSubmenuItem('Export Selection', [
-            { label: 'Excel', onClick: () => callPanelMethod('exportSelectionToExcel') },
-            { label: 'CSV', onClick: () => callPanelMethod('exportSelectionToCsv') },
-            { label: 'JSON', onClick: () => callPanelMethod('exportSelectionToJson') },
-        ], menu));
+            { label: 'Excel', icon: 'file-spreadsheet', onClick: () => callPanelMethod('exportSelectionToExcel') },
+            { label: 'CSV', icon: 'file-text', onClick: () => callPanelMethod('exportSelectionToCsv') },
+            { label: 'JSON', icon: 'braces', onClick: () => callPanelMethod('exportSelectionToJson') },
+        ], menu, 'download'));
     }
 
     menu.appendChild(createSubmenuItem('Export All Visible', [
-        { label: 'Excel', onClick: () => callPanelMethod('exportAllVisibleToExcel') },
-        { label: 'CSV', onClick: () => callPanelMethod('exportAllVisibleToCsv') },
-        { label: 'JSON', onClick: () => callPanelMethod('exportAllVisibleToJson') },
-    ], menu));
+        { label: 'Excel', icon: 'file-spreadsheet', onClick: () => callPanelMethod('exportAllVisibleToExcel') },
+        { label: 'CSV', icon: 'file-text', onClick: () => callPanelMethod('exportAllVisibleToCsv') },
+        { label: 'JSON', icon: 'braces', onClick: () => callPanelMethod('exportAllVisibleToJson') },
+    ], menu, 'download'));
 
     document.body.appendChild(menu);
 

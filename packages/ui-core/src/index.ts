@@ -109,3 +109,5 @@ export type {
   UiSurface,
   UiWorkspaceState,
 } from './types';
+export { MENU_ICON_SHAPES } from './menuIcons';
+export type { MenuIconName, MenuIconShape } from './menuIcons';

@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./menuIcons": {
+      "types": "./dist/menuIcons.d.ts",
+      "require": "./dist/menuIcons.js",
+      "default": "./dist/menuIcons.js"
     }
   },
   "engines": { "node": ">=22.12.0" },

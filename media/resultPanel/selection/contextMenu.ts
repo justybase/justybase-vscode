@@ -1,5 +1,33 @@
 import type { TanStackTable } from '../types.js';
 import { openRangeChartModal, RANGE_CHART_MENU } from '../rangeChart.js';
+import { createMenuIcon, type MenuIconName } from '../../shared/menuIcons.js';
+
+const ICON_CLASS = 'grid-context-menu-icon';
+const LABEL_CLASS = 'grid-context-menu-label';
+
+function styleMenuItem(item: HTMLElement): void {
+    item.style.padding = '4px 10px';
+    item.style.cursor = 'pointer';
+    item.style.color = 'var(--vscode-menu-foreground)';
+    item.style.fontSize = '12px';
+    item.style.userSelect = 'none';
+}
+
+/** Icon slot plus label; a missing icon still reserves the column so rows align. */
+function fillMenuRow(item: HTMLElement, text: string, icon: MenuIconName | undefined): void {
+    if (icon) {
+        item.appendChild(createMenuIcon(icon, ICON_CLASS));
+    } else {
+        const placeholder = document.createElement('span');
+        placeholder.className = `${ICON_CLASS} ${ICON_CLASS}-empty`;
+        placeholder.setAttribute('aria-hidden', 'true');
+        item.appendChild(placeholder);
+    }
+    const label = document.createElement('span');
+    label.className = LABEL_CLASS;
+    label.textContent = text;
+    item.appendChild(label);
+}
 
 export function removeOpenSubmenus() {
     document.querySelectorAll('.grid-context-submenu').forEach((submenu) => {
@@ -42,12 +70,8 @@ export function createChartRangeSubmenuItem(
 ): HTMLElement {
     const item = document.createElement('div');
     item.className = 'grid-context-menu-item has-submenu';
-    item.textContent = 'Chart Range';
-    item.style.padding = '3px 12px';
-    item.style.cursor = 'pointer';
-    item.style.color = 'var(--vscode-menu-foreground)';
-    item.style.fontSize = '12px';
-    item.style.userSelect = 'none';
+    fillMenuRow(item, 'Chart Range', 'bar-chart');
+    styleMenuItem(item);
 
     let categorySubmenu: HTMLElement | null = null;
     let activeVariantSubmenu: HTMLElement | null = null;
@@ -79,11 +103,8 @@ export function createChartRangeSubmenuItem(
         variants.forEach((variant: { label: string; spec: Parameters<typeof openRangeChartModal>[2] }) => {
             const variantItem = document.createElement('div');
             variantItem.className = 'grid-context-menu-item';
-            variantItem.textContent = variant.label;
-            variantItem.style.padding = '3px 12px';
-            variantItem.style.cursor = 'pointer';
-            variantItem.style.color = 'var(--vscode-menu-foreground)';
-            variantItem.style.fontSize = '12px';
+            fillMenuRow(variantItem, variant.label, undefined);
+            styleMenuItem(variantItem);
 
             variantItem.addEventListener('mouseover', () => {
                 variantItem.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';
@@ -121,11 +142,8 @@ export function createChartRangeSubmenuItem(
         RANGE_CHART_MENU.forEach((category) => {
             const categoryItem = document.createElement('div');
             categoryItem.className = 'grid-context-menu-item has-submenu';
-            categoryItem.textContent = category.label;
-            categoryItem.style.padding = '3px 12px';
-            categoryItem.style.cursor = 'pointer';
-            categoryItem.style.color = 'var(--vscode-menu-foreground)';
-            categoryItem.style.fontSize = '12px';
+            fillMenuRow(categoryItem, category.label, undefined);
+            styleMenuItem(categoryItem);
 
             categoryItem.addEventListener('mouseover', () => {
                 categoryItem.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';
@@ -155,15 +173,11 @@ export function createChartRangeSubmenuItem(
     return item;
 }
 
-export function createContextMenuItem(text: string, onClick: () => void): HTMLElement {
+export function createContextMenuItem(text: string, onClick: () => void, icon?: MenuIconName): HTMLElement {
     const item = document.createElement('div');
     item.className = 'grid-context-menu-item';
-    item.textContent = text;
-    item.style.padding = '3px 12px';
-    item.style.cursor = 'pointer';
-    item.style.color = 'var(--vscode-menu-foreground)';
-    item.style.fontSize = '12px';
-    item.style.userSelect = 'none';
+    fillMenuRow(item, text, icon);
+    styleMenuItem(item);
 
     item.addEventListener('mouseover', () => {
         item.style.backgroundColor = 'var(--vscode-menu-selectionBackground)';
@@ -181,19 +195,16 @@ export function createContextMenuItem(text: string, onClick: () => void): HTMLEl
 
 export interface ContextSubmenuEntry {
     label: string;
+    icon?: MenuIconName;
     onClick: () => void;
 }
 
 /** Hover submenu with plain entries; picking one closes the parent menu. */
-export function createSubmenuItem(text: string, entries: ContextSubmenuEntry[], parentMenu: HTMLElement): HTMLElement {
+export function createSubmenuItem(text: string, entries: ContextSubmenuEntry[], parentMenu: HTMLElement, icon?: MenuIconName): HTMLElement {
     const item = document.createElement('div');
     item.className = 'grid-context-menu-item has-submenu';
-    item.textContent = text;
-    item.style.padding = '3px 12px';
-    item.style.cursor = 'pointer';
-    item.style.color = 'var(--vscode-menu-foreground)';
-    item.style.fontSize = '12px';
-    item.style.userSelect = 'none';
+    fillMenuRow(item, text, icon);
+    styleMenuItem(item);
 
     function openSubmenu(): void {
         removeOpenSubmenus();
@@ -204,7 +215,7 @@ export function createSubmenuItem(text: string, entries: ContextSubmenuEntry[], 
                 parentMenu.remove();
                 removeOpenSubmenus();
                 entry.onClick();
-            }));
+            }, entry.icon));
         });
         document.body.appendChild(submenu);
         positionSubmenu(submenu, item.getBoundingClientRect());

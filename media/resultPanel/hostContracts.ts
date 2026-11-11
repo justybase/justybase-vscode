@@ -323,6 +323,13 @@ interface ResultPanelWebviewToHostMessageMap {
         filters: ExploreFilterModel;
     };
     openExploreSqlInEditor: { sql: string; label?: string };
+    columnAction: {
+        sourceUri: string;
+        resultSetIndex: number;
+        action: 'copyQualifiedName' | 'addToSelect' | 'commentOnColumn' | 'findReferences' | 'toggleFavorite';
+        columnName: string;
+        editSource?: { db?: string; schema?: string; table: string };
+    };
 }
 
 interface ResultPanelHostToWebviewMessageMap {
@@ -502,6 +509,7 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['sqlQueueAction', 'openRel
     'moveToDisk', 'moveAllToDisk', 'requestDatabaseGrouping', 'cancelDatabaseGrouping',
     'previewDatabaseGrouping', 'requestExploreOperation', 'cancelExploreOperation', 'requestExploreFullStats', 'requestExplorePivot', 'previewExplorePivot',
     'requestExploreComposer', 'previewExploreComposer', 'previewExploreFilteredSql', 'openExploreSqlInEditor',
+    'columnAction',
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['sqlQueueState',

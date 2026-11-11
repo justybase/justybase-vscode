@@ -374,6 +374,14 @@ export type ResultPanelWebviewToHostMessage =
         command: 'openExploreSqlInEditor';
         sql: string;
         label?: string;
+    }
+    | {
+        command: 'columnAction';
+        sourceUri: string;
+        resultSetIndex: number;
+        action: 'copyQualifiedName' | 'addToSelect' | 'commentOnColumn' | 'findReferences' | 'toggleFavorite';
+        columnName: string;
+        editSource?: { db?: string; schema?: string; table: string };
     };
 
 export type ResultPanelHostToWebviewMessage =
@@ -665,7 +673,8 @@ export const RESULT_PANEL_WEBVIEW_TO_HOST_COMMANDS = ['sqlQueueAction', 'openRel
   'previewExploreFilteredSql',
   'requestExploreOperation',
   'cancelExploreOperation',
-  'openExploreSqlInEditor'
+  'openExploreSqlInEditor',
+  'columnAction'
 ] as const satisfies readonly ResultPanelWebviewToHostMessage['command'][];
 
 export const RESULT_PANEL_HOST_TO_WEBVIEW_COMMANDS = ['exploreOperationResult','sqlQueueState',

@@ -186,6 +186,7 @@ describe('result panel protocol', () => {
                 command,
                 ...(command === 'testBridgeResult' ? { requestId: 'test-1', action: 'test' } : {}),
                 ...(command === 'sqlQueueAction' ? { action: 'pause' } : {}),
+                ...(command === 'columnAction' ? { action: 'addToSelect', columnName: 'id' } : {}),
             });
             if (!parsed) throw new Error(`invalid webview fixture: ${command}`);
         }

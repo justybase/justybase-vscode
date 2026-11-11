@@ -157,6 +157,26 @@ describe('ResultPanelMessageHandler', () => {
         expect(openRelatedRows).toHaveBeenCalledWith('file:///active.sql', 2, 11, 3);
     });
 
+    it('routes result-grid column actions to the host callback', () => {
+        const onColumnAction = jest.fn();
+        callbacks.onColumnAction = onColumnAction;
+        handler.handleMessage({
+            command: 'columnAction',
+            sourceUri: 'file:///active.sql',
+            resultSetIndex: 1,
+            action: 'findReferences',
+            columnName: 'ORDER_ID',
+            editSource: { db: 'SALES', schema: 'ADMIN', table: 'ORDERS' },
+        });
+        expect(onColumnAction).toHaveBeenCalledWith({
+            sourceUri: 'file:///active.sql',
+            resultSetIndex: 1,
+            action: 'findReferences',
+            columnName: 'ORDER_ID',
+            editSource: { db: 'SALES', schema: 'ADMIN', table: 'ORDERS' },
+        });
+    });
+
     it('appends auxiliary rows without replacing existing result tabs', () => {
         const sourceUri = 'file:///related-rows.sql';
         stateManager.setActiveSource(sourceUri);

@@ -29,6 +29,7 @@ import {
     SaveEditsRequest,
     AllRowsExportRequest,
     TestExportRequest,
+    ColumnActionRequest,
 } from './resultPanelMessageHandler';
 import { ResultsHtmlGenerator, ViewScriptUris } from './resultsHtmlGenerator';
 import { DuckDbResultBridge } from '../services/duckdbResultBridge';
@@ -79,6 +80,8 @@ import {
 } from './resultPanelTrace';
 import { exportQueryToStreamFile, type QueryStreamExportFormat } from '../export/queryStreamExporter';
 import { exportResultSetToFile } from '../export/resultExporter';
+import { formatIdentifierForSql, formatQualifiedObjectName } from '../utils/identifierUtils';
+import type { SchemaItemData } from '../commands/schema/itemTypes';
 import {
     buildDatabaseAggregationSql,
     DatabaseAggregationRequest,
@@ -350,6 +353,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             onPreviewExploreFilteredSql: (sourceUri, resultSetIndex, filters) =>
                 this._previewExploreFilteredSql(sourceUri, resultSetIndex, filters),
             onOpenExploreSqlInEditor: (sql, label) => this._openExploreSqlInEditor(sql, label),
+            onColumnAction: request => this._handleColumnAction(request),
         };
 
         this._messageHandler = new ResultPanelMessageHandler(
@@ -2236,6 +2240,105 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             language: 'sql',
         });
         await vscode.window.showTextDocument(document, { preview: false });
+    }
+
+    /**
+     * Column actions requested from the result-grid context menu. Copy/insert
+     * work on the result column name; catalog actions reuse the schema command
+     * handlers with the result's known table coordinates.
+     */
+    private async _handleColumnAction(request: ColumnActionRequest): Promise<void> {
+        if (!this._connectionManager) {
+            vscode.window.showErrorMessage('Column actions are not available in this view.');
+            return;
+        }
+        const columnName = request.columnName.trim();
+        if (!columnName) {
+            return;
+        }
+
+        const documentUri = this._stateManager.getDocumentUri(request.sourceUri);
+        const connectionName = this._connectionManager.getConnectionForExecution(documentUri)
+            ?? this._connectionManager.getActiveConnectionName()
+            ?? undefined;
+        const databaseKind = this._connectionManager.getConnectionDatabaseKind(connectionName);
+        const target = request.editSource;
+        const connection = connectionName
+            ? await this._connectionManager.getConnection(connectionName)
+            : undefined;
+        const dbName = target?.db
+            ?? (connectionName ? await this._connectionManager.getEffectiveDatabase(documentUri, connectionName) : null)
+            ?? connection?.database;
+        const schema = target?.schema
+            ?? (connectionName ? await this._connectionManager.getEffectiveSchema(documentUri, connectionName) : null);
+
+        if (request.action === 'copyQualifiedName') {
+            if (!target) {
+                vscode.window.showWarningMessage('This result is not bound to a table, so a qualified column name is unavailable.');
+                return;
+            }
+            const tableName = formatQualifiedObjectName(
+                target.db ?? dbName ?? undefined,
+                target.schema ?? schema ?? undefined,
+                target.table,
+                databaseKind,
+            );
+            const qualified = `${tableName}.${formatIdentifierForSql(columnName, databaseKind)}`;
+            await vscode.env.clipboard.writeText(qualified);
+            vscode.window.showInformationMessage('Copied qualified column name to clipboard');
+            return;
+        }
+
+        if (request.action === 'addToSelect') {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showWarningMessage('Open a SQL editor before adding a column to SELECT.');
+                return;
+            }
+            const text = formatIdentifierForSql(columnName, databaseKind);
+            const position = editor.selection.active;
+            const inserted = await editor.edit(editBuilder => {
+                editBuilder.insert(position, text);
+            });
+            if (!inserted) {
+                return;
+            }
+            const end = position.translate(0, text.length);
+            editor.selection = new vscode.Selection(end, end);
+            editor.revealRange(new vscode.Range(end, end));
+            return;
+        }
+
+        if (!target) {
+            vscode.window.showWarningMessage('This result is not bound to a table, so catalog actions are unavailable.');
+            return;
+        }
+        if (!dbName || !schema) {
+            vscode.window.showWarningMessage('Column catalog actions need a database and schema for the source table.');
+            return;
+        }
+
+        const item: SchemaItemData = {
+            label: columnName,
+            rawLabel: columnName,
+            dbName,
+            schema,
+            parentName: target.table,
+            objType: 'TABLE',
+            connectionName,
+            contextValue: 'column',
+        };
+        switch (request.action) {
+            case 'commentOnColumn':
+                await vscode.commands.executeCommand('netezza.addColumnComment', item);
+                return;
+            case 'findReferences':
+                await vscode.commands.executeCommand('netezza.findColumnReferences', item);
+                return;
+            case 'toggleFavorite':
+                await vscode.commands.executeCommand('netezza.toggleColumnFavorite', item);
+                return;
+        }
     }
 
     private async _handleDatabaseAggregations(
