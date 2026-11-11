@@ -30,6 +30,10 @@ import {
   QUERY_HISTORY_OUTBOUND_TYPES,
 } from "../contracts/webviews/queryHistoryContracts";
 import {
+  SNIPPETS_INBOUND_TYPES,
+  SNIPPETS_OUTBOUND_TYPES,
+} from "../contracts/webviews/snippetsContracts";
+import {
   FILE_CONNECTION_PANEL_INBOUND_TYPES,
   FILE_CONNECTION_PANEL_OUTBOUND_TYPES,
 } from "../contracts/webviews/fileConnectionPanelContracts";
@@ -75,6 +79,14 @@ const QUERY_HISTORY_FRONTEND_FILES = [
 ];
 
 const QUERY_HISTORY_HOST_CONTRACTS_FILE = "media/queryHistory/hostContracts.ts";
+
+const SNIPPETS_FRONTEND_FILES = [
+  "media/snippets/panel.ts",
+];
+
+const SNIPPETS_HOST_CONTRACTS_FILE = "media/snippets/hostContracts.ts";
+
+const SNIPPETS_VIEW_FILE = "src/views/snippetsView.ts";
 
 const IMPORT_WIZARD_FRONTEND_FILES = [
   "media/importWizard/panel.ts",
@@ -190,6 +202,32 @@ function extractCaseLabels(source: string): string[] {
   }
 
   return matches;
+}
+
+function extractSwitchCaseLabels(source: string, expression: string): string[] {
+  const escapedExpression = expression.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const switchPattern = new RegExp(
+    `switch\\s*\\(\\s*${escapedExpression}\\s*\\)\\s*\\{`,
+  );
+  const switchMatch = switchPattern.exec(source);
+  expect(switchMatch).not.toBeNull();
+
+  const startIndex = switchMatch!.index + switchMatch![0].length;
+  let depth = 1;
+  let index = startIndex;
+
+  while (index < source.length && depth > 0) {
+    const character = source[index];
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+    }
+    index += 1;
+  }
+
+  expect(depth).toBe(0);
+  return extractCaseLabels(source.slice(startIndex, index - 1));
 }
 
 function extractObjectPropertyValues(
@@ -462,6 +500,66 @@ describe("Webview contract sync", () => {
         expectedRecoveryTypes,
       );
     });
+  });
+
+  it("keeps Snippets inbound message types aligned with the host handler and frontend senders", () => {
+    const hostHandledTypes = extractSwitchCaseLabels(
+      readWorkspaceFile(SNIPPETS_VIEW_FILE),
+      "message.type",
+    );
+    const frontendPostedTypes = extractFromFiles(
+      SNIPPETS_FRONTEND_FILES,
+      (source) => extractPostedPropertyValues(source, "type"),
+    );
+
+    expectSetEqual(hostHandledTypes, SNIPPETS_INBOUND_TYPES);
+    expectSubset(frontendPostedTypes, SNIPPETS_INBOUND_TYPES);
+  });
+
+  it("keeps Snippets outbound message types aligned with host senders and frontend handlers", () => {
+    const hostSentTypes = extractMethodPostedPropertyValues(
+      readWorkspaceFile(SNIPPETS_VIEW_FILE),
+      "postMessage",
+      "type",
+    );
+    const frontendHandledTypes = extractFromFiles(
+      SNIPPETS_FRONTEND_FILES,
+      (source) => extractSwitchCaseLabels(source, "message.type"),
+    );
+
+    expectSetEqual(hostSentTypes, SNIPPETS_OUTBOUND_TYPES);
+    expectSetEqual(frontendHandledTypes, SNIPPETS_OUTBOUND_TYPES);
+  });
+
+  it("keeps Snippets frontend files bound to the shared JSDoc contracts", () => {
+    const frontendSources = SNIPPETS_FRONTEND_FILES.map(readWorkspaceFile);
+    const hostViewSource = readWorkspaceFile(SNIPPETS_VIEW_FILE);
+
+    frontendSources.forEach((source) => {
+      expect(source).toContain("SnippetsHostToWebviewMessage");
+      expect(source).toContain("SnippetsWebviewToHostMessage");
+      expect(source).toContain("./hostContracts.js");
+    });
+    expect(hostViewSource).toContain("../contracts/webviews");
+  });
+
+  it("keeps Snippets webview hostContracts aligned with shared contracts", () => {
+    const hostContractsSource = readWorkspaceFile(SNIPPETS_HOST_CONTRACTS_FILE);
+
+    expectSetEqual(
+      extractUnionMessageTypeLiterals(
+        hostContractsSource,
+        "SnippetsWebviewToHostMessage",
+      ),
+      SNIPPETS_INBOUND_TYPES,
+    );
+    expectSetEqual(
+      extractUnionMessageTypeLiterals(
+        hostContractsSource,
+        "SnippetsHostToWebviewMessage",
+      ),
+      SNIPPETS_OUTBOUND_TYPES,
+    );
   });
 
   it("keeps Import Wizard message types aligned across the host and webview", () => {

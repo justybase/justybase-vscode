@@ -1,0 +1,339 @@
+:root {
+    color-scheme: light dark;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    color: var(--vscode-foreground);
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size, 12px);
+    line-height: 1.4;
+}
+
+button,
+input,
+textarea {
+    font: inherit;
+    color: inherit;
+}
+
+.snippets-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+}
+
+.snippets-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+}
+
+.snippets-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground));
+}
+
+.snippets-title svg {
+    color: var(--vscode-icon-foreground);
+}
+
+.snippets-count {
+    margin-left: auto;
+    color: var(--vscode-descriptionForeground);
+    font-variant-numeric: tabular-nums;
+}
+
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--vscode-icon-foreground);
+    cursor: pointer;
+}
+
+.icon-button:hover {
+    background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.icon-button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 1px;
+}
+
+.snippets-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 3px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+}
+
+.snippets-search:focus-within {
+    border-color: var(--vscode-focusBorder);
+}
+
+.snippets-search svg {
+    flex: none;
+    color: var(--vscode-descriptionForeground);
+}
+
+.snippets-search input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: inherit;
+}
+
+.snippets-search input::placeholder,
+.snippet-field input::placeholder,
+.snippet-field textarea::placeholder {
+    color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+}
+
+.save-current {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, transparent));
+    border-radius: 3px;
+    background: var(--vscode-button-secondaryBackground, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    cursor: pointer;
+}
+
+.save-current:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.save-current:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.snippet-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--vscode-focusBorder);
+    border-radius: 4px;
+    background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+}
+
+.snippet-form-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.snippet-form-head strong {
+    font-size: 12px;
+}
+
+.snippet-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.snippet-field > span {
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.snippet-field input,
+.snippet-field textarea {
+    width: 100%;
+    padding: 6px 7px;
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 3px;
+    outline: 0;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+}
+
+.snippet-field input:focus,
+.snippet-field textarea:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+.snippet-field textarea {
+    min-height: 110px;
+    resize: vertical;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--vscode-editor-font-size, 12px);
+    line-height: 1.45;
+}
+
+.snippet-form-error,
+.snippets-error {
+    padding: 6px 8px;
+    border: 1px solid var(--vscode-inputValidation-errorBorder, transparent);
+    border-radius: 3px;
+    background: var(--vscode-inputValidation-errorBackground, transparent);
+    color: var(--vscode-errorForeground);
+    font-size: 11px;
+}
+
+.snippet-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.snippet-form-actions button {
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.snippet-form-actions .ghost {
+    background: transparent;
+    color: var(--vscode-foreground);
+}
+
+.snippet-form-actions .ghost:hover {
+    background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.snippet-form-actions .primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.snippet-form-actions .primary:hover:not(:disabled) {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.snippet-form-actions .primary:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.snippet-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.snippet-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border, transparent));
+    border-radius: 4px;
+    background: var(--vscode-editorWidget-background, transparent);
+}
+
+.snippet-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.snippet-card-head strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.snippet-card-head span {
+    flex: none;
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+}
+
+.snippet-preview {
+    margin: 0;
+    overflow: hidden;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+.snippet-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.snippet-tag {
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    font-size: 10px;
+}
+
+.snippet-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 2px;
+}
+
+.snippet-actions .icon-button {
+    width: 22px;
+    height: 22px;
+}
+
+.snippets-empty {
+    padding: 12px 8px;
+    color: var(--vscode-descriptionForeground);
+    text-align: center;
+}

@@ -43,6 +43,16 @@ export {
 } from './queryHistoryContracts';
 
 export {
+    SNIPPETS_HOST_TO_WEBVIEW_TYPES,
+    SNIPPETS_INBOUND_TYPES,
+    SNIPPETS_OUTBOUND_TYPES,
+    SNIPPETS_WEBVIEW_TO_HOST_TYPES,
+    toSnippetDto
+} from './snippetsContracts';
+
+export type { SnippetDto, SnippetsHostToWebviewMessage, SnippetsInboundMessage, SnippetsOutboundMessage, SnippetsWebviewToHostMessage } from './snippetsContracts';
+
+export {
     SCHEMA_SEARCH_HOST_TO_WEBVIEW_TYPES,
     SCHEMA_SEARCH_INBOUND_TYPES,
     SCHEMA_SEARCH_OUTBOUND_TYPES,

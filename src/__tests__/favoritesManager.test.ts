@@ -236,6 +236,40 @@ describe('FavoritesManager', () => {
         expect(snippet?.autoInclude).toBe(false);
     });
 
+    it('should store and update tags for SQL snippets', async () => {
+        const id = await manager.addSqlSnippet(
+            'Monthly totals',
+            'SELECT 1;',
+            undefined,
+            'report, monthly'
+        );
+
+        const created = (await manager.getSqlSnippets()).find(f => f.id === id);
+        expect(created?.tags).toBe('report, monthly');
+
+        expect(await manager.updateSnippet(id, 'Monthly totals', 'SELECT 2;', 'report')).toBe(true);
+        const updated = (await manager.getSqlSnippets()).find(f => f.id === id);
+        expect(updated?.tags).toBe('report');
+        expect(updated?.sqlContent).toBe('SELECT 2;');
+    });
+
+    it('should return only SQL snippets, newest first', async () => {
+        const nowSpy = jest.spyOn(Date, 'now');
+        nowSpy.mockReturnValue(1000);
+        const first = await manager.addSqlSnippet('First query', 'SELECT 1;');
+        await manager.addFolder('Some folder');
+        nowSpy.mockReturnValue(2000);
+        const second = await manager.addSqlSnippet('Second query', 'SELECT 2;');
+        nowSpy.mockReturnValue(3000);
+        await manager.updateSnippet(first, 'First query', 'SELECT 3;');
+
+        const snippets = await manager.getSqlSnippets();
+
+        expect(snippets.map(snippet => snippet.id)).toEqual([first, second]);
+        expect(snippets.every(snippet => snippet.type === 'sql')).toBe(true);
+        nowSpy.mockRestore();
+    });
+
     it('should include SQL snippets in Copilot context only when explicitly auto-enabled', async () => {
         const id = await manager.addSqlSnippet('Q2', 'SELECT 2;');
 

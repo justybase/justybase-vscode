@@ -41,6 +41,7 @@ export const window = {
   onDidChangeTextEditorSelection: jest.fn(() => ({ dispose: jest.fn() })),
   onDidChangeActiveTextEditor: jest.fn(() => ({ dispose: jest.fn() })),
   onDidChangeVisibleTextEditors: jest.fn(() => ({ dispose: jest.fn() })),
+  registerWebviewViewProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerCustomEditorProvider: jest.fn(() => ({ dispose: jest.fn() })),
 };
 

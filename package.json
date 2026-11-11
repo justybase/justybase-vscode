@@ -106,6 +106,12 @@
         },
         {
           "type": "webview",
+          "id": "netezza.snippets",
+          "name": "Snippets",
+          "icon": "$(bookmark)"
+        },
+        {
+          "type": "webview",
           "id": "netezza.fileSearch",
           "name": "File Search",
           "icon": "$(file-search)"
@@ -1017,6 +1023,16 @@
       {
         "command": "netezza.favorites.openSql",
         "title": "Open SQL Snippet"
+      },
+      {
+        "command": "netezza.snippets.new",
+        "title": "New Snippet",
+        "icon": "$(add)"
+      },
+      {
+        "command": "netezza.snippets.saveCurrentSql",
+        "title": "Save Current SQL as Snippet",
+        "icon": "$(save)"
       },
       {
         "command": "netezza.runStatementFromLens",
@@ -2404,6 +2420,11 @@
           "command": "netezza.favorites.addSqlSnippet",
           "when": "resourceExtname == .sql || resourceLangId == sql",
           "group": "5_favorites"
+        },
+        {
+          "command": "netezza.snippets.saveCurrentSql",
+          "when": "resourceExtname == .sql || resourceLangId == sql",
+          "group": "5_favorites@2"
         }
       ],
       "netezza.sqlRun": [

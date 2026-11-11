@@ -4,6 +4,7 @@ import { ResultPanelView } from '../views/resultPanelView';
 import { SchemaSearchProvider } from '../providers/schemaSearchProvider';
 import { FileSearchProvider } from '../providers/fileSearchProvider';
 import { QueryHistoryView } from '../views/queryHistoryView';
+import { SnippetsView } from '../views/snippetsView';
 import { JoinKnowledgeManagerView } from '../views/joinKnowledgeManagerView';
 import { FilePreviewEditor } from '../editors/filePreviewEditor';
 import type { ConnectionManager } from '../core/connectionManager';
@@ -13,6 +14,7 @@ import { readJoinKnowledgeManagerFocus } from '../contracts/joinKnowledgeManager
 export interface ExplorerViewsActivationResult {
     schemaSearchProvider: SchemaSearchProvider;
     queryHistoryProvider: QueryHistoryView;
+    snippetsProvider: SnippetsView;
     fileSearchProvider: FileSearchProvider;
 }
 
@@ -29,6 +31,7 @@ export function activateExplorerViews(
         connectionManager,
     );
     const queryHistoryProvider = new QueryHistoryView(context.extensionUri, context, connectionManager);
+    const snippetsProvider = new SnippetsView(context.extensionUri, context);
     const joinKnowledgeProvider = new JoinKnowledgeManagerView(context.extensionUri);
     const fileSearchProvider = new FileSearchProvider(context.extensionUri, context.globalState);
 
@@ -39,6 +42,13 @@ export function activateExplorerViews(
         }),
         vscode.window.registerWebviewViewProvider(SchemaSearchProvider.viewType, schemaSearchProvider),
         vscode.window.registerWebviewViewProvider(QueryHistoryView.viewType, queryHistoryProvider),
+        vscode.window.registerWebviewViewProvider(SnippetsView.viewType, snippetsProvider),
+        vscode.commands.registerCommand('netezza.snippets.new', () =>
+            snippetsProvider.openNewSnippet()
+        ),
+        vscode.commands.registerCommand('netezza.snippets.saveCurrentSql', () =>
+            snippetsProvider.openFormWithCurrentSql()
+        ),
         vscode.commands.registerCommand('netezza.openJoinKnowledge', (focus?: unknown) => {
             joinKnowledgeProvider.openInEditor(readJoinKnowledgeManagerFocus(focus));
         }),
@@ -78,5 +88,5 @@ export function activateExplorerViews(
         }),
     );
 
-    return { schemaSearchProvider, queryHistoryProvider, fileSearchProvider };
+    return { schemaSearchProvider, queryHistoryProvider, snippetsProvider, fileSearchProvider };
 }

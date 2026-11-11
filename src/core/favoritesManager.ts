@@ -21,6 +21,8 @@ export interface SchemaFavorite {
     objType?: string;
     // for 'sql'
     sqlContent?: string;
+    /** Comma-separated tags for SQL snippets (for example `report, monthly`). */
+    tags?: string;
     // general
     parentId?: string; // ID of parent folder (undefined = root)
     customNote?: string;
@@ -278,6 +280,13 @@ export class FavoritesManager {
         });
     }
 
+    public async getSqlSnippets(): Promise<SchemaFavorite[]> {
+        if (!this.initialized) this.initialize();
+        return this.cache
+            .filter(f => f.type === 'sql')
+            .sort((left, right) => right.timestamp - left.timestamp);
+    }
+
     public getFavoriteById(id: string): SchemaFavorite | undefined {
         if (!this.initialized) this.initialize();
         return this.cache.find(f => f.id === id);
@@ -362,7 +371,7 @@ export class FavoritesManager {
         return id;
     }
 
-    public async addSqlSnippet(label: string, sqlContent: string, parentId?: string): Promise<string> {
+    public async addSqlSnippet(label: string, sqlContent: string, parentId?: string, tags?: string): Promise<string> {
         if (!this.initialized) this.initialize();
         if (this.cache.some(f => f.type === 'sql' && f.label.toLowerCase() === label.toLowerCase())) {
             throw new Error(`Snippet "${label}" already exists`);
@@ -373,6 +382,7 @@ export class FavoritesManager {
             type: 'sql',
             label,
             sqlContent,
+            ...(tags !== undefined ? { tags } : {}),
             autoInclude: false,
             timestamp: Date.now(),
             parentId
@@ -384,7 +394,7 @@ export class FavoritesManager {
         return id;
     }
 
-    public async updateSnippet(id: string, label: string, sqlContent: string): Promise<boolean> {
+    public async updateSnippet(id: string, label: string, sqlContent: string, tags?: string): Promise<boolean> {
         if (!this.initialized) this.initialize();
         const index = this.cache.findIndex(f => f.id === id && f.type === 'sql');
         if (index === -1) return false;
@@ -393,6 +403,9 @@ export class FavoritesManager {
         }
         this.cache[index].label = label;
         this.cache[index].sqlContent = sqlContent;
+        if (tags !== undefined) {
+            this.cache[index].tags = tags;
+        }
         this.cache[index].timestamp = Date.now();
         await this.context.globalState.update(FavoritesManager.STORAGE_KEY, this.cache);
         this.saveFavoritesToRepository();
