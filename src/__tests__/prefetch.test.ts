@@ -488,6 +488,33 @@ describe('CachePrefetcher', () => {
       expect(mockCache.setTables).toHaveBeenCalledTimes(2);
     });
 
+    it('should persist the _V_TABLE.RELTUPLES estimate through the prefetch object cache write', async () => {
+      mockCache.getDatabases.mockReturnValue([{ label: 'db1' } as any]);
+      mockRunQuery.mockResolvedValue({
+        columns: [
+          { name: 'OBJNAME' },
+          { name: 'OBJID' },
+          { name: 'SCHEMA' },
+          { name: 'DBNAME' },
+          { name: 'OBJTYPE' },
+          { name: 'RELTUPLES' },
+        ],
+        data: [
+          ['FACT200K', 201, 'S1', 'db1', 'TABLE', 18484],
+          ['VIEW1', 202, 'S1', 'db1', 'VIEW', null],
+        ],
+      });
+
+      await prefetcher.prefetchAllObjects(connName, mockRunQuery, false);
+
+      const cachedRows = mockCache.setTables.mock.calls[0][2] as Array<Record<string, unknown>>;
+      expect(cachedRows).toEqual(expect.arrayContaining([
+        expect.objectContaining({ label: 'FACT200K', rowCount: 18484 }),
+        expect.objectContaining({ label: 'VIEW1' }),
+      ]));
+      expect(cachedRows.find(row => row.label === 'VIEW1')).not.toHaveProperty('rowCount');
+    });
+
     it('should discover external objects once when regular tables are already cached', async () => {
       (mockCache.hasTableCacheForConnection as jest.Mock).mockReturnValue(true);
       prefetcher['primaryObjectsPrefetchCompletedSet'].add(`ALL_OBJECTS|${connName}`);
