@@ -5570,7 +5570,7 @@
     "check-types:tabular-import-runtime": "npm run build:dialect-utils && npm run build:database-utils && npm run check-types --workspace @justybase/tabular-import-runtime",
     "check-types:file-runtime": "npm run build:contracts && npm run check-types --workspace @justybase/file-runtime",
     "check-types:dialect-utils": "npm run build:contracts && npm run build:sql-core && npm run check-types --workspace @justybase/dialect-utils",
-    "check-types:ts7": "npm run build:access-file && npm run build:database-runtime && npm exec --yes --package=typescript@7.0.2 -- tsc --version && npm exec --yes --package=typescript@7.0.2 -- tsc --noEmit && npm exec --yes --package=typescript@7.0.2 -- tsc --project tsconfig.media.json --noEmit",
+    "check-types:ts7": "npm run build:access-file && npm run build:database-runtime && npm exec --yes --package=typescript@7.0.2 -- tsc --version && npm exec --yes --package=typescript@7.0.2 -- tsc --noEmit --skipLibCheck && npm exec --yes --package=typescript@7.0.2 -- tsc --project tsconfig.media.json --noEmit",
     "check-types:media": "tsc --project tsconfig.media.json --noEmit",
     "check-types:media:strict": "tsc --project tsconfig.media.json --noEmit",
     "check-types:db2": "node ./node_modules/typescript/bin/tsc --project extensions/db2/tsconfig.json --noEmit",

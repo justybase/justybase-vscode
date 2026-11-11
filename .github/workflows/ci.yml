@@ -160,6 +160,11 @@ jobs:
         run: npm exec --yes --package=typescript@7.0.2 -- tsc --version
 
       - name: Type check with TypeScript 7
+        # The root program is checked with --skipLibCheck on purpose: TypeScript 7
+        # reports TS2411 for `["Infinity"]`/`["NaN"]` in @types/jsdom (pulled in by
+        # jest-environment-jsdom), a third-party declaration file we do not own.
+        # Our own sources are still fully checked; the media program keeps its own
+        # skipLibCheck setting from tsconfig.media.json.
         run: npm run check-types:ts7
 
   completion-parity:
