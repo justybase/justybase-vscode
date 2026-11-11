@@ -34,7 +34,7 @@ Right-clicking a table, view, procedure or other object opens the same menu layo
 | --- | --- |
 | Top | Select Top 1000, Edit Data, Count Rows, Call Routine, Refresh Materialized View |
 | Copy | Copy Name, Create DDL Code |
-| **Data ▸** | Export Table Data, Migration Studio, Search Values, Find Duplicate Rows, Create Table From This, Create View in Another Database, Generate Test Data |
+| **Data ▸** | Export Table Data, Migration Studio, Search Values, Find Duplicate Rows, Create Table From This, Create Table Like (Structure Only), Create View in Another Database, Generate Test Data |
 | **Structure ▸** | Object Designer, columns, keys and constraints, indexes and partitions (Db2, PostgreSQL and MySQL add their designers here) |
 | **Maintenance ▸** | Show Maintenance Status, statistics, space reclaim (Groom / Vacuum / Reorganize (REORG) / Optimize / Move — named after what the database runs), reindex, storage, data skew, Recreate Table |
 | **Analysis ▸** | Compare With, Show Dependencies, Show Used By, Impact Analysis, Show Size & Row Count, Show Privileges |

@@ -146,6 +146,18 @@ describe("dataCommands", () => {
     expect(doc.content).toContain("WITH DATA");
   });
 
+  it("createTableLike opens a structure-only Netezza CTAS", async () => {
+    (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("netezza");
+    const handler = await getHandler("netezza.createTableLike");
+    (vscode.window.showInputBox as jest.Mock).mockResolvedValueOnce("COPY_ORDERS");
+    await handler({ label: "ORDERS", dbName: "DB", schema: "S", objType: "TABLE", connectionName: "c" });
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalled();
+    const doc = (vscode.workspace.openTextDocument as jest.Mock).mock.calls[0][0] as { content: string };
+    expect(doc.content).toContain("WHERE 1 = 0");
+    expect(doc.content).toContain("DISTRIBUTE ON RANDOM");
+    expect(doc.content).toContain("no rows");
+  });
+
   it("callRoutine executes a Db2 function as VALUES", async () => {
     (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue("db2");
     const handler = await getHandler("netezza.callRoutine");

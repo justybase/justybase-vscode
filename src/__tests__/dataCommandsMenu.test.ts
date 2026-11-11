@@ -36,6 +36,7 @@ describe('data exploration context menu', () => {
     'netezza.countRows',
     'netezza.findDuplicateRows',
     'netezza.createTableFromTable',
+    'netezza.createTableLike',
     'netezza.callRoutine',
     'netezza.setTableStorage',
     'netezza.searchSchemaValues',
@@ -54,6 +55,7 @@ describe('data exploration context menu', () => {
     'netezza.countRows',
     'netezza.findDuplicateRows',
     'netezza.createTableFromTable',
+    'netezza.createTableLike',
     'netezza.callRoutine',
     'netezza.setTableStorage',
     'netezza.searchSchemaValues',
@@ -93,6 +95,12 @@ describe('data exploration context menu', () => {
 
   it('scopes createTableFromTable to tables', () => {
     const entries = menuEntries('netezza.createTableFromTable');
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0]?.when).toContain('viewItem == netezza:TABLE');
+  });
+
+  it('scopes createTableLike to tables', () => {
+    const entries = menuEntries('netezza.createTableLike');
     expect(entries.length).toBeGreaterThan(0);
     expect(entries[0]?.when).toContain('viewItem == netezza:TABLE');
   });

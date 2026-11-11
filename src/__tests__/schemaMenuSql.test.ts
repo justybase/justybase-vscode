@@ -4,6 +4,7 @@ import {
     countRowsSql,
     createIndexSql,
     createTableFromSql,
+    createTableLikeSql,
     duplicateRowsSql,
     isSafeSqlDataType,
     isSafeSqliteAddColumnDefault,
@@ -123,6 +124,21 @@ describe('schema menu SQL generators', () => {
         );
         expect(createTableFromSql('duckdb', '"main"."copy"', '"main"."source"', 'id > 10')).toBe(
             'CREATE TABLE "main"."copy" AS SELECT * FROM "main"."source" WHERE id > 10;',
+        );
+    });
+
+    it('builds a structure-only copy for dialects without CREATE TABLE LIKE', () => {
+        expect(createTableLikeSql('netezza', '"DB"."S"."COPY"', '"DB"."S"."SOURCE"')).toBe(
+            'CREATE TABLE "DB"."S"."COPY" AS (SELECT * FROM "DB"."S"."SOURCE" WHERE 1 = 0) DISTRIBUTE ON RANDOM;',
+        );
+        expect(createTableLikeSql('db2', '"S"."COPY"', '"S"."SOURCE"')).toBe(
+            'CREATE TABLE "S"."COPY" AS (SELECT * FROM "S"."SOURCE" WHERE 1 = 0) WITH DATA;',
+        );
+        expect(createTableLikeSql('mssql', '[dbo].[copy]', '[dbo].[source]')).toBe(
+            'SELECT * INTO [dbo].[copy] FROM [dbo].[source] WHERE 1 = 0;',
+        );
+        expect(createTableLikeSql('postgresql', '"public"."copy"', '"public"."source"')).toBe(
+            'CREATE TABLE "public"."copy" AS SELECT * FROM "public"."source" WHERE 1 = 0;',
         );
     });
 

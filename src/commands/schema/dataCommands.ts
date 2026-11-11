@@ -2,7 +2,7 @@
  * Schema Commands - Data Exploration Operations
  *
  * Commands: countRows, findDuplicateRows, createTableFromTable,
- *           callRoutine, setTableStorage, searchSchemaValues
+ *           createTableLike, callRoutine, setTableStorage, searchSchemaValues
  *
  * SQL builders live in ./menuSql (ported from the Tauri SchemaBrowser so
  * both shells generate identical dialect-specific statements).
@@ -32,6 +32,7 @@ import {
     countRowsSql,
     createIndexSql,
     createTableFromSql,
+    createTableLikeSql,
     duplicateRowsSql,
     isSafeSqlDataType,
     postgresTableStorageSql,
@@ -56,6 +57,19 @@ function isTableItem(item: SchemaItemData | undefined): boolean {
 
 function isRoutineItem(item: SchemaItemData | undefined): item is SchemaItemData {
     return !!item && !!item.label && !!item.dbName && (item.objType === 'PROCEDURE' || item.objType === 'FUNCTION');
+}
+
+async function promptForNewTableName(): Promise<string | undefined> {
+    const targetName = await vscode.window.showInputBox({
+        prompt: 'Enter the new table name',
+        placeHolder: 'e.g. NEW_TABLE',
+        validateInput: value => {
+            if (!value || value.trim().length === 0) return 'Table name cannot be empty.';
+            if (!isValidIdentifier(value.trim())) return 'Invalid table name.';
+            return null;
+        },
+    });
+    return targetName?.trim();
 }
 
 /**
@@ -168,15 +182,7 @@ export function registerDataCommands(deps: SchemaCommandsDependencies): vscode.D
                 return;
             }
             const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-            const targetName = await vscode.window.showInputBox({
-                prompt: 'Enter the new table name',
-                placeHolder: 'e.g. NEW_TABLE',
-                validateInput: value => {
-                    if (!value || value.trim().length === 0) return 'Table name cannot be empty.';
-                    if (!isValidIdentifier(value.trim())) return 'Invalid table name.';
-                    return null;
-                },
-            });
+            const targetName = await promptForNewTableName();
             if (!targetName) {
                 return;
             }
@@ -195,6 +201,26 @@ export function registerDataCommands(deps: SchemaCommandsDependencies): vscode.D
                 whereClause,
             );
             await openSqlForItem(deps, item, `-- Review before running: creates ${target} from ${getFullName(item, connectionManager)}.\n${sql}\n`);
+        }),
+
+        vscode.commands.registerCommand('netezza.createTableLike', async (item: SchemaItemData) => {
+            if (!isTableItem(item)) {
+                vscode.window.showErrorMessage('Select a table to create a structure-only copy from.');
+                return;
+            }
+            const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+            const targetName = await promptForNewTableName();
+            if (!targetName) {
+                return;
+            }
+            const source = getFullName(item, connectionManager);
+            const target = formatQualifiedObjectName(item.dbName, item.schema, targetName.trim(), databaseKind);
+            const sql = createTableLikeSql(databaseKind, target, source);
+            await openSqlForItem(
+                deps,
+                item,
+                `-- Review before running: creates ${target} with the same columns as ${source} and no rows.\n${sql}\n`,
+            );
         }),
 
         vscode.commands.registerCommand('netezza.callRoutine', async (item: SchemaItemData) => {

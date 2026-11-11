@@ -220,6 +220,26 @@ export function createTableFromSql(
     return `CREATE TABLE ${target} AS ${select};`;
 }
 
+/**
+ * Structure-only copy. Netezza and most dialects do not support
+ * `CREATE TABLE ... LIKE`, so use CTAS with a predicate that can never match.
+ * The result has the source columns but zero rows; indexes, constraints and
+ * distribution still need a separate review.
+ */
+export function createTableLikeSql(
+    kind: string | undefined,
+    target: string,
+    source: string,
+): string {
+    if (kind === 'mssql' || kind === 'access') {
+        return `SELECT * INTO ${target} FROM ${source} WHERE 1 = 0;`;
+    }
+    if (kind === 'clickhouse') {
+        return `CREATE TABLE ${target} AS ${source};`;
+    }
+    return createTableFromSql(kind, target, source, '1 = 0');
+}
+
 export function callRoutineSql(
     kind: string | undefined,
     objectType: 'FUNCTION' | 'PROCEDURE',

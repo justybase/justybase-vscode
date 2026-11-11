@@ -306,6 +306,10 @@
         "title": "Create Table From This..."
       },
       {
+        "command": "netezza.createTableLike",
+        "title": "Create Table Like (Structure Only)..."
+      },
+      {
         "command": "netezza.callRoutine",
         "title": "Call Routine..."
       },
@@ -2202,6 +2206,10 @@
           "when": "false"
         },
         {
+          "command": "netezza.createTableLike",
+          "when": "false"
+        },
+        {
           "command": "netezza.callRoutine",
           "when": "false"
         },
@@ -2972,6 +2980,11 @@
           "command": "netezza.createTableFromTable",
           "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
           "group": "2_copy@2"
+        },
+        {
+          "command": "netezza.createTableLike",
+          "when": "(view == netezza.schema && viewItem == netezza:TABLE || view == netezza.schema && viewItem == favoritesObject:TABLE)",
+          "group": "2_copy@3"
         },
         {
           "command": "netezza.exportTableData",

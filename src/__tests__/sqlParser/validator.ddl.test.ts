@@ -232,6 +232,12 @@ SELECT S.DEPARTMENT_ID FROM SUMMARY S;`);
         "CREATE TABLE SAMPLE_EMP AS (SELECT * FROM TESTDB..EMPLOYEES LIMIT 100) DISTRIBUTE ON RANDOM;",
       );
     });
+
+    it("should validate structure-only CTAS with a false predicate", () => {
+      expectValid(
+        'CREATE TABLE "CONFORMANCE"."COPY_OF_FACT200K" AS (SELECT * FROM TESTDB..EMPLOYEES WHERE 1 = 0) DISTRIBUTE ON RANDOM;',
+      );
+    });
   });
 
   describe("CTAS — syntax errors", () => {
