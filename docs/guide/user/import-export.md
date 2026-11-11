@@ -51,6 +51,21 @@ Data Workspace uses a local DuckDB/SQLite-backed profile to query files as table
 
 ## Import from a file
 
+The **Import Data** button opens the Import data panel with two source tabs:
+
+- **Spreadsheet** — drop a CSV, XLSX, or XLSB file onto the dashed area, or click it
+  to browse the local disk. XLSM is not supported in this version.
+- **Clipboard** — paste tab-separated cells copied from Excel, review the character
+  count, and choose **Use clipboard**.
+
+Spreadsheet files are limited to 100 MB and clipboard text to 20 MB. Clicking the
+drop area always opens the native file picker; dropping a file from the operating
+system requires holding Shift in a VS Code webview, which is a VS Code security
+rule. Dropped files are staged in the extension's private storage before the
+wizard creates a session, so the rest of the flow is unchanged. Staged copies are
+removed when the wizard closes or the source changes; leftovers older than a day
+are removed at activation.
+
 1. Select a target table in Schema Browser and choose **Import Data** from the
    main bar or **Import Data (Advanced Wizard)** where the desktop wizard is
    available.

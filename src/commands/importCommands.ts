@@ -858,6 +858,62 @@ async function openAdvancedImportWizard(
     });
 }
 
+async function resolveImportWizardPickerContext(
+    connectionManager: ConnectionManager,
+): Promise<{ connectionName: string; connectionDetails: ManagedConnectionDetails } | undefined> {
+    const editor = vscode.window.activeTextEditor;
+    const documentUri = editor?.document?.uri?.toString();
+    let connectionName = connectionManager.getConnectionForExecution(documentUri)
+        ?? connectionManager.getActiveConnectionName()
+        ?? undefined;
+    if (!connectionName) {
+        const connectionNames = await connectionManager.getConnectionNames();
+        if (connectionNames.length === 0) {
+            throw new Error('No database connections configured. Add a connection before importing.');
+        }
+        connectionName = await vscode.window.showQuickPick(connectionNames, {
+            placeHolder: 'Select the target database connection',
+        });
+        if (!connectionName) {
+            return undefined;
+        }
+    }
+    const connectionDetails = await connectionManager.getConnectionDetailsForImport(documentUri, connectionName);
+    if (!connectionDetails) {
+        throw new Error('Connection not configured. Please connect first.');
+    }
+    return { connectionName, connectionDetails };
+}
+
+/** Open the Import data picker (Spreadsheet/Clipboard) before a source exists. */
+async function openImportWizardSourcePicker(
+    context: vscode.ExtensionContext,
+    connectionManager: ConnectionManager,
+    metadataCache: MetadataCache,
+    importWizardService: ImportWizardService,
+): Promise<void> {
+    const wizardConfig = getImportWizardConfiguration();
+    const target = await resolveImportWizardPickerContext(connectionManager);
+    if (!target) {
+        return;
+    }
+    await ImportWizardView.createOrShowSourcePicker(
+        context,
+        context.extensionUri,
+        connectionManager,
+        metadataCache,
+        importWizardService,
+        {
+            filePath: '',
+            targetTable: '',
+            connectionDetails: target.connectionDetails,
+            connectionName: target.connectionName,
+            previewRowCount: wizardConfig.previewRowCount,
+            validationSampleSize: wizardConfig.validationSampleSize,
+        },
+    );
+}
+
 /**
  * Register all import-related commands
  */
@@ -917,6 +973,15 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
 
         vscode.commands.registerCommand('netezza.importDataAdvanced', async (target?: AdvancedImportCommandTarget) => {
             try {
+                if (target === undefined) {
+                    await openImportWizardSourcePicker(
+                        context,
+                        connectionManager,
+                        metadataCache,
+                        importWizardService,
+                    );
+                    return;
+                }
                 const resolvedContext = await resolveAdvancedImportCommandContext(connectionManager, target);
                 if (!resolvedContext) {
                     return;
@@ -945,6 +1010,18 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
                     forcedMode = fileArg.mode;
                 } else {
                     filePath = fileArg as string | vscode.Uri | undefined;
+                }
+                if (!filePath && !forcedMode) {
+                    const wizardConfig = getImportWizardConfiguration();
+                    if (wizardConfig.defaultMode !== 'simple') {
+                        await openImportWizardSourcePicker(
+                            context,
+                            connectionManager,
+                            metadataCache,
+                            importWizardService,
+                        );
+                        return;
+                    }
                 }
                 const importMode = forcedMode || await resolveImportMode();
                 if (!importMode) {

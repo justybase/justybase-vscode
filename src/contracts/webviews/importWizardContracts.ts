@@ -39,8 +39,14 @@ export type ImportWizardWebviewToHostMessage =
     | { type: 'setHasHeaders'; hasHeaders: boolean }
     | { type: 'setCreateTable'; createTable: boolean }
     | { type: 'setConnection'; connectionName: string }
-    | { type: 'requestClipboardSource' }
+    | { type: 'requestClipboardSource'; text?: string }
+    | { type: 'requestClipboardPreview' }
     | { type: 'requestFileSource' }
+    | { type: 'requestFormImport' }
+    | { type: 'beginDroppedFile'; uploadId: string; name: string; size: number }
+    | { type: 'droppedFileChunk'; uploadId: string; dataBase64: string }
+    | { type: 'finishDroppedFile'; uploadId: string }
+    | { type: 'cancelDroppedFile'; uploadId: string }
     | { type: 'closeWizard' }
     | { type: 'setTargetDatabase'; database?: string }
     | { type: 'setTargetSchema'; schema?: string }
@@ -72,7 +78,9 @@ export type ImportWizardHostToWebviewMessage =
     | { type: 'executionFinished'; result: ImportResult }
     | { type: 'executionFailed'; message: string }
     | { type: 'sessionTransitionStarted' }
-    | { type: 'sessionTransitionFinished' };
+    | { type: 'sessionTransitionFinished' }
+    | { type: 'sourcePickerReady'; maxUploadMb: number; maxClipboardMb: number }
+    | { type: 'clipboardText'; text: string };
 
 export type ImportWizardInboundMessage = ImportWizardWebviewToHostMessage;
 export type ImportWizardOutboundMessage = ImportWizardHostToWebviewMessage;
@@ -89,7 +97,13 @@ export const IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES = [
     'setCreateTable',
     'setConnection',
     'requestClipboardSource',
+    'requestClipboardPreview',
     'requestFileSource',
+    'requestFormImport',
+    'beginDroppedFile',
+    'droppedFileChunk',
+    'finishDroppedFile',
+    'cancelDroppedFile',
     'closeWizard',
     'setTargetDatabase',
     'setTargetSchema',
@@ -113,7 +127,9 @@ export const IMPORT_WIZARD_HOST_TO_WEBVIEW_TYPES = [
     'executionFinished',
     'executionFailed',
     'sessionTransitionStarted',
-    'sessionTransitionFinished'
+    'sessionTransitionFinished',
+    'sourcePickerReady',
+    'clipboardText'
 ] as const satisfies readonly ImportWizardHostToWebviewMessage['type'][];
 
 export const IMPORT_WIZARD_INBOUND_TYPES = IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES;

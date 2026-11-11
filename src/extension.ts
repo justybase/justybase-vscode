@@ -24,6 +24,7 @@ import { registerExportCommands } from './commands/exportCommands';
 import { registerExportToMdCommand } from './commands/exportToMdCommand';
 import { registerImportCommands } from './commands/importCommands';
 import { removeAbandonedClipboardImportSources } from './import/clipboardImportSource';
+import { removeAbandonedDroppedImportSources } from './import/droppedImportSource';
 import { registerMigrationCommands } from './commands/migrationCommands';
 import { registerFileConnectionCommands } from './commands/fileConnectionCommands';
 import { registerQueryCommands } from './commands/queryCommands';
@@ -116,6 +117,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         await removeAbandonedClipboardImportSources(context.globalStorageUri.fsPath);
     } catch (error) {
         logger.warn(`Netezza extension: Could not remove abandoned clipboard import snapshots: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+        await removeAbandonedDroppedImportSources(context.globalStorageUri.fsPath);
+    } catch (error) {
+        logger.warn(`Netezza extension: Could not remove abandoned dropped import files: ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
         await runCompatibilityMigrations(context, logger);

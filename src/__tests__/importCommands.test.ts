@@ -73,6 +73,7 @@ jest.mock('../import/wizard/ImportWizardService', () => ({
 jest.mock('../views/importWizardView', () => ({
     ImportWizardView: {
         createOrShow: jest.fn(),
+        createOrShowSourcePicker: jest.fn(),
     },
 }));
 
@@ -736,6 +737,54 @@ describe('commands/importCommands', () => {
             );
         });
 
+        it('should open the source picker when Import Data has no file and uses prompt mode', async () => {
+            const deps: ImportCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            };
+            registerImportCommands(deps);
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                (call) => call[0] === 'netezza.importData',
+            )?.[1];
+
+            await handler();
+
+            expect(ImportWizardView.createOrShowSourcePicker).toHaveBeenCalledWith(
+                mockContext,
+                mockContext.extensionUri,
+                mockConnectionManager,
+                mockMetadataCache,
+                expect.any(Object),
+                expect.objectContaining({
+                    filePath: '',
+                    targetTable: '',
+                    connectionName: 'test-connection',
+                }),
+            );
+            expect(vscode.window.showOpenDialog).not.toHaveBeenCalled();
+            expect(ImportWizardView.createOrShow).not.toHaveBeenCalled();
+        });
+
+        it('should open the source picker for the advanced command without a target', async () => {
+            const deps: ImportCommandsDependencies = {
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            };
+            registerImportCommands(deps);
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                (call) => call[0] === 'netezza.importDataAdvanced',
+            )?.[1];
+
+            await handler();
+
+            expect(ImportWizardView.createOrShowSourcePicker).toHaveBeenCalled();
+            expect(ImportWizardView.createOrShow).not.toHaveBeenCalled();
+        });
+
         it('should open the advanced import wizard command directly', async () => {
             const deps: ImportCommandsDependencies = {
                 context: mockContext,
@@ -815,7 +864,7 @@ describe('commands/importCommands', () => {
                 (call) => call[0] === 'netezza.importData',
             )?.[1];
 
-            await handler();
+            await handler({ mode: 'default' });
             expect(importDataToNetezza).toHaveBeenCalledWith(
                 'D:\\data\\input.csv',
                 'admin.target_table',
@@ -915,7 +964,7 @@ describe('commands/importCommands', () => {
                 (call) => call[0] === 'netezza.importData',
             )?.[1];
 
-            await handler();
+            await handler({ mode: 'default' });
             expect(importDataToPostgreSql).toHaveBeenCalledWith(
                 'D:\\data\\input.csv',
                 'admin.target_table',

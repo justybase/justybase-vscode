@@ -7,6 +7,9 @@
  * promise.
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ImportWizardMessageHandler } from '../views/importWizardMessageHandler';
 
@@ -396,6 +399,62 @@ describe('ImportWizardMessageHandler', () => {
         });
     }
 
+    function createHandlerWithStorage(
+        service: Record<string, jest.Mock>,
+        postMessage: jest.Mock,
+        storageDirectory: string,
+    ): ImportWizardMessageHandler {
+        const connectionManager = {
+            getConnectionNames: jest.fn().mockReturnValue([]),
+            getConnection: jest.fn().mockResolvedValue(undefined),
+            getMetadataCache: jest.fn().mockReturnValue({
+                onDidInvalidate: jest.fn(() => ({ dispose: jest.fn() })),
+                onDidExternalRefresh: jest.fn(() => ({ dispose: jest.fn() })),
+            }),
+        };
+        const catalogService = {
+            loadCatalog: jest.fn().mockResolvedValue({ availableDatabases: [], availableSchemas: [] }),
+        };
+        return new ImportWizardMessageHandler({
+            context: { globalStorageUri: { fsPath: storageDirectory } } as never,
+            service: service as never,
+            connectionManager: connectionManager as never,
+            catalogService: catalogService as never,
+            postMessage,
+        });
+    }
+
+    function createPickerOptions() {
+        return {
+            filePath: '',
+            targetTable: '',
+            connectionDetails: { database: 'DWH' } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        };
+    }
+
+    function createPickerService() {
+        const state = {
+            id: 'session-1',
+            targetTable: 'CLIPBOARD_IMPORT',
+            targetLocation: { database: 'DWH' },
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: { mode: 'direct', createTableSql: '', warnings: [] },
+        };
+        const postMessage = jest.fn().mockResolvedValue(true);
+        const service = {
+            createSession: jest.fn().mockResolvedValue(state),
+            getSessionState: jest.fn().mockReturnValue(state),
+            setTargetCatalog: jest.fn().mockResolvedValue(undefined),
+            startBackgroundValidation: jest.fn(),
+            disposeSession: jest.fn(),
+        };
+        return { service, postMessage };
+    }
+
     async function initializeWizard(handler: ImportWizardMessageHandler): Promise<void> {
         await handler.initialize({
             filePath: '/tmp/orders.csv',
@@ -689,5 +748,114 @@ describe('ImportWizardMessageHandler', () => {
             }
             handler.dispose();
         }
+    });
+
+    it('posts the source picker before a session exists', async () => {
+        const { service, postMessage } = createPickerService();
+        const handler = createHandlerWithService(service, postMessage);
+
+        await handler.initializeSourcePicker(createPickerOptions());
+        await handler.handleMessage({ type: 'ready' });
+
+        expect(postMessage).toHaveBeenCalledWith({
+            type: 'sourcePickerReady',
+            maxUploadMb: 100,
+            maxClipboardMb: 20,
+        });
+        expect(service.createSession).not.toHaveBeenCalled();
+
+        handler.dispose();
+    });
+
+    it('uses clipboard text supplied by the picker instead of the system clipboard', async () => {
+        const storage = await fs.mkdtemp(path.join(os.tmpdir(), 'import-picker-clipboard-'));
+        const { service, postMessage } = createPickerService();
+        const handler = createHandlerWithStorage(service, postMessage, storage);
+
+        try {
+            await handler.initializeSourcePicker(createPickerOptions());
+            await handler.handleMessage({ type: 'requestClipboardSource', text: 'id\tname\n1\tAda' });
+
+            expect(service.createSession).toHaveBeenCalledWith(expect.objectContaining({
+                sourceKind: 'clipboard',
+                targetTable: 'CLIPBOARD_IMPORT',
+                filePath: expect.stringContaining('clipboard.txt'),
+            }));
+            const options = service.createSession.mock.calls[0][0] as { filePath: string };
+            await expect(fs.readFile(options.filePath, 'utf8')).resolves.toBe('id\tname\n1\tAda');
+        } finally {
+            handler.dispose();
+            await fs.rm(storage, { recursive: true, force: true });
+        }
+    });
+
+    it('writes a dropped file to a temporary source and opens a session', async () => {
+        const storage = await fs.mkdtemp(path.join(os.tmpdir(), 'import-picker-drop-'));
+        const { service, postMessage } = createPickerService();
+        const handler = createHandlerWithStorage(service, postMessage, storage);
+        const csv = 'id,name\n1,Ada';
+
+        try {
+            await handler.initializeSourcePicker(createPickerOptions());
+            await handler.handleMessage({
+                type: 'beginDroppedFile',
+                uploadId: 'upload-1',
+                name: 'orders.csv',
+                size: Buffer.byteLength(csv),
+            });
+            await handler.handleMessage({
+                type: 'droppedFileChunk',
+                uploadId: 'upload-1',
+                dataBase64: Buffer.from(csv).toString('base64'),
+            });
+            await handler.handleMessage({ type: 'finishDroppedFile', uploadId: 'upload-1' });
+
+            expect(service.createSession).toHaveBeenCalledWith(expect.objectContaining({
+                sourceKind: 'file',
+                sourceName: 'orders.csv',
+                targetTable: 'ORDERS',
+                filePath: expect.stringContaining('import-drops'),
+            }));
+            const options = service.createSession.mock.calls[0][0] as { filePath: string };
+            await expect(fs.readFile(options.filePath, 'utf8')).resolves.toBe(csv);
+        } finally {
+            handler.dispose();
+            await fs.rm(storage, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a dropped file above the upload limit', async () => {
+        const { service, postMessage } = createPickerService();
+        const handler = createHandlerWithService(service, postMessage);
+
+        await handler.handleMessage({
+            type: 'beginDroppedFile',
+            uploadId: 'upload-big',
+            name: 'big.xlsx',
+            size: 101 * 1024 * 1024,
+        });
+
+        expect(postMessage).toHaveBeenCalledWith({
+            type: 'executionFailed',
+            message: 'File is larger than the 100 MB import limit.',
+        });
+        expect(service.createSession).not.toHaveBeenCalled();
+
+        handler.dispose();
+    });
+
+    it('posts the system clipboard text for the clipboard tab preview', async () => {
+        const { service, postMessage } = createPickerService();
+        const handler = createHandlerWithService(service, postMessage);
+        (vscode.env.clipboard.readText as jest.Mock).mockResolvedValueOnce('id\tname\n1\tAda');
+
+        await handler.handleMessage({ type: 'requestClipboardPreview' });
+
+        expect(postMessage).toHaveBeenCalledWith({
+            type: 'clipboardText',
+            text: 'id\tname\n1\tAda',
+        });
+
+        handler.dispose();
     });
 });

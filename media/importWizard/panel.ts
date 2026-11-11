@@ -25,6 +25,11 @@ interface ImportWizardViewState {
     executionProgress: ImportExecutionProgress | null;
     targetEditorOpen: boolean;
     lastProgressAt: number;
+    sourcePicker: { maxUploadMb: number; maxClipboardMb: number } | null;
+    sourcePickerMode: 'file' | 'clipboard';
+    clipboardText: string;
+    dragActive: boolean;
+    dropUploading: boolean;
 }
 
 const state: ImportWizardViewState = {
@@ -36,6 +41,11 @@ const state: ImportWizardViewState = {
     executionProgress: null,
     targetEditorOpen: false,
     lastProgressAt: 0,
+    sourcePicker: null,
+    sourcePickerMode: 'file',
+    clipboardText: '',
+    dragActive: false,
+    dropUploading: false,
 };
 
 function isWizardBusy(): boolean {
@@ -783,10 +793,175 @@ function attachListeners(): void {
     closeTop?.addEventListener('click', () => postToHost({ type: 'closeWizard' }));
 }
 
+const PICKER_ICONS = {
+    spreadsheet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h2l2 5 2-5h2"/></svg>',
+    clipboard: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 14h6m-6 3h6"/></svg>',
+    upload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="m8 8 4-4 4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>',
+};
+
+function renderSourcePicker(): string {
+    const limits = state.sourcePicker;
+    const mode = state.sourcePickerMode;
+    const error = state.status?.kind === 'error' ? state.status.message : '';
+    return `
+			<div class="import-picker">
+				<header class="import-picker-header">
+					<div class="import-picker-heading">
+						<h1>Import data</h1>
+						<p>CSV/XLSX/XLSB up to ${limits?.maxUploadMb ?? 100} MB · clipboard up to ${limits?.maxClipboardMb ?? 20} MB</p>
+					</div>
+					<button id="close-import-picker" class="import-close" type="button" title="Close" aria-label="Close import dialog">✕</button>
+				</header>
+				<div class="import-picker-body">
+					<div class="import-picker-tabs" role="tablist">
+						<button type="button" role="tab" aria-selected="${mode === 'file'}" class="import-picker-tab${mode === 'file' ? ' active' : ''}" data-picker-mode="file">${PICKER_ICONS.spreadsheet} Spreadsheet</button>
+						<button type="button" role="tab" aria-selected="${mode === 'clipboard'}" class="import-picker-tab${mode === 'clipboard' ? ' active' : ''}" data-picker-mode="clipboard">${PICKER_ICONS.clipboard} Clipboard</button>
+					</div>
+					${mode === 'file' ? `
+						<div id="import-dropzone" class="import-dropzone${state.dragActive ? ' dragging' : ''}${state.dropUploading ? ' busy' : ''}" role="button" tabindex="0" aria-label="Drop or browse for an import file">
+							<span class="import-dropzone-icon">${PICKER_ICONS.upload}</span>
+							<strong>${state.dropUploading ? 'Uploading…' : 'Drop a CSV, XLSX, or XLSB file here'}</strong>
+							<span>or click to browse. XLSM is not supported in this version.</span>
+							<small>Hold Shift while dropping from the system in VS Code.</small>
+						</div>` : `
+						<div class="import-clipboard-pane">
+							<label class="import-picker-label" for="import-clipboard-text">Paste cells copied from Excel (tab-separated)</label>
+							<textarea id="import-clipboard-text" class="import-clipboard-textarea" spellcheck="false" placeholder="ID&#9;Name&#9;Amount&#10;1&#9;Alpha&#9;10.50&#10;2&#9;Beta&#9;20.25">${escapeHtml(state.clipboardText)}</textarea>
+							<div class="import-clipboard-footer">
+								<span id="import-clipboard-count">${state.clipboardText.length.toLocaleString()} characters</span>
+								<button id="use-clipboard" type="button" class="primary import-submit-button" ${!state.clipboardText.trim() || state.dropUploading ? 'disabled' : ''}>${PICKER_ICONS.clipboard} Use clipboard</button>
+							</div>
+						</div>`}
+					${error ? `<div class="import-picker-error" role="alert">${escapeHtml(error)}</div>` : ''}
+				</div>
+				<footer class="import-picker-footer">
+					<span>Tabular data stays on this machine until the import starts.</span>
+					<button id="form-import" type="button" class="import-link-button">Form import…</button>
+				</footer>
+			</div>`;
+}
+
+const DROP_CHUNK_SIZE = 512 * 1024;
+
+async function uploadDroppedFile(file: File): Promise<void> {
+    if (!/\.(xlsx|xlsb|csv|txt|tsv)$/i.test(file.name)) {
+        state.status = { kind: 'error', message: 'Choose an .xlsx, .xlsb, .csv, .txt, or .tsv file.' };
+        render();
+        return;
+    }
+    const maxUploadMb = state.sourcePicker?.maxUploadMb ?? 100;
+    if (file.size > maxUploadMb * 1024 * 1024) {
+        state.status = { kind: 'error', message: `File is larger than the ${maxUploadMb} MB import limit.` };
+        render();
+        return;
+    }
+    state.dropUploading = true;
+    state.status = null;
+    render();
+
+    try {
+        const uploadId = `drop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        postToHost({ type: 'beginDroppedFile', uploadId, name: file.name, size: file.size });
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        for (let offset = 0; offset < bytes.length; offset += DROP_CHUNK_SIZE) {
+            const slice = bytes.subarray(offset, offset + DROP_CHUNK_SIZE);
+            let binary = '';
+            const batchSize = 0x8000;
+            for (let index = 0; index < slice.length; index += batchSize) {
+                binary += String.fromCharCode(...slice.subarray(index, index + batchSize));
+            }
+            postToHost({ type: 'droppedFileChunk', uploadId, dataBase64: btoa(binary) });
+            await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+        }
+        postToHost({ type: 'finishDroppedFile', uploadId });
+    } catch (error) {
+        state.dropUploading = false;
+        state.status = { kind: 'error', message: error instanceof Error ? error.message : String(error) };
+        render();
+    }
+}
+
+function attachSourcePickerListeners(): void {
+    document.querySelectorAll('[data-picker-mode]').forEach(button => {
+        button.addEventListener('click', () => {
+            const mode = (button as HTMLElement).dataset.pickerMode === 'clipboard' ? 'clipboard' : 'file';
+            state.sourcePickerMode = mode;
+            state.status = null;
+            render();
+            if (mode === 'clipboard' && !state.clipboardText.trim()) {
+                postToHost({ type: 'requestClipboardPreview' });
+            }
+        });
+    });
+
+    const dropzone = getElementById('import-dropzone');
+    if (dropzone) {
+        const requestFile = () => {
+            if (!state.dropUploading) {
+                postToHost({ type: 'requestFileSource' });
+            }
+        };
+        dropzone.addEventListener('click', requestFile);
+        dropzone.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                requestFile();
+            }
+        });
+        dropzone.addEventListener('dragover', event => {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+            if (!state.dragActive) {
+                state.dragActive = true;
+                dropzone.classList.add('dragging');
+            }
+        });
+        dropzone.addEventListener('dragleave', () => {
+            state.dragActive = false;
+            dropzone.classList.remove('dragging');
+        });
+        dropzone.addEventListener('drop', event => {
+            event.preventDefault();
+            state.dragActive = false;
+            dropzone.classList.remove('dragging');
+            const file = event.dataTransfer?.files?.[0];
+            if (!file) {
+                requestFile();
+                return;
+            }
+            void uploadDroppedFile(file);
+        });
+    }
+
+    const clipboardText = getElementById<HTMLTextAreaElement>('import-clipboard-text');
+    clipboardText?.addEventListener('input', () => {
+        state.clipboardText = clipboardText.value;
+        const count = document.getElementById('import-clipboard-count');
+        if (count) count.textContent = `${clipboardText.value.length.toLocaleString()} characters`;
+        const use = getElementById<HTMLButtonElement>('use-clipboard');
+        if (use) use.disabled = !clipboardText.value.trim() || state.dropUploading;
+    });
+
+    getElementById('use-clipboard')?.addEventListener('click', () => {
+        if (!state.clipboardText.trim()) {
+            return;
+        }
+        postToHost({ type: 'requestClipboardSource', text: state.clipboardText });
+    });
+
+    getElementById('form-import')?.addEventListener('click', () => postToHost({ type: 'requestFormImport' }));
+    getElementById('close-import-picker')?.addEventListener('click', () => postToHost({ type: 'closeWizard' }));
+}
+
 function render(): void {
     if (!app) return;
 
     if (!state.session) {
+        if (state.sourcePicker) {
+            app.innerHTML = renderSourcePicker();
+            attachSourcePickerListeners();
+            return;
+        }
         const message = state.status?.kind === 'error'
             ? state.status.message
             : 'Loading advanced import wizard...';
@@ -846,6 +1021,10 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             state.backgroundValidation = null;
             state.executionProgress = null;
             state.session = message.state;
+            state.sourcePicker = null;
+            state.clipboardText = '';
+            state.dragActive = false;
+            state.dropUploading = false;
             render();
             return;
         case 'previewUpdated':
@@ -913,11 +1092,33 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
         case 'executionFailed':
             state.isExecuting = false;
             state.executionProgress = null;
+            state.dropUploading = false;
             state.status = {
                 kind: 'error',
                 message: message.message || 'Import failed.',
             };
             render();
+            return;
+        case 'sourcePickerReady':
+            state.session = null;
+            state.sourcePicker = {
+                maxUploadMb: message.maxUploadMb,
+                maxClipboardMb: message.maxClipboardMb,
+            };
+            state.sourcePickerMode = 'file';
+            state.clipboardText = '';
+            state.dragActive = false;
+            state.status = null;
+            state.dropUploading = false;
+            render();
+            return;
+        case 'clipboardText':
+            if (!state.clipboardText.trim() && typeof message.text === 'string' && message.text.length > 0) {
+                state.clipboardText = message.text;
+                if (state.sourcePickerMode === 'clipboard') {
+                    render();
+                }
+            }
             return;
         case 'sessionTransitionStarted':
             state.isTransitioning = true;

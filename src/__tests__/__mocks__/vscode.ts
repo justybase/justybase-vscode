@@ -60,6 +60,7 @@ export const workspace = {
 
 export const env = {
   clipboard: {
+    readText: jest.fn().mockResolvedValue(""),
     writeText: jest.fn().mockResolvedValue(undefined),
   },
 };

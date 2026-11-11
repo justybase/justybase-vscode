@@ -73,11 +73,48 @@ export class ImportWizardView {
         service: ImportWizardService,
         options: ImportWizardSessionOptions,
     ): Promise<ImportWizardView> {
+        const view = ImportWizardView.getOrCreatePanel(
+            context,
+            extensionUri,
+            connectionManager,
+            metadataCache,
+            service,
+        );
+        await view.loadSession(options);
+        return view;
+    }
+
+    /** Open the wizard on the source picker (Spreadsheet/Clipboard) without a session. */
+    public static async createOrShowSourcePicker(
+        context: vscode.ExtensionContext,
+        extensionUri: vscode.Uri,
+        connectionManager: ConnectionManager,
+        metadataCache: MetadataCache,
+        service: ImportWizardService,
+        options: ImportWizardSessionOptions,
+    ): Promise<ImportWizardView> {
+        const view = ImportWizardView.getOrCreatePanel(
+            context,
+            extensionUri,
+            connectionManager,
+            metadataCache,
+            service,
+        );
+        await view.loadSourcePicker(options);
+        return view;
+    }
+
+    private static getOrCreatePanel(
+        context: vscode.ExtensionContext,
+        extensionUri: vscode.Uri,
+        connectionManager: ConnectionManager,
+        metadataCache: MetadataCache,
+        service: ImportWizardService,
+    ): ImportWizardView {
         const column = vscode.window.activeTextEditor ? vscode.ViewColumn.Beside : vscode.ViewColumn.One;
 
         if (ImportWizardView.currentPanel) {
             ImportWizardView.currentPanel.panel.reveal(column);
-            await ImportWizardView.currentPanel.loadSession(options);
             return ImportWizardView.currentPanel;
         }
 
@@ -104,7 +141,6 @@ export class ImportWizardView {
             service,
         );
         ImportWizardView.currentPanel = view;
-        await view.loadSession(options);
         return view;
     }
 
@@ -112,6 +148,19 @@ export class ImportWizardView {
         this.panel.title = 'Import data';
         try {
             await this.messageHandler.initialize(options);
+        } catch (error) {
+            await this.panel.webview.postMessage({
+                type: 'executionFailed',
+                message: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        }
+    }
+
+    public async loadSourcePicker(options: ImportWizardSessionOptions): Promise<void> {
+        this.panel.title = 'Import data';
+        try {
+            await this.messageHandler.initializeSourcePicker(options);
         } catch (error) {
             await this.panel.webview.postMessage({
                 type: 'executionFailed',

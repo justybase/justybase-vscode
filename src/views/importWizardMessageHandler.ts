@@ -9,6 +9,10 @@ import type {
 import type { ImportProgressDetail } from "@justybase/contracts";
 import type { ConnectionManager } from "../core/connectionManager";
 import { createClipboardImportSource, removeClipboardImportSource } from "../import/clipboardImportSource";
+import {
+  removeDroppedImportSource,
+  stageDroppedImportSource,
+} from "../import/droppedImportSource";
 import { getOutputChannel } from "../core/queryRunnerUtils";
 import type { ImportResult } from "../import/dataImporter";
 import { ImportWizardService } from "../import/wizard/ImportWizardService";
@@ -94,6 +98,26 @@ const DEFAULT_BACKGROUND_VALIDATION_SAMPLE_SIZE = 20000;
 const MIN_BACKGROUND_VALIDATION_SAMPLE_SIZE = 100;
 const MAX_BACKGROUND_VALIDATION_SAMPLE_SIZE = 50000;
 
+/** Keep the picker limits in sync with the webview subtitle. */
+const IMPORT_MAX_UPLOAD_MB = 100;
+const IMPORT_MAX_CLIPBOARD_MB = 20;
+const IMPORT_MAX_UPLOAD_BYTES = IMPORT_MAX_UPLOAD_MB * 1024 * 1024;
+const IMPORT_MAX_CLIPBOARD_BYTES = IMPORT_MAX_CLIPBOARD_MB * 1024 * 1024;
+const DROPPED_FILE_EXTENSIONS = new Set([".csv", ".txt", ".tsv", ".xlsx", ".xlsb"]);
+
+function suggestTargetTableFromSource(sourceName: string): string {
+  const baseName = path.basename(sourceName).replace(/\.[^.]+$/, "");
+  const sanitized = baseName
+    .replace(/[^A-Za-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+  return sanitized || "IMPORTED_DATA";
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
 export class ImportWizardMessageHandler {
   private sessionId?: string;
   private webviewReady = false;
@@ -105,6 +129,13 @@ export class ImportWizardMessageHandler {
   private lastExecutionProgress?: ImportExecutionProgress;
   private lastExecutionProgressAt = 0;
   private disposed = false;
+  private awaitingSource = false;
+  private readonly droppedFileUploads = new Map<string, {
+    name: string;
+    size: number;
+    chunks: Buffer[];
+    receivedBytes: number;
+  }>();
   private metadataSubscriptions: vscode.Disposable[] = [];
 
   public constructor(
@@ -123,6 +154,8 @@ export class ImportWizardMessageHandler {
     }
 
     const previousPath = this.currentOptions?.filePath;
+    this.awaitingSource = false;
+    await this.removeDroppedSource(previousPath && previousPath !== options.filePath ? previousPath : undefined);
     if (this.sessionId) {
       this.deps.service.disposeSession(this.sessionId);
     }
@@ -164,6 +197,41 @@ export class ImportWizardMessageHandler {
 
     // A slow database must not keep the wizard on "Loading..." before it can render the preview.
     void this.loadTargetCatalog(state.id, options);
+  }
+
+  /**
+   * Open the wizard without a source so the webview can present the
+   * Spreadsheet/Clipboard picker. The session is created only after the user
+   * chooses a file or clipboard text.
+   */
+  public async initializeSourcePicker(options: ImportWizardSessionOptions): Promise<void> {
+    if (this.isExecuting || this.isTransitioning) {
+      throw new Error("An import or source change is already in progress.");
+    }
+    if (this.sessionId) {
+      this.deps.service.disposeSession(this.sessionId);
+      this.sessionId = undefined;
+    }
+    await this.removeDroppedSource(this.currentOptions?.filePath);
+    if (this.clipboardSourceDirectory) {
+      await removeClipboardImportSource(this.clipboardSourceDirectory);
+      this.clipboardSourceDirectory = undefined;
+    }
+    this.currentOptions = { ...options };
+    this.connectionName = options.connectionName;
+    this.awaitingSource = true;
+    this.droppedFileUploads.clear();
+    if (this.webviewReady) {
+      await this.postSourcePicker();
+    }
+  }
+
+  private async postSourcePicker(): Promise<void> {
+    await this.deps.postMessage({
+      type: "sourcePickerReady",
+      maxUploadMb: IMPORT_MAX_UPLOAD_MB,
+      maxClipboardMb: IMPORT_MAX_CLIPBOARD_MB,
+    });
   }
 
   private async loadTargetCatalog(
@@ -231,6 +299,10 @@ export class ImportWizardMessageHandler {
     switch (message.type) {
       case "ready":
         this.webviewReady = true;
+        if (this.awaitingSource && !this.sessionId) {
+          await this.postSourcePicker();
+          return;
+        }
         await this.postState(true);
         this.startBackgroundValidation();
         return;
@@ -304,10 +376,28 @@ export class ImportWizardMessageHandler {
         );
         return;
       case "requestClipboardSource":
-        await this.runSessionTransition(() => this.loadClipboardSource());
+        await this.runSessionTransition(() => this.loadClipboardSource(message.text));
+        return;
+      case "requestClipboardPreview":
+        await this.postClipboardPreview();
         return;
       case "requestFileSource":
         await this.runSessionTransition(() => this.loadFileSource());
+        return;
+      case "requestFormImport":
+        await this.requestFormImport();
+        return;
+      case "beginDroppedFile":
+        this.beginDroppedFile(message.uploadId, message.name, message.size);
+        return;
+      case "droppedFileChunk":
+        this.appendDroppedFileChunk(message.uploadId, message.dataBase64);
+        return;
+      case "finishDroppedFile":
+        await this.runSessionTransition(() => this.finishDroppedFile(message.uploadId));
+        return;
+      case "cancelDroppedFile":
+        this.droppedFileUploads.delete(message.uploadId);
         return;
       case "closeWizard":
         this.deps.onClose?.();
@@ -367,8 +457,24 @@ export class ImportWizardMessageHandler {
     }
     this.sessionId = undefined;
     void removeClipboardImportSource(this.clipboardSourceDirectory);
+    void this.removeDroppedSource(this.currentOptions?.filePath);
     this.clipboardSourceDirectory = undefined;
+    this.droppedFileUploads.clear();
+    this.awaitingSource = false;
     this.currentOptions = undefined;
+  }
+
+  /** Delete a dropped file staged in private extension storage. */
+  private async removeDroppedSource(filePath: string | undefined): Promise<void> {
+    const storagePath = this.deps.context.globalStorageUri?.fsPath;
+    if (!storagePath) {
+      return;
+    }
+    try {
+      await removeDroppedImportSource(storagePath, filePath);
+    } catch {
+      // The staging file may already be gone; cleanup is best-effort.
+    }
   }
 
   /**
@@ -446,32 +552,38 @@ export class ImportWizardMessageHandler {
     }
   }
 
-  private async loadClipboardSource(): Promise<void> {
+  private async loadClipboardSource(textOverride?: string): Promise<void> {
     const currentOptions = this.currentOptions;
     if (!currentOptions) {
       return;
     }
     let sourceDirectory: string | undefined;
     try {
-      const text = await vscode.env.clipboard.readText();
+      const text = textOverride ?? await vscode.env.clipboard.readText();
+      if (!text.trim()) {
+        throw new Error("The clipboard is empty. Copy tabular data first.");
+      }
+      if (Buffer.byteLength(text, "utf8") > IMPORT_MAX_CLIPBOARD_BYTES) {
+        throw new Error(`Clipboard data is larger than the ${IMPORT_MAX_CLIPBOARD_MB} MB limit.`);
+      }
       const source = await createClipboardImportSource(
         this.deps.context.globalStorageUri.fsPath,
         text,
       );
       sourceDirectory = source.directoryPath;
-      const currentState = this.getState();
       await this.initialize({
         ...currentOptions,
         filePath: source.filePath,
         sourceKind: "clipboard",
         sourceName: "Clipboard",
         clipboardSourceDirectory: source.directoryPath,
-        targetTable: currentState.targetTable,
+        targetTable: this.currentSessionTable().trim() || "CLIPBOARD_IMPORT",
         hasHeaders: true,
       }, true);
     } catch (error) {
       await removeClipboardImportSource(sourceDirectory);
       vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+      throw error;
     }
   }
 
@@ -490,16 +602,97 @@ export class ImportWizardMessageHandler {
     if (!uri) {
       return;
     }
-    const currentTable = this.getState().targetTable;
+    await this.initializeFileSource(uri.fsPath, path.basename(uri.fsPath));
+  }
+
+  private async initializeFileSource(filePath: string, sourceName: string): Promise<void> {
+    const currentOptions = this.currentOptions;
+    if (!currentOptions) {
+      return;
+    }
     await this.initialize({
       ...currentOptions,
-      filePath: uri.fsPath,
+      filePath,
       sourceKind: "file",
-      sourceName: path.basename(uri.fsPath),
+      sourceName,
       clipboardSourceDirectory: undefined,
-      targetTable: currentTable,
+      targetTable: this.currentSessionTable().trim() || suggestTargetTableFromSource(sourceName),
       hasHeaders: undefined,
     }, true);
+  }
+
+  private currentSessionTable(): string {
+    return this.sessionId ? this.getState().targetTable : this.currentOptions?.targetTable ?? "";
+  }
+
+  private async postClipboardPreview(): Promise<void> {
+    try {
+      const text = await vscode.env.clipboard.readText();
+      await this.deps.postMessage({ type: "clipboardText", text });
+    } catch (error) {
+      await this.deps.postMessage({
+        type: "executionFailed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async requestFormImport(): Promise<void> {
+    this.deps.onClose?.();
+    await vscode.commands.executeCommand("netezza.importData", { mode: "form" });
+  }
+
+  private beginDroppedFile(uploadId: string, name: string, size: number): void {
+    const extension = path.extname(name).toLowerCase();
+    if (!DROPPED_FILE_EXTENSIONS.has(extension)) {
+      throw new Error("Choose an .xlsx, .xlsb, .csv, .txt, or .tsv file.");
+    }
+    if (!uploadId || !Number.isFinite(size) || size <= 0) {
+      throw new Error("The dropped file is empty or invalid.");
+    }
+    if (size > IMPORT_MAX_UPLOAD_BYTES) {
+      throw new Error(`File is larger than the ${formatMegabytes(IMPORT_MAX_UPLOAD_BYTES)} import limit.`);
+    }
+    this.droppedFileUploads.set(uploadId, {
+      name,
+      size,
+      chunks: [],
+      receivedBytes: 0,
+    });
+  }
+
+  private appendDroppedFileChunk(uploadId: string, dataBase64: string): void {
+    const upload = this.droppedFileUploads.get(uploadId);
+    if (!upload) {
+      throw new Error("The dropped file upload is no longer active.");
+    }
+    if (typeof dataBase64 !== "string" || dataBase64.length === 0) {
+      return;
+    }
+    const chunk = Buffer.from(dataBase64, "base64");
+    upload.chunks.push(chunk);
+    upload.receivedBytes += chunk.length;
+    if (upload.receivedBytes > upload.size) {
+      this.droppedFileUploads.delete(uploadId);
+      throw new Error("The dropped file exceeded its declared size.");
+    }
+  }
+
+  private async finishDroppedFile(uploadId: string): Promise<void> {
+    const upload = this.droppedFileUploads.get(uploadId);
+    if (!upload) {
+      throw new Error("The dropped file upload is no longer active.");
+    }
+    this.droppedFileUploads.delete(uploadId);
+    if (upload.receivedBytes !== upload.size) {
+      throw new Error("The dropped file was not transferred completely.");
+    }
+    const filePath = await stageDroppedImportSource(
+      this.deps.context.globalStorageUri.fsPath,
+      upload.name,
+      Buffer.concat(upload.chunks, upload.size),
+    );
+    await this.initializeFileSource(filePath, upload.name);
   }
 
   private getBackgroundValidationSettings(): {
