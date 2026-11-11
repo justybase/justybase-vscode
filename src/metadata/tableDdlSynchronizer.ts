@@ -457,6 +457,13 @@ export class TableDdlSynchronizer {
             if (!target || !target.database) {
                 continue;
             }
+            // Definitions live in the optional object-details layer, not in
+            // the object list. Drop the stale source before refreshing the
+            // type so analysis cannot keep using a replaced or dropped view.
+            this.metadataCache.invalidateObjectDetails(
+                connectionName,
+                `${target.database}.${target.schema ?? ''}.${impact.target.table}`,
+            );
             await this.queueObjectTypeRefresh(
                 connectionName,
                 connection,

@@ -186,12 +186,14 @@ refreshing per statement:
 | `ALTER TABLE` (first object/schema) | Refresh object + columns immediately | 1–2 |
 | Repeated `ALTER` on the same object | Coalesced into one trailing type refresh | 1 |
 | Many objects in one schema (> 5 within 30 s) | One database-wide object-type refresh | 1 |
-| `CREATE/DROP/ALTER VIEW`, `PROCEDURE`, `SYNONYM` | Refresh the affected object-type layer (coalesced) | 1 |
+| `CREATE/DROP/ALTER VIEW`, `PROCEDURE`, `SYNONYM` | Drop the cached definition and refresh the affected object-type layer (coalesced) | 1 |
 | `ROLLBACK` | Pending impacts discarded | 0 |
 
 `CREATE/DROP/ALTER VIEW|PROCEDURE|SYNONYM` may not be modelled by every
 dialect grammar; a token-level fallback recognizes the keywords and target so
-the type layer is still invalidated. A full-scope database refresh switches the
+the type layer is still invalidated. View and procedure definitions live in the
+optional object-details layer; object DDL drops the affected definition so
+analysis cannot reuse a replaced or dropped source. A full-scope database refresh switches the
 shared metadata session to that database (`SET CATALOG`) around the view
 definition read and restores the original catalog afterwards.
 

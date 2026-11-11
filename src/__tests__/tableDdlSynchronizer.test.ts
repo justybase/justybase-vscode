@@ -668,6 +668,25 @@ describe('TableDdlSynchronizer', () => {
         expect(description()).toBe('committed');
     });
 
+    it('drops cached view definitions when the view DDL changes', async () => {
+        const fixture = createFixture();
+        fixture.metadataCache.setObjectDetails('CONN', 'JUST_DATA.ADMIN.SAVED_QUERY', {
+            objectType: 'VIEW',
+            definition: 'SELECT 1',
+        });
+
+        await fixture.synchronizer.handleStatementSucceeded({
+            sql: 'DROP VIEW ADMIN.SAVED_QUERY',
+            connectionName: 'CONN',
+            documentUri: 'file:///view.sql',
+            connection: fixture.connection,
+        });
+
+        expect(
+            fixture.metadataCache.getObjectDetails('CONN', 'JUST_DATA.ADMIN.SAVED_QUERY'),
+        ).toBeUndefined();
+    });
+
     it('patches column comments without querying the catalog', async () => {
         const sqlLog: string[] = [];
         const fixture = createFixture({ onSql: sql => sqlLog.push(sql) });
