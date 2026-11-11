@@ -139,6 +139,16 @@ describe('MetadataProvider system catalog mirroring', () => {
         expect(executedQueries.some(query => query.includes('_V_TABLE') && query.includes('RELTUPLES'))).toBe(true)
     })
 
+    it('appends the reltuples estimate to table completion detail', async () => {
+        const items = await provider.getTables('CONN_1', 'TARGET_DB')
+        const orders = items.find(item => completionItemLabel(item) === 'ORDERS')
+        const detail = typeof orders?.label === 'string'
+            ? orders.detail
+            : orders?.label.detail
+
+        expect(detail).toBe('Table (PUBLIC) · ~18,484 rows')
+    })
+
     it('loads mirrored system catalog columns from SYSTEM for arbitrary database prefixes', async () => {
         const columns = await provider.getTableColumnsMetadata('CONN_1', 'TARGET_DB', undefined, '_V_SESSION')
 
@@ -178,19 +188,25 @@ describe('MetadataProvider system catalog mirroring', () => {
                 OBJNAME: 'EMP_VIEW',
                 OBJID: 21,
                 SCHEMA: 'DB2INST1',
-                DESCRIPTION: 'Employee view'
+                DESCRIPTION: 'Employee view',
+                RELTUPLES: 42
             }
         ])
 
         const items = await provider.getViews('CONN_1', 'TESTDB', 'DB2INST1')
 
         expect(items.map(item => completionItemLabel(item))).toEqual(expect.arrayContaining(['EMP_VIEW']))
+        const empView = items.find(item => completionItemLabel(item) === 'EMP_VIEW')
+        const empViewDetail = typeof empView?.label === 'string'
+            ? empView.detail
+            : empView?.label.detail
+        expect(empViewDetail).toBe('View · ~42 rows')
         expect(metadataCache.setTables).toHaveBeenCalledWith(
             'CONN_1',
             '@NZEX@TESTDB.DB2INST1',
             expect.arrayContaining([
                 expect.objectContaining({ label: 'EMPLOYEES', objType: 'TABLE' }),
-                expect.objectContaining({ label: 'EMP_VIEW', objType: 'VIEW' })
+                expect.objectContaining({ label: 'EMP_VIEW', objType: 'VIEW', rowCount: 42 })
             ]),
             expect.any(Map),
             undefined,

@@ -557,3 +557,40 @@ describe('handleMetadataRequest warmDatabaseColumns', () => {
         expect(response).toBeNull()
     })
 })
+
+describe('handleMetadataRequest row estimates', () => {
+    it('returns the cached reltuples estimate for completion objects', async () => {
+        const metadataCache = new MetadataCache({} as vscode.ExtensionContext)
+        metadataCache.setTables('CONN_1', 'DB1.PUBLIC', [
+            {
+                ...createTableMetadata('ORDERS', 'TABLE', 'PUBLIC'),
+                rowCount: 18484,
+            },
+        ], new Map())
+
+        const response = await handleMetadataRequest(
+            {
+                documentUri: 'file:///completion.sql',
+                kind: 'tables',
+                schema: 'PUBLIC',
+                cacheOnly: true,
+            },
+            mockExtensionContext,
+            {} as MetadataProvider,
+            metadataCache,
+            createConnectionManager('postgresql', {
+                effectiveDatabase: 'DB1',
+                effectiveSchema: 'PUBLIC',
+            }),
+        )
+
+        expect(response).toEqual([
+            expect.objectContaining({
+                name: 'ORDERS',
+                objectType: 'table',
+                rowCount: 18484,
+            }),
+        ])
+        await metadataCache.dispose()
+    })
+})

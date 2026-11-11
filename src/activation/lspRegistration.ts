@@ -5,6 +5,7 @@ import type { ConnectionManager } from "../core/connectionManager";
 import type { MetadataCache } from "../metadataCache";
 import { getCachedColumnsFromMetadataCacheAsync } from "../metadata/columnCacheLookup";
 import { getTablesForScope } from "../metadata/cache/schemaTreeDataSource";
+import { normalizeEstimatedRowCount } from "../metadata/estimatedRowCount";
 import { extractLabel, inferObjectType } from "../metadata/helpers";
 import { parseProcedureArgumentNames } from "../metadata/procedureSignatureUtils";
 import type {
@@ -1358,6 +1359,7 @@ function mapTableMetadata(
       : normalizedType === "VIEW"
         ? "view"
         : "table";
+  const rowCount = normalizeEstimatedRowCount(item.rowCount);
   return {
     name,
     database,
@@ -1365,6 +1367,7 @@ function mapTableMetadata(
     objectType,
     detail: item.detail,
     description: normalizeName(item.DESCRIPTION),
+    ...(rowCount !== undefined ? { rowCount } : {}),
   };
 }
 

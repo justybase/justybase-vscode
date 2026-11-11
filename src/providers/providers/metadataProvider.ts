@@ -13,7 +13,7 @@ import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/sch
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
-import { normalizeEstimatedRowCount } from '../../metadata/estimatedRowCount';
+import { normalizeEstimatedRowCount, appendEstimatedRowCount } from '../../metadata/estimatedRowCount';
 import {
     allowsLiveMetadataFetchForSource,
 } from '../../metadata/liveFallbackPolicy';
@@ -603,7 +603,12 @@ export class MetadataProvider {
                     const detail = item.objType?.toUpperCase() === 'MATERIALIZED VIEW'
                         ? `Materialized View${schemaSuffix}`
                         : `View${schemaSuffix}`;
-                    this.applySuggestDescription(ci, label, detail, item.DESCRIPTION);
+                    this.applySuggestDescription(
+                        ci,
+                        label,
+                        appendEstimatedRowCount(detail, item.rowCount),
+                        item.DESCRIPTION,
+                    );
                     ci.sortText = item.sortText || label;
                     return ci;
                 });
@@ -657,10 +662,11 @@ export class MetadataProvider {
             });
             if (!result) return [];
 
-            const results = queryResultToRows<Record<string, unknown> & { OBJNAME: string; SCHEMA?: string; DESCRIPTION?: string; OBJTYPE?: string }>(result);
+            const results = queryResultToRows<Record<string, unknown> & { OBJNAME: string; SCHEMA?: string; DESCRIPTION?: string; OBJTYPE?: string; RELTUPLES?: unknown }>(result);
             const viewItems: TableMetadata[] = results.map(row => {
                 const normalizedObjectType = row.OBJTYPE?.trim().toUpperCase() || 'VIEW';
                 const isMaterializedView = normalizedObjectType === 'MATERIALIZED VIEW';
+                const rowCount = normalizeEstimatedRowCount(row.RELTUPLES);
                 return {
                     OBJNAME: row.OBJNAME,
                     TABLENAME: row.OBJNAME,
@@ -674,6 +680,7 @@ export class MetadataProvider {
                     sortText: row.OBJNAME,
                     DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
                     tableDefinition: clickHouseTableDefinitionFromRow(row),
+                    ...(rowCount !== undefined ? { rowCount } : {}),
                 };
             });
 
@@ -1566,7 +1573,12 @@ export class MetadataProvider {
                     : isView ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class
             );
             ci.insertText = this.formatMetadataIdentifier(label, databaseKind);
-            this.applySuggestDescription(ci, label, item.detail, item.DESCRIPTION);
+            this.applySuggestDescription(
+                ci,
+                label,
+                appendEstimatedRowCount(item.detail, item.rowCount),
+                item.DESCRIPTION,
+            );
             ci.sortText = item.sortText;
             return ci;
         });

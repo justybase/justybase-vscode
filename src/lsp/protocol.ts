@@ -196,6 +196,8 @@ export interface MetadataObjectItem {
     | "procedure";
   detail?: string;
   description?: string;
+  /** Optimizer row-count estimate from the catalog (rounded), when known. */
+  rowCount?: number;
   /** Parsed from procedure signature when objectType is procedure. */
   argumentNames?: string[];
   /** Cached PK/FK name matches used to build a complete JOIN suggestion. */

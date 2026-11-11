@@ -8,6 +8,7 @@ import {
 import type { DatabaseKind } from "../contracts/database";
 import type { MetadataColumnItem, MetadataObjectItem } from "../lsp/protocol";
 import type { LocalDefinition } from "../providers/types";
+import { appendEstimatedRowCount } from "../metadata/estimatedRowCount";
 import { formatIdentifierForSql } from "../utils/identifierUtils";
 import { getRelatedColumnRole, isSelfNamedKeyColumn } from "../utils/relatedColumnNames";
 import {
@@ -441,10 +442,12 @@ export function filterMetadataItems(
         (databaseKind === "netezza" && item.name.startsWith("_V_")
           ? "9_"
           : "3_");
-      const detail =
+      const detail = appendEstimatedRowCount(
         options?.ranking?.role === "location" && databaseKind === "db2"
           ? "Db2 location (CURRENT SERVER)"
-          : item.detail;
+          : item.detail,
+        item.rowCount,
+      );
       const completionRank = getCompletionMatchRank(item.name, prefix);
       const sourceParts = options?.ranking?.role === "source"
         ? getSourceScopeKind(

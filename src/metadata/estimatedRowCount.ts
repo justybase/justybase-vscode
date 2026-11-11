@@ -21,3 +21,20 @@ export function normalizeEstimatedRowCount(value: unknown): number | undefined {
 export function formatEstimatedRowCount(value: number): string {
     return `~${Math.max(0, Math.round(value)).toLocaleString('en-US')}`;
 }
+
+/**
+ * Appends the catalog row estimate to a completion detail line, e.g.
+ * `Table (ADMIN) · ~18,484 rows`. Keeping this next to the object type makes
+ * the estimate visible in the suggestion list without opening documentation.
+ */
+export function appendEstimatedRowCount(
+    detail: string | undefined,
+    rowCount: number | undefined,
+): string | undefined {
+    const normalized = normalizeEstimatedRowCount(rowCount);
+    if (normalized === undefined) {
+        return detail;
+    }
+    const rows = `${formatEstimatedRowCount(normalized)} rows`;
+    return detail ? `${detail} · ${rows}` : rows;
+}

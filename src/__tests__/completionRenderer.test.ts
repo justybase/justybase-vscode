@@ -149,6 +149,23 @@ describe("completionRenderer — documentation regression guard", () => {
   });
 
   describe("filterMetadataItems", () => {
+    it("appends the catalog row estimate to the completion detail", () => {
+      const tables: MetadataObjectItem[] = [
+        { name: "FACT_SALES", objectType: "table", detail: "Table (PUBLIC)", rowCount: 776 },
+      ];
+      const items = filterMetadataItems(tables, "FACT");
+      expect(items).toHaveLength(1);
+      expect(items[0].detail).toBe("Table (PUBLIC) · ~776 rows");
+    });
+
+    it("keeps the detail unchanged when no row estimate is cached", () => {
+      const tables: MetadataObjectItem[] = [
+        { name: "FACT_SALES", objectType: "table", detail: "Table (PUBLIC)" },
+      ];
+      const items = filterMetadataItems(tables, "FACT");
+      expect(items[0].detail).toBe("Table (PUBLIC)");
+    });
+
     it("includes table description as documentation when present", () => {
       const tables: MetadataObjectItem[] = [
         { name: "FACT_SALES", objectType: "table", description: "Daily sales facts" },
