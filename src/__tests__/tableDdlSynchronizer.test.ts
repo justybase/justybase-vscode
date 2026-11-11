@@ -628,6 +628,46 @@ describe('TableDdlSynchronizer', () => {
         ).toBe('batch 99');
     });
 
+    it('buffers COMMENT ON until COMMIT and discards it on ROLLBACK', async () => {
+        const fixture = createFixture();
+        fixture.metadataCache.setTables('CONN', 'JUST_DATA.ADMIN', [
+            {
+                OBJNAME: 'ORDERS',
+                SCHEMA: 'ADMIN',
+                OBJID: 1,
+                objType: 'TABLE',
+                label: 'ORDERS',
+                DESCRIPTION: 'old comment',
+            },
+        ], new Map([['JUST_DATA.ADMIN.ORDERS', 1]]));
+
+        const base = {
+            connectionName: 'CONN',
+            documentUri: 'file:///comment-tx.sql',
+            connection: fixture.connection,
+        };
+        const description = () =>
+            fixture.metadataCache.getTables('CONN', 'JUST_DATA.ADMIN')?.[0].DESCRIPTION;
+
+        await fixture.synchronizer.handleStatementSucceeded({ ...base, sql: 'BEGIN' });
+        await fixture.synchronizer.handleStatementSucceeded({
+            ...base,
+            sql: "COMMENT ON TABLE ADMIN.ORDERS IS 'rolled back'",
+        });
+        expect(description()).toBe('old comment');
+        await fixture.synchronizer.handleStatementSucceeded({ ...base, sql: 'ROLLBACK' });
+        expect(description()).toBe('old comment');
+
+        await fixture.synchronizer.handleStatementSucceeded({ ...base, sql: 'BEGIN' });
+        await fixture.synchronizer.handleStatementSucceeded({
+            ...base,
+            sql: "COMMENT ON TABLE ADMIN.ORDERS IS 'committed'",
+        });
+        expect(description()).toBe('old comment');
+        await fixture.synchronizer.handleStatementSucceeded({ ...base, sql: 'COMMIT' });
+        expect(description()).toBe('committed');
+    });
+
     it('patches column comments without querying the catalog', async () => {
         const sqlLog: string[] = [];
         const fixture = createFixture({ onSql: sql => sqlLog.push(sql) });

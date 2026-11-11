@@ -79,9 +79,15 @@ export interface TableDdlSynchronizerDiagnostics {
     pending: number;
 }
 
+interface PendingMetadataBatch {
+    impacts: readonly MetadataDdlImpact[];
+    runtimeContext: RuntimeContextValue | undefined;
+}
+
 interface TransactionState {
     active: boolean;
     pending: ResolvedTableDdlImpact[];
+    pendingMetadata: PendingMetadataBatch[];
 }
 
 export interface SuccessfulStatementContext {
@@ -213,7 +219,7 @@ export class TableDdlSynchronizer {
         const key = transactionKey(event.connectionName, event.documentUri);
         try {
             if (tableEffect.transactionControl === 'begin') {
-                this.transactions.set(key, { active: true, pending: [] });
+                this.transactions.set(key, { active: true, pending: [], pendingMetadata: [] });
                 return;
             }
             if (tableEffect.transactionControl === 'rollback') {
@@ -230,6 +236,17 @@ export class TableDdlSynchronizer {
                         databaseKind,
                         state.pending,
                     );
+                }
+                if (state?.pendingMetadata.length) {
+                    for (const batch of state.pendingMetadata) {
+                        await this.applyMetadataImpactsWithContext(
+                            event.connectionName,
+                            event.connection,
+                            databaseKind,
+                            batch.impacts,
+                            batch.runtimeContext,
+                        );
+                    }
                 }
                 return;
             }
@@ -259,6 +276,24 @@ export class TableDdlSynchronizer {
             }
 
             if (metadataEffect.impacts.length > 0) {
+                const transaction = this.transactions.get(key);
+                if (transaction?.active) {
+                    // Comments and other metadata-only DDL are transactional
+                    // too: keep them out of the cache until COMMIT, and drop
+                    // the whole batch on ROLLBACK.
+                    const runtimeContext = await this.resolveMetadataRuntimeContext(
+                        event.connectionName,
+                        event.connection,
+                        databaseKind,
+                        event.documentUri,
+                        metadataEffect.impacts,
+                    );
+                    transaction.pendingMetadata.push({
+                        impacts: metadataEffect.impacts,
+                        runtimeContext,
+                    });
+                    return;
+                }
                 await this.applyMetadataImpacts(
                     event.connectionName,
                     event.connection,
@@ -364,14 +399,51 @@ export class TableDdlSynchronizer {
         documentUri: string | undefined,
         impacts: readonly MetadataDdlImpact[],
     ): Promise<void> {
-        const runtimeContext = impacts.some(impact =>
+        const runtimeContext = await this.resolveMetadataRuntimeContext(
+            connectionName,
+            connection,
+            databaseKind,
+            documentUri,
+            impacts,
+        );
+        await this.applyMetadataImpactsWithContext(
+            connectionName,
+            connection,
+            databaseKind,
+            impacts,
+            runtimeContext,
+        );
+    }
+
+    /**
+     * Resolve CURRENT_CATALOG/CURRENT_SCHEMA only when at least one impact
+     * needs it. A transaction resolves it once at statement time and reuses
+     * that value on COMMIT, so a later SET SCHEMA cannot retarget a buffered
+     * comment.
+     */
+    private async resolveMetadataRuntimeContext(
+        connectionName: string,
+        connection: DatabaseConnection,
+        databaseKind: DatabaseKind,
+        documentUri: string | undefined,
+        impacts: readonly MetadataDdlImpact[],
+    ): Promise<RuntimeContextValue | undefined> {
+        return impacts.some(impact =>
             impact.kind !== 'comment'
             || !impact.target.database
             || impact.target.schema === undefined,
         )
             ? await this.resolveRuntimeContext(connectionName, connection, databaseKind, documentUri)
             : undefined;
+    }
 
+    private async applyMetadataImpactsWithContext(
+        connectionName: string,
+        connection: DatabaseConnection,
+        databaseKind: DatabaseKind,
+        impacts: readonly MetadataDdlImpact[],
+        runtimeContext: RuntimeContextValue | undefined,
+    ): Promise<void> {
         for (const impact of impacts) {
             if (impact.kind === 'comment') {
                 this.applyCommentImpact(
