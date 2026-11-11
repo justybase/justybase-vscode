@@ -50,6 +50,20 @@ describe('EditDataProvider', () => {
         connectionName: 'TestConnection'
     };
 
+    const flushAsync = async (): Promise<void> => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+    };
+
+    /**
+     * The panel defers its first query until the webview signals `ready`, so
+     * tests must drive the same handshake instead of assuming an eager load.
+     */
+    const signalReady = async (): Promise<void> => {
+        await messageHandler!({ command: 'ready' });
+        await flushAsync();
+    };
+
     beforeEach(() => {
         // Reset mocks
         jest.clearAllMocks();
@@ -132,7 +146,7 @@ describe('EditDataProvider', () => {
             expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Invalid table selection');
         });
 
-        it('should load data on creation', async () => {
+        it('loads data after the webview signals ready', async () => {
             const mockData = {
                 columns: [{ name: 'ID' }, { name: 'NAME' }],
                 data: [
@@ -152,6 +166,10 @@ describe('EditDataProvider', () => {
                 mockContext,
                 mockConnectionManager
             );
+
+            // Nothing is queried until the webview asks for its first load.
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            await signalReady();
 
             expect(runQueryRaw).toHaveBeenCalled();
             expect(getTableMetadata).toHaveBeenCalled();
@@ -204,8 +222,8 @@ describe('EditDataProvider', () => {
                 mockConnectionManager
             );
 
-            // Wait for initial load
-            await new Promise(resolve => setTimeout(resolve, 10));
+            // Initial load happens through the webview `ready` handshake.
+            await signalReady();
         });
 
         it('should handle refresh command', async () => {
@@ -443,7 +461,7 @@ describe('EditDataProvider', () => {
                 mockConnectionManager
             );
 
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await signalReady();
 
             const query = (runQueryRaw as jest.Mock).mock.calls[0][1];
             expect(query).toContain('ROWID');
@@ -488,7 +506,7 @@ describe('EditDataProvider', () => {
                 mockConnectionManager
             );
 
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await signalReady();
 
             expect(vscode.window.showErrorMessage).toHaveBeenCalled();
         });
@@ -503,7 +521,7 @@ describe('EditDataProvider', () => {
                 mockConnectionManager
             );
 
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await signalReady();
 
             expect(mockWebview.postMessage).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -547,6 +565,10 @@ describe('EditDataProvider', () => {
                 mockContext,
                 mockConnectionManager
             );
+            expect(deferreds).toHaveLength(0);
+
+            void messageHandler!({ command: 'ready' });
+            await flush();
             expect(deferreds).toHaveLength(1);
 
             void messageHandler!({ command: 'refresh', whereClause: '', columns: '' });
@@ -575,6 +597,9 @@ describe('EditDataProvider', () => {
                 mockContext,
                 mockConnectionManager
             );
+            // Start the first load so it is in flight when the panel is disposed.
+            void messageHandler!({ command: 'ready' });
+            await flush();
             expect(disposeHandler).toBeDefined();
             disposeHandler!();
 
@@ -650,6 +675,7 @@ describe('EditDataProvider', () => {
             });
             (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
             await EditDataProvider.createOrShow(mockContext.extensionUri, sampleItem, mockContext, mockConnectionManager);
+            await messageHandler!({ command: 'ready' });
             await flush();
         };
 

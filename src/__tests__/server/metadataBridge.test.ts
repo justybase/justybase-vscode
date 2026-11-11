@@ -1068,8 +1068,8 @@ describe("MetadataBridge list cache", () => {
 
       expect(sendRequest).toHaveBeenCalledTimes(2);
       expect(result1).toEqual([
-        { label: "ORDERS", kind: CompletionItemKind.Class, detail: undefined, sortText: "3_000_ORDERS", insertText: "ORDERS" },
-        { label: "CUSTOMERS", kind: CompletionItemKind.Class, detail: undefined, sortText: "3_000_CUSTOMERS", insertText: "CUSTOMERS" },
+        { label: "ORDERS", kind: CompletionItemKind.Class, detail: "TABLE", sortText: "3_000_ORDERS", insertText: "ORDERS" },
+        { label: "CUSTOMERS", kind: CompletionItemKind.Class, detail: "TABLE", sortText: "3_000_CUSTOMERS", insertText: "CUSTOMERS" },
       ]);
 
       // Second call: cached
