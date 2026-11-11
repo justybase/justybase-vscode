@@ -44,7 +44,7 @@ function isObjectCatalogQuery(sql: string): boolean {
 }
 
 function isReadCatalogObjectQuery(sql: string): boolean {
-    return sql.includes('SELECT OBJNAME, SCHEMA, OBJID, OBJTYPE');
+    return /SELECT\s+(?:O\.)?OBJNAME,\s*(?:O\.)?SCHEMA,\s*(?:O\.)?OBJID,\s*(?:O\.)?OBJTYPE/.test(sql);
 }
 
 function createConnection(options: ConnectionMockOptions = {}): DatabaseConnection {
