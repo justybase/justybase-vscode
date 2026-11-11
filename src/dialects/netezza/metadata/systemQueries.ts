@@ -907,9 +907,11 @@ export const NZ_QUERIES = {
                     O.OBJTYPE,
                     O.OWNER,
                     COALESCE(S.REFOBJNAME, '') AS REFOBJNAME,
-                    COALESCE(O.DESCRIPTION, '') AS DESCRIPTION
+                    COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
+                    CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
                 FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
                 LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
+                LEFT JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
                 WHERE O.DBNAME = '${dbLiteral}' AND O.OBJTYPE IN (${objTypes})
             `.trim();
             });

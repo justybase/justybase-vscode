@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { buildIdLookupKey, extractLabel, inferCachedTableLikeType } from '../helpers';
+import { normalizeEstimatedRowCount } from '../estimatedRowCount';
 import type { TableMetadata } from '../types';
 import type { MetadataCachePort } from './metadataCachePort';
 import { buildSchemaCacheKey } from './schemaTreeDataSource';
@@ -111,6 +112,7 @@ export function toTableMetadata(row: {
     OBJTYPE?: string;
     OWNER?: string;
     DESCRIPTION?: string;
+    RELTUPLES?: unknown;
     tableDefinition?: TableMetadata['tableDefinition'];
     [key: string]: unknown;
 }): TableMetadata {
@@ -118,6 +120,7 @@ export function toTableMetadata(row: {
     const tableDefinition = row.tableDefinition ?? nativeTableDefinitionFromRow(row);
     const isViewLike = objectType === 'VIEW' || objectType === 'MATERIALIZED VIEW';
     const typeLabel = objectType === 'MATERIALIZED VIEW' ? 'Materialized View' : objectType;
+    const rowCount = normalizeEstimatedRowCount(row.RELTUPLES);
     return {
         OBJNAME: row.OBJNAME,
         OBJID: row.OBJID,
@@ -130,6 +133,7 @@ export function toTableMetadata(row: {
         detail: row.SCHEMA ? `${typeLabel} (${row.SCHEMA})` : typeLabel,
         sortText: row.OBJNAME,
         ...(tableDefinition ? { tableDefinition } : {}),
+        ...(rowCount !== undefined ? { rowCount } : {}),
     };
 }
 

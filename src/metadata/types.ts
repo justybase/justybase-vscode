@@ -90,6 +90,8 @@ export interface TableMetadata {
     label?: string | { label: string };
     detail?: string;
     sortText?: string;
+    /** Optimizer row-count estimate from `_V_TABLE.RELTUPLES`, rounded. */
+    rowCount?: number;
     /** Optional native storage definition, populated by dialect catalog queries. */
     tableDefinition?: DatabaseTableDefinitionMetadata;
     [key: string]: unknown;

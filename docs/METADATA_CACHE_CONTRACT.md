@@ -77,6 +77,11 @@ schema key with the full result set for that schema.
 
 **Schema explorer** refreshes one type at a time and merges with existing cache entries of other types.
 
+**Row-count estimates** — Netezza table rows carry `rowCount` from
+`_V_TABLE.RELTUPLES`. It is stored in the same table layer as other fields,
+follows the same TTL, invalidation and disk-persistence rules, and negative
+estimates are omitted rather than displayed.
+
 ### Example: refresh VIEW when TABLE already cached
 
 1. Explorer loads VIEW list from the server.

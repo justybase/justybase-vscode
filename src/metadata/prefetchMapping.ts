@@ -2,6 +2,7 @@ import type { DatabaseTableDefinitionMetadata } from '@justybase/contracts';
 import type { MetadataPrefetchTarget } from './cache/MetadataPrefetchTarget';
 import { buildColumnCacheKey, normalizeCatalogPart, type RawColumnRowWithKeys } from './columnRowMapping';
 import { buildNetezzaCacheDatabasePart } from './helpers';
+import { normalizeEstimatedRowCount } from './estimatedRowCount';
 import type { TableMetadata } from './types';
 import type { QueryResult } from '../types';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
@@ -29,6 +30,7 @@ export interface RawObjectRow {
     REFOBJNAME?: string;
     OWNER?: string;
     DESCRIPTION?: string;
+    RELTUPLES?: number | string | null;
     [key: string]: unknown;
 }
 
@@ -112,6 +114,7 @@ export function mapPrefetchObjectRow(row: RawObjectRow, preserveCatalogIdentity 
     };
     const typeLabel = typeLabelByObjType[normalizedObjectType] ?? normalizedObjectType;
     const tableDefinition = mapNativeTableDefinition(row);
+    const rowCount = normalizeEstimatedRowCount(row.RELTUPLES);
 
     return {
         OBJNAME: objectName,
@@ -126,6 +129,7 @@ export function mapPrefetchObjectRow(row: RawObjectRow, preserveCatalogIdentity 
         DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
         REFOBJNAME: normalizeCatalogPart(row.REFOBJNAME, identityOptions),
         ...(tableDefinition ? { tableDefinition } : {}),
+        ...(rowCount !== undefined ? { rowCount } : {}),
     };
 }
 

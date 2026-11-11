@@ -70,13 +70,30 @@ function buildObjectSearchQuery(database: string, likePattern: string): string {
     `.trim();
 }
 
+/** Snippet window expression: 40 characters of lead, 160 characters total. */
+function buildSnippetColumns(sourceColumn: string, options: DatabaseSourceSearchQueryOptions): string {
+    if (!options.includeSnippet) {
+        return '';
+    }
+    const lead = Math.max(0, Math.trunc(options.snippetLead ?? 40));
+    const length = Math.max(1, Math.trunc(options.snippetLength ?? 160));
+    const needle = escapeSqlLiteral((options.rawTerm ?? '').toUpperCase());
+    const position = `INSTR(UPPER(${sourceColumn}), '${needle}')`;
+    const start = lead > 0
+        ? `CASE WHEN ${position} > ${lead} THEN ${position} - ${lead} ELSE 1 END`
+        : '1';
+    return `,\n                   SUBSTR(${sourceColumn}, ${start}, ${length}) AS SNIPPET` +
+        `,\n                   CASE WHEN ${position} > 0 THEN ${position} - 1 ELSE -1 END AS MATCH_OFFSET`;
+}
+
 function buildViewSourceSearchQuery(database: string, options: DatabaseSourceSearchQueryOptions): string {
     const db = database;
     const viewSource = qualifySystemView(db, NZ_SYSTEM_VIEWS.VIEW);
+    const snippetColumns = buildSnippetColumns('DEFINITION', options);
 
     if (options.useServerSideFilter) {
         return `
-            SELECT VIEWNAME AS NAME, SCHEMA, DATABASE
+            SELECT VIEWNAME AS NAME, SCHEMA, DATABASE${snippetColumns}
             FROM ${viewSource}
             WHERE DATABASE != 'SYSTEM' AND UPPER(DEFINITION) LIKE '${options.likePattern}' ESCAPE '\\'
         `.trim();
@@ -92,10 +109,11 @@ function buildViewSourceSearchQuery(database: string, options: DatabaseSourceSea
 function buildProcedureSourceSearchQuery(database: string, options: DatabaseSourceSearchQueryOptions): string {
     const db = database;
     const procedureSource = qualifySystemView(db, NZ_SYSTEM_VIEWS.PROCEDURE);
+    const snippetColumns = buildSnippetColumns('PROCEDURESOURCE', options);
 
     if (options.useServerSideFilter) {
         return `
-            SELECT PROCEDURE AS NAME, SCHEMA, DATABASE
+            SELECT PROCEDURE AS NAME, SCHEMA, DATABASE${snippetColumns}
             FROM ${procedureSource}
             WHERE DATABASE != 'SYSTEM' AND UPPER(PROCEDURESOURCE) LIKE '${options.likePattern}' ESCAPE '\\'
         `.trim();
@@ -134,9 +152,11 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                     O.OBJID,
                     O.OBJTYPE,
                     COALESCE(S.REFOBJNAME, '') AS REFOBJNAME,
-                    COALESCE(O.DESCRIPTION, '') AS DESCRIPTION
+                    COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
+                    CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
                 FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
                 LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
+                LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
                 WHERE ${buildDatabasePredicate(database)}
                     AND ${buildNetezzaIdentifierEquality('O.SCHEMA', schema)}
                     AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
@@ -150,9 +170,11 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 O.OBJTYPE,
                 O.SCHEMA,
                 COALESCE(S.REFOBJNAME, '') AS REFOBJNAME,
-                COALESCE(O.DESCRIPTION, '') AS DESCRIPTION
+                COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
+                CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
             FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
             LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.SYNONYM)} S ON S.OBJID = O.OBJID
+            LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
             WHERE ${buildDatabasePredicate(database)}
                 AND O.OBJTYPE IN ('TABLE', 'VIEW', 'SYNONYM', 'EXTERNAL TABLE')
             ORDER BY O.OBJNAME
@@ -192,6 +214,22 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 ORDER BY O.OBJNAME
             `.trim();
         }
+        if (objectType === 'TABLE') {
+            return `
+                SELECT
+                    O.OBJNAME,
+                    O.SCHEMA,
+                    O.OBJID,
+                    COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
+                    O.OWNER,
+                    CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
+                FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+                LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
+                WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', database)}
+                    AND O.OBJTYPE = 'TABLE'
+                ORDER BY O.OBJNAME
+            `.trim();
+        }
         return `SELECT OBJNAME, SCHEMA, OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildNetezzaIdentifierEquality('DBNAME', database)} AND OBJTYPE = '${escapeSqlLiteral(objectType)}' ORDER BY OBJNAME`;
     },
     buildObjectByNameQuery(
@@ -204,13 +242,15 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
             .map(type => `'${escapeSqlLiteral(type)}'`)
             .join(', ');
         return `
-            SELECT OBJNAME, SCHEMA, OBJID, OBJTYPE,
-                   COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER
-            FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)}
-            WHERE ${buildDatabasePredicate(database)}
-              AND ${buildSchemaPredicate(schema)}
-              AND ${buildNetezzaIdentifierEquality('OBJNAME', objectName)}
-              AND OBJTYPE IN (${types})
+            SELECT O.OBJNAME, O.SCHEMA, O.OBJID, O.OBJTYPE,
+                   COALESCE(O.DESCRIPTION, '') AS DESCRIPTION, O.OWNER,
+                   CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
+            FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+            LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
+            WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', database)}
+              AND ${buildNetezzaIdentifierEquality('O.SCHEMA', schema)}
+              AND ${buildNetezzaIdentifierEquality('O.OBJNAME', objectName)}
+              AND O.OBJTYPE IN (${types})
         `.trim();
     },
     buildTypeGroupsQuery(database: string): string {

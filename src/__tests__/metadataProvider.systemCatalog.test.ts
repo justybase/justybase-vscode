@@ -80,7 +80,7 @@ describe('MetadataProvider system catalog mirroring', () => {
 
             if (query.includes('FROM TARGET_DB.._V_OBJECT_DATA')) {
                 return [
-                    { OBJNAME: 'ORDERS', OBJID: 11, OBJTYPE: 'TABLE', SCHEMA: 'PUBLIC', DESCRIPTION: 'Orders table' },
+                    { OBJNAME: 'ORDERS', OBJID: 11, OBJTYPE: 'TABLE', SCHEMA: 'PUBLIC', DESCRIPTION: 'Orders table', RELTUPLES: 18484 },
                     {
                         OBJNAME: 'ORDERS_SYNONYM',
                         OBJID: 12,
@@ -125,6 +125,18 @@ describe('MetadataProvider system catalog mirroring', () => {
         expect(executedQueries.some(query => query.includes('TARGET_DB.._V_OBJECT_DATA'))).toBe(true)
         expect(executedQueries.some(query => query.includes('SYSTEM.._V_OBJECT_DATA'))).toBe(true)
         expect(metadataCache.setTables).toHaveBeenCalled()
+    })
+
+    it('maps _V_TABLE.RELTUPLES into cached table metadata', async () => {
+        await provider.getTables('CONN_1', 'TARGET_DB')
+
+        const cachedRows = (metadataCache.setTables as jest.Mock).mock.calls
+            .flatMap(call => call[2] as TableMetadata[])
+            .filter(row => row.OBJNAME === 'ORDERS')
+        expect(cachedRows[0]?.rowCount).toBe(18484)
+
+        const executedQueries = runQueryRawMock.mock.calls.map(call => (call[0] as RunQueryRawOptions).query)
+        expect(executedQueries.some(query => query.includes('_V_TABLE') && query.includes('RELTUPLES'))).toBe(true)
     })
 
     it('loads mirrored system catalog columns from SYSTEM for arbitrary database prefixes', async () => {

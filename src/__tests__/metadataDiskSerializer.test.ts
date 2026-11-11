@@ -58,6 +58,7 @@ describe('metadataDiskSerializer', () => {
                 objType: 'TABLE',
                 kind: 6,
                 label: 'T1',
+                rowCount: 18484,
             }],
             idMap,
         );
@@ -92,6 +93,7 @@ describe('metadataDiskSerializer', () => {
         expect(cache2.getDatabases('conn1')).toEqual(cache.getDatabases('conn1'));
         expect(cache2.getSchemas('conn1', 'DB1')).toEqual(cache.getSchemas('conn1', 'DB1'));
         expect(cache2.getTables('conn1', 'DB1.ADMIN')).toEqual(cache.getTables('conn1', 'DB1.ADMIN'));
+        expect(cache2.getTables('conn1', 'DB1.ADMIN')?.[0].rowCount).toBe(18484);
         expect(cache2.findTableId('conn1', 'DB1.ADMIN.T1')).toBe(100);
     });
 

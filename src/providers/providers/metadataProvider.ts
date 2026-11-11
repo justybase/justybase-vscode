@@ -13,6 +13,7 @@ import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/sch
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
+import { normalizeEstimatedRowCount } from '../../metadata/estimatedRowCount';
 import {
     allowsLiveMetadataFetchForSource,
 } from '../../metadata/liveFallbackPolicy';
@@ -495,13 +496,14 @@ export class MetadataProvider {
             });
             if (!result) return [];
 
-            const results = queryResultToRows<Record<string, unknown> & { OBJNAME: string; OBJID: number; OBJTYPE: string; SCHEMA?: string; DESCRIPTION?: string; REFOBJNAME?: string }>(result);
+            const results = queryResultToRows<Record<string, unknown> & { OBJNAME: string; OBJID: number; OBJTYPE: string; SCHEMA?: string; DESCRIPTION?: string; REFOBJNAME?: string; RELTUPLES?: unknown }>(result);
             const items: TableMetadata[] = results.map(row => {
                 const label = row.OBJNAME;
                 const schema = row.SCHEMA || schemaName;
                 const normalizedObjectType = row.OBJTYPE?.toUpperCase() || 'TABLE';
                 const isView = normalizedObjectType === 'VIEW' || normalizedObjectType === 'MATERIALIZED VIEW';
                 const kind = isView ? vscode.CompletionItemKind.Interface : vscode.CompletionItemKind.Class;
+                const rowCount = normalizeEstimatedRowCount(row.RELTUPLES);
                 const typeLabel =
                     normalizedObjectType === 'NICKNAME'
                         ? 'Nickname'
@@ -528,6 +530,7 @@ export class MetadataProvider {
                     DESCRIPTION: normalizeCompletionDescription(row.DESCRIPTION),
                     REFOBJNAME: row.REFOBJNAME,
                     tableDefinition: clickHouseTableDefinitionFromRow(row),
+                    ...(rowCount !== undefined ? { rowCount } : {}),
                 };
             });
 

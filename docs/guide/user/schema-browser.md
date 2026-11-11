@@ -61,6 +61,7 @@ Metadata warm-up is scoped to databases rather than the whole connection:
 - Every other database stays lazy: the first expansion, `DB..` reference, or explicit refresh builds that database's snapshot.
 - **Refresh Selected Metadata** on a database rebuilds the full scope for that database only, including view definitions and procedure sources.
 - Empty databases and schemas are remembered as empty, so reopening them does not repeat catalog queries.
+- Table nodes show the optimizer's estimated row count from `_V_TABLE.RELTUPLES`, prefixed with `~`. It is an estimate, not an exact `COUNT(*)`, and it follows the same TTL, invalidation and disk-persistence policy as other table metadata.
 
 `justybase.metadata.liveFallback` controls whether a cache miss may query the server:
 

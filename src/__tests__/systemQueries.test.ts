@@ -418,6 +418,14 @@ describe('metadata/systemQueries', () => {
             expect(query).not.toContain('_V_EXTERNAL');
             expect(query).not.toContain('_V_EXTOBJECT');
         });
+
+        it('should fetch the optimizer row estimate from _V_TABLE.RELTUPLES', () => {
+            const query = NZ_QUERIES.listTablesAndViews(['MYDB']);
+            expect(query).toContain('MYDB.._V_TABLE');
+            expect(query).toContain('T.OBJID = O.OBJID');
+            expect(query).toContain('T.RELTUPLES >= 0');
+            expect(query).toContain('AS RELTUPLES');
+        });
     });
 
     describe('NZ_QUERIES.listExternalTables', () => {

@@ -56,6 +56,7 @@ import {
     tableMatchesSchemaFilter,
 } from './schemaFilterUtils';
 import { buildNetezzaSynonymTargetQuery } from '../metadata/synonymColumns';
+import { formatEstimatedRowCount } from '../metadata/estimatedRowCount';
 import {
     isNetezzaQuotedIdentifier,
     unquoteNetezzaIdentifier,
@@ -2931,6 +2932,7 @@ export class SchemaProvider
                         detail?: string;
                         OWNER?: string;
                         label?: string | { label: string };
+                        rowCount?: number;
                     }) => {
                         const expandableTypes = [
                             'TABLE',
@@ -2952,7 +2954,7 @@ export class SchemaProvider
                             obj.OBJNAME ||
                             obj.TABLENAME ||
                             (typeof obj.label === 'string' ? obj.label : obj.label?.label || '');
-                        return new SchemaItem(
+                        const item = new SchemaItem(
                             rawObjectName,
                             isExpandable
                                 ? vscode.TreeItemCollapsibleState.Collapsed
@@ -2971,6 +2973,8 @@ export class SchemaProvider
                             obj.OWNER, // owner
                             rawObjectName,
                         );
+                        item.applyRowCount(obj.rowCount);
+                        return item;
                     },
                 );
                 return this.cacheTypeGroupChildren(element, children);
@@ -3240,6 +3244,8 @@ export class SchemaItem extends vscode.TreeItem {
      * to prevent duplicate ID errors when the same table is expanded in both views.
      */
     public sourceContext?: string;
+    /** Optimizer row-count estimate from `_V_TABLE.RELTUPLES`, when available. */
+    public rowCount?: number;
     public readonly rawLabel: string;
     public readonly objectDescription?: string;
     /** Tooltip and description as built by the constructor, before a user note is applied. */
@@ -3380,6 +3386,28 @@ export class SchemaItem extends vscode.TreeItem {
                 arguments: [this, { fromTreeClick: true }],
             };
         }
+    }
+
+    /**
+     * Show the optimizer's estimated row count on table-like items. The value
+     * comes from `_V_TABLE.RELTUPLES`, so it is explicitly marked with `~` and
+     * never replaced with an exact `COUNT(*)`.
+     */
+    applyRowCount(rowCount: number | undefined): void {
+        if (rowCount === undefined || !Number.isFinite(rowCount) || rowCount < 0) {
+            return;
+        }
+        this.rowCount = rowCount;
+        const formatted = formatEstimatedRowCount(rowCount);
+        this.description = typeof this.description === 'string' && this.description
+            ? `${this.description} · ${formatted}`
+            : formatted;
+        const tooltipText = this.tooltip instanceof vscode.MarkdownString
+            ? this.tooltip.value
+            : typeof this.tooltip === 'string'
+                ? this.tooltip
+                : this.label;
+        this.tooltip = `${tooltipText}\n\nEstimated rows: ${formatted} (reltuples)`;
     }
 
     /** Shows a local user note at the top of the tooltip and marks the node with 📝. */
