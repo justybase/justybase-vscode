@@ -1335,6 +1335,8 @@ export class MetadataProvider {
                     isPk: col.isPk,
                     isFk: col.isFk,
                     isDistributionKey: col.isDistributionKey,
+                    isNotNull: col.isNotNull,
+                    colDefault: col.colDefault,
                     documentation: col.description
                 }));
             } else {

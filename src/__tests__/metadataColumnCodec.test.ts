@@ -108,6 +108,26 @@ describe('metadataColumnCodec', () => {
         expect(decodeColumnFile(encoded)['DB1.ADMIN.NO_COLUMNS'].data).toEqual([]);
     });
 
+    it('should roundtrip ATTNOTNULL/COLDEFAULT without inventing nullable columns', () => {
+        const encoded = encodeColumnLayers('DB1', {
+            'DB1.ADMIN.DIMDATE': {
+                timestamp: 400,
+                data: [
+                    { ATTNAME: 'DIMDATEID', FORMAT_TYPE: 'INTEGER', label: 'DIMDATEID', isNotNull: true },
+                    { ATTNAME: 'YEAR', FORMAT_TYPE: 'INTEGER', label: 'YEAR', isNotNull: false },
+                    { ATTNAME: 'DAYNAME', FORMAT_TYPE: 'VARCHAR', label: 'DAYNAME' },
+                    { ATTNAME: 'CREATED_AT', FORMAT_TYPE: 'TIMESTAMP', label: 'CREATED_AT', isNotNull: true, colDefault: 'NOW()' },
+                ],
+            },
+        });
+
+        const decoded = decodeColumnLayerFromFile(encoded, 'DB1.ADMIN.DIMDATE')!;
+        expect(decoded.map(column => column.isNotNull)).toEqual([true, false, undefined, true]);
+        expect(decoded[2]).not.toHaveProperty('isNotNull');
+        expect(decoded[3].colDefault).toBe('NOW()');
+        expect(decoded[0]).not.toHaveProperty('colDefault');
+    });
+
     it('should produce smaller JSON than expanded column objects at scale', () => {
         const largeLayers: Record<string, SerializedLayerEntry<ColumnMetadata>> = {};
         for (let table = 0; table < 50; table++) {

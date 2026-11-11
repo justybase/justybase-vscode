@@ -166,6 +166,8 @@ async function loadTableColumns(
             isPk: column.isPk,
             isFk: column.isFk,
             isDistributionKey: column.isDistributionKey,
+            isNotNull: column.isNotNull,
+            colDefault: column.colDefault,
         }),
     );
     deps.metadataCache.setColumns(

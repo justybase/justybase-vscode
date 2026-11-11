@@ -120,6 +120,10 @@ export interface ColumnMetadata {
     isPk?: boolean;
     isFk?: boolean;
     isDistributionKey?: boolean;
+    /** `_V_RELATION_COLUMN.ATTNOTNULL`; undefined when the layer never read it. */
+    isNotNull?: boolean;
+    /** `_V_RELATION_COLUMN.COLDEFAULT`; null when the column has no default. */
+    colDefault?: string | null;
     joinReferences?: import('../contracts/database').DatabaseForeignKeyColumnReference[];
     [key: string]: unknown;
 }

@@ -299,6 +299,18 @@ describe('metadata/systemQueries', () => {
             expect(query).not.toContain('IS_PK');
         });
 
+        it('should cache ATTNOTNULL and COLDEFAULT with the base column scan', () => {
+            const query = NZ_QUERIES.listColumnsWithKeys('MYDB');
+            expect(query).toContain('CASE WHEN C.ATTNOTNULL THEN 1 ELSE 0 END AS IS_NOT_NULL');
+            expect(query).toContain('C.COLDEFAULT');
+        });
+
+        it('should expose the same column flags for external tables', () => {
+            const query = NZ_QUERIES.listExternalColumnsWithKeys('MYDB');
+            expect(query).toContain('CASE WHEN C.ATTNOTNULL THEN 1 ELSE 0 END AS IS_NOT_NULL');
+            expect(query).toContain('C.COLDEFAULT');
+        });
+
         it('should build independent per-database key and distribution scans', () => {
             const keys = NZ_QUERIES.listColumnKeyFlags('MYDB');
             const distribution = NZ_QUERIES.listColumnDistributionFlags('MYDB');

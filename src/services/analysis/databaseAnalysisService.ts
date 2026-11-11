@@ -353,7 +353,7 @@ export class DatabaseAnalysisService implements vscode.Disposable {
                             if (table.object.database !== database) { continue; }
                             const matching = merged.filter(c => text(c, 'TABLENAME') === table.object.name && text(c, 'SCHEMA') === table.object.schema);
                             if (matching.length) {
-                                this.cache.setColumns(connection, buildColumnCacheKey(table.object.database, table.object.schema, table.object.name, { preserveCase: true, exactNetezza: true }), matching.map(row => mapRawColumnRowToMetadata({ TABLENAME: text(row, 'TABLENAME'), ATTNAME: text(row, 'ATTNAME'), FORMAT_TYPE: text(row, 'FORMAT_TYPE'), SCHEMA: text(row, 'SCHEMA'), DBNAME: text(row, 'DBNAME'), IS_DISTRIBUTION_KEY: Number(row.IS_DISTRIBUTION_KEY) })));
+                                this.cache.setColumns(connection, buildColumnCacheKey(table.object.database, table.object.schema, table.object.name, { preserveCase: true, exactNetezza: true }), matching.map(row => mapRawColumnRowToMetadata({ TABLENAME: text(row, 'TABLENAME'), ATTNAME: text(row, 'ATTNAME'), FORMAT_TYPE: text(row, 'FORMAT_TYPE'), SCHEMA: text(row, 'SCHEMA'), DBNAME: text(row, 'DBNAME'), IS_DISTRIBUTION_KEY: Number(row.IS_DISTRIBUTION_KEY), IS_NOT_NULL: row.IS_NOT_NULL, COLDEFAULT: row.COLDEFAULT })));
                                 table.columns = matching.map(c => ({ name: text(c, 'ATTNAME'), type: text(c, 'FORMAT_TYPE') }));
                                 table.distribution = distributionFromKeys(matching.filter(c => c.IS_DISTRIBUTION_KEY === 1).map(c => text(c, 'ATTNAME')), table.object, true);
                             }

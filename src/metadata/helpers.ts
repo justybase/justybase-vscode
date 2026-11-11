@@ -5,6 +5,7 @@
 
 import type { TableMetadata } from './types';
 import { mergeObjectType } from '@justybase/metadata-core';
+import { carryForwardRowCounts } from './estimatedRowCount';
 import {
     createNetezzaUserIdentifier,
     isNetezzaQuotedIdentifier,
@@ -230,6 +231,14 @@ export function inferCachedTableLikeType(item: TableMetadata): string {
     return item.kind === 18 ? 'VIEW' : 'TABLE';
 }
 
+/** Stable identity of a cached table-like object inside one schema layer. */
+export function tableLikeObjectIdentity(item: TableMetadata): string | undefined {
+    const label = extractLabel(item) || item.OBJNAME || item.TABLENAME;
+    if (!label) return undefined;
+    const schemaName = typeof item.SCHEMA === 'string' ? item.SCHEMA.toUpperCase() : '';
+    return `${inferCachedTableLikeType(item)}|${schemaName}|${label.toUpperCase()}`;
+}
+
 /**
  * Merge shared table-like cache entries while replacing only the requested object type.
  *
@@ -244,16 +253,21 @@ export function mergeTableLikeObjectsForSchema(
     targetType: string
 ): TableMetadata[] {
     const normalizedTargetType = targetType.toUpperCase();
-    return mergeObjectType(existingTables ?? [], updatedTables, {
+    const previousTables = existingTables ?? [];
+    // A refresh may come from a path that does not report `RELTUPLES` (mirrored
+    // system catalog, external-only pass, generic type query). The merge treats
+    // the incoming row as authoritative, so carry the last known estimate over
+    // instead of dropping the `~N rows` hint from the tree and suggestions.
+    const refreshedTables = carryForwardRowCounts(
+        previousTables,
+        updatedTables,
+        tableLikeObjectIdentity,
+    );
+    return mergeObjectType(previousTables, refreshedTables, {
         objectType: normalizedTargetType,
         getObjectType: table => inferCachedTableLikeType(table),
         normalizeObjectType: value => value.toUpperCase(),
-        getIdentity: table => {
-            const label = extractLabel(table) || table.OBJNAME || table.TABLENAME;
-            if (!label) return undefined;
-            const schemaName = typeof table.SCHEMA === 'string' ? table.SCHEMA.toUpperCase() : '';
-            return `${inferCachedTableLikeType(table)}|${schemaName}|${label.toUpperCase()}`;
-        },
+        getIdentity: tableLikeObjectIdentity,
         sort: (left, right) => {
         const leftType = inferCachedTableLikeType(left);
         const rightType = inferCachedTableLikeType(right);

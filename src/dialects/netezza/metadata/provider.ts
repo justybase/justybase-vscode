@@ -181,10 +181,22 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
         `.trim();
     },
     buildListViewsQuery(database: string, schema?: string): string {
-        if (schema) {
-            return `SELECT OBJNAME, SCHEMA, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildDatabasePredicate(database)} AND ${buildSchemaPredicate(schema)} AND OBJTYPE = 'VIEW' ORDER BY OBJNAME`;
-        }
-        return `SELECT OBJNAME, SCHEMA, COALESCE(DESCRIPTION, '') AS DESCRIPTION FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildDatabasePredicate(database)} AND OBJTYPE = 'VIEW' ORDER BY OBJNAME`;
+        // `_V_TABLE` also describes materialized views, so their optimizer
+        // estimate stays available after a view-only refresh. Plain views get
+        // `NULL` and therefore no `~N rows` hint.
+        const schemaPredicate = schema ? `\n                AND ${buildNetezzaIdentifierEquality('O.SCHEMA', schema)}` : '';
+        return `
+            SELECT
+                O.OBJNAME,
+                O.SCHEMA,
+                COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
+                CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
+            FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+            LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
+            WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', database)}
+                AND O.OBJTYPE = 'VIEW'${schemaPredicate}
+            ORDER BY O.OBJNAME
+        `.trim();
     },
     buildListProceduresQuery(database: string, schema?: string): string {
         let query = `SELECT SCHEMA, PROCEDURE, PROCEDURESIGNATURE FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.PROCEDURE)} WHERE ${buildNetezzaIdentifierEquality('DATABASE', database)}`;
@@ -230,7 +242,20 @@ export const netezzaMetadataProvider: NetezzaMetadataProvider = {
                 ORDER BY O.OBJNAME
             `.trim();
         }
-        return `SELECT OBJNAME, SCHEMA, OBJID, COALESCE(DESCRIPTION, '') AS DESCRIPTION, OWNER FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} WHERE ${buildNetezzaIdentifierEquality('DBNAME', database)} AND OBJTYPE = '${escapeSqlLiteral(objectType)}' ORDER BY OBJNAME`;
+        return `
+            SELECT
+                O.OBJNAME,
+                O.SCHEMA,
+                O.OBJID,
+                COALESCE(O.DESCRIPTION, '') AS DESCRIPTION,
+                O.OWNER,
+                CASE WHEN T.RELTUPLES >= 0 THEN T.RELTUPLES ELSE NULL END AS RELTUPLES
+            FROM ${qualifySystemView(database, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O
+            LEFT JOIN ${qualifySystemView(database, NZ_SYSTEM_VIEWS.TABLE)} T ON T.OBJID = O.OBJID
+            WHERE ${buildNetezzaIdentifierEquality('O.DBNAME', database)}
+                AND O.OBJTYPE = '${escapeSqlLiteral(objectType)}'
+            ORDER BY O.OBJNAME
+        `.trim();
     },
     buildObjectByNameQuery(
         database: string,

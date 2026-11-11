@@ -30,6 +30,13 @@ export const FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION = 1;
 export const COLUMN_FLAG_PK = 1;
 export const COLUMN_FLAG_FK = 2;
 export const COLUMN_FLAG_DISTRIBUTION_KEY = 4;
+/**
+ * `_V_RELATION_COLUMN.ATTNOTNULL` needs two bits: `KNOWN` separates "catalog
+ * said nullable" from "this layer never read the flag", so an older entry is
+ * never mistaken for an explicitly nullable column.
+ */
+export const COLUMN_FLAG_NOT_NULL_KNOWN = 8;
+export const COLUMN_FLAG_NOT_NULL = 16;
 
 /** @deprecated Use LEGACY_CACHE_FILE_NAME from metadataDiskPaths */
 export const CACHE_FILE_NAME = 'metadata-cache-v1.json.gz';
@@ -102,6 +109,8 @@ export interface EncodedColumnRecord {
     name: string;
     flags: number;
     doc?: number;
+    /** `_V_RELATION_COLUMN.COLDEFAULT`, stored only when the column has one. */
+    default?: string;
     /** Exact declared FK endpoints for cache-only JOIN completion. */
     references?: import('../../contracts/database').DatabaseForeignKeyColumnReference[];
 }

@@ -193,6 +193,21 @@ describe("completionRenderer — documentation regression guard", () => {
       expect(items[0].documentation).toBe("Daily sales facts");
     });
 
+    it("derives the type and schema when the metadata layer has no detail", () => {
+      const tables: MetadataObjectItem[] = [{
+        name: "DIMDATE",
+        objectType: "table",
+        schema: "CONFORMANCE",
+        description: "test comment",
+        rowCount: 4213,
+      }];
+      const items = filterMetadataItems(tables, "DIM", undefined, undefined, {
+        ranking: { role: "source" },
+      });
+      expect(items[0].detail).toBe("TABLE (CONFORMANCE) · ~4k rows · test comment");
+      expect(items[0].documentation).toBe("test comment");
+    });
+
     it("omits documentation when description is undefined", () => {
       const tables: MetadataObjectItem[] = [
         { name: "FACT_SALES", objectType: "table" },

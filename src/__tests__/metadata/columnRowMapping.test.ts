@@ -91,4 +91,44 @@ describe('columnRowMapping', () => {
         expect(grouped.get('DB1.PUBLIC.ORDERS')).toHaveLength(1);
         expect(buildColumnCacheKey(' DB1 ', ' PUBLIC ', ' ORDERS ')).toBe('DB1.PUBLIC.ORDERS');
     });
+
+    it('maps ATTNOTNULL and COLDEFAULT into the cached column', () => {
+        const notNull = mapRawColumnRowToMetadata({
+            TABLENAME: 'ORDERS',
+            DBNAME: 'DB1',
+            SCHEMA: 'PUBLIC',
+            ATTNAME: 'ID',
+            FORMAT_TYPE: 'INT4',
+            IS_NOT_NULL: 1,
+        });
+        expect(notNull.isNotNull).toBe(true);
+        expect(notNull.colDefault).toBeUndefined();
+
+        const withDefault = mapRawColumnRowToMetadata({
+            TABLENAME: 'ORDERS',
+            DBNAME: 'DB1',
+            SCHEMA: 'PUBLIC',
+            ATTNAME: 'STATUS',
+            FORMAT_TYPE: 'VARCHAR(20)',
+            IS_NOT_NULL: 0,
+            COLDEFAULT: "  'OPEN'::text  ",
+        });
+        expect(withDefault.isNotNull).toBe(false);
+        expect(withDefault.colDefault).toBe("'OPEN'::text");
+    });
+
+    it('omits nullability when the catalog column was never read', () => {
+        const mapped = mapRawColumnRowToMetadata({
+            TABLENAME: 'ORDERS',
+            DBNAME: 'DB1',
+            SCHEMA: 'PUBLIC',
+            ATTNAME: 'AMOUNT',
+            FORMAT_TYPE: 'NUMERIC',
+        });
+
+        // `undefined` marks an older/completion-only layer; it must not be
+        // confused with an explicitly nullable column.
+        expect(mapped).not.toHaveProperty('isNotNull');
+        expect(mapped).not.toHaveProperty('colDefault');
+    });
 });

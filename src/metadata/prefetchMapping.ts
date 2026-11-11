@@ -120,7 +120,7 @@ export function mapPrefetchObjectRow(row: RawObjectRow, preserveCatalogIdentity 
         OBJNAME: objectName,
         label: objectName,
         kind: isViewLike ? 18 : 6,
-        detail: schemaName ? typeLabel : `${typeLabel} (${schemaName})`,
+        detail: schemaName ? `${typeLabel} (${schemaName})` : typeLabel,
         objType: normalizedObjectType,
         OBJID: row.OBJID,
         SCHEMA: schemaName,

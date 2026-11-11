@@ -987,7 +987,8 @@ ${unionSql}
      * Get the base column metadata leg for tables in a database.
      * Key and distribution flags are fetched by separate catalog queries and
      * merged in TypeScript by `loadColumnsWithKeysRows`.
-     * Returns: OBJID, TABLENAME, SCHEMA, DBNAME, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION
+     * Returns: OBJID, TABLENAME, SCHEMA, DBNAME, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION,
+     * IS_NOT_NULL, COLDEFAULT
      *
      * Note: Uses DBNAME filter to ensure we only get objects from the specified database.
      * Column DESCRIPTION comes from _V_RELATION_COLUMN which doesn't have the cross-DB issue.
@@ -1011,7 +1012,9 @@ ${unionSql}
                 C.ATTNAME,
                 C.FORMAT_TYPE,
                 C.ATTNUM,
-                C.DESCRIPTION AS DESCRIPTION
+                C.DESCRIPTION AS DESCRIPTION,
+                CASE WHEN C.ATTNOTNULL THEN 1 ELSE 0 END AS IS_NOT_NULL,
+                C.COLDEFAULT
             FROM ${qualifySystemView(db, NZ_SYSTEM_VIEWS.RELATION_COLUMN)} C
             JOIN ${qualifySystemView(db, NZ_SYSTEM_VIEWS.OBJECT_DATA)} O ON C.OBJID = O.OBJID
             WHERE ${whereClause}
@@ -1087,7 +1090,8 @@ ${unionSql}
      * `_V_OBJECT_DATA`. Duplicate resolution is performed in TypeScript.
      *
      * Returns the same row shape as `listColumnsWithKeys`:
-     * TABLENAME, SCHEMA, DBNAME, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION, IS_PK, IS_FK, IS_DISTRIBUTION_KEY
+     * TABLENAME, SCHEMA, DBNAME, ATTNAME, FORMAT_TYPE, ATTNUM, DESCRIPTION,
+     * IS_NOT_NULL, COLDEFAULT, IS_PK, IS_FK, IS_DISTRIBUTION_KEY
      *
      * @param database - Database name
      * @param options - Optional filters: schema, tableName
@@ -1111,6 +1115,8 @@ ${unionSql}
                 C.FORMAT_TYPE,
                 C.ATTNUM,
                 COALESCE(C.DESCRIPTION, '') AS DESCRIPTION,
+                CASE WHEN C.ATTNOTNULL THEN 1 ELSE 0 END AS IS_NOT_NULL,
+                C.COLDEFAULT,
                 0 AS IS_PK,
                 0 AS IS_FK,
                 0 AS IS_DISTRIBUTION_KEY

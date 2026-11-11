@@ -13,6 +13,8 @@ export interface RawColumnRowWithKeys {
     SCHEMA?: string;
     DBNAME?: string;
     DESCRIPTION?: string | null;
+    IS_NOT_NULL?: unknown;
+    COLDEFAULT?: unknown;
     IS_PK?: number | string;
     IS_FK?: number | string;
     IS_DISTRIBUTION_KEY?: number | string;
@@ -30,6 +32,7 @@ export function normalizeCatalogPart(
 }
 
 export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMetadata {
+    const colDefault = typeof row.COLDEFAULT === 'string' ? row.COLDEFAULT.trim() : '';
     return {
         ATTNAME: row.ATTNAME,
         FORMAT_TYPE: row.FORMAT_TYPE,
@@ -43,8 +46,26 @@ export function mapRawColumnRowToMetadata(row: RawColumnRowWithKeys): ColumnMeta
             row.IS_DISTRIBUTION_KEY !== undefined
                 ? Number(row.IS_DISTRIBUTION_KEY) === 1
                 : false,
+        // `undefined` means "this layer never read the catalog column", which is
+        // different from a column that is genuinely nullable / has no default.
+        ...(row.IS_NOT_NULL === undefined || row.IS_NOT_NULL === null
+            ? {}
+            : { isNotNull: normalizeColumnFlag(row.IS_NOT_NULL) }),
+        ...(row.COLDEFAULT === undefined
+            ? {}
+            : { colDefault: colDefault.length > 0 ? colDefault : null }),
         joinReferences: Array.isArray(row.JOIN_REFERENCES) ? row.JOIN_REFERENCES : undefined,
     };
+}
+
+/** Catalog boolean flags arrive as 1/0, 't'/'f', true/false or 'true'/'false'. */
+function normalizeColumnFlag(value: unknown): boolean {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized === '1' || normalized === 't' || normalized === 'true'
+        || normalized === 'yes' || normalized === 'on';
 }
 
 export function normalizeTableNameForColumnCacheKey(tableName: string): string {

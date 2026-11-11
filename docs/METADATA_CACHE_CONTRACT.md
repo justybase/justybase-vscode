@@ -82,6 +82,14 @@ schema key with the full result set for that schema.
 follows the same TTL, invalidation and disk-persistence rules, and negative
 estimates are omitted rather than displayed.
 
+Refreshes treat an incoming row as authoritative, so a query that does not
+select `RELTUPLES` (or returns `NULL` because the optimizer has no statistics)
+would silently erase a known estimate. `mergeTableLikeObjectsForSchema`,
+`replaceTableObjectTypeForDatabase` and `upsertTableObject` therefore carry the
+last known `rowCount` over when the refreshed row does not report one
+(`carryForwardRowCounts`). A real estimate always replaces the carried value;
+newly discovered objects start without one.
+
 ### Example: refresh VIEW when TABLE already cached
 
 1. Explorer loads VIEW list from the server.
@@ -89,6 +97,24 @@ estimates are omitted rather than displayed.
 3. `setTables` writes the merged array.
 
 Skipping step 2 removes all TABLE entries for that schema key.
+
+## Column cache payload
+
+`ColumnMetadata` mirrors the Netezza catalog row so the schema tree, completion
+and the read-only object view can share one layer:
+
+| Field | Source | Notes |
+| --- | --- | --- |
+| `ATTNAME`, `FORMAT_TYPE`, `documentation` | `_V_RELATION_COLUMN` | name, type and comment |
+| `isPk`, `isFk` | `_V_RELATION_KEYDATA` | merged in code |
+| `isDistributionKey` | `_V_TABLE_DIST_MAP` | merged in code |
+| `isNotNull` | `_V_RELATION_COLUMN.ATTNOTNULL` | `undefined` means the layer never read the flag; `false` means the column is nullable |
+| `colDefault` | `_V_RELATION_COLUMN.COLDEFAULT` | trimmed expression, `null`/absent when the column has no default |
+
+The `*.columns.json.gz` codec stores `isNotNull` as two flag bits
+(`COLUMN_FLAG_NOT_NULL_KNOWN` plus `COLUMN_FLAG_NOT_NULL`) so a column file
+written before the field existed is never mistaken for an explicitly nullable
+column.
 
 ## TTL and prefetch freshness
 

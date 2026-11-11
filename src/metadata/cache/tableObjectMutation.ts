@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { buildIdLookupKey, extractLabel, inferCachedTableLikeType } from '../helpers';
-import { normalizeEstimatedRowCount } from '../estimatedRowCount';
+import { carryForwardRowCounts, normalizeEstimatedRowCount } from '../estimatedRowCount';
 import type { TableMetadata } from '../types';
 import type { MetadataCachePort } from './metadataCachePort';
 import { buildSchemaCacheKey } from './schemaTreeDataSource';
@@ -81,13 +81,20 @@ function mergeUpsertedTableObject(
 
     const objectType = inferCachedTableLikeType(table).toUpperCase();
     const remaining = existing.filter(item => !sameName(getObjectName(item), tableName));
+    // A single-object refresh can report `RELTUPLES = NULL` (no statistics);
+    // keep the estimate the row already had instead of dropping the hint.
+    const previousRowCount = existing
+        .find(item => sameName(getObjectName(item), tableName))?.rowCount;
+    const nextTable = table.rowCount === undefined && previousRowCount !== undefined
+        ? { ...table, rowCount: previousRowCount }
+        : table;
     const retained = remaining.filter(
         item => inferCachedTableLikeType(item).toUpperCase() !== objectType,
     );
     const sameType = remaining.filter(
         item => inferCachedTableLikeType(item).toUpperCase() === objectType,
     );
-    sameType.push(table);
+    sameType.push(nextTable);
     sameType.sort(compareTableObjectNames);
     return [...retained, ...sameType];
 }
@@ -235,6 +242,14 @@ export function replaceTableObjectTypeForDatabase(
         }
     }
 
+    // A type-group refresh built from a query without `RELTUPLES` must not
+    // erase estimates the cache already knows (tree and suggestions show them).
+    const refreshedRows = carryForwardRowCounts(
+        cachedTables,
+        rows,
+        row => `${(row.SCHEMA?.trim().toUpperCase() || '')}\u0000${(getObjectName(row) || '').toUpperCase()}`,
+    );
+
     for (const schema of schemas) {
         const schemaName = schema || undefined;
         const cacheKey = buildSchemaCacheKey(database, schemaName);
@@ -242,7 +257,7 @@ export function replaceTableObjectTypeForDatabase(
             ?? cachedBySchema.get(schema)
             ?? [];
         const retained = existing.filter(item => inferCachedTableLikeType(item).toUpperCase() !== objectType.toUpperCase());
-        const replacements = rows.filter(row => (row.SCHEMA?.trim().toUpperCase() || '') === schema);
+        const replacements = refreshedRows.filter(row => (row.SCHEMA?.trim().toUpperCase() || '') === schema);
         const merged = [...retained, ...replacements];
         cache.setTables(connectionName, cacheKey, merged, buildIdMap(database, schemaName, merged));
         cache.markObjectsCatalogLoaded(connectionName, cacheKey, objectType);

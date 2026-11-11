@@ -157,6 +157,8 @@ export function normalizeColumnCacheEntry(
     | 'isPk'
     | 'isFk'
     | 'isDistributionKey'
+    | 'isNotNull'
+    | 'colDefault'
   >,
 ): ColumnMetadata {
   return {
@@ -169,6 +171,10 @@ export function normalizeColumnCacheEntry(
     isPk: col.isPk ?? false,
     isFk: col.isFk ?? false,
     isDistributionKey: col.isDistributionKey ?? false,
+    // `undefined` stays undefined: it marks a layer that never read the flag,
+    // while a nullable column is an explicit `false`.
+    ...(col.isNotNull === undefined ? {} : { isNotNull: col.isNotNull }),
+    ...(col.colDefault === undefined ? {} : { colDefault: col.colDefault ?? null }),
   };
 }
 

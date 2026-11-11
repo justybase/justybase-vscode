@@ -2,7 +2,6 @@ import type { CompletionItem } from "vscode-languageserver/node";
 import {
   mergeCompletionDetail,
   normalizeCompletionDescription,
-  toInlineCompletionDescription,
 } from "../utils/completionDescriptionUtils";
 
 export {

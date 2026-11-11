@@ -21,6 +21,8 @@ export interface NetezzaColumnsWithKeysRow extends Record<string, unknown> {
     FORMAT_TYPE?: unknown;
     ATTNUM?: unknown;
     DESCRIPTION?: unknown;
+    IS_NOT_NULL?: unknown;
+    COLDEFAULT?: unknown;
     IS_PK?: unknown;
     IS_FK?: unknown;
     IS_DISTRIBUTION_KEY?: unknown;
@@ -140,6 +142,8 @@ export function mergeNetezzaColumnsWithKeysRows(
             FORMAT_TYPE: row.FORMAT_TYPE,
             ATTNUM: row.ATTNUM,
             DESCRIPTION: row.DESCRIPTION,
+            IS_NOT_NULL: row.IS_NOT_NULL,
+            COLDEFAULT: row.COLDEFAULT,
             IS_PK: isPk,
             IS_FK: isFk,
             IS_DISTRIBUTION_KEY: isDistributionKey,

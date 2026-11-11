@@ -442,12 +442,13 @@ export function filterMetadataItems(
         (databaseKind === "netezza" && item.name.startsWith("_V_")
           ? "9_"
           : "3_");
-      const detail = appendEstimatedRowCount(
-        options?.ranking?.role === "location" && databaseKind === "db2"
-          ? "Db2 location (CURRENT SERVER)"
-          : item.detail,
-        item.rowCount,
-      );
+      const baseDetail = options?.ranking?.role === "location" && databaseKind === "db2"
+        ? "Db2 location (CURRENT SERVER)"
+        : item.detail
+          ?? (options?.ranking?.role === "source"
+            ? buildSourceObjectDetail(item)
+            : undefined);
+      const detail = appendEstimatedRowCount(baseDetail, item.rowCount);
       const completionRank = getCompletionMatchRank(item.name, prefix);
       const sourceParts = options?.ranking?.role === "source"
         ? getSourceScopeKind(
@@ -644,6 +645,26 @@ function namesEqual(
   }
 
   return left.toUpperCase() === right.toUpperCase();
+}
+
+const OBJECT_TYPE_DETAIL_LABEL: Record<NonNullable<MetadataObjectItem["objectType"]>, string> = {
+  table: "TABLE",
+  view: "VIEW",
+  "materialized-view": "MATERIALIZED VIEW",
+  synonym: "SYNONYM",
+  procedure: "PROCEDURE",
+};
+
+/**
+ * `TABLE (CONFORMANCE)` for a table suggestion whose metadata carries no
+ * detail string, so the schema never disappears from the suggest row.
+ */
+function buildSourceObjectDetail(item: MetadataObjectItem): string | undefined {
+  const typeLabel = item.objectType ? OBJECT_TYPE_DETAIL_LABEL[item.objectType] : undefined;
+  if (!typeLabel) {
+    return undefined;
+  }
+  return item.schema ? `${typeLabel} (${item.schema})` : typeLabel;
 }
 
 export function toCompletionKind(

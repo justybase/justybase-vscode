@@ -4,10 +4,12 @@
 
 import type { ColumnMetadata } from '../types';
 import {
-    COLUMN_FILE_SCHEMA_VERSION,
     COLUMN_FLAG_DISTRIBUTION_KEY,
     COLUMN_FLAG_FK,
+    COLUMN_FLAG_NOT_NULL,
+    COLUMN_FLAG_NOT_NULL_KNOWN,
     COLUMN_FLAG_PK,
+    COLUMN_FILE_SCHEMA_VERSION,
     type EncodedColumnLayer,
     type EncodedColumnRecord,
     type SerializedColumnFile,
@@ -94,6 +96,12 @@ export function encodeColumnLayers(
             if (col.isDistributionKey) {
                 flags |= COLUMN_FLAG_DISTRIBUTION_KEY;
             }
+            if (col.isNotNull !== undefined) {
+                flags |= COLUMN_FLAG_NOT_NULL_KNOWN;
+                if (col.isNotNull) {
+                    flags |= COLUMN_FLAG_NOT_NULL;
+                }
+            }
 
             const record: EncodedColumnRecord = {
                 schema: schemaIdx,
@@ -104,6 +112,9 @@ export function encodeColumnLayers(
             };
             if (typeof col.documentation === 'string' && col.documentation.length > 0) {
                 record.doc = intern(docs, col.documentation);
+            }
+            if (typeof col.colDefault === 'string' && col.colDefault.length > 0) {
+                record.default = col.colDefault;
             }
             if (Array.isArray(col.joinReferences) && col.joinReferences.length > 0) {
                 record.references = col.joinReferences.map(reference => ({ ...reference }));
@@ -143,6 +154,12 @@ function decodeLayerColumnsV3(
         };
         if (encoded.doc !== undefined && file.docs[encoded.doc] !== undefined) {
             metadata.documentation = file.docs[encoded.doc];
+        }
+        if ((encoded.flags & COLUMN_FLAG_NOT_NULL_KNOWN) !== 0) {
+            metadata.isNotNull = (encoded.flags & COLUMN_FLAG_NOT_NULL) !== 0;
+        }
+        if (encoded.default !== undefined) {
+            metadata.colDefault = encoded.default;
         }
         if (encoded.references?.length) {
             metadata.joinReferences = encoded.references.map(reference => ({ ...reference }));

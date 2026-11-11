@@ -2510,6 +2510,8 @@ export class SchemaProvider
                         isPk: col.isPk,
                         isFk: col.isFk,
                         isDistributionKey: col.isDistributionKey,
+                        isNotNull: col.isNotNull,
+                        colDefault: col.colDefault,
                     }),
                 );
                 this.metadataCache.setColumns(element.connectionName, columnKey, cacheItems);
@@ -3116,6 +3118,8 @@ export class SchemaProvider
                         isPk: col.isPk,
                         isFk: col.isFk,
                         isDistributionKey: col.isDistributionKey,
+                        isNotNull: col.isNotNull,
+                        colDefault: col.colDefault,
                     }),
                 );
                 this.metadataCache.setColumns(element.connectionName, columnKey, cacheItems);
