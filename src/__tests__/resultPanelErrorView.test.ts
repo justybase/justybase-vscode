@@ -233,4 +233,113 @@ describe('result panel error view', () => {
             .join('\n');
         expect(rendered).not.toContain('RAW-PAYLOAD');
     });
+
+    it('renders the Netezza caret diagnostic byte-for-byte so the ^ stays aligned', () => {
+        const createdElements: Array<ReturnType<typeof createMockElement>> = [];
+
+        Object.defineProperty(global, 'document', {
+            configurable: true,
+            writable: true,
+            value: {
+                createElement: jest.fn((tag: string) => {
+                    const element = createMockElement(tag);
+                    createdElements.push(element);
+                    return element;
+                }),
+                querySelectorAll: jest.fn(() => [{ click: jest.fn() }]),
+            },
+        });
+
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: { resultSets: [{ isError: true, data: [] }] },
+        });
+
+        Object.defineProperty(global, 'vscode', {
+            configurable: true,
+            writable: true,
+            value: { postMessage: jest.fn() },
+        });
+
+        const gridModule: {
+            createErrorView: (
+                rs: Record<string, unknown>,
+                rsIndex: number,
+                container: { appendChild: (child: unknown) => void }
+            ) => void;
+        } = require('../../media/resultPanel/grid.js');
+
+        // Exact payload returned by the Netezza driver for `SELECT 1,,2;`.
+        // `^` sits at index 18 because the SQL starts at index 9 on line 1
+        // (`ERROR:  '`), so any extra prefix on line 1 would shift it.
+        const driverMessage = "ERROR:  'SELECT 1,,2;'\nerror             ^ found \",\" (at char 10) expecting an identifier found a keyword";
+
+        gridModule.createErrorView(
+            { message: driverMessage, sql: 'SELECT 1,,2;', isError: true, data: [] },
+            0,
+            { appendChild: jest.fn() },
+        );
+
+        const summary = createdElements.find(element => element.className === 'error-summary');
+        expect(summary?.textContent).toBe(
+            'found "," (at char 10) expecting an identifier found a keyword',
+        );
+
+        const details = createdElements.find(element => element.className === 'error-details');
+        expect(details?.textContent).toBe(driverMessage);
+        // Column 18 on the second line: 9 characters of `ERROR:  '` prefix plus
+        // the offending character offset inside the SQL text.
+        expect(details?.textContent?.split('\n')[1].indexOf('^')).toBe(18);
+        expect(details?.textContent?.startsWith('Error: ')).toBe(false);
+    });
+
+    it('classifies connection, parser and database failures', () => {
+        const views: {
+            getErrorKind: (message: string, details?: Record<string, unknown>) => string;
+            getErrorKindLabel: (kind: string) => string;
+        } = require('../../media/resultPanel/grid/alternateViews.js');
+
+        const connection = views.getErrorKind('connect ECONNREFUSED 127.0.0.1:5480');
+        expect(connection).toBe('connection');
+        expect(views.getErrorKindLabel(connection)).toBe('Network');
+
+        const parser = views.getErrorKind(
+            "ERROR:  'SELECT 1,,2;'\nerror             ^ found \",\" (at char 10) expecting an identifier",
+        );
+        expect(parser).toBe('syntax');
+        expect(views.getErrorKindLabel(parser)).toBe('Parser');
+
+        // A missing relation is a database/schema problem, not a parse problem.
+        const missingTable = views.getErrorKind('relation "JBL_MISSING_TABLE" does not exist');
+        expect(missingTable).toBe('backend');
+        expect(views.getErrorKindLabel(missingTable)).toBe('Database');
+        expect(views.getErrorKind('anything at all', { code: '42P01' })).toBe('backend');
+    });
+
+    it('keeps the driver detail block monospace, preformatted and unwrapped', () => {
+        const style = { textContent: '' };
+        Object.defineProperty(global, 'document', {
+            configurable: true,
+            writable: true,
+            value: {
+                createElement: jest.fn(() => style),
+                head: { appendChild: jest.fn() },
+            },
+        });
+
+        const stylesModule: { injectStyles: () => void } = require('../../media/resultPanel/styles.js');
+        stylesModule.injectStyles();
+
+        const detailsRule = style.textContent
+            .split('\n')
+            .slice(style.textContent.split('\n').findIndex(line => line.trim().startsWith('.error-details {')));
+        const block = detailsRule.slice(0, detailsRule.findIndex(line => line.trim() === '}') + 1).join('\n');
+
+        expect(block).toContain('font-family: var(--vscode-editor-font-family');
+        expect(block).toContain('white-space: pre;');
+        expect(block).toContain('font-variant-ligatures: none;');
+        expect(block).not.toContain('pre-wrap');
+        expect(block).not.toContain('word-break: break-word');
+    });
 });

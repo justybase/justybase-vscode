@@ -29,6 +29,8 @@ jest.mock("../core/queryRunnerUtils", () => ({
   }),
   isConnectionBrokenError: jest.fn().mockReturnValue(false),
   logOutput: jest.fn(),
+  formatQueryRunnerErrorMessage: jest.fn((message: string) =>
+    /[\r\n]/u.test(message) ? message : `Error: ${message}`),
 }));
 
 jest.mock("../core/queryHistoryManager", () => ({

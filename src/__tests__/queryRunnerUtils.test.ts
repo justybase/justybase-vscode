@@ -167,6 +167,21 @@ describe("queryRunnerUtils", () => {
         "Error: Syntax error",
       );
     });
+
+    it("should keep multi-line Netezza parser messages byte-for-byte", () => {
+      const message = [
+        "ERROR:  'SELECT 1,,2'",
+        "error",
+        '           ^ found "," (at char 10) expecting an identifier found a keyword',
+      ].join("\n");
+      expect(formatQueryRunnerErrorMessage(message)).toBe(message);
+    });
+
+    it("should not prefix messages that already start with ERROR:", () => {
+      expect(formatQueryRunnerErrorMessage("ERROR: relation does not exist")).toBe(
+        "ERROR: relation does not exist",
+      );
+    });
   });
 
   describe("isBusyConnectionError", () => {

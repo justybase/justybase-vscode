@@ -6,96 +6,188 @@ export function injectStyles(): void {
     /* Console log styles live in media/resultPanel.css (single source of truth).
        Kept here: only error/analysis/grouping styles injected at runtime. */
     .error-wrapper {
-        padding: 20px;
+        padding: 10px 12px 16px;
         background-color: var(--vscode-editor-background);
         height: 100%;
         overflow: auto;
         box-sizing: border-box;
     }
     .error-view {
-        background-color: var(--vscode-editor-background);
-        padding: 16px;
+        max-width: 1100px;
         margin: 0;
-        white-space: pre-wrap;
-        font-family: var(--vscode-editor-font-family);
-        color: var(--vscode-editor-foreground);
+        padding: 10px 12px;
+        font-family: var(--vscode-font-family, var(--vscode-editor-font-family));
+        color: var(--vscode-foreground);
         border: 1px solid var(--vscode-panel-border);
-        border-radius: 6px;
+        border-left: 3px solid var(--vscode-errorForeground);
+        border-radius: 2px;
+        background: var(--vscode-editor-background);
     }
-    .error-title {
+    .error-header {
         display: flex;
-        align-items: center;
-        gap: 8px;
-        font-weight: 600;
-        margin-bottom: 12px;
-        font-size: 13px;
-        color: var(--vscode-errorForeground);
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--vscode-panel-border);
+        align-items: flex-start;
+        gap: 10px;
     }
-    .error-title .error-icon {
-        flex-shrink: 0;
+    .error-icon {
+        flex: 0 0 auto;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 20px;
-        height: 20px;
+        width: 16px;
+        height: 16px;
+        margin-top: 1px;
         border-radius: 50%;
         background: var(--vscode-errorForeground);
         color: var(--vscode-editor-background);
-        font-size: 12px;
+        font-size: 10px;
         font-weight: 700;
         line-height: 1;
     }
-    .error-recovery-hint {
-        margin-top: 12px;
+    .error-heading {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
+    .error-title {
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.35;
+        color: var(--vscode-foreground);
+    }
+    .error-kind {
+        font-size: 11px;
+        line-height: 1.35;
         color: var(--vscode-descriptionForeground);
-        font-size: 0.93em;
+    }
+    .error-kind-connection {
+        color: var(--vscode-errorForeground);
+    }
+    .error-kind-syntax {
+        color: var(--vscode-editorWarning-foreground, #c9a13b);
+    }
+    .error-kind-backend {
+        color: var(--vscode-textLink-foreground);
+    }
+    .error-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin-top: 6px;
+        padding: 3px 0 5px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .error-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+    .error-body {
+        margin-top: 8px;
+    }
+    .error-recovery-hint {
+        position: relative;
+        margin-top: 10px;
+        padding-left: 16px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
         line-height: 1.5;
+    }
+    .error-recovery-hint::before {
+        content: 'ⓘ';
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: var(--vscode-textLink-foreground);
+        font-size: 12px;
     }
     .error-sql {
-        margin-top: 15px;
-        padding-top: 10px;
-        border-top: 1px solid var(--vscode-panel-border);
-        opacity: 0.7;
-        font-size: 0.9em;
+        margin-top: 12px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+        overflow: hidden;
+    }
+    .error-sql-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--vscode-descriptionForeground);
+    }
+    .error-sql-copy {
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--vscode-textLink-foreground);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: normal;
+        text-transform: none;
+        padding: 2px 4px;
+        cursor: pointer;
+    }
+    .error-sql-copy:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+    .error-sql-code {
+        margin: 0;
+        padding: 8px 10px;
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--vscode-foreground);
+        max-height: 180px;
+        overflow: auto;
     }
     .error-summary {
-        margin: 4px 0 8px;
-        padding: 10px 12px;
-        background: var(--vscode-textBlockQuote-background, var(--vscode-editor-background));
-        border: 1px solid var(--vscode-panel-border);
+        margin: 0;
+        padding: 8px 10px;
+        background: rgba(241, 76, 76, 0.06);
+        border: 0;
         border-left: 3px solid var(--vscode-errorForeground);
-        border-radius: 4px;
-        font-family: var(--vscode-editor-font-family, monospace);
-        font-size: 13px;
-        font-weight: 500;
+        border-radius: 2px;
+        font-family: var(--vscode-editor-font-family, var(--vscode-editor-font-family));
+        font-size: 12.5px;
+        font-weight: 400;
         line-height: 1.5;
-        color: var(--vscode-editor-foreground);
+        color: var(--vscode-foreground);
         word-break: break-word;
     }
     .error-details-toggle {
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        margin-top: 8px;
-        padding: 2px 6px;
-        border: none;
-        border-radius: 3px;
+        margin-top: 6px;
+        padding: 2px 0;
+        border: 0;
+        border-radius: 2px;
         background: transparent;
         color: var(--vscode-textLink-foreground);
         cursor: pointer;
-        font-size: 11px;
+        font-size: 12px;
         font-family: inherit;
-        transition: background 0.15s ease;
+        text-align: left;
     }
     .error-details-toggle:hover {
-        background: var(--vscode-list-hoverBackground);
+        text-decoration: underline;
     }
     .error-details-toggle .arrow {
         display: inline-block;
-        transition: transform 0.2s ease;
-        font-size: 10px;
+        transition: transform 0.15s ease;
+        font-size: 9px;
     }
     .error-details-toggle .arrow.open {
         transform: rotate(90deg);
@@ -105,75 +197,106 @@ export function injectStyles(): void {
         padding: 8px 10px;
         background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
         border: 1px solid var(--vscode-panel-border);
+        border-left: 2px solid var(--vscode-panel-border);
         border-radius: 3px;
         font-family: var(--vscode-editor-font-family, monospace);
-        font-size: 11px;
-        line-height: 1.4;
-        white-space: pre-wrap;
-        word-break: break-word;
+        font-size: 11.5px;
+        line-height: 1.5;
+        font-variant-ligatures: none;
+        white-space: pre;
+        word-break: normal;
         color: var(--vscode-descriptionForeground);
         display: none;
-        max-height: 400px;
-        overflow-y: auto;
+        max-height: 360px;
+        overflow: auto;
     }
     .error-details.visible {
         display: block;
     }
-    .error-actions {
-        margin-top: 20px;
-        padding-top: 15px;
-        border-top: 1px solid var(--vscode-panel-border);
+    .error-diagnostics {
         display: flex;
-        gap: 10px;
-        align-items: center;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--vscode-panel-border);
+    }
+    .error-diagnostic-line {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 8px;
+        align-items: baseline;
+        font-size: 12px;
+        line-height: 1.5;
+    }
+    .error-diagnostic-label {
+        color: var(--vscode-descriptionForeground);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding-top: 1px;
+    }
+    .error-diagnostic-value {
+        color: var(--vscode-foreground);
+        font-family: var(--vscode-editor-font-family, monospace);
+        word-break: break-word;
+        white-space: normal;
+    }
+    .error-copy-diagnostics {
+        align-self: flex-start;
+        margin-top: 4px;
     }
     .error-secondary-btn {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px 14px;
-        font-size: 13px;
+        gap: 6px;
+        padding: 4px 8px;
+        font-size: 12px;
         font-weight: 500;
-        border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
-        border-radius: 4px;
+        border: 1px solid transparent;
+        border-radius: 3px;
         cursor: pointer;
-        background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
-        color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
-        transition: background 0.2s ease;
+        background: transparent;
+        color: var(--vscode-textLink-foreground);
+        transition: background 0.15s ease;
     }
     .error-secondary-btn:hover {
-        background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+        background: var(--vscode-list-hoverBackground);
     }
     .copilot-fix-btn {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px 16px;
-        font-size: 13px;
+        gap: 6px;
+        padding: 4px 10px;
+        font-size: 12px;
         font-weight: 500;
-        border: none;
-        border-radius: 4px;
+        border: 1px solid var(--vscode-button-border, transparent);
+        border-radius: 3px;
         cursor: pointer;
-        background: linear-gradient(135deg, var(--vscode-button-background) 0%, #6b5ce7 100%);
+        background: var(--vscode-button-background);
         color: var(--vscode-button-foreground);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        transition: all 0.2s ease;
+        transition: background 0.15s ease;
     }
     .copilot-fix-btn:hover {
-        background: linear-gradient(135deg, var(--vscode-button-hoverBackground) 0%, #7d6ff0 100%);
-        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
-        transform: translateY(-1px);
+        background: var(--vscode-button-hoverBackground);
     }
     .copilot-fix-btn:active {
-        transform: translateY(0);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        background: var(--vscode-button-background);
     }
     .copilot-fix-btn .icon {
-        font-size: 16px;
+        font-size: 13px;
     }
     .copilot-fix-btn.loading {
         opacity: 0.7;
         cursor: wait;
+    }
+    .error-secondary-btn:focus-visible,
+    .copilot-fix-btn:focus-visible,
+    .error-details-toggle:focus-visible,
+    .error-sql-copy:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: 1px;
     }
 
     /* === Database Grouping Panel + Right Bar === */

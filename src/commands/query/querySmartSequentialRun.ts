@@ -33,6 +33,7 @@ import {
 import type { DatabaseErrorDetails } from '@justybase/contracts';
 import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
 import { recordJoinKnowledgeSuccessfulStatement } from '../../knowledge/joinKnowledgeRuntime';
+import { describeQueryError, ensureQueryErrorMessage } from '../../core/errorPresentation';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
@@ -106,7 +107,7 @@ function buildQueryErrorResult(
     return {
         columns: [],
         data: [],
-        message: userMessage,
+        message: ensureQueryErrorMessage(userMessage),
         isError: true,
         sql,
         ...(errorDetails === undefined ? {} : { errorDetails }),
@@ -426,7 +427,7 @@ async function executePreparedQuery(
         if (!executionStillCurrent) {
             return 'cancelled';
         }
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = describeQueryError(err);
         executionGate.recordError(msg);
         if (isConnectionBrokenError(err)) executionGate.requireSessionIsolation();
 

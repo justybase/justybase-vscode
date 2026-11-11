@@ -50,6 +50,7 @@ import { tryAcquireQueryExecution } from './query/queryExecutionGate';
 import { recordJoinKnowledgeSuccessfulStatement } from '../knowledge/joinKnowledgeRuntime';
 import { createQueryExecutionRecovery } from './query/queryExecutionRecovery';
 import { getRequiredDatabaseQueryProfileProvider } from '../core/connectionFactory';
+import { describeQueryError } from '../core/errorPresentation';
 
 /**
  * Attaches serialisable backend diagnostics (SQLSTATE, severity, detail, hint)
@@ -1070,7 +1071,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     if (!executionStillCurrent) {
                         return;
                     }
-                    const msg = err instanceof Error ? err.message : String(err);
+                    const msg = describeQueryError(err);
                     if (msg.includes('Query cancelled')) {
                         resultPanelProvider.log(sourceUri, 'Query execution cancelled by user.');
                         resultPanelProvider.finalizeExecution(sourceUri);
@@ -1205,7 +1206,7 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     if (!executionStillCurrent) {
                         return;
                     }
-                    const msg = err instanceof Error ? err.message : String(err);
+                    const msg = describeQueryError(err);
                     if (msg.includes('Query cancelled')) {
                         resultPanelProvider.log(sourceUri, 'Procedure compilation cancelled by user.');
                         resultPanelProvider.finalizeExecution(sourceUri);

@@ -1188,6 +1188,20 @@ LIMIT &limit_cnt;`, {});
             ).rejects.toThrow("Error: Table not found");
         });
 
+        it("should keep multi-line parser messages without a prefix", async () => {
+            (handleBusyConnectionError as jest.Mock).mockResolvedValue(false);
+            const connManager = {} as any;
+            const message = [
+                "ERROR:  'SELECT 1,,2'",
+                "error",
+                '           ^ found "," (at char 10) expecting an identifier found a keyword',
+            ].join("\n");
+
+            await expect(
+                handleBatchError(new Error(message), connManager, undefined, undefined),
+            ).rejects.toThrow(message);
+        });
+
         it("should log error to output channel", async () => {
             (handleBusyConnectionError as jest.Mock).mockResolvedValue(false);
             const appendLine = jest.fn();

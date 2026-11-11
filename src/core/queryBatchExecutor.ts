@@ -33,6 +33,7 @@ import {
     normalizeUriKey,
     getOutputChannel,
     isConnectionBrokenError,
+    formatQueryRunnerErrorMessage,
 } from "./queryRunnerUtils";
 import {
     handleBusyConnectionError,
@@ -897,7 +898,7 @@ export async function handleBatchError(
         throw new Error(`Connection is busy. Use the popup actions to resolve.`, { cause: error });
     }
 
-    const errorMessage = `Error: ${errObj.message || String(error)}`;
+    const errorMessage = formatQueryRunnerErrorMessage(errObj.message || String(error));
     logBatch(outputChannel, logCallback, errorMessage);
     throw new Error(errorMessage, { cause: error });
 }

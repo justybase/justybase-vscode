@@ -27,6 +27,7 @@ import {
 } from './queryExecutionGate';
 import { createQueryExecutionRecovery } from './queryExecutionRecovery';
 import { isSqlAuthoringLanguageId } from '../../utils/sqlLanguage';
+import { describeQueryError } from '../../core/errorPresentation';
 
 const VIEW_DATA_ROW_LIMIT = 100;
 
@@ -287,7 +288,7 @@ export function registerQueryCommands(
                 if (!executionStillCurrent) {
                     return;
                 }
-                const message = err instanceof Error ? err.message : String(err);
+                const message = describeQueryError(err);
                 const status: 'error' | 'cancelled' = message.includes('Query cancelled') ? 'cancelled' : 'error';
 
                 if (status === 'cancelled') {

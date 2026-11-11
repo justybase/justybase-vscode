@@ -39,6 +39,7 @@ import {
     isSafeToRetryAfterBrokenConnection,
     skipLeadingSqlTrivia,
 } from './queryRetrySafety';
+import { ensureQueryErrorMessage } from './errorPresentation';
 
 const SLOW_STREAMING_PHASE_MS = 1000;
 
@@ -583,9 +584,11 @@ async function runBatchWithSharedOrchestrator(
                     }
                     const message = cancelled
                         ? 'Query cancelled'
-                        : state.retrying
-                            ? event.failure.message
-                            : reported.message;
+                        : ensureQueryErrorMessage(
+                            state.retrying ? event.failure.message : reported.message,
+                            event.failure.cause,
+                            'Query execution failed.',
+                        );
                     state.terminalized = true;
                     const durationMs = Date.now() - state.startedAt;
                     const errorDetails = cancelled

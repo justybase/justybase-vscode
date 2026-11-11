@@ -64,6 +64,7 @@ import { affectsExtensionConfiguration } from '../compatibility/configuration';
 import { getConnectionForDocument } from '../core/queryRunnerHelpers';
 import { ensurePersistentConnectionReadyForQuery } from '../core/connectionReadiness';
 import { runQueryRaw } from '../core/queryRunner';
+import { describeQueryError } from '../core/errorPresentation';
 import { openRelatedRowsFromCell } from '../results/relatedRowsNavigation';
 import { MigrationWizardView } from './migrationWizardView';
 import {
@@ -1537,7 +1538,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             );
             return true;
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = describeQueryError(error);
             this._stateManager.setResultSetRefreshFailure(sourceUri, resultSetIndex, {
                 message,
                 sql: sqlToExecute,

@@ -128,7 +128,14 @@ export function isConnectionBrokenError(error: unknown): boolean {
 /** User-facing query error text; avoids `Error: Error (after reconnect attempt): …`. */
 export function formatQueryRunnerErrorMessage(message: string): string {
   const trimmed = message.trim();
-  if (/^Error(?:\s*\(|:)/i.test(trimmed)) {
+  // Multi-line driver messages (for example Netezza parser output with a
+  // caret under the offending character) are position-sensitive. Prefixing
+  // only the first line shifts the caret relative to the SQL line, so keep
+  // those messages byte-for-byte.
+  if (/[\r\n]/u.test(message)) {
+    return message;
+  }
+  if (/^(?:Error(?:\s*\(|:)|ERROR\s*:|Netezza\s+Error:)/iu.test(trimmed)) {
     return message;
   }
   return `Error: ${message}`;

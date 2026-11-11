@@ -309,6 +309,112 @@ export function extractKeyNetezzaErrorInfo(fullMessage: string): string {
     return msg;
 }
 
+export type ErrorKind = 'connection' | 'syntax' | 'backend' | 'unknown';
+
+export function getErrorKind(message: string, errorDetails?: ResultSetWithExtras['errorDetails']): ErrorKind {
+    if (errorDetails?.code) return 'backend';
+    const normalized = message.toLowerCase();
+    if (
+        normalized.includes('econnrefused')
+        || normalized.includes('enotfound')
+        || normalized.includes('etimedout')
+        || normalized.includes('econnaborted')
+        || normalized.includes('econnreset')
+        || normalized.includes('epipe')
+        || normalized.includes('socket closed')
+        || normalized.includes('socket ended')
+        || normalized.includes('connection timeout')
+        || normalized.includes('connection is closed')
+        || normalized.includes('connection reset')
+        || normalized.includes('broken pipe')
+        || normalized.includes('connection was lost')
+    ) {
+        return 'connection';
+    }
+    if (
+        normalized.includes('syntax error')
+        || /found .*\(at char \d+\)/.test(normalized)
+        || normalized.includes('expecting an identifier')
+        || normalized.includes('unexpected token')
+        || normalized.includes('parse error')
+    ) {
+        return 'syntax';
+    }
+    if (
+        normalized.includes('does not exist')
+        || normalized.includes('not found')
+        || normalized.includes('permission denied')
+        || normalized.includes('insufficient privilege')
+        || normalized.includes('access denied')
+        || normalized.includes('constraint')
+    ) {
+        return 'backend';
+    }
+    if (normalized.includes('error')) return 'backend';
+    return 'unknown';
+}
+
+export function getErrorKindLabel(kind: ErrorKind): string {
+    switch (kind) {
+        case 'connection': return 'Network';
+        case 'syntax': return 'Parser';
+        case 'backend': return 'Database';
+        default: return 'Error';
+    }
+}
+
+function getErrorTitle(kind: ErrorKind): string {
+    switch (kind) {
+        case 'connection': return 'Connection failed';
+        case 'syntax': return 'SQL syntax error';
+        case 'backend': return 'Query failed';
+        default: return 'Query failed';
+    }
+}
+
+function getErrorNextSteps(kind: ErrorKind): string {
+    switch (kind) {
+        case 'connection':
+            return 'Check that the server is running and reachable (host/port, VPN or SSH tunnel), then retry. Review Logs for details.';
+        case 'syntax':
+            return 'Review Logs for the full execution timeline, or fix the position in the message and retry.';
+        case 'backend':
+            return 'Use the diagnostics or Logs to identify the object or permission, then retry.';
+        default:
+            return 'Review Logs for the full execution timeline, then retry or adjust the query.';
+    }
+}
+
+/**
+ * Never render a bare "Unknown error occurred." card. When the host sends no
+ * message (falsy/blank), explain what is known instead of hiding the failure:
+ * SQLSTATE when present, otherwise a pointer to Logs. The driver message,
+ * when present, is always preferred and returned unchanged.
+ */
+export function resolveErrorMessage(rs: ResultSetWithExtras): string {
+    if (typeof rs.message === 'string' && rs.message.trim().length > 0) {
+        return rs.message;
+    }
+    const code = rs.errorDetails?.code;
+    const severity = rs.errorDetails?.severity;
+    if (code) {
+        return `Database error ${code}${severity ? ` (${severity})` : ''}: the database returned no message text. Check Logs for the execution timeline.`;
+    }
+    return 'Database returned an empty error response. Check Logs for the execution timeline and verify the connection.';
+}
+
+/** Copy through the clipboard API and tell the host when it is unavailable. */
+function copyText(text: string): void {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) {
+        void vscode.postMessage({ command: 'info', text: 'Clipboard is not available in this window.' });
+        return;
+    }
+    clipboard.writeText(text).catch(() => {
+        void vscode.postMessage({ command: 'info', text: 'Failed to copy to clipboard' });
+    });
+}
+
 /**
  * Renders backend diagnostics (SQLSTATE, severity, detail, hint) below the
  * summary. Detail and hint stay collapsed because they are often long, and the
@@ -382,7 +488,7 @@ function appendErrorDiagnostics(errorDiv: HTMLElement, rs: ResultSetWithExtras):
     copyBtn.title = 'Copy SQLSTATE, severity, detail and hint to the clipboard';
     copyBtn.onclick = () => {
         const lines = [...rows, ...collapsible].map(row => `${row.label}: ${row.value}`);
-        void navigator.clipboard?.writeText(lines.join('\n')).catch(() => undefined);
+        copyText(lines.join('\n'));
     };
     block.appendChild(copyBtn);
 
@@ -398,25 +504,102 @@ export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, contai
 
     const errorDiv = document.createElement('div');
     errorDiv.className = 'error-view';
+    errorDiv.setAttribute('role', 'group');
+    errorDiv.setAttribute('aria-label', 'Query error');
 
-    const title = document.createElement('div');
-    title.className = 'error-title';
+    const fullMessage = resolveErrorMessage(rs);
+    const simplifiedMessage = extractKeyNetezzaErrorInfo(fullMessage);
+    const kind = getErrorKind(fullMessage, rs.errorDetails);
+
+    const header = document.createElement('div');
+    header.className = 'error-header';
+
     const iconSpan = document.createElement('span');
     iconSpan.className = 'error-icon';
     iconSpan.textContent = '!';
     iconSpan.setAttribute('aria-hidden', 'true');
-    title.appendChild(iconSpan);
-    title.append('SQL Execution Error');
-    errorDiv.appendChild(title);
+    header.appendChild(iconSpan);
 
-    const fullMessage = rs.message || 'Unknown error occurred.';
-    const simplifiedMessage = extractKeyNetezzaErrorInfo(fullMessage);
+    const heading = document.createElement('div');
+    heading.className = 'error-heading';
+    const title = document.createElement('div');
+    title.className = 'error-title';
+    title.textContent = getErrorTitle(kind);
+    heading.appendChild(title);
+    const kindLabel = document.createElement('div');
+    kindLabel.className = `error-kind error-kind-${kind}`;
+    kindLabel.textContent = getErrorKindLabel(kind);
+    heading.appendChild(kindLabel);
+    header.appendChild(heading);
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'error-actions';
+
+    const logResultIndex = Array.isArray(getResultSets())
+        ? getResultSets().findIndex(resultSet => resultSet && resultSet.isLog)
+        : -1;
+
+    if (logResultIndex >= 0) {
+        const logsBtn = document.createElement('button');
+        logsBtn.type = 'button';
+        logsBtn.className = 'error-secondary-btn';
+        logsBtn.textContent = 'Open Logs';
+        logsBtn.title = 'Jump to the Logs tab for execution details';
+        logsBtn.onclick = () => {
+            const tabs = document.querySelectorAll('.result-set-tab');
+            const logsTab = tabs[logResultIndex] as HTMLElement | undefined;
+            logsTab?.click();
+        };
+        actionsDiv.appendChild(logsBtn);
+    }
+
+    const copyErrorBtn = document.createElement('button');
+    copyErrorBtn.type = 'button';
+    copyErrorBtn.className = 'error-secondary-btn error-copy-error';
+    copyErrorBtn.textContent = 'Copy';
+    copyErrorBtn.title = 'Copy the error message and executed SQL to the clipboard';
+    copyErrorBtn.onclick = () => {
+        const parts = [fullMessage];
+        if (rs.errorDetails?.code) parts.push(`SQLSTATE: ${rs.errorDetails.code}`);
+        if (rs.sql) parts.push(`SQL: ${rs.sql}`);
+        copyText(parts.join('\n'));
+    };
+    actionsDiv.appendChild(copyErrorBtn);
+
+    const fixBtn = document.createElement('button');
+    fixBtn.type = 'button';
+    fixBtn.className = 'copilot-fix-btn';
+    fixBtn.innerHTML = '<span class="icon">✨</span><span>Fix with Copilot</span>';
+    fixBtn.title = 'Send error and SQL to Copilot Chat for fixing (includes table DDL for context)';
+    fixBtn.onclick = () => {
+        fixBtn.classList.add('loading');
+        fixBtn.innerHTML = '<span class="icon">⏳</span><span>Sending to Copilot...</span>';
+        vscode.postMessage({
+            command: 'fixSqlError',
+            errorMessage: fullMessage,
+            sql: rs.sql || ''
+        });
+        setTimeout(() => {
+            fixBtn.classList.remove('loading');
+            fixBtn.innerHTML = '<span class="icon">✨</span><span>Fix with Copilot</span>';
+        }, 2000);
+    };
+    actionsDiv.appendChild(fixBtn);
+    const toolbar = document.createElement('div');
+    toolbar.className = 'error-toolbar';
+    toolbar.appendChild(actionsDiv);
+    errorDiv.appendChild(header);
+    errorDiv.appendChild(toolbar);
+
+    const body = document.createElement('div');
+    body.className = 'error-body';
 
     // Key fragment — shown prominently at the top
     const summary = document.createElement('div');
     summary.className = 'error-summary';
+    summary.setAttribute('role', 'alert');
     summary.textContent = simplifiedMessage;
-    errorDiv.appendChild(summary);
+    body.appendChild(summary);
 
     // Full details — collapsible, shown on demand
     const isDifferent = simplifiedMessage !== fullMessage;
@@ -435,68 +618,46 @@ export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, contai
             toggleBtn.setAttribute('aria-expanded', String(isVisible));
         };
         toggleBtn.setAttribute('aria-expanded', 'false');
-        errorDiv.appendChild(toggleBtn);
+        body.appendChild(toggleBtn);
 
         const details = document.createElement('div');
         details.className = 'error-details';
         details.textContent = fullMessage;
-        errorDiv.appendChild(details);
+        body.appendChild(details);
     }
 
-    appendErrorDiagnostics(errorDiv, rs);
+    appendErrorDiagnostics(body, rs);
 
     const recoveryHint = document.createElement('div');
     recoveryHint.className = 'error-recovery-hint';
-    recoveryHint.textContent = 'Review Logs for the full execution timeline, then retry or adjust the query.';
-    errorDiv.appendChild(recoveryHint);
+    recoveryHint.textContent = getErrorNextSteps(kind);
+    body.appendChild(recoveryHint);
 
     if (rs.sql) {
         const sqlDiv = document.createElement('div');
         sqlDiv.className = 'error-sql';
-        sqlDiv.innerHTML = `<strong>Executed SQL:</strong><br><pre style="margin-top: 5px;">${rs.sql}</pre>`;
-        errorDiv.appendChild(sqlDiv);
+        const sqlHeader = document.createElement('div');
+        sqlHeader.className = 'error-sql-header';
+        const sqlLabel = document.createElement('span');
+        sqlLabel.className = 'error-sql-label';
+        sqlLabel.textContent = 'SQL';
+        sqlHeader.appendChild(sqlLabel);
+        const copySqlBtn = document.createElement('button');
+        copySqlBtn.type = 'button';
+        copySqlBtn.className = 'error-sql-copy';
+        copySqlBtn.textContent = 'Copy SQL';
+        copySqlBtn.title = 'Copy the executed SQL to the clipboard';
+        copySqlBtn.onclick = () => copyText(rs.sql ?? '');
+        sqlHeader.appendChild(copySqlBtn);
+        sqlDiv.appendChild(sqlHeader);
+        const sqlPre = document.createElement('pre');
+        sqlPre.className = 'error-sql-code';
+        sqlPre.textContent = rs.sql;
+        sqlDiv.appendChild(sqlPre);
+        body.appendChild(sqlDiv);
     }
 
-    // Add Fix with Copilot button
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'error-actions';
-
-    const logResultIndex = Array.isArray(getResultSets())
-        ? getResultSets().findIndex(resultSet => resultSet && resultSet.isLog)
-        : -1;
-
-    if (logResultIndex >= 0) {
-        const logsBtn = document.createElement('button');
-        logsBtn.className = 'error-secondary-btn';
-        logsBtn.textContent = 'Open Logs';
-        logsBtn.title = 'Jump to the Logs tab for execution details';
-        logsBtn.onclick = () => {
-            const tabs = document.querySelectorAll('.result-set-tab');
-            const logsTab = tabs[logResultIndex] as HTMLElement | undefined;
-            logsTab?.click();
-        };
-        actionsDiv.appendChild(logsBtn);
-    }
-
-    const fixBtn = document.createElement('button');
-    fixBtn.className = 'copilot-fix-btn';
-    fixBtn.innerHTML = '<span class="icon">✨</span><span>Fix with Copilot</span>';
-    fixBtn.title = 'Send error and SQL to Copilot Chat for fixing (includes table DDL for context)';
-    fixBtn.onclick = () => {
-        fixBtn.classList.add('loading');
-        fixBtn.innerHTML = '<span class="icon">⏳</span><span>Sending to Copilot...</span>';
-        vscode.postMessage({
-            command: 'fixSqlError',
-            errorMessage: rs.message || 'Unknown error',
-            sql: rs.sql || ''
-        });
-        setTimeout(() => {
-            fixBtn.classList.remove('loading');
-            fixBtn.innerHTML = '<span class="icon">✨</span><span>Fix with Copilot</span>';
-        }, 2000);
-    };
-    actionsDiv.appendChild(fixBtn);
-    errorDiv.appendChild(actionsDiv);
+    errorDiv.appendChild(body);
 
     wrapper.appendChild(errorDiv);
     addGrid(null);
