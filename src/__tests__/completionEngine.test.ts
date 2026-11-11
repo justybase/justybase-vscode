@@ -6204,7 +6204,7 @@ SELECT M.| FROM MIXED M`);
       const items = await complete("SELECT * FROM ORD|");
       const orders = items.find((item) => item.label === "ORDERS");
 
-      expect(orders?.detail).toBe("Table · ~18,484 rows");
+      expect(orders?.detail).toBe("Table · ~18k rows");
     });
 
     it("leaves the detail unchanged when no estimate is cached", async () => {

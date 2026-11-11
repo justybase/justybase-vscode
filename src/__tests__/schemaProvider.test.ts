@@ -917,7 +917,7 @@ describe('SchemaProvider', () => {
             const children = await schemaProvider.getChildren(typeGroupItem);
 
             expect(children[0].rowCount).toBe(18484);
-            expect(children[0].description).toContain('~18,484');
+            expect(children[0].description).toContain('~18k');
             expect(mockMetadataCache.setTables).toHaveBeenCalledWith(
                 'TestConnection',
                 'TESTDB.PUBLIC',
@@ -942,7 +942,7 @@ describe('SchemaProvider', () => {
             const children = await schemaProvider.getChildren(typeGroupItem);
 
             expect(children[0].rowCount).toBe(18484);
-            expect(children[0].description).toContain('~18,484');
+            expect(children[0].description).toContain('~18k');
             expect(runQueryRaw).not.toHaveBeenCalled();
         });
 

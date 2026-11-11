@@ -19,12 +19,22 @@ export function normalizeEstimatedRowCount(value: unknown): number | undefined {
 }
 
 export function formatEstimatedRowCount(value: number): string {
-    return `~${Math.max(0, Math.round(value)).toLocaleString('en-US')}`;
+    const rounded = Math.max(0, Math.round(value));
+    if (rounded >= 1_000_000) {
+        return `~${Math.round(rounded / 1_000_000)}m`;
+    }
+    if (rounded >= 1_000) {
+        const thousands = Math.round(rounded / 1_000);
+        return thousands >= 1_000
+            ? `~${Math.round(rounded / 1_000_000)}m`
+            : `~${thousands}k`;
+    }
+    return `~${rounded}`;
 }
 
 /**
  * Appends the catalog row estimate to a completion detail line, e.g.
- * `Table (ADMIN) · ~18,484 rows`. Keeping this next to the object type makes
+ * `Table (ADMIN) · ~18k rows`. Keeping this next to the object type makes
  * the estimate visible in the suggestion list without opening documentation.
  */
 export function appendEstimatedRowCount(

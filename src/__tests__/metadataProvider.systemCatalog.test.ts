@@ -146,7 +146,7 @@ describe('MetadataProvider system catalog mirroring', () => {
             ? orders.detail
             : orders?.label.detail
 
-        expect(detail).toBe('Table (PUBLIC) · ~18,484 rows')
+        expect(detail).toBe('Table (PUBLIC) · ~18k rows')
     })
 
     it('loads mirrored system catalog columns from SYSTEM for arbitrary database prefixes', async () => {

@@ -13,8 +13,17 @@ describe('estimated row counts', () => {
         expect(normalizeEstimatedRowCount(null)).toBeUndefined();
     });
 
-    it('formats the estimate with a tilde and grouping', () => {
-        expect(formatEstimatedRowCount(18484)).toBe('~18,484');
+    it('formats the estimate with a tilde and k/m abbreviations', () => {
+        expect(formatEstimatedRowCount(250)).toBe('~250');
+        expect(formatEstimatedRowCount(999)).toBe('~999');
+        expect(formatEstimatedRowCount(1_000)).toBe('~1k');
+        expect(formatEstimatedRowCount(12_700)).toBe('~13k');
+        expect(formatEstimatedRowCount(18_484)).toBe('~18k');
+        expect(formatEstimatedRowCount(999_499)).toBe('~999k');
+        expect(formatEstimatedRowCount(999_500)).toBe('~1m');
+        expect(formatEstimatedRowCount(1_000_000)).toBe('~1m');
+        expect(formatEstimatedRowCount(1_500_000)).toBe('~2m');
+        expect(formatEstimatedRowCount(18_000_000)).toBe('~18m');
     });
 
     it('appends the estimate to an existing completion detail', () => {

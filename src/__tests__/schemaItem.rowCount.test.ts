@@ -17,9 +17,9 @@ describe('SchemaItem estimated row count', () => {
 
         item.applyRowCount(18484);
 
-        expect(item.description).toBe('(CONFORMANCE) - fact table · ~18,484');
+        expect(item.description).toBe('(CONFORMANCE) - fact table · ~18k');
         expect(item.rowCount).toBe(18484);
-        expect(String(item.tooltip)).toContain('Estimated rows: ~18,484 (reltuples)');
+        expect(String(item.tooltip)).toContain('Estimated rows: ~18k (reltuples)');
     });
 
     it('ignores missing and negative estimates', () => {
