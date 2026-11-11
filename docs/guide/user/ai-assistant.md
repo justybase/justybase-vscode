@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.20.3
+product_version: 3.20.4
 ---
 
 # AI SQL Assistant

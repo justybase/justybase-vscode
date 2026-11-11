@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-10-06
-product_version: 3.20.3
+product_version: 3.20.4
 ---
 
 # SQL execution queue
