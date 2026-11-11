@@ -155,9 +155,10 @@ describe('cross-dialect metadata refresh', () => {
 		expect(refresh).toHaveBeenCalled();
 	});
 
-	it('rebuilds Netezza FK metadata after refreshing a selected database', async () => {
+	it('rebuilds Netezza database metadata after refreshing a selected database', async () => {
 		const invalidateSchema = jest.fn();
 		const reloadTypeGroups = jest.fn(async () => undefined);
+		const triggerDatabasePrefetch = jest.fn();
 		const triggerConnectionPrefetch = jest.fn();
 		let handler: ((item?: SchemaItem) => Promise<void>) | undefined;
 		(vscode.commands.registerCommand as jest.Mock).mockImplementation(
@@ -172,7 +173,11 @@ describe('cross-dialect metadata refresh', () => {
 			connectionManager: {
 				getConnectionDatabaseKind: jest.fn(() => 'netezza'),
 			} as unknown as ConnectionManager,
-			metadataCache: { invalidateSchema, triggerConnectionPrefetch },
+			metadataCache: {
+				invalidateSchema,
+				triggerDatabasePrefetch,
+				triggerConnectionPrefetch,
+			},
 			schemaProvider: { reloadTypeGroups },
 			schemaTreeView: {} as vscode.TreeView<SchemaItem>,
 		} as unknown as SchemaCommandsDependencies);
@@ -185,11 +190,13 @@ describe('cross-dialect metadata refresh', () => {
 
 		expect(invalidateSchema).toHaveBeenCalledWith('NZ', 'DB1');
 		expect(reloadTypeGroups).toHaveBeenCalledWith('NZ', 'DB1');
-		expect(triggerConnectionPrefetch).toHaveBeenCalledWith(
+		expect(triggerDatabasePrefetch).toHaveBeenCalledWith(
 			'NZ',
+			'DB1',
 			expect.any(Function),
-			{ manual: true },
+			{ manual: true, scope: 'full' },
 		);
+		expect(triggerConnectionPrefetch).not.toHaveBeenCalled();
 	});
 
 	it('shows a dialect-neutral warning when nothing is selected', async () => {

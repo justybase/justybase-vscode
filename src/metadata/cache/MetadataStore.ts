@@ -6,6 +6,8 @@ import type {
   CachedObjectInfo,
   ColumnMetadata,
   DatabaseMetadata,
+  DatabaseSnapshotScope,
+  ObjectDetails,
   ObjectWithSchema,
   PerKeyEntry,
   ProcedureMetadata,
@@ -51,6 +53,10 @@ export class MetadataStore {
   readonly defaultSchemaCache = new Map<string, PerKeyEntry<string>>();
   /** Key: "CONN" — Netezza SHOW ENABLE_SCHEMA_DBO_CHECK */
   readonly netezzaSchemasEnabledCache = new Map<string, PerKeyEntry<boolean>>();
+  /** Key: "CONN|DB" — completed per-database snapshot scope and timestamp. */
+  readonly databaseSnapshotCache = new Map<string, PerKeyEntry<{ scope: DatabaseSnapshotScope }>>();
+  /** Key: "CONN|DB.SCHEMA.TABLE" — optional heavy object details. */
+  readonly objectDetailsCache = new Map<string, PerKeyEntry<ObjectDetails>>();
   /** Key: "CONN|DB.SCHEMA" or "CONN|DB.." */
   readonly tableCache = new Map<string, PerKeyEntry<TableMetadata[]>>();
   readonly procedureCache = new Map<string, PerKeyEntry<ProcedureMetadata[]>>();
@@ -99,6 +105,8 @@ export class MetadataStore {
       this.currentSchemaCache.size +
       this.defaultSchemaCache.size +
       this.netezzaSchemasEnabledCache.size +
+      this.databaseSnapshotCache.size +
+      this.objectDetailsCache.size +
       this.tableCache.size +
       this.columnCache.size +
       this.foreignKeyRelationships.size +
@@ -117,6 +125,8 @@ export class MetadataStore {
     this.currentSchemaCache.clear();
     this.defaultSchemaCache.clear();
     this.netezzaSchemasEnabledCache.clear();
+    this.databaseSnapshotCache.clear();
+    this.objectDetailsCache.clear();
     this.tableCache.clear();
     this.procedureCache.clear();
     this.columnCache.clear();

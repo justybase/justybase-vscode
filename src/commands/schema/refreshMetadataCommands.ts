@@ -76,8 +76,11 @@ export function registerRefreshMetadataCommands(
 									await deps.schemaProvider.reloadTypeGroups(connectionName, database);
 								} finally {
 									if (databaseKind === 'netezza') {
-										deps.metadataCache.triggerConnectionPrefetch(
+										// Explicit database refresh: rebuild every
+										// metadata layer for this database only.
+										deps.metadataCache.triggerDatabasePrefetch(
 											connectionName,
+											database,
 											createConnectionScopedMetadataQueryRunner({
 												context: deps.context,
 												connectionManager: deps.connectionManager,
@@ -85,7 +88,7 @@ export function registerRefreshMetadataCommands(
 												maxRows: 1000000,
 												timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
 											}),
-											{ manual: true },
+											{ manual: true, scope: 'full' },
 										);
 									}
 								}

@@ -36,6 +36,8 @@ import { activateJoinKnowledge } from './activation/joinKnowledgeRegistration';
 import { activateCoreServices } from './activation/activateCoreServices';
 import { activateConnectionEvents } from './activation/activateConnectionEvents';
 import { MetadataPrefetchCoordinator } from './activation/MetadataPrefetchCoordinator';
+import { DatabaseUsageHistory } from './metadata/databaseUsageHistory';
+import { QueryHistoryManager } from './core/queryHistoryManager';
 import { DeferredFeatureScheduler } from './activation/DeferredFeatureScheduler';
 import { activateExplorerViews } from './activation/activateExplorerViews';
 import { activateEditorSync } from './activation/activateEditorSync';
@@ -138,12 +140,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     });
     const { services, metadataCacheInit } = coreActivation;
     const { connectionManager, metadataCache, schemaProvider } = services;
+    const databaseUsageHistory = new DatabaseUsageHistory(context.globalState);
+    context.subscriptions.push({
+        dispose: () => databaseUsageHistory.dispose(),
+    });
+    const queryHistoryManager = QueryHistoryManager.getInstance(context);
+    context.subscriptions.push(
+        queryHistoryManager.onDidAddEntry(entry => {
+            if (entry.database && (entry.status === undefined || entry.status === 'success')) {
+                databaseUsageHistory.record(entry.connectionName ?? '', entry.database);
+            }
+        }),
+    );
+    if (databaseUsageHistory.isEmpty) {
+        void queryHistoryManager.getHistory(2000)
+            .then(entries => databaseUsageHistory.seed(
+                entries.filter(entry => entry.status === undefined || entry.status === 'success'),
+            ))
+            .then(() => databaseUsageHistory.flush())
+            .catch(() => undefined);
+    }
     const tableDdlSynchronizer = new TableDdlSynchronizer(
         context,
         connectionManager,
         metadataCache,
         schemaProvider,
     );
+    context.subscriptions.push({
+        dispose: () => tableDdlSynchronizer.dispose(),
+    });
 
     context.subscriptions.push(...registerStartupCommands({
         context,
@@ -247,7 +272,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
         updateSelectionStatsStatusBar(selectionStatsStatusBar, stats);
     });
 
-    const metadataPrefetchCoordinator = new MetadataPrefetchCoordinator(context, services, logger);
+    const metadataPrefetchCoordinator = new MetadataPrefetchCoordinator(
+        context,
+        services,
+        logger,
+        databaseUsageHistory,
+    );
     metadataPrefetchCoordinator.register(context, metadataCacheInit);
 
     metadataSessionSweeper.start(connectionManager);

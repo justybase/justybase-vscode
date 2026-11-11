@@ -4679,6 +4679,28 @@
           "maximum": 8,
           "description": "Physical Netezza sessions used by the column stage of a full metadata refresh (1–8). One is safest; higher values can shorten refreshes by processing independent databases in parallel. Additional sessions are optional and fall back to the primary session if they cannot be opened."
         },
+        "justybase.metadata.popularDatabases": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Number of recently used Netezza databases warmed together with the active database. The rest stay lazy and are loaded when opened. Default: 2. Set to 0 to warm only the active database."
+        },
+        "justybase.metadata.liveFallback": {
+          "type": "string",
+          "enum": [
+            "never",
+            "onDemand",
+            "always"
+          ],
+          "enumDescriptions": [
+            "Authoring reads the shadow cache only; a missing scope shows a refresh placeholder.",
+            "Authoring reads the cache and may query the live catalog when the user explicitly expands or requests data (DataGrip-like).",
+            "Preserve the legacy behaviour: fall back to a live catalog query whenever the cache misses."
+          ],
+          "default": "onDemand",
+          "description": "Controls whether metadata consumers may fall back to a live Netezza catalog query on a cache miss. Completion and validation always prefer the shadow cache."
+        },
         "justybase.sqlParser.fastPathThreshold": {
           "type": "integer",
           "default": 1572864,

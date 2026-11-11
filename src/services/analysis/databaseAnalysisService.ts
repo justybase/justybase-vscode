@@ -187,8 +187,62 @@ export class DatabaseAnalysisService implements vscode.Disposable {
         const snapshot: DefinitionCatalogSnapshot = { definitions: [], objects: [], issues: [] };
         let totalBytes = 0;
         const definitionMap = new Map<string, { object: ObjectReference; sql: string }>();
+        const cachedObjectDetails = this.cache.getObjectDetailsForDatabase?.(
+            session.connectionName,
+            session.database,
+        ) ?? [];
+        const cachedDefinitionFor = (schema: string, name: string): string | undefined => {
+            const key = `${session.database}.${schema}.${name}`.toUpperCase();
+            return cachedObjectDetails.find(entry =>
+                entry.key.toUpperCase() === key
+                && typeof entry.details.definition === 'string',
+            )?.details.definition as string | undefined;
+        };
+        const addDefinition = (object: ObjectReference, sql: string): void => {
+            totalBytes += Buffer.byteLength(sql, 'utf8');
+            if (totalBytes > 32_000_000) {
+                snapshot.issues.push('Definition catalog exceeded 32 MB; analysis is partial.');
+                return;
+            }
+            const existing = definitionMap.get(objectId(object));
+            if (existing) {
+                existing.sql += `\n${sql}`;
+                snapshot.issues.push(`${object.name}: overloaded routines are aggregated; calls are not resolved by signature.`);
+            } else {
+                const definition = { object, sql };
+                snapshot.definitions.push(definition);
+                definitionMap.set(objectId(object), definition);
+            }
+        };
+        // A full-scope snapshot already contains every view definition and
+        // procedure source for this database. Use it instead of re-reading the
+        // definition catalogs.
+        const fullSnapshot = this.cache.getDatabaseSnapshotState?.(
+            session.connectionName,
+            session.database,
+        )?.scope === 'full';
         for (const kind of ['VIEW', 'PROCEDURE', 'TABLE', 'EXTERNAL TABLE'] as const) {
             try {
+                if (fullSnapshot && (kind === 'VIEW' || kind === 'PROCEDURE')) {
+                    const cachedForType = cachedObjectDetails.filter(entry =>
+                        String(entry.details.objectType ?? '').toUpperCase() === kind,
+                    );
+                    for (const entry of cachedForType.slice(0, MAX_OBJECTS)) {
+                        const segments = entry.key.split('.');
+                        const name = segments.pop();
+                        const schema = segments.pop() ?? '';
+                        if (!name) { continue; }
+                        const object: ObjectReference = { database: session.database, schema, name, type: kind };
+                        snapshot.objects.push(object);
+                        const sql = String(entry.details.definition ?? '');
+                        if (!sql) {
+                            snapshot.issues.push(`${object.name}: definition unavailable (permissions or catalog visibility).`);
+                            continue;
+                        }
+                        addDefinition(object, sql);
+                    }
+                    continue;
+                }
                 const query = kind === 'VIEW' ? NZ_QUERIES.listViewDefinitions(session.database) : kind === 'PROCEDURE' ? NZ_QUERIES.listProcedureSources(session.database) : kind === 'EXTERNAL TABLE' ? NZ_QUERIES.listExternalTables([session.database]) : NZ_QUERIES.listTablesAndViews([session.database]);
                 const rows = await session.rows(query);
                 if (rows.length > MAX_OBJECTS) { snapshot.issues.push(`${kind} catalog exceeded ${MAX_OBJECTS} objects; analysis is partial.`); }
@@ -198,15 +252,14 @@ export class DatabaseAnalysisService implements vscode.Disposable {
                     snapshot.objects.push(object);
                     if (kind === 'TABLE' || kind === 'EXTERNAL TABLE') { continue; }
                     let sql = text(row, kind === 'VIEW' ? 'DEFINITION' : 'PROCEDURESOURCE');
+                    if (!sql) {
+                        sql = cachedDefinitionFor(object.schema, object.name) ?? '';
+                    }
                     if (!sql) { snapshot.issues.push(`${object.name}: definition unavailable (permissions or catalog visibility).`); continue; }
                     if (kind === 'PROCEDURE' && !/^\s*CREATE\s/i.test(sql)) {
                         sql = wrapProcedureStringBody(sql.replace(/^\s*BEGIN_PROC\b/i, '').replace(/\bEND_PROC\s*;?\s*$/i, ''));
                     }
-                    totalBytes += Buffer.byteLength(sql, 'utf8');
-                    if (totalBytes > 32_000_000) { snapshot.issues.push('Definition catalog exceeded 32 MB; analysis is partial.'); break; }
-                    const existing = definitionMap.get(objectId(object));
-                    if (existing) { existing.sql += `\n${sql}`; snapshot.issues.push(`${object.name}: overloaded routines are aggregated; calls are not resolved by signature.`); }
-                    else { const definition = { object, sql }; snapshot.definitions.push(definition); definitionMap.set(objectId(object), definition); }
+                    addDefinition(object, sql);
                 }
             } catch (error) {
                 if (token.isCancellationRequested) { throw new vscode.CancellationError(); }

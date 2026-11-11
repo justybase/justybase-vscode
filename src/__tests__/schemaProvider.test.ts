@@ -133,8 +133,10 @@ describe('SchemaProvider', () => {
             setColumns: jest.fn(),
             hasConnectionPrefetchTriggered: jest.fn().mockReturnValue(false),
             isConnectionPrefetchFresh: jest.fn().mockReturnValue(false),
+            isDatabaseSnapshotFresh: jest.fn().mockReturnValue(false),
             whenDiskReady: jest.fn().mockResolvedValue(undefined),
             triggerConnectionPrefetch: jest.fn(),
+            triggerDatabasePrefetch: jest.fn().mockResolvedValue(undefined),
             onDidExternalRefresh: jest.fn().mockReturnValue({ dispose: jest.fn() }),
             ensureColumnsLoadedForTableKey: jest.fn().mockResolvedValue(undefined),
             getForeignKeyRelationshipsForDatabase: jest.fn().mockReturnValue(undefined),
@@ -739,24 +741,27 @@ describe('SchemaProvider', () => {
             expect(mockMetadataCache.setTypeGroups).toHaveBeenCalled();
         });
 
-        it('should trigger database prefetch', async () => {
+        it('should trigger a scoped database prefetch', async () => {
             mockMetadataCache.getTypeGroups.mockReturnValue(['TABLE']);
             mockMetadataCache.hasCachedTypeGroups.mockReturnValue(true);
 
             await schemaProvider.getChildren(databaseItem);
 
-            expect(mockMetadataCache.isConnectionPrefetchFresh).toHaveBeenCalledWith('TestConnection');
+            expect(mockMetadataCache.isDatabaseSnapshotFresh).toHaveBeenCalledWith(
+                'TestConnection',
+                'TESTDB',
+            );
         });
 
-        it('should skip legacy connection prefetch for DB2 databases', async () => {
+        it('should skip legacy database prefetch for DB2 databases', async () => {
             mockConnectionManager.getConnectionDatabaseKind.mockReturnValue('db2');
             mockMetadataCache.getTypeGroups.mockReturnValue(['TABLE']);
             mockMetadataCache.hasCachedTypeGroups.mockReturnValue(true);
 
             await schemaProvider.getChildren(databaseItem);
 
-            expect(mockMetadataCache.isConnectionPrefetchFresh).not.toHaveBeenCalled();
-            expect(mockMetadataCache.triggerConnectionPrefetch).not.toHaveBeenCalled();
+            expect(mockMetadataCache.isDatabaseSnapshotFresh).not.toHaveBeenCalled();
+            expect(mockMetadataCache.triggerDatabasePrefetch).not.toHaveBeenCalled();
         });
     });
 

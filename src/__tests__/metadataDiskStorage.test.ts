@@ -212,6 +212,24 @@ describe('MetadataDiskStorage', () => {
         expect(parsed.schemas).toContain('S1');
     });
 
+    it('persists per-database snapshot states in the index and manifest', async () => {
+        populateCache('conn1');
+        const completedAt = Date.now();
+        cache.markDatabaseSnapshotComplete('conn1', 'DB1', completedAt, 'full');
+
+        await storage.saveConnection(cache, 'conn1', completedAt);
+
+        const manifests = await storage.loadAllConnectionManifests();
+        expect(manifests.get('conn1')?.databaseSnapshots).toEqual({
+            DB1: { prefetchCompletedAt: completedAt, scope: 'full' },
+        });
+
+        const loaded = await storage.loadAllConnectionsMetadataOnly();
+        expect(loaded.get('conn1')?.databaseSnapshots).toEqual({
+            DB1: { prefetchCompletedAt: completedAt, scope: 'full' },
+        });
+    });
+
     it('loads a compatible v2 column blob referenced by v3 and rewrites it as v3', async () => {
         populateCache('conn1');
         await storage.saveConnection(cache, 'conn1', Date.now());

@@ -21,6 +21,28 @@ export interface MetadataCachePort extends MetadataStorageReader {
   readonly _tableCache: Map<string, PerKeyEntry<TableMetadata[]>>;
   readonly _columnCache: Map<string, PerKeyEntry<ColumnMetadata[]>>;
   readonly _procedureCache: Map<string, PerKeyEntry<ProcedureMetadata[]>>;
+  readonly _objectDetailsCache?: Map<string, PerKeyEntry<import('../types').ObjectDetails>>;
+
+  markDatabaseSnapshotComplete?(
+    connectionName: string,
+    dbName: string,
+    timestamp?: number,
+    scope?: import('../types').DatabaseSnapshotScope,
+  ): void;
+  getDatabaseSnapshotStates?(connectionName?: string): Record<string, import('../types').DatabaseSnapshotDiskState>;
+  restoreDatabaseSnapshotStates?(
+    connectionName: string,
+    states: Record<string, import('../types').DatabaseSnapshotDiskState> | undefined,
+  ): void;
+  getObjectDetailsForDatabase?(
+    connectionName: string,
+    dbName: string,
+  ): Array<{ key: string; details: import('../types').ObjectDetails }>;
+  setObjectDetails?(
+    connectionName: string,
+    key: string,
+    details: import('../types').ObjectDetails,
+  ): void;
 
   getForeignKeyRelationshipSlices(
     connectionName: string,
@@ -70,6 +92,7 @@ export interface MetadataCachePort extends MetadataStorageReader {
   markProcedureCatalogLoaded(connectionName: string, dbName: string): void;
   markObjectsCatalogLoaded(connectionName: string, layerKey: string, objType: string): void;
   markTableObjectCatalogLoaded?(connectionName: string, layerKey: string, objType: string): void;
+  isObjectsCatalogLoaded?(connectionName: string, layerKey: string, objType: string): boolean;
   hasCachedTypeGroups(connectionName: string, dbName: string): boolean;
   deriveTypeGroupsFromCache(connectionName: string, dbName: string): string[] | undefined;
   setTypeGroups(connectionName: string, dbName: string, types: string[]): void;

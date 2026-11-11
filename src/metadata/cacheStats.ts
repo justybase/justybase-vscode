@@ -25,6 +25,10 @@ export interface CacheStatsSnapshot {
     ttlEvictions: number;
     /** Refresh operations recorded */
     refreshOps: readonly RefreshRecord[];
+    /** Live catalog queries by request source (authoring fallbacks) */
+    liveQueries: Readonly<Record<string, number>>;
+    /** Timestamp of the most recent live catalog fallback */
+    lastLiveQueryAt?: number;
 }
 
 export interface RefreshRecord {
@@ -73,6 +77,8 @@ interface PerConnectionStats {
     entriesByLayer: Record<CacheLayer, number>;
     ttlEvictions: number;
     refreshOps: RefreshRecord[];
+    liveQueries: Record<string, number>;
+    lastLiveQueryAt?: number;
 }
 
 /**
@@ -83,6 +89,10 @@ interface PerConnectionStats {
  */
 export class CacheStatsTracker {
     private readonly _stats = new Map<string, PerConnectionStats>();
+    private readonly liveQueryTimestamps = new Map<string, number[]>();
+    private static readonly LIVE_QUERY_WINDOW_MS = 10 * 60 * 1000;
+    private static readonly LIVE_QUERY_WARNING_THRESHOLD = 20;
+    private static readonly LIVE_QUERY_TIMESTAMP_CAP = 200;
 
     private getOrCreate(connectionName: string): PerConnectionStats {
         let entry = this._stats.get(connectionName);
@@ -93,6 +103,7 @@ export class CacheStatsTracker {
                 entriesByLayer: createZeroCounters(),
                 ttlEvictions: 0,
                 refreshOps: [],
+                liveQueries: {},
             };
             this._stats.set(connectionName, entry);
         }
@@ -111,6 +122,36 @@ export class CacheStatsTracker {
 
     recordTtlEviction(connectionName: string, _layer: CacheLayer): void {
         this.getOrCreate(connectionName).ttlEvictions++;
+    }
+
+    /**
+     * Record a live catalog query that bypassed the shadow cache.
+     * `source` is a `MetadataRequestSource` value (completion, schema-tree,
+     * ddl-sync, ...). Refresh-pipeline sources are recorded by the prefetcher,
+     * not here.
+     */
+    recordLiveQuery(connectionName: string, source: string): void {
+        const stats = this.getOrCreate(connectionName);
+        const key = source.trim() || 'unknown';
+        stats.liveQueries[key] = (stats.liveQueries[key] ?? 0) + 1;
+        stats.lastLiveQueryAt = Date.now();
+
+        const now = stats.lastLiveQueryAt;
+        const timestamps = this.liveQueryTimestamps.get(connectionName) ?? [];
+        timestamps.push(now);
+        if (timestamps.length > CacheStatsTracker.LIVE_QUERY_TIMESTAMP_CAP) {
+            timestamps.splice(0, timestamps.length - CacheStatsTracker.LIVE_QUERY_TIMESTAMP_CAP);
+        }
+        this.liveQueryTimestamps.set(connectionName, timestamps);
+        const recent = timestamps.filter(timestamp =>
+            now - timestamp <= CacheStatsTracker.LIVE_QUERY_WINDOW_MS,
+        );
+        if (recent.length === CacheStatsTracker.LIVE_QUERY_WARNING_THRESHOLD + 1) {
+            Logger.getInstance().warn(
+                `[CacheStats] ${recent.length} live catalog queries in the last 10 minutes for ${connectionName}; `
+                + 'authoring is missing the shadow cache. Check justybase.metadata.liveFallback and the database snapshots.',
+            );
+        }
     }
 
     recordEntriesByLayer(connectionName: string, layer: CacheLayer, count: number): void {
@@ -164,6 +205,8 @@ export class CacheStatsTracker {
             entriesByLayer,
             ttlEvictions: entry.ttlEvictions,
             refreshOps: [...entry.refreshOps],
+            liveQueries: { ...entry.liveQueries },
+            lastLiveQueryAt: entry.lastLiveQueryAt,
         };
     }
 
@@ -225,11 +268,13 @@ export class CacheStatsTracker {
     /** Clear stats for a specific connection */
     clearConnection(connectionName: string): void {
         this._stats.delete(connectionName);
+        this.liveQueryTimestamps.delete(connectionName);
     }
 
     /** Clear all stats */
     clearAll(): void {
         this._stats.clear();
+        this.liveQueryTimestamps.clear();
     }
 
     // ========== Logging ==========

@@ -95,6 +95,34 @@ describe('metadataDiskSerializer', () => {
         expect(cache2.findTableId('conn1', 'DB1.ADMIN.T1')).toBe(100);
     });
 
+    it('should roundtrip optional object details through serialize and hydrate', () => {
+        populateFullConnection('conn1');
+        cache.setObjectDetails('conn1', 'DB1.ADMIN.V1', {
+            objectType: 'VIEW',
+            definition: 'SELECT 1 AS ID',
+        });
+        cache.markDatabaseSnapshotComplete('conn1', 'DB1', Date.now(), 'full');
+
+        const serialized = serializeConnectionFromCache(
+            cache,
+            'conn1',
+            'fingerprint',
+            Date.now(),
+        );
+        expect(serialized?.objectDetails?.['DB1.ADMIN.V1']?.data[0]).toEqual({
+            objectType: 'VIEW',
+            definition: 'SELECT 1 AS ID',
+        });
+
+        const cache2 = new MetadataCache({ globalStorageUri: vscode.Uri.file('/tmp/y') } as vscode.ExtensionContext);
+        hydrateConnectionIntoCache(cache2, 'conn1', serialized!);
+
+        expect(cache2.getObjectDetails('conn1', 'DB1.ADMIN.V1')).toEqual({
+            objectType: 'VIEW',
+            definition: 'SELECT 1 AS ID',
+        });
+    });
+
     it('should strip unknown keys and truncate documentation (E15)', () => {
         populateFullConnection('conn1');
         cache.setColumns('conn1', 'DB1.ADMIN.T1', [{

@@ -12,6 +12,21 @@ export interface PerKeyEntry<T> {
     timestamp: number;
 }
 
+/** Scope of a per-database metadata snapshot. */
+export type DatabaseSnapshotScope = 'core' | 'full';
+
+/** Persisted per-database snapshot marker. */
+export interface DatabaseSnapshotDiskState {
+    prefetchCompletedAt: number;
+    scope: DatabaseSnapshotScope;
+}
+
+/**
+ * Optional per-object details that are too heavy for the object-list layer
+ * (view definitions, procedure sources, future constraint/index payloads).
+ */
+export type ObjectDetails = Record<string, unknown>;
+
 /**
  * Cache type identifiers for selective saving
  */

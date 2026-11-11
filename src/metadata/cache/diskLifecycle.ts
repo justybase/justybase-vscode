@@ -136,6 +136,10 @@ export async function initializeDiskCache(deps: DiskLifecycleDeps): Promise<void
       connectionName,
       manifest.columnLayerKeys ?? [],
     );
+    deps.cache.restoreDatabaseSnapshotStates?.(
+      connectionName,
+      manifest.databaseSnapshots,
+    );
     if (manifest.database.data.length > 0) {
       deps.cache.setDatabases(connectionName, manifest.database.data);
     }
@@ -223,6 +227,10 @@ async function hydrateConnectionMetadataFromDisk(
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
     }
+    deps.cache.restoreDatabaseSnapshotStates?.(
+      connectionName,
+      loaded.databaseSnapshots,
+    );
     deps.cache.invalidateForeignKeyRelationships(connectionName);
     for (const slice of loaded.foreignKeyRelationships) {
       deps.cache.setForeignKeyRelationshipsForDatabase(
@@ -333,6 +341,10 @@ export async function onExternalCacheUpdate(
     if (!deps.isCacheGenerationCurrent(generation)) {
       return;
     }
+    deps.cache.restoreDatabaseSnapshotStates?.(
+      connectionName,
+      loaded.databaseSnapshots,
+    );
     deps.cache.invalidateForeignKeyRelationships(connectionName);
     for (const slice of loaded.foreignKeyRelationships) {
       deps.cache.setForeignKeyRelationshipsForDatabase(

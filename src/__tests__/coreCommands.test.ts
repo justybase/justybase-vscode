@@ -100,6 +100,8 @@ describe("registerCoreCommands", () => {
     logStats: jest.Mock;
     clearCache: jest.Mock;
     triggerConnectionPrefetch: jest.Mock;
+    getDatabaseSnapshotStates: jest.Mock;
+    isDatabaseSnapshotFresh: jest.Mock;
   };
 
   const mockedRegisterCommand = vscode.commands.registerCommand as jest.Mock;
@@ -121,6 +123,8 @@ describe("registerCoreCommands", () => {
       logStats: jest.fn(),
       clearCache: jest.fn(),
       triggerConnectionPrefetch: jest.fn(),
+      getDatabaseSnapshotStates: jest.fn().mockReturnValue({}),
+      isDatabaseSnapshotFresh: jest.fn().mockReturnValue(false),
     };
 
     ctx = {
@@ -206,6 +210,7 @@ describe("registerCoreCommands", () => {
           entryCount: 4,
         },
       ],
+      liveQueries: {},
     });
 
     const command = getCommand("netezza.showMetadataCacheStats");

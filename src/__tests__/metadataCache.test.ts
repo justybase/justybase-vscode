@@ -2278,4 +2278,73 @@ describe("Concurrent Schema Refresh Simulation", () => {
     expect(viewsAfterS1Refresh?.length).toBe(1);
     expect(viewsAfterS1Refresh?.[0].item.OBJNAME).toBe("V2");
   });
+
+  it("tracks per-database snapshot freshness independently", () => {
+    const now = Date.now();
+    cache.markDatabaseSnapshotComplete("conn1", "DB1", now - 1_000, "core");
+    cache.markDatabaseSnapshotComplete("conn1", "DB2", now - 500, "full");
+
+    expect(cache.getDatabaseSnapshotState("conn1", "DB1")).toEqual({
+      timestamp: now - 1_000,
+      scope: "core",
+    });
+    expect(cache.getDatabaseSnapshotStates("conn1")).toEqual({
+      DB1: { prefetchCompletedAt: now - 1_000, scope: "core" },
+      DB2: { prefetchCompletedAt: now - 500, scope: "full" },
+    });
+    expect(cache.isDatabaseSnapshotFresh("conn1", "DB1")).toBe(true);
+    expect(cache.isDatabaseSnapshotFresh("conn1", "DB3")).toBe(false);
+
+    cache.invalidateDatabaseSnapshot("conn1", "DB2");
+    expect(cache.isDatabaseSnapshotFresh("conn1", "DB2")).toBe(false);
+    expect(cache.isDatabaseSnapshotFresh("conn1", "DB1")).toBe(true);
+  });
+
+  it("restores per-database snapshot states from disk", () => {
+    cache.restoreDatabaseSnapshotStates("conn1", {
+      DB1: { prefetchCompletedAt: 5_000, scope: "core" },
+      DB2: { prefetchCompletedAt: 6_000, scope: "full" },
+    });
+
+    expect(cache.getDatabaseSnapshotStates("conn1")).toEqual({
+      DB1: { prefetchCompletedAt: 5_000, scope: "core" },
+      DB2: { prefetchCompletedAt: 6_000, scope: "full" },
+    });
+    expect(cache.getDatabaseSnapshotState("conn1", "DB2")?.scope).toBe("full");
+  });
+
+  it("patches object and column comments without invalidating the cache", () => {
+    const invalidated = jest.fn();
+    cache.onDidInvalidate(invalidated);
+    cache.setTables(
+      "conn1",
+      "DB1.ADMIN",
+      [{ OBJNAME: "ORDERS", SCHEMA: "ADMIN", OBJID: 1, objType: "TABLE", label: "ORDERS" }],
+      new Map([["DB1.ADMIN.ORDERS", 1]]),
+    );
+    cache.setColumns("conn1", "DB1.ADMIN.ORDERS", [
+      { ATTNAME: "AMOUNT", FORMAT_TYPE: "INTEGER" },
+    ]);
+
+    expect(cache.updateObjectComment("conn1", "DB1", "ADMIN", "ORDERS", "orders table")).toBe(true);
+    expect(cache.updateColumnComment("conn1", "DB1", "ADMIN", "ORDERS", "AMOUNT", "total")).toBe(true);
+
+    expect(cache.getTables("conn1", "DB1.ADMIN")?.[0].DESCRIPTION).toBe("orders table");
+    expect(cache.getColumns("conn1", "DB1.ADMIN.ORDERS")?.[0].documentation).toBe("total");
+    expect(cache.updateObjectComment("conn1", "DB1", "ADMIN", "MISSING", "x")).toBe(false);
+    expect(invalidated).not.toHaveBeenCalled();
+  });
+
+  it("stores and invalidates optional object details", () => {
+    cache.setObjectDetails("conn1", "DB1.ADMIN.ORDERS", { objectType: "VIEW", definition: "SELECT 1" });
+    expect(cache.getObjectDetails("conn1", "DB1.ADMIN.ORDERS")).toEqual({
+      objectType: "VIEW",
+      definition: "SELECT 1",
+    });
+    expect(cache.getObjectDetailsForDatabase("conn1", "DB1")).toHaveLength(1);
+
+    cache.invalidateObjectDetails("conn1", "DB1.ADMIN");
+    expect(cache.getObjectDetails("conn1", "DB1.ADMIN.ORDERS")).toBeUndefined();
+    expect(cache.getObjectDetailsForDatabase("conn1", "DB1")).toHaveLength(0);
+  });
 });

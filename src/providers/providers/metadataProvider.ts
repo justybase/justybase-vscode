@@ -13,6 +13,9 @@ import { getTablesForScope, buildSchemaCacheKey } from '../../metadata/cache/sch
 import { DatabaseMetadata, SchemaMetadata, TableMetadata, ProcedureMetadata, ColumnMetadata } from '../../metadata/types';
 import { supportsLegacyMetadataPrefetch } from '../../metadata/prefetchSupport';
 import { createConnectionScopedMetadataQueryRunner } from '../../metadata/connectionScopedMetadataQueryRunner';
+import {
+    allowsLiveMetadataFetchForSource,
+} from '../../metadata/liveFallbackPolicy';
 import { formatIdentifierForSql } from '../../utils/identifierUtils';
 import {
     METADATA_QUERY_TIMEOUT_SECONDS,
@@ -91,6 +94,19 @@ export class MetadataProvider {
         return this.connectionManager.getConnectionDatabaseKind(connectionName);
     }
 
+    /**
+     * Live-fallback gate for cache misses. Only shadow-cache connections
+     * (currently Netezza) can be blocked; other dialects keep their existing
+     * live metadata path.
+     */
+    private shouldBlockLiveMetadata(
+        connectionName: string,
+        source: MetadataRequestSource | undefined,
+    ): boolean {
+        return this.supportsLegacyMetadataPrefetch(connectionName)
+            && !allowsLiveMetadataFetchForSource(source);
+    }
+
     private supportsLegacyMetadataPrefetch(connectionName: string): boolean {
         const cache = this.metadataCache as MetadataCache & {
             supportsLegacyMetadataPrefetch?: (name: string) => boolean;
@@ -99,6 +115,45 @@ export class MetadataProvider {
             return cache.supportsLegacyMetadataPrefetch(connectionName);
         }
         return supportsLegacyMetadataPrefetch(this.tryGetConnectionDatabaseKind(connectionName));
+    }
+
+    /**
+     * When live fallback is disabled, a cache miss must not block the UI on a
+     * catalog round-trip. Warm the affected database in the background instead;
+     * the next render reads it from the shadow cache.
+     */
+    private ensureDatabaseShadowSnapshot(
+        connectionName: string,
+        database: string | undefined,
+    ): void {
+        const dbName = database?.trim();
+        if (!dbName || !this.supportsLegacyMetadataPrefetch(connectionName)) {
+            return;
+        }
+        if (this.metadataCache.isDatabaseSnapshotFresh(connectionName, dbName)) {
+            return;
+        }
+        setImmediate(() => {
+            try {
+                void this.metadataCache.triggerDatabasePrefetch(
+                    connectionName,
+                    dbName,
+                    createConnectionScopedMetadataQueryRunner({
+                        context: this.context,
+                        connectionManager: this.connectionManager,
+                        connectionName,
+                        maxRows: 1000000,
+                        timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
+                    }),
+                );
+            } catch (e: unknown) {
+                logWithFallback(
+                    'error',
+                    '[MetadataProvider] Database shadow snapshot warmup error:',
+                    e,
+                );
+            }
+        });
     }
 
     private getConnectionDatabaseKind(connectionName?: string): DatabaseKind {
@@ -311,6 +366,11 @@ export class MetadataProvider {
             });
         }
 
+        if (this.shouldBlockLiveMetadata(connectionName, 'schema-tree')) {
+            this.ensureDatabaseShadowSnapshot(connectionName, dbName);
+            return [];
+        }
+
         const statusBarDisposable = vscode.window.setStatusBarMessage(`Fetching schemas for ${dbName}...`);
         try {
             const query = this.getMetadataProvider(connectionName).buildListSchemasQuery(dbName);
@@ -410,6 +470,11 @@ export class MetadataProvider {
             );
         }
 
+        if (this.shouldBlockLiveMetadata(connectionName, 'schema-tree')) {
+            this.ensureDatabaseShadowSnapshot(connectionName, dbName);
+            return [];
+        }
+
         const statusBarMessage = schemaName
             ? `Fetching tables for ${dbName}.${schemaName}...`
             : `Fetching tables for ${dbName}...`;
@@ -418,6 +483,7 @@ export class MetadataProvider {
         try {
             const query = this.getMetadataProvider(connectionName).buildListTablesQuery(dbName, schemaName);
 
+            this.metadataCache.recordLiveMetadataQuery?.(connectionName, 'schema-tree');
             const result = await runQueryRaw({
                 context: this.context,
                 query,
@@ -563,6 +629,11 @@ export class MetadataProvider {
             // Cache has objects but views not yet enumerated for this scope — fetch below.
         }
 
+        if (this.shouldBlockLiveMetadata(connectionName, 'schema-tree')) {
+            this.ensureDatabaseShadowSnapshot(connectionName, dbName);
+            return [];
+        }
+
         const statusBarMessage = schemaName
             ? `Fetching views for ${dbName}.${schemaName}...`
             : `Fetching views for ${dbName}...`;
@@ -571,6 +642,7 @@ export class MetadataProvider {
         try {
             const query = this.getMetadataProvider(connectionName).buildListViewsQuery(dbName, schemaName);
 
+            this.metadataCache.recordLiveMetadataQuery?.(connectionName, 'schema-tree');
             const result = await runQueryRaw({
                 context: this.context,
                 query,
@@ -651,12 +723,17 @@ export class MetadataProvider {
         }
 
         const cacheKey = this.buildMetadataSchemaCacheKey(connectionName, dbName, schemaName);
+        if (this.shouldBlockLiveMetadata(connectionName, 'schema-tree')) {
+            this.ensureDatabaseShadowSnapshot(connectionName, dbName);
+            return [];
+        }
         const statusBarMessage = schemaName
             ? `Fetching source objects for ${dbName}.${schemaName}...`
             : `Fetching source objects for ${dbName}...`;
         const statusBarDisposable = vscode.window.setStatusBarMessage(statusBarMessage);
 
         try {
+            this.metadataCache.recordLiveMetadataQuery?.(connectionName, 'schema-tree');
             const result = await runQueryRaw({
                 context: this.context,
                 query: queryBuilder.call(metadataProvider, dbName, schemaName),
@@ -763,6 +840,11 @@ export class MetadataProvider {
 
         if (cached) {
             return toCompletionItems(cached);
+        }
+
+        if (this.shouldBlockLiveMetadata(connectionName, 'schema-tree')) {
+            this.ensureDatabaseShadowSnapshot(connectionName, dbName);
+            return [];
         }
 
         const statusBarMessage = schemaName
@@ -1047,11 +1129,18 @@ export class MetadataProvider {
                 }
             }
 
-            if (options?.allowDatabaseFetch === false) {
+            if (
+                options?.allowDatabaseFetch === false
+                || this.shouldBlockLiveMetadata(
+                    connectionName,
+                    options?.requestSource ?? 'schema-tree',
+                )
+            ) {
                 logWithFallback(
                     'debug',
-                    `[MetadataProvider] Cache-only column lookup miss for ${connectionName}/${normalizedDbName ?? 'CURRENT'}.${normalizedSchemaName ?? ''}.${normalizedTableName}; source=${options.requestSource ?? 'unknown'}`,
+                    `[MetadataProvider] Cache-only column lookup miss for ${connectionName}/${normalizedDbName ?? 'CURRENT'}.${normalizedSchemaName ?? ''}.${normalizedTableName}; source=${options?.requestSource ?? 'unknown'}`,
                 );
+                this.ensureDatabaseShadowSnapshot(connectionName, normalizedDbName);
                 return [];
             }
 
@@ -1168,6 +1257,7 @@ export class MetadataProvider {
             return [];
         }
 
+        this.metadataCache.recordLiveMetadataQuery?.(connectionName, requestSource);
         const statusMsg = vscode.window.setStatusBarMessage(`Fetching columns for ${tableName}...`);
 
         try {
@@ -1334,12 +1424,13 @@ export class MetadataProvider {
 
         setImmediate(() => {
             try {
-                if (!cache.isConnectionPrefetchFresh(connectionName)) {
-                    // The central prefetch circuit owns retry timing. Do not
-                    // replace a suppressed full refresh with a database-wide
-                    // column scan on every authoring cache miss.
-                    cache.triggerConnectionPrefetch(
+                if (!cache.isDatabaseSnapshotFresh(connectionName, normalizedDbName)) {
+                    // The central prefetch circuit owns retry timing. Warm one
+                    // database snapshot instead of the whole connection; the
+                    // remaining databases stay lazy.
+                    void cache.triggerDatabasePrefetch(
                         connectionName,
+                        normalizedDbName,
                         createConnectionScopedMetadataQueryRunner({
                             context,
                             connectionManager,
@@ -1386,8 +1477,8 @@ export class MetadataProvider {
                 metadataContext,
             });
 
-        const prefetchFresh =
-            this.metadataCache.isConnectionPrefetchFresh(connectionName);
+        const prefetchFresh = (database: string): boolean =>
+            this.metadataCache.isDatabaseSnapshotFresh(connectionName, database);
 
         const concurrencyLimit = getMetadataQueryConcurrencyLimit();
         for (let i = 0; i < uniqueDatabases.length; i += concurrencyLimit) {
@@ -1399,9 +1490,13 @@ export class MetadataProvider {
             );
         }
 
-        if (!prefetchFresh) {
-            this.metadataCache.triggerConnectionPrefetch(
+        for (const dbName of uniqueDatabases) {
+            if (prefetchFresh(dbName)) {
+                continue;
+            }
+            void this.metadataCache.triggerDatabasePrefetch(
                 connectionName,
+                dbName,
                 createConnectionScopedMetadataQueryRunner({
                     context: this.context,
                     connectionManager: this.connectionManager,

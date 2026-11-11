@@ -5,6 +5,7 @@
 
 import type {
     ConnectionPrefetchOptions,
+    DatabasePrefetchOptions,
     MetadataPrefetchTarget,
     MetadataSnapshotCompletenessReport,
 } from './cache/MetadataPrefetchTarget';
@@ -73,6 +74,7 @@ import { NZ_QUERIES } from './systemQueries';
 import {
     createNetezzaCatalogIdentifier,
     createNetezzaUserIdentifier,
+    formatNetezzaIdentifier,
 } from '../dialects/netezza/metadata/identifierUtils';
 import {
     buildNetezzaColumnsWithKeysQueries,
@@ -343,6 +345,9 @@ export class CachePrefetcher {
     private externalObjectsPrefetchTriggeredSet: Set<string> = new Set();
     private connectionPrefetchTriggered: Map<string, number> = new Map();
     private connectionPrefetchInProgress: Set<string> = new Set();
+    /** Key: "CONN|DB" — scoped database refreshes. */
+    private databasePrefetchInProgress: Set<string> = new Set();
+    private databasePrefetchTriggered: Map<string, number> = new Map();
     private automaticPrefetchFailures = new Map<string, AutomaticPrefetchFailureState>();
     private readonly refreshDetailsByConnection = new Map<string, ActiveRefreshDetails>();
     private refreshSequence = 0;
@@ -1472,6 +1477,17 @@ export class CachePrefetcher {
         this.primaryObjectsPrefetchCompletedSet.delete(key);
         this.externalObjectsPrefetchTriggeredSet.delete(key);
         this.automaticPrefetchFailures.delete(connectionName);
+        const prefix = `${connectionName}|`;
+        for (const databaseKey of Array.from(this.databasePrefetchTriggered.keys())) {
+            if (databaseKey.startsWith(prefix)) {
+                this.databasePrefetchTriggered.delete(databaseKey);
+            }
+        }
+        for (const databaseKey of Array.from(this.databasePrefetchInProgress)) {
+            if (databaseKey.startsWith(prefix)) {
+                this.databasePrefetchInProgress.delete(databaseKey);
+            }
+        }
         this.clearConnectionPrefetchTimestamp(connectionName);
     }
 
@@ -1511,7 +1527,8 @@ export class CachePrefetcher {
             return existing;
         }
 
-        const promise = this.executePrefetchColumnsForDatabase(connectionName, dbName, runQueryFn)
+        const promise = this.executePrefetchColumnsForDatabase(connectionName, dbName, runQueryFn, false)
+            .then(() => undefined)
             .finally(() => {
                 this.databaseColumnPrefetchInFlight.delete(inflightKey);
             });
@@ -1523,7 +1540,8 @@ export class CachePrefetcher {
         connectionName: string,
         dbName: string,
         runQueryFn: QueryRunnerRawFn,
-    ): Promise<void> {
+        forceRefresh = false,
+    ): Promise<boolean> {
         const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
         const userDatabase = preserveCatalogIdentity
             ? createNetezzaUserIdentifier(dbName).value
@@ -1532,7 +1550,7 @@ export class CachePrefetcher {
             ? buildNetezzaCacheDatabasePart(userDatabase)
             : dbName;
         if (this.cache.isDatabaseDead(connectionName, cacheDatabase)) {
-            return;
+            return false;
         }
 
         const columnQueries = buildNetezzaColumnsWithKeysQueries(
@@ -1540,6 +1558,7 @@ export class CachePrefetcher {
         );
         let mainRows: RawColumnRowWithKeys[] = [];
         let mainCatalogFailure = false;
+        let mainComplete = false;
 
         try {
             const result = await this.runColumnsWithKeysQueries(
@@ -1557,6 +1576,7 @@ export class CachePrefetcher {
             );
             if (result) {
                 mainRows = result.rows;
+                mainComplete = true;
                 this.cache.setForeignKeyRelationshipsForDatabase?.(
                     connectionName,
                     userDatabase,
@@ -1587,6 +1607,7 @@ export class CachePrefetcher {
         }
 
         let externalRows: RawColumnRowWithKeys[] = [];
+        let externalComplete = true;
 
         // External table columns are fetched only when the object stage
         // proved that this database contains an external table. Keep this
@@ -1611,8 +1632,11 @@ export class CachePrefetcher {
                 );
                 if (externalResult) {
                     externalRows = queryResultToRows<RawColumnRowWithKeys>(externalResult);
+                } else {
+                    externalComplete = false;
                 }
             } catch (e: unknown) {
+                externalComplete = false;
                 logPrefetchError(`[CachePrefetcher] Error fetching external columns for DB ${dbName}:`, e);
             }
         }
@@ -1627,12 +1651,13 @@ export class CachePrefetcher {
         );
 
         for (const [key, columns] of columnsByKey) {
-            if (!this.cache.getColumns(connectionName, key)) {
+            if (forceRefresh || !this.cache.getColumns(connectionName, key)) {
                 this.cache.setColumns(connectionName, key, columns);
             }
         }
 
         await mirrorSynonymColumnsForConnection(this.cache, connectionName);
+        return mainComplete && externalComplete;
     }
 
     triggerConnectionPrefetch(
@@ -1670,6 +1695,529 @@ export class CachePrefetcher {
 
     /** Threshold in ms for considering a prefetch 'slow' — used to suggest disk persistence. */
     private static readonly SLOW_PREFETCH_MS = 30_000;
+
+    /** Stable identity for a scoped database refresh (Netezza catalog names are exact). */
+    private databasePrefetchKey(connectionName: string, database: string): string {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const databasePart = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+            : database.trim().toUpperCase();
+        return `${connectionName}|${databasePart}`;
+    }
+
+    hasDatabasePrefetchInProgress(connectionName: string, database: string): boolean {
+        return this.databasePrefetchInProgress.has(
+            this.databasePrefetchKey(connectionName, database),
+        );
+    }
+
+    getDatabasePrefetchTimestamp(connectionName: string, database: string): number | undefined {
+        return this.databasePrefetchTriggered.get(
+            this.databasePrefetchKey(connectionName, database),
+        );
+    }
+
+    /**
+     * Refresh every metadata layer for one database. This is the normal unit
+     * of work for the active and recently used databases; the rest of the
+     * connection is left untouched until a database is opened.
+     */
+    triggerDatabasePrefetch(
+        connectionName: string,
+        database: string,
+        runQueryFn: DisposableQueryRunnerRawFn,
+        options?: DatabasePrefetchOptions,
+    ): Promise<void> {
+        if (options?.manual) {
+            this.automaticPrefetchFailures.delete(connectionName);
+        }
+        return this.cache.whenDiskReady()
+            .then(async () => {
+                if (this.cache.isConnectionMetadataHydrating(connectionName)) {
+                    await this.cache.whenConnectionMetadataHydrated(connectionName);
+                }
+                await this.runDatabasePrefetch(connectionName, database, runQueryFn, options);
+            })
+            .catch((error: unknown) => {
+                logPrefetchError(
+                    `[CachePrefetcher] Failed to start database prefetch for ${connectionName}/${database}:`,
+                    error,
+                );
+            })
+            .finally(async () => {
+                try {
+                    await runQueryFn.dispose?.();
+                } catch (error: unknown) {
+                    logPrefetchError(
+                        `[CachePrefetcher] Failed to close metadata session for ${connectionName}:`,
+                        error,
+                    );
+                }
+            });
+    }
+
+    private async runDatabasePrefetch(
+        connectionName: string,
+        database: string,
+        runQueryFn: QueryRunnerRawFn,
+        options?: DatabasePrefetchOptions,
+    ): Promise<void> {
+        const key = this.databasePrefetchKey(connectionName, database);
+        if (this.databasePrefetchInProgress.has(key)) {
+            return;
+        }
+        const cacheFresh = this.cache.isDatabaseSnapshotFresh?.(connectionName, database) === true;
+        if (!options?.manual && cacheFresh) {
+            this.recordConnectionPrefetchSkipped(connectionName, 'fresh');
+            return;
+        }
+        if (!this.shouldStartConnectionPrefetch(connectionName, options)) {
+            this.recordConnectionPrefetchSkipped(connectionName, 'suppressed');
+            return;
+        }
+
+        this.databasePrefetchInProgress.add(key);
+        this.databasePrefetchTriggered.set(key, Date.now());
+        this.lastPrefetchAttemptTime.set(connectionName, Date.now());
+
+        let lease: import('./diskStorage/metadataDiskStorage').PrefetchLease | undefined;
+        try {
+            lease = await this.cache.tryAcquirePrefetchLock(connectionName);
+        } catch (error: unknown) {
+            this.databasePrefetchInProgress.delete(key);
+            logPrefetchError(
+                `[CachePrefetcher] Failed to acquire prefetch lock for ${connectionName}:`,
+                error,
+            );
+            this.recordConnectionPrefetchOutcome(connectionName, false, options);
+            return;
+        }
+        if (!lease) {
+            this.databasePrefetchInProgress.delete(key);
+            this.recordConnectionPrefetchSkipped(connectionName, 'locked');
+            return;
+        }
+
+        const scope = options?.scope === 'full' ? 'full' : 'core';
+        let complete = false;
+        try {
+            this.beginRefreshDetails(connectionName);
+            this.emitProgress({
+                connectionName,
+                stage: 'start',
+                percent: 0,
+                message: `Refreshing database ${database}...`,
+            });
+
+            const details = this.refreshDetailsByConnection.get(connectionName);
+            const lifecycle = details
+                ? this.getQueryLifecycleReporter(connectionName, details.refreshId)
+                : undefined;
+            const result = await this.executeDatabasePrefetch(
+                connectionName,
+                database,
+                runQueryFn,
+                options?.manual === true,
+                scope,
+                lifecycle,
+            );
+            complete = result.coreComplete;
+            if (!complete) {
+                this.emitProgress({
+                    connectionName,
+                    stage: 'error',
+                    percent: 100,
+                    message: `Metadata refresh incomplete for ${database}`,
+                });
+                return;
+            }
+
+            // A full refresh that could not read view definitions (for example
+            // because the session cannot see them) still leaves a valid core
+            // snapshot. Record `core` so lazy warm-up does not repeat the whole
+            // database, but never advertise `full`.
+            const completedScope: import('./types').DatabaseSnapshotScope =
+                scope === 'full' && result.detailsComplete ? 'full' : 'core';
+            this.cache.markDatabaseSnapshotComplete?.(
+                connectionName,
+                database,
+                Date.now(),
+                completedScope,
+            );
+            this.emitProgress({
+                connectionName,
+                stage: 'complete',
+                percent: 100,
+                message: `Metadata ready for ${database}`,
+            });
+
+            if (this.cache.verifyCompleteSnapshot?.(connectionName, false) === true) {
+                this.connectionPrefetchTriggered.set(connectionName, Date.now());
+                await this.cache.saveConnectionToDiskAfterPrefetch(connectionName, false, lease);
+            } else {
+                // Scoped snapshots are durable but deliberately not marked as
+                // a complete connection snapshot.
+                await this.cache.checkpointSave(connectionName, lease);
+            }
+        } catch (error: unknown) {
+            logPrefetchError(
+                `[CachePrefetcher] Database prefetch error for ${connectionName}/${database}:`,
+                error,
+            );
+            this.emitProgress({
+                connectionName,
+                stage: 'error',
+                percent: 100,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            this.databasePrefetchInProgress.delete(key);
+            this.recordConnectionPrefetchOutcome(connectionName, complete, options);
+            this.finalizeRefreshDetails(connectionName);
+            await this.cache.releasePrefetchLock(lease);
+        }
+    }
+
+    private async executeDatabasePrefetch(
+        connectionName: string,
+        database: string,
+        runQueryFn: QueryRunnerRawFn,
+        forceRefresh: boolean,
+        scope: import('./types').DatabaseSnapshotScope,
+        lifecycle?: PrefetchQueryLifecycleReporter,
+    ): Promise<{ coreComplete: boolean; detailsComplete: boolean }> {
+        // Ensure the database list exists without forcing a full connection
+        // refresh; a cached list is reused.
+        const databases = await this.prefetchDatabases(connectionName, runQueryFn, false, lifecycle);
+        const canonicalDatabase = databases.find(name =>
+            name.trim().toUpperCase() === database.trim().toUpperCase(),
+        ) ?? database;
+
+        const schemasComplete = await this.prefetchSchemasForDb(
+            connectionName,
+            canonicalDatabase,
+            runQueryFn,
+            forceRefresh,
+            lifecycle,
+        );
+        const typeGroupsComplete = await this.prefetchTypeGroupsForDb(
+            connectionName,
+            canonicalDatabase,
+            runQueryFn,
+            forceRefresh,
+            lifecycle,
+        );
+        const objectsComplete = await this.prefetchAllObjects(
+            connectionName,
+            runQueryFn,
+            false,
+            [canonicalDatabase],
+            true,
+            lifecycle,
+        );
+        const proceduresComplete = await this.prefetchProceduresForDb(
+            connectionName,
+            canonicalDatabase,
+            runQueryFn,
+            forceRefresh,
+            lifecycle,
+        );
+        const columnsComplete = await this.executePrefetchColumnsForDatabase(
+            connectionName,
+            canonicalDatabase,
+            runQueryFn,
+            true,
+        );
+        this.markEmptySchemasForDatabase(connectionName, canonicalDatabase);
+
+        let detailsComplete = true;
+        if (scope === 'full') {
+            detailsComplete = await this.prefetchObjectDetailsForDatabase(
+                connectionName,
+                canonicalDatabase,
+                runQueryFn,
+                lifecycle,
+            );
+        }
+
+        return {
+            coreComplete: schemasComplete
+                && typeGroupsComplete
+                && objectsComplete
+                && proceduresComplete
+                && columnsComplete,
+            detailsComplete,
+        };
+    }
+
+    private markEmptySchemasForDatabase(connectionName: string, database: string): void {
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const cacheDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+            : database;
+        const schemas = this.cache.getSchemas(connectionName, cacheDatabase) ?? [];
+        let hasObjects = false;
+
+        for (const schema of schemas) {
+            const schemaName = typeof schema.SCHEMA === 'string' ? schema.SCHEMA : extractLabel(schema);
+            if (!schemaName) {
+                continue;
+            }
+            const key = buildDbSchemaCacheKey(
+                cacheDatabase,
+                schemaName,
+                preserveCatalogIdentity
+                    ? { preserveCase: true, exactNetezza: true }
+                    : undefined,
+            );
+            const tables = this.cache.getTables(connectionName, key);
+            if (tables === undefined) {
+                this.cache.setTables(connectionName, key, [], new Map());
+                this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, key);
+            } else if (tables.length > 0) {
+                hasObjects = true;
+            }
+        }
+
+        if (!hasObjects) {
+            const aggregateKey = buildDbSchemaCacheKey(
+                cacheDatabase,
+                undefined,
+                preserveCatalogIdentity
+                    ? { preserveCase: true, exactNetezza: true }
+                    : undefined,
+            );
+            if (this.cache.getTables(connectionName, aggregateKey) === undefined) {
+                this.cache.setTables(connectionName, aggregateKey, [], new Map());
+            }
+            this.cache.markPrefetchObjectTypesCatalogLoaded(connectionName, aggregateKey);
+        }
+    }
+
+    /**
+     * Full-scope snapshot: cache view definitions and procedure sources so a
+     * manual database refresh is not core-only.
+     */
+    private async prefetchObjectDetailsForDatabase(
+        connectionName: string,
+        database: string,
+        runQueryFn: QueryRunnerRawFn,
+        lifecycle?: PrefetchQueryLifecycleReporter,
+    ): Promise<boolean> {
+        if (!this.cache.setObjectDetails) {
+            return true;
+        }
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        const catalogDatabase = preserveCatalogIdentity
+            ? formatNetezzaIdentifier(createNetezzaCatalogIdentifier(database))
+            : database;
+        let complete = true;
+
+        // _V_VIEW.DEFINITION is only populated when the session is connected to
+        // the database that owns the view. A scoped database refresh may target
+        // a database other than the profile default, so switch and restore the
+        // session catalog around the definition read.
+        let restoreCatalog: string | undefined;
+        let catalogSwitched = false;
+        if (preserveCatalogIdentity) {
+            const currentCatalogResult = await this.runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                'SELECT CURRENT_CATALOG',
+                {
+                    source: 'database-prefetch',
+                    kind: 'databases',
+                    database,
+                    reason: 'read-current-catalog',
+                },
+                lifecycle,
+            );
+            const currentCatalog = currentCatalogResult
+                ? String(
+                    queryResultToRows<Record<string, unknown>>(currentCatalogResult)[0]?.CURRENT_CATALOG
+                    ?? Object.values(
+                        queryResultToRows<Record<string, unknown>>(currentCatalogResult)[0] ?? {},
+                    )[0]
+                    ?? '',
+                ).trim()
+                : '';
+            restoreCatalog = currentCatalog || undefined;
+            if (!currentCatalog || currentCatalog.toUpperCase() !== database.trim().toUpperCase()) {
+                const switched = await this.setSessionCatalog(
+                    connectionName,
+                    runQueryFn,
+                    database,
+                    lifecycle,
+                );
+                catalogSwitched = switched;
+                if (!switched) {
+                    complete = false;
+                }
+            }
+        }
+
+        const cacheDatabase = preserveCatalogIdentity
+            ? buildNetezzaCacheDatabasePart(createNetezzaUserIdentifier(database).value)
+            : database;
+        let storedViewDetails = 0;
+
+        try {
+            const viewResult = await this.runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                NZ_QUERIES.listViewDefinitions(
+                    preserveCatalogIdentity ? catalogDatabase : database,
+                ),
+                {
+                    source: 'database-prefetch',
+                    kind: 'objects',
+                    database,
+                    reason: 'view-definition-prefetch',
+                },
+                lifecycle,
+            );
+            if (!viewResult) {
+                complete = false;
+            } else {
+                for (const row of queryResultToRows<Record<string, unknown>>(viewResult)) {
+                    const schema = String(row.SCHEMA ?? '').trim();
+                    const name = String(row.VIEWNAME ?? '').trim();
+                    const definition = String(row.DEFINITION ?? '');
+                    if (!schema || !name || !definition) {
+                        continue;
+                    }
+                    this.cache.setObjectDetails?.(
+                        connectionName,
+                        `${database}.${schema}.${name}`,
+                        { objectType: 'VIEW', definition },
+                    );
+                    storedViewDetails += 1;
+                }
+            }
+        } catch (error: unknown) {
+            complete = false;
+            logPrefetchError(
+                `[CachePrefetcher] View definition prefetch failed for ${database}:`,
+                error,
+            );
+        } finally {
+            if (catalogSwitched && restoreCatalog) {
+                const restored = await this.setSessionCatalog(
+                    connectionName,
+                    runQueryFn,
+                    restoreCatalog,
+                    lifecycle,
+                );
+                if (!restored) {
+                    complete = false;
+                }
+            }
+        }
+
+        if (storedViewDetails === 0) {
+            const expectedViews = this.countCachedViews(connectionName, cacheDatabase);
+            if (expectedViews > 0) {
+                // Definitions are invisible across databases (or the user
+                // lacks permission). Do not advertise a complete full snapshot.
+                complete = false;
+                Logger.getInstance().warn(
+                    `[CachePrefetcher] View definitions unavailable for ${database} (${expectedViews} view(s) cached); full snapshot marked incomplete`,
+                );
+            }
+        }
+
+        try {
+            const procedureResult = await this.runPrefetchQuery(
+                connectionName,
+                runQueryFn,
+                NZ_QUERIES.listProcedureSources(catalogDatabase),
+                {
+                    source: 'database-prefetch',
+                    kind: 'procedures',
+                    database,
+                    reason: 'procedure-source-prefetch',
+                },
+                lifecycle,
+            );
+            if (!procedureResult) {
+                complete = false;
+            } else {
+                for (const row of queryResultToRows<Record<string, unknown>>(procedureResult)) {
+                    const schema = String(row.SCHEMA ?? '').trim();
+                    const name = String(row.PROCEDURE ?? '').trim();
+                    const definition = String(row.PROCEDURESOURCE ?? '');
+                    if (!schema || !name || !definition) {
+                        continue;
+                    }
+                    this.cache.setObjectDetails?.(
+                        connectionName,
+                        `${database}.${schema}.${name}`,
+                        {
+                            objectType: 'PROCEDURE',
+                            signature: String(row.PROCEDURESIGNATURE ?? ''),
+                            definition,
+                        },
+                    );
+                }
+            }
+        } catch (error: unknown) {
+            complete = false;
+            logPrefetchError(
+                `[CachePrefetcher] Procedure source prefetch failed for ${database}:`,
+                error,
+            );
+        }
+
+        return complete;
+    }
+
+    /** Switch the shared metadata session to a database. Returns true on success. */
+    private async setSessionCatalog(
+        connectionName: string,
+        runQueryFn: QueryRunnerRawFn,
+        database: string,
+        lifecycle?: PrefetchQueryLifecycleReporter,
+    ): Promise<boolean> {
+        const result = await this.runPrefetchQuery(
+            connectionName,
+            runQueryFn,
+            `SET CATALOG ${formatNetezzaIdentifier(createNetezzaCatalogIdentifier(database))}`,
+            {
+                source: 'database-prefetch',
+                kind: 'databases',
+                database,
+                reason: 'switch-session-catalog',
+            },
+            lifecycle,
+        );
+        return result !== undefined;
+    }
+
+    /** Count cached view objects for a database without issuing catalog SQL. */
+    private countCachedViews(connectionName: string, cacheDatabase: string): number {
+        let views = 0;
+        const schemas = this.cache.getSchemas(connectionName, cacheDatabase) ?? [];
+        const preserveCatalogIdentity = this.cache.isNetezzaConnection?.(connectionName) === true;
+        for (const schema of schemas) {
+            const schemaName = typeof schema.SCHEMA === 'string' ? schema.SCHEMA : extractLabel(schema);
+            if (!schemaName) {
+                continue;
+            }
+            const key = buildDbSchemaCacheKey(
+                cacheDatabase,
+                schemaName,
+                preserveCatalogIdentity
+                    ? { preserveCase: true, exactNetezza: true }
+                    : undefined,
+            );
+            const tables = this.cache.getTables(connectionName, key) ?? [];
+            views += tables.filter(table =>
+                (table.objType ?? '').toUpperCase() === 'VIEW'
+                || (table.objType ?? '').toUpperCase() === 'MATERIALIZED VIEW',
+            ).length;
+        }
+        return views;
+    }
 
     private readonly lastPrefetchAttemptTime: Map<string, number> = new Map();
 
@@ -2095,6 +2643,21 @@ export class CachePrefetcher {
             }
             : undefined;
         this.setRefreshSnapshotStatus(connectionName, refreshSnapshotReport, reconciliation);
+
+        // A successful connection-wide refresh is also a complete core
+        // snapshot for every database it covered. Record the per-database
+        // markers so lazy database warming does not repeat this work.
+        if (stagesComplete && snapshotComplete) {
+            const completedAt = Date.now();
+            for (const database of databases) {
+                this.cache.markDatabaseSnapshotComplete?.(
+                    connectionName,
+                    database,
+                    completedAt,
+                    'core',
+                );
+            }
+        }
 
         // ─── SUMMARY ───
         const totalDuration = Date.now() - prefetchStartOverall;
@@ -2807,6 +3370,8 @@ export class CachePrefetcher {
         this.externalObjectsPrefetchTriggeredSet.clear();
         this.connectionPrefetchTriggered.clear();
         this.connectionPrefetchInProgress.clear();
+        this.databasePrefetchTriggered.clear();
+        this.databasePrefetchInProgress.clear();
         this.automaticPrefetchFailures.clear();
         this.lastPrefetchAttemptTime.clear();
         this.lastCheckpointTime.clear();

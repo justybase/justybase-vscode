@@ -79,6 +79,29 @@ describe('schemaTreeDataSource', () => {
     ]);
   });
 
+  it('getTablesForScope treats a loaded empty catalog as an authoritative empty result', () => {
+    const cache = {
+      getTables: jest.fn(() => undefined),
+      getTablesAllSchemas: jest.fn(() => undefined),
+      isObjectsCatalogLoaded: jest.fn(
+        (_connectionName: string, _key: string, _objType: string) => true,
+      ),
+    };
+
+    expect(getTablesForScope(cache as never, 'conn', 'DB1')).toEqual([]);
+    expect(cache.isObjectsCatalogLoaded).toHaveBeenCalledWith('conn', 'DB1..', 'TABLE');
+  });
+
+  it('getTablesForScope still reports an unknown scope as undefined', () => {
+    const cache = {
+      getTables: jest.fn(() => undefined),
+      getTablesAllSchemas: jest.fn(() => undefined),
+      isObjectsCatalogLoaded: jest.fn(() => false),
+    };
+
+    expect(getTablesForScope(cache as never, 'conn', 'DB1')).toBeUndefined();
+  });
+
   it('hasTreeReadyColumnCache distinguishes a missing layer from an explicit empty layer', () => {
     expect(hasTreeReadyColumnCache(undefined)).toBe(false);
     expect(hasTreeReadyColumnCache([])).toBe(true);

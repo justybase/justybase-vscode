@@ -30,6 +30,13 @@ export interface ConnectionPrefetchOptions {
   manual?: boolean;
 }
 
+export interface DatabasePrefetchOptions {
+  /** Explicit user refreshes bypass the automatic retry circuit. */
+  manual?: boolean;
+  /** `core` warms every cache layer; `full` also fills object details. */
+  scope?: import('../types').DatabaseSnapshotScope;
+}
+
 export interface MetadataPrefetchTarget extends MetadataStorageReader {
   /** Discard an expired connection snapshot before starting a full refresh. */
   discardExpiredConnectionMetadata?(
@@ -89,7 +96,21 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   isDiskPersistenceEnabled(): boolean;
   verifyStagesComplete(connectionName: string): boolean;
   /** True only when every prefetched table-like object has column metadata. */
-  verifyCompleteSnapshot?(connectionName: string): boolean;
+  verifyCompleteSnapshot?(connectionName: string, logMissing?: boolean): boolean;
+  /** Per-database snapshot freshness for scoped prefetch. */
+  isDatabaseSnapshotFresh?(connectionName: string, dbName: string): boolean;
+  markDatabaseSnapshotComplete?(
+    connectionName: string,
+    dbName: string,
+    timestamp?: number,
+    scope?: import('../types').DatabaseSnapshotScope,
+  ): void;
+  getDatabaseSnapshotStates?(connectionName?: string): Record<string, import('../types').DatabaseSnapshotDiskState>;
+  setObjectDetails?(
+    connectionName: string,
+    key: string,
+    details: import('../types').ObjectDetails,
+  ): void;
   /** Detailed form of verifyCompleteSnapshot for refresh observability. */
   getSnapshotCompletenessReport?(
     connectionName: string,

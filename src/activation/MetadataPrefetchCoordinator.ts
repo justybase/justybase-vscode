@@ -11,6 +11,12 @@ import {
 } from '../services/statusBarManager';
 import { MetadataRefreshDetailsPanel } from '../services/metadataRefreshDetailsPanel';
 import type { MetadataPrefetchRefreshDetails } from '../metadata/prefetch';
+import {
+    DEFAULT_POPULAR_DATABASE_COUNT,
+    MAX_POPULAR_DATABASE_COUNT,
+    type DatabaseUsageHistory,
+} from '../metadata/databaseUsageHistory';
+import { getExtensionConfiguration } from '../compatibility/configuration';
 import type { ExtensionServices } from './extensionServices';
 import type { NzConnection } from '../types';
 
@@ -29,6 +35,7 @@ export class MetadataPrefetchCoordinator {
         private readonly context: vscode.ExtensionContext,
         private readonly services: ExtensionServices,
         private readonly logger: Logger,
+        private readonly databaseUsageHistory?: DatabaseUsageHistory,
     ) {
         this.metadataRefreshStatusBar = createMetadataRefreshStatusBar(context);
         this.metadataRefreshDetailsPanel = new MetadataRefreshDetailsPanel(connectionName => {
@@ -107,9 +114,10 @@ export class MetadataPrefetchCoordinator {
                         await this.services.metadataCache.whenConnectionMetadataHydrated(active);
                     }
                     await this.services.metadataCache.preloadColumnsForConnection(active);
-                    if (!this.services.metadataCache.isConnectionPrefetchFresh(active)) {
-                        this.triggerForConnection(active);
-                    }
+                    // Always resolve the active + popular database scope: when
+                    // every database snapshot is fresh this is a RAM-only check
+                    // and records a "skipped" diagnostics card.
+                    this.triggerForConnection(active);
                 }
             })
             .catch((error: unknown) => {
@@ -130,9 +138,9 @@ export class MetadataPrefetchCoordinator {
         );
     }
 
-    triggerForConnection(connectionName: string | undefined): void {
+    triggerForConnection(connectionName: string | undefined, preferredDatabase?: string): void {
         void this.refreshCurrentSchema(connectionName);
-        void this.services.metadataCache.whenDiskReady().then(() => {
+        void this.services.metadataCache.whenDiskReady().then(async () => {
             if (
                 !connectionName
                 || !supportsLegacyMetadataPrefetch(
@@ -142,7 +150,7 @@ export class MetadataPrefetchCoordinator {
                 return;
             }
 
-            const runner = createConnectionScopedMetadataQueryRunner({
+            const connectionRunner = () => createConnectionScopedMetadataQueryRunner({
                 context: this.context,
                 connectionManager: this.services.connectionManager,
                 connectionName,
@@ -150,18 +158,98 @@ export class MetadataPrefetchCoordinator {
                 timeoutSeconds: METADATA_QUERY_TIMEOUT_SECONDS,
                 queryExecutor: this.services.queryExecutor,
             });
-            if (this.services.metadataCache.isConnectionPrefetchFresh(connectionName)) {
-                // No catalog SQL will run, but the connection still belongs in
-                // the Schema Refresh Details panel. Without this the panel only
+
+            const connectionSnapshotFresh =
+                this.services.metadataCache.isConnectionPrefetchFresh(connectionName);
+            if (connectionSnapshotFresh) {
+                // Cached core snapshot: no catalog SQL, but still recover any
+                // incomplete FK slices and keep the connection in the panel.
+                void this.services.metadataCache.refreshIncompleteForeignKeyRelationships(
+                    connectionName,
+                    connectionRunner(),
+                ).catch(error => this.logger.warn('FK metadata recovery failed', error));
+            }
+
+            const databases = await this.resolvePrefetchDatabases(connectionName, preferredDatabase);
+            if (databases.length === 0) {
+                this.logger.debug(`[MetadataCache] No active or popular database to warm for ${connectionName}`);
+                return;
+            }
+
+            let pendingDatabases = 0;
+            for (const database of databases) {
+                if (this.services.metadataCache.isDatabaseSnapshotFresh(connectionName, database)) {
+                    continue;
+                }
+                pendingDatabases += 1;
+                // Sequential by design: one metadata session and one catalog
+                // workload per connection. The disk lock is connection-scoped,
+                // so starting all databases in parallel would make all but one
+                // skip as "locked".
+                await this.services.metadataCache.triggerDatabasePrefetch(
+                    connectionName,
+                    database,
+                    connectionRunner(),
+                );
+            }
+            if (pendingDatabases === 0) {
+                // No catalog SQL ran, but the connection still belongs in the
+                // Schema Refresh Details panel. Without this the panel only
                 // ever shows the first connection that happened to refresh.
                 this.services.metadataCache.recordConnectionPrefetchSkipped(connectionName, 'fresh');
-                void this.services.metadataCache.refreshIncompleteForeignKeyRelationships(connectionName, runner)
-                    .catch(error => this.logger.warn('FK metadata recovery failed', error));
-            } else {
-                this.logger.debug(`[MetadataCache] Core snapshot expired, absent or incomplete: ${connectionName}`);
-                this.services.metadataCache.triggerConnectionPrefetch(connectionName, runner);
             }
         });
+    }
+
+    /**
+     * Active database first, then the most used databases from query history.
+     * The rest of the connection stays lazy until the user opens it.
+     */
+    private async resolvePrefetchDatabases(
+        connectionName: string,
+        preferredDatabase?: string,
+    ): Promise<string[]> {
+        const popularCount = Math.max(0, Math.min(
+            MAX_POPULAR_DATABASE_COUNT,
+            Math.trunc(
+                getExtensionConfiguration('metadata')
+                    .get<number>('popularDatabases', DEFAULT_POPULAR_DATABASE_COUNT)
+                ?? DEFAULT_POPULAR_DATABASE_COUNT,
+            ),
+        ));
+        const activeDatabase = await this.resolveActiveDatabase(connectionName);
+        const popular = this.databaseUsageHistory?.getPopular(connectionName, popularCount) ?? [];
+        const result: string[] = [];
+        const seen = new Set<string>();
+        for (const candidate of [activeDatabase, preferredDatabase, ...popular]) {
+            const database = candidate?.trim();
+            if (!database) {
+                continue;
+            }
+            const key = database.toUpperCase();
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            result.push(database);
+        }
+        return result;
+    }
+
+    private async resolveActiveDatabase(connectionName: string): Promise<string | undefined> {
+        const documentUri = vscode.window.activeTextEditor?.document.uri.toString();
+        if (documentUri) {
+            try {
+                const database = await this.services.connectionManager
+                    .getEffectiveDatabase(documentUri, connectionName);
+                if (database?.trim()) {
+                    return database.trim();
+                }
+            } catch {
+                // Fall through to the connection profile database.
+            }
+        }
+        return this.services.connectionManager.getConnectionMetadata(connectionName)?.database;
     }
 
     triggerForDocument(document: vscode.TextDocument): void {
@@ -176,6 +264,16 @@ export class MetadataPrefetchCoordinator {
             || undefined;
         this.primeAccessConnection(connectionName, documentUri);
         void this.refreshCurrentSchema(connectionName, documentUri);
+        if (connectionName) {
+            // Warm the database this document is pinned to, not only the
+            // active editor's database. Several open documents may target
+            // different databases of the same connection.
+            void this.services.connectionManager
+                .getEffectiveDatabase(documentUri, connectionName)
+                .then(database => this.triggerForConnection(connectionName, database?.trim() || undefined))
+                .catch(() => this.triggerForConnection(connectionName));
+            return;
+        }
         this.triggerForConnection(connectionName);
     }
 

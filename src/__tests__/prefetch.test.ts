@@ -234,6 +234,112 @@ describe('CachePrefetcher', () => {
     });
   });
 
+  describe('scoped database prefetch', () => {
+    it('skips a database with a fresh snapshot without running catalog SQL', async () => {
+      mockCache.isDatabaseSnapshotFresh = jest.fn(
+        (_connectionName: string, database: string) => database === 'DB1',
+      );
+
+      await prefetcher.triggerDatabasePrefetch(connName, 'DB1', mockRunQuery);
+
+      expect(mockRunQuery).not.toHaveBeenCalled();
+      expect(prefetcher.hasDatabasePrefetchInProgress(connName, 'DB1')).toBe(false);
+    });
+
+    it('marks only the refreshed database snapshot as complete', async () => {
+      mockCache.isDatabaseSnapshotFresh = jest.fn().mockReturnValue(false);
+      mockCache.markDatabaseSnapshotComplete = jest.fn();
+      mockCache.verifyCompleteSnapshot = jest.fn().mockReturnValue(false);
+      const execute = jest
+        .spyOn(prefetcher as unknown as {
+          executeDatabasePrefetch: (...args: unknown[]) => Promise<{ coreComplete: boolean; detailsComplete: boolean }>;
+        }, 'executeDatabasePrefetch')
+        .mockResolvedValue({ coreComplete: true, detailsComplete: true });
+
+      await prefetcher.triggerDatabasePrefetch(connName, 'DB9', mockRunQuery);
+
+      expect(execute).toHaveBeenCalledWith(
+        connName,
+        'DB9',
+        mockRunQuery,
+        false,
+        'core',
+        expect.anything(),
+      );
+      expect(mockCache.markDatabaseSnapshotComplete).toHaveBeenCalledWith(
+        connName,
+        'DB9',
+        expect.any(Number),
+        'core',
+      );
+      expect(mockCache.checkpointSave).toHaveBeenCalled();
+    });
+
+    it('passes the full scope to a manual database refresh', async () => {
+      mockCache.isDatabaseSnapshotFresh = jest.fn().mockReturnValue(false);
+      mockCache.markDatabaseSnapshotComplete = jest.fn();
+      mockCache.verifyCompleteSnapshot = jest.fn().mockReturnValue(false);
+      const execute = jest
+        .spyOn(prefetcher as unknown as {
+          executeDatabasePrefetch: (...args: unknown[]) => Promise<{ coreComplete: boolean; detailsComplete: boolean }>;
+        }, 'executeDatabasePrefetch')
+        .mockResolvedValue({ coreComplete: true, detailsComplete: true });
+
+      await prefetcher.triggerDatabasePrefetch(connName, 'DB9', mockRunQuery, {
+        manual: true,
+        scope: 'full',
+      });
+
+      expect(execute).toHaveBeenCalledWith(
+        connName,
+        'DB9',
+        mockRunQuery,
+        true,
+        'full',
+        expect.anything(),
+      );
+      expect(mockCache.markDatabaseSnapshotComplete).toHaveBeenCalledWith(
+        connName,
+        'DB9',
+        expect.any(Number),
+        'full',
+      );
+    });
+
+    it('records core freshness when a full refresh cannot read object details', async () => {
+      mockCache.isDatabaseSnapshotFresh = jest.fn().mockReturnValue(false);
+      mockCache.markDatabaseSnapshotComplete = jest.fn();
+      mockCache.verifyCompleteSnapshot = jest.fn().mockReturnValue(false);
+      jest
+        .spyOn(prefetcher as unknown as {
+          executeDatabasePrefetch: (...args: unknown[]) => Promise<{ coreComplete: boolean; detailsComplete: boolean }>;
+        }, 'executeDatabasePrefetch')
+        .mockResolvedValue({ coreComplete: true, detailsComplete: false });
+
+      await prefetcher.triggerDatabasePrefetch(connName, 'DB9', mockRunQuery, {
+        manual: true,
+        scope: 'full',
+      });
+
+      expect(mockCache.markDatabaseSnapshotComplete).toHaveBeenCalledWith(
+        connName,
+        'DB9',
+        expect.any(Number),
+        'core',
+      );
+    });
+
+    it('clears per-database tracking with the connection state', () => {
+      prefetcher['databasePrefetchTriggered'].set(`${connName}|DB1`, Date.now());
+      prefetcher['databasePrefetchInProgress'].add(`${connName}|DB1`);
+
+      prefetcher.clearConnectionPrefetchState(connName);
+
+      expect(prefetcher.hasDatabasePrefetchInProgress(connName, 'DB1')).toBe(false);
+      expect(prefetcher.getDatabasePrefetchTimestamp(connName, 'DB1')).toBeUndefined();
+    });
+  });
+
   describe('prefetchColumnsForSchema', () => {
     it('should do nothing if prefetch is already in progress', async () => {
       // First call blocks the second

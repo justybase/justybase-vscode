@@ -240,6 +240,51 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
             }
         }
 
+        const databaseSnapshots = metadataCache.getDatabaseSnapshotStates(connectionName);
+        lines.push('', '## Database Snapshots', '');
+        const snapshotEntries = Object.entries(databaseSnapshots);
+        if (snapshotEntries.length === 0) {
+            lines.push('No per-database snapshots recorded yet.');
+        } else {
+            lines.push(
+                `| Database | Scope | Completed | Fresh |`,
+                `| --- | --- | --- | --- |`,
+            );
+            for (const [database, state] of snapshotEntries) {
+                lines.push(
+                    `| ${database} | ${state.scope} | ${new Date(state.prefetchCompletedAt).toISOString()} | ${
+                        metadataCache.isDatabaseSnapshotFresh(connectionName, database) ? 'yes' : 'stale'
+                    } |`,
+                );
+            }
+        }
+
+        lines.push('', '## Live Catalog Queries', '');
+        const liveQueries = Object.entries(snapshot.liveQueries);
+        if (liveQueries.length === 0) {
+            lines.push('No live catalog fallbacks recorded in this session.');
+        } else {
+            lines.push(`| Source | Queries |`, `| --- | ---: |`);
+            for (const [source, count] of liveQueries.sort(([, left], [, right]) => right - left)) {
+                lines.push(`| ${source} | ${count} |`);
+            }
+            if (snapshot.lastLiveQueryAt !== undefined) {
+                lines.push('', `Last live query: ${new Date(snapshot.lastLiveQueryAt).toISOString()}`);
+            }
+        }
+
+        const ddlDiagnostics = tableDdlSynchronizer?.getDiagnostics();
+        if (ddlDiagnostics) {
+            lines.push(
+                '',
+                '## DDL Coalescing',
+                '',
+                `| Refreshed | Merged | Cache-only | Pending batches |`,
+                `| ---: | ---: | ---: | ---: |`,
+                `| ${ddlDiagnostics.refreshed} | ${ddlDiagnostics.merged} | ${ddlDiagnostics.skipped} | ${ddlDiagnostics.pending} |`,
+            );
+        }
+
         return lines.join('\n');
     };
 

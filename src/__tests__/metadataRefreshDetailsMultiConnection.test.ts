@@ -233,13 +233,15 @@ describe('Schema Refresh Details with two Netezza connections', () => {
     });
 
     describe('MetadataPrefetchCoordinator (accumulates across connections)', () => {
-        function createCoordinator(isFresh: boolean) {
+        function createCoordinator(isFresh: boolean, databaseFresh = true) {
             const listeners: Array<(details: MetadataPrefetchRefreshDetails) => void> = [];
             const metadataCache = {
                 whenDiskReady: jest.fn(async () => undefined),
                 isConnectionPrefetchFresh: jest.fn(() => isFresh),
+                isDatabaseSnapshotFresh: jest.fn(() => databaseFresh),
                 refreshIncompleteForeignKeyRelationships: jest.fn(async () => undefined),
                 triggerConnectionPrefetch: jest.fn(),
+                triggerDatabasePrefetch: jest.fn(async () => undefined),
                 // Mirrors the real MetadataCache: the prefetcher publishes the
                 // skip record through the very same details event.
                 recordConnectionPrefetchSkipped: jest.fn((connectionName: string, reason: string) => {
@@ -321,13 +323,17 @@ describe('Schema Refresh Details with two Netezza connections', () => {
             update.mockRestore();
         });
 
-        it('still runs a full prefetch for a stale connection', async () => {
-            const { coordinator, metadataCache } = createCoordinator(false);
+        it('still runs a scoped database prefetch for a stale connection', async () => {
+            const { coordinator, metadataCache } = createCoordinator(false, false);
 
             coordinator.triggerForConnection(CONN_B);
             await flush();
 
-            expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith(CONN_B, expect.any(Function));
+            expect(metadataCache.triggerDatabasePrefetch).toHaveBeenCalledWith(
+                CONN_B,
+                'JUST_DATA',
+                expect.any(Function),
+            );
             expect(metadataCache.recordConnectionPrefetchSkipped).not.toHaveBeenCalled();
         });
     });

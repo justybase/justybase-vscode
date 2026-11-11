@@ -23,11 +23,15 @@ import {
   CachedObjectInfo,
   ObjectWithSchema,
   DatabaseMetadata,
+  DatabaseSnapshotDiskState,
+  DatabaseSnapshotScope,
+  ObjectDetails,
   SchemaMetadata,
   TableMetadata,
   ProcedureMetadata,
   ColumnMetadata,
 } from '../types';
+import { normalizeCompletionDescription } from '../../utils/completionDescriptionUtils';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { Logger } from '../../utils/logger';
 import { CacheStatsTracker } from '../cacheStats';
@@ -54,6 +58,7 @@ import {
 } from '../prefetchSupport';
 import type {
   ConnectionPrefetchOptions,
+  DatabasePrefetchOptions,
   MetadataPrefetchTarget,
   MetadataSnapshotCompletenessReport,
 } from './MetadataPrefetchTarget';
@@ -572,6 +577,8 @@ export class MetadataCache implements MetadataPrefetchTarget {
     deletePrefixed(this._store.currentSchemaCache);
     deletePrefixed(this._store.defaultSchemaCache);
     this._store.netezzaSchemasEnabledCache.delete(connectionName);
+    deletePrefixed(this._store.databaseSnapshotCache);
+    deletePrefixed(this._store.objectDetailsCache);
     deletePrefixed(this._store.tableCache);
     deletePrefixed(this._store.procedureCache);
     deletePrefixed(this._store.columnCache);
@@ -903,6 +910,362 @@ export class MetadataCache implements MetadataPrefetchTarget {
     this._store.netezzaSchemasEnabledCache.delete(connectionName);
   }
 
+  // ========== Per-database snapshot state ==========
+
+  /**
+   * Record that every metadata stage for one database completed successfully.
+   * This is the authoritative freshness unit for scoped prefetch: a connection
+   * may hold a mix of fresh and missing database snapshots.
+   */
+  markDatabaseSnapshotComplete(
+    connectionName: string,
+    dbName: string,
+    timestamp = Date.now(),
+    scope: DatabaseSnapshotScope = 'core',
+  ): void {
+    this._store.databaseSnapshotCache.set(
+      `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
+      { data: { scope }, timestamp },
+    );
+  }
+
+  getDatabaseSnapshotState(
+    connectionName: string,
+    dbName: string,
+  ): { timestamp: number; scope: DatabaseSnapshotScope } | undefined {
+    const entry = this._store.databaseSnapshotCache.get(
+      `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
+    );
+    if (!entry) {
+      return undefined;
+    }
+    return { timestamp: entry.timestamp, scope: entry.data.scope };
+  }
+
+  /** Fresh database snapshot according to the configured cache TTL. */
+  isDatabaseSnapshotFresh(connectionName: string, dbName: string): boolean {
+    const entry = this._store.databaseSnapshotCache.get(
+      `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
+    );
+    return entry !== undefined && this._store.isEntryFresh(entry.timestamp);
+  }
+
+  invalidateDatabaseSnapshot(connectionName: string, dbName?: string): void {
+    if (dbName !== undefined) {
+      this._store.databaseSnapshotCache.delete(
+        `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
+      );
+      return;
+    }
+    const prefix = `${connectionName}|`;
+    for (const key of Array.from(this._store.databaseSnapshotCache.keys())) {
+      if (key.startsWith(prefix)) {
+        this._store.databaseSnapshotCache.delete(key);
+      }
+    }
+  }
+
+  /** Snapshot states persisted in the disk manifest/index. */
+  getDatabaseSnapshotStates(
+    connectionName?: string,
+  ): Record<string, DatabaseSnapshotDiskState> {
+    const states: Record<string, DatabaseSnapshotDiskState> = {};
+    const prefix = connectionName !== undefined ? `${connectionName}|` : undefined;
+    for (const [key, entry] of this._store.databaseSnapshotCache) {
+      if (prefix && !key.startsWith(prefix)) {
+        continue;
+      }
+      const database = key.slice(key.indexOf('|') + 1);
+      if (!database) {
+        continue;
+      }
+      states[database] = {
+        prefetchCompletedAt: entry.timestamp,
+        scope: entry.data.scope,
+      };
+    }
+    return states;
+  }
+
+  restoreDatabaseSnapshotStates(
+    connectionName: string,
+    states: Record<string, DatabaseSnapshotDiskState> | undefined,
+  ): void {
+    if (!states) {
+      return;
+    }
+    for (const [database, state] of Object.entries(states)) {
+      if (!database || typeof state?.prefetchCompletedAt !== 'number') {
+        continue;
+      }
+      this._store.databaseSnapshotCache.set(
+        `${connectionName}|${this.databaseIdentity(connectionName, database)}`,
+        {
+          data: { scope: state.scope === 'full' ? 'full' : 'core' },
+          timestamp: state.prefetchCompletedAt,
+        },
+      );
+    }
+  }
+
+  // ========== Optional object details ==========
+
+  setObjectDetails(
+    connectionName: string,
+    key: string,
+    details: ObjectDetails,
+  ): void {
+    const normalizedKey = this.normalizeObjectDetailsKey(connectionName, key);
+    if (!normalizedKey) {
+      return;
+    }
+    this._store.objectDetailsCache.set(
+      `${connectionName}|${normalizedKey}`,
+      { data: { ...details }, timestamp: Date.now() },
+    );
+  }
+
+  getObjectDetails(
+    connectionName: string,
+    key: string,
+  ): ObjectDetails | undefined {
+    const normalizedKey = this.normalizeObjectDetailsKey(connectionName, key);
+    if (!normalizedKey) {
+      return undefined;
+    }
+    const entry = this._store.objectDetailsCache.get(`${connectionName}|${normalizedKey}`);
+    if (!entry) {
+      return undefined;
+    }
+    if (!this._store.isEntryValid(entry.timestamp)) {
+      this._store.objectDetailsCache.delete(`${connectionName}|${normalizedKey}`);
+      return undefined;
+    }
+    return entry.data;
+  }
+
+  getObjectDetailsForDatabase(
+    connectionName: string,
+    dbName: string,
+  ): Array<{ key: string; details: ObjectDetails }> {
+    const database = this.databaseIdentity(connectionName, dbName).toUpperCase();
+    const prefix = `${connectionName}|`;
+    const result: Array<{ key: string; details: ObjectDetails }> = [];
+    for (const [fullKey, entry] of this._store.objectDetailsCache) {
+      if (!fullKey.startsWith(prefix)) {
+        continue;
+      }
+      const key = fullKey.slice(prefix.length);
+      const layerDatabase = key.includes('..')
+        ? key.slice(0, key.indexOf('..'))
+        : key.split('.')[0];
+      if (layerDatabase.toUpperCase() !== database) {
+        continue;
+      }
+      if (!this._store.isEntryValid(entry.timestamp)) {
+        continue;
+      }
+      result.push({ key, details: entry.data });
+    }
+    return result;
+  }
+
+  invalidateObjectDetails(connectionName: string, keyPrefix?: string): void {
+    const prefix = `${connectionName}|`;
+    const normalizedPrefix = keyPrefix
+      ? this.normalizeObjectDetailsKey(connectionName, keyPrefix)
+      : undefined;
+    for (const key of Array.from(this._store.objectDetailsCache.keys())) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      if (normalizedPrefix && !key.slice(prefix.length).startsWith(normalizedPrefix)) {
+        continue;
+      }
+      this._store.objectDetailsCache.delete(key);
+    }
+  }
+
+  private normalizeObjectDetailsKey(
+    connectionName: string,
+    key: string,
+  ): string | undefined {
+    const trimmed = key.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    if (!this.isNetezzaConnection(connectionName)) {
+      return trimmed.toUpperCase();
+    }
+    const parts = trimmed.split('.');
+    if (parts.length < 3) {
+      return trimmed.toUpperCase();
+    }
+    const database = isNetezzaExactCachePart(parts[0])
+      ? decodeNetezzaCacheDatabasePart(parts[0])
+      : parts[0];
+    const schema = parts.length === 3 ? parts[1] : '';
+    const table = parts[parts.length - 1];
+    return [
+      createNetezzaUserIdentifier(database).value,
+      schema,
+      createNetezzaUserIdentifier(table).value,
+    ].join('.');
+  }
+
+  // ========== Comment patches after COMMENT ON ==========
+
+  /**
+   * Patch an object comment without a catalog round-trip.
+   * Returns false when the object is not cached (the caller should not force a
+   * refresh on behalf of a comment statement).
+   */
+  updateObjectComment(
+    connectionName: string,
+    dbName: string,
+    schemaName: string | undefined,
+    objectName: string,
+    comment: string,
+  ): boolean {
+    const normalizedComment = normalizeCompletionDescription(comment);
+    const normalizedObject = objectName.trim().toUpperCase();
+    if (!normalizedObject) {
+      return false;
+    }
+    const database = this.databaseIdentity(connectionName, dbName).toUpperCase();
+    const prefix = `${connectionName}|`;
+    let changed = false;
+
+    for (const [fullKey, entry] of this._store.tableCache) {
+      if (!fullKey.startsWith(prefix)) {
+        continue;
+      }
+      const layerKey = fullKey.slice(prefix.length);
+      const layerDatabase = isNetezzaExactCachePart(layerKey.split('.')[0])
+        ? decodeNetezzaCacheDatabasePart(layerKey.split('.')[0])
+        : layerKey.split('.')[0];
+      if (layerDatabase.toUpperCase() !== database) {
+        continue;
+      }
+      const layerSchema = parseDbSchemaCacheKey(layerKey).schemaName || '';
+      for (const item of entry.data) {
+        const itemName = (extractLabel(item) || item.OBJNAME || item.TABLENAME || '').toUpperCase();
+        if (itemName !== normalizedObject) {
+          continue;
+        }
+        const itemSchema = (item.SCHEMA || layerSchema || '').trim();
+        if (schemaName && itemSchema.toUpperCase() !== schemaName.trim().toUpperCase()) {
+          continue;
+        }
+        item.DESCRIPTION = normalizedComment;
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  /** Patch one column comment without a catalog round-trip. */
+  updateColumnComment(
+    connectionName: string,
+    dbName: string,
+    schemaName: string | undefined,
+    tableName: string,
+    columnName: string,
+    comment: string,
+  ): boolean {
+    const normalizedComment = normalizeCompletionDescription(comment);
+    const normalizedTable = tableName.trim().toUpperCase();
+    const normalizedColumn = columnName.trim().toUpperCase();
+    if (!normalizedTable || !normalizedColumn) {
+      return false;
+    }
+    const database = this.databaseIdentity(connectionName, dbName).toUpperCase();
+    const prefix = `${connectionName}|`;
+    let changed = false;
+
+    for (const [fullKey, entry] of this._store.columnCache) {
+      if (!fullKey.startsWith(prefix)) {
+        continue;
+      }
+      const layerKey = fullKey.slice(prefix.length);
+      const doubleDot = layerKey.indexOf('..');
+      const layerDatabase = doubleDot > 0 ? layerKey.slice(0, doubleDot) : layerKey.split('.')[0];
+      if ((isNetezzaExactCachePart(layerDatabase)
+        ? decodeNetezzaCacheDatabasePart(layerDatabase)
+        : layerDatabase
+      ).toUpperCase() !== database) {
+        continue;
+      }
+      const remainder = doubleDot > 0 ? layerKey.slice(doubleDot + 2) : layerKey.split('.').slice(2).join('.');
+      if (remainder.toUpperCase() !== normalizedTable) {
+        continue;
+      }
+      if (schemaName) {
+        const layerSchema = doubleDot > 0 ? '' : layerKey.split('.')[1] || '';
+        if (layerSchema.toUpperCase() !== schemaName.trim().toUpperCase()) {
+          continue;
+        }
+      }
+      for (const column of entry.data) {
+        if ((column.ATTNAME || '').toUpperCase() !== normalizedColumn) {
+          continue;
+        }
+        column.documentation = normalizedComment;
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  /** Patch one procedure comment without a catalog round-trip. */
+  updateProcedureComment(
+    connectionName: string,
+    dbName: string,
+    schemaName: string | undefined,
+    procedureName: string,
+    comment: string,
+  ): boolean {
+    const normalizedComment = normalizeCompletionDescription(comment);
+    const normalizedProcedure = procedureName.trim().toUpperCase();
+    if (!normalizedProcedure) {
+      return false;
+    }
+    const database = this.databaseIdentity(connectionName, dbName).toUpperCase();
+    const prefix = `${connectionName}|`;
+    let changed = false;
+
+    for (const [fullKey, entry] of this._store.procedureCache) {
+      if (!fullKey.startsWith(prefix)) {
+        continue;
+      }
+      const layerKey = fullKey.slice(prefix.length);
+      const layerDatabase = layerKey.split('.')[0];
+      if ((isNetezzaExactCachePart(layerDatabase)
+        ? decodeNetezzaCacheDatabasePart(layerDatabase)
+        : layerDatabase
+      ).toUpperCase() !== database) {
+        continue;
+      }
+      const layerSchema = parseDbSchemaCacheKey(layerKey).schemaName || '';
+      for (const procedure of entry.data) {
+        if (procedure.PROCEDURE.trim().toUpperCase() !== normalizedProcedure) {
+          continue;
+        }
+        if (schemaName
+          && (procedure.SCHEMA || layerSchema || '').toUpperCase() !== schemaName.trim().toUpperCase()) {
+          continue;
+        }
+        procedure.DESCRIPTION = normalizedComment;
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+
   getProcedures(
     connectionName: string,
     key: string,
@@ -1091,6 +1454,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
     this._store.columnCache.delete(`${connectionName}|${aggregateKey}`);
     this._invalidatedColumnLayerKeys.add(`${connectionName}|${directKey}`);
     this._invalidatedColumnLayerKeys.add(`${connectionName}|${aggregateKey}`);
+    this.invalidateObjectDetails(
+      connectionName,
+      `${database}.${schema ?? ''}.${tableName}`,
+    );
   }
 
   /** Notify tree/LSP subscribers after a precise cache mutation. */
@@ -1161,6 +1528,11 @@ export class MetadataCache implements MetadataPrefetchTarget {
     const normalizedSchema = exactNetezza && schemaName !== undefined
       ? schemaName
       : schemaName;
+    this.invalidateDatabaseSnapshot(connectionName, dbName);
+    this.invalidateObjectDetails(
+      connectionName,
+      schemaName !== undefined ? `${dbName}.${schemaName}` : dbName,
+    );
     invalidateSchemaCore(
       {
         store: this._store,
@@ -1199,6 +1571,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
       objectsByType: this._store.objectsByTypeCache.size,
       objectLookup: this._store.objectLookupIndex.size,
     };
+  }
+
+  recordLiveMetadataQuery(connectionName: string, source: string): void {
+    this._stats.recordLiveQuery(connectionName, source);
   }
 
   getStatsSnapshot(connectionName: string): CacheStatsSnapshot | undefined {
@@ -1706,6 +2082,31 @@ export class MetadataCache implements MetadataPrefetchTarget {
     }
   }
 
+  triggerDatabasePrefetch(
+    connectionName: string,
+    database: string,
+    runQueryFn: DisposableQueryRunnerRawFn,
+    options?: DatabasePrefetchOptions,
+  ): Promise<void> {
+    if (!this.supportsLegacyMetadataPrefetch(connectionName)) {
+      return Promise.resolve();
+    }
+    return this.prefetcher.triggerDatabasePrefetch(
+      connectionName,
+      database,
+      runQueryFn,
+      options,
+    );
+  }
+
+  hasDatabasePrefetchInProgress(connectionName: string, database: string): boolean {
+    return this.prefetcher.hasDatabasePrefetchInProgress(connectionName, database);
+  }
+
+  getDatabasePrefetchTimestamp(connectionName: string, database: string): number | undefined {
+    return this.prefetcher.getDatabasePrefetchTimestamp(connectionName, database);
+  }
+
   triggerConnectionPrefetch(
     connectionName: string,
     runQueryFn: DisposableQueryRunnerRawFn,
@@ -1820,6 +2221,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   public get _procedureCache(): Map<string, PerKeyEntry<ProcedureMetadata[]>> {
     return this._store.procedureCache;
+  }
+
+  public get _objectDetailsCache(): Map<string, PerKeyEntry<ObjectDetails>> {
+    return this._store.objectDetailsCache;
   }
 
   public get _tableIdMap(): Map<string, PerKeyEntry<Map<string, number>>> {

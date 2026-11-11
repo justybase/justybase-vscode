@@ -69,8 +69,10 @@ describe('MetadataProvider column fetch deduplication', () => {
             whenConnectionMetadataHydrated: jest.fn().mockResolvedValue(undefined),
             hasConnectionPrefetchTriggered: jest.fn().mockReturnValue(true),
             isConnectionPrefetchFresh: jest.fn().mockReturnValue(true),
+            isDatabaseSnapshotFresh: jest.fn().mockReturnValue(false),
             prefetchColumnsForDatabase: jest.fn().mockResolvedValue(undefined),
             triggerConnectionPrefetch: jest.fn(),
+            triggerDatabasePrefetch: jest.fn().mockResolvedValue(undefined),
             isDatabaseDead: jest.fn().mockReturnValue(false),
             markDatabaseDead: jest.fn(),
         } as unknown as jest.Mocked<MetadataCache>;
@@ -211,8 +213,10 @@ describe('MetadataProvider column fetch deduplication', () => {
         expect(result).toBe(cached);
     });
 
-    it('warmDatabaseColumns awaits database prefetch even when connection prefetch is cold', async () => {
-        metadataCache.isConnectionPrefetchFresh.mockReturnValue(false);
+    it('warmDatabaseColumns prefetches only databases without a fresh snapshot', async () => {
+        metadataCache.isDatabaseSnapshotFresh.mockImplementation(
+            (_connectionName, database) => database === 'DB1',
+        );
 
         await provider.warmDatabaseColumns('CONN', ['DB1', 'DB2']);
 
@@ -222,24 +226,29 @@ describe('MetadataProvider column fetch deduplication', () => {
             'DB1',
             expect.any(Function),
         );
-        expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith(
+        expect(metadataCache.triggerDatabasePrefetch).toHaveBeenCalledTimes(1);
+        expect(metadataCache.triggerDatabasePrefetch).toHaveBeenCalledWith(
             'CONN',
+            'DB2',
             expect.any(Function),
         );
+        expect(metadataCache.triggerConnectionPrefetch).not.toHaveBeenCalled();
     });
 
-    it('does not replace a suppressed full refresh with database-wide authoring warmup', async () => {
-        metadataCache.isConnectionPrefetchFresh.mockReturnValue(false);
+    it('schedules a scoped database snapshot when authoring columns miss the cache', async () => {
+        metadataCache.isDatabaseSnapshotFresh.mockReturnValue(false);
 
         (provider as unknown as {
             scheduleColumnMetadataWarmup(connectionName: string, database: string): void;
         }).scheduleColumnMetadataWarmup('CONN', 'DB1');
         await new Promise<void>(resolve => setImmediate(resolve));
 
-        expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith(
+        expect(metadataCache.triggerDatabasePrefetch).toHaveBeenCalledWith(
             'CONN',
+            'DB1',
             expect.any(Function),
         );
+        expect(metadataCache.triggerConnectionPrefetch).not.toHaveBeenCalled();
         expect(metadataCache.prefetchColumnsForDatabase).not.toHaveBeenCalled();
     });
 

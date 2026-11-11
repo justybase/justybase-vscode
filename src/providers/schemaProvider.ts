@@ -39,6 +39,7 @@ import { formatIdentifierForSql, unquoteIdentifier, stripIdentifierQuoting } fro
 import { getConnectionAccentResourceUri } from '../utils/connectionAccent';
 import { getDialectIconUri } from '../utils/dialectIcons';
 import { supportsLegacyMetadataPrefetch } from '../metadata/prefetchSupport';
+import { allowsLiveMetadataFetchForSource } from '../metadata/liveFallbackPolicy';
 import { createConnectionScopedMetadataQueryRunner } from '../metadata/connectionScopedMetadataQueryRunner';
 import {
     METADATA_QUERY_TIMEOUT_SECONDS,
@@ -1100,28 +1101,29 @@ export class SchemaProvider
      * Trigger background prefetch for a connection when database is expanded.
      * This warms up the cache shared with autocomplete and revealInSchema.
      */
-    private triggerDatabasePrefetch(connectionName: string, _dbName: string): void {
+    private triggerDatabasePrefetch(connectionName: string, dbName: string): void {
         const databaseKind = this.getConnectionDatabaseKind(connectionName);
         if (!supportsLegacyMetadataPrefetch(databaseKind)) {
             return;
         }
 
         // Don't block UI - run prefetch in background
-        if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
-            // A fresh connection runs no catalog SQL here, but it still has to
+        if (this.metadataCache.isDatabaseSnapshotFresh(connectionName, dbName)) {
+            // A fresh database runs no catalog SQL here, but it still has to
             // appear in the Schema Refresh Details panel alongside any other
             // Netezza connection in the tree.
             this.metadataCache.recordConnectionPrefetchSkipped(connectionName, 'fresh');
             return;
         }
-        logWithFallback('debug', `[SchemaProvider] Triggering connection prefetch for: ${connectionName}`);
-        void this.metadataCache.whenDiskReady().then(() => {
-            if (this.metadataCache.isConnectionPrefetchFresh(connectionName)) {
+        logWithFallback('debug', `[SchemaProvider] Triggering database prefetch for: ${connectionName}/${dbName}`);
+        void this.metadataCache.whenDiskReady().then(async () => {
+            if (this.metadataCache.isDatabaseSnapshotFresh(connectionName, dbName)) {
                 this.metadataCache.recordConnectionPrefetchSkipped(connectionName, 'fresh');
                 return;
             }
-            this.metadataCache.triggerConnectionPrefetch(
+            await this.metadataCache.triggerDatabasePrefetch(
                 connectionName,
+                dbName,
                 createConnectionScopedMetadataQueryRunner({
                     context: this.context,
                     connectionManager: this.connectionManager,
@@ -1130,6 +1132,9 @@ export class SchemaProvider
                     timeoutSeconds: Math.max(1, Math.ceil(SCHEMA_QUERY_TIMEOUT / 1000)),
                 }),
             );
+            // The snapshot changed under any expanded type group; repaint once
+            // instead of waiting for the user to collapse/expand it again.
+            this.refresh();
         });
     }
 
@@ -2801,6 +2806,13 @@ export class SchemaProvider
                     element.connectionName,
                     'load schema objects',
                 );
+                if (
+                    connectionName
+                    && supportsLegacyMetadataPrefetch(requiredDatabaseKind)
+                    && !allowsLiveMetadataFetchForSource('schema-tree')
+                ) {
+                    return [this.createMetadataCachePlaceholder(element)];
+                }
                 const query = this.getMetadataProvider(element.connectionName!).buildObjectTypeQuery(
                     databaseKind === 'netezza'
                         ? formatNetezzaCatalogIdentifier(element.dbName!)
@@ -3158,6 +3170,44 @@ export class SchemaProvider
         }
 
         return [];
+    }
+
+    /**
+     * Cache-only mode: an authoritative empty scope or a not-yet-warmed scope
+     * must not issue a blocking catalog query. The background snapshot started
+     * by the database node will populate the cache.
+     */
+    private createMetadataCachePlaceholder(element: SchemaItem): SchemaItem {
+        const item = new SchemaItem(
+            'Metadata not cached',
+            vscode.TreeItemCollapsibleState.None,
+            'metadataPlaceholder',
+            element.dbName,
+            element.objType,
+            undefined,
+            undefined,
+            'Refresh database metadata to load this object group',
+            element.connectionName,
+        );
+        item.iconPath = new vscode.ThemeIcon('database');
+        item.command = {
+            command: 'netezza.refreshSchemaSelection',
+            title: 'Refresh Database Metadata',
+            arguments: [
+                new SchemaItem(
+                    element.dbName ?? 'database',
+                    vscode.TreeItemCollapsibleState.None,
+                    'database',
+                    element.dbName,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    element.connectionName,
+                ),
+            ],
+        };
+        return item;
     }
 
     /**

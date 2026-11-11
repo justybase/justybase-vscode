@@ -88,6 +88,37 @@ describe('database analysis lifecycle',()=>{
         service.dispose();
     });
 
+    test('full database snapshot serves view definitions from object details without catalog reads',async()=>{
+        const {service,session,cache}=setup();
+        const snapshotCache = cache as unknown as {
+            getDatabaseSnapshotState: jest.Mock;
+            getObjectDetailsForDatabase: jest.Mock;
+        };
+        snapshotCache.getDatabaseSnapshotState = jest.fn(() => ({ timestamp: Date.now(), scope: 'full' }));
+        snapshotCache.getObjectDetailsForDatabase = jest.fn(() => [
+            {
+                key: 'DB.PUBLIC.V',
+                details: { objectType: 'VIEW', definition: 'SELECT C.EMAIL FROM CUSTOMER C' },
+            },
+        ]);
+
+        const report = await service.dependencies(
+            'NZ',
+            root,
+            'incoming',
+            2,
+            new vscode.CancellationTokenSource().token,
+            'EMAIL',
+        );
+
+        expect(report.affected.map(item => item.object.name)).toEqual(['V']);
+        const definitionQueries = session.rows.mock.calls.filter(([query]) =>
+            query.includes('_V_VIEW') || query.includes('PROCEDURESOURCE'),
+        );
+        expect(definitionQueries).toHaveLength(0);
+        service.dispose();
+    });
+
     test('performance resolves relation types so object links can open DDL',async()=>{
         const {service,session,cache}=setup();cache.getObjectsWithSchema.mockReturnValue([]);
         const original=session.rows.getMockImplementation()!;

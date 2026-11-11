@@ -19,6 +19,7 @@ interface ConnectionMockOptions {
     objectRows?: Row[];
     columnRows?: Row[];
     columnQueryError?: Error;
+    onSql?: (sql: string) => void;
 }
 
 function isColumnCatalogQuery(sql: string): boolean {
@@ -42,16 +43,22 @@ function isObjectCatalogQuery(sql: string): boolean {
     return sql.includes('_V_OBJECT_DATA') || sql.includes('_access_metadata.object_type');
 }
 
+function isReadCatalogObjectQuery(sql: string): boolean {
+    return sql.includes('SELECT OBJNAME, SCHEMA, OBJID, OBJTYPE');
+}
+
 function createConnection(options: ConnectionMockOptions = {}): DatabaseConnection {
     const {
         objectRows = [],
         columnRows = [],
         columnQueryError,
+        onSql,
     } = options;
 
     return {
         createCommand: (sql: string) => ({
             executeReader: async () => {
+                onSql?.(sql);
                 if (columnQueryError && isColumnCatalogQuery(sql)) {
                     throw columnQueryError;
                 }
@@ -586,5 +593,166 @@ describe('TableDdlSynchronizer', () => {
                 expect.objectContaining({ OBJNAME: 'SAVED_QUERY', objType: 'VIEW' }),
             ]),
         );
+    });
+
+    it('patches a COMMENT ON batch in the cache without catalog round-trips', async () => {
+        const sqlLog: string[] = [];
+        const fixture = createFixture({ onSql: sql => sqlLog.push(sql) });
+        fixture.metadataCache.setTables('CONN', 'JUST_DATA.ADMIN', [
+            {
+                OBJNAME: 'ORDERS',
+                SCHEMA: 'ADMIN',
+                OBJID: 1,
+                objType: 'TABLE',
+                label: 'ORDERS',
+                DESCRIPTION: 'old comment',
+            },
+        ], new Map([['JUST_DATA.ADMIN.ORDERS', 1]]));
+
+        const base = {
+            connectionName: 'CONN',
+            documentUri: 'file:///comment.sql',
+            connection: fixture.connection,
+        };
+        for (let index = 0; index < 100; index += 1) {
+            await fixture.synchronizer.handleStatementSucceeded({
+                ...base,
+                sql: `COMMENT ON TABLE ADMIN.ORDERS IS 'batch ${index}'`,
+            });
+        }
+
+        expect(sqlLog.filter(isObjectCatalogQuery)).toHaveLength(0);
+        expect(sqlLog.filter(isColumnCatalogQuery)).toHaveLength(0);
+        expect(
+            fixture.metadataCache.getTables('CONN', 'JUST_DATA.ADMIN')?.[0].DESCRIPTION,
+        ).toBe('batch 99');
+    });
+
+    it('patches column comments without querying the catalog', async () => {
+        const sqlLog: string[] = [];
+        const fixture = createFixture({ onSql: sql => sqlLog.push(sql) });
+        const columnKey = buildColumnCacheKey('JUST_DATA', 'ADMIN', 'ORDERS');
+        fixture.metadataCache.setTables('CONN', 'JUST_DATA.ADMIN', [
+            { OBJNAME: 'ORDERS', SCHEMA: 'ADMIN', OBJID: 1, objType: 'TABLE', label: 'ORDERS' },
+        ], new Map([['JUST_DATA.ADMIN.ORDERS', 1]]));
+        fixture.metadataCache.setColumns('CONN', columnKey, [
+            { ATTNAME: 'AMOUNT', FORMAT_TYPE: 'INTEGER', documentation: 'old' },
+        ]);
+
+        await fixture.synchronizer.handleStatementSucceeded({
+            sql: "COMMENT ON COLUMN ADMIN.ORDERS.AMOUNT IS 'total amount'",
+            connectionName: 'CONN',
+            documentUri: 'file:///comment.sql',
+            connection: fixture.connection,
+        });
+
+        expect(sqlLog.filter(isObjectCatalogQuery)).toHaveLength(0);
+        expect(sqlLog.filter(isColumnCatalogQuery)).toHaveLength(0);
+        expect(
+            fixture.metadataCache.getColumns('CONN', columnKey)?.[0].documentation,
+        ).toBe('total amount');
+    });
+
+    it('coalesces a repeated ALTER on one object into a single deferred type refresh', async () => {
+        jest.useFakeTimers();
+        try {
+            const sqlLog: string[] = [];
+            const fixture = createFixture({
+                onSql: sql => sqlLog.push(sql),
+                objectRows: [
+                    {
+                        OBJNAME: 'ORDERS',
+                        SCHEMA: 'ADMIN',
+                        OBJID: 1,
+                        OBJTYPE: 'TABLE',
+                        OWNER: 'ADMIN',
+                        DESCRIPTION: '',
+                    },
+                ],
+                columnRows: [
+                    {
+                        TABLENAME: 'ORDERS',
+                        SCHEMA: 'ADMIN',
+                        DBNAME: 'JUST_DATA',
+                        ATTNAME: 'ID',
+                        FORMAT_TYPE: 'INTEGER',
+                        IS_PK: 0,
+                        IS_FK: 0,
+                        IS_DISTRIBUTION_KEY: 0,
+                    },
+                ],
+            });
+            const refreshObjectType = jest
+                .spyOn(fixture.synchronizer, 'refreshObjectType')
+                .mockResolvedValue(undefined);
+            const base = {
+                connectionName: 'CONN',
+                documentUri: 'file:///alter.sql',
+                connection: fixture.connection,
+            };
+
+            for (let index = 0; index < 100; index += 1) {
+                await fixture.synchronizer.handleStatementSucceeded({
+                    ...base,
+                    sql: `ALTER TABLE ADMIN.ORDERS ADD COLUMN C${index} INTEGER`,
+                });
+            }
+
+            // Only the first statement is applied eagerly.
+            expect(sqlLog.filter(isReadCatalogObjectQuery)).toHaveLength(1);
+            expect(refreshObjectType).not.toHaveBeenCalled();
+
+            await jest.advanceTimersByTimeAsync(1_600);
+
+            expect(refreshObjectType).toHaveBeenCalledTimes(1);
+            expect(refreshObjectType).toHaveBeenCalledWith('CONN', 'JUST_DATA', 'TABLE');
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('escalates many distinct objects in one schema to a single bulk refresh', async () => {
+        jest.useFakeTimers();
+        try {
+            const objectRows = Array.from({ length: 20 }, (_, index) => ({
+                OBJNAME: `T_${index}`,
+                SCHEMA: 'ADMIN',
+                OBJID: index + 1,
+                OBJTYPE: 'TABLE',
+                OWNER: 'ADMIN',
+                DESCRIPTION: '',
+            }));
+            const sqlLog: string[] = [];
+            const fixture = createFixture({
+                onSql: sql => sqlLog.push(sql),
+                objectRows,
+            });
+            const refreshObjectType = jest
+                .spyOn(fixture.synchronizer, 'refreshObjectType')
+                .mockResolvedValue(undefined);
+            const base = {
+                connectionName: 'CONN',
+                documentUri: 'file:///bulk.sql',
+                connection: fixture.connection,
+            };
+
+            for (let index = 0; index < objectRows.length; index += 1) {
+                await fixture.synchronizer.handleStatementSucceeded({
+                    ...base,
+                    sql: `ALTER TABLE ADMIN.T_${index} ADD COLUMN C INTEGER`,
+                });
+            }
+
+            // The schema threshold bounds eager per-object refreshes.
+            expect(sqlLog.filter(isReadCatalogObjectQuery).length).toBeLessThanOrEqual(5);
+            expect(refreshObjectType).not.toHaveBeenCalled();
+
+            await jest.advanceTimersByTimeAsync(1_600);
+
+            expect(refreshObjectType).toHaveBeenCalledTimes(1);
+            expect(refreshObjectType).toHaveBeenCalledWith('CONN', 'JUST_DATA', 'TABLE');
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });

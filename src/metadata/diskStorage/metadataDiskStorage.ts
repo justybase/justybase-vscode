@@ -402,6 +402,7 @@ export class MetadataDiskStorage {
                 connectionName,
                 indexEntry,
             ),
+            databaseSnapshots: indexEntry.databaseSnapshots,
         };
     }
 
@@ -448,6 +449,8 @@ export class MetadataDiskStorage {
                     ],
                     relationshipIndexVersion:
                         entry.relationshipIndexVersion ?? manifest.relationshipIndexVersion,
+                    databaseSnapshots:
+                        entry.databaseSnapshots ?? manifest.databaseSnapshots,
                     isComplete: entry.isComplete ?? manifest.isComplete ?? true,
                     hasManifestFile: true,
                 });
@@ -468,6 +471,7 @@ export class MetadataDiskStorage {
                 columnLayerKeys: [...(entry.columnLayerKeys ?? [])],
                 relationshipDatabases: [...(entry.relationshipDatabases ?? [])],
                 relationshipIndexVersion: entry.relationshipIndexVersion,
+                databaseSnapshots: entry.databaseSnapshots,
                 isComplete: entry.isComplete ?? true,
                 hasManifestFile: false,
             });
@@ -961,6 +965,7 @@ export class MetadataDiskStorage {
             ? metadataCache.getForeignKeyRelationshipSlices(connectionName)
             : [];
         const relationshipDatabases = foreignKeyRelationships.map(slice => slice.database);
+        const databaseSnapshots = metadataCache.getDatabaseSnapshotStates?.(connectionName) ?? {};
 
         await this.writeGzipJson(
             getV3ConnectionMetadataPath(this.storageDir, connectionName),
@@ -1008,6 +1013,7 @@ export class MetadataDiskStorage {
             metadataCache.isNetezzaConnection(connectionName)
                 ? FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION
                 : undefined,
+            databaseSnapshots,
             isComplete,
         );
 
@@ -1020,6 +1026,7 @@ export class MetadataDiskStorage {
             relationshipIndexVersion: metadataCache.isNetezzaConnection(connectionName)
                 ? FOREIGN_KEY_RELATIONSHIP_SCHEMA_VERSION
                 : undefined,
+            databaseSnapshots,
             isComplete,
             committedFence: lease.fence,
             prefetchStartedAt: current?.prefetchStartedAt,
@@ -1037,6 +1044,7 @@ export class MetadataDiskStorage {
         columnLayerKeys: string[],
         relationshipDatabases: string[],
         relationshipIndexVersion: number | undefined,
+        databaseSnapshots: Record<string, import('../types').DatabaseSnapshotDiskState> | undefined,
         isComplete = true,
     ): Promise<void> {
         const manifest: SerializedConnectionManifest = {
@@ -1048,6 +1056,7 @@ export class MetadataDiskStorage {
             columnLayerKeys,
             relationshipDatabases,
             relationshipIndexVersion,
+            databaseSnapshots,
             isComplete,
         };
         await this.writeGzipJson(

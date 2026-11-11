@@ -137,7 +137,30 @@ function serializeConnectionMetadataLayers(
             (fullKey) => fullKey.split('|')[1],
         ),
         typeGroup: serializeTypeGroups(cache, connectionName),
+        ...(cache._objectDetailsCache && cache._objectDetailsCache.size > 0
+            ? { objectDetails: serializeObjectDetails(cache, connectionName) }
+            : {}),
     };
+}
+
+function serializeObjectDetails(
+    cache: MetadataCachePort,
+    connectionName: string,
+): Record<string, SerializedLayerEntry<import('../types').ObjectDetails>> {
+    const result: Record<string, SerializedLayerEntry<import('../types').ObjectDetails>> = {};
+    const prefix = `${connectionName}|`;
+    for (const [fullKey, entry] of cache._objectDetailsCache ?? []) {
+        if (!fullKey.startsWith(prefix)) {
+            continue;
+        }
+        const key = fullKey.slice(prefix.length);
+        result[key] = {
+            timestamp: entry.timestamp,
+            // Keep details opaque; consumers own their schema.
+            data: [{ ...entry.data }],
+        };
+    }
+    return result;
 }
 
 function serializeColumnLayersForConnection(
@@ -347,6 +370,13 @@ export function hydrateConnectionMetadataIntoCache(
     for (const [dbName, entry] of Object.entries(data.typeGroup)) {
         cache.setTypeGroups(connectionName, dbName, entry.data);
     }
+
+    for (const [layerKey, entry] of Object.entries(data.objectDetails ?? {})) {
+        const details = entry.data[0];
+        if (details) {
+            cache.setObjectDetails?.(connectionName, layerKey, details);
+        }
+    }
 }
 
 export async function hydrateConnectionMetadataChunked(
@@ -426,6 +456,23 @@ export async function hydrateConnectionMetadataChunked(
                 return;
             }
             cache.setTypeGroups(connectionName, dbName, entry.data);
+        },
+    );
+
+    if (!isHydrateStillValid(cache, options)) {
+        return;
+    }
+    await forEachWithYield(
+        Object.entries(data.objectDetails ?? {}),
+        METADATA_HYDRATE_BATCH_SIZE,
+        ([layerKey, entry]) => {
+            if (!isHydrateStillValid(cache, options)) {
+                return;
+            }
+            const details = entry.data[0];
+            if (details) {
+                cache.setObjectDetails?.(connectionName, layerKey, details);
+            }
         },
     );
 }

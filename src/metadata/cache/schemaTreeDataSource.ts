@@ -86,7 +86,17 @@ export function getTablesForScope(
   if (direct !== undefined && direct.length > 0) {
     return direct;
   }
-  return cache.getTablesAllSchemas(connectionName, dbName);
+  const allSchemas = cache.getTablesAllSchemas(connectionName, dbName);
+  if (allSchemas !== undefined) {
+    return allSchemas;
+  }
+  // A complete snapshot may legitimately contain zero objects. The catalog
+  // flag turns that negative result into an authoritative cache hit instead
+  // of a repeated live query.
+  if (cache.isObjectsCatalogLoaded?.(connectionName, cacheKey, 'TABLE') === true) {
+    return [];
+  }
+  return direct;
 }
 
 /**

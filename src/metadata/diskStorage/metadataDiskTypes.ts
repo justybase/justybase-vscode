@@ -5,6 +5,8 @@
 import type {
     ColumnMetadata,
     DatabaseMetadata,
+    DatabaseSnapshotDiskState,
+    ObjectDetails,
     ProcedureMetadata,
     SchemaMetadata,
     TableMetadata,
@@ -57,6 +59,8 @@ export interface SerializedConnectionMetadata {
     table: Record<string, SerializedLayerEntry<TableMetadata>>;
     procedure: Record<string, SerializedLayerEntry<ProcedureMetadata>>;
     typeGroup: Record<string, SerializedStringLayerEntry>;
+    /** Optional heavy object details (view/procedure definitions). */
+    objectDetails?: Record<string, SerializedLayerEntry<ObjectDetails>>;
 }
 
 /** Small per-connection manifest loaded during activation before full metadata hydrate. */
@@ -71,6 +75,8 @@ export interface SerializedConnectionManifest {
     /** Database FK relationship slices persisted beside metadata files. */
     relationshipDatabases?: string[];
     relationshipIndexVersion?: number;
+    /** Per-database snapshot freshness markers (scoped prefetch). */
+    databaseSnapshots?: Record<string, DatabaseSnapshotDiskState>;
     isComplete?: boolean;
 }
 
@@ -133,6 +139,7 @@ export interface V2ConnectionIndexEntry {
     columnLayerKeys?: string[];
     relationshipDatabases?: string[];
     relationshipIndexVersion?: number;
+    databaseSnapshots?: Record<string, DatabaseSnapshotDiskState>;
     isComplete?: boolean;
 }
 
@@ -168,6 +175,7 @@ export interface LoadedConnectionMetadata extends SerializedConnectionMetadata {
     columnDatabases: string[];
     columnLayerKeys: string[];
     foreignKeyRelationships: ForeignKeyRelationshipCacheSlice[];
+    databaseSnapshots?: Record<string, DatabaseSnapshotDiskState>;
 }
 
 /** Manifest loaded from disk without heavy metadata layers. */

@@ -62,6 +62,7 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     'metadataCache.memoryWarningBytes': { min: 0 },
     'metadata.queryConcurrency': { min: 1, max: 16 },
     'metadata.fullRefreshColumnConnections': { min: 1, max: 8 },
+    'metadata.popularDatabases': { min: 0, max: 5 },
     'metadata.sessionSweep.intervalMinutes': { min: 1, max: 60 },
     'metadata.sessionSweep.maxAgeMinutes': { min: 5, max: 240 },
     'sqlParser.fastPathThreshold': { min: 102400, max: 52428800 },
@@ -286,6 +287,27 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'metadata.fullRefreshColumnConnections',
                 defaultValue: 1
+            },
+            {
+                id: 'metadata-popular-databases',
+                label: 'Popular Databases to Warm',
+                description: 'Recently used databases warmed together with the active database (0–5)',
+                type: 'number',
+                configKey: 'metadata.popularDatabases',
+                defaultValue: 2
+            },
+            {
+                id: 'metadata-live-fallback',
+                label: 'Live Metadata Fallback',
+                description: 'Controls whether a metadata cache miss may query the live catalog',
+                type: 'select',
+                configKey: 'metadata.liveFallback',
+                options: [
+                    { label: 'Never (cache only)', value: 'never' },
+                    { label: 'On demand (recommended)', value: 'onDemand' },
+                    { label: 'Always (legacy)', value: 'always' }
+                ],
+                defaultValue: 'onDemand'
             },
             {
                 id: 'metadata-session-sweep-enabled',

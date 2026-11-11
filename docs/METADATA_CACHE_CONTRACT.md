@@ -99,6 +99,47 @@ Skipping step 2 removes all TABLE entries for that schema key.
   refresh stages remain on the primary session. A session-open failure falls
   back to the primary session and never starts an unbounded retry loop.
 
+### Per-database snapshot freshness (shadow-first)
+
+Prefetch is scoped to a database, not a connection. `markDatabaseSnapshotComplete`
+records the timestamp and scope (`core` or `full`) after every stage for that
+database succeeded; `isDatabaseSnapshotFresh` is the authoritative lazy-load
+decision used by the schema tree, the prefetch coordinator and the live-fallback
+gate. A connection can therefore hold a mix of fresh and missing databases.
+
+- Automatic warm-up covers the **active database** (effective database of the
+  active SQL editor, otherwise the profile database) plus the most used
+  databases from `DatabaseUsageHistory`.
+- `justybase.metadata.popularDatabases` (0–5, default `2`) bounds the popular
+  set. `0` warms only the active database.
+- Explicit "Refresh database" invalidates every layer for that database and
+  rebuilds a **full** snapshot, including optional object details (view
+  definitions and procedure sources).
+- Other databases run zero catalog SQL until the user opens them, references
+  them in `DB..` completion, or explicitly refreshes them.
+- Empty schemas/databases are stored as explicit empty layers plus catalog
+  flags, so a known-empty scope is an authoritative cache hit (`[]`), not a
+  reason to query again.
+
+### Live fallback policy
+
+`justybase.metadata.liveFallback` decides whether an authoring cache miss may
+issue a live catalog query:
+
+| Value | Behavior |
+| --- | --- |
+| `never` | Authoring reads only the shadow cache; a missing scope starts a background database snapshot and returns a placeholder. |
+| `onDemand` (default) | Completion stays cache-only; explicit user scopes (schema tree, Edit Data, DDL sync, explicit refresh) may query live. |
+| `always` | Legacy behavior: any cache miss may query the catalog. |
+
+Non-shadow dialects (SQLite, DuckDB, Oracle, ...) keep their existing live
+metadata path regardless of this setting.
+
+Live fallbacks are counted per request source in the cache stats snapshot
+(`netezza.showMetadataCacheStats`). More than 20 live authoring queries in a
+rolling ten-minute window logs a warning that the shadow cache is missing the
+scope; refresh and DDL-driven reads are not counted.
+
 ### Optional foreign-key metadata
 
 Core snapshot completeness and TTL depend on database, schema, object, procedure
@@ -131,6 +172,33 @@ Removes for the target scope:
 - Lookup indexes via `removeTableCacheEntry`
 
 Fires `onDidInvalidate`.
+
+### DDL-driven invalidation and coalescing
+
+`TableDdlSynchronizer` routes successful DDL through the cache instead of
+refreshing per statement:
+
+| Statement | Cache action | Catalog SQL |
+| --- | --- | --- |
+| `COMMENT ON TABLE/VIEW/PROCEDURE` | Patch `DESCRIPTION` in place | 0 |
+| `COMMENT ON COLUMN` | Patch column `documentation` | 0 |
+| `DROP TABLE/VIEW` | Remove object + columns | 0 |
+| `ALTER TABLE` (first object/schema) | Refresh object + columns immediately | 1–2 |
+| Repeated `ALTER` on the same object | Coalesced into one trailing type refresh | 1 |
+| Many objects in one schema (> 5 within 30 s) | One database-wide object-type refresh | 1 |
+| `CREATE/DROP/ALTER VIEW`, `PROCEDURE`, `SYNONYM` | Refresh the affected object-type layer (coalesced) | 1 |
+| `ROLLBACK` | Pending impacts discarded | 0 |
+
+`CREATE/DROP/ALTER VIEW|PROCEDURE|SYNONYM` may not be modelled by every
+dialect grammar; a token-level fallback recognizes the keywords and target so
+the type layer is still invalidated. A full-scope database refresh switches the
+shared metadata session to that database (`SET CATALOG`) around the view
+definition read and restores the original catalog afterwards.
+
+`CURRENT_CATALOG`/`CURRENT_SCHEMA` is cached per connection+document for 30 s,
+so a 100-statement DDL script pays for one context query, not one hundred.
+Tree/LSP notifications are debounced once per batch. Comment patches never
+fire invalidation; the trailing notify refreshes the tree once.
 
 ### `clearCache()`
 
@@ -193,6 +261,12 @@ When disk persistence is enabled (`justybase.metadataCache.diskPersistence`, def
 - **Columns** stay in per-database column files (`*.columns.json.gz`) until loaded on demand.
 - **Netezza FK relationships** are loaded from per-database `*.foreign-keys.json.gz` sidecars during the metadata hydrate; this does not hydrate column layers or query the database.
 - Prefetch checkpoints metadata to disk; column files are written at checkpoint/dispose.
+- Per-database snapshot markers (`prefetchCompletedAt`, `scope`) are written to
+  the v3 index and connection manifest. Startup restores them, so a fresh
+  database never triggers catalog SQL while a missing database stays lazy.
+- Optional heavy object details (view definitions, procedure sources) are stored
+  in the metadata payload and restored with the metadata hydrate. They are
+  filled only by a `full`-scope database refresh.
 - Checkpoints are marked `isComplete: false`. They may be loaded for recovery, but never restore `isConnectionPrefetchFresh`.
 - Only a verified complete snapshot (`isComplete: true`) restores prefetch freshness. Completion requires database, schema, table, procedure/type catalog stages, column cache entries for table/view/external-table objects, and a complete FK slice for every Netezza database.
 - Another VS Code window writing the v3 index triggers `onExternalCacheUpdate` → re-hydrate metadata → `onDidExternalRefresh`.
