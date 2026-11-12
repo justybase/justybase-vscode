@@ -171,6 +171,11 @@ Live fallbacks are counted per request source in the cache stats snapshot
 rolling ten-minute window logs a warning that the shadow cache is missing the
 scope; refresh and DDL-driven reads are not counted.
 
+The Edit Data / Object details panel is cache-first for its Structure tab: it
+renders cached columns and the cached table comment immediately, then refreshes
+the catalog in the background. Row data (`SELECT ... LIMIT`) is requested only
+when the Data tab is activated.
+
 ### Optional foreign-key metadata
 
 Core snapshot completeness and TTL depend on database, schema, object, procedure

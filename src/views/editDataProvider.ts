@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type {
     EditDataChanges,
+    EditDataColumnMetadata,
+    EditDataMetadata,
     EditDataObjectKind,
     EditDataPanelInboundMessage,
     EditDataPanelOutboundMessage,
@@ -8,9 +10,13 @@ import type {
 } from '../contracts/webviews';
 import { runQuery, runQueryRaw, runQueriesSequentially, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
-import { getTableMetadata, toWebviewFormat } from '../providers/tableMetadataProvider';
+import { getTableMetadata, toWebviewFormat, type TableMetadata } from '../providers/tableMetadataProvider';
 import type { MetadataQueryKind } from '../metadata/metadataQueryDiagnostics';
 import { runWithMetadataQueryConcurrencyLimit } from '../metadata/metadataQueryLimiter';
+import type { ConnectionManagerMetadataCache } from '../core/connectionManagerPorts';
+import type { ColumnMetadata } from '../metadata/types';
+import { getCachedColumnsFromMetadataCache, getCachedColumnsFromMetadataCacheAsync } from '../metadata/columnCacheLookup';
+import type { DatabaseKind } from '../contracts/database';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 import { splitCommaSeparatedTopLevel } from '../core/parenAwareText';
 
@@ -83,10 +89,19 @@ interface EditDataQueryOptions {
  */
 interface EditDataPanelState {
     loadGeneration: number;
+    metadataGeneration: number;
     disposed: boolean;
     saveInFlight: boolean;
+    /** Row data has been delivered at least once; later Data activations reuse it. */
+    dataLoaded: boolean;
+    /** A row-data load is in flight; duplicate `requestData` messages are ignored. */
+    dataInFlight: boolean;
     /** Column names returned by the last load; DML may only reference these. */
     knownColumns: Set<string>;
+    /** Last live catalog read, reused for the projection fallback. */
+    lastTableMetadata?: TableMetadata;
+    /** Last Structure payload; bundled into setData so the grid keeps column types. */
+    lastMetadataPayload?: EditDataMetadata;
     objectType: string;
     objectKind: EditDataObjectKind;
     readOnly: boolean;
@@ -147,6 +162,92 @@ function buildProcedureProperties(item: EditDataItem, objectType: string, signat
     return properties;
 }
 
+function normalizeLookupName(value: unknown): string {
+    return String(value ?? '').trim().toUpperCase();
+}
+
+/**
+ * Cached table rows carry the catalog `DESCRIPTION`. The row is matched by
+ * schema + name when the entry records its schema, and by name alone otherwise.
+ */
+function findCachedTableComment(
+    cache: ConnectionManagerMetadataCache,
+    connectionName: string,
+    database: string,
+    schema: string,
+    table: string,
+): string {
+    const rows = cache.getTablesAllSchemas(connectionName, database);
+    if (!rows || rows.length === 0) {
+        return '';
+    }
+    const wantedTable = normalizeLookupName(table);
+    const wantedSchema = normalizeLookupName(schema);
+    const match = rows.find(entry => {
+        const name = entry.OBJNAME ?? entry.TABLENAME
+            ?? (typeof entry.label === 'string' ? entry.label : entry.label?.label);
+        if (normalizeLookupName(name) !== wantedTable) {
+            return false;
+        }
+        return !entry.SCHEMA || normalizeLookupName(entry.SCHEMA) === wantedSchema;
+    });
+    return typeof match?.DESCRIPTION === 'string' ? match.DESCRIPTION : '';
+}
+
+/**
+ * Cache-first Structure payload. Column cache entries written by the schema
+ * tree include keys, defaults and comments, so the tab can render before the
+ * catalog round trip completes.
+ */
+async function readCachedTableMetadata(
+    cache: ConnectionManagerMetadataCache,
+    connectionName: string,
+    database: string,
+    schema: string,
+    table: string,
+    databaseKind: DatabaseKind | undefined,
+): Promise<{ tableComment: string; columns: ColumnMetadata[] } | undefined> {
+    // A warm in-memory entry must not wait for disk hydration; only a miss needs it.
+    const columns = getCachedColumnsFromMetadataCache(
+        cache,
+        connectionName,
+        database,
+        schema,
+        table,
+        databaseKind,
+    ) ?? await getCachedColumnsFromMetadataCacheAsync(
+        cache,
+        connectionName,
+        database,
+        schema,
+        table,
+        databaseKind,
+    );
+    if (!columns || columns.length === 0) {
+        return undefined;
+    }
+    return {
+        tableComment: findCachedTableComment(cache, connectionName, database, schema, table),
+        columns,
+    };
+}
+
+/** Maps cache column metadata onto the uppercase keys the Structure tab renders. */
+export function cachedColumnsToWebviewFormat(
+    columns: readonly ColumnMetadata[],
+): EditDataColumnMetadata[] {
+    return columns.map(column => ({
+        ATTNAME: column.ATTNAME,
+        FORMAT_TYPE: column.FORMAT_TYPE,
+        IS_NOT_NULL: column.isNotNull === true ? 1 : 0,
+        COLDEFAULT: column.colDefault ?? null,
+        DESCRIPTION: column.documentation ?? '',
+        IS_PK: column.isPk === true ? 1 : 0,
+        IS_FK: column.isFk === true ? 1 : 0,
+        IS_DISTRIBUTION_KEY: column.isDistributionKey === true ? 1 : 0,
+    }));
+}
+
 export class EditDataProvider {
     public static readonly viewType = 'netezza.editData';
 
@@ -201,8 +302,11 @@ export class EditDataProvider {
 
         const state: EditDataPanelState = {
             loadGeneration: 0,
+            metadataGeneration: 0,
             disposed: false,
             saveInFlight: false,
+            dataLoaded: false,
+            dataInFlight: false,
             knownColumns: new Set(),
             objectType,
             objectKind,
@@ -217,9 +321,15 @@ export class EditDataProvider {
             state.disposed = true;
             // Invalidate any in-flight request so late results are discarded.
             state.loadGeneration += 1;
+            state.metadataGeneration += 1;
         });
 
+        const loadMetadata = () => {
+            void this._loadMetadata(panel, database, schema, tableName, item.connectionName, context, connectionManager);
+        };
+
         const reload = (options: EditDataQueryOptions = {}) => {
+            loadMetadata();
             void this._loadData(panel, database, schema, tableName, item.connectionName, context, connectionManager, options);
         };
 
@@ -232,7 +342,26 @@ export class EditDataProvider {
                 }
                 switch (message.command) {
                     case 'ready':
-                        reload();
+                        // Object details opens on Structure: render cached metadata
+                        // right away and defer the row query until the Data tab asks.
+                        if ((options.initialTab ?? 'data') === 'data' || objectKind === 'procedure') {
+                            reload();
+                        } else {
+                            loadMetadata();
+                        }
+                        break;
+                    case 'requestData':
+                        if (!state.dataLoaded && !state.dataInFlight) {
+                            void this._loadData(
+                                panel,
+                                database,
+                                schema,
+                                tableName,
+                                item.connectionName,
+                                context,
+                                connectionManager,
+                            );
+                        }
                         break;
                     case 'save': {
                         const saved = await this._handleSave(
@@ -387,6 +516,135 @@ export class EditDataProvider {
         }
     }
 
+    /**
+     * Catalog queries for this panel share the per-connection metadata limit and
+     * are tagged so the metadata diagnostics can attribute the queue wait.
+     */
+    private static _createMetadataQueryRunner(
+        context: vscode.ExtensionContext,
+        connectionManager: ConnectionManager,
+        connectionName: string,
+        db: string,
+        schema: string,
+        table: string,
+    ): Parameters<typeof getTableMetadata>[0] {
+        return (query: string, queryKind: MetadataQueryKind = 'table-columns') =>
+            runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
+                runQueryRaw({
+                    context,
+                    query,
+                    silent: true,
+                    connectionManager,
+                    connectionName,
+                    isUserQuery: false,
+                    metadataContext: {
+                        source: 'schema-tree',
+                        kind: queryKind,
+                        connectionName,
+                        database: db,
+                        schema,
+                        table,
+                        reason: 'edit-data-metadata',
+                        queueWaitMs,
+                    },
+                    metadataQueueWaitMs: queueWaitMs,
+                }),
+            );
+    }
+
+    /**
+     * Structure payload: cached columns/comments first, then the live catalog.
+     * The live read never blocks the Data tab; it only refreshes the Structure
+     * tab once the server answers.
+     */
+    private static async _loadMetadata(
+        panel: vscode.WebviewPanel,
+        db: string,
+        schema: string,
+        table: string,
+        connectionName: string,
+        context: vscode.ExtensionContext,
+        connectionManager: ConnectionManager,
+    ): Promise<void> {
+        const state = panelStates.get(panel);
+        if (state?.disposed) return;
+        // Procedures have no column catalog rows; their Structure payload ships with setData.
+        if ((state?.objectKind ?? 'table') === 'procedure') return;
+
+        const metadataGeneration = state ? ++state.metadataGeneration : 0;
+        const isStale = (): boolean => Boolean(state && (state.disposed || state.metadataGeneration !== metadataGeneration));
+        const databaseKind = connectionManager.getConnectionDatabaseKind?.(connectionName);
+        const objectTypeOption = state?.objectType && state.objectType.toUpperCase() !== 'TABLE'
+            ? state.objectType
+            : undefined;
+        let renderedFromCache = false;
+
+        // Cache read failures (disk hydration, cache ports) must never block the
+        // live catalog read; treat them as a cache miss.
+        let cached: { tableComment: string; columns: ColumnMetadata[] } | undefined;
+        try {
+            const cache = connectionManager.getMetadataCache?.();
+            if (cache) {
+                cached = await readCachedTableMetadata(cache, connectionName, db, schema, table, databaseKind);
+            }
+        } catch {
+            cached = undefined;
+        }
+        if (isStale()) return;
+        if (cached) {
+            renderedFromCache = true;
+            const payload: EditDataMetadata = {
+                tableComment: cached.tableComment,
+                columns: cachedColumnsToWebviewFormat(cached.columns),
+                objectKind: state?.objectKind ?? 'table',
+            };
+            if (state) state.lastMetadataPayload = payload;
+            this._postMessage(panel, {
+                command: 'setMetadata',
+                metadata: payload,
+                readOnly: state?.readOnly ?? false,
+                source: 'cache',
+            });
+        }
+
+        try {
+            const metadata = await getTableMetadata(
+                this._createMetadataQueryRunner(context, connectionManager, connectionName, db, schema, table),
+                db,
+                schema,
+                table,
+                databaseKind,
+                { objectType: objectTypeOption },
+            );
+            if (isStale()) return;
+            if (state) state.lastTableMetadata = metadata;
+            const payload: EditDataMetadata = {
+                tableComment: metadata.tableComment || '',
+                columns: toWebviewFormat(metadata.columns),
+                objectKind: state?.objectKind ?? 'table',
+            };
+            if (state) state.lastMetadataPayload = payload;
+            this._postMessage(panel, {
+                command: 'setMetadata',
+                metadata: payload,
+                readOnly: state?.readOnly ?? false,
+                source: 'live',
+            });
+        } catch (err: unknown) {
+            if (isStale()) return;
+            // A cached render is still useful; only surface the failure when the
+            // Structure tab has nothing to show.
+            if (renderedFromCache) return;
+            const message = err instanceof Error ? err.message : String(err);
+            this._postMessage(panel, {
+                command: 'setMetadata',
+                metadata: null,
+                readOnly: state?.readOnly ?? false,
+                error: message,
+            });
+        }
+    }
+
     private static async _loadData(
         panel: vscode.WebviewPanel,
         db: string,
@@ -404,6 +662,7 @@ export class EditDataProvider {
         const generation = state ? ++state.loadGeneration : 0;
         const isStale = (): boolean => Boolean(state && (state.disposed || state.loadGeneration !== generation));
         if (state?.disposed) return;
+        if (state) state.dataInFlight = true;
         const startedAt = Date.now();
         try {
             this._postMessage(panel, { command: 'setLoading', loading: true, message: 'Fetching data...' });
@@ -411,6 +670,7 @@ export class EditDataProvider {
             if (objectKind === 'procedure') {
                 const signature = state?.ddlObjectName ?? table;
                 if (isStale()) return;
+                if (state) state.dataLoaded = true;
                 this._postMessage(panel, {
                     command: 'setData',
                     data: [],
@@ -432,32 +692,6 @@ export class EditDataProvider {
                 });
                 return;
             }
-
-            const databaseKind = connectionManager.getConnectionDatabaseKind?.(connectionName);
-
-            // Use centralized tableMetadataProvider for metadata queries
-            const queryRunner = (query: string, queryKind: MetadataQueryKind = 'table-columns') =>
-                runWithMetadataQueryConcurrencyLimit(connectionName, (queueWaitMs) =>
-                    runQueryRaw({
-                        context,
-                        query,
-                        silent: true,
-                        connectionManager,
-                        connectionName,
-                        isUserQuery: false,
-                        metadataContext: {
-                            source: 'schema-tree',
-                            kind: queryKind,
-                            connectionName,
-                            database: db,
-                            schema,
-                            table,
-                            reason: 'edit-data-metadata',
-                            queueWaitMs,
-                        },
-                        metadataQueueWaitMs: queueWaitMs,
-                    }),
-                );
 
             const editable = objectKind === 'table' && !readOnly;
 
@@ -483,24 +717,13 @@ export class EditDataProvider {
                 query += ` LIMIT ${EDIT_DATA_ROW_LIMIT}`;
             }
 
-            const [dataResult, metadata] = await Promise.all([
-                runQueryRaw(
-                    context,
-                    query,
-                    true,
-                    connectionManager,
-                    connectionName
-                ),
-                getTableMetadata(queryRunner, db, schema, table, databaseKind, {
-                    objectType: state?.objectType && state.objectType.toUpperCase() !== 'TABLE'
-                        ? state.objectType
-                        : undefined,
-                })
-            ]);
-
-            // Convert to webview format (uppercase keys for JS compatibility)
-            const tableComment = metadata.tableComment || '';
-            const columnsMeta = toWebviewFormat(metadata.columns);
+            const dataResult = await runQueryRaw(
+                context,
+                query,
+                true,
+                connectionManager,
+                connectionName
+            );
 
             let data: Record<string, unknown>[] = [];
             if (dataResult && dataResult.data) {
@@ -521,8 +744,30 @@ export class EditDataProvider {
                 const cols = options.columns.trim().split(',').map(c => c.trim()).filter(c => c);
                 const hasRowId = cols.some(c => c.toUpperCase() === 'ROWID');
                 columns = editable && !hasRowId ? ['ROWID', ...cols] : cols;
-            } else if (columnsMeta.length > 0) {
-                const metaColumns = columnsMeta.map((c: { ATTNAME: string }) => c.ATTNAME);
+            } else {
+                // Last-resort projection when the server returns neither rows nor
+                // column descriptors: reuse the Structure catalog read.
+                let metaColumns = (state?.lastTableMetadata?.columns ?? []).map(c => c.attname);
+                if (metaColumns.length === 0) {
+                    const databaseKind = connectionManager.getConnectionDatabaseKind?.(connectionName);
+                    const metadata = await getTableMetadata(
+                        this._createMetadataQueryRunner(context, connectionManager, connectionName, db, schema, table),
+                        db,
+                        schema,
+                        table,
+                        databaseKind,
+                        {
+                            objectType: state?.objectType && state.objectType.toUpperCase() !== 'TABLE'
+                                ? state.objectType
+                                : undefined,
+                        },
+                    ).catch(() => undefined);
+                    if (isStale()) return;
+                    if (metadata) {
+                        if (state) state.lastTableMetadata = metadata;
+                        metaColumns = metadata.columns.map(c => c.attname);
+                    }
+                }
                 columns = editable ? ['ROWID', ...metaColumns] : metaColumns;
             }
             if (editable && columns.includes('ROWID')) {
@@ -530,16 +775,17 @@ export class EditDataProvider {
             }
 
             if (isStale()) return;
-            if (state) state.knownColumns = new Set(columns);
+            if (state) {
+                state.knownColumns = new Set(columns);
+                state.dataLoaded = true;
+            }
             this._postMessage(panel, {
                 command: 'setData',
                 data,
                 columns,
-                metadata: {
-                    tableComment,
-                    columns: columnsMeta,
-                    objectKind,
-                },
+                // Structure is delivered by setMetadata; bundling the last payload
+                // keeps grid column types while a null payload preserves the tab.
+                metadata: state?.lastMetadataPayload ?? null,
                 info: {
                     rowLimit: EDIT_DATA_ROW_LIMIT,
                     elapsedMs: Date.now() - startedAt,
@@ -554,6 +800,9 @@ export class EditDataProvider {
             vscode.window.showErrorMessage(`Failed to load data: ${msg}`);
             this._postMessage(panel, { command: 'setError', text: msg });
         } finally {
+            if (state && state.loadGeneration === generation) {
+                state.dataInFlight = false;
+            }
             if (!isStale()) {
                 this._postMessage(panel, { command: 'setLoading', loading: false });
             }
@@ -891,7 +1140,7 @@ export function renderEditDataShell(target: {
                 ${dataPanel}
 
                 <section id="tab-metadata" class="${tabPanelClass('tab-metadata')}" role="tabpanel">
-                    <div id="metadataContent" class="metadata-content">Loading metadata...</div>
+                    <div id="metadataContent" class="metadata-content"><div class="empty-state"><span class="spinner"></span>Loading metadata…</div></div>
                 </section>
 
                 <section id="tab-ddl" class="${tabPanelClass('tab-ddl')}" role="tabpanel">

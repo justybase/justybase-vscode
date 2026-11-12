@@ -35,6 +35,9 @@ export interface EditDataMetadata {
     arguments?: EditDataArgument[];
 }
 
+/** Where a Structure payload came from: the metadata cache or a fresh catalog read. */
+export type EditDataMetadataSource = 'cache' | 'live';
+
 export interface EditDataRow {
     ROWID?: string | number | null;
     __tempId?: number;
@@ -57,6 +60,7 @@ export interface EditDataChanges {
 
 export type EditDataPanelWebviewToHostMessage =
     | { command: 'ready' }
+    | { command: 'requestData' }
     | { command: 'refresh'; whereClause?: string; columns?: string; orderBy?: string }
     | {
           command: 'save';
@@ -79,6 +83,13 @@ export type EditDataPanelWebviewToHostMessage =
 
 export type EditDataPanelHostToWebviewMessage =
     | { command: 'setLoading'; loading: boolean; message?: string }
+    | {
+          command: 'setMetadata';
+          metadata: EditDataMetadata | null;
+          readOnly?: boolean;
+          source?: EditDataMetadataSource;
+          error?: string;
+      }
     | {
           command: 'setData';
           data: EditDataRow[];

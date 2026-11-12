@@ -5,6 +5,7 @@
 import type {
     EditDataLoadInfo,
     EditDataMetadata,
+    EditDataMetadataSource,
     EditDataPanelHostToWebviewMessage,
     EditDataPanelWebviewToHostMessage,
     EditDataRow,
@@ -36,6 +37,9 @@ let loadInfo: EditDataLoadInfo | null = null;
 let grid: DataGrid | null = null;
 let loading = false;
 let readOnly = false;
+let dataLoaded = false;
+/** Set when the user edits a comment box, so a late refresh cannot discard it. */
+let structureDirty = false;
 let ddlText: string | null = null;
 let ddlRequested = false;
 let pendingPreview: ((statements: string[], error?: string) => void) | null = null;
@@ -49,6 +53,9 @@ window.addEventListener('message', event => {
     switch (message.command) {
         case 'setData':
             initData(message.data, message.columns, message.metadata, message.info, message.readOnly === true);
+            break;
+        case 'setMetadata':
+            applyMetadata(message.metadata, message.readOnly === true, message.source, message.error);
             break;
         case 'setLoading':
             setLoading(message.loading, message.message);
@@ -93,6 +100,7 @@ async function confirmDiscard(action: string): Promise<boolean> {
 async function refresh(): Promise<void> {
     if (loading) return;
     if (!(await confirmDiscard('reload the data'))) return;
+    structureDirty = false;
     post({ command: 'refresh', ...readFilter() });
 }
 
@@ -213,6 +221,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // A late cache/live refresh must not discard an in-progress comment edit.
+    getElementById('metadataContent')?.addEventListener('input', event => {
+        const target = event.target as HTMLElement | null;
+        if (target?.id === 'tableCommentBox' || target?.classList.contains('col-comment')) {
+            structureDirty = true;
+        }
+    });
+
     const on = (id: string, handler: () => void) => getElementById(id)?.addEventListener('click', handler);
     on('refreshBtn', () => void refresh());
     on('saveBtn', submit);
@@ -296,7 +312,16 @@ function setActiveTab(tabId: string | undefined): void {
         content.classList.toggle('active', content.id === tabId);
     });
     if (tabId === 'tab-ddl') requestDdl(false);
-    if (tabId === 'tab-data') grid?.focus();
+    if (tabId === 'tab-data') {
+        requestData();
+        grid?.focus();
+    }
+}
+
+/** Row data loads on first Data activation; Object details opens on Structure. */
+function requestData(): void {
+    if (dataLoaded) return;
+    post({ command: 'requestData' });
 }
 
 function requestDdl(force: boolean): void {
@@ -354,24 +379,57 @@ function initData(
     info: EditDataLoadInfo | undefined,
     nextReadOnly: boolean,
 ): void {
-    metadata = nextMetadata;
     loadInfo = info ?? loadInfo;
     readOnly = nextReadOnly;
     document.body.classList.toggle('is-readonly', readOnly);
     appliedFilter = readFilter();
     editorState = createState(data || [], columns || [], metadata?.columns, { readOnly });
     hideError();
+    dataLoaded = true;
 
     const hasFilter = Boolean(appliedFilter.whereClause);
     grid?.setState(editorState, hasFilter
         ? 'No rows match the WHERE filter.'
         : readOnly ? 'This object has no rows.' : 'This table is empty. Use Add row (Alt+Insert) to insert one.');
 
-    const structure = getElementById('metadataContent');
-    if (structure) {
-        renderStructure(structure, metadata, post, showError, { readOnly });
+    if (nextMetadata) {
+        metadata = nextMetadata;
+        const structure = getElementById('metadataContent');
+        if (structure) {
+            renderStructure(structure, metadata, post, showError, { readOnly });
+        }
     }
+    structureDirty = false;
     updateFilterState();
+    updateChrome();
+}
+
+/**
+ * Renders the Structure tab without touching the grid. The host sends the
+ * cached payload first and a catalog refresh afterwards, so `setData` no longer
+ * gates the Structure tab on the row query.
+ */
+function applyMetadata(
+    next: EditDataMetadata | null,
+    nextReadOnly: boolean,
+    _source: EditDataMetadataSource | undefined,
+    error: string | undefined,
+): void {
+    const structure = getElementById('metadataContent');
+    if (!structure) return;
+
+    if (!next) {
+        if (error) {
+            structure.innerHTML = `<div class="empty-state empty-state--error">${escapeHtml(error)}</div>`;
+        }
+        return;
+    }
+    if (structureDirty) return;
+
+    metadata = next;
+    readOnly = nextReadOnly;
+    document.body.classList.toggle('is-readonly', readOnly);
+    renderStructure(structure, metadata, post, showError, { readOnly });
     updateChrome();
 }
 

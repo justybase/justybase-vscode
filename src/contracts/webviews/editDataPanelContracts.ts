@@ -31,6 +31,9 @@ export interface EditDataMetadata {
     arguments?: EditDataArgument[];
 }
 
+/** Where a Structure payload came from: the metadata cache or a fresh catalog read. */
+export type EditDataMetadataSource = 'cache' | 'live';
+
 export interface EditDataRow {
     ROWID?: string | number | null;
     __tempId?: number;
@@ -53,6 +56,7 @@ export interface EditDataChanges {
 
 export type EditDataPanelWebviewToHostMessage =
     | { command: 'ready' }
+    | { command: 'requestData' }
     | { command: 'refresh'; whereClause?: string; columns?: string; orderBy?: string }
     | {
         command: 'save';
@@ -76,6 +80,13 @@ export type EditDataPanelWebviewToHostMessage =
 export type EditDataPanelHostToWebviewMessage =
     | { command: 'setLoading'; loading: boolean; message?: string }
     | {
+        command: 'setMetadata';
+        metadata: EditDataMetadata | null;
+        readOnly?: boolean;
+        source?: EditDataMetadataSource;
+        error?: string;
+    }
+    | {
         command: 'setData';
         data: EditDataRow[];
         columns: string[];
@@ -93,6 +104,7 @@ export type EditDataPanelOutboundMessage = EditDataPanelHostToWebviewMessage;
 
 export const EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
     'ready',
+    'requestData',
     'refresh',
     'save',
     'updateTableComment',
@@ -110,6 +122,7 @@ export const EDIT_DATA_PANEL_WEBVIEW_TO_HOST_COMMANDS = [
 
 export const EDIT_DATA_PANEL_HOST_TO_WEBVIEW_COMMANDS = [
     'setLoading',
+    'setMetadata',
     'setData',
     'setError',
     'saveFailed',

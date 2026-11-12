@@ -52,6 +52,8 @@ Object rows expose inline actions for refresh, copying the metadata comment, fav
 - **Views** open read-only: data, columns, and comments can be inspected, but inline comment editing and column mutations are hidden.
 - **Procedures** open on Structure with definition properties and positional argument types instead of columns, and expose only Structure and DDL tabs. DDL uses the procedure signature, so overloads open the correct definition.
 
+The Structure tab is cache-first: columns (with key badges, nullability, defaults and comments) and the cached table comment render immediately, and a catalog refresh updates the tab in the background. The Data tab is loaded the first time it is activated, so opening Object Details does not run the row query.
+
 Editing remains available from the regular **View/Edit Data** command for tables.
 
 ## DDL and navigation

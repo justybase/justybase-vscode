@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { EditDataProvider, EditDataItem } from '../views/editDataProvider';
+import { EditDataProvider, EditDataItem, cachedColumnsToWebviewFormat } from '../views/editDataProvider';
 import { ConnectionManager } from '../core/connectionManager';
 
 // Mock dependencies
@@ -778,6 +778,166 @@ describe('EditDataProvider', () => {
             );
             expect(mockWebview.html).not.toContain('<img src=x');
             expect(mockWebview.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+        });
+    });
+
+    describe('Object details cache-first structure', () => {
+        const flush = async (): Promise<void> => {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await new Promise(resolve => setTimeout(resolve, 0));
+        };
+
+        const cachedColumns = [
+            {
+                ATTNAME: 'ID',
+                FORMAT_TYPE: 'INTEGER',
+                isNotNull: true,
+                colDefault: null,
+                documentation: 'Primary key',
+                isPk: true,
+                isFk: false,
+                isDistributionKey: true,
+            },
+        ];
+
+        const installCachedTable = (): void => {
+            const cache = {
+                getColumns: jest.fn((_connectionName: string, key: string) =>
+                    key === 'TESTDB.PUBLIC.USERS' ? cachedColumns : undefined),
+                getTablesAllSchemas: jest.fn(() => [
+                    { TABLENAME: 'USERS', SCHEMA: 'PUBLIC', DESCRIPTION: 'Cached table comment' },
+                ]),
+                isNetezzaConnection: jest.fn(() => false),
+            };
+            (mockConnectionManager as unknown as { getMetadataCache: jest.Mock }).getMetadataCache =
+                jest.fn(() => cache);
+        };
+
+        const postedCommands = (): Array<{ command: string; [key: string]: unknown }> =>
+            (mockWebview.postMessage as jest.Mock).mock.calls.map(call => call[0]);
+
+        const openObjectDetails = async (): Promise<void> => {
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager,
+                { initialTab: 'structure' },
+            );
+            await signalReady();
+        };
+
+        it('renders the cached structure before any data query', async () => {
+            installCachedTable();
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: 'Live comment' });
+
+            await openObjectDetails();
+
+            const cachedPayload = postedCommands().find(
+                message => message.command === 'setMetadata' && message.source === 'cache',
+            );
+            expect(cachedPayload).toBeDefined();
+            expect(cachedPayload?.metadata).toEqual({
+                tableComment: 'Cached table comment',
+                columns: [{
+                    ATTNAME: 'ID',
+                    FORMAT_TYPE: 'INTEGER',
+                    IS_NOT_NULL: 1,
+                    COLDEFAULT: null,
+                    DESCRIPTION: 'Primary key',
+                    IS_PK: 1,
+                    IS_FK: 0,
+                    IS_DISTRIBUTION_KEY: 1,
+                }],
+                objectKind: 'table',
+            });
+            expect(runQueryRaw).not.toHaveBeenCalled();
+            expect(postedCommands().some(
+                message => message.command === 'setMetadata' && message.source === 'live',
+            )).toBe(true);
+        });
+
+        it('loads rows only when the Data tab requests them', async () => {
+            installCachedTable();
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ID' }],
+                data: [[1]],
+            });
+
+            await openObjectDetails();
+            expect(runQueryRaw).not.toHaveBeenCalled();
+
+            await messageHandler!({ command: 'requestData' });
+            await flush();
+            expect(runQueryRaw).toHaveBeenCalledTimes(1);
+            expect(postedCommands().some(message => message.command === 'setData')).toBe(true);
+
+            await messageHandler!({ command: 'requestData' });
+            await flush();
+            expect(runQueryRaw).toHaveBeenCalledTimes(1);
+        });
+
+        it('bundles the cached structure with row data so grid columns keep their types', async () => {
+            installCachedTable();
+            // Keep the live read pending so the cache payload is the newest one.
+            (getTableMetadata as jest.Mock).mockReturnValue(new Promise(() => undefined));
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ID' }],
+                data: [[1]],
+            });
+
+            await openObjectDetails();
+            await messageHandler!({ command: 'requestData' });
+            await flush();
+
+            const setData = postedCommands().find(message => message.command === 'setData');
+            expect(setData?.metadata).toEqual(expect.objectContaining({
+                columns: [expect.objectContaining({
+                    ATTNAME: 'ID',
+                    FORMAT_TYPE: 'INTEGER',
+                    IS_PK: 1,
+                })],
+            }));
+        });
+
+        it('keeps the cached structure when the live refresh fails', async () => {
+            installCachedTable();
+            (getTableMetadata as jest.Mock).mockRejectedValue(new Error('catalog offline'));
+
+            await openObjectDetails();
+
+            const metadataMessages = postedCommands().filter(message => message.command === 'setMetadata');
+            expect(metadataMessages).toHaveLength(1);
+            expect(metadataMessages[0].source).toBe('cache');
+        });
+
+        it('maps cached column metadata onto the webview payload', () => {
+            expect(cachedColumnsToWebviewFormat([
+                { ATTNAME: 'NAME', FORMAT_TYPE: 'VARCHAR(10)', documentation: 'Display name' },
+                { ATTNAME: 'AMOUNT', FORMAT_TYPE: 'NUMERIC(10,2)', colDefault: '0', isNotNull: false },
+            ])).toEqual([
+                {
+                    ATTNAME: 'NAME',
+                    FORMAT_TYPE: 'VARCHAR(10)',
+                    IS_NOT_NULL: 0,
+                    COLDEFAULT: null,
+                    DESCRIPTION: 'Display name',
+                    IS_PK: 0,
+                    IS_FK: 0,
+                    IS_DISTRIBUTION_KEY: 0,
+                },
+                {
+                    ATTNAME: 'AMOUNT',
+                    FORMAT_TYPE: 'NUMERIC(10,2)',
+                    IS_NOT_NULL: 0,
+                    COLDEFAULT: '0',
+                    DESCRIPTION: '',
+                    IS_PK: 0,
+                    IS_FK: 0,
+                    IS_DISTRIBUTION_KEY: 0,
+                },
+            ]);
         });
     });
 });
