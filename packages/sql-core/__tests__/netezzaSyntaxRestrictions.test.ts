@@ -48,6 +48,8 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     expect(preParseCodes("ALTER TABLE T DROP C")).toContain("NZS005");
     expect(preParseCodes("ALTER TABLE T DROP COLUMN C RESTRICT")).not.toContain("NZS005");
     expect(preParseCodes("ALTER TABLE T DROP COLUMN C CASCADE")).not.toContain("NZS005");
+    // Live Netezza 11.2.2.1 accepts DROP DEFAULT without RESTRICT/CASCADE.
+    expect(preParseCodes("ALTER TABLE T ALTER COLUMN C DROP DEFAULT")).not.toContain("NZS005");
   });
 
   it("rejects multi-row VALUES and accepts one row", () => {

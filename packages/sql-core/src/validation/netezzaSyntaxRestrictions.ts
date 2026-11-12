@@ -266,7 +266,13 @@ export function detectNetezzaSyntaxRestrictions(
         }
       }
       if (dropIndex !== -1) {
-        if (!hasBehavior) {
+        // `ALTER COLUMN <c> DROP DEFAULT` is a column-property change, not a
+        // column/constraint drop. Live Netezza 11.2.2.1 accepts it without a
+        // RESTRICT/CASCADE suffix; only the ALTER TABLE action DROP needs one.
+        const isAlterColumnAction = tokens
+          .slice(index + 2, dropIndex)
+          .some((token) => tokenName(token) === "Alter");
+        if (!hasBehavior && !isAlterColumnAction) {
           const what =
             tokenName(tokens[dropIndex + 1]) === "Constraint"
               ? "DROP CONSTRAINT"
