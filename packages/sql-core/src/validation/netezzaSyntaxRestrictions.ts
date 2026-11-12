@@ -68,12 +68,31 @@ function tokenName(token: IToken | undefined): string | undefined {
 }
 
 const JOIN_TYPE_BEFORE_OUTER = new Set(["Left", "Right", "Full"]);
+const SELECT_ITEM_START = new Set(["Select", "Comma", "Distinct", "All", "Unique"]);
 const EXPLAIN_OPTIONS: Record<string, true> = {
   Verbose: true,
   Distribution: true,
   Plantext: true,
   Plangraph: true,
 };
+
+/**
+ * True when the `*` at `index` is a select-list wildcard rather than a
+ * multiplication operator. A wildcard starts a select item (after SELECT, a
+ * comma, DISTINCT/ALL/UNIQUE, or TOP's row count) or follows a qualifier dot.
+ */
+function isWildcardProjection(tokens: readonly IToken[], index: number): boolean {
+  const previousName = tokenName(tokens[index - 1]);
+  if (previousName === "Dot") return true;
+  if (previousName && SELECT_ITEM_START.has(previousName)) return true;
+  // TOP <count> * ... (including DISTINCT TOP <count> * ...)
+  return previousName === "Integer" && tokenName(tokens[index - 2]) === "Top";
+}
+
+function isImplicitAliasToken(token: IToken | undefined): boolean {
+  const name = tokenName(token);
+  return name === "Identifier" || name === "QuotedIdentifier";
+}
 
 export function detectNetezzaSyntaxRestrictions(
   tokens: readonly IToken[],
@@ -83,16 +102,21 @@ export function detectNetezzaSyntaxRestrictions(
   for (let index = 0; index < tokens.length; index += 1) {
     const name = tokenName(tokens[index]);
     const image = tokens[index].image.toUpperCase();
-    // A wildcard select item cannot be aliased. Live Netezza rejects
-    // `SELECT * AS SOME_ALIAS ...` with `found "AS" ... expecting a keyword`.
-    // Only a Multiply directly followed by As is inspected, so `COUNT(*) AS x`
-    // and `a * b AS x` remain accepted.
-    if (name === "Multiply" && tokenName(tokens[index + 1]) === "As") {
+    // A wildcard select item cannot be aliased, with or without AS. Live
+    // Netezza rejects both `SELECT * AS SOME_ALIAS` (at AS) and
+    // `SELECT * SOME_ALIAS` / `SELECT T.* SOME_ALIAS` (at the alias).
+    // The wildcard-position check keeps `COUNT(*) AS x` and `a * b AS x`
+    // accepted.
+    const next = tokens[index + 1];
+    const aliasToken = tokenName(next) === "As"
+      ? next
+      : isImplicitAliasToken(next) ? next : undefined;
+    if (name === "Multiply" && isWildcardProjection(tokens, index) && aliasToken) {
       errors.push(
         errorAt(
           "NZS017",
-          "Netezza does not accept an alias after '*'; a wildcard cannot have an alias. Remove 'AS <alias>'.",
-          tokens[index + 1],
+          "Netezza does not accept an alias after '*'; a wildcard cannot have an alias. Remove the alias.",
+          aliasToken,
         ),
       );
     }

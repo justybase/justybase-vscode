@@ -83,12 +83,16 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
   });
 
   it("rejects an alias on a wildcard but accepts expression aliases (NZS017, live-verified)", () => {
-    // Live Netezza 11.2.2.1: found "AS" (at char 10) expecting a keyword.
+    // Live Netezza 11.2.2.1: explicit AS is rejected at AS; implicit aliases
+    // are rejected at the alias token.
     expect(preParseCodes("SELECT * AS SOME_ALIAS FROM DIMDATE")).toContain("NZS017");
+    expect(preParseCodes("SELECT * SOME_ALIAS FROM DIMDATE")).toContain("NZS017");
     expect(preParseCodes("SELECT T.* AS SOME_ALIAS FROM DIMDATE T")).toContain("NZS017");
+    expect(preParseCodes("SELECT T.* SOME_ALIAS FROM DIMDATE T")).toContain("NZS017");
     expect(preParseCodes("SELECT * FROM DIMDATE")).not.toContain("NZS017");
     expect(preParseCodes("SELECT COUNT(*) AS CNT FROM DIMDATE")).not.toContain("NZS017");
     expect(preParseCodes("SELECT DATEKEY * 2 AS DOUBLE_KEY FROM DIMDATE")).not.toContain("NZS017");
+    expect(preParseCodes("SELECT 1 * 2 AS TWO FROM DIMDATE")).not.toContain("NZS017");
     const aliasError = validator
       .runPreParseChecks(parseNetezzaSqlStatements({
         sql: "SELECT * AS SOME_ALIAS FROM DIMDATE",
@@ -97,6 +101,15 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     expect(aliasError?.position).toMatchObject({
       startColumn: 10,
       endColumn: 12,
+    });
+    const implicitAliasError = validator
+      .runPreParseChecks(parseNetezzaSqlStatements({
+        sql: "SELECT * SOME_ALIAS FROM DIMDATE",
+      }).lexResult)
+      .errors.find((error) => error.code === "NZS017");
+    expect(implicitAliasError?.position).toMatchObject({
+      startColumn: 10,
+      endColumn: 20,
     });
   });
 
