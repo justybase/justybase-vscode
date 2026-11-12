@@ -1,4 +1,5 @@
 import type { IToken } from "chevrotain";
+import { getAvailableTokenLocation } from "./tokenLocation";
 import type { ValidationError } from "./types";
 
 /**
@@ -41,8 +42,13 @@ function errorAt(code: string, message: string, token: IToken): ValidationError 
   const startLine = token.startLine ?? 1;
   const startColumn = token.startColumn ?? 1;
   const endLine = token.endLine ?? startLine;
+  // Chevrotain's endColumn is the 1-based column of the last character, while
+  // validation positions use an exclusive end. Add one so diagnostics cover the
+  // whole token instead of stopping on its first character.
   const endColumn =
-    token.endColumn ?? startColumn + (token.image?.length ?? 1);
+    getAvailableTokenLocation(token.endColumn) !== undefined
+      ? token.endColumn! + 1
+      : startColumn + (token.image?.length ?? 1);
   return {
     message,
     severity: "error",

@@ -89,6 +89,15 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     expect(preParseCodes("SELECT * FROM DIMDATE")).not.toContain("NZS017");
     expect(preParseCodes("SELECT COUNT(*) AS CNT FROM DIMDATE")).not.toContain("NZS017");
     expect(preParseCodes("SELECT DATEKEY * 2 AS DOUBLE_KEY FROM DIMDATE")).not.toContain("NZS017");
+    const aliasError = validator
+      .runPreParseChecks(parseNetezzaSqlStatements({
+        sql: "SELECT * AS SOME_ALIAS FROM DIMDATE",
+      }).lexResult)
+      .errors.find((error) => error.code === "NZS017");
+    expect(aliasError?.position).toMatchObject({
+      startColumn: 10,
+      endColumn: 12,
+    });
   });
 
   it("rejects SERIAL/BIGSERIAL column types but accepts a column named serial (NZS014, live-verified)", () => {
