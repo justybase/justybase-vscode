@@ -49,6 +49,9 @@ export interface NetezzaConnectionDetails {
   database: string;
   user: string;
   password: string;
+  securityLevel?: string;
+  sslCerFilePath?: string;
+  rejectUnauthorized?: boolean;
   connectionTimeout?: number;
   clientType?: number;
 }
@@ -268,6 +271,9 @@ function driverConfig(details: NetezzaConnectionDetails): NetezzaDriverConfig {
     database: details.database,
     user: details.user,
     password: details.password,
+    ...(details.securityLevel === undefined ? {} : { securityLevel: details.securityLevel }),
+    ...(details.sslCerFilePath === undefined ? {} : { sslCerFilePath: details.sslCerFilePath }),
+    ...(details.rejectUnauthorized === undefined ? {} : { rejectUnauthorized: details.rejectUnauthorized }),
     ...(details.connectionTimeout === undefined ? {} : { connectionTimeout: details.connectionTimeout }),
     ...(details.clientType === undefined ? {} : { clientType: details.clientType }),
   };

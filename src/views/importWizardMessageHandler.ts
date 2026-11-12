@@ -23,6 +23,8 @@ import type {
   ImportWizardState,
   ImportWizardValidationSummary,
 } from "../import/wizard/ImportWizardState";
+import { composeImportTargetTable } from "../import/wizard/importTargetLocation";
+import { formatIdentifierForSql } from "../utils/identifierUtils";
 import { presentAccessError } from "../utils/accessErrorHandling";
 
 interface ImportWizardMessageHandlerDependencies {
@@ -126,6 +128,8 @@ export class ImportWizardMessageHandler {
   private clipboardSourceDirectory?: string;
   private isExecuting = false;
   private isTransitioning = false;
+  /** Verification SELECT captured when an import succeeds. */
+  private verification?: { sql: string; tableName: string };
   private lastExecutionProgress?: ImportExecutionProgress;
   private lastExecutionProgressAt = 0;
   private disposed = false;
@@ -155,6 +159,7 @@ export class ImportWizardMessageHandler {
 
     const previousPath = this.currentOptions?.filePath;
     this.awaitingSource = false;
+    this.verification = undefined;
     await this.removeDroppedSource(previousPath && previousPath !== options.filePath ? previousPath : undefined);
     if (this.sessionId) {
       this.deps.service.disposeSession(this.sessionId);
@@ -208,6 +213,7 @@ export class ImportWizardMessageHandler {
     if (this.isExecuting || this.isTransitioning) {
       throw new Error("An import or source change is already in progress.");
     }
+    this.verification = undefined;
     if (this.sessionId) {
       this.deps.service.disposeSession(this.sessionId);
       this.sessionId = undefined;
@@ -436,6 +442,9 @@ export class ImportWizardMessageHandler {
         return;
       case "executeImport":
         await this.executeImport();
+        return;
+      case "copyImportedTableSqlAndClose":
+        await this.copyImportedTableSqlAndClose();
         return;
       case "startBackgroundValidation":
         this.startBackgroundValidation(message.backgroundValidationSampleSize);
@@ -861,6 +870,53 @@ export class ImportWizardMessageHandler {
     );
   }
 
+  /**
+   * Copy a ready-to-run SELECT for the just-imported table and close the
+   * wizard, so the next step is verifying the rows in a SQL editor.
+   */
+  private async copyImportedTableSqlAndClose(): Promise<void> {
+    const verification = this.verification;
+    if (!verification) {
+      throw new Error("No completed import is available.");
+    }
+    await vscode.env.clipboard.writeText(verification.sql);
+    vscode.window.showInformationMessage(
+      `Verification SQL for ${verification.tableName} copied to clipboard.`,
+    );
+    this.deps.onClose?.();
+  }
+
+  private buildVerificationSql(
+    state: ImportWizardState,
+  ): { sql: string; tableName: string } | undefined {
+    const connectionDetails = this.currentOptions?.connectionDetails;
+    if (!connectionDetails || !state.targetLocation.tableName?.trim()) {
+      return undefined;
+    }
+    try {
+      const qualifiedTable = composeImportTargetTable(
+        state.targetLocation,
+        connectionDetails,
+        state.databaseKind,
+      );
+      const columns = state.columns
+        .filter((column) => column.included)
+        .sort((left, right) => left.order - right.order)
+        .map((column) => formatIdentifierForSql(column.targetName, state.databaseKind))
+        .filter((column) => column.length > 0);
+      // Oracle rejects AS for table aliases; the other supported dialects
+      // accept the explicit alias form.
+      const tableAlias = state.databaseKind === "oracle" ? "T1" : "AS T1";
+      const sql = columns.length > 0
+        ? `SELECT ${columns.map((column) => `T1.${column}`).join(", ")}\nFROM ${qualifiedTable} ${tableAlias};\n`
+        : `SELECT *\nFROM ${qualifiedTable};\n`;
+      return { sql, tableName: state.targetTable };
+    } catch {
+      // A partial session state must not turn a successful import into an error.
+      return undefined;
+    }
+  }
+
   private async openSqlPreview(
     kind: ImportWizardPreviewKind,
   ): Promise<void> {
@@ -1090,6 +1146,7 @@ export class ImportWizardMessageHandler {
       } else if (!result.success) {
         throw new Error(result.message);
       } else {
+        this.verification = this.buildVerificationSql(state);
         vscode.window.showInformationMessage(
           `Data imported successfully to table: ${state.targetTable}`,
         );

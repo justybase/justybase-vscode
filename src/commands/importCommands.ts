@@ -17,6 +17,7 @@ import {
 } from '../import/importDispatcher';
 import { ImportWizardService } from '../import/wizard/ImportWizardService';
 import { createClipboardImportSource, removeClipboardImportSource } from '../import/clipboardImportSource';
+import { describeTabularPaste, detectTabularPaste, type TabularPasteInfo } from '../import/tabularPaste';
 import type { MetadataCache } from '../metadataCache';
 import { getCachedColumnsFromMetadataCacheAsync } from '../metadata/columnCacheLookup';
 import { formatInListPaste } from './inListPasteFormatter';
@@ -858,6 +859,73 @@ async function openAdvancedImportWizard(
     });
 }
 
+interface ClipboardImportWizardDependencies {
+    context: vscode.ExtensionContext;
+    connectionManager: ConnectionManager;
+    metadataCache: MetadataCache;
+    importWizardService: ImportWizardService;
+    outputChannel: vscode.OutputChannel;
+}
+
+interface ClipboardImportWizardOptions {
+    /** Exact text to import. Falls back to the current clipboard. */
+    text?: string;
+    /** Document whose connection should receive the imported table. */
+    documentUri?: string;
+}
+
+/** Open the advanced import wizard seeded with clipboard or pasted text. */
+async function openClipboardImportWizard(
+    deps: ClipboardImportWizardDependencies,
+    options: ClipboardImportWizardOptions = {},
+): Promise<void> {
+    let clipboardSourceDirectory: string | undefined;
+    try {
+        const editor = vscode.window.activeTextEditor;
+        const documentUri = options.documentUri ?? editor?.document?.uri?.toString();
+        const connectionName = deps.connectionManager.getConnectionForExecution(documentUri);
+        const connectionDetails = await deps.connectionManager.getConnectionDetailsForImport(
+            documentUri,
+            connectionName,
+        );
+        if (!connectionDetails) {
+            throw new Error('Connection not configured. Please connect first.');
+        }
+
+        const source = await createClipboardImportSource(
+            deps.context.globalStorageUri.fsPath,
+            options.text ?? await vscode.env.clipboard.readText(),
+        );
+        clipboardSourceDirectory = source.directoryPath;
+        await openAdvancedImportWizard(
+            deps.context,
+            deps.connectionManager,
+            deps.metadataCache,
+            deps.importWizardService,
+            {
+                connectionName,
+                connectionDetails,
+                sourceFile: source.filePath,
+                targetTable: suggestWizardTargetTable(connectionDetails.dbType, 'Clipboard'),
+                sourceKind: 'clipboard',
+                sourceName: 'Clipboard',
+                clipboardSourceDirectory: source.directoryPath,
+            },
+        );
+    } catch (err: unknown) {
+        await removeClipboardImportSource(clipboardSourceDirectory);
+        if (await presentAccessError(err, {
+            outputChannel: deps.outputChannel,
+            operation: 'Clipboard import wizard',
+        })) {
+            return;
+        }
+        vscode.window.showErrorMessage(
+            `Error opening clipboard import wizard: ${err instanceof Error ? err.message : String(err)}`,
+        );
+    }
+}
+
 async function resolveImportWizardPickerContext(
     connectionManager: ConnectionManager,
 ): Promise<{ connectionName: string; connectionDetails: ManagedConnectionDetails } | undefined> {
@@ -920,55 +988,18 @@ async function openImportWizardSourcePicker(
 export function registerImportCommands(deps: ImportCommandsDependencies): vscode.Disposable[] {
     const { context, connectionManager, metadataCache, outputChannel } = deps;
     const importWizardService = new ImportWizardService();
+    const wizardDeps: ClipboardImportWizardDependencies = {
+        context,
+        connectionManager,
+        metadataCache,
+        importWizardService,
+        outputChannel,
+    };
 
     return [
         // Import Data from Clipboard opens the shared import wizard.
         vscode.commands.registerCommand('netezza.importClipboard', async () => {
-            let clipboardSourceDirectory: string | undefined;
-            try {
-                const editor = vscode.window.activeTextEditor;
-                const documentUri = editor?.document?.uri?.toString();
-                const connectionName = connectionManager.getConnectionForExecution(documentUri);
-                const connectionDetails = await connectionManager.getConnectionDetailsForImport(
-                    documentUri,
-                    connectionName,
-                );
-                if (!connectionDetails) {
-                    throw new Error('Connection not configured. Please connect first.');
-                }
-
-                const source = await createClipboardImportSource(
-                    context.globalStorageUri.fsPath,
-                    await vscode.env.clipboard.readText(),
-                );
-                clipboardSourceDirectory = source.directoryPath;
-                await openAdvancedImportWizard(
-                    context,
-                    connectionManager,
-                    metadataCache,
-                    importWizardService,
-                    {
-                        connectionName,
-                        connectionDetails,
-                        sourceFile: source.filePath,
-                        targetTable: suggestWizardTargetTable(connectionDetails.dbType, 'Clipboard'),
-                        sourceKind: 'clipboard',
-                        sourceName: 'Clipboard',
-                        clipboardSourceDirectory: source.directoryPath,
-                    },
-                );
-            } catch (err: unknown) {
-                await removeClipboardImportSource(clipboardSourceDirectory);
-                if (await presentAccessError(err, {
-                    outputChannel,
-                    operation: 'Clipboard import wizard',
-                })) {
-                    return;
-                }
-                vscode.window.showErrorMessage(
-                    `Error opening clipboard import wizard: ${err instanceof Error ? err.message : String(err)}`,
-                );
-            }
+            await openClipboardImportWizard(wizardDeps);
         }),
 
         vscode.commands.registerCommand('netezza.importDataAdvanced', async (target?: AdvancedImportCommandTarget) => {
@@ -1392,19 +1423,17 @@ export function registerImportCommands(deps: ImportCommandsDependencies): vscode
             }
         }),
 
-        // Register paste detection for automatic file path detection
-        registerPasteDetection(context, connectionManager, metadataCache),
+        // Register paste detection for automatic file path and tabular-data detection
+        registerPasteDetection(wizardDeps),
     ];
 }
 
 /**
- * Register paste detection listener to automatically detect file paths being pasted
+ * Register paste detection listener to automatically detect file paths and
+ * spreadsheet-style tabular data being pasted.
  */
-function registerPasteDetection(
-    _context: vscode.ExtensionContext,
-    connectionManager: ConnectionManager,
-    metadataCache: MetadataCache,
-): vscode.Disposable {
+function registerPasteDetection(deps: ClipboardImportWizardDependencies): vscode.Disposable {
+    const { connectionManager, metadataCache } = deps;
     let lastPasteTime = 0;
     const PASTE_DEBOUNCE_MS = 500;
     const internallyFormatted = new Set<string>();
@@ -1441,6 +1470,16 @@ function registerPasteDetection(
             change.text.length > 0;
 
         if (!isPaste) {
+            return;
+        }
+
+        // Offer to import spreadsheet-style paste blocks before any SQL
+        // formatting runs. The text is already in the document because the
+        // VS Code editor API exposes no pre-paste hook, so declining or
+        // cancelling the prompt removes the provisional insertion.
+        const tabularPaste = detectTabularPaste(change.text);
+        if (tabularPaste) {
+            await promptTabularPasteImport(deps, event.document, change, tabularPaste, documentUri);
             return;
         }
 
@@ -1533,6 +1572,74 @@ function registerPasteDetection(
 interface TextChangeLike {
     range: vscode.Range;
     text: string;
+}
+
+/**
+ * Ask whether a tabular paste should become a database table. Choosing
+ * "Import data" removes the provisional insertion and seeds the import
+ * wizard; "Paste as text" keeps it; dismissing the modal cancels the paste.
+ */
+async function promptTabularPasteImport(
+    deps: ClipboardImportWizardDependencies,
+    document: vscode.TextDocument,
+    change: TextChangeLike,
+    info: TabularPasteInfo,
+    documentUri: string,
+): Promise<void> {
+    const importAction = 'Import data';
+    const pasteAction = 'Paste as text';
+    const action = await vscode.window.showWarningMessage(
+        `The pasted text contains ${describeTabularPaste(info)}. `
+            + 'Import it into a new table instead of pasting it as SQL?',
+        { modal: true },
+        importAction,
+        pasteAction,
+    );
+
+    if (action === pasteAction) {
+        return;
+    }
+
+    await removePastedText(document, change);
+    if (action === importAction) {
+        await openClipboardImportWizard(deps, { text: change.text, documentUri });
+    }
+}
+
+function pastedTextRange(
+    document: vscode.TextDocument,
+    change: TextChangeLike,
+): vscode.Range | undefined {
+    if (document.isClosed) {
+        return undefined;
+    }
+    if (typeof document.offsetAt !== 'function' || typeof document.positionAt !== 'function') {
+        return undefined;
+    }
+    const startOffset = document.offsetAt(change.range.start);
+    const endOffset = startOffset + change.text.length;
+    if (endOffset > document.getText().length) {
+        return undefined;
+    }
+    const range = new vscode.Range(change.range.start, document.positionAt(endOffset));
+    return document.getText(range) === change.text ? range : undefined;
+}
+
+/** Undo the provisional paste so the import flow can take over cleanly. */
+async function removePastedText(
+    document: vscode.TextDocument,
+    change: TextChangeLike,
+): Promise<void> {
+    const range = pastedTextRange(document, change);
+    if (!range) {
+        return;
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (editor?.document === document) {
+        await editor.edit((editBuilder) => {
+            editBuilder.delete(range);
+        });
+    }
 }
 
 async function formatPastedInList(

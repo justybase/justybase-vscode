@@ -26,6 +26,12 @@ describe("SqlQualityEngine unified diagnostics", () => {
     expect(isParserDiagnosticRuleId("NZ001")).toBe(false);
   });
 
+  it("surfaces the Netezza wildcard-alias restriction as a parser issue", () => {
+    const result = engine.analyze("SELECT * AS SOME_ALIAS FROM DIMDATE;");
+
+    expect(result.issues.some((issue) => issue.ruleId === "NZS017")).toBe(true);
+  });
+
   it("analyzeQualityRulesOnly skips parser diagnostics", () => {
     const sql = "SELECT * FORM broken_table;";
     const full = engine.analyze(sql);

@@ -12,6 +12,7 @@ import { netezzaMetadataProvider } from "./metadata/provider";
 import { netezzaSqlAuthoring } from "./sql/authoring";
 import { netezzaDialectTraits } from "./traits";
 import { getOptionNumber } from "../../core/connectionUtils";
+import { getNetezzaTlsDriverOptions } from "../../core/netezzaTlsOptions";
 import { createNetezzaConnection, getNetezzaConnectionConstructor, type NetezzaDriverConfig } from "@justybase/netezza-runtime";
 
 /**
@@ -78,8 +79,9 @@ export const netezzaDialect: DatabaseDialect = {
     const configuredTimeout = getOptionNumber(config, "connectionTimeout");
     return createNetezzaConnection({
       ...config,
-      // @justybase/netezza-driver expects this setting at the top level,
+      // @justybase/netezza-driver expects these settings at the top level,
       // while shared connection details store dialect options in `options`.
+      ...getNetezzaTlsDriverOptions(config.options),
       connectionTimeout:
         configuredTimeout !== undefined && configuredTimeout >= 0
           ? configuredTimeout

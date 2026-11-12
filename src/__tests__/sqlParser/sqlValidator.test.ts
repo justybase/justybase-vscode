@@ -231,6 +231,22 @@ LIMIT 10;`);
       expectSyntaxError("SELECT EMPLOYEE_ID TESTDB..EMPLOYEES;");
     });
 
+    it("should reject an alias on a wildcard (NZS017, live-verified)", () => {
+      // Live Netezza 11.2.2.1: found "AS" (at char 10) expecting a keyword.
+      const result = validator.validate("SELECT * AS SOME_ALIAS FROM DIMDATE;");
+      const error = result.errors.find((e) => e.code === "NZS017");
+      expect(error).toBeDefined();
+      expect(error?.position.startColumn).toBe(10);
+      expect(error?.message).toContain("wildcard");
+      expectErrorCode("SELECT D.* AS SOME_ALIAS FROM JUST_DATA..DIMDATE D;", "NZS017");
+    });
+
+    it("should accept wildcard and expression aliases", () => {
+      expectValid("SELECT * FROM JUST_DATA..DIMDATE;");
+      expectValid("SELECT COUNT(*) AS CNT FROM JUST_DATA..DIMDATE;");
+      expectValid("SELECT DATEKEY * 2 AS DOUBLE_KEY FROM JUST_DATA..DIMDATE;");
+    });
+
     it("should detect double comma in SELECT list", () => {
       expectSyntaxError("SELECT 1, , 2;");
     });
@@ -357,8 +373,8 @@ LIMIT 10;`);
       expectErrorCode("SELECT 1 TABLENAME;", "SQL016");
     });
 
-    it("should not flag SELECT * AS TABLENAME (explicit alias)", () => {
-      const result = validator.validate("SELECT * AS TABLENAME;");
+    it("should not flag SELECT 1 AS TABLENAME (explicit alias)", () => {
+      const result = validator.validate("SELECT 1 AS TABLENAME;");
       expect(result.errors.some((e) => e.code === "SQL016")).toBe(false);
     });
 

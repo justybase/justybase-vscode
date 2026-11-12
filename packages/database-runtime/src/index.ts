@@ -39,6 +39,9 @@ export interface NetezzaConnectionDetails {
   database: string;
   user: string;
   password: string;
+  securityLevel?: string;
+  sslCerFilePath?: string;
+  rejectUnauthorized?: boolean;
   connectionTimeout?: number;
   clientType?: number;
 }

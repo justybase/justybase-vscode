@@ -381,7 +381,11 @@ describe('ImportWizardMessageHandler', () => {
         }
     });
 
-    function createHandlerWithService(service: Record<string, jest.Mock>, postMessage: jest.Mock): ImportWizardMessageHandler {
+    function createHandlerWithService(
+        service: Record<string, jest.Mock>,
+        postMessage: jest.Mock,
+        onClose?: () => void,
+    ): ImportWizardMessageHandler {
         const connectionManager = {
             getConnectionNames: jest.fn().mockReturnValue([]),
             getConnection: jest.fn().mockResolvedValue(undefined),
@@ -396,6 +400,7 @@ describe('ImportWizardMessageHandler', () => {
             connectionManager: connectionManager as never,
             catalogService: catalogService as never,
             postMessage,
+            onClose,
         });
     }
 
@@ -857,5 +862,60 @@ describe('ImportWizardMessageHandler', () => {
         });
 
         handler.dispose();
+    });
+
+    it('copies a column-qualified verification query for the imported table and closes the wizard', async () => {
+        const { service, postMessage } = createWizardService();
+        const state = service.getSessionState();
+        state.databaseKind = 'netezza';
+        state.targetTable = 'JUST_DATA.ADMIN.TARGET';
+        state.targetLocation = { database: 'JUST_DATA', schema: 'ADMIN', tableName: 'TARGET' };
+        state.columns = [
+            { sourceIndex: 0, targetName: 'ID', included: true, order: 0 },
+            { sourceIndex: 1, targetName: 'CUSTOMER_NAME', included: true, order: 1 },
+            { sourceIndex: 2, targetName: 'IGNORED', included: false, order: 2 },
+        ];
+        const onClose = jest.fn();
+        const handler = createHandlerWithService(service, postMessage, onClose);
+
+        try {
+            await initializeWizard(handler);
+            await handler.handleMessage({ type: 'executeImport' });
+            await handler.handleMessage({ type: 'copyImportedTableSqlAndClose' });
+
+            expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(
+                'SELECT T1.ID, T1.CUSTOMER_NAME\nFROM JUST_DATA.ADMIN.TARGET AS T1;\n',
+            );
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                'Verification SQL for JUST_DATA.ADMIN.TARGET copied to clipboard.',
+            );
+            expect(onClose).toHaveBeenCalledTimes(1);
+        } finally {
+            handler.dispose();
+        }
+    });
+
+    it('omits AS for the Oracle table alias', async () => {
+        const { service, postMessage } = createWizardService();
+        const state = service.getSessionState();
+        state.databaseKind = 'oracle';
+        state.targetTable = 'ADMIN.TARGET';
+        state.targetLocation = { schema: 'ADMIN', tableName: 'TARGET' };
+        state.columns = [
+            { sourceIndex: 0, targetName: 'ID', included: true, order: 0 },
+        ];
+        const handler = createHandlerWithService(service, postMessage);
+
+        try {
+            await initializeWizard(handler);
+            await handler.handleMessage({ type: 'executeImport' });
+            await handler.handleMessage({ type: 'copyImportedTableSqlAndClose' });
+
+            expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(
+                'SELECT T1.ID\nFROM ADMIN.TARGET T1;\n',
+            );
+        } finally {
+            handler.dispose();
+        }
     });
 });

@@ -349,7 +349,8 @@ describe('result panel execution banner messages', () => {
                 activeSource: 'file:///queries/failing_batch.sql',
                 executingSources: new Set(),
                 resultSets: [
-                    { isLog: false, isError: true, data: [[1]] }
+                    { isLog: false, isError: true, data: [] },
+                    { isLog: false, data: [[1]] }
                 ]
             }
         });
@@ -365,7 +366,66 @@ describe('result panel execution banner messages', () => {
         messagesModule.updateExecutionStatusBanner();
 
         expect(textEl.textContent).toContain('failing_batch.sql: completed with errors');
-        expect(textEl.textContent).toContain('Partial results remain available: 1 rows');
+        expect(textEl.textContent).toContain('Partial results remain available: 1 row in 1 result set');
         expect(banner.title).toContain('error result set');
+    });
+
+    it('hides the banner for a terminal error without retained rows', () => {
+        const { banner, textEl } = installBanner();
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: {
+                activeSource: 'untitled:Untitled-1',
+                executingSources: new Set(),
+                resultSets: [
+                    { isLog: false, isError: true, data: [] },
+                    // A failed query still logs ~14 lines; they are not result rows.
+                    { isLog: true, data: Array.from({ length: 14 }, () => ['12:00:00', 'log line']) }
+                ]
+            }
+        });
+
+        const messagesModule: {
+            updateExecutionStatusBanner: () => void;
+        } = require('../../media/resultPanel/messages.js');
+        const { subscribeRunningUiRefresh } = require('../../media/resultPanel/runningUiDelay.js');
+        subscribeRunningUiRefresh(() => {
+            messagesModule.updateExecutionStatusBanner();
+        });
+
+        messagesModule.updateExecutionStatusBanner();
+
+        expect(banner.style.display).toBe('none');
+        expect(textEl.textContent).toBe('');
+    });
+
+    it('does not count log console rows as partial results', () => {
+        const { textEl } = installBanner();
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: {
+                activeSource: 'file:///queries/failing_batch.sql',
+                executingSources: new Set(),
+                resultSets: [
+                    { isLog: false, isError: true, data: [] },
+                    { isLog: false, data: [[1], [2]] },
+                    { isLog: true, data: Array.from({ length: 14 }, () => ['12:00:00', 'log line']) }
+                ]
+            }
+        });
+
+        const messagesModule: {
+            updateExecutionStatusBanner: () => void;
+        } = require('../../media/resultPanel/messages.js');
+        const { subscribeRunningUiRefresh } = require('../../media/resultPanel/runningUiDelay.js');
+        subscribeRunningUiRefresh(() => {
+            messagesModule.updateExecutionStatusBanner();
+        });
+
+        messagesModule.updateExecutionStatusBanner();
+
+        expect(textEl.textContent).toContain('Partial results remain available: 2 rows in 1 result set');
     });
 });

@@ -30,6 +30,8 @@ interface ImportWizardViewState {
     clipboardText: string;
     dragActive: boolean;
     dropUploading: boolean;
+    /** A successful import turns the primary action into Copy SQL and Exit. */
+    importCompleted: boolean;
 }
 
 const state: ImportWizardViewState = {
@@ -46,6 +48,7 @@ const state: ImportWizardViewState = {
     clipboardText: '',
     dragActive: false,
     dropUploading: false,
+    importCompleted: false,
 };
 
 function isWizardBusy(): boolean {
@@ -766,6 +769,11 @@ function attachListeners(): void {
         postToHost({ type: 'executeImport' }),
     );
 
+    const copySqlAndExit = getElementById('copy-sql-and-exit');
+    copySqlAndExit?.addEventListener('click', () =>
+        postToHost({ type: 'copyImportedTableSqlAndClose' }),
+    );
+
     const targetDatabase = getElementById<HTMLSelectElement>('target-database');
     targetDatabase?.addEventListener('change', event => {
         const target = eventTargetAsSelect(event);
@@ -975,6 +983,9 @@ function render(): void {
         && !session.hasValidationErrors
         && selectedColumnCount > 0
         && Boolean(session.targetLocation.tableName.trim());
+    const canCopyVerificationSql = state.importCompleted
+        && !isWizardBusy()
+        && Boolean(session.targetLocation.tableName.trim());
     const previousBody = document.querySelector<HTMLElement>('.import-workflow-body');
     const bodyScrollTop = previousBody?.scrollTop ?? 0;
     const detailsState = captureDetailsState();
@@ -1000,7 +1011,9 @@ function render(): void {
 			<footer class="import-workflow-footer">
 				<span class="import-status ${escapeHtml(state.status?.kind || 'neutral')}" role="status" aria-live="polite"><i></i>${escapeHtml(state.status?.message || 'Review the preview and mapping before importing.')}</span>
 				<button id="close-import" class="import-cancel-button" ${isWizardBusy() ? 'disabled' : ''}>Close</button>
-				<button id="execute-import" class="primary import-submit-button" ${canExecute ? '' : 'disabled'}>${state.isExecuting ? '<span class="import-button-spinner"></span>Importing…' : state.isTransitioning ? 'Updating…' : 'Import data'} <span aria-hidden="true">→</span></button>
+				${canCopyVerificationSql
+					? '<button id="copy-sql-and-exit" class="primary import-submit-button">Copy SQL and Exit</button>'
+					: `<button id="execute-import" class="primary import-submit-button" ${canExecute ? '' : 'disabled'}>${state.isExecuting ? '<span class="import-button-spinner"></span>Importing…' : state.isTransitioning ? 'Updating…' : 'Import data'} <span aria-hidden="true">→</span></button>`}
 			</footer>`;
 
     restoreDetailsState(detailsState);
@@ -1025,6 +1038,7 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             state.clipboardText = '';
             state.dragActive = false;
             state.dropUploading = false;
+            state.importCompleted = false;
             render();
             return;
         case 'previewUpdated':
@@ -1063,6 +1077,7 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             return;
         case 'executionStarted':
             state.isExecuting = true;
+            state.importCompleted = false;
             state.executionProgress = { phase: 'preparing', message: 'Starting import…' };
             state.status = { kind: 'info', message: 'Executing import...' };
             state.lastProgressAt = Date.now();
@@ -1082,6 +1097,7 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             state.isExecuting = false;
             state.executionProgress = null;
             const failed = message.result?.success === false;
+            state.importCompleted = !failed;
             state.status = {
                 kind: failed ? 'error' : 'success',
                 message: message.result?.message || (failed ? 'Import finished with errors.' : 'Import finished.'),
@@ -1091,6 +1107,7 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
         }
         case 'executionFailed':
             state.isExecuting = false;
+            state.importCompleted = false;
             state.executionProgress = null;
             state.dropUploading = false;
             state.status = {
@@ -1101,6 +1118,7 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             return;
         case 'sourcePickerReady':
             state.session = null;
+            state.importCompleted = false;
             state.sourcePicker = {
                 maxUploadMb: message.maxUploadMb,
                 maxClipboardMb: message.maxClipboardMb,
@@ -1122,6 +1140,7 @@ window.addEventListener('message', (event: MessageEvent<ImportWizardHostToWebvie
             return;
         case 'sessionTransitionStarted':
             state.isTransitioning = true;
+            state.importCompleted = false;
             render();
             return;
         case 'sessionTransitionFinished':

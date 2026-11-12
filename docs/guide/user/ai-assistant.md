@@ -53,7 +53,7 @@ Depending on the action and confirmation, the context builder may include:
   <figcaption>Confirmations describe what is sent before a supported AI action transmits context.</figcaption>
 </figure>
 
-When an action would send SQL or metadata to the Copilot service, JustyBase shows a confirmation describing the operation and context. `justybase.copilot.skipPrivacyConfirmation` can skip that prompt only when the user and organization have made that policy decision. `justybase.copilot.enabled` is the broad off switch; when false, AI features are unavailable and the extension does not send their context.
+When an action would send SQL or metadata to the Copilot service, JustyBase shows a confirmation describing the operation and context. Error-card discussions go further: **Discuss with Copilot** opens a preview of the exact prompt — error message, executed SQL, referenced table DDL and any dialect reference — and offers only **Copy prompt**. The extension does not open Copilot Chat or transmit the prompt: you paste it into your own chat thread when you decide to. `justybase.copilot.skipPrivacyConfirmation` can skip the confirmation prompt for the other AI actions only when the user and organization have made that policy decision. `justybase.copilot.enabled` is the broad off switch; when false, AI features are unavailable and the extension does not send their context.
 
 Do not select secrets, passwords, tokens, regulated row data, or an unreviewed production dump as AI context. Prefer a read-only connection and a sanitized query. Copilot’s own retention, account, model, and organization policies still apply; JustyBase cannot override them.
 

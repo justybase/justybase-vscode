@@ -311,19 +311,21 @@ Paste data directly from Excel or other sources.
 
 ### Smart Paste
 
-Automatically detect and format pasted data as SQL.
+Automatically detect pasted file paths and tabular data and open the matching import flow.
 
 **How to use:**
 
 1. Copy data from Excel or other source
 2. Position cursor in SQL editor
-3. Use Command Palette → "Netezza: Smart Paste (Auto-detect Tabular Data)" or right-click context menu
-4. Extension auto-detects format and generates `INSERT` statement
+3. Use Command Palette → "Netezza: Smart Paste (Auto-detect File Paths or Tabular Data)" or right-click context menu
+4. Choose **Import** to open the import wizard, or **Paste as text** to keep the clipboard text
+
+Pasting a spreadsheet block directly into a SQL editor also prompts with **Import data** and **Paste as text**. Import data opens the advanced wizard with the pasted text as its source.
 
 **Detects:**
-- Excel XML format
-- CSV format
-- Tab-separated format
+- File paths (`.csv`, `.tsv`, `.xlsx`, `.xlsb`)
+- Tab-separated blocks with a consistent column count
+- Excel XML and CSV clipboard formats
 
 ---
 

@@ -14,6 +14,7 @@ interface PostedMessage {
     data?: {
         user?: string;
         password?: string;
+        options?: Record<string, unknown>;
         tunnel?: { id: string; serverUrl: string; auth?: string };
         tunnelToken?: string;
         clearTunnelToken?: boolean;
@@ -159,6 +160,19 @@ describe('login panel webview: service login', () => {
         setChecked('tunnelEnabled', false);
 
         expect(passwordGroup().style.display).not.toBe('none');
+    });
+
+    it('collects the Netezza TLS mode and CA certificate path into options', () => {
+        setValue('netezzaSslMode', 'verify-full');
+        setValue('netezzaSslRootCert', 'D:\\Emulator_nz\\certs\\ca-cert.pem');
+
+        element('btnSave').click();
+
+        const { data } = lastSave();
+        expect(data?.options).toMatchObject({
+            netezzaSslMode: 'verify-full',
+            netezzaSslRootCert: 'D:\\Emulator_nz\\certs\\ca-cert.pem',
+        });
     });
 
     it('sends the mode and the service password, with no database password', () => {

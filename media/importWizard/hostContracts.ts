@@ -161,6 +161,7 @@ export type ImportWizardWebviewToHostMessage =
     | { type: 'copySql'; kind?: ImportWizardPreviewKind }
     | { type: 'openSqlPreview'; kind?: ImportWizardPreviewKind }
     | { type: 'executeImport' }
+    | { type: 'copyImportedTableSqlAndClose' }
     | { type: 'startBackgroundValidation'; backgroundValidationSampleSize?: number }
     | { type: 'cancelBackgroundValidation' };
 

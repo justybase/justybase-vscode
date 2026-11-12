@@ -32,6 +32,8 @@ import {
 } from './copilot';
 import { CopilotToolsHandler } from './copilot/CopilotToolsHandler';
 import { getExtensionConfiguration } from '../compatibility/configuration';
+import { showCopilotPromptPreview } from './copilotPromptPreview';
+import type { CopilotPromptPreviewResult } from './copilotPromptPreview';
 import { logWithFallback } from '../utils/logger';
 import { isAiToolAllowed } from './copilotTools/aiToolPolicy';
 import type { ProcedureRepairInput } from './copilot/tools/procedureRepairUtils';
@@ -886,30 +888,27 @@ ${rewrittenSql}
     }
 
     /**
- * Fixes SQL error by sending error message and SQL to Copilot Chat
- * Called from Results panel when an error occurs
- */
-public async fixSqlError(errorMessage: string, sql: string): Promise<void> {
-    try {
-        if (!sql.trim()) {
-            vscode.window.showWarningMessage('No SQL to fix');
-            return;
-        }
+     * Opens a copy-ready preview for a SQL error. The exact prompt — error
+     * message, executed SQL, referenced table DDL and any dialect reference —
+     * is shown, but the extension never sends it: the user copies it and
+     * pastes it into their own Copilot Chat thread.
+     * Called from the Results panel error card and the linter quick fix.
+     */
+    public async fixSqlError(errorMessage: string, sql: string): Promise<void> {
+        try {
+            if (!sql.trim()) {
+                vscode.window.showWarningMessage('No SQL to fix');
+                return;
+            }
 
-        // Privacy confirmation - user must accept before sending data
-        const contextSummary = `• SQL code (${sql.length} characters)\n• Error message\n• Table DDL schemas (if referenced)`;
-        const confirmed = await this.confirmDataTransmission('Fix SQL Error', contextSummary);
-        if (!confirmed) {
-            vscode.window.showInformationMessage('Operation cancelled - no data was sent.');
-            return;
-        }
+            let previewResult: CopilotPromptPreviewResult | undefined;
 
-        // Show progress while gathering DDL
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Window,
-            title: 'Gathering table DDL for Copilot...',
-            cancellable: false
-        }, async () => {
+            // Gather DDL first so the preview can show the complete payload.
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Window,
+                title: 'Gathering table DDL for Copilot...',
+                cancellable: false
+            }, async (progress) => {
                 // Gather DDL for tables referenced in the SQL
                 const ddlContext = await this.contextBuilder.getSchemaForSql(sql);
 
@@ -939,8 +938,14 @@ ${sql}
 \`\`\`
 `;
 
+                const hasDdlContext = Boolean(
+                    ddlContext
+                    && !ddlContext.includes('No table references')
+                    && !ddlContext.includes('Could not gather DDL')
+                );
+
                 // Add DDL context if available
-                if (ddlContext && !ddlContext.includes('No table references') && !ddlContext.includes('Could not gather DDL')) {
+                if (hasDdlContext) {
                     prompt += `
 **Referenced Table Schemas (DDL):**
 \`\`\`sql
@@ -949,8 +954,10 @@ ${ddlContext}
 `;
                 }
 
+                const includesNzplsqlReference = this.responseHandler.isProcedureCode(sql);
+
                 // Add NZPLSQL reference if code contains stored procedure
-                if (this.responseHandler.isProcedureCode(sql)) {
+                if (includesNzplsqlReference) {
                     prompt += `\n${this.getNetezzaReference('nzplsql')}\n`;
                 }
 
@@ -960,17 +967,34 @@ Please:
 2. Provide the corrected SQL query
 3. Explain the fix you made`;
 
-                // Open Copilot Chat with the prompt
-                await vscode.commands.executeCommand(
-                    'workbench.action.chat.open',
-                    { query: prompt }
-                );
+                progress.report({ message: 'Preparing the prompt for review...' });
+
+                const payloadItems = [
+                    `Error message (${errorMessage.length.toLocaleString('en-US')} characters)`,
+                    `Executed SQL (${sql.length.toLocaleString('en-US')} characters)`,
+                ];
+                if (hasDdlContext) {
+                    payloadItems.push(`Referenced table DDL (${ddlContext.length.toLocaleString('en-US')} characters)`);
+                }
+                if (includesNzplsqlReference) {
+                    payloadItems.push('NZPLSQL language reference');
+                }
+
+                previewResult = await showCopilotPromptPreview({
+                    operation: 'Discuss SQL error with Copilot',
+                    prompt,
+                    items: payloadItems,
+                });
             });
 
-            vscode.window.showInformationMessage('✅ Error sent to Copilot Chat for fixing. Check the Chat panel.');
+            if (previewResult === 'copied') {
+                vscode.window.showInformationMessage(
+                    'Prompt copied to clipboard. Paste it into your Copilot Chat thread to continue.',
+                );
+            }
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e);
-            vscode.window.showErrorMessage(`Failed to send error to Copilot: ${msg}`);
+            vscode.window.showErrorMessage(`Failed to prepare the Copilot prompt: ${msg}`);
         }
     }
 

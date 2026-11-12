@@ -18,6 +18,10 @@ Open **JustyBase: Connect…**, select the database kind, fill in the connection
 
 If your organization runs a service that holds the Netezza login, enable the tunnel and choose **Service login** as the sign-in mode. You then sign in with your login to that service and do not need a database login. See the [tunnel guide](../../database-tunnel.md).
 
+### Netezza TLS
+
+Netezza profiles expose **SSL mode** and an optional **CA certificate (PEM)**. `Default (negotiate)` keeps the existing driver behavior, and the driver prefers an unencrypted session when the server allows it, so it is not a guarantee of encryption. `Require` forces an encrypted session without validating the server certificate; it does not need a certificate file. `Verify full` forces TLS and validates the certificate chain and host name, so select the appliance or CA certificate for a self-signed or private-CA server. No client certificate or private key is required. The CA path is stored with the profile options; the profile password remains in VS Code Secret Storage.
+
 ## Select context per tab
 
 Use **Select Connection for SQL Tab** and **Select Database for SQL Tab** when a document needs a different scope from the global connection. The tab context is shown in the SQL editor and is used by completion, diagnostics, DDL, execution, and metadata lookup. `DB.SCHEMA.TABLE`, `DB..TABLE`, `SCHEMA.TABLE`, and quoted identifiers remain distinct object forms; do not remove qualification merely to make a suggestion appear.

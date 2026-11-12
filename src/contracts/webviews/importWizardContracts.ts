@@ -55,6 +55,7 @@ export type ImportWizardWebviewToHostMessage =
     | { type: 'copySql'; kind?: ImportWizardPreviewKind }
     | { type: 'openSqlPreview'; kind?: ImportWizardPreviewKind }
     | { type: 'executeImport' }
+    | { type: 'copyImportedTableSqlAndClose' }
     | { type: 'startBackgroundValidation'; backgroundValidationSampleSize?: number }
     | { type: 'cancelBackgroundValidation' };
 
@@ -112,6 +113,7 @@ export const IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES = [
     'copySql',
     'openSqlPreview',
     'executeImport',
+    'copyImportedTableSqlAndClose',
     'startBackgroundValidation',
     'cancelBackgroundValidation'
 ] as const satisfies readonly ImportWizardWebviewToHostMessage['type'][];

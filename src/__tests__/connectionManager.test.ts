@@ -1651,6 +1651,32 @@ describe('ConnectionManager', () => {
              await newManager.dispose();
         });
 
+        it('should keep an explicit Netezza profile with TLS options classified as Netezza', async () => {
+            globalState.set('justybase.connectionsCache', {
+                WarehouseNetezza: {
+                    name: 'WarehouseNetezza',
+                    host: '127.0.0.1',
+                    port: 5480,
+                    database: 'SYSTEM',
+                    user: 'admin',
+                    dbType: 'netezza',
+                    options: {
+                        netezzaSslMode: 'verify-full',
+                        netezzaSslRootCert: 'D:/Emulator_nz/certs/ca-cert.pem',
+                    },
+                }
+            });
+            globalState.set('justybase.activeConnection', 'WarehouseNetezza');
+
+            const newManager = new ConnectionManager(mockContext);
+
+            expect(newManager.isFastLoaded()).toBe(true);
+            expect(newManager.getConnectionMetadata('WarehouseNetezza')?.dbType).toBe('netezza');
+            expect(newManager.getConnectionDatabaseKind('WarehouseNetezza')).toBe('netezza');
+
+            await newManager.dispose();
+        });
+
         it('should infer file kind for legacy data-file entries without dbType', async () => {
             globalState.set('justybase.connectionsCache', {
                 'File SQL: data1.xlsx': {

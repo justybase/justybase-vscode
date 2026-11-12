@@ -24,6 +24,7 @@ module.exports = [
   "nzplsqlProcedureMatrix.live.integration.test.ts",
   "nzplsqlArtifacts.live.integration.test.ts",
   "netezzaDropSession.live.integration.test.ts",
+  "netezzaSsl.live.integration.test.ts",
   "cteToTempTable.live.integration.test.ts",
   "macroPreprocessor.live.integration.test.ts",
   "migration.live.integration.test.ts",

@@ -394,8 +394,14 @@ export function updateExecutionStatusBanner(): void {
 
     const state = inferExecutionState();
     const resultSets = getActiveResultSets();
-    const totalRowCount = getTotalRowCount(resultSets);
-    const nonLogResultCount = resultSets.filter(resultSet => resultSet && !resultSet.isLog).length;
+    // Only real tabular results are "partial results". Log consoles also carry
+    // rows (one per log line), and error cards carry none — counting either
+    // made a failed query with no data report e.g. "14 rows in 1 result set".
+    const tabularResultSets = resultSets.filter(resultSet =>
+        resultSet && !resultSet.isLog && !resultSet.isError && !resultSet.isTextContent
+    );
+    const totalRowCount = getTotalRowCount(tabularResultSets);
+    const tabularResultCount = tabularResultSets.length;
     const errorResultCount = resultSets.filter(resultSet => resultSet && resultSet.isError).length;
     const sourceLabel = formatActiveSourceLabel(getActiveSourceUri());
 
@@ -437,18 +443,26 @@ export function updateExecutionStatusBanner(): void {
     // identical on every OS/runner locale (bare toLocaleString follows the
     // runtime locale and renders e.g. narrow no-break spaces elsewhere).
     const formatBannerCount = (value: number): string => value.toLocaleString('en-US');
+    const formatRowCount = (value: number): string =>
+        `${formatBannerCount(value)} ${value === 1 ? 'row' : 'rows'}`;
+    const formatResultSetCount = (value: number): string =>
+        `${formatBannerCount(value)} result ${value === 1 ? 'set' : 'sets'}`;
     const messages: Record<ResultPanelExecutionState, string> = {
         loading: `${sourceLabel}: running...`,
-        finalizing: `${sourceLabel}: ${formatBannerCount(totalRowCount)} rows received; finalizing database session...`,
+        finalizing: `${sourceLabel}: ${formatRowCount(totalRowCount)} received; finalizing database session...`,
         retrying: `${sourceLabel}: retrying after a connection interruption...`,
         cancelled: totalRowCount > 0
-            ? `${sourceLabel}: cancelled. Partial results retained: ${formatBannerCount(totalRowCount)} rows in ${nonLogResultCount} result set(s).`
+            ? `${sourceLabel}: cancelled. Partial results retained: ${formatRowCount(totalRowCount)} in ${formatResultSetCount(tabularResultCount)}.`
             : `${sourceLabel}: cancelled. No tabular rows were retained.`,
+        // A terminal error is already rendered as an error card (or in Logs)
+        // with the message, SQL and next steps. Repeating it in the banner just
+        // stacks a second red surface above the toolbar, so the banner is only
+        // kept when batch execution retained real rows before the failure.
         error: totalRowCount > 0
-            ? `${sourceLabel}: completed with errors. Partial results remain available: ${formatBannerCount(totalRowCount)} rows in ${nonLogResultCount} result set(s).`
-            : `${sourceLabel}: failed. Review the error result or execution logs for details.`,
+            ? `${sourceLabel}: completed with errors. Partial results remain available: ${formatRowCount(totalRowCount)} in ${formatResultSetCount(tabularResultCount)}.`
+            : '',
         success: totalRowCount > 0
-            ? `${sourceLabel}: ${formatBannerCount(totalRowCount)} rows ready in ${nonLogResultCount} result set(s).`
+            ? `${sourceLabel}: ${formatRowCount(totalRowCount)} ready in ${formatResultSetCount(tabularResultCount)}.`
             : `${sourceLabel}: no rows returned.`,
         idle: ''
     };

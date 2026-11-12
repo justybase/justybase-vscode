@@ -5,6 +5,7 @@ import {
 } from '@justybase/netezza-runtime';
 import type { ConnectionDetails } from '../types';
 import { getOptionNumber } from './connectionUtils';
+import { getNetezzaTlsDriverOptions } from './netezzaTlsOptions';
 
 /**
  * Netezza-only connection helpers used by the standalone MCP process.
@@ -24,6 +25,7 @@ export async function createConnectedNetezzaConnectionFromDetails(
         user: details.user,
         password: details.password ?? '',
         clientType: 11,
+        ...getNetezzaTlsDriverOptions(details.options),
         connectionTimeout: getOptionNumber({
             host: details.host,
             port: details.port,

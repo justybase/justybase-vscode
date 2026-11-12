@@ -126,6 +126,13 @@ function renderConnectionField(
     let inputMarkup: string;
     if (field.type === 'select') {
         inputMarkup = `<select id="${escapeHtml(field.key)}">${renderFieldOptions(field.options, valueText)}</select>`;
+    } else if (field.type === 'file') {
+        inputMarkup = [
+            '<div class="file-field-row">',
+            `    <input type="text" id="${escapeHtml(field.key)}"${placeholder}${valueAttribute}>`,
+            `    <button type="button" class="file-browse-btn" data-field-key="${escapeHtml(field.key)}" title="Browse for a file">Browse</button>`,
+            '</div>'
+        ].join('\n');
     } else {
         const inputType = field.type === 'number' ? 'number' : field.type;
         inputMarkup =
@@ -293,12 +300,21 @@ export class LoginPanel {
                     case 'browseFile': {
                         try {
                             const isDuckDbDatabase = message.dialectKind === 'duckdb' && message.fieldKey === 'database';
+                            const isPemCertificate =
+                                message.fieldKey === 'netezzaSslRootCert' || message.fieldKey === 'sslRootCert';
                             const result = await vscode.window.showOpenDialog({
                                 canSelectMany: false,
                                 canSelectFolders: false,
-                                openLabel: isDuckDbDatabase ? 'Select DuckDB Database' : 'Select File',
+                                openLabel: isDuckDbDatabase
+                                    ? 'Select DuckDB Database'
+                                    : isPemCertificate
+                                        ? 'Select CA Certificate'
+                                        : 'Select File',
                                 filters: isDuckDbDatabase ? {
                                     'DuckDB databases': ['duckdb', 'db', 'ddb'],
+                                    'All files': ['*'],
+                                } : isPemCertificate ? {
+                                    'PEM certificates': ['pem', 'crt', 'cer'],
                                     'All files': ['*'],
                                 } : {
                                     'Data files': ['xlsx', 'xlsb', 'csv', 'tsv', 'parquet', 'avro'],

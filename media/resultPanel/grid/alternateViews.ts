@@ -569,11 +569,11 @@ export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, contai
     const fixBtn = document.createElement('button');
     fixBtn.type = 'button';
     fixBtn.className = 'copilot-fix-btn';
-    fixBtn.innerHTML = '<span class="icon">✨</span><span>Fix with Copilot</span>';
-    fixBtn.title = 'Send error and SQL to Copilot Chat for fixing (includes table DDL for context)';
+    fixBtn.innerHTML = '<span class="icon">✨</span><span>Discuss with Copilot</span>';
+    fixBtn.title = 'Preview and copy the error, SQL and referenced DDL for your own Copilot Chat thread';
     fixBtn.onclick = () => {
         fixBtn.classList.add('loading');
-        fixBtn.innerHTML = '<span class="icon">⏳</span><span>Sending to Copilot...</span>';
+        fixBtn.innerHTML = '<span class="icon">⏳</span><span>Preparing prompt...</span>';
         vscode.postMessage({
             command: 'fixSqlError',
             errorMessage: fullMessage,
@@ -581,7 +581,7 @@ export function createErrorView(rs: ResultSetWithExtras, rsIndex: number, contai
         });
         setTimeout(() => {
             fixBtn.classList.remove('loading');
-            fixBtn.innerHTML = '<span class="icon">✨</span><span>Fix with Copilot</span>';
+            fixBtn.innerHTML = '<span class="icon">✨</span><span>Discuss with Copilot</span>';
         }, 2000);
     };
     actionsDiv.appendChild(fixBtn);
@@ -728,10 +728,18 @@ export function updateControlsVisibility(index: number): void {
     const rs = getResultSetAt(index);
     const isLog = rs && rs.isLog;
     const isTextContent = rs && rs.isTextContent;
-    const hideControls = isLog || isTextContent;
-    const controls = document.querySelector('.controls');
+    // Error results are not a grid: Table/Analyze, filters, Export, Columns and
+    // Row View all target data that does not exist. The error card already
+    // offers Open Logs / Copy / Discuss with Copilot / Copy SQL, so the whole
+    // toolbar row is collapsed instead of leaving a dead strip above the card.
+    const isError = rs && rs.isError;
+    const hideControls = Boolean(isLog || isTextContent || isError);
+    const controls = document.querySelector<HTMLElement>('.controls');
 
     if (controls) {
+        // Logs keep their single surviving action (Clear Logs); every other
+        // non-grid view collapses the row entirely.
+        controls.style.display = hideControls && !isLog ? 'none' : '';
         // Explicit allow-list: only the log clearer survives on Logs/Text views.
         // Every other toolbar group is hidden as a whole, so adding a new
         // group to `.controls` never leaks onto Logs/Text by accident.

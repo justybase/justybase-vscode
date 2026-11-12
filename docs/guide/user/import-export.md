@@ -75,6 +75,7 @@ are removed at activation.
 5. Review the generated DDL and import plan. A preview is not an execution.
 6. Run synchronous sample validation, then allow background validation for the larger sample when enabled.
 7. Confirm the write and monitor progress. Cancellation stops the transfer for every database importer. A failed batch import rolls back its transaction where supported and drops a newly created target table instead of leaving a partial load.
+8. After a successful import, the primary wizard action becomes **Copy SQL and Exit**. It copies a verification query with the imported columns (`SELECT T1.<column>, ... FROM <imported table> AS T1;`) to the clipboard and closes the wizard so the rows can be verified in a SQL editor. Oracle uses `FROM <table> T1` because it rejects `AS` for table aliases.
 
 The simple importer is useful for a known, clean file. The advanced wizard is safer for mixed types, renamed columns, nullability, date formats, and large files because it separates inference, mapping, validation, and execution.
 
@@ -90,7 +91,11 @@ Parquet is supported by the DuckDB/File SQL connection, not by the direct Netezz
 
 ## Import from the clipboard
 
-**Import Clipboard Data to Table** reads tabular clipboard content. **Smart Paste** detects file paths and tabular text, then opens the matching path or import flow. Clipboard parsing is bounded by the host and OS clipboard limits; for large data, save a file so the wizard can validate and retry deterministically.
+**Import Clipboard Data to Table** reads tabular clipboard content. **Smart Paste** detects file paths and tabular text, then opens the matching path or import flow.
+
+Pasting a spreadsheet block (at least three lines with a consistent tab-separated column count) directly into a SQL editor also offers **Import data** or **Paste as text**. **Import data** removes the provisional paste and opens the advanced import wizard seeded with the pasted text; **Paste as text** keeps it in the editor. Dismissing the prompt cancels the paste. SQL scripts are not treated as tabular data.
+
+Clipboard parsing is bounded by the host and OS clipboard limits; for large data, save a file so the wizard can validate and retry deterministically.
 
 Netezza clipboard imports use the same transient virtual external-table stream as file imports. Duplicate or empty column names are normalized before the target DDL is generated, and the stream is unregistered and destroyed after success or failure.
 

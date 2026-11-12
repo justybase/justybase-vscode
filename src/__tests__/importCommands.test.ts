@@ -171,6 +171,7 @@ describe('commands/importCommands', () => {
             value: 'default',
         });
         (vscode.window.showInformationMessage as jest.Mock).mockReset().mockResolvedValue(undefined);
+        (vscode.window.showWarningMessage as jest.Mock).mockReset().mockResolvedValue(undefined);
         (vscode.window.showOpenDialog as jest.Mock).mockReset().mockResolvedValue([{ fsPath: 'D:\\data\\input.csv' }]);
         (vscode.window.withProgress as jest.Mock).mockReset().mockImplementation(async (_options, callback) => {
             return callback({ report: jest.fn() }, { isCancellationRequested: false });
@@ -1654,6 +1655,122 @@ describe('commands/importCommands', () => {
 
             expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Paste import failed'));
             global.Date.now = originalNow;
+        });
+
+        function createTabularPasteFixture(text: string) {
+            const deleteMock = jest.fn();
+            const document = {
+                languageId: 'sql',
+                uri: { toString: () => 'file:///test.sql' },
+                offsetAt: jest.fn(() => 0),
+                positionAt: jest.fn((offset: number) => ({ line: 0, character: offset })),
+                getText: jest.fn(() => text),
+            };
+            const activeEditor = {
+                document,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                edit: jest.fn(async (cb: any) => cb({ delete: deleteMock })),
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = activeEditor;
+            const change = {
+                text,
+                rangeLength: 0,
+                range: { start: { line: 0, character: 0 } },
+            };
+            return { document, activeEditor, change, deleteMock };
+        }
+
+        it('offers to import a tabular paste instead of keeping it as SQL', async () => {
+            const text = 'col1\tcol2\n0\t0\n1\t0\n2\t0';
+            const { document, change, deleteMock } = createTabularPasteFixture(text);
+            (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue('Import data');
+
+            registerImportCommands({
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            });
+            const onChange = (vscode.workspace.onDidChangeTextDocument as jest.Mock).mock.calls[0][0];
+
+            await onChange({ document, contentChanges: [change] });
+
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+                expect.stringContaining('4 tab-separated lines with 2 columns'),
+                { modal: true },
+                'Import data',
+                'Paste as text',
+            );
+            expect(deleteMock).toHaveBeenCalled();
+            expect(ImportWizardView.createOrShow).toHaveBeenCalledWith(
+                mockContext,
+                mockContext.extensionUri,
+                mockConnectionManager,
+                mockMetadataCache,
+                expect.any(Object),
+                expect.objectContaining({
+                    sourceKind: 'clipboard',
+                    sourceName: 'Clipboard',
+                    filePath: expect.stringMatching(/clipboard-imports[\\/][^\\/]+[\\/]clipboard\.txt$/),
+                }),
+            );
+            const wizardOptions = (ImportWizardView.createOrShow as jest.Mock).mock.calls[0]?.[5] as {
+                filePath: string;
+            };
+            await expect(fs.readFile(wizardOptions.filePath, 'utf8')).resolves.toBe(text);
+        });
+
+        it('keeps the pasted text when the user chooses Paste as text', async () => {
+            const { document, change, deleteMock } = createTabularPasteFixture('A\tB\n1\t2\n3\t4');
+            (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue('Paste as text');
+
+            registerImportCommands({
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            });
+            const onChange = (vscode.workspace.onDidChangeTextDocument as jest.Mock).mock.calls[0][0];
+
+            await onChange({ document, contentChanges: [change] });
+
+            expect(deleteMock).not.toHaveBeenCalled();
+            expect(ImportWizardView.createOrShow).not.toHaveBeenCalled();
+        });
+
+        it('removes the provisional paste when the import prompt is cancelled', async () => {
+            const { document, change, deleteMock } = createTabularPasteFixture('A\tB\n1\t2\n3\t4');
+            (vscode.window.showWarningMessage as jest.Mock).mockResolvedValue(undefined);
+
+            registerImportCommands({
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            });
+            const onChange = (vscode.workspace.onDidChangeTextDocument as jest.Mock).mock.calls[0][0];
+
+            await onChange({ document, contentChanges: [change] });
+
+            expect(deleteMock).toHaveBeenCalled();
+            expect(ImportWizardView.createOrShow).not.toHaveBeenCalled();
+        });
+
+        it('does not offer an import for ordinary SQL text', async () => {
+            const { document, change } = createTabularPasteFixture('SELECT 1\nFROM ADMIN.T\nWHERE ID = 1');
+
+            registerImportCommands({
+                context: mockContext,
+                connectionManager: mockConnectionManager,
+                metadataCache: mockMetadataCache,
+                outputChannel: mockOutputChannel,
+            });
+            const onChange = (vscode.workspace.onDidChangeTextDocument as jest.Mock).mock.calls[0][0];
+
+            await onChange({ document, contentChanges: [change] });
+
+            expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
         });
     });
 

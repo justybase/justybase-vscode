@@ -2,6 +2,7 @@
 
 import * as vscode from 'vscode';
 import { CopilotService } from '../services/copilotService';
+import { showCopilotPromptPreview } from '../services/copilotPromptPreview';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
 
@@ -112,6 +113,10 @@ jest.mock('vscode', () => {
 jest.mock('../ddl/helpers', () => ({
     createConnectionFromDetails: jest.fn(),
     executeQueryHelper: jest.requireActual('../ddl/helpers').executeQueryHelper
+}));
+
+jest.mock('../services/copilotPromptPreview', () => ({
+    showCopilotPromptPreview: jest.fn().mockResolvedValue('copied')
 }));
 
 describe('CopilotService - Comprehensive Tests', () => {
@@ -616,34 +621,62 @@ describe('CopilotService - Comprehensive Tests', () => {
     });
 
     describe('Fix SQL Error', () => {
+    const runProgressImmediately = (): void => {
+        (vscode.window.withProgress as jest.Mock).mockImplementation(
+            async (
+                _options: unknown,
+                task: (progress: { report: jest.Mock }) => Promise<void>,
+            ) => task({ report: jest.fn() }),
+        );
+    };
+
     it('should handle empty SQL', async () => {
         await service.fixSqlError('Some error', '');
 
         expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No SQL to fix');
     });
 
-    it('should cancel operation when user declines privacy confirmation', async () => {
-        (vscode.window.showWarningMessage as jest.Mock).mockResolvedValueOnce('Cancel');
+    it('should not show a copied-prompt message when the preview is closed', async () => {
+        runProgressImmediately();
+        service['contextBuilder']['getSchemaForSql'] = jest.fn().mockResolvedValue('No table references found');
+        (showCopilotPromptPreview as jest.Mock).mockResolvedValueOnce('closed');
 
         await service.fixSqlError('Syntax error', 'SELECT * FROM users');
 
-        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('Operation cancelled - no data was sent.');
+        expect(showCopilotPromptPreview).toHaveBeenCalled();
+        expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+            'workbench.action.chat.open',
+            expect.anything(),
+        );
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
 
-    it('should proceed when user selects "Don\'t ask again"', async () => {
-        const mockConfig = {
-            get: jest.fn().mockReturnValue(false),
-            update: jest.fn().mockResolvedValue(undefined)
-        };
-        (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue(mockConfig);
-        (vscode.window.showWarningMessage as jest.Mock).mockResolvedValueOnce("Don't ask again");
+    it('offers the exact prompt for copying and never sends it', async () => {
+        runProgressImmediately();
+        service['contextBuilder']['getSchemaForSql'] = jest.fn().mockResolvedValue(
+            'CREATE TABLE USERS (ID INT, NAME VARCHAR(50))',
+        );
+        (showCopilotPromptPreview as jest.Mock).mockResolvedValueOnce('copied');
 
         await service.fixSqlError('Syntax error', 'SELECT * FROM users');
 
-        // Verify the setting was updated - check first call arguments
-        const firstCall = mockConfig.update.mock.calls[0];
-        expect(firstCall[0]).toBe('skipPrivacyConfirmation');
-        expect(firstCall[1]).toBe(true);
+        const preview = (showCopilotPromptPreview as jest.Mock).mock.calls[0][0];
+        expect(preview.operation).toBe('Discuss SQL error with Copilot');
+        expect(preview.prompt).toContain('Syntax error');
+        expect(preview.prompt).toContain('SELECT * FROM users');
+        expect(preview.prompt).toContain('CREATE TABLE USERS (ID INT, NAME VARCHAR(50))');
+        expect(preview.items).toEqual(expect.arrayContaining([
+            expect.stringContaining('Error message'),
+            expect.stringContaining('Executed SQL'),
+            expect.stringContaining('Referenced table DDL'),
+        ]));
+        expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+            'workbench.action.chat.open',
+            expect.anything(),
+        );
+        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+            'Prompt copied to clipboard. Paste it into your Copilot Chat thread to continue.',
+        );
     });
 });
 

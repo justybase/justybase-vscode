@@ -183,6 +183,25 @@ describe('LoginPanel', () => {
             }));
         });
 
+        it('opens the PEM certificate picker for the Netezza CA field', async () => {
+            LoginPanel.createOrShow(mockExtensionUri, mockConnectionManager);
+            (vscode.window.showOpenDialog as jest.Mock).mockResolvedValue([{ fsPath: 'D:/certs/nz-ca.pem' }]);
+
+            await messageHandler?.({ command: 'browseFile', fieldKey: 'netezzaSslRootCert', dialectKind: 'netezza' });
+
+            expect(vscode.window.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({
+                openLabel: 'Select CA Certificate',
+                filters: expect.objectContaining({
+                    'PEM certificates': ['pem', 'crt', 'cer'],
+                }),
+            }));
+            expect(mockWebviewPanel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+                command: 'browseFileResult',
+                fieldKey: 'netezzaSslRootCert',
+                path: 'D:/certs/nz-ca.pem',
+            }));
+        });
+
         it('should subscribe to connection and active-connection updates', () => {
             LoginPanel.createOrShow(mockExtensionUri, mockConnectionManager);
 
@@ -825,6 +844,12 @@ describe('LoginPanel', () => {
             expect(html).toContain('id="user"');
             expect(html).toContain('id="password"');
             expect(html).toContain('id="accentColor"');
+            expect(html).toContain('id="netezzaSslMode"');
+            expect(html).toContain('value="require"');
+            expect(html).toContain('value="verify-full"');
+            expect(html).toContain('id="netezzaSslRootCert"');
+            expect(html).toContain('class="file-browse-btn" data-field-key="netezzaSslRootCert"');
+            expect(html).not.toContain('type="file" id="netezzaSslRootCert"');
         });
 
         it('should include connection list container', () => {

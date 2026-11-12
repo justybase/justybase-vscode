@@ -156,6 +156,8 @@ const DIALECT_CASES: readonly DialectContractCase[] = [
       "database",
       "user",
       "password",
+      "netezzaSslMode",
+      "netezzaSslRootCert",
     ],
     validationTypeName: "VARCHAR",
     expectedTypeCanonical: "VARCHAR",

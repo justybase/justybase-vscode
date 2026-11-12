@@ -52,6 +52,7 @@ describe('result panel error view', () => {
         innerHTML: string;
         style: Record<string, string>;
         dataset: Record<string, string>;
+        classList: { add: jest.Mock; remove: jest.Mock; contains: jest.Mock };
         children: MockElement[];
         appendChild: jest.Mock<MockElement, [MockElement]>;
         append: (...nodes: Array<MockElement | string>) => void;
@@ -68,6 +69,11 @@ describe('result panel error view', () => {
             innerHTML: '',
             style: {},
             dataset: {},
+            classList: {
+                add: jest.fn(),
+                remove: jest.fn(),
+                contains: jest.fn(() => false)
+            },
             children: [],
             appendChild: jest.fn((child: MockElement) => {
                 element.children.push(child);
@@ -149,6 +155,77 @@ describe('result panel error view', () => {
         expect(openLogsButton).toBeDefined();
         openLogsButton?.onclick?.();
         expect(logTab.click).toHaveBeenCalled();
+    });
+
+    it('offers a Copilot discussion that previews the payload first', () => {
+        jest.useFakeTimers();
+        const createdElements: Array<ReturnType<typeof createMockElement>> = [];
+        const posted = jest.fn();
+
+        Object.defineProperty(global, 'document', {
+            configurable: true,
+            writable: true,
+            value: {
+                createElement: jest.fn((tag: string) => {
+                    const element = createMockElement(tag);
+                    createdElements.push(element);
+                    return element;
+                }),
+                querySelectorAll: jest.fn((selector: string) => (
+                    selector === '.result-set-tab' ? [{ click: jest.fn() }, { click: jest.fn() }] : []
+                ))
+            }
+        });
+
+        Object.defineProperty(global, 'window', {
+            configurable: true,
+            writable: true,
+            value: {
+                resultSets: [
+                    { isError: true, data: [] },
+                    { isLog: true, data: [] }
+                ]
+            }
+        });
+
+        Object.defineProperty(global, 'vscode', {
+            configurable: true,
+            writable: true,
+            value: { postMessage: posted }
+        });
+        Object.defineProperty(globalThis, 'acquireVsCodeApi', {
+            configurable: true,
+            writable: true,
+            value: () => ({ postMessage: posted, getState: () => undefined, setState: () => undefined })
+        });
+
+        const gridModule = require('../../media/resultPanel/grid.js') as {
+            createErrorView: (
+                rs: Record<string, unknown>,
+                rsIndex: number,
+                container: { appendChild: (child: unknown) => void }
+            ) => void;
+        };
+
+        gridModule.createErrorView(
+            { message: 'Syntax error', sql: 'SELECT * FROM users', isError: true, data: [] },
+            0,
+            { appendChild: jest.fn() }
+        );
+
+        const copilotButton = createdElements.find(element => element.className === 'copilot-fix-btn');
+        expect(copilotButton?.innerHTML).toContain('Discuss with Copilot');
+        expect(copilotButton?.title).toContain('Preview and copy the error, SQL and referenced DDL');
+
+        copilotButton?.onclick?.();
+        expect(posted).toHaveBeenCalledWith({
+            command: 'fixSqlError',
+            errorMessage: 'Syntax error',
+            sql: 'SELECT * FROM users'
+        });
+
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
     });
 
     it('shows SQLSTATE and severity, keeps detail and hint collapsible, and never renders the raw payload', () => {
