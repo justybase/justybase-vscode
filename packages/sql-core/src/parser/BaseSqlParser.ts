@@ -225,7 +225,7 @@ export class BaseSqlParser extends CstParser {
 
   protected registerCreateTableDialectClauses(): void {}
 
-  /** Opt in per dialect; Netezza deliberately keeps its existing constraint grammar. */
+  /** Opt in per dialect; dialects without referential actions return an empty list. */
   protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {
     switch (event) {
       case 'DELETE':

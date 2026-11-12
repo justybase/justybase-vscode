@@ -305,6 +305,19 @@ export class NetezzaSqlParser extends BaseSqlParser {
   }
 
   /**
+   * Netezza accepts the standard referential actions on foreign keys even
+   * though it does not enforce the constraint. They are parsed as syntax so
+   * `REFERENCES ... ON DELETE NO ACTION ON UPDATE NO ACTION` is not treated as
+   * trailing input.
+   */
+  protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {
+    if (event === 'DELETE' || event === 'UPDATE') {
+      return ['CASCADE', 'RESTRICT', 'NO ACTION'];
+    }
+    return [];
+  }
+
+  /**
    * Registers the dialect-specific ALTER TABLE rule. A dialect layered on
    * this parser can replace the rule without inheriting Netezza's ORGANIZE
    * clause or other Netezza-only actions.

@@ -155,4 +155,16 @@ SELECT 2;`],
     expect(first.usedIsolatedParser).toBe(false);
     expect(second.usedIsolatedParser).toBe(false);
   });
+
+  it.each([
+    "ON DELETE NO ACTION ON UPDATE NO ACTION",
+    "ON DELETE CASCADE",
+    "ON UPDATE RESTRICT",
+  ])("accepts foreign-key referential actions: %s", (actions) => {
+    const sql = `ALTER TABLE JUST_DATA.ADMIN.FACTSURVEYRESPONSE ADD CONSTRAINT FK_DATE FOREIGN KEY (DATEKEY) REFERENCES JUST_DATA.ADMIN.DIMDATE(DATEKEY) ${actions};`;
+    const result = parseNetezzaSqlStatements({ sql });
+
+    expect(result.actionableParserErrors).toEqual([]);
+    expect(result.cst).toBeDefined();
+  });
 });
