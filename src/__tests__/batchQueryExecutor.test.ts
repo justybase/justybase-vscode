@@ -67,15 +67,19 @@ jest.mock('../core/variableResolver', () => ({
     promptForVariableValues: jest.fn().mockResolvedValue({}),
 }));
 
-jest.mock('../core/queryRunnerUtils', () => ({
-    normalizeUriKey: jest.fn().mockImplementation((uri: string) => uri),
-    getOutputChannel: jest.fn().mockReturnValue({
-        appendLine: jest.fn(),
-        show: jest.fn(),
-    }),
-    isConnectionBrokenError: jest.fn().mockReturnValue(false),
-    logOutput: jest.fn(),
-}));
+jest.mock('../core/queryRunnerUtils', () => {
+    const actual = jest.requireActual('../core/queryRunnerUtils');
+    return {
+        ...actual,
+        normalizeUriKey: jest.fn().mockImplementation((uri: string) => uri),
+        getOutputChannel: jest.fn().mockReturnValue({
+            appendLine: jest.fn(),
+            show: jest.fn(),
+        }),
+        isConnectionBrokenError: jest.fn().mockReturnValue(false),
+        logOutput: jest.fn(),
+    };
+});
 
 jest.mock('../core/connectionManager', () => ({
     ConnectionManager: jest.fn(),
