@@ -53,8 +53,7 @@ export class CopilotToolsHandler {
         this.explainTuningTools = new CopilotExplainTuningTools({
             connectionManager,
             context,
-            runtime: this.runtime,
-            getTableStats: (tableName, database) => this.getTableStats(tableName, database)
+            runtime: this.runtime
         });
 
         this.validationTools = new CopilotValidationTools({
@@ -87,21 +86,8 @@ export class CopilotToolsHandler {
         return this.explainTuningTools.getExplainPlanAnalysis(sql, verbose, database);
     }
 
-    async tableStats(table: string): Promise<string> {
-        return this.schemaTools.tableStats(table);
-    }
-
     async getTableStats(tableName: string, database?: string): Promise<string> {
         return this.schemaTools.getTableStats(tableName, database);
-    }
-
-    async getTuningAdvice(
-        sql?: string,
-        database?: string,
-        analyzeAllTables: boolean = true,
-        maxTables: number = 5
-    ): Promise<string> {
-        return this.explainTuningTools.getTuningAdvice(sql, database, analyzeAllTables, maxTables);
     }
 
     async getDatabases(): Promise<string> {
@@ -122,10 +108,6 @@ export class CopilotToolsHandler {
 
     async getExternalTables(database?: string, schema?: string, pattern?: string): Promise<string> {
         return this.metadataTools.getExternalTables(database, schema, pattern);
-    }
-
-    async getObjectDefinition(objectName: string, objectType: 'view' | 'procedure', database?: string): Promise<string> {
-        return this.metadataTools.getObjectDefinition(objectName, objectType, database);
     }
 
     async validateSqlParser(sql: string): Promise<string> {

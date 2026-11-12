@@ -335,50 +335,24 @@ jest.mock('../utils/logger', () => ({
 
 jest.mock('../services/copilotService', () => ({
     CopilotService: jest.fn().mockImplementation(() => ({
-        fixSql: jest.fn(),
-        optimizeSql: jest.fn(),
-        explainSql: jest.fn(),
-        askCustomQuestion: jest.fn(),
-        generateSqlInteractive: jest.fn(),
-        bestPracticesSql: jest.fn(),
-        changeModel: jest.fn(),
-        clearPersistedModel: jest.fn(),
         describeDataWithCopilot: jest.fn(),
         fixSqlError: jest.fn(),
         getWorkspaceTableProfiles: jest.fn().mockResolvedValue([]),
         upsertWorkspaceTableProfile: jest.fn(),
         deleteWorkspaceTableProfile: jest.fn(),
         includeWorkspaceTableProfileNow: jest.fn().mockResolvedValue(true),
-        getWorkspaceTableProfilesSummary: jest.fn().mockResolvedValue('No workspace table profiles configured.'),
-        registerChatParticipant: jest.fn().mockReturnValue({ dispose: jest.fn() })
+        getWorkspaceTableProfilesSummary: jest.fn().mockResolvedValue('No workspace table profiles configured.')
     })),
-    SchemaTool: jest.fn(),
-    ColumnsTool: jest.fn(),
-    TablesTool: jest.fn(),
-    ExecuteQueryTool: jest.fn(),
-    SampleDataTool: jest.fn(),
-    ExplainPlanTool: jest.fn(),
-    TuningAdviceTool: jest.fn(),
-    SearchSchemaTool: jest.fn(),
-    TableStatsTool: jest.fn(),
-    DependenciesTool: jest.fn(),
+    GetContextTool: jest.fn(),
+    SearchCatalogTool: jest.fn(),
+    GetObjectDetailsTool: jest.fn(),
+    ExplainSqlTool: jest.fn(),
     ValidateSqlTool: jest.fn(),
     ValidateSqlOnDatabaseTool: jest.fn(),
-    GetSqlDiagnosticsTool: jest.fn(),
+    ProcedureRepairTool: jest.fn(),
     InspectImportFileTool: jest.fn(),
     ProposeImportMappingTool: jest.fn(),
-    ExecuteImportTool: jest.fn(),
-    ExportQueryResultsTool: jest.fn(),
-    DatabasesTool: jest.fn(),
-    SchemasTool: jest.fn(),
-    ProceduresTool: jest.fn(),
-    ViewsTool: jest.fn(),
-    ExternalTablesTool: jest.fn(),
-    GetDDLTool: jest.fn(),
-    NetezzaReferenceTool: jest.fn(),
-    FindTableLocationsTool: jest.fn(),
-    GetCommentsTool: jest.fn(),
-    FavoritesTool: jest.fn()
+    NetezzaReferenceTool: jest.fn()
 }));
 
 jest.mock('../commands/schemaCommands', () => ({
@@ -708,20 +682,16 @@ describe('extension.ts', () => {
             );
         });
 
-        it('should register Copilot commands', async () => {
+        it('should register the remaining Copilot editor commands', async () => {
             await activate(mockContext);
 
             const { commands } = jest.requireMock('vscode');
             expect(commands.registerCommand).toHaveBeenCalledWith(
-                'netezza.copilotFixSql',
+                'netezza.describeDataWithCopilot',
                 expect.any(Function)
             );
             expect(commands.registerCommand).toHaveBeenCalledWith(
-                'netezza.copilotOptimizeSql',
-                expect.any(Function)
-            );
-            expect(commands.registerCommand).toHaveBeenCalledWith(
-                'netezza.copilotExplainSql',
+                'netezza.fixSqlError',
                 expect.any(Function)
             );
         });
@@ -824,26 +794,6 @@ describe('extension.ts', () => {
             expect(commands.executeCommand).not.toHaveBeenCalledWith('setContext', 'netezza.resultsCopyPrimed', false);
             expect(commands.executeCommand).not.toHaveBeenCalledWith('setContext', 'netezza.resultsFocused', false);
             expect(commands.executeCommand).not.toHaveBeenCalledWith('setContext', 'netezza.resultsInputFocused', false);
-        });
-    });
-
-    describe('Error Handling', () => {
-        it('should handle errors in Copilot commands gracefully', async () => {
-            const { CopilotService } = jest.requireMock('../services/copilotService');
-            const mockInstance = new CopilotService();
-            (mockInstance.fixSql as jest.Mock).mockRejectedValue(new Error('Test error'));
-
-            await activate(mockContext);
-
-            // Get the registered command handler
-            const { commands } = jest.requireMock('vscode');
-            const calls = (commands.registerCommand as jest.Mock).mock.calls;
-            const fixSqlCall = calls.find((call: unknown[]) => call[0] === 'netezza.copilotFixSql');
-            expect(fixSqlCall).toBeDefined();
-
-            // Execute the handler - should not throw
-            const handler = fixSqlCall[1];
-            await expect(handler()).resolves.not.toThrow();
         });
     });
 

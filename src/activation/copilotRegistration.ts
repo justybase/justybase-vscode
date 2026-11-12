@@ -1,35 +1,23 @@
 import * as vscode from 'vscode';
 import {
     CopilotService,
-    SchemaTool,
-    ColumnsTool,
-    TablesTool,
-    ExplainPlanTool,
-    TuningAdviceTool,
-    SearchSchemaTool,
-    TableStatsTool,
-    DependenciesTool,
+    GetContextTool,
+    SearchCatalogTool,
+    GetObjectDetailsTool,
+    ExplainSqlTool,
     ValidateSqlTool,
     ValidateSqlOnDatabaseTool,
-    GetSqlDiagnosticsTool,
+    ProcedureRepairTool,
     InspectImportFileTool,
     ProposeImportMappingTool,
-    DatabasesTool,
-    SchemasTool,
-    ProceduresTool,
-    ViewsTool,
-    ExternalTablesTool,
-    FindTableLocationsTool,
-    GetCommentsTool,
-    FavoritesTool,
-    GetDDLTool,
-    ProcedureRepairTool
+    NetezzaReferenceTool
 } from '../services/copilotService';
 import { withContractEnforcement } from '../services/copilotTools/contractEnforcedTool';
 import { isAiToolAllowed } from '../services/copilotTools/aiToolPolicy';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
 import { ResultPanelView } from '../views/resultPanelView';
+import { getExtensionConfiguration } from '../compatibility/configuration';
 
 interface CopilotRegistrationParams {
     context: vscode.ExtensionContext;
@@ -49,68 +37,26 @@ function showCopilotRegistrationWarning(): void {
     );
 }
 
+function isCopilotEnabled(): boolean {
+    return getExtensionConfiguration('copilot').get<boolean>('enabled') ?? true;
+}
+
+function showCopilotDisabledMessage(): void {
+    void vscode.window.showInformationMessage(
+        'AI features are disabled. Enable them with "justybase.copilot.enabled".'
+    );
+}
+
 export function registerCopilotFeatures(params: CopilotRegistrationParams): CopilotService {
     const { context, connectionManager, metadataCache, resultPanelProvider } = params;
     const copilotService = new CopilotService(connectionManager, context, metadataCache, resultPanelProvider);
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('netezza.copilotFixSql', async () => {
-            try {
-                await copilotService.fixSql();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilotOptimizeSql', async () => {
-            try {
-                await copilotService.optimizeSql();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilotExplainSql', async () => {
-            try {
-                await copilotService.explainSql();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilotCustomQuestion', async () => {
-            try {
-                await copilotService.askCustomQuestion();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilotGenerateSql', async () => {
-            try {
-                await copilotService.generateSqlInteractive();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilotBestPractices', async () => {
-            try {
-                await copilotService.bestPracticesSql();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilot.changeModel', async () => {
-            try {
-                await copilotService.changeModel();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
-        vscode.commands.registerCommand('netezza.copilot.clearModel', async () => {
-            try {
-                await copilotService.clearPersistedModel();
-            } catch (e: unknown) {
-                showCopilotError(e);
-            }
-        }),
         vscode.commands.registerCommand('netezza.describeDataWithCopilot', async (data: Record<string, unknown>[], sql?: string) => {
+            if (!isCopilotEnabled()) {
+                showCopilotDisabledMessage();
+                return;
+            }
             try {
                 await copilotService.describeDataWithCopilot(data, sql);
             } catch (e: unknown) {
@@ -118,6 +64,10 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
             }
         }),
         vscode.commands.registerCommand('netezza.fixSqlError', async (errorMessage: string, sql: string) => {
+            if (!isCopilotEnabled()) {
+                showCopilotDisabledMessage();
+                return;
+            }
             try {
                 await copilotService.fixSqlError(errorMessage, sql);
             } catch (e: unknown) {
@@ -126,9 +76,8 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
         })
     );
 
-    const sqlCopilotParticipant = copilotService.registerChatParticipant(context);
-    if (sqlCopilotParticipant) {
-        context.subscriptions.push(sqlCopilotParticipant);
+    if (!isCopilotEnabled()) {
+        return copilotService;
     }
 
     const languageModelApi = (vscode as typeof vscode & { lm?: typeof vscode.lm }).lm;
@@ -142,29 +91,16 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
     ): vscode.Disposable => languageModelApi.registerTool(toolName, withContractEnforcement(toolName, tool));
 
     const toolRegistrations: Array<{ name: string; register: () => vscode.Disposable }> = [
-        { name: 'netezza_get_sql_schema', register: () => registerToolWithContract('netezza_get_sql_schema', new SchemaTool(copilotService)) },
-        { name: 'netezza_get_columns', register: () => registerToolWithContract('netezza_get_columns', new ColumnsTool(copilotService)) },
-        { name: 'netezza_get_tables', register: () => registerToolWithContract('netezza_get_tables', new TablesTool(copilotService)) },
-        { name: 'netezza_explain_plan', register: () => registerToolWithContract('netezza_explain_plan', new ExplainPlanTool(copilotService)) },
-        { name: 'netezza_get_tuning_advice', register: () => registerToolWithContract('netezza_get_tuning_advice', new TuningAdviceTool(copilotService)) },
-        { name: 'netezza_search_schema', register: () => registerToolWithContract('netezza_search_schema', new SearchSchemaTool(copilotService)) },
-        { name: 'netezza_get_table_stats', register: () => registerToolWithContract('netezza_get_table_stats', new TableStatsTool(copilotService)) },
-        { name: 'netezza_get_dependencies', register: () => registerToolWithContract('netezza_get_dependencies', new DependenciesTool(copilotService)) },
+        { name: 'netezza_get_context', register: () => registerToolWithContract('netezza_get_context', new GetContextTool(copilotService)) },
+        { name: 'netezza_search_catalog', register: () => registerToolWithContract('netezza_search_catalog', new SearchCatalogTool(copilotService)) },
+        { name: 'netezza_get_object_details', register: () => registerToolWithContract('netezza_get_object_details', new GetObjectDetailsTool(copilotService)) },
+        { name: 'netezza_explain_sql', register: () => registerToolWithContract('netezza_explain_sql', new ExplainSqlTool(copilotService)) },
         { name: 'netezza_validate_sql', register: () => registerToolWithContract('netezza_validate_sql', new ValidateSqlTool(copilotService)) },
         { name: 'netezza_validate_sql_on_database', register: () => registerToolWithContract('netezza_validate_sql_on_database', new ValidateSqlOnDatabaseTool(copilotService)) },
         { name: 'netezza_repair_procedure', register: () => registerToolWithContract('netezza_repair_procedure', new ProcedureRepairTool(copilotService)) },
-        { name: 'netezza_get_sql_diagnostics', register: () => registerToolWithContract('netezza_get_sql_diagnostics', new GetSqlDiagnosticsTool(copilotService)) },
         { name: 'netezza_inspect_import_file', register: () => registerToolWithContract('netezza_inspect_import_file', new InspectImportFileTool(copilotService)) },
         { name: 'netezza_propose_import_mapping', register: () => registerToolWithContract('netezza_propose_import_mapping', new ProposeImportMappingTool(copilotService)) },
-        { name: 'netezza_get_databases', register: () => registerToolWithContract('netezza_get_databases', new DatabasesTool(copilotService)) },
-        { name: 'netezza_get_schemas', register: () => registerToolWithContract('netezza_get_schemas', new SchemasTool(copilotService)) },
-        { name: 'netezza_get_procedures', register: () => registerToolWithContract('netezza_get_procedures', new ProceduresTool(copilotService)) },
-        { name: 'netezza_get_views', register: () => registerToolWithContract('netezza_get_views', new ViewsTool(copilotService)) },
-        { name: 'netezza_get_external_tables', register: () => registerToolWithContract('netezza_get_external_tables', new ExternalTablesTool(copilotService)) },
-        { name: 'netezza_find_table_locations', register: () => registerToolWithContract('netezza_find_table_locations', new FindTableLocationsTool(copilotService)) },
-        { name: 'netezza_get_comments', register: () => registerToolWithContract('netezza_get_comments', new GetCommentsTool(copilotService)) },
-        { name: 'netezza_get_favorites', register: () => registerToolWithContract('netezza_get_favorites', new FavoritesTool(copilotService)) },
-        { name: 'netezza_get_ddl', register: () => registerToolWithContract('netezza_get_ddl', new GetDDLTool(copilotService)) }
+        { name: 'netezza_get_dialect_reference', register: () => registerToolWithContract('netezza_get_dialect_reference', new NetezzaReferenceTool(copilotService)) }
     ];
     let hasToolRegistrationFailure = false;
 

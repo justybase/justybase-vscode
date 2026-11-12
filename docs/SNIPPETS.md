@@ -178,7 +178,7 @@ Favorites are automatically synced to `.vscode/netezza-favorites.json` in your w
 
 ### Copilot Integration
 
-- **Auto-Include**: Mark a snippet to always include in `@sql-copilot` context
+- **Auto-Include**: Mark a snippet to always include in Copilot/AI context
 - **Include Next**: Include a snippet once in the next Copilot request
 - **Disable**: Exclude a snippet from Copilot context entirely
 

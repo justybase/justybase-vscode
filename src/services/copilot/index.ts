@@ -2,8 +2,6 @@ export * from './types';
 export * from './TableReferenceExtractor';
 export * from './DDLCacheManager';
 export * from './NetezzaReferenceProvider';
-export * from './ModelSelector';
-export * from './CopilotPromptManager';
 export * from './CopilotContextBuilder';
 export * from './CopilotResponseHandler';
 export * from './CopilotTableProfilesManager';

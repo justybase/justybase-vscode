@@ -3,10 +3,6 @@ jest.unmock('chevrotain');
 import { CopilotToolsHandler } from '../services/copilot/CopilotToolsHandler';
 import { CopilotExplainTuningTools } from '../services/copilot/tools/CopilotExplainTuningTools';
 import { runQuery, runQueryRaw, runExplainQuery, queryResultToRows } from '../core/queryRunner';
-import {
-    createConnectedDatabaseConnectionFromDetails as createConnectionFromDetails,
-    executeDatabaseQuery as executeQueryHelper
-} from '../core/connectionFactory';
 import { generateDDL } from '../ddlGenerator';
 import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
 import { importDataToNetezza, NetezzaImporter } from '../import/dataImporter';
@@ -492,25 +488,6 @@ describe('services/copilot/CopilotToolsHandler', () => {
         expect(result).toContain('MY_VIEW');
     });
 
-    it('should get view definition with dedicated connection', async () => {
-        const mockConn = { close: jest.fn().mockResolvedValue(undefined) };
-        (createConnectionFromDetails as jest.Mock).mockResolvedValue(mockConn);
-        (executeQueryHelper as jest.Mock).mockResolvedValue([{ DEFINITION: 'SELECT * FROM T' }]);
-
-        const result = await handler.getObjectDefinition('JUST_DATA_2.ADMIN.MY_VIEW', 'view');
-
-        // Should create dedicated connection to JUST_DATA_2
-        expect(createConnectionFromDetails).toHaveBeenCalledWith(
-            expect.objectContaining({ database: 'JUST_DATA_2' })
-        );
-        expect(executeQueryHelper).toHaveBeenCalledWith(
-            mockConn,
-            expect.stringContaining("_V_VIEW WHERE DATABASE = 'JUST_DATA_2'")
-        );
-        expect(result).toContain('SELECT * FROM T');
-        expect(mockConn.close).toHaveBeenCalled();
-    });
-
 
 
 
@@ -552,65 +529,6 @@ describe('services/copilot/CopilotToolsHandler', () => {
 
 
 
-    it('should generate structured tuning advice payload', async () => {
-        const explainReader = {
-            read: jest.fn().mockResolvedValue(false),
-            close: jest.fn().mockResolvedValue(undefined)
-        };
-        const conn = {
-            close: jest.fn().mockResolvedValue(undefined),
-            on: jest.fn((_event: string, listener: (msg: unknown) => void) =>
-                listener({ message: 'Nested Loop (cost=100.00..20000000.00 rows=250000 width=16 conf=0)' })
-            ),
-            removeListener: jest.fn(),
-            createCommand: jest.fn().mockReturnValue({
-                executeReader: jest.fn().mockResolvedValue(explainReader)
-            })
-        };
-        (createConnectionFromDetails as jest.Mock).mockResolvedValue(conn);
-        (executeQueryHelper as jest.Mock)
-            .mockResolvedValueOnce([{ DIST_KEY: 'RANDOM', OWNER: 'ADMIN' }])
-            .mockResolvedValueOnce([{ TBL_ROWS: 1000, ALLOCATED_BYTES: 1000000, USED_BYTES: 600000, SKEW: 35 }]);
-
-        const result = await handler.getTuningAdvice('SELECT * FROM ADMIN.MYTAB', 'DB1');
-
-        expect(result).toContain('summary:');
-        expect(result).toContain('data:');
-        expect(result).toContain('next-actions:');
-        expect(result).toContain('"recommendations"');
-        expect(createConnectionFromDetails).toHaveBeenCalledWith(
-            expect.objectContaining({ database: 'DB1' }),
-            'DB1'
-        );
-        expect(runExplainQuery).not.toHaveBeenCalled();
-    });
-
-    it('should limit tuning analysis to first referenced table when analyzeAllTables=false', async () => {
-        const explainSpy = jest.spyOn(handler, 'getExplainPlan').mockResolvedValue('Hash Join (cost=10..20 rows=10 width=8 conf=50)');
-        const statsSpy = jest.spyOn(handler, 'getTableStats').mockResolvedValue(
-            '## Table Statistics: DB1.ADMIN.T1\n**Mode:** quick\n**Distribution Key:** ID\n**Skew Ratio:** 5.0%'
-        );
-
-        const result = await handler.getTuningAdvice(
-            'SELECT * FROM ADMIN.T1 t1 JOIN ADMIN.T2 t2 ON t1.ID = t2.ID',
-            'DB1',
-            false,
-            5
-        );
-
-        expect(statsSpy).toHaveBeenCalledTimes(1);
-        expect(result).toContain('"analyzeAllTables": false');
-        expect(result).toContain('"tableTargets"');
-
-        explainSpy.mockRestore();
-        statsSpy.mockRestore();
-    });
-
-    it('should return structured error when tuning sql input is missing', async () => {
-        const result = await handler.getTuningAdvice('   ');
-        expect(result).toContain('summary:');
-        expect(result).toContain('SQL input is required for tuning analysis');
-    });
 
     it('should return graceful errors for missing connection/table stats context', async () => {
         connectionManager.getActiveConnectionName.mockReturnValue(undefined);
@@ -708,12 +626,6 @@ END_PROC;
         expect(await handler.getProcedures(undefined, 'admin')).toBe('ok');
         expect(await handler.getViews(undefined, 'admin')).toBe('ok');
         expect(await handler.getExternalTables(undefined, 'admin', 'X%')).toBe('ok');
-        // getObjectDefinition for views requires dedicated connection
-        const mockConn = { close: jest.fn().mockResolvedValue(undefined) };
-        (createConnectionFromDetails as jest.Mock).mockResolvedValue(mockConn);
-        (executeQueryHelper as jest.Mock).mockResolvedValue([{ DEFINITION: 'SELECT 1' }]);
-        expect(await handler.getObjectDefinition('v1', 'view')).toContain('SELECT 1');
-        expect(await handler.getObjectDefinition('p1', 'procedure')).toBe('ok');
         expect(await handler.getObjectDependencies('obj')).toContain('summary:');
     });
 

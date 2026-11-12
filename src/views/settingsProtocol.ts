@@ -5,7 +5,6 @@ export type SettingsWebviewMessage =
     | { command: 'resetSetting'; key: string }
     | { command: 'resetSection'; key: string }
     | { command: 'getSettings' }
-    | { command: 'testPrompt'; key: string; value: string }
     | { command: 'openVSCodeSettings' | 'clearAutocompleteCache' | 'openConnection' | 'refreshSchema' | 'openSettings' | 'openJoinKnowledge' | 'showMetadataStats' | 'openSnippetsFile' | 'getSnippets' }
     | { command: 'createSnippet'; value: { label: string; sql: string } }
     | { command: 'updateSnippet'; value: { id: string; label: string; sql: string } }
@@ -20,8 +19,7 @@ export type SettingsHostMessage =
     | { command: 'snippetsData'; userSnippets: unknown[]; predefined: unknown[] }
     | { command: 'snippetCreated'; success: boolean; error?: string }
     | { command: 'snippetUpdated'; success: boolean; id: string; error?: string }
-    | { command: 'snippetDeleted'; success: boolean; id: string; error?: string }
-    | { command: 'testPromptResult'; promptType: string; status: 'success' | 'error'; result?: string; error?: string };
+    | { command: 'snippetDeleted'; success: boolean; id: string; error?: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
@@ -37,8 +35,6 @@ export function isSettingsWebviewMessage(value: unknown): value is SettingsWebvi
         case 'resetSetting':
         case 'resetSection':
             return typeof value.key === 'string';
-        case 'testPrompt':
-            return typeof value.key === 'string' && typeof value.value === 'string';
         case 'createSnippet': {
             const snippet = value.value;
             return isRecord(snippet) && typeof snippet.label === 'string' && typeof snippet.sql === 'string';

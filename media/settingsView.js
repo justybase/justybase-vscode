@@ -410,15 +410,12 @@ function renderControl(setting) {
 
 function renderTextareaControl(setting) {
     const val = settingsValues[setting.id] ?? '';
-    const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + setting.defaultValue : '↺ Reset to default prompt';
-    const promptType = setting.id.replace('copilot-prompt-', '');
-    return '<textarea class="textarea-control" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" placeholder="Customize this prompt...">' + escapeHtml(val) + '</textarea>' +
+    const defaultHint = setting.defaultValue !== undefined ? '↺ Reset to default: ' + setting.defaultValue : '↺ Reset to default';
+    return '<textarea class="textarea-control" data-key="' + (setting.configKey || '') + '" data-id="' + setting.id + '" placeholder="Enter a value...">' + escapeHtml(val) + '</textarea>' +
         '<div class="textarea-actions">' +
-            '<button class="btn btn-test-prompt" data-prompt-id="' + setting.id + '" data-prompt-type="' + promptType + '" title="Send this prompt to AI with a test query">▶ Test Prompt</button>' +
             '<button class="reset-btn" data-reset-key="' + setting.configKey + '" data-reset-id="' + setting.id + '" title="' + escapeHtml(defaultHint) + '" aria-label="Reset ' + escapeHtml(String(setting.label || setting.id)) + ' to default">↺</button>' +
             '<span class="textarea-status" id="status-' + setting.id + '"></span>' +
-        '</div>' +
-        '<div class="prompt-test-result" id="test-result-' + setting.id + '"></div>';
+        '</div>';
 }
 
 function renderJsonControl(setting) {
@@ -673,26 +670,6 @@ function attachControlListeners() {
         el.addEventListener('click', () => insertJsonExample(el));
     });
 
-    // Test Prompt buttons
-    document.querySelectorAll('.btn-test-prompt[data-prompt-id]').forEach(el => {
-        el.addEventListener('click', () => {
-            if (el.classList.contains('loading')) return;
-            const promptId = el.dataset.promptId;
-            const promptType = el.dataset.promptType;
-            const textarea = document.querySelector('.textarea-control[data-id="' + promptId + '"]');
-            if (textarea && promptType) {
-                el.classList.add('loading');
-                const promptText = textarea.value;
-                const resultEl = document.getElementById('test-result-' + promptId);
-                if (resultEl) {
-                    resultEl.innerHTML = '<span class="loading-spinner"></span> Contacting AI...';
-                    resultEl.className = 'prompt-test-result visible loading';
-                }
-                vscode.postMessage({ command: 'testPrompt', key: promptType, value: promptText });
-            }
-        });
-    });
-
     // Section reset button
     document.querySelectorAll('.section-reset-btn[data-section-reset]').forEach(el => {
         el.addEventListener('click', () => {
@@ -886,25 +863,6 @@ window.addEventListener('message', event => {
                 showToast('✓ Snippet deleted');
             } else {
                 showToast('✗ Delete failed: ' + (msg.error || 'Error'), 'error');
-            }
-            break;
-        case 'testPromptResult':
-            const resultId = 'copilot-prompt-' + msg.promptType;
-            const resultEl = document.getElementById('test-result-' + resultId);
-            // Re-enable the test button
-            const testBtn = document.querySelector('.btn-test-prompt[data-prompt-id="' + resultId + '"]');
-            if (testBtn) testBtn.classList.remove('loading');
-            if (resultEl) {
-                if (msg.status === 'loading') {
-                    resultEl.innerHTML = '<span class="loading-spinner"></span> Contacting AI...';
-                    resultEl.className = 'prompt-test-result visible loading';
-                } else if (msg.status === 'success') {
-                    resultEl.textContent = msg.result;
-                    resultEl.className = 'prompt-test-result visible';
-                } else if (msg.status === 'error') {
-                    resultEl.textContent = '❌ ' + (msg.error || 'Unknown error');
-                    resultEl.className = 'prompt-test-result visible error';
-                }
             }
             break;
     }

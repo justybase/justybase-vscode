@@ -327,65 +327,6 @@ describe('CopilotContextBuilder', () => {
         });
     });
 
-    describe('buildGenerateSqlPrompt', () => {
-        it('should build prompt with user description and schema', () => {
-            const userDescription = 'Find all customers with orders over $1000';
-            const schemaOverview = 'DATABASE: TEST_DB\nTABLES: 1\n\n[SCHEMA: PUBLIC]\n  TABLE: customers\n    - id: INT\n    - name: VARCHAR';
-
-            const prompt = contextBuilder.buildGenerateSqlPrompt(userDescription, schemaOverview);
-
-            expect(prompt).toContain(userDescription);
-            expect(prompt).toContain('DATABASE: TEST_DB');
-            expect(prompt).toContain('NETEZZA SQL NAMING CONVENTIONS');
-            expect(prompt).toContain('DISTRIBUTE ON');
-            expect(prompt).toContain('ORGANIZE ON');
-        });
-
-        it('should include Netezza-specific rules in prompt', () => {
-            const userDescription = 'Create a table';
-            const schemaOverview = 'DATABASE: TEST_DB';
-
-            const prompt = contextBuilder.buildGenerateSqlPrompt(userDescription, schemaOverview);
-
-            expect(prompt).toContain('DATABASE..OBJECT');
-            expect(prompt).toContain('DATABASE..TABLE syntax is valid and CORRECT');
-            expect(prompt).toContain('GROOM TABLE');
-            expect(prompt).toContain('GENERATE STATISTICS');
-        });
-
-        it('should include aggregation intent scaffold for metric requests', () => {
-            const userDescription = 'Calculate monthly revenue sum and average order value by region';
-            const schemaOverview = 'DATABASE: TEST_DB';
-
-            const prompt = contextBuilder.buildGenerateSqlPrompt(userDescription, schemaOverview);
-
-            expect(prompt).toContain('Intent: aggregation');
-            expect(prompt).toContain('Aggregation / summarization');
-            expect(prompt).toContain('Pre-filter raw rows before GROUP BY');
-        });
-
-        it('should include data quality intent scaffold for validation requests', () => {
-            const userDescription = 'Find duplicate customer IDs and rows with missing email';
-            const schemaOverview = 'DATABASE: TEST_DB';
-
-            const prompt = contextBuilder.buildGenerateSqlPrompt(userDescription, schemaOverview);
-
-            expect(prompt).toContain('Intent: quality-check');
-            expect(prompt).toContain('Data quality validation');
-            expect(prompt).toContain('null/duplicate checks');
-        });
-
-        it('should avoid substring false-positives in intent classification', () => {
-            const userDescription = 'Prepare backstage report for weekly revenue trend';
-            const schemaOverview = 'DATABASE: TEST_DB';
-
-            const prompt = contextBuilder.buildGenerateSqlPrompt(userDescription, schemaOverview);
-
-            expect(prompt).toContain('Intent: reporting');
-            expect(prompt).not.toContain('Intent: etl-transform');
-        });
-    });
-
     describe('error handling', () => {
         it('should handle connection errors gracefully', async () => {
             const mockEditor = {

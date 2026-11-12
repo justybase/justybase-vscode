@@ -87,7 +87,6 @@ const NUMERIC_LIMITS: Record<string, { min?: number; max?: number }> = {
     'filePreview.maxColumns': { min: 16, max: 16384 },
     'importWizard.validationSampleSize': { min: 5, max: 200 },
     'importWizard.backgroundValidationSampleSize': { min: 100, max: 50000 },
-    'copilot.requestTimeout': { min: 5000, max: 300000 },
     'copilot.maxWorkspaceProfilesInContext': { min: 1, max: 20 },
     'mcp.port': { min: 1024, max: 65535 }
 };
@@ -1093,52 +1092,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 defaultValue: true
             },
             {
-                id: 'copilot-prompt-optimize',
-                label: 'Optimize Prompt',
-                description: 'Custom prompt template for SQL optimization. Edit inline below.',
-                type: 'textarea',
-                configKey: 'copilot.prompts.optimize',
-                defaultValue: 'Optimize the following Netezza SQL query for performance and readability:'
-            },
-            {
-                id: 'copilot-prompt-fix',
-                label: 'Fix Prompt',
-                description: 'Custom prompt template for SQL fixing. Edit inline below.',
-                type: 'textarea',
-                configKey: 'copilot.prompts.fix',
-                defaultValue: 'Fix the syntax errors in the following Netezza SQL query:'
-            },
-            {
-                id: 'copilot-prompt-explain',
-                label: 'Explain Prompt',
-                description: 'Custom prompt template for SQL explanation. Edit inline below.',
-                type: 'textarea',
-                configKey: 'copilot.prompts.explain',
-                defaultValue: 'Explain what this Netezza SQL query does:'
-            },
-            {
-                id: 'copilot-request-timeout',
-                label: 'Request Timeout (ms)',
-                description: 'Timeout for Copilot API requests (5000–300000 ms)',
-                type: 'number',
-                configKey: 'copilot.requestTimeout',
-                defaultValue: 60000
-            },
-            {
                 id: 'copilot-max-profiles',
                 label: 'Max Workspace Profiles in Context',
                 description: 'Maximum number of workspace profiles included in Copilot context (1–20)',
                 type: 'number',
                 configKey: 'copilot.maxWorkspaceProfilesInContext',
                 defaultValue: 5
-            },
-            {
-                id: 'copilot-skip-privacy',
-                label: 'Skip Privacy Confirmation',
-                description: 'Skip the privacy confirmation prompt for AI data sharing',
-                type: 'toggle',
-                configKey: 'copilot.skipPrivacyConfirmation',
-                defaultValue: false
             }
         ]
     },
@@ -1287,11 +1246,6 @@ export class SettingsView {
                         return;
                     case 'getSettings':
                         await this._sendCurrentSettings();
-                        return;
-                    case 'testPrompt':
-                        if (message.key && message.value && typeof message.key === 'string' && typeof message.value === 'string') {
-                            await this._testPrompt(message.key, message.value);
-                        }
                         return;
                     case 'openVSCodeSettings':
                         await vscode.commands.executeCommand('workbench.action.openSettings', 'justybase');
@@ -1520,73 +1474,6 @@ export class SettingsView {
             }
         }
         return count;
-    }
-
-    private async _testPrompt(promptType: string, promptText: string): Promise<void> {
-        // Loading state is already shown on the frontend before sending.
-        try {
-            const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-            if (!models || models.length === 0) {
-                this._postMessage({
-                    command: 'testPromptResult',
-                    promptType,
-                    status: 'error',
-                    error: 'No AI model available. Please sign in to GitHub Copilot and try again.'
-                });
-                return;
-            }
-
-            const model = models[0];
-
-            const testSql =
-`SELECT u.name, o.total
-FROM users u
-JOIN orders o ON u.id = o.user_id
-WHERE u.status = 'active'
-ORDER BY o.total DESC;`;
-
-            const fullPrompt = `You are a SQL assistant. Test the following custom prompt instruction:
-
----
-${promptText}
----
-
-Apply it to this SQL:
-
-\`\`\`sql
-${testSql}
-\`\`\`
-
-Respond as the AI assistant would with this prompt. Show the full response.`;
-
-            const messages = [vscode.LanguageModelChatMessage.User(fullPrompt)];
-            const tokenSource = new vscode.CancellationTokenSource();
-            try {
-                const response = await model.sendRequest(messages, {}, tokenSource.token);
-
-                let fullResult = '';
-                for await (const chunk of response.text) {
-                    fullResult += chunk;
-                }
-
-                this._postMessage({
-                    command: 'testPromptResult',
-                    promptType,
-                    status: 'success',
-                    result: fullResult
-                });
-            } finally {
-                tokenSource.dispose();
-            }
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            this._postMessage({
-                command: 'testPromptResult',
-                promptType,
-                status: 'error',
-                error: msg
-            });
-        }
     }
 
     private async _getCurrentValue(key: string | undefined, defaultValue: unknown): Promise<unknown> {

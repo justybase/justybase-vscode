@@ -161,7 +161,7 @@ See the [Editor Capability Matrix](https://justybase.github.io/justybase-vscode/
 
 ## Requirements
 
-- VS Code `1.103.2` or newer.
+- VS Code `1.109.0` or newer.
 - No external Netezza driver for the core extension.
 - The Microsoft Access pack uses the Node.js runtime supplied by VS Code; no Java runtime is required.
 - Optional database packs may require their own native or JavaScript driver package.

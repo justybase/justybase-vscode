@@ -40,7 +40,7 @@ The root `package.json` uses npm workspaces for `packages/*`. The desktop build 
 ### Toolchain and Local Setup
 
 - Node.js `>=22.12.0` and npm are required by the root and workspace package manifests.
-- The desktop extension targets VS Code `^1.103.2`.
+- The desktop extension targets VS Code `^1.109.0` (required by `contributes.chatSkills` and `contributes.chatPromptFiles`).
 - Run `npm install` from the repository root so workspace links and shared tooling resolve consistently.
 - Optional extensions may require additional native/runtime dependencies; follow the README and verification script for the extension being changed.
 
@@ -602,8 +602,11 @@ When adding or changing diagnostic codes:
 
 ## Copilot Integration
 
-- Features wired from `src/activation/copilotRegistration.ts`
-- Tool definitions must stay aligned across `package.json`, `src/services/copilotTools/*`, and `src/contracts/copilotTools/contracts.ts`
+- Features are wired from `src/activation/copilotRegistration.ts`.
+- Keep tool names, tags, and input keys aligned across `package.json` (`contributes.languageModelTools`), `src/services/copilotTools/*`, `src/contracts/copilotTools/contracts.ts`, and `src/services/copilotTools/aiToolPolicy.ts`.
+- Agent workflows live in `skills/*/SKILL.md` (`contributes.chatSkills`) and explicit slash prompts in `prompts/*.prompt.md` (`contributes.chatPromptFiles`). These contribution points require VS Code `^1.109.0`.
+- `justybase.copilot.enabled` gates language-model tool registration; the MCP server is gated separately by `justybase.mcp.enabled`.
+- Do not add new prompt-orchestration commands that call `vscode.lm` directly; prefer tools and skills so the Copilot agent owns orchestration.
 
 ## Release Process
 

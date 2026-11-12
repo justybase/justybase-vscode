@@ -276,16 +276,6 @@ export class CopilotSchemaIntrospectionTools {
     }
 
 
-    async getSampleData(table: string, database: string | undefined, sampleSize: number): Promise<string> {
-        const sql = `SELECT * FROM ${table} LIMIT ${sampleSize}`;
-        return this.deps.runtime.runQuerySafe(sql, 'fetch sample data', database);
-    }
-
-    async tableStats(table: string): Promise<string> {
-        const sql = `SELECT * FROM _V_TABLE WHERE TABLENAME = '${table.toUpperCase()}'`;
-        return this.deps.runtime.runQuerySafe(sql, 'fetch table stats');
-    }
-
     /** Gets catalog-based table statistics without scanning user table data. */
     async getTableStats(tableName: string, database?: string): Promise<string> {
         const connectionName = this.deps.connectionManager.getActiveConnectionName();

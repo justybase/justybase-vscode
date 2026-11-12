@@ -1,8 +1,4 @@
 import { ConnectionManager } from '../../../core/connectionManager';
-import {
-    createConnectedDatabaseConnectionFromDetails,
-    executeDatabaseQuery
-} from '../../../core/connectionFactory';
 
 interface CopilotMetadataToolsDeps {
     connectionManager: ConnectionManager;
@@ -109,85 +105,4 @@ export class CopilotMetadataTools {
         return this.deps.runQuerySafe(sql, 'fetch external tables');
     }
 
-    async getObjectDefinition(objectName: string, objectType: 'view' | 'procedure', database?: string): Promise<string> {
-        // Parse object name to extract database if provided in format DB.SCHEMA.OBJECT
-        const parts = objectName.split('.');
-        let db: string | undefined;
-        let objName: string;
-
-        if (parts.length === 3) {
-            db = parts[0].toUpperCase();
-            objName = parts[2].toUpperCase();
-        } else if (parts.length === 2) {
-            objName = parts[1].toUpperCase();
-        } else {
-            objName = objectName.toUpperCase();
-        }
-
-        // Get database from parameter or current connection
-        if (!db) {
-            db = database?.toUpperCase();
-        }
-        if (!db) {
-            const activeConn = this.deps.connectionManager.getActiveConnectionName();
-            if (activeConn) {
-                db = await this.deps.connectionManager.getCurrentDatabase(activeConn) ?? undefined;
-            }
-        }
-        if (!db) {
-            return 'No database specified and no active connection';
-        }
-
-        if (objectType === 'view') {
-            // CRITICAL: View DEFINITION is only accessible when connected TO THE SAME DATABASE
-            // Cross-database query (DB.._V_VIEW) will return NULL for DEFINITION column
-            // We must establish a dedicated connection to the target database
-            return this.getViewDefinitionWithDedicatedConnection(db, objName);
-        } else {
-            // Procedures can be queried cross-database - PROCEDURESOURCE is accessible
-            const sql = `SELECT PROCEDURESIGNATURE, RETURNS, PROCEDURESOURCE FROM ${db}.._V_PROCEDURE WHERE DATABASE = '${db}' AND PROCEDURE = '${objName}'`;
-            return this.deps.runQuerySafe(sql, 'fetch definition');
-        }
-    }
-
-    /**
-     * Get view definition using a dedicated connection to the target database.
-     * This is required because DEFINITION column is only accessible when connected
-     * to the same database where the view exists.
-     */
-    private async getViewDefinitionWithDedicatedConnection(database: string, viewName: string): Promise<string> {
-        const connectionName = this.deps.connectionManager.getActiveConnectionName();
-        if (!connectionName) {
-            return 'No active connection';
-        }
-
-        const connectionDetails = await this.deps.connectionManager.getConnection(connectionName);
-        if (!connectionDetails) {
-            return `Connection "${connectionName}" not found.`;
-        }
-
-        // Create dedicated connection to the target database
-        const connection = await createConnectedDatabaseConnectionFromDetails({
-            ...connectionDetails,
-            database: database
-        });
-
-        if (!connection) {
-            return `Could not establish connection to database "${database}".`;
-        }
-
-        try {
-            const sql = `SELECT DEFINITION FROM _V_VIEW WHERE DATABASE = '${database}' AND VIEWNAME = '${viewName}'`;
-            const result = await executeDatabaseQuery<{ DEFINITION: string }>(connection, sql);
-            if (result && result.length > 0 && result[0].DEFINITION) {
-                return result[0].DEFINITION;
-            }
-            return `View "${viewName}" not found in database "${database}" or has no definition.`;
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            return `Error fetching view definition: ${msg}`;
-        } finally {
-            await connection.close();
-        }
-    }
 }

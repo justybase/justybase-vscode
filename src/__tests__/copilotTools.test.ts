@@ -1,706 +1,278 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Tests for all Copilot Tools
- * Tests the 17 Tool classes that were refactored from copilotService.ts
+ * Tests for the consolidated JustyBase AI tools.
  */
 
 import * as vscode from 'vscode';
 import {
-    SchemaTool,
-    ISchemaToolParameters,
-    ColumnsTool,
-    IColumnsToolParameters,
-    TablesTool,
-    ITablesToolParameters,
-    ExplainPlanTool,
-    IExplainPlanToolParameters,
-    SearchSchemaTool,
-    ISearchSchemaToolParameters,
-    TableStatsTool,
-    ITableStatsToolParameters,
-    DependenciesTool,
-    IDependenciesToolParameters,
+    GetContextTool,
+    IGetContextToolParameters,
+    SearchCatalogTool,
+    ISearchCatalogToolParameters,
+    GetObjectDetailsTool,
+    IGetObjectDetailsToolParameters,
+    ExplainSqlTool,
+    IExplainSqlToolParameters,
     ValidateSqlTool,
     IValidateSqlToolParameters,
-    DatabasesTool,
-    IDatabasesToolParameters,
-    SchemasTool,
-    ISchemasToolParameters,
-    ProceduresTool,
-    IProceduresToolParameters,
-    ViewsTool,
-    IViewsToolParameters,
-    ExternalTablesTool,
-    IExternalTablesToolParameters,
+    ValidateSqlOnDatabaseTool,
+    IValidateSqlOnDatabaseToolParameters,
+    InspectImportFileTool,
+    IInspectImportFileToolParameters,
+    ProposeImportMappingTool,
+    IProposeImportMappingToolParameters,
     NetezzaReferenceTool,
-    INetezzaReferenceToolParameters,
-    FavoritesTool,
-    IFavoritesToolParameters
+    INetezzaReferenceToolParameters
 } from '../services/copilotTools';
 
-// Mock CopilotService type
 interface MockCopilotService {
+    getToolContext: jest.Mock;
     getSchemaForSql: jest.Mock;
-    getSchemaContextForCurrentSql: jest.Mock;
-    getColumnsForTables: jest.Mock;
-    getTablesFromDatabase: jest.Mock;
-    executeSelectQuery: jest.Mock;
-    getSampleData: jest.Mock;
-    getExplainPlanAnalysis: jest.Mock;
-    searchSchema: jest.Mock;
-    getTableStats: jest.Mock;
-    getObjectDependencies: jest.Mock;
-    validateSql: jest.Mock;
+    getSqlDiagnostics: jest.Mock;
     getDatabases: jest.Mock;
     getSchemas: jest.Mock;
-    getProcedures: jest.Mock;
+    getTablesFromDatabase: jest.Mock;
     getViews: jest.Mock;
+    getProcedures: jest.Mock;
     getExternalTables: jest.Mock;
+    searchSchema: jest.Mock;
+    findTableLocations: jest.Mock;
     getDDL: jest.Mock;
-    getNetezzaReference: jest.Mock;
-    includeWorkspaceTableProfileNow: jest.Mock;
+    getColumnsForTables: jest.Mock;
+    getComments: jest.Mock;
+    getTableStats: jest.Mock;
+    getObjectDependencies: jest.Mock;
     getWorkspaceTableProfilesSummary: jest.Mock;
+    getExplainPlanAnalysis: jest.Mock;
+    validateSql: jest.Mock;
+    validateSqlOnDatabase: jest.Mock;
+    inspectImportFile: jest.Mock;
+    proposeImportMapping: jest.Mock;
+    getNetezzaReference: jest.Mock;
 }
 
-// Mock CopilotService
 const mockCopilotService: MockCopilotService = {
+    getToolContext: jest.fn(),
     getSchemaForSql: jest.fn(),
-    getSchemaContextForCurrentSql: jest.fn(),
-    getColumnsForTables: jest.fn(),
-    getTablesFromDatabase: jest.fn(),
-    executeSelectQuery: jest.fn(),
-    getSampleData: jest.fn(),
-    getExplainPlanAnalysis: jest.fn(),
-    searchSchema: jest.fn(),
-    getTableStats: jest.fn(),
-    getObjectDependencies: jest.fn(),
-    validateSql: jest.fn(),
+    getSqlDiagnostics: jest.fn(),
     getDatabases: jest.fn(),
     getSchemas: jest.fn(),
-    getProcedures: jest.fn(),
+    getTablesFromDatabase: jest.fn(),
     getViews: jest.fn(),
+    getProcedures: jest.fn(),
     getExternalTables: jest.fn(),
+    searchSchema: jest.fn(),
+    findTableLocations: jest.fn(),
     getDDL: jest.fn(),
-    getNetezzaReference: jest.fn(),
-    includeWorkspaceTableProfileNow: jest.fn(),
-    getWorkspaceTableProfilesSummary: jest.fn()
+    getColumnsForTables: jest.fn(),
+    getComments: jest.fn(),
+    getTableStats: jest.fn(),
+    getObjectDependencies: jest.fn(),
+    getWorkspaceTableProfilesSummary: jest.fn(),
+    getExplainPlanAnalysis: jest.fn(),
+    validateSql: jest.fn(),
+    validateSqlOnDatabase: jest.fn(),
+    inspectImportFile: jest.fn(),
+    proposeImportMapping: jest.fn(),
+    getNetezzaReference: jest.fn()
 };
 
-describe('Copilot Tools', () => {
+const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+
+describe('JustyBase AI tools', () => {
     beforeEach(() => {
         jest.clearAllMocks();
     });
 
-    describe('SchemaTool', () => {
-        let tool: SchemaTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+    describe('GetContextTool', () => {
+        const tool = new GetContextTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new SchemaTool(mockCopilotService as unknown as InstanceType<typeof SchemaTool>['copilotService']);
+        it('collects context with default options', async () => {
+            mockCopilotService.getToolContext.mockResolvedValue('context');
+            const options = { input: {} } as vscode.LanguageModelToolInvocationOptions<IGetContextToolParameters>;
+
+            const result = await tool.invoke(options, mockToken);
+
+            expect(mockCopilotService.getToolContext).toHaveBeenCalledWith(undefined, true, true);
+            expect(result).toBeDefined();
         });
 
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with provided SQL', async () => {
-                const options = {
-                    input: { sql: 'SELECT * FROM users' }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<ISchemaToolParameters>;
+        it('passes explicit options and handles errors', async () => {
+            mockCopilotService.getToolContext.mockRejectedValue(new Error('boom'));
+            const options = { input: { sql: 'SELECT 1', includeSchema: false, includeDiagnostics: false } } as vscode.LanguageModelToolInvocationOptions<IGetContextToolParameters>;
 
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('Fetching table schema');
-                expect(result.invocationMessage).toContain('provided SQL');
-                expect(result.confirmationMessages?.title).toBe('Get SQL Schema');
-            });
-
-            it('should prepare invocation for current editor', async () => {
-                const options = {
-                    input: {}
-                } as vscode.LanguageModelToolInvocationPrepareOptions<ISchemaToolParameters>;
-
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('current editor');
-            });
-        });
-
-        describe('invoke', () => {
-            it('should invoke with provided SQL', async () => {
-                const schemaInfo = 'Table: users\n- id: INTEGER\n- name: VARCHAR(100)';
-                mockCopilotService.getSchemaForSql.mockResolvedValue(schemaInfo);
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users' }
-                } as vscode.LanguageModelToolInvocationOptions<ISchemaToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getSchemaForSql).toHaveBeenCalledWith('SELECT * FROM users');
-                expect(result).toBeDefined();
-                expect(result.content).toBeDefined();
-            });
-
-            it('should invoke with current editor SQL', async () => {
-                const schemaInfo = 'Current SQL schema context';
-                mockCopilotService.getSchemaContextForCurrentSql.mockResolvedValue(schemaInfo);
-
-                const options = {
-                    input: {}
-                } as vscode.LanguageModelToolInvocationOptions<ISchemaToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getSchemaContextForCurrentSql).toHaveBeenCalled();
-                expect(result).toBeDefined();
-            });
-
-            it('should handle errors', async () => {
-                mockCopilotService.getSchemaForSql.mockRejectedValue(new Error('Connection failed'));
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users' }
-                } as vscode.LanguageModelToolInvocationOptions<ISchemaToolParameters>;
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('Failed to get SQL schema');
-            });
+            await expect(tool.invoke(options, mockToken)).rejects.toThrow('Failed to collect SQL context');
+            expect(mockCopilotService.getToolContext).toHaveBeenCalledWith('SELECT 1', false, false);
         });
     });
 
-    describe('ColumnsTool', () => {
-        let tool: ColumnsTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+    describe('SearchCatalogTool', () => {
+        const tool = new SearchCatalogTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new ColumnsTool(mockCopilotService as any);
+        it('lists tables by default', async () => {
+            mockCopilotService.getTablesFromDatabase.mockResolvedValue('tables');
+            const options = { input: {} } as vscode.LanguageModelToolInvocationOptions<ISearchCatalogToolParameters>;
+
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.getTablesFromDatabase).toHaveBeenCalledWith(undefined, undefined);
         });
 
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with tables list', async () => {
-                const options = {
-                    input: { tables: ['users', 'orders'], database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<IColumnsToolParameters>;
+        it('routes each catalog object type', async () => {
+            mockCopilotService.getDatabases.mockResolvedValue('dbs');
+            mockCopilotService.getSchemas.mockResolvedValue('schemas');
+            mockCopilotService.getViews.mockResolvedValue('views');
+            mockCopilotService.getProcedures.mockResolvedValue('procs');
+            mockCopilotService.getExternalTables.mockResolvedValue('ext');
+            mockCopilotService.searchSchema.mockResolvedValue('search');
+            mockCopilotService.findTableLocations.mockResolvedValue('locations');
 
-                const result = await tool.prepareInvocation(options, mockToken);
+            const invoke = (input: ISearchCatalogToolParameters) => tool.invoke(
+                { input } as vscode.LanguageModelToolInvocationOptions<ISearchCatalogToolParameters>,
+                mockToken
+            );
 
-                expect(result.invocationMessage).toContain('2 table(s)');
-                expect(result.invocationMessage).toContain('mydb');
-                expect(result.confirmationMessages?.title).toBe('Get Table Columns');
-            });
+            await invoke({ objectType: 'databases' });
+            await invoke({ objectType: 'schemas', database: 'DB' });
+            await invoke({ objectType: 'views', database: 'DB', schema: 'ADMIN' });
+            await invoke({ objectType: 'procedures', database: 'DB' });
+            await invoke({ objectType: 'external tables', pattern: 'EXT' });
+            await invoke({ objectType: 'columns', pattern: 'NAME' });
+            await invoke({ objectType: 'all', pattern: 'NAME' });
+            await invoke({ objectType: 'locations', pattern: 'ORDERS' });
 
-            it('should prepare invocation without database', async () => {
-                const options = {
-                    input: { tables: ['users'] }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<IColumnsToolParameters>;
-
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('1 table(s)');
-            });
+            expect(mockCopilotService.searchSchema).toHaveBeenCalledWith('NAME', 'COLUMNS', undefined);
+            expect(mockCopilotService.searchSchema).toHaveBeenCalledWith('NAME', 'ALL', undefined);
+            expect(mockCopilotService.findTableLocations).toHaveBeenCalledWith('ORDERS');
         });
 
-        describe('invoke', () => {
-            it('should fetch columns for tables', async () => {
-                const columnsInfo = 'users:\n- id: INTEGER\n- name: VARCHAR(100)';
-                mockCopilotService.getColumnsForTables.mockResolvedValue(columnsInfo);
-
-                const options = {
-                    input: { tables: ['users', 'orders'], database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationOptions<IColumnsToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getColumnsForTables).toHaveBeenCalledWith(['users', 'orders'], 'mydb');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should throw error when no tables specified', async () => {
-                const options: vscode.LanguageModelToolInvocationOptions<IColumnsToolParameters> = {
-                    input: { tables: [] },
-                    toolInvocationToken: {} as any
-                };
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('No tables specified');
-            });
-
-            it('should handle service errors', async () => {
-                mockCopilotService.getColumnsForTables.mockRejectedValue(new Error('DB Error'));
-
-                const options = {
-                    input: { tables: ['users'] }
-                } as vscode.LanguageModelToolInvocationOptions<IColumnsToolParameters>;
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('Failed to get columns');
-            });
+        it('requires a pattern for column and location searches', async () => {
+            const options = { input: { objectType: 'columns' } } as vscode.LanguageModelToolInvocationOptions<ISearchCatalogToolParameters>;
+            await expect(tool.invoke(options, mockToken)).rejects.toThrow('Catalog search failed');
         });
     });
 
-    describe('TablesTool', () => {
-        let tool: TablesTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+    describe('GetObjectDetailsTool', () => {
+        const tool = new GetObjectDetailsTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new TablesTool(mockCopilotService as any);
+        it('reads default sections', async () => {
+            mockCopilotService.getDDL.mockResolvedValue('DDL');
+            mockCopilotService.getColumnsForTables.mockResolvedValue('COLUMNS');
+            const options = { input: { objectName: 'ADMIN.T' } } as vscode.LanguageModelToolInvocationOptions<IGetObjectDetailsToolParameters>;
+
+            const result = await tool.invoke(options, mockToken);
+            expect(mockCopilotService.getDDL).toHaveBeenCalled();
+            expect(mockCopilotService.getColumnsForTables).toHaveBeenCalledWith(['ADMIN.T'], undefined);
+            expect(result).toBeDefined();
         });
 
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with database', async () => {
-                const options = {
-                    input: { database: 'mydb', schema: 'public' }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<ITablesToolParameters>;
+        it('supports all sections and continues after a section error', async () => {
+            mockCopilotService.getDDL.mockResolvedValue('DDL');
+            mockCopilotService.getColumnsForTables.mockResolvedValue('COLUMNS');
+            mockCopilotService.getComments.mockResolvedValue('COMMENTS');
+            mockCopilotService.getTableStats.mockResolvedValue('STATS');
+            mockCopilotService.getObjectDependencies.mockResolvedValue('DEPS');
+            mockCopilotService.getWorkspaceTableProfilesSummary.mockResolvedValue('FAVORITES');
 
-                const result = await tool.prepareInvocation(options, mockToken);
+            const options = {
+                input: {
+                    objectName: 'ADMIN.T',
+                    sections: ['ddl', 'columns', 'comments', 'stats', 'dependencies', 'favorites']
+                }
+            } as vscode.LanguageModelToolInvocationOptions<IGetObjectDetailsToolParameters>;
 
-                expect(result.invocationMessage).toContain('mydb');
-                expect(result.invocationMessage).toContain('public');
-            });
+            const result = await tool.invoke(options, mockToken);
+            expect(result).toBeDefined();
+            expect(mockCopilotService.getObjectDependencies).toHaveBeenCalledWith('ADMIN.T', undefined, 'TABLE');
         });
 
-        describe('invoke', () => {
-            it('should fetch tables from database', async () => {
-                const tablesInfo = 'Tables in mydb:\n- users\n- orders\n- products';
-                mockCopilotService.getTablesFromDatabase.mockResolvedValue(tablesInfo);
+        it('requires objectName unless only favorites are requested', async () => {
+            const invalid = { input: { sections: ['ddl'] } } as vscode.LanguageModelToolInvocationOptions<IGetObjectDetailsToolParameters>;
+            await expect(tool.invoke(invalid, mockToken)).rejects.toThrow('objectName');
 
-                const options = {
-                    input: { database: 'mydb', schema: 'public' }
-                } as vscode.LanguageModelToolInvocationOptions<ITablesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getTablesFromDatabase).toHaveBeenCalledWith('mydb', 'public');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-        });
-    });
-
-
-
-
-
-    describe('ExplainPlanTool', () => {
-        let tool: ExplainPlanTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new ExplainPlanTool(mockCopilotService as any);
-        });
-
-        describe('prepareInvocation', () => {
-            it('should prepare invocation in verbose mode', async () => {
-                const options = {
-                    input: { sql: 'SELECT * FROM users', verbose: true }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<IExplainPlanToolParameters>;
-
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('verbose');
-            });
-        });
-
-        describe('invoke', () => {
-            it('should get explain plan', async () => {
-                const explainPlan = 'QUERY PLAN\nSeq Scan on users';
-                mockCopilotService.getExplainPlanAnalysis.mockResolvedValue(explainPlan);
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users', verbose: true }
-                } as vscode.LanguageModelToolInvocationOptions<IExplainPlanToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getExplainPlanAnalysis).toHaveBeenCalledWith('SELECT * FROM users', true, undefined);
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should pass database scope to explain plan', async () => {
-                const explainPlan = 'QUERY PLAN\nSeq Scan on users';
-                mockCopilotService.getExplainPlanAnalysis.mockResolvedValue(explainPlan);
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users', verbose: false, database: 'MYDB' }
-                } as vscode.LanguageModelToolInvocationOptions<IExplainPlanToolParameters>;
-
-                await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getExplainPlanAnalysis).toHaveBeenCalledWith('SELECT * FROM users', false, 'MYDB');
-            });
+            mockCopilotService.getWorkspaceTableProfilesSummary.mockResolvedValue('FAVORITES');
+            const favorites = { input: { sections: ['favorites'] } } as vscode.LanguageModelToolInvocationOptions<IGetObjectDetailsToolParameters>;
+            await expect(tool.invoke(favorites, mockToken)).resolves.toBeDefined();
         });
     });
 
-    describe('SearchSchemaTool', () => {
-        let tool: SearchSchemaTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+    describe('ExplainSqlTool', () => {
+        const tool = new ExplainSqlTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new SearchSchemaTool(mockCopilotService as any);
+        it('returns plan analysis', async () => {
+            mockCopilotService.getExplainPlanAnalysis.mockResolvedValue('plan');
+            const options = { input: { sql: 'SELECT 1', verbose: true, database: 'DB' } } as vscode.LanguageModelToolInvocationOptions<IExplainSqlToolParameters>;
+
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.getExplainPlanAnalysis).toHaveBeenCalledWith('SELECT 1', true, 'DB');
         });
 
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with search pattern', async () => {
-                const options = {
-                    input: { pattern: 'user%', searchType: 'tables', database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<ISearchSchemaToolParameters>;
-
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('user%');
-                expect(result.invocationMessage).toContain('tables');
-            });
-        });
-
-        describe('invoke', () => {
-            it('should search schema', async () => {
-                const searchResult = 'Found tables:\n- users\n- user_profiles';
-                mockCopilotService.searchSchema.mockResolvedValue(searchResult);
-
-                const options = {
-                    input: { pattern: 'user%', searchType: 'tables', database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationOptions<ISearchSchemaToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.searchSchema).toHaveBeenCalledWith('user%', 'tables', 'mydb');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-        });
-    });
-
-    describe('TableStatsTool', () => {
-        let tool: TableStatsTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new TableStatsTool(mockCopilotService as any);
-        });
-
-        describe('invoke', () => {
-            it('should fetch table statistics', async () => {
-                const stats = 'Table: users\nRows: 10000\nSize: 2MB';
-                mockCopilotService.getTableStats.mockResolvedValue(stats);
-
-                const options = {
-                    input: { table: 'users', database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationOptions<ITableStatsToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getTableStats).toHaveBeenCalledWith('users', 'mydb');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-        });
-    });
-
-    describe('DependenciesTool', () => {
-        let tool: DependenciesTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new DependenciesTool(mockCopilotService as any);
-        });
-
-        describe('invoke', () => {
-            it('should fetch object dependencies', async () => {
-                const deps = 'Objects depending on users:\n- view_user_summary\n- proc_validate_user';
-                mockCopilotService.getObjectDependencies.mockResolvedValue(deps);
-
-                const options = {
-                    input: { object: 'users', database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationOptions<IDependenciesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getObjectDependencies).toHaveBeenCalledWith('users', 'mydb', undefined);
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should throw error when object name is missing', async () => {
-                const options = {
-                    input: { object: '' }
-                } as vscode.LanguageModelToolInvocationOptions<IDependenciesToolParameters>;
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('Object name is required');
-            });
+        it('rejects missing SQL', async () => {
+            const options = { input: { sql: '' } } as vscode.LanguageModelToolInvocationOptions<IExplainSqlToolParameters>;
+            await expect(tool.invoke(options, mockToken)).rejects.toThrow('SQL query is required');
         });
     });
 
     describe('ValidateSqlTool', () => {
-        let tool: ValidateSqlTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+        const tool = new ValidateSqlTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new ValidateSqlTool(mockCopilotService as any);
-        });
+        it('validates provided SQL', async () => {
+            mockCopilotService.validateSql.mockResolvedValue('valid');
+            const options = { input: { sql: 'SELECT 1' } } as vscode.LanguageModelToolInvocationOptions<IValidateSqlToolParameters>;
 
-        describe('invoke', () => {
-            it('should validate SQL', async () => {
-                const validation = 'SQL is valid\nSyntax: OK';
-                mockCopilotService.validateSql.mockResolvedValue(validation);
-
-                const options = {
-                    input: { sql: 'SELECT * FROM users' }
-                } as vscode.LanguageModelToolInvocationOptions<IValidateSqlToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.validateSql).toHaveBeenCalledWith('SELECT * FROM users');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should throw error when SQL is missing', async () => {
-                const options = {
-                    input: { sql: '' }
-                } as vscode.LanguageModelToolInvocationOptions<IValidateSqlToolParameters>;
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('SQL is required');
-            });
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.validateSql).toHaveBeenCalledWith('SELECT 1');
         });
     });
 
-    describe('DatabasesTool', () => {
-        let tool: DatabasesTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+    describe('ValidateSqlOnDatabaseTool', () => {
+        const tool = new ValidateSqlOnDatabaseTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new DatabasesTool(mockCopilotService as any);
-        });
+        it('validates on the requested database', async () => {
+            mockCopilotService.validateSqlOnDatabase.mockResolvedValue('valid');
+            const options = { input: { sql: 'SELECT 1', database: 'DB' } } as vscode.LanguageModelToolInvocationOptions<IValidateSqlOnDatabaseToolParameters>;
 
-        describe('invoke', () => {
-            it('should fetch databases list', async () => {
-                const databases = 'Available databases:\n- system\n- mydb\n- testdb';
-                mockCopilotService.getDatabases.mockResolvedValue(databases);
-
-                const options = {
-                    input: {}
-                } as vscode.LanguageModelToolInvocationOptions<IDatabasesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getDatabases).toHaveBeenCalled();
-                expect(result).toBeDefined();
-                expect(result.content).toBeDefined();
-            });
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.validateSqlOnDatabase).toHaveBeenCalledWith('SELECT 1', 'DB');
         });
     });
 
-    describe('SchemasTool', () => {
-        let tool: SchemasTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+    describe('Import tools', () => {
+        it('inspects an import file', async () => {
+            mockCopilotService.inspectImportFile.mockResolvedValue('inspection');
+            const tool = new InspectImportFileTool(mockCopilotService as any);
+            const options = { input: { filePath: 'C:/tmp/data.csv', sampleRows: 3 } } as vscode.LanguageModelToolInvocationOptions<IInspectImportFileToolParameters>;
 
-        beforeEach(() => {
-            tool = new SchemasTool(mockCopilotService as any);
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.inspectImportFile).toHaveBeenCalledWith('C:/tmp/data.csv', 3);
         });
 
-        describe('invoke', () => {
-            it('should fetch schemas for database', async () => {
-                const schemas = 'Schemas in mydb:\n- public\n- admin\n- app_data';
-                mockCopilotService.getSchemas.mockResolvedValue(schemas);
+        it('proposes an import mapping', async () => {
+            mockCopilotService.proposeImportMapping.mockResolvedValue('mapping');
+            const tool = new ProposeImportMappingTool(mockCopilotService as any);
+            const options = { input: { filePath: 'C:/tmp/data.csv', targetTable: 'ADMIN.T' } } as vscode.LanguageModelToolInvocationOptions<IProposeImportMappingToolParameters>;
 
-                const options = {
-                    input: { database: 'mydb' }
-                } as vscode.LanguageModelToolInvocationOptions<ISchemasToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getSchemas).toHaveBeenCalledWith('mydb');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-        });
-    });
-
-    describe('ProceduresTool', () => {
-        let tool: ProceduresTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new ProceduresTool(mockCopilotService as any);
-        });
-
-        describe('invoke', () => {
-            it('should fetch procedures', async () => {
-                const procedures = 'Procedures:\n- get_user_count()\n- validate_data()';
-                mockCopilotService.getProcedures.mockResolvedValue(procedures);
-
-                const options = {
-                    input: { database: 'mydb', schema: 'public' }
-                } as vscode.LanguageModelToolInvocationOptions<IProceduresToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getProcedures).toHaveBeenCalledWith('mydb', 'public');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-        });
-    });
-
-    describe('ViewsTool', () => {
-        let tool: ViewsTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new ViewsTool(mockCopilotService as any);
-        });
-
-        describe('invoke', () => {
-            it('should fetch views', async () => {
-                const views = 'Views:\n- user_summary\n- order_stats';
-                mockCopilotService.getViews.mockResolvedValue(views);
-
-                const options = {
-                    input: { database: 'mydb', schema: 'public' }
-                } as vscode.LanguageModelToolInvocationOptions<IViewsToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getViews).toHaveBeenCalledWith('mydb', 'public');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-        });
-    });
-
-    describe('ExternalTablesTool', () => {
-        let tool: ExternalTablesTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new ExternalTablesTool(mockCopilotService as any);
-        });
-
-        describe('invoke', () => {
-            it('should fetch external tables', async () => {
-                const extTables = 'External Tables:\n- ext_users\n- ext_orders';
-                mockCopilotService.getExternalTables.mockResolvedValue(extTables);
-
-                const options = {
-                    input: { database: 'mydb', schema: 'public', dataObjectPattern: 'ext_%' }
-                } as vscode.LanguageModelToolInvocationOptions<IExternalTablesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getExternalTables).toHaveBeenCalledWith('mydb', 'public', 'ext_%');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.proposeImportMapping).toHaveBeenCalledWith('C:/tmp/data.csv', 'ADMIN.T');
         });
     });
 
     describe('NetezzaReferenceTool', () => {
-        let tool: NetezzaReferenceTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
+        const tool = new NetezzaReferenceTool(mockCopilotService as any);
 
-        beforeEach(() => {
-            tool = new NetezzaReferenceTool(mockCopilotService as any);
+        it('returns the requested reference topic', async () => {
+            mockCopilotService.getNetezzaReference.mockReturnValue('reference');
+            const options = { input: { topic: 'nzplsql' } } as vscode.LanguageModelToolInvocationOptions<INetezzaReferenceToolParameters>;
+
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.getNetezzaReference).toHaveBeenCalledWith('nzplsql');
         });
 
-        describe('invoke', () => {
-            it('should get optimization reference', async () => {
-                const reference = 'Optimization rules:\n1. Use indexes';
-                mockCopilotService.getNetezzaReference.mockReturnValue(reference);
+        it('defaults to all topics', async () => {
+            mockCopilotService.getNetezzaReference.mockReturnValue('reference');
+            const options = { input: {} } as vscode.LanguageModelToolInvocationOptions<INetezzaReferenceToolParameters>;
 
-                const options = {
-                    input: { topic: 'optimization' }
-                } as vscode.LanguageModelToolInvocationOptions<INetezzaReferenceToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getNetezzaReference).toHaveBeenCalledWith('optimization');
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should get nzplsql reference', async () => {
-                const reference = 'NZPLSQL syntax:\nCREATE PROCEDURE...';
-                mockCopilotService.getNetezzaReference.mockReturnValue(reference);
-
-                const options = {
-                    input: { topic: 'nzplsql' }
-                } as vscode.LanguageModelToolInvocationOptions<INetezzaReferenceToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getNetezzaReference).toHaveBeenCalledWith('nzplsql');
-                expect(result).toBeDefined();
-            });
-        });
-    });
-
-    describe('FavoritesTool', () => {
-        let tool: FavoritesTool;
-        const mockToken = { isCancellationRequested: false } as vscode.CancellationToken;
-
-        beforeEach(() => {
-            tool = new FavoritesTool(mockCopilotService as any);
-        });
-
-        describe('prepareInvocation', () => {
-            it('should prepare invocation with summary mode', async () => {
-                const options = {
-                    input: { mode: 'summary' }
-                } as vscode.LanguageModelToolInvocationPrepareOptions<IFavoritesToolParameters>;
-
-                const result = await tool.prepareInvocation(options, mockToken);
-
-                expect(result.invocationMessage).toContain('listing favorites');
-                expect(result.confirmationMessages?.title).toBe('Netezza Favorites');
-            });
-        });
-
-        describe('invoke', () => {
-            it('should return favorites in summary mode', async () => {
-                mockCopilotService.getWorkspaceTableProfilesSummary.mockResolvedValue('summary output');
-
-                const options = {
-                    input: { mode: 'summary' }
-                } as vscode.LanguageModelToolInvocationOptions<IFavoritesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getWorkspaceTableProfilesSummary).toHaveBeenCalledWith('summary', undefined);
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should return favorites in content mode with filtering', async () => {
-                mockCopilotService.getWorkspaceTableProfilesSummary.mockResolvedValue('filtered output');
-
-                const options = {
-                    input: { mode: 'content', profileNames: ['test'] }
-                } as vscode.LanguageModelToolInvocationOptions<IFavoritesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getWorkspaceTableProfilesSummary).toHaveBeenCalledWith('content', ['test']);
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-            it('should return workspace profiles summary', async () => {
-                mockCopilotService.getWorkspaceTableProfilesSummary.mockResolvedValue('profiles summary');
-
-                const options = {
-                    input: {}
-                } as vscode.LanguageModelToolInvocationOptions<IFavoritesToolParameters>;
-
-                const result = await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.getWorkspaceTableProfilesSummary).toHaveBeenCalled();
-                expect(result).toBeInstanceOf(vscode.LanguageModelToolResult);
-            });
-
-            it('should include profile for next prompt when includeNowProfileId is provided', async () => {
-                mockCopilotService.includeWorkspaceTableProfileNow.mockResolvedValue(true);
-                mockCopilotService.getWorkspaceTableProfilesSummary.mockResolvedValue('profiles summary');
-
-                const options = {
-                    input: { includeNowProfileId: 'DB.SCH.TAB' }
-                } as vscode.LanguageModelToolInvocationOptions<IFavoritesToolParameters>;
-
-                await tool.invoke(options, mockToken);
-
-                expect(mockCopilotService.includeWorkspaceTableProfileNow).toHaveBeenCalledWith('DB.SCH.TAB');
-            });
-
-            it('should throw when includeNow profile is missing', async () => {
-                mockCopilotService.includeWorkspaceTableProfileNow.mockResolvedValue(false);
-
-                const options = {
-                    input: { includeNowProfileId: 'DB.SCH.MISSING' }
-                } as vscode.LanguageModelToolInvocationOptions<IFavoritesToolParameters>;
-
-                await expect(tool.invoke(options, mockToken)).rejects.toThrow('Failed to read favorites');
-            });
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.getNetezzaReference).toHaveBeenCalledWith('all');
         });
     });
 });

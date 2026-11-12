@@ -360,7 +360,7 @@ export class CatalogIntrospection {
     /**
      * Returns pipe-delimited table with header:
      * DATABASE|SCHEMA|TABLE_NAME|COLUMN_NAME|DATA_TYPE|NOT_NULL
-     * (same shape as the Copilot `netezza_get_columns` tool).
+     * (same shape as the JustyBase object-details column output).
      */
     async getColumns(tables: string[], database?: string): Promise<string> {
         if (tables.length === 0) {
