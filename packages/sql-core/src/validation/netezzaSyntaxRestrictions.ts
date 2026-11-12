@@ -32,6 +32,9 @@ import type { ValidationError } from "./types";
  *   parenthesized query without AS is rejected (live: found "SELECT"
  *   expecting an identifier); NZS016. `WITH name [(cols)] AS (...)` stays
  *   accepted.
+ * - A wildcard select item cannot carry an alias; `SELECT * AS x` is rejected
+ *   (live: found "AS" expecting a keyword); NZS017. `COUNT(*) AS x` and
+ *   expression aliases such as `a * b AS x` stay accepted.
  */
 
 function errorAt(code: string, message: string, token: IToken): ValidationError {
@@ -74,6 +77,19 @@ export function detectNetezzaSyntaxRestrictions(
   for (let index = 0; index < tokens.length; index += 1) {
     const name = tokenName(tokens[index]);
     const image = tokens[index].image.toUpperCase();
+    // A wildcard select item cannot be aliased. Live Netezza rejects
+    // `SELECT * AS SOME_ALIAS ...` with `found "AS" ... expecting a keyword`.
+    // Only a Multiply directly followed by As is inspected, so `COUNT(*) AS x`
+    // and `a * b AS x` remain accepted.
+    if (name === "Multiply" && tokenName(tokens[index + 1]) === "As") {
+      errors.push(
+        errorAt(
+          "NZS017",
+          "Netezza does not accept an alias after '*'; a wildcard cannot have an alias. Remove 'AS <alias>'.",
+          tokens[index + 1],
+        ),
+      );
+    }
     if (name === "Explain"
       && EXPLAIN_OPTIONS[tokenName(tokens[index + 1]) ?? ""] === true
       && EXPLAIN_OPTIONS[tokenName(tokens[index + 2]) ?? ""] === true) {

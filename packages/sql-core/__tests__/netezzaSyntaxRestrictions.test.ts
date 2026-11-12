@@ -82,6 +82,15 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     )).not.toContain("NZS016");
   });
 
+  it("rejects an alias on a wildcard but accepts expression aliases (NZS017, live-verified)", () => {
+    // Live Netezza 11.2.2.1: found "AS" (at char 10) expecting a keyword.
+    expect(preParseCodes("SELECT * AS SOME_ALIAS FROM DIMDATE")).toContain("NZS017");
+    expect(preParseCodes("SELECT T.* AS SOME_ALIAS FROM DIMDATE T")).toContain("NZS017");
+    expect(preParseCodes("SELECT * FROM DIMDATE")).not.toContain("NZS017");
+    expect(preParseCodes("SELECT COUNT(*) AS CNT FROM DIMDATE")).not.toContain("NZS017");
+    expect(preParseCodes("SELECT DATEKEY * 2 AS DOUBLE_KEY FROM DIMDATE")).not.toContain("NZS017");
+  });
+
   it("rejects SERIAL/BIGSERIAL column types but accepts a column named serial (NZS014, live-verified)", () => {
     expect(preParseCodes(
       "CREATE TABLE SERIAL_TYPES (ID SERIAL, BIG_ID BIGSERIAL);",
