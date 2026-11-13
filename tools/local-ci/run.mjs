@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { qualityStage } from './stages/quality.mjs';
 import { testsStage } from './stages/tests.mjs';
+import { integrationStage } from './stages/integration.mjs';
 import { releaseDryRunStage } from './stages/releaseDryRun.mjs';
 import { prepareWorkspace } from './lib/snapshot.mjs';
 import { writeSummary } from './lib/summary.mjs';
@@ -11,6 +12,7 @@ import { writeSummary } from './lib/summary.mjs';
 const STAGES = new Map([
     [qualityStage.id, qualityStage],
     [testsStage.id, testsStage],
+    [integrationStage.id, integrationStage],
     [releaseDryRunStage.id, releaseDryRunStage],
 ]);
 
@@ -30,8 +32,9 @@ function usage() {
 Stages:
   quality           docs + quality jobs (types, lint, architecture, build)
   tests             unit/coverage, UI coverage, parser and Extension Host gates
+  integration       DuckDB + File SQL integration suites from the release gate
   release-dry-run   version bump + build + VSIX package + marketplace audit
-  all               run quality, tests, then release-dry-run
+  all               run quality, tests, integration, then release-dry-run
 
 Options:
   --release-type <type>   patch|minor|major|prepatch|preminor|premajor|prerelease|exact
@@ -116,7 +119,7 @@ function validateStage(stage, options) {
     if (options.list) return;
 
     if (!stage) {
-        fail('a stage is required (quality, tests, release-dry-run, or all)');
+        fail('a stage is required (quality, tests, integration, release-dry-run, or all)');
     }
 
     if (stage !== 'all' && !STAGES.has(stage)) {
@@ -182,7 +185,7 @@ async function main() {
         for (const candidate of STAGES.values()) {
             console.log(`${candidate.id}\t${candidate.description}`);
         }
-        console.log('all\tRun quality, tests, then release-dry-run.');
+        console.log('all\tRun quality, tests, integration, then release-dry-run.');
         return;
     }
 
@@ -217,7 +220,7 @@ async function main() {
     });
 
     const selected = stage === 'all'
-        ? [qualityStage, testsStage, releaseDryRunStage]
+        ? [qualityStage, testsStage, integrationStage, releaseDryRunStage]
         : [STAGES.get(stage)];
 
     let failure = null;

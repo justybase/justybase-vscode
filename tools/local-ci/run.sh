@@ -17,8 +17,9 @@ Usage:
 Stages:
   quality           docs + quality jobs (types, lint, architecture, build)
   tests             unit/coverage, UI coverage, parser and Extension Host gates
+  integration       DuckDB + File SQL integration suites from the release gate
   release-dry-run   version bump + build + VSIX package + marketplace audit
-  all               run quality, tests, then release-dry-run
+  all               run quality, tests, integration, then release-dry-run
 
 Options:
   --release-type <type>   patch|minor|major|prepatch|preminor|premajor|prerelease|exact
@@ -36,6 +37,7 @@ Options:
 Examples:
   tools/local-ci/run.sh quality
   tools/local-ci/run.sh tests
+  tools/local-ci/run.sh integration
   tools/local-ci/run.sh release-dry-run --release-type patch
   tools/local-ci/run.sh release-dry-run --release-type exact --version 3.21.0
   tools/local-ci/run.sh all --release-type minor

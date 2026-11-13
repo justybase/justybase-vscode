@@ -51,6 +51,7 @@ host checkout (read-only)          Docker named volumes
 # From the repository root, in WSL:
 tools/local-ci/run.sh quality
 tools/local-ci/run.sh tests
+tools/local-ci/run.sh integration
 tools/local-ci/run.sh release-dry-run --release-type patch
 tools/local-ci/run.sh all --release-type patch
 ```
@@ -79,9 +80,10 @@ Outputs are written to `artifacts/local-ci/` (already gitignored):
 |-------------|---------------------|
 | `quality` | `docs` + `quality` |
 | `tests` | `unit-tests`, `completion-parity`, `quickfix-regression`, `parser-perf`, `extension-host-result-panel` |
+| `integration` | `local-integration` (DuckDB + File SQL; the Access extension suite is skipped because `publish_access` is false) |
 | `release-dry-run` | `prepare-release` (version resolution only) + `build-main` + `audit-vsix`, without commit/tag/push/publish |
 
-`all` runs the three stages in order.
+`all` runs the four stages in order.
 
 ### `quality`
 
@@ -108,6 +110,20 @@ Outputs are written to `artifacts/local-ci/` (already gitignored):
 - `npm run test:parser-perf`
 - `xvfb-run -a npm run test:extension-host`
 - optional changed-coverage gate with `--base <git-ref>`
+
+### `integration`
+
+Mirrors the `integration-gate` steps that a Core release runs:
+
+- `tools/access-ddl-compare/bootstrap.sh`
+- `npm run build:access-file`
+- `npm ci` in `extensions/duckdb`
+- `npm run test:duckdb:integration`
+- `npm run test:file:integration`
+
+Both suites run in-process against temporary files, so no database server or
+Compose stack is required. `extensions/access` is not installed and the Access
+integration test is not run.
 
 ### `release-dry-run`
 
@@ -161,11 +177,14 @@ Current stages:
 - `quality` — the offline gates from `ci.yml` (`docs`, `quality`);
 - `tests` — root unit/coverage plus completion parity, quick-fix, parser
   budget, and the Extension Host result-panel gate;
+- `integration` — DuckDB and File SQL integration suites, plus the shared
+  Access file package they load;
 - `release-dry-run` — version resolution, build, Core VSIX packaging, and the
   marketplace audit, without commit, tag, push, or publish.
 
-Stage 2 (planned) adds the local runtime integrations that a core release
-actually runs in `publish-marketplace.yml` → `integration-gate`:
+Stage 2 is implemented as the `integration` stage and covers exactly the local
+runtime integrations that a core release runs in `publish-marketplace.yml` →
+`integration-gate`:
 
 - `npm run build:access-file`;
 - `npm run test:duckdb:integration`;
