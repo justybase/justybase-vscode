@@ -146,10 +146,6 @@ export function detectNetezzaSyntaxRestrictions(
         tokens[index + 2],
       ));
     }
-    if (image === "INTERVAL" && tokenName(tokens[index + 1]) === "StringLiteral"
-      && /^(YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)$/.test(tokens[index + 2]?.image.toUpperCase() ?? "")) {
-      errors.push(errorAt("NZS007", "Netezza interval units belong inside the interval literal.", tokens[index + 2]));
-    }
     if (image === "TIMESTAMPTZ" && (tokenName(tokens[index - 1]) === "As"
       || tokenName(tokens[index + 1]) === "StringLiteral")) {
       errors.push(errorAt("NZS008", "TIMESTAMPTZ literals and casts are not supported by Netezza.", tokens[index]));

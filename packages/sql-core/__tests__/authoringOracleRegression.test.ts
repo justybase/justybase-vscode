@@ -4,8 +4,6 @@ import { NetezzaSqlSemanticValidator } from '../src/validation';
 
 describe('live-backed authoring syntax', () => {
   test.each([
-    "SELECT INTERVAL '1' DAY",
-    "SELECT CURRENT_TIMESTAMP + INTERVAL '1' DAY",
     "SELECT CAST('2020-01-01' AS TIMESTAMPTZ)",
     "SELECT TIMESTAMPTZ '2023-01-01 12:00:00 UTC'",
     'CREATE MATERIALIZED VIEW t AS SELECT 7 AS ID',
@@ -22,6 +20,7 @@ describe('live-backed authoring syntax', () => {
     expect(parsed.parserErrors.length + pre.errors.length).toBeGreaterThan(0);
   });
 
-  test.each(['SELECT DATABASE FROM _V_DATABASE LIMIT 1', 'ALTER TABLE t MODIFY COLUMN NAME VARCHAR(80)',
+  test.each(['SELECT INTERVAL \'1\' DAY', 'SELECT CURRENT_TIMESTAMP + INTERVAL \'1\' DAY',
+    'SELECT DATABASE FROM _V_DATABASE LIMIT 1', 'ALTER TABLE t MODIFY COLUMN NAME VARCHAR(80)',
     'CREATE MATERIALIZED VIEW v AS (SELECT id FROM t)'])('accepts %s', sql => expect(parseNetezzaSqlStatements({ sql }).parserErrors).toHaveLength(0));
 });
