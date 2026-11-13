@@ -1,0 +1,3 @@
+# Local CI scripts run inside Linux containers. Keep them LF even when the
+# repository is checked out on Windows so bash does not see stray CR bytes.
+* text=auto eol=lf

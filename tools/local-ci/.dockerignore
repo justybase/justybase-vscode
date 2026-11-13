@@ -1,0 +1,4 @@
+# The image needs no build context: scripts are bind-mounted read-only at /src.
+*
+!Dockerfile
+!.dockerignore
