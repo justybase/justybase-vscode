@@ -15,7 +15,7 @@ import {
   removeCommentsAndStrings,
   splitSqlStatementsWithOffsets,
 } from "./sourceScan";
-import { isInsideStringOrComment } from "../sourceScan";
+import { buildSqlSourceScanIndex, isInsideStringOrComment } from "../sourceScan";
 
 const KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
@@ -608,24 +608,61 @@ function shouldUseProcedureRegexFallback(sql: string, ruleId: string): boolean {
   return useFallback;
 }
 
-function parenthesisDepthBefore(sql: string, offset: number): number {
-  let depth = 0;
-  for (let index = 0; index < offset; index += 1) {
-    if (isInsideStringOrComment(sql, index)) continue;
-    if (sql[index] === "(") depth += 1;
-    else if (sql[index] === ")") depth = Math.max(0, depth - 1);
-  }
-  return depth;
+interface EmbeddedSelectScan {
+  sql: string;
+  /** Parenthesis depth immediately before each character offset. */
+  depthBefore: Int32Array;
+  /** Offset right after the last `;` before each character offset. */
+  statementStart: Int32Array;
 }
 
-function statementPrefixBefore(sql: string, offset: number): string {
-  const statements = sql.slice(0, offset).split(";");
-  return statements[statements.length - 1] ?? "";
+let embeddedSelectScanCache: EmbeddedSelectScan | undefined;
+
+/**
+ * Builds the parenthesis-depth and statement-prefix lookup once per procedure
+ * body. The rules used to rescan from offset zero for every matched SELECT,
+ * which made regex fallback quadratic on large procedures.
+ */
+function getEmbeddedSelectScan(sql: string): EmbeddedSelectScan {
+  if (embeddedSelectScanCache?.sql === sql) {
+    return embeddedSelectScanCache;
+  }
+
+  const sourceIndex = buildSqlSourceScanIndex(sql);
+  const depthBefore = new Int32Array(sql.length + 1);
+  const statementStart = new Int32Array(sql.length + 1);
+  let depth = 0;
+  let currentStatementStart = 0;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    depthBefore[index] = depth;
+    statementStart[index] = currentStatementStart;
+    if (!sourceIndex.isInStringOrComment(index)) {
+      const char = sql[index];
+      if (char === "(") {
+        depth += 1;
+      } else if (char === ")") {
+        depth = Math.max(0, depth - 1);
+      }
+    }
+    // Preserve the old naive split semantics: every semicolon starts a prefix.
+    if (sql[index] === ";") {
+      currentStatementStart = index + 1;
+    }
+  }
+  depthBefore[sql.length] = depth;
+  statementStart[sql.length] = currentStatementStart;
+
+  embeddedSelectScanCache = { sql, depthBefore, statementStart };
+  return embeddedSelectScanCache;
 }
 
 function isEmbeddedDmlSelect(sql: string, selectOffset: number): boolean {
-  if (parenthesisDepthBefore(sql, selectOffset) > 0) return true;
-  const prefix = statementPrefixBefore(sql, selectOffset);
+  const offset = Math.max(0, Math.min(selectOffset, sql.length));
+  const scan = getEmbeddedSelectScan(sql);
+  if (scan.depthBefore[offset] > 0) return true;
+
+  const prefix = sql.slice(scan.statementStart[offset], offset);
   return /\bINSERT\s+INTO\b/i.test(prefix)
     || /\bCREATE\s+(?:TEMP\s+)?TABLE\b[\s\S]*\bAS\s*\(\s*$/i.test(prefix)
     || /\bCURSOR\s+FOR\s*$/i.test(prefix)

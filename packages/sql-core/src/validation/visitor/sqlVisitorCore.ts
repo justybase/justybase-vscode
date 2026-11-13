@@ -54,6 +54,13 @@ function getBaseSqlVisitor(): BaseCstVisitorConstructor {
   return _BaseSqlVisitor!;
 }
 
+/**
+ * Chevrotain's visitor-completeness check walks every grammar rule name. The
+ * rule set is fixed per visitor class, so validate each subclass only once;
+ * incremental validation constructs a visitor per statement.
+ */
+const validatedVisitorClasses = new WeakSet<object>();
+
 const BOOLEAN_CONTEXT_TOKEN_TYPES = new Set([
   "Equals",
   "NotEquals",
@@ -127,7 +134,11 @@ export class SqlVisitor
     this.schemaProvider = schemaProvider;
     this.validationProfile = validationProfile;
     this.macroReferenceRanges = macroReferenceRanges;
-    this.validateVisitor();
+    const visitorClass = this.constructor;
+    if (!validatedVisitorClasses.has(visitorClass)) {
+      this.validateVisitor();
+      validatedVisitorClasses.add(visitorClass);
+    }
   }
 
   setMacroReferenceRanges(

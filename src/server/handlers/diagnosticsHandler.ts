@@ -22,8 +22,8 @@ import {
   prepareIncrementalValidation,
   runValidationPipeline,
 } from "../../sqlParser/validationPipeline";
+import { groupDiagnosticsByStatement } from "../../sqlParser/statementIndex";
 import type {
-  StatementBoundary,
   StatementIndex,
   ValidationError,
 } from "../../sqlParser";
@@ -247,6 +247,7 @@ export function createDiagnosticsHandler(
         validationIssues,
         metadataEpoch,
         documentValidationSession,
+        dirtyIndices,
       );
       documentValidationSession.commitDocumentIndex(
         document.uri,
@@ -346,27 +347,24 @@ function storeDiagnosticsByStatement(
   diagnostics: ValidationError[],
   metadataEpoch: number,
   documentValidationSession: DocumentValidationSession,
+  dirtyIndices: readonly number[],
 ): void {
+  const dirty = new Set(dirtyIndices);
+  const grouped = groupDiagnosticsByStatement(
+    statementIndex.statements,
+    diagnostics,
+  );
   for (const statement of statementIndex.statements) {
+    if (!dirty.has(statement.index)) {
+      continue;
+    }
     documentValidationSession.storeStatementDiagnostics(
       documentUri,
       statement,
-      diagnostics.filter((diagnostic) =>
-        diagnosticBelongsToStatement(diagnostic, statement),
-      ),
+      grouped.get(statement.index) ?? [],
       metadataEpoch,
     );
   }
-}
-
-function diagnosticBelongsToStatement(
-  diagnostic: ValidationError,
-  statement: StatementBoundary,
-): boolean {
-  return (
-    diagnostic.position.offset >= statement.startOffset &&
-    diagnostic.position.offset <= statement.endOffset
-  );
 }
 
 function toErrorMessage(error: unknown): string {

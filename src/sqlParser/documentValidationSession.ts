@@ -8,7 +8,12 @@ import {
 } from "./statementIndex";
 
 const MAX_DOCUMENTS = 16;
-const MAX_DIAGNOSTIC_ENTRIES_PER_DOCUMENT = 512;
+/**
+ * Diagnostic payloads are cached only for statements that produced issues. The
+ * coverage map below tracks every validated statement, so clean statements no
+ * longer consume this budget and large scripts stay incremental.
+ */
+const MAX_DIAGNOSTIC_PAYLOAD_ENTRIES_PER_DOCUMENT = 10_000;
 
 export interface DocumentValidationState {
   previousIndex?: StatementIndex;
@@ -16,15 +21,12 @@ export interface DocumentValidationState {
   diff: StatementIndexDiff;
 }
 
-interface CachedStatementDiagnostics {
-  statementHash: string;
-  diagnostics: ValidationError[];
-  createdAtMs: number;
-}
-
 interface DocumentDiagnosticsCache {
   statementIndex?: StatementIndex;
-  diagnosticsByStatement: Map<number, CachedStatementDiagnostics>;
+  /** Content hash of every validated statement, including clean ones. */
+  validatedStatementHashes: Map<number, string>;
+  /** Payloads are stored only for statements with at least one diagnostic. */
+  diagnosticsByStatement: Map<number, ValidationError[]>;
   metadataEpoch?: number;
   createdAtMs: number;
 }
@@ -58,6 +60,7 @@ export class DocumentValidationSession {
       cache.metadataEpoch !== metadataEpoch
     ) {
       cache.diagnosticsByStatement.clear();
+      cache.validatedStatementHashes.clear();
     }
     cache.metadataEpoch = metadataEpoch;
   }
@@ -75,13 +78,14 @@ export class DocumentValidationSession {
     ) {
       return undefined;
     }
-    const cached = cache?.diagnosticsByStatement.get(statement.index);
-    if (!cached || cached.statementHash !== statement.contentHash) {
+
+    // Coverage is tracked separately from the (capped) diagnostic payloads: a
+    // clean statement is reusable even when no payload entry is retained.
+    const statementHash = cache?.validatedStatementHashes.get(statement.index);
+    if (!cache || statementHash !== statement.contentHash) {
       return undefined;
     }
-
-    cached.createdAtMs = Date.now();
-    return cached.diagnostics;
+    return cache.diagnosticsByStatement.get(statement.index) ?? [];
   }
 
   storeStatementDiagnostics(
@@ -94,13 +98,15 @@ export class DocumentValidationSession {
     if (metadataEpoch !== undefined) {
       cache.metadataEpoch = metadataEpoch;
     }
-    cache.diagnosticsByStatement.set(statement.index, {
-      statementHash: statement.contentHash,
-      diagnostics,
-      createdAtMs: Date.now(),
-    });
+    cache.validatedStatementHashes.set(statement.index, statement.contentHash);
+    if (diagnostics.length === 0) {
+      // Clean statements keep coverage without a payload.
+      cache.diagnosticsByStatement.delete(statement.index);
+    } else {
+      cache.diagnosticsByStatement.set(statement.index, diagnostics);
+      this.evictStatementDiagnostics(cache);
+    }
     cache.createdAtMs = Date.now();
-    this.evictStatementDiagnostics(cache);
   }
 
   invalidateDocument(documentUri: string): void {
@@ -117,6 +123,7 @@ export class DocumentValidationSession {
     let cache = this.documents.get(documentUri);
     if (!cache) {
       cache = {
+        validatedStatementHashes: new Map(),
         diagnosticsByStatement: new Map(),
         createdAtMs: Date.now(),
       };
@@ -127,20 +134,17 @@ export class DocumentValidationSession {
 
   private evictStatementDiagnostics(cache: DocumentDiagnosticsCache): void {
     while (
-      cache.diagnosticsByStatement.size > MAX_DIAGNOSTIC_ENTRIES_PER_DOCUMENT
+      cache.diagnosticsByStatement.size >
+      MAX_DIAGNOSTIC_PAYLOAD_ENTRIES_PER_DOCUMENT
     ) {
-      let oldestKey: number | undefined;
-      let oldestTime = Number.POSITIVE_INFINITY;
-      for (const [key, entry] of cache.diagnosticsByStatement.entries()) {
-        if (entry.createdAtMs < oldestTime) {
-          oldestTime = entry.createdAtMs;
-          oldestKey = key;
-        }
-      }
-      if (oldestKey === undefined) {
+      const oldest = cache.diagnosticsByStatement.keys().next();
+      if (oldest.done) {
         return;
       }
-      cache.diagnosticsByStatement.delete(oldestKey);
+      // Dropping the payload would make the cached result incomplete, so drop
+      // coverage for that statement too and let the next pass revalidate it.
+      cache.diagnosticsByStatement.delete(oldest.value);
+      cache.validatedStatementHashes.delete(oldest.value);
     }
   }
 

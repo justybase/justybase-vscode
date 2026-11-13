@@ -1,9 +1,12 @@
 import {
   buildStatementIndex,
   diffStatementIndexes,
+  groupDiagnosticsByStatement,
 } from "../../sqlParser/statementIndex";
 import { expandDirtyIndicesForScriptContext } from "../../sqlParser/scriptScopeStatements";
 import { DocumentValidationSession } from "../../sqlParser/documentValidationSession";
+import { prepareIncrementalValidation } from "../../sqlParser/validationPipeline";
+import type { ValidationError } from "../../sqlParser/types";
 
 describe("statementIndex", () => {
   it("builds statement boundaries with stable hashes", () => {
@@ -165,5 +168,75 @@ describe("DocumentValidationSession", () => {
     expect(
       session.getCachedDiagnostics(uri, second.nextIndex.statements[0], 2),
     ).toBeUndefined();
+  });
+
+  it("keeps incremental coverage for more than 512 statements", () => {
+    const sql = Array.from(
+      { length: 1200 },
+      (_, index) => `SELECT ${index};`,
+    ).join("\n");
+    const session = new DocumentValidationSession();
+    const first = session.prepareDocument(uri, sql);
+    for (const statement of first.nextIndex.statements) {
+      session.storeStatementDiagnostics(uri, statement, []);
+    }
+    session.commitDocumentIndex(uri, first.nextIndex);
+
+    const edited = sql.replace("SELECT 0;", "SELECT 9999;");
+    const prepared = prepareIncrementalValidation({
+      documentUri: uri,
+      sql: edited,
+      validationSession: session,
+      requireFullCacheCoverage: true,
+    });
+
+    expect(prepared.incrementalValidation).toBeDefined();
+    expect(prepared.incrementalValidation?.dirtyIndices).toEqual([0]);
+    expect(prepared.incrementalValidation?.cachedDiagnostics.size).toBe(1199);
+  });
+});
+
+describe("groupDiagnosticsByStatement", () => {
+  function diagnostic(offset: number, code = "SQL999"): ValidationError {
+    return {
+      message: code,
+      severity: "warning",
+      position: {
+        startLine: 1,
+        startColumn: offset + 1,
+        endLine: 1,
+        endColumn: offset + 2,
+        offset,
+      },
+      code,
+    };
+  }
+
+  it("assigns diagnostics with binary search and preserves their order", () => {
+    const index = buildStatementIndex(
+      "SELECT 1;\nSELECT 2;\nSELECT 3;",
+    );
+    const first = diagnostic(index.statements[0].startOffset + 1, "A");
+    const thirdEarly = diagnostic(index.statements[2].startOffset + 1, "B");
+    const thirdLate = diagnostic(index.statements[2].startOffset + 5, "C");
+
+    const grouped = groupDiagnosticsByStatement(
+      index.statements,
+      [thirdLate, first, thirdEarly],
+    );
+
+    expect(grouped.get(0)).toEqual([first]);
+    expect(grouped.get(2)).toEqual([thirdLate, thirdEarly]);
+    expect(grouped.get(1)).toBeUndefined();
+  });
+
+  it("ignores diagnostics outside every statement range", () => {
+    const index = buildStatementIndex("SELECT 1;");
+    const grouped = groupDiagnosticsByStatement(index.statements, [
+      diagnostic(-1),
+      diagnostic(index.statements[0].endOffset + 1),
+    ]);
+
+    expect(grouped.size).toBe(0);
   });
 });

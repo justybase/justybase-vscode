@@ -1,6 +1,7 @@
 import { simpleHash } from "../providers/parsers/hashUtils";
 import { SqlParser } from "../sql/sqlParser";
 import type { StatementBoundary as CoreStatementBoundary } from "@justybase/sql-core/validation";
+import type { ValidationError } from "./types";
 
 export interface StatementBoundary extends CoreStatementBoundary {
   contentHash: string;
@@ -83,4 +84,48 @@ export function diffStatementIndexes(
     dirtyIndices: Array.from(dirty).sort((a, b) => a - b),
     affectedFromIndex: firstDirty,
   };
+}
+
+/**
+ * Assigns diagnostics to statements with a binary search instead of filtering
+ * the whole diagnostic list for every statement. Statement ranges are ordered
+ * and non-overlapping, so each diagnostic belongs to at most one statement.
+ */
+export function groupDiagnosticsByStatement(
+  statements: readonly StatementBoundary[],
+  diagnostics: readonly ValidationError[],
+): Map<number, ValidationError[]> {
+  const grouped = new Map<number, ValidationError[]>();
+  if (statements.length === 0) {
+    return grouped;
+  }
+
+  for (const diagnostic of diagnostics) {
+    const offset = diagnostic.position.offset;
+    let low = 0;
+    let high = statements.length - 1;
+    let candidate = -1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (statements[middle].startOffset <= offset) {
+        candidate = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    if (candidate < 0 || offset > statements[candidate].endOffset) {
+      continue;
+    }
+
+    const statementIndex = statements[candidate].index;
+    const bucket = grouped.get(statementIndex);
+    if (bucket) {
+      bucket.push(diagnostic);
+    } else {
+      grouped.set(statementIndex, [diagnostic]);
+    }
+  }
+
+  return grouped;
 }
