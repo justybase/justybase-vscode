@@ -8,6 +8,7 @@
 import {
   buildSqlSourceScanIndex,
   isInsideStringOrComment,
+  SqlSourceRegion,
 } from "../sourceScan";
 
 interface MacroDirectiveRange {
@@ -237,12 +238,13 @@ export function hasTopLevelKeywordInRange(
   if (matches.length === 0) return false;
 
   const statementDepth = getParenDepthAt(sql, rangeStart);
+  const scan = buildSqlSourceScanIndex(sql);
   let depth = statementDepth;
   let cursor = rangeStart;
 
   for (const match of matches) {
     while (cursor < match.index) {
-      if (!isInsideStringOrComment(sql, cursor)) {
+      if (scan.region[cursor] === SqlSourceRegion.Code) {
         if (sql[cursor] === "(") depth += 1;
         else if (sql[cursor] === ")") depth = Math.max(statementDepth, depth - 1);
       }
@@ -262,23 +264,58 @@ export function findFirstKeywordInRange(
   return findPatternMatchesInRange(sql, rangeStart, rangeEnd, pattern)[0];
 }
 
-function getParenDepthAt(sql: string, position: number): number {
-  let depth = 0;
-  for (let index = 0; index < position; index += 1) {
-    if (isInsideStringOrComment(sql, index)) continue;
-    if (sql[index] === "(") depth += 1;
-    else if (sql[index] === ")") depth = Math.max(0, depth - 1);
+let cachedParenDepthSql: string | undefined;
+let cachedParenDepthPrefix: Int32Array | undefined;
+
+/**
+ * Parenthesis depth after every offset, computed in one pass. `getParenDepthAt`
+ * used to rescan from the start of the script for every WHERE clause, which
+ * made NZ009/NZ015 quadratic on multi-statement scripts.
+ */
+function getParenDepthPrefix(sql: string): Int32Array {
+  if (cachedParenDepthSql === sql && cachedParenDepthPrefix) {
+    return cachedParenDepthPrefix;
   }
-  return depth;
+  const scan = buildSqlSourceScanIndex(sql);
+  const prefix = new Int32Array(sql.length + 1);
+  let depth = 0;
+  for (let index = 0; index < sql.length; index += 1) {
+    prefix[index] = depth;
+    if (scan.region[index] !== SqlSourceRegion.Code) continue;
+    const character = sql[index];
+    if (character === "(") depth += 1;
+    else if (character === ")") depth = Math.max(0, depth - 1);
+  }
+  prefix[sql.length] = depth;
+  cachedParenDepthSql = sql;
+  cachedParenDepthPrefix = prefix;
+  return prefix;
 }
 
-const WHERE_CLAUSE_END_KEYWORD = /\b(GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|UNION|INTERSECT|EXCEPT)\b/i;
+function getParenDepthAt(sql: string, position: number): number {
+  const prefix = getParenDepthPrefix(sql);
+  if (position <= 0) return 0;
+  if (position >= prefix.length) return prefix[prefix.length - 1];
+  return prefix[position];
+}
+
+const WHERE_CLAUSE_END_START = /(?:GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|UNION|INTERSECT|EXCEPT)\b/gi;
 
 export function indexOfWhereClauseEnd(sql: string, contentStart: number, statementEnd: number): number {
   const depthAtWhere = getParenDepthAt(sql, contentStart);
+  const keywordStarts = new Set<number>();
+  for (const match of findPatternMatchesInRange(
+    sql,
+    contentStart,
+    statementEnd,
+    WHERE_CLAUSE_END_START,
+  )) {
+    keywordStarts.add(match.index);
+  }
+  const scan = buildSqlSourceScanIndex(sql);
   let depth = depthAtWhere;
   for (let index = contentStart; index < statementEnd; index += 1) {
-    if (isInsideStringOrComment(sql, index)) continue;
+    if (scan.region[index] !== SqlSourceRegion.Code) continue;
     const character = sql[index];
     if (character === "(") {
       depth += 1;
@@ -289,18 +326,16 @@ export function indexOfWhereClauseEnd(sql: string, contentStart: number, stateme
       if (depth < depthAtWhere) return index;
       continue;
     }
-    if (depth === depthAtWhere) {
-      const keyword = findFirstKeywordInRange(sql, index, statementEnd, WHERE_CLAUSE_END_KEYWORD);
-      if (keyword?.index === index) return index;
-    }
+    if (depth === depthAtWhere && keywordStarts.has(index)) return index;
   }
   return statementEnd;
 }
 
 export function indexOfStatementSemicolon(sql: string, start: number): number {
+  const scan = buildSqlSourceScanIndex(sql);
   let parenDepth = 0;
   for (let index = start; index < sql.length; index += 1) {
-    if (isInsideStringOrComment(sql, index)) continue;
+    if (scan.region[index] !== SqlSourceRegion.Code) continue;
     if (sql[index] === "(") parenDepth += 1;
     else if (sql[index] === ")") parenDepth = Math.max(0, parenDepth - 1);
     else if (sql[index] === ";" && parenDepth === 0) return index;
@@ -316,9 +351,10 @@ export interface SqlStatementSlice {
 
 export function splitSqlStatementsWithOffsets(sql: string): SqlStatementSlice[] {
   const statements: SqlStatementSlice[] = [];
+  const scan = buildSqlSourceScanIndex(sql);
   let start = 0;
   for (let index = 0; index < sql.length; index += 1) {
-    if (sql[index] !== ";" || isInsideStringOrComment(sql, index)) continue;
+    if (sql[index] !== ";" || scan.region[index] !== SqlSourceRegion.Code) continue;
     const statementSql = sql.substring(start, index);
     if (statementSql.trim().length > 0) statements.push({ startOffset: start, endOffset: index, sql: statementSql });
     start = index + 1;
