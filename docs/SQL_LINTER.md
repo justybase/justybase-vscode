@@ -237,49 +237,64 @@ which is why this path is never used automatically.
 parsing is cached for one quality-rule evaluation so a procedure is not parsed once per migrated NZP
 rule.
 
-Local benchmark results (`npm run benchmark:parser`) for a realistic NZPLSQL procedure. The benchmark
-runs the compiled `packages/sql-core/dist` bundle in plain Node; the earlier Jest-based numbers were
-replaced because ts-jest/Babel transformation inflated them by roughly 4-5x:
+Local benchmark results (`npm run benchmark:parser`) for a realistic NZPLSQL procedure and
+alias-heavy SELECT scripts. The benchmark runs the compiled `packages/sql-core/dist` bundle in plain
+Node; the earlier Jest-based numbers were replaced because ts-jest/Babel transformation inflated them
+by roughly 4-5x:
 
-| Size | Parse + validate, before | Parse + validate, after | Improvement |
+| Fixture | Before optimizations | Current | Improvement |
 |---|---:|---:|---:|
-| 3k lines / 84k chars | ~153 ms | ~47-52 ms | ~66-69% |
-| 5k lines / 140k chars | ~197 ms | ~74-79 ms | ~60-63% |
-| 10k lines / 281k chars | ~389 ms | ~146-195 ms | ~50-62% |
-| 15k lines / 422k chars | ~588 ms | ~220-290 ms | ~51-63% |
+| 3k procedure / 84k chars | ~153 ms | ~36 ms | ~76% |
+| 5k procedure / 140k chars | ~197 ms | ~49 ms | ~75% |
+| 10k procedure / 281k chars | ~389 ms | ~88 ms | ~77% |
+| 15k procedure / 422k chars | ~588 ms | ~121 ms | ~79% |
+| 5k SELECT with aliases / 254k chars | ~1,240 ms | ~311 ms | ~75% |
+| 10k SELECT with aliases / 509k chars | ~4,020 ms | ~650 ms | ~84% |
 
-The dominant hot path was PAR004 keyword-typo detection: a full Levenshtein DP matrix was built for
-every identifier and every clause keyword, which accounted for about 49% of validation CPU. It now
-uses a linear single-edit check plus a per-validation cache, so the typo scan costs roughly 0.5-1 ms
-for a 10k-line procedure.
+The first hot path was PAR004 keyword-typo detection: a full Levenshtein DP matrix was built for every
+identifier and every clause keyword, which accounted for about 49% of validation CPU. It now uses a
+linear single-edit check plus a per-validation cache, so the typo scan costs well under 1 ms.
+
+The next, larger hot path was the unused-symbol collector (SQL018/SQL019). It grouped occurrences with
+`definitions.map(definition => occurrences.filter(...))`, which is quadratic for scripts with many
+aliases or CTEs. Grouping occurrences by `symbolId` in one pass reduced the 10k-SELECT case from
+~4.0 s to ~0.65 s. The validator also skips the collector when the token stream contains no
+`WITH`/`FROM`/`JOIN`/`UPDATE`/`DELETE`/`MERGE`, and the CST walkers no longer allocate temporary
+`Object.values`/`Object.entries` arrays or a default `Set` per call. The Netezza parser now caches its
+identifier OR-alternatives instead of rebuilding them on every rule invocation, and the macro
+sanitizer returns immediately when the SQL contains no `%`, `&`, or `$`.
 
 Full LSP diagnostics pipeline (`npm run benchmark:lsp-pipeline`). It runs the real diagnostics handler,
 metadata bridge, parse/validation sessions, incremental validation, statement indexing, and
 diagnostics conversion; only JSON-RPC transport and metadata I/O are stubbed. Times exclude the 2 s
-large-script debounce:
+large-script debounce and are medians from the local benchmark run:
 
-| Size | Cold first validation | Warm edit | Cold P95 |
-|---|---:|---:|---:|
-| 3k lines / 84k chars (procedure) | ~85-100 ms | ~70-95 ms | ~86-119 ms |
-| 5k lines / 140k chars (procedure) | ~105-135 ms | ~120-180 ms | ~123-166 ms |
-| 10k lines / 281k chars (procedure) | ~230-335 ms | ~210-250 ms | ~280-336 ms |
-| 15k lines / 422k chars (procedure) | ~316-345 ms | ~325-345 ms | ~333-389 ms |
-| 20k lines / 563k chars (procedure) | ~408-492 ms | ~410-423 ms | ~480-560 ms |
-| 5k lines / 184k chars (10k short statements) | ~206 ms | ~204 ms | ~216 ms |
-| 10k lines / 369k chars (10k short statements) | ~389-497 ms | ~450-496 ms | ~426-503 ms |
+| Fixture | Cold first validation | Warm edit |
+|---|---:|---:|
+| 3k procedure / 84k chars | ~59 ms | ~45 ms |
+| 5k procedure / 140k chars | ~67 ms | ~74 ms |
+| 10k procedure / 281k chars | ~140 ms | ~148 ms |
+| 15k procedure / 422k chars | ~215 ms | ~251 ms |
+| 20k procedure / 563k chars | ~290 ms | ~296 ms |
+| 5k short INSERT statements / 184k chars | ~149 ms | ~135 ms |
+| 10k short INSERT statements / 369k chars | ~271 ms | ~315 ms |
+| 5k SELECT with aliases / 254k chars | ~493 ms | ~508 ms |
+| 10k SELECT with aliases / 509k chars | ~973 ms | ~873 ms |
 
 A real `dist/server/main.js` process confirmed the harness at the boundary: after the 2 s debounce,
-a 10k-line procedure published diagnostics in ~298 ms wall time (~260 ms handler timer), while a
-15k-line document was short-circuited with an empty diagnostic list.
+a 10k-line procedure published diagnostics in about 0.3 s wall time (the handler timer was ~0.26 s in
+the pre-optimization run), while a 15k-line document was short-circuited with an empty diagnostic
+list.
 
-The 10k case takes about 0.23-0.34 s for a single procedure and 0.39-0.50 s for 10k short
-statements. Both stay below a 1 s budget even with slower machines. Based on that
-measurement the automatic LSP limits were raised from `150,000` characters / `3,000` lines to
-`400,000` characters / `10,000` lines. 15k+ scripts remain on the explicit `Validate SQL` path for
-headroom: they still take only ~0.35 s here, but a slower laptop or a cold metadata cache can multiply
-that, and the language server serves completion/hover from the same event loop. The extension-host
-guard remains at `150,000` characters / `500` lines, so the larger LSP window does not turn on the
-expensive extension-host features.
+The 10k procedure now takes about 0.14 s, 10k short statements about 0.27 s, and a 5k alias-heavy
+SELECT script about 0.49 s. All stay well below a 1 s budget even with slower machines. The 10k
+alias-heavy SELECT fixture is 509k characters, above the 400k LSP limit, and is included only through
+the benchmark override; it still completes in about 0.97 s. Based on these measurements the automatic
+LSP limits were raised from `150,000` characters / `3,000` lines to `400,000` characters / `10,000`
+lines. 15k+ scripts remain on the explicit `Validate SQL` path for headroom: a slower laptop or a cold
+metadata cache can multiply the measured times, and the language server serves completion/hover from
+the same event loop. The extension-host guard remains at `150,000` characters / `500` lines, so the
+larger LSP window does not turn on the expensive extension-host features.
 
 The warm row is not much faster than cold because the procedure fixtures are one large
 `CREATE PROCEDURE` statement: any edit invalidates the whole statement. Multi-statement fixtures also

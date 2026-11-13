@@ -62,6 +62,16 @@ function generateProcedure(targetLines, syntaxError) {
   return lines.join("\n");
 }
 
+function generateSelects(targetLines) {
+  const lines = [];
+  for (let index = 0; index < targetLines; index += 1) {
+    lines.push(
+      `SELECT t${index % 10}.ID FROM BENCH..T${index % 5} t${index % 10} WHERE t${index % 10}.ID = ${index};`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function buildFixtures() {
   const fixtures = [
     { name: "Valid 3k", targetLines: 3_000, syntaxError: false },
@@ -69,10 +79,14 @@ function buildFixtures() {
     { name: "Valid 10k", targetLines: 10_000, syntaxError: false },
     { name: "Invalid 10k", targetLines: 10_000, syntaxError: true },
     { name: "Valid 15k", targetLines: 15_000, syntaxError: false },
+    { name: "Select 5k", targetLines: 5_000, generator: "selects" },
+    { name: "Select 10k", targetLines: 10_000, generator: "selects" },
   ];
 
   return fixtures.map((fixture) => {
-    const sql = generateProcedure(fixture.targetLines, fixture.syntaxError);
+    const sql = fixture.generator === "selects"
+      ? generateSelects(fixture.targetLines)
+      : generateProcedure(fixture.targetLines, fixture.syntaxError);
     return {
       ...fixture,
       sql,
@@ -171,7 +185,8 @@ function writeResults(rows) {
     "",
     `Environment: Node ${process.version}, ${os.platform()} ${os.arch()}, ${cpu}.`,
     "",
-    "Fixture: NZPLSQL procedure with repeated assignments, INSERTs, and IF blocks.",
+    "Fixtures: an NZPLSQL procedure with repeated assignments, INSERTs, and IF blocks,",
+    "plus alias-heavy SELECT statement scripts for the symbol-collector path.",
     "Measured against the compiled `packages/sql-core/dist` bundle in plain Node;",
     "the previous Jest benchmark inflated medians by roughly 4-5x because of ts-jest",
     "and Babel transformation overhead.",

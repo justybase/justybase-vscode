@@ -127,6 +127,16 @@ function generateStatements(targetLines) {
   return lines.join("\n");
 }
 
+function generateSelects(targetLines) {
+  const lines = [];
+  for (let index = 0; index < targetLines; index += 1) {
+    lines.push(
+      `SELECT t${index % 10}.ID FROM BENCH..T${index % 5} t${index % 10} WHERE t${index % 10}.ID = ${index};`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function buildFixtures() {
   const fixtures = [
     { name: "Valid 3k", targetLines: 3_000, syntaxError: false },
@@ -137,21 +147,27 @@ function buildFixtures() {
     { name: "Valid 20k", targetLines: 20_000, syntaxError: false },
     { name: "Multi 5k", targetLines: 5_000, syntaxError: false, generator: "statements" },
     { name: "Multi 10k", targetLines: 10_000, syntaxError: false, generator: "statements" },
+    { name: "Select 5k", targetLines: 5_000, syntaxError: false, generator: "selects" },
+    { name: "Select 10k", targetLines: 10_000, syntaxError: false, generator: "selects" },
   ];
 
   return fixtures.map((fixture) => {
     const sql =
       fixture.generator === "statements"
         ? generateStatements(fixture.targetLines)
-        : generateProcedure(fixture.targetLines, fixture.syntaxError);
+        : fixture.generator === "selects"
+          ? generateSelects(fixture.targetLines)
+          : generateProcedure(fixture.targetLines, fixture.syntaxError);
     const changedSql = fixture.generator === "statements"
       ? sql.replace("VALUES (0);", "VALUES (9999);")
-      : sql.includes("v_total := v_total + 1;")
-        ? sql.replace(
-            "v_total := v_total + 1;",
-            "v_total := v_total + 2;",
-          )
-        : `${sql}\n-- edited`;
+      : fixture.generator === "selects"
+        ? sql.replace("ID = 0;", "ID = 9999;")
+        : sql.includes("v_total := v_total + 1;")
+          ? sql.replace(
+              "v_total := v_total + 1;",
+              "v_total := v_total + 2;",
+            )
+          : `${sql}\n-- edited`;
     return {
       ...fixture,
       sql,
@@ -339,10 +355,10 @@ function writeResults(rows) {
     "the values are CPU-bound pipeline cost.",
     "",
     "The production diagnostics cutoffs are overridden for this benchmark so 5k/10k/15k/20k",
-    "procedure documents and 5k/10k short-statement scripts reach the pipeline instead of being",
-    "short-circuited. `Cold` is the first validation of a document with fresh sessions; `Warm` is a",
-    "small in-place edit with the same sessions and metadata cache. Wall times exclude the LSP",
-    "debounce (2 s above 1500 lines).",
+    "procedure documents, short INSERT scripts, and alias-heavy SELECT scripts reach the pipeline",
+    "instead of being short-circuited. `Cold` is the first validation of a document with fresh",
+    "sessions; `Warm` is a small in-place edit with the same sessions and metadata cache. Wall times",
+    "exclude the LSP debounce (2 s above 1500 lines).",
     "",
     "| Document | Lines | Chars | Cold median | Cold P95 | Warm median | Warm P95 | Handler cold | Handler warm | Diagnostics | Metadata requests/run |",
     "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
