@@ -1181,7 +1181,15 @@ SELECT * FROM ABC;`);
     });
 
     it("should validate COMMENT ON PROCEDURE", () => {
-      expectValid("COMMENT ON PROCEDURE MY_PROC IS 'Helper procedure';");
+      expectValid("COMMENT ON PROCEDURE MY_PROC() IS 'Helper procedure';");
+    });
+
+    it("should reject COMMENT ON PROCEDURE without a signature", () => {
+      // Live Netezza: found "IS" expecting '('.
+      expectErrorCode(
+        "COMMENT ON PROCEDURE MY_PROC IS 'Helper procedure';",
+        "NZS018",
+      );
     });
 
     it("should validate COMMENT ON PROCEDURE with empty parens", () => {

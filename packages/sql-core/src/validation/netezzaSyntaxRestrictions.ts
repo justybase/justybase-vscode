@@ -36,6 +36,11 @@ import type { ValidationError } from "./types";
  * - A wildcard select item cannot carry an alias; `SELECT * AS x` is rejected
  *   (live: found "AS" expecting a keyword); NZS017. `COUNT(*) AS x` and
  *   expression aliases such as `a * b AS x` stay accepted.
+ * - A procedure reference in DROP/COMMENT ON requires its argument-type
+ *   signature; `DROP PROCEDURE p;` is rejected (live: found ";" expecting
+ *   '(') and `COMMENT ON PROCEDURE p IS '...'` is rejected (live: found "IS"
+ *   expecting '('); NZS018. The parens may be empty. An unterminated
+ *   statement stays quiet so typing is not flagged before `(` is typed.
  */
 
 function errorAt(code: string, message: string, token: IToken): ValidationError {
@@ -568,6 +573,70 @@ export function detectNetezzaSyntaxRestrictions(
         ));
       }
     }
+  }
+
+  // DROP PROCEDURE / COMMENT ON PROCEDURE require the argument-type
+  // signature: live Netezza resolves a routine by name plus signature.
+  for (let index = 0; index < tokens.length; index += 1) {
+    let procIdx = -1;
+    if (
+      tokenName(tokens[index]) === "Drop" &&
+      tokenName(tokens[index + 1]) === "Procedure"
+    ) {
+      procIdx = index + 2;
+    } else if (
+      tokenName(tokens[index]) === "Comment" &&
+      tokenName(tokens[index + 1]) === "On" &&
+      tokenName(tokens[index + 2]) === "Procedure"
+    ) {
+      procIdx = index + 3;
+    }
+    if (procIdx === -1) continue;
+    // Optional leading IF EXISTS (accepted positionally here; placement is
+    // validated by the NZS004 rule) and the qualified routine name.
+    if (
+      tokenName(tokens[procIdx]) === "If" &&
+      tokenName(tokens[procIdx + 1]) === "Exists"
+    ) {
+      procIdx += 2;
+    }
+    let scan = procIdx;
+    // Qualified names may use keywords (e.g. TESTDB.PUBLIC.P_COMMENT):
+    // anything except structural tokens counts as part of the routine name.
+    const nameTerminator = new Set([
+      "LParen",
+      "RParen",
+      "Semicolon",
+      "Comma",
+      "Is",
+      "If",
+      "Exists",
+      "StringLiteral",
+    ]);
+    while (
+      scan < tokens.length &&
+      !nameTerminator.has(tokenName(tokens[scan]) ?? "")
+    ) {
+      scan += 1;
+    }
+    if (scan === procIdx) continue;
+    if (tokenName(tokens[scan]) === "LParen") continue;
+    // Unterminated input stays quiet: the signature may still be typed.
+    let end = scan;
+    while (
+      end < tokens.length &&
+      tokenName(tokens[end]) !== "Semicolon"
+    ) {
+      end += 1;
+    }
+    if (end >= tokens.length) continue;
+    errors.push(
+      errorAt(
+        "NZS018",
+        "Netezza identifies a procedure by name plus its argument-type signature; add parentheses, e.g. `MY_PROC()`.",
+        tokens[scan],
+      ),
+    );
   }
 
   return errors;

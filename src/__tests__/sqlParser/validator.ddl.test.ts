@@ -352,7 +352,16 @@ FROM TESTDB..EMPLOYEES d;`);
     });
 
     it("should validate DROP PROCEDURE", () => {
-      expectValid("DROP PROCEDURE MY_PROC;");
+      expectValid("DROP PROCEDURE MY_PROC();");
+    });
+
+    it("should reject DROP PROCEDURE without a signature", () => {
+      // Live Netezza: found ";" expecting '('.
+      expectErrorCode("DROP PROCEDURE MY_PROC;", "NZS018");
+    });
+
+    it("should stay quiet for unterminated DROP PROCEDURE while typing", () => {
+      expectValid("DROP PROCEDURE my_proc");
     });
 
     it("should validate DROP DATABASE", () => {
