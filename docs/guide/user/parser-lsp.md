@@ -118,3 +118,4 @@ Netezza is the reference parser and includes NZPLSQL analysis, broad identifier 
 - If a valid vendor extension is underlined, check the selected dialect and report a focused SQL example; do not disable all diagnostics first.
 - If coloring disappears after a syntax error, repair the first parser error. Strict semantic coloring intentionally avoids cascading guesses.
 - For large scripts, the fast statement-splitting threshold is controlled by `justybase.sqlParser.fastPathThreshold`.
+- Automatic diagnostics stop above `150,000` characters or `3,000` lines. Run **Validate SQL (Chevrotain Parser)** (`Ctrl+Alt+V`) to force a full parse and publish the findings to the Problems panel.

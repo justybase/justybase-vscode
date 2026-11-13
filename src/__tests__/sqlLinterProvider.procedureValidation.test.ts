@@ -292,4 +292,89 @@ END_PROC;
         expect(diagnosticCollection.set).not.toHaveBeenCalled();
         lintSqlSpy.mockRestore();
     });
+
+    it('publishes validator diagnostics with a base offset and source', () => {
+        const document = {
+            uri: { toString: () => 'file:///publish.sql' },
+            version: 1,
+            languageId: 'sql',
+            getText: jest.fn(() => 'SELECT FROM T;'),
+            positionAt: jest.fn((offset: number) => new vscode.Position(0, offset))
+        } as unknown as vscode.TextDocument;
+        const diagnosticCollection = (
+            provider as unknown as { diagnosticCollection: { set: jest.Mock } }
+        ).diagnosticCollection;
+
+        provider.publishValidationErrors(document, [{
+            code: 'SQL003',
+            message: 'Syntax error',
+            severity: 'error',
+            position: {
+                offset: 0,
+                startLine: 1,
+                startColumn: 1,
+                endLine: 1,
+                endColumn: 2
+            }
+        }], { baseOffset: 7, source: 'Netezza Parser (selection)' });
+
+        const diagnostics = diagnosticCollection.set.mock.calls[0][1] as vscode.Diagnostic[];
+        expect(diagnostics[0].source).toBe('Netezza Parser (selection)');
+        expect(diagnostics[0].message).toBe('SQL003: Syntax error');
+        expect(diagnostics[0].range.start.character).toBe(7);
+    });
+
+    it('runs an explicitly requested on-demand lint even when automatic linting is disabled', async () => {
+        const document = {
+            uri: { toString: () => 'file:///disabled.sql' },
+            version: 1,
+            languageId: 'sql',
+            lineCount: 1,
+            getText: jest.fn(() => 'SELECT 1;'),
+            positionAt: jest.fn((offset: number) => new vscode.Position(0, offset))
+        } as unknown as vscode.TextDocument;
+
+        (vscode.workspace as unknown as { textDocuments: vscode.TextDocument[] }).textDocuments = [document];
+        (vscode.workspace.getConfiguration as jest.Mock).mockReturnValueOnce({
+            get: jest.fn((key: string, defaultValue?: unknown) =>
+                key === 'enabled' ? false : defaultValue
+            )
+        });
+
+        const lintSqlSpy = jest.spyOn(provider, 'lintSql').mockResolvedValue([]);
+
+        await provider.lintDocument(document, true);
+
+        expect(lintSqlSpy).toHaveBeenCalled();
+        lintSqlSpy.mockRestore();
+    });
+
+    it('clears on-demand diagnostics when a skipped large document changes', () => {
+        const largeText = 'x'.repeat(1_000);
+        const document = {
+            uri: { toString: () => 'file:///large-change.sql' },
+            version: 1,
+            languageId: 'sql',
+            lineCount: 1_000,
+            getText: jest.fn(() => largeText),
+            positionAt: jest.fn((offset: number) => new vscode.Position(0, offset))
+        } as unknown as vscode.TextDocument;
+
+        (vscode.workspace as unknown as { textDocuments: vscode.TextDocument[] }).textDocuments = [document];
+        provider.activate({ subscriptions: [] } as unknown as vscode.ExtensionContext);
+
+        const changeHandler = (vscode.workspace.onDidChangeTextDocument as jest.Mock).mock.calls
+            .find(call => typeof call[0] === 'function')?.[0] as
+            | ((event: { document: vscode.TextDocument }) => void)
+            | undefined;
+        expect(changeHandler).toBeDefined();
+
+        const diagnosticCollection = (
+            provider as unknown as { diagnosticCollection: { delete: jest.Mock } }
+        ).diagnosticCollection;
+
+        changeHandler?.({ document });
+
+        expect(diagnosticCollection.delete).toHaveBeenCalledWith(document.uri);
+    });
 });

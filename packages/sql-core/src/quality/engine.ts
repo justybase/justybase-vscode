@@ -2,6 +2,8 @@ import type { DatabaseSqlLintIssue, DatabaseSqlQualityRule } from "@justybase/co
 import { NetezzaSqlSemanticValidator } from "../validation/semanticValidator";
 import type { ValidationError } from "../validation/types";
 import {
+  beginProcedureFallbackEvaluation,
+  endProcedureFallbackEvaluation,
   netezzaProcedureQualityRules,
   netezzaSqlQualityRules,
   parserOwnedNetezzaQualityRuleIds,
@@ -94,22 +96,28 @@ export class QualityEngineCore<
         .map((diagnostic) => this.toLintIssue(diagnostic))
       : [];
     const includeProcedureRules = /\bCREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b/i.test(sql);
-    const qualityIssues = this.rules
-      .filter((rule) => !parserOwnedNetezzaQualityRuleIds.has(rule.id))
-      .filter((rule) => includeProcedureRules || rule.id === "NZP012" || !rule.id.startsWith("NZP"))
-      .filter((rule) => options.includeOnDemandRules || !rule.onDemandOnly)
-      .flatMap((rule) => {
-        const configured = options.rulesConfig?.[rule.id];
-        if (configured === "off") return [];
-        const severity = configured ? parseQualitySeverity(configured) : rule.defaultSeverity;
-        if (severity === null) return [];
-        return rule.check(sql).map((candidate) => ({ ...candidate, severity }));
-      });
 
-    return {
-      parserResult,
-      issues: [...parserIssues, ...qualityIssues].sort(compareIssues),
-    };
+    beginProcedureFallbackEvaluation();
+    try {
+      const qualityIssues = this.rules
+        .filter((rule) => !parserOwnedNetezzaQualityRuleIds.has(rule.id))
+        .filter((rule) => includeProcedureRules || rule.id === "NZP012" || !rule.id.startsWith("NZP"))
+        .filter((rule) => options.includeOnDemandRules || !rule.onDemandOnly)
+        .flatMap((rule) => {
+          const configured = options.rulesConfig?.[rule.id];
+          if (configured === "off") return [];
+          const severity = configured ? parseQualitySeverity(configured) : rule.defaultSeverity;
+          if (severity === null) return [];
+          return rule.check(sql).map((candidate) => ({ ...candidate, severity }));
+        });
+
+      return {
+        parserResult,
+        issues: [...parserIssues, ...qualityIssues].sort(compareIssues),
+      };
+    } finally {
+      endProcedureFallbackEvaluation();
+    }
   }
 
   private isParserDiagnosticEnabled(

@@ -33,8 +33,17 @@ import {
 import { isSqlAuthoringLanguageId } from "../utils/sqlLanguage";
 import { Logger } from "../utils/logger";
 import { getUxPerfSession } from "../services/perf/uxPerfSession";
+import type { ValidationError } from "../sqlParser";
 
 type LinterMode = "advanced";
+
+/** Options for publishing validator diagnostics outside the automatic lint pass. */
+export interface PublishValidationOptions {
+  /** Offset added to every issue (used for selection-relative results). */
+  baseOffset?: number;
+  /** Diagnostic source shown in the Problems panel. */
+  source?: string;
+}
 
 /**
  * SQL Linter Provider
@@ -108,6 +117,12 @@ export class SqlLinterProvider {
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (this.shouldRunExtensionHostLint(event.document)) {
           this.scheduleLint(event.document);
+        } else if (this.shouldLint(event.document)) {
+          // Automatic lint is skipped for this document (large script with a
+          // running LSP). Drop on-demand diagnostics so they cannot outlive
+          // the content they were produced for.
+          this.diagnosticCollection.delete(event.document.uri);
+          this.clearCacheForUri(event.document.uri);
         }
       }),
     );
@@ -229,8 +244,9 @@ export class SqlLinterProvider {
 
     const config = this.getConfig();
 
-    // If linter is disabled, clear diagnostics
-    if (!config.enabled) {
+    // If the linter is disabled, clear automatic diagnostics. An explicit
+    // on-demand run still has to work: the user intentionally asked for it.
+    if (!config.enabled && !onDemand) {
       this.diagnosticCollection.delete(document.uri);
       this.clearCacheForUri(document.uri);
       return [];
@@ -433,15 +449,83 @@ export class SqlLinterProvider {
   }
 
   /**
+   * Publish parser diagnostics produced outside the automatic lint pass.
+   *
+   * Used by the explicit "Validate SQL" command, including selection-only
+   * validation where every offset is relative to the selection start.
+   */
+  public publishValidationErrors(
+    document: vscode.TextDocument,
+    errors: readonly ValidationError[],
+    options: PublishValidationOptions = {},
+  ): void {
+    // An explicit validation result must not be overwritten by a pending
+    // automatic lint pass for the same document version.
+    const key = document.uri.toString();
+    const pendingLint = this.lintTimers.get(key);
+    if (pendingLint) {
+      clearTimeout(pendingLint);
+      this.lintTimers.delete(key);
+    }
+
+    this.diagnosticCollection.set(
+      document.uri,
+      this.issuesToDiagnostics(
+        document,
+        errors.map((error) => this.toLintIssue(error)),
+        options,
+      ),
+    );
+  }
+
+  private toLintIssue(error: ValidationError): LintIssue {
+    const span =
+      error.position.endLine === error.position.startLine
+        ? Math.max(
+            1,
+            error.position.endColumn - error.position.startColumn,
+          )
+        : 1;
+    return {
+      ruleId: error.code,
+      message: `${error.code}: ${error.message}`,
+      severity:
+        error.severity === "error"
+          ? vscode.DiagnosticSeverity.Error
+          : error.severity === "warning"
+            ? vscode.DiagnosticSeverity.Warning
+            : error.severity === "information"
+              ? vscode.DiagnosticSeverity.Information
+              : vscode.DiagnosticSeverity.Hint,
+      startOffset: error.position.offset,
+      endOffset: error.position.offset + span,
+      suggestedFix: error.suggestedFix,
+    };
+  }
+
+  /**
    * Convert lint issues to VS Code diagnostics
    */
   private issuesToDiagnostics(
     document: vscode.TextDocument,
     issues: LintIssue[],
+    options: PublishValidationOptions = {},
   ): vscode.Diagnostic[] {
+    const baseOffset = options.baseOffset ?? 0;
+    const source = options.source ?? "Netezza Quality";
+    const textLength = document.getText().length;
+
     return issues.map((issue) => {
-      const startPos = document.positionAt(issue.startOffset);
-      const endPos = document.positionAt(issue.endOffset);
+      const startOffset = Math.min(
+        Math.max(0, issue.startOffset + baseOffset),
+        textLength,
+      );
+      const endOffset = Math.min(
+        Math.max(startOffset, issue.endOffset + baseOffset),
+        textLength,
+      );
+      const startPos = document.positionAt(startOffset);
+      const endPos = document.positionAt(endOffset);
       const range = new vscode.Range(startPos, endPos);
 
       const diagnostic = new vscode.Diagnostic(
@@ -449,7 +533,7 @@ export class SqlLinterProvider {
         issue.message,
         issue.severity,
       );
-      diagnostic.source = "Netezza Quality";
+      diagnostic.source = source;
       diagnostic.code = issue.ruleId;
       if (issue.suggestedFix) {
         (diagnostic as unknown as { data?: { suggestedFix: string } }).data = {

@@ -215,6 +215,39 @@ procedure contract checks run automatically; style and heuristic NZP rules such 
 handler, naming conventions, transaction-control advice, missing `EXECUTE AS`, and VARRAY advice are
 available only in on-demand linting.
 
+### Large scripts and forced parser validation
+
+Automatic diagnostics are intentionally skipped for very large scripts:
+
+- the SQL language server does not publish parser diagnostics above `150,000` characters or `3,000` lines;
+- the extension-host linter skips automatic quality lint above `500` lines or `150,000` characters while the LSP is running.
+
+`Validate SQL (Chevrotain Parser)` is the explicit override. It validates the whole document (or the
+current selection) in the extension host and publishes the findings to the Problems panel under
+`Netezza Parser (on demand)` (or `Netezza Parser (selection)` for a partial selection). The command
+shows a progress notification while the synchronous parse is running; large scripts can block the
+extension host for a few seconds, which is why this path is never used automatically.
+
+`Lint SQL (On-Demand)` remains the separate command for NZ/NZP quality rules. Procedure fallback
+parsing is cached for one quality-rule evaluation so a procedure is not parsed once per migrated NZP
+rule.
+
+Local benchmark results (`npm run benchmark:large-script`) for a realistic NZPLSQL procedure:
+
+| Size | Parse + validate | 60fps frames blocked |
+|---|---:|---:|
+| 3k lines / 84k chars | ~0.6 s | ~38 |
+| 5k lines / 140k chars | ~1.0 s | ~59 |
+| 10k lines / 281k chars | ~2.1-3.0 s | ~128-178 |
+| 15k lines / 422k chars | ~3.2 s | ~194 |
+
+The default limits stay at `150,000` characters / `3,000` lines deliberately. Raising them to cover
+10k lines would make the single-threaded language server spend seconds validating after every typing
+pause and would delay completion/hover for the same duration. A modest raise of only the line limit
+to `5,000` is defensible (about one second at 140k characters, after the two-second large-script
+debounce), but it should be treated as an opt-in trade-off rather than the default. Scripts above
+the defaults should use the explicit `Validate SQL` command.
+
 ### Parser-Based Symbol Rename
 
 The advanced parser model also powers SQL **Rename Symbol** (`F2`) for local SQL symbols:

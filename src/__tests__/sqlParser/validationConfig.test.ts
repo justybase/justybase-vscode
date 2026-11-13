@@ -7,6 +7,7 @@ import {
   HUGE_SCRIPT_LINE_THRESHOLD,
   isLargeScript,
   isLargeScriptDocument,
+  isLspDiagnosticsSkipExceeded,
   LARGE_SCRIPT_CHAR_THRESHOLD,
   LARGE_SCRIPT_LINE_THRESHOLD,
   LSP_LARGE_DIAGNOSTICS_LINE_THRESHOLD,
@@ -26,5 +27,12 @@ describe('validationConfig large-script thresholds', () => {
     expect(LSP_LARGE_DIAGNOSTICS_LINE_THRESHOLD).toBe(1500);
     expect(HUGE_SCRIPT_LINE_THRESHOLD).toBe(3000);
     expect(LSP_LARGE_DIAGNOSTICS_LINE_THRESHOLD).toBeLessThan(HUGE_SCRIPT_LINE_THRESHOLD);
+  });
+
+  it('identifies documents the LSP will not validate automatically', () => {
+    expect(isLspDiagnosticsSkipExceeded(HUGE_SCRIPT_LINE_THRESHOLD, 1)).toBe(false);
+    expect(isLspDiagnosticsSkipExceeded(HUGE_SCRIPT_LINE_THRESHOLD + 1, 1)).toBe(true);
+    expect(isLspDiagnosticsSkipExceeded(1, LARGE_SCRIPT_CHAR_THRESHOLD)).toBe(false);
+    expect(isLspDiagnosticsSkipExceeded(1, LARGE_SCRIPT_CHAR_THRESHOLD + 1)).toBe(true);
   });
 });

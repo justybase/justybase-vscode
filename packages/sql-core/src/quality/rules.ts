@@ -530,6 +530,29 @@ const PROCEDURE_REGEX_FALLBACK_RULES = new Set([
   "NZP017", "NZP022", "NZP024",
 ]);
 
+interface ProcedureFallbackCacheEntry {
+  sql: string;
+  useFallback: boolean;
+}
+
+let procedureFallbackCache: ProcedureFallbackCacheEntry | undefined;
+
+/**
+ * Reset the procedure fallback parse cache for one quality-rule evaluation.
+ *
+ * Several migrated NZP rules need the same "did the CST parse cleanly?"
+ * answer. Parsing the full procedure once per rule is prohibitively expensive
+ * for large scripts, so the result is shared for the duration of a single
+ * `QualityEngineCore.analyzeWithOptions` call.
+ */
+export function beginProcedureFallbackEvaluation(): void {
+  procedureFallbackCache = undefined;
+}
+
+export function endProcedureFallbackEvaluation(): void {
+  procedureFallbackCache = undefined;
+}
+
 interface ProcedureBody {
   body: string;
   startOffset: number;
@@ -567,14 +590,22 @@ function extractProcedureBody(sql: string): ProcedureBody | undefined {
 
 function shouldUseProcedureRegexFallback(sql: string, ruleId: string): boolean {
   if (!PROCEDURE_REGEX_FALLBACK_RULES.has(ruleId)) return true;
+  if (procedureFallbackCache?.sql === sql) {
+    return procedureFallbackCache.useFallback;
+  }
+
+  let useFallback: boolean;
   try {
     const parsed = parseNetezzaSqlStatements({ sql });
-    return parsed.cst === undefined
+    useFallback = parsed.cst === undefined
       || parsed.lexResult.errors.length > 0
       || parsed.actionableParserErrors.length > 0;
   } catch {
-    return true;
+    useFallback = true;
   }
+
+  procedureFallbackCache = { sql, useFallback };
+  return useFallback;
 }
 
 function parenthesisDepthBefore(sql: string, offset: number): number {

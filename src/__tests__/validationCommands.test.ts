@@ -1,6 +1,6 @@
 /**
  * Unit tests for commands/validationCommands.ts
- * Tests SQL validation command registration and helper functions
+ * Tests SQL validation command registration and parser diagnostic publishing
  */
 
 import * as vscode from 'vscode';
@@ -13,11 +13,12 @@ import {
 const mockLinter = {
     lintDocument: jest.fn().mockResolvedValue([]),
     lintSql: jest.fn().mockResolvedValue([]),
+    publishValidationErrors: jest.fn(),
     clearDiagnostics: jest.fn(),
     clearAllDiagnostics: jest.fn()
 };
 
-const isSqlLanguageClientRunningMock = jest.fn(() => true);
+const validateMock = jest.fn();
 
 // Mock vscode module
 jest.mock('vscode', () => ({
@@ -29,7 +30,17 @@ jest.mock('vscode', () => ({
         activeTextEditor: undefined,
         showErrorMessage: jest.fn(),
         showWarningMessage: jest.fn(),
-        showInformationMessage: jest.fn()
+        showInformationMessage: jest.fn(),
+        withProgress: jest.fn(async (_options, task) => task(
+            { report: jest.fn() },
+            {
+                isCancellationRequested: false,
+                onCancellationRequested: jest.fn(() => ({ dispose: jest.fn() }))
+            }
+        ))
+    },
+    ProgressLocation: {
+        Notification: 15
     },
     workspace: {
         onDidCloseTextDocument: jest.fn(() => ({ dispose: jest.fn() }))
@@ -61,23 +72,30 @@ jest.mock('vscode', () => ({
     }
 }));
 
-// Mock SqlValidator
 jest.mock('../sqlParser', () => ({
     SqlValidator: jest.fn().mockImplementation(() => ({
-        validate: jest.fn().mockReturnValue({
-            errors: [],
-            warnings: []
-        })
+        validate: validateMock
     })),
     ValidationError: {}
 }));
 
-// Mock metadataCacheAdapter
+jest.mock('../sqlParser/sqlCoreBackedValidator', () => ({
+    SqlCoreBackedValidator: jest.fn().mockImplementation(() => ({
+        validate: validateMock
+    }))
+}));
+
 jest.mock('../sqlParser/metadataCacheAdapter', () => ({
     createMetadataCacheSchemaProvider: jest.fn()
 }));
 
-// Mock logger
+jest.mock('../core/connectionFactory', () => ({
+    getDatabaseSqlAuthoring: jest.fn(() => ({
+        validation: {},
+        qualityRules: []
+    }))
+}));
+
 jest.mock('../utils/logger', () => ({
     getLogger: jest.fn(() => ({
         info: jest.fn(),
@@ -85,13 +103,8 @@ jest.mock('../utils/logger', () => ({
     }))
 }));
 
-// Mock sqlLinterProvider
 jest.mock('../providers/sqlLinterProvider', () => ({
     getSqlLinter: jest.fn(() => mockLinter)
-}));
-
-jest.mock('../activation/lspRegistration', () => ({
-    isSqlLanguageClientRunning: () => isSqlLanguageClientRunningMock()
 }));
 
 jest.mock('../compatibility/configuration', () => ({
@@ -100,9 +113,45 @@ jest.mock('../compatibility/configuration', () => ({
     }))
 }));
 
+function makeDocument(text: string): vscode.TextDocument {
+    return {
+        uri: { toString: () => 'file:///validate.sql' },
+        languageId: 'sql',
+        version: 1,
+        lineCount: text.split('\n').length,
+        getText: jest.fn((range?: vscode.Range) => {
+            if (!range) {
+                return text;
+            }
+            return text.slice(range.start.character, range.end.character);
+        }),
+        positionAt: jest.fn((offset: number) => ({ line: 0, character: offset })),
+        offsetAt: jest.fn((position: vscode.Position) => position.character)
+    } as unknown as vscode.TextDocument;
+}
+
+function getValidateHandler(): () => Promise<void> {
+    registerValidationCommands();
+    return (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+        call => call[0] === 'netezza.validateSelectedSql'
+    )?.[1] as () => Promise<void>;
+}
+
+function makeValidationResult(errors: unknown[] = []): unknown {
+    return {
+        valid: errors.length === 0,
+        errors,
+        warnings: [],
+        scope: { tables: new Map(), ctes: new Map(), level: 0 }
+    };
+}
+
 describe('commands/validationCommands', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        validateMock.mockReset();
+        validateMock.mockReturnValue(makeValidationResult());
+        mockLinter.publishValidationErrors.mockReset();
     });
 
     describe('registerValidationCommands', () => {
@@ -148,11 +197,7 @@ describe('commands/validationCommands', () => {
 
     describe('validateSelectedSql command handler', () => {
         it('should show warning when no active editor', async () => {
-            registerValidationCommands();
-
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                call => call[0] === 'netezza.validateSelectedSql'
-            )?.[1];
+            const handler = getValidateHandler();
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = undefined;
@@ -162,11 +207,7 @@ describe('commands/validationCommands', () => {
         });
 
         it('should show warning for non-SQL files', async () => {
-            registerValidationCommands();
-
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                call => call[0] === 'netezza.validateSelectedSql'
-            )?.[1];
+            const handler = getValidateHandler();
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = {
@@ -184,18 +225,11 @@ describe('commands/validationCommands', () => {
         });
 
         it('should show warning for empty SQL', async () => {
-            registerValidationCommands();
-
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                call => call[0] === 'netezza.validateSelectedSql'
-            )?.[1];
+            const handler = getValidateHandler();
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = {
-                document: {
-                    languageId: 'sql',
-                    getText: jest.fn().mockReturnValue('   ')
-                },
+                document: makeDocument('   '),
                 selection: { isEmpty: true }
             };
             await handler();
@@ -203,50 +237,110 @@ describe('commands/validationCommands', () => {
             expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No SQL code to validate');
         });
 
-        it('should summarize whole-document validation from linter without parser revalidate when LSP is active', async () => {
-            registerValidationCommands();
-            isSqlLanguageClientRunningMock.mockReturnValue(true);
-            mockLinter.lintDocument.mockResolvedValue([
+        it('publishes whole-document parser findings to Problems', async () => {
+            const document = makeDocument('SELECT FROM T;');
+            validateMock.mockReturnValue(makeValidationResult([
                 {
-                    ruleId: 'NZ001',
-                    message: 'Avoid SELECT *',
-                    severity: vscode.DiagnosticSeverity.Warning,
-                    startOffset: 0,
-                    endOffset: 8
+                    code: 'SQL003',
+                    message: 'Syntax error',
+                    severity: 'error',
+                    position: {
+                        offset: 7,
+                        startLine: 1,
+                        startColumn: 8,
+                        endLine: 1,
+                        endColumn: 9
+                    }
                 }
-            ]);
+            ]));
 
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                call => call[0] === 'netezza.validateSelectedSql'
-            )?.[1];
-
+            const handler = getValidateHandler();
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = {
-                document: {
-                    languageId: 'sql',
-                    uri: { toString: () => 'file:///validate.sql' },
-                    getText: jest.fn().mockReturnValue('SELECT * FROM T1;')
-                },
+                document,
                 selection: { isEmpty: true }
             };
             await handler();
 
-            expect(mockLinter.lintDocument).toHaveBeenCalledWith(
-                expect.objectContaining({ languageId: 'sql' }),
-                true
+            expect(validateMock).toHaveBeenCalledWith('SELECT FROM T;');
+            expect(mockLinter.publishValidationErrors).toHaveBeenCalledWith(
+                document,
+                [expect.objectContaining({ code: 'SQL003' })],
+                { baseOffset: 0, source: 'Netezza Parser (on demand)' }
             );
-            expect(mockLinter.lintSql).not.toHaveBeenCalled();
-            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-                expect.stringMatching(/parser diagnostics \(if any\) are in the Problems panel \(LSP\)/i)
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+                expect.stringMatching(/found 1 error/i)
+            );
+            expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+                'workbench.actions.view.problems'
             );
         });
 
-        it('should accept MSSQL files as supported SQL documents', async () => {
-            registerValidationCommands();
+        it('publishes selection-relative findings with an absolute offset', async () => {
+            const text = 'SELECT FROM T;';
+            const document = makeDocument(text);
+            const selection = {
+                isEmpty: false,
+                start: { line: 0, character: 7 },
+                end: { line: 0, character: 12 }
+            };
+            validateMock.mockReturnValue(makeValidationResult([
+                {
+                    code: 'SQL003',
+                    message: 'Syntax error',
+                    severity: 'error',
+                    position: {
+                        offset: 0,
+                        startLine: 1,
+                        startColumn: 1,
+                        endLine: 1,
+                        endColumn: 2
+                    }
+                }
+            ]));
 
-            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
-                call => call[0] === 'netezza.validateSelectedSql'
-            )?.[1];
+            const handler = getValidateHandler();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = { document, selection };
+            await handler();
+
+            expect(document.getText).toHaveBeenCalledWith(selection);
+            expect(mockLinter.publishValidationErrors).toHaveBeenCalledWith(
+                document,
+                [expect.objectContaining({ code: 'SQL003' })],
+                { baseOffset: 7, source: 'Netezza Parser (selection)' }
+            );
+        });
+
+        it('treats a full-document selection as whole-document validation', async () => {
+            const text = 'SELECT FROM T;';
+            const document = makeDocument(text);
+            const selection = {
+                isEmpty: false,
+                start: { line: 0, character: 0 },
+                end: { line: 0, character: text.length }
+            };
+
+            const handler = getValidateHandler();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = { document, selection };
+            await handler();
+
+            expect(mockLinter.publishValidationErrors).toHaveBeenCalledWith(
+                document,
+                [],
+                { baseOffset: 0, source: 'Netezza Parser (on demand)' }
+            );
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                'SQL validation passed! No errors or warnings found.'
+            );
+            expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+                'workbench.actions.view.problems'
+            );
+        });
+
+        it('accepts MSSQL files as supported SQL documents', async () => {
+            const handler = getValidateHandler();
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (vscode.window as any).activeTextEditor = {
@@ -317,13 +411,10 @@ describe('commands/validationCommands', () => {
     });
 
     describe('getInitializedSqlValidator', () => {
-        it('should return undefined when not initialized', () => {
-            // Reset the module to clear the validator instance
-            jest.resetModules();
-            
-            // Re-import to get fresh state - the validator should be undefined
-            // Note: Due to module caching, this test verifies the function exists
-            expect(typeof getInitializedSqlValidator).toBe('function');
+        it('creates a document-scoped validator after initialization', () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            initializeSqlValidator({} as any, {} as any);
+            expect(getInitializedSqlValidator('file:///unknown.sql')).toBeDefined();
         });
     });
 });

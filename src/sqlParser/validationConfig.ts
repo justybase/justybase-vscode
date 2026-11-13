@@ -26,6 +26,24 @@ export function isLargeScript(textLength: number): boolean {
   return textLength > LARGE_SCRIPT_CHAR_THRESHOLD;
 }
 
+/**
+ * True when automatic LSP diagnostics are skipped for this document.
+ *
+ * The language server intentionally returns an empty diagnostic list above
+ * these limits to avoid multi-second work on every edit. An explicit,
+ * user-triggered validation must bypass this check instead of pretending the
+ * LSP already published parser diagnostics.
+ */
+export function isLspDiagnosticsSkipExceeded(
+  lineCount: number,
+  textLength: number,
+): boolean {
+  return (
+    textLength > LARGE_SCRIPT_CHAR_THRESHOLD ||
+    lineCount > HUGE_SCRIPT_LINE_THRESHOLD
+  );
+}
+
 /** True when line count or char size indicates a heavy SQL script. */
 export function isLargeScriptDocument(
   lineCount: number,
