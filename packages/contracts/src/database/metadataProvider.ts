@@ -129,3 +129,41 @@ export interface DatabaseMetadataProvider {
   /** Read-only database-wide report (lock waits, invalid objects), run as-is in SQL Results. */
   buildDatabaseReportQuery?(database: string, report: DatabaseReportKind): string | undefined;
 }
+
+/** Portable metadata tree/listing shapes shared by runtime adapters and UI. */
+export interface MetadataDatabase { name: string; }
+export interface MetadataSchema { name: string; database: string; }
+export interface MetadataObject {
+  name: string;
+  schema?: string;
+  database?: string;
+  objectType?: string;
+  description?: string;
+  /** Source SQL for a view, when the provider can expose it cheaply. */
+  viewSql?: string;
+}
+export interface MetadataColumn {
+  name: string;
+  type?: string;
+  description?: string;
+  isPk?: boolean;
+  isFk?: boolean;
+}
+
+export type SchemaNodeKind = 'connection' | 'database' | 'schema' | 'group' | 'object' | 'column' | 'cte';
+
+export interface SchemaTreeNode {
+  id: string;
+  parentId?: string;
+  kind: SchemaNodeKind;
+  label: string;
+  description?: string;
+  viewSql?: string;
+  database?: string;
+  schema?: string;
+  objectName?: string;
+  objectType?: string;
+  columnType?: string;
+  hasChildren: boolean;
+  isLoading?: boolean;
+}

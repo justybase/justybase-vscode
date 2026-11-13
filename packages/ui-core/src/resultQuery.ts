@@ -28,7 +28,7 @@ export function resolveUiResultColumnIndex(columns: readonly UiResultColumn[], k
   return -1;
 }
 
-/** Converts shared view state to the strict API query shape. */
+/** Converts shared view state to the strict query request shape. */
 export function toUiResultQueryOptions(
   columns: readonly UiResultColumn[],
   view: UiResultQueryView,

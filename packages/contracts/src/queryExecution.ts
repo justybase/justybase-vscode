@@ -1,5 +1,5 @@
 import type { DatabaseErrorDetails } from './databaseErrors';
-import type { QueryColumn } from './webApi';
+import type { QueryColumn } from './queryResults';
 
 export type Awaitable<T> = T | PromiseLike<T>;
 

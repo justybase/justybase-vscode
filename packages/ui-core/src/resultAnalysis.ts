@@ -17,7 +17,7 @@ function columnType(column: UiResultColumn | undefined): UiResultColumn {
   return column ? { ...column } : { name: 'Value' };
 }
 
-/** Maps the API aggregate DTO to the portable table consumed by renderers. */
+/** Maps the aggregate result DTO to the portable table consumed by renderers. */
 export function createAggregateAnalysisTable(
   columns: readonly UiResultColumn[],
   response: QueryAggregateResponse,
@@ -48,7 +48,7 @@ export function createAggregateAnalysisTable(
   };
 }
 
-/** Maps grouped API output without changing row values or decimal strings. */
+/** Maps grouped result output without changing row values or decimal strings. */
 export function createGroupAnalysisTable(response: QueryGroupResponse): UiResultAnalysisTable {
   const rows = response.rows.map(row => row.slice());
   const truncated = response.totalGroups > rows.length;

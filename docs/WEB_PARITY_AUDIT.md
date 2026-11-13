@@ -227,7 +227,7 @@ the React coverage gate in the quality roadmap.
 
 **Regression risk:** 🟢 **none to desktop** — this is `apps/web` + `apps/api` only. The one
 rule that applies is the shared-contracts additive rule: any new request/response types
-(`QueryAggregateRequest`, pivot spec) must **add** to `@justybase/contracts`/`webApi.ts`,
+(`QueryAggregateRequest`, pivot spec) must **add** to `@justybase/contracts`,
 never re-type existing fields.
 
 ### Architecture decision (updated 2026-09-12)
@@ -313,7 +313,7 @@ clearly labelled authoring-only and keep save/test/run/schema/DDL controls disab
 until an explicit server-side driver/runtime adapter, metadata provider, capability
 declarations and live contract are added.
 
-SQLite and DuckDB are already available in the web API for local profiles,
+SQLite and DuckDB were already available in the retired web API for local profiles,
 metadata, query sessions, paging, aggregation and grouping. The remaining work
 is parity polish (file-SQL workflows, capability-specific runtime gates, and
 controlled remote runtime adapters). Add remote execution only with explicit

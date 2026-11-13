@@ -131,7 +131,7 @@ builds.
 
 ### R2 — Runtime Pilot: SQLite, DuckDB, and the Netezza Boundary
 
-Status: closed (2026-09-08). The web API has an
+Status: closed (2026-09-08). The retired web API had an
 instance-scoped runtime registry, `@justybase/sqlite-runtime` shares a session
 with the desktop, `@justybase/duckdb-runtime` shares a session with the API
 and the DuckDB/File SQL companion, and `@justybase/netezza-runtime` is the

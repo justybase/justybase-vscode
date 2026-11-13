@@ -5,9 +5,8 @@
  *
  * - it never carries the driver's `raw` payload;
  * - {@link DatabaseErrorDetails.code} is the SQLSTATE reported by the database
- *   (for example `42P01`), never an API error code (`QUERY_FAILED`) or a
- *   transport code (`ECONNRESET`). Consumers must keep the two namespaces
- *   separate;
+ *   (for example `42P01`), never a product-level or transport error code
+ *   (for example `ECONNRESET`). Consumers must keep the namespaces separate;
  * - every field is optional so older producers and consumers stay compatible.
  *
  * Products populate it through the shared extractor in
@@ -15,7 +14,7 @@
  * errors can cross a bundle boundary where `instanceof` is unreliable.
  */
 export interface DatabaseErrorDetails {
-  /** SQLSTATE / backend error code, e.g. `42P01`. Not an API or transport code. */
+  /** SQLSTATE / backend error code, e.g. `42P01`. Not a product or transport code. */
   code?: string;
   /** Backend severity: `ERROR`, `FATAL`, `PANIC`, `WARNING`, `NOTICE`, `DEBUG`. */
   severity?: string;
