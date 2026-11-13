@@ -150,17 +150,45 @@ tools/local-ci/run.sh tests --base origin/master
 tools/local-ci/run.sh --clean tests
 ```
 
-## Stage 1 scope
+## Scope: Core releases only
 
-Intentionally not covered yet:
+The runner exists to rehearse a **Core Netezza extension** release. Optional
+companion extensions are not publishing targets here, even though a core
+release still executes the shared runtime suites.
 
-- live database integrations (DuckDB/File SQL/Access are planned for Stage 2,
-  and external Oracle/DB2/Snowflake/MSSQL/MySQL/ClickHouse/PostgreSQL/Vertica
-  servers are out of scope);
+Current stages:
+
+- `quality` — the offline gates from `ci.yml` (`docs`, `quality`);
+- `tests` — root unit/coverage plus completion parity, quick-fix, parser
+  budget, and the Extension Host result-panel gate;
+- `release-dry-run` — version resolution, build, Core VSIX packaging, and the
+  marketplace audit, without commit, tag, push, or publish.
+
+Stage 2 (planned) adds the local runtime integrations that a core release
+actually runs in `publish-marketplace.yml` → `integration-gate`:
+
+- `npm run build:access-file`;
+- `npm run test:duckdb:integration`;
+- `npm run test:file:integration`.
+
+The Access companion extension integration test is **not** part of a core
+release. `publish_access` defaults to `false`, so `integration-gate` skips both
+`Install Access extension dependencies` and `Run Access integration tests`. The
+pinned Access reference and the shared Access file package stay because the File
+SQL suite converts Access fixtures.
+
+Stage 3 (planned) adds core publishing: commit, tag, push, GitHub Release
+assets, Visual Studio Marketplace, and Open VSX. It stays dry-run by default.
+
+Intentionally out of scope:
+
+- optional companion extension packaging and publishing (Db2, DuckDB, Access,
+  Oracle, PostgreSQL, Vertica, MSSQL, MySQL, ClickHouse, Snowflake);
+- external database servers for live integration tests;
 - the Java Jackcess cross-check;
 - the informational TypeScript 7 compatibility job;
-- publishing to Visual Studio Marketplace or Open VSX, tagging, pushing, and
-  GitHub Releases (Stage 3);
+- the Playwright webview and data-grid performance harnesses (not part of a
+  core release);
 - Windows and macOS runner parity. By design every stage runs in the Linux
   container; the release dry run packages the VSIX with `vsce` on Linux. The
   GitHub workflow still builds the official package on Windows, so byte-for-byte
