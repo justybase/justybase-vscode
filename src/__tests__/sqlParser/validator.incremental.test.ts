@@ -116,8 +116,8 @@ ${commentSql}`;
         columns: ["EMPLOYEE_ID", "DEPARTMENT_ID"],
       },
     ]);
-    const sql = `CREATE TABLE TESTDB.PUBLIC.CTAS_RESULT AS (SELECT 1 AS A, 2 AS B);
-SELECT A, B FROM TESTDB.PUBLIC.CTAS_RESULT;`;
+    const sql = `CREATE TABLE TESTDB.\"PUBLIC\".CTAS_RESULT AS (SELECT 1 AS A, 2 AS B);
+SELECT A, B FROM TESTDB.\"PUBLIC\".CTAS_RESULT;`;
     const index = buildStatementIndex(sql);
     const validator = new SqlValidator(schemaProvider);
 
@@ -154,8 +154,8 @@ SELECT ID, NAME FROM MY_TEMP;`;
   });
 
   it("seeds script-created views for dirty statement validation", () => {
-    const sql = `CREATE VIEW TESTDB.PUBLIC.V1 AS SELECT 1 AS ID;
-SELECT ID FROM TESTDB.PUBLIC.V1;`;
+    const sql = `CREATE VIEW TESTDB.\"PUBLIC\".V1 AS SELECT 1 AS ID;
+SELECT ID FROM TESTDB.\"PUBLIC\".V1;`;
     const index = buildStatementIndex(sql);
     const validator = new SqlValidator(createMockSchemaProvider([]));
 
@@ -170,9 +170,9 @@ SELECT ID FROM TESTDB.PUBLIC.V1;`;
   });
 
   it("removes dropped script tables from scope seed for downstream validation", () => {
-    const sql = `CREATE TABLE TESTDB.PUBLIC.T1 AS (SELECT 1 AS ID);
-DROP TABLE TESTDB.PUBLIC.T1;
-SELECT ID FROM TESTDB.PUBLIC.T1;`;
+    const sql = `CREATE TABLE TESTDB.\"PUBLIC\".T1 AS (SELECT 1 AS ID);
+DROP TABLE TESTDB.\"PUBLIC\".T1;
+SELECT ID FROM TESTDB.\"PUBLIC\".T1;`;
     const index = buildStatementIndex(sql);
     const validator = new SqlValidator(createMockSchemaProvider([]));
 

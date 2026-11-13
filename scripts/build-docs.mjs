@@ -73,7 +73,7 @@ function getBuildProvenance() {
       ? `https://github.com/justybase/justybase-vscode/commit/${sourceCommit}`
       : 'https://github.com/justybase/justybase-vscode',
     workingTreeDirty,
-    generatedAt: new Date().toISOString(),
+    generatedAt: new Date().toISOString().slice(0, 10),
   };
 }
 

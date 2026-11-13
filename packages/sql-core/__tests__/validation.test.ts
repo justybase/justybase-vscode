@@ -29,7 +29,7 @@ describe("NetezzaSqlSemanticValidator", () => {
 
   it("owns type-aware semantic diagnostics and scope construction", () => {
     const result = new NetezzaSqlSemanticValidator(schema).validate(
-      "SELECT ORDER_ID FROM DB.PUBLIC.ORDERS WHERE ORDER_ID = '1' AND DESCRIPTION > 10",
+      "SELECT ORDER_ID FROM DB.\"PUBLIC\".ORDERS WHERE ORDER_ID = '1' AND DESCRIPTION > 10",
     );
 
     expect(result.valid).toBe(true);
@@ -59,7 +59,7 @@ describe("NetezzaSqlSemanticValidator", () => {
 
     expect(validator.validate("SELECT T.").errors).toEqual([]);
     expect(
-      validator.validate("SELECT T. FROM DB.PUBLIC.ORDERS T").errors,
+      validator.validate("SELECT T. FROM DB.\"PUBLIC\".ORDERS T").errors,
     ).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "PAR001" })]),
     );
@@ -115,8 +115,8 @@ describe("NetezzaSqlSemanticValidator", () => {
 DECLARE &TABLE_NAME = 'ORDERS';
 DECLARE &SUFFIX = '2026';
 DECLARE &SEARCHED = 'ACTIVE';
-SELECT NAME_&SUFFIX FROM DB.PUBLIC.ORDERS WHERE STATUS = &SEARCHED;
-SELECT * FROM DB.PUBLIC.&TABLE_NAME;
+SELECT NAME_&SUFFIX FROM DB.\"PUBLIC\".ORDERS WHERE STATUS = &SEARCHED;
+SELECT * FROM DB.\"PUBLIC\".&TABLE_NAME;
 CREATE TABLE STAGE_&SUFFIX (ID INT4);
 `);
 
@@ -127,7 +127,7 @@ CREATE TABLE STAGE_&SUFFIX (ID INT4);
 
   it("continues validating static references next to DECLARE macros", () => {
     const result = new NetezzaSqlSemanticValidator(schema).validate(
-      "DECLARE &TABLE_NAME = 'ORDERS'; SELECT MISSING FROM DB.PUBLIC.ORDERS;",
+      "DECLARE &TABLE_NAME = 'ORDERS'; SELECT MISSING FROM DB.\"PUBLIC\".ORDERS;",
     );
 
     expect(result.errors.map((error) => error.code)).toContain("SQL004");

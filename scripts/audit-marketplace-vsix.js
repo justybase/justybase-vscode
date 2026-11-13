@@ -389,7 +389,7 @@ const vsixFiles = readdirSync(inputDir)
 assert(vsixFiles.length > 0, `No VSIX files found in ${inputDir}`);
 
 const report = {
-  generatedAt: new Date().toISOString(),
+  generatedAt: new Date().toISOString().slice(0, 10),
   auditVersion: 3,
   artifacts: vsixFiles.map(file => inspectVsix(path.join(inputDir, file))),
 };

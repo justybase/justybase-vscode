@@ -383,7 +383,7 @@ END_PROC;`);
 
     it("should validate RETURNS REFTABLE(...)", () => {
       expectValid(`CREATE OR REPLACE PROCEDURE RT_PROC()
-RETURNS REFTABLE(TESTDB.PUBLIC.EMPLOYEES)
+RETURNS REFTABLE(TESTDB.\"PUBLIC\".EMPLOYEES)
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
 BEGIN
@@ -1003,7 +1003,7 @@ END_PROC;`);
 
     it("should validate RETURN REFTABLE", () => {
       expectValid(`CREATE OR REPLACE PROCEDURE RET_REFTABLE()
-RETURNS REFTABLE(TESTDB.PUBLIC.EMPLOYEES)
+RETURNS REFTABLE(TESTDB.\"PUBLIC\".EMPLOYEES)
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
 BEGIN
@@ -1549,7 +1549,7 @@ END_PROC;`);
   // ========================================================================
   describe("NZPLSQL advanced features", () => {
     it("should support AUTOCOMMIT ON blocks", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_AUTOCOMMIT()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_AUTOCOMMIT()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1561,7 +1561,7 @@ END_PROC;`);
     });
 
     it("should validate record field assignments (rec.field := ...)", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_REC_FIELD()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_REC_FIELD()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1575,7 +1575,7 @@ END_PROC;`);
     });
 
     it("should reject PERFORM (unsupported by NZPLSQL, verified live)", () => {
-      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_PERFORM()
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_PERFORM()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1587,7 +1587,7 @@ END_PROC;`);
     });
 
     it("should reject RAISE ERROR and RAISE WARNING (only DEBUG/NOTICE/EXCEPTION, verified live)", () => {
-      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_RAISE()
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_RAISE()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1600,7 +1600,7 @@ END_PROC;`);
     });
 
     it("should reject OUT/INOUT and named parameters (Netezza takes input types only, verified live)", () => {
-      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_MODES(
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_MODES(
     IN p_id INT4,
     OUT p_cnt INT4,
     INOUT p_flag BOOLEAN
@@ -1616,7 +1616,7 @@ END_PROC;`);
     });
 
     it("should validate VARRAY EXTEND method call", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_VARRAY()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_VARRAY()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1631,7 +1631,7 @@ END_PROC;`);
     });
 
     it("should reject WHEN SQLSTATE (only OTHERS/TRANSACTION_ABORTED, verified live)", () => {
-      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_EXC()
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_EXC()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1647,7 +1647,7 @@ END_PROC;`);
     });
 
     it("should validate CREATE PROCEDURE followed by COMMENT ON PROCEDURE", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_COMMENT()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_COMMENT()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1655,11 +1655,11 @@ BEGIN
     RETURN 1;
 END;
 END_PROC;
-COMMENT ON PROCEDURE TESTDB.PUBLIC.P_COMMENT() IS 'test procedure';`);
+COMMENT ON PROCEDURE TESTDB.\"PUBLIC\".P_COMMENT() IS 'test procedure';`);
     });
 
     it("should validate string-body procedure with RETURN via inner parse", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_STR()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_STR()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 'BEGIN
@@ -1668,7 +1668,7 @@ END;';`);
     });
 
     it("should report SQL037 as information for standalone SELECT without INTO in procedure", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_SELECT_NO_INTO()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_SELECT_NO_INTO()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1687,7 +1687,7 @@ END_PROC;`);
     });
 
     it("should not report SQL037 for SELECT with INTO in procedure", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_SELECT_INTO()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_SELECT_INTO()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1702,7 +1702,7 @@ END_PROC;`);
     });
 
     it("should not report SQL037 for INSERT INTO SELECT in procedure", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_INSERT_SELECT()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_INSERT_SELECT()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1716,7 +1716,7 @@ END_PROC;`);
     });
 
     it("should not report SQL037 for INSERT with CTE SELECT in procedure", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_INSERT_CTE()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_INSERT_CTE()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1733,7 +1733,7 @@ END_PROC;`);
     });
 
     it("should not report SQL037 for CTAS SELECT in procedure", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_CTAS()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_CTAS()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1748,7 +1748,7 @@ END_PROC;`);
     });
 
     it("should not report SQL037 for embedded SELECT in WHERE IN subquery", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_EMBED_SELECT()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_EMBED_SELECT()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1762,7 +1762,7 @@ END_PROC;`);
     });
 
     it("should not report SQL038 for string-body procedure missing RETURN (live-verified legal)", () => {
-      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_STR_BAD()
+      const result = validator.validate(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_STR_BAD()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 'BEGIN
@@ -1821,7 +1821,7 @@ END_PROC;`);
 
     it("should report SQL041 for string-body procedure CASE without END", () => {
       expectErrorCode(
-        `CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_STR_CASE_BAD()
+        `CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_STR_CASE_BAD()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 'BEGIN
@@ -1832,7 +1832,7 @@ END;';`,
     });
 
     it("should validate FOR loop with REVERSE range", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_REVERSE()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_REVERSE()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1848,7 +1848,7 @@ END_PROC;`);
     });
 
     it("should validate EXIT with label and WHEN condition", () => {
-      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_EXIT_LABEL()
+      expectValid(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_EXIT_LABEL()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1865,7 +1865,7 @@ END_PROC;`);
     });
 
     it("should reject EXCEPTION WHEN named exception (only OTHERS/TRANSACTION_ABORTED, verified live)", () => {
-      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_NAMED_EXC()
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_NAMED_EXC()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC
@@ -1879,7 +1879,7 @@ END_PROC;`);
     });
 
     it("should reject GOTO as unsupported NZPLSQL syntax", () => {
-      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.PUBLIC.P_GOTO()
+      expectSyntaxError(`CREATE OR REPLACE PROCEDURE TESTDB.\"PUBLIC\".P_GOTO()
 RETURNS INT4
 LANGUAGE NZPLSQL AS
 BEGIN_PROC

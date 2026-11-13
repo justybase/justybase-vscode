@@ -41,6 +41,18 @@ import type { ValidationError } from "./types";
  *   '(') and `COMMENT ON PROCEDURE p IS '...'` is rejected (live: found "IS"
  *   expecting '('); NZS018. The parens may be empty. An unterminated
  *   statement stays quiet so typing is not flagged before `(` is typed.
+ * - Unquoted PUBLIC is a keyword wherever Netezza expects an identifier
+ *   (relation, column, alias, schema, procedure, view, sequence, synonym);
+ *   NZS019. Live: found "PUBLIC" ... expecting an identifier found a keyword.
+ *   `DB."PUBLIC"`/`"PUBLIC".T` stay accepted, and GRANT/REVOKE grantees are
+ *   the only unquoted PUBLIC positions live accepts (`TO PUBLIC`,
+ *   `FROM PUBLIC`).
+ * - CREATE EXTERNAL TABLE ... SAMEAS requires a USING (...) clause; NZS020.
+ *   Live: found ";" ... expecting USING.
+ * - EXPLAIN supports only DELETE/INSERT/SELECT/UPDATE/WITH statements; NZS021.
+ *   Live: found "CREATE" ... expecting DELETE or INSERT or SELECT or UPDATE or WITH.
+ * - GRANT/REVOKE with an object class (TABLE, SCHEMA) require the role clause
+ *   immediately after the class; a relation/schema name is rejected (PAR003).
  */
 
 function errorAt(code: string, message: string, token: IToken): ValidationError {
@@ -157,6 +169,36 @@ export function detectNetezzaSyntaxRestrictions(
       }
       if (!hasSource || hasWhere) errors.push(errorAt("NZS009",
         "Netezza materialized views require a source relation and do not support a WHERE filter.", tokens[index]));
+    }
+    if (name === "Explain") {
+      let statementIndex = index + 1;
+      while (EXPLAIN_OPTIONS[tokenName(tokens[statementIndex]) ?? ""] === true) {
+        statementIndex += 1;
+      }
+      if (tokenName(tokens[statementIndex]) === "Create") {
+        errors.push(errorAt(
+          "NZS021",
+          "Netezza EXPLAIN supports only SELECT, INSERT, UPDATE, DELETE, or WITH statements.",
+          tokens[statementIndex],
+        ));
+      }
+    }
+    if (name === "Create" && tokenName(tokens[index + 1]) === "External"
+      && tokenName(tokens[index + 2]) === "Table") {
+      let sameAsIndex: number | undefined;
+      let hasUsing = false;
+      for (let scan = index + 3; scan < tokens.length && tokenName(tokens[scan]) !== "Semicolon"; scan++) {
+        const current = tokenName(tokens[scan]);
+        if (current === "SameAs") sameAsIndex = scan;
+        if (current === "Using") hasUsing = true;
+      }
+      if (sameAsIndex !== undefined && !hasUsing) {
+        errors.push(errorAt(
+          "NZS020",
+          "Netezza requires USING (...) after CREATE EXTERNAL TABLE ... SAMEAS.",
+          tokens[sameAsIndex],
+        ));
+      }
     }
     if (name === "Merge") {
       let depth = 0;
@@ -330,8 +372,9 @@ export function detectNetezzaSyntaxRestrictions(
         if (scanName === "Semicolon") break;
         if (tokens[scan].image.toUpperCase() !== "ON") continue;
         const next = tokens[scan + 2];
+        const objectClass = tokenName(tokens[scan + 1]);
         if (
-          tokenName(tokens[scan + 1]) === "Table" &&
+          (objectClass === "Table" || objectClass === "Schema") &&
           next !== undefined &&
           tokenName(next) !== "Semicolon" &&
           next.image.toUpperCase() !== roleClause
@@ -339,7 +382,7 @@ export function detectNetezzaSyntaxRestrictions(
           errors.push(
             errorAt(
               "PAR003",
-              `Expected ${roleClause} after the object class 'TABLE'.`,
+              `Expected ${roleClause} after the object class '${tokens[scan + 1].image.toUpperCase()}'.`,
               next,
             ),
           );
@@ -601,8 +644,10 @@ export function detectNetezzaSyntaxRestrictions(
       procIdx += 2;
     }
     let scan = procIdx;
-    // Qualified names may use keywords (e.g. TESTDB.PUBLIC.P_COMMENT):
-    // anything except structural tokens counts as part of the routine name.
+    // The permissive grammar accepts keyword tokens in a qualified routine
+    // name (e.g. TESTDB.PUBLIC.P_COMMENT); unquoted PUBLIC is still reported
+    // separately by NZS019 because Netezza rejects it as an identifier.
+    // Anything except structural tokens counts as part of the routine name.
     const nameTerminator = new Set([
       "LParen",
       "RParen",
@@ -635,6 +680,54 @@ export function detectNetezzaSyntaxRestrictions(
         "NZS018",
         "Netezza identifies a procedure by name plus its argument-type signature; add parentheses, e.g. `MY_PROC()`.",
         tokens[scan],
+      ),
+    );
+  }
+
+  // Unquoted PUBLIC is a keyword, not an identifier. Live Netezza rejects it
+  // in every identifier position (relation, column, alias, schema, routine,
+  // view, sequence, synonym) with `expecting an identifier found a keyword`.
+  // GRANT/REVOKE grantees are the only accepted unquoted use, so allow a
+  // PUBLIC token that follows the grantee clause keyword (TO/FROM) of its
+  // statement and quote everything else.
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokenName(tokens[index]) !== "Public") continue;
+    let statementStart = index;
+    while (
+      statementStart > 0 &&
+      tokenName(tokens[statementStart - 1]) !== "Semicolon"
+    ) {
+      statementStart -= 1;
+    }
+    // Track the most recent GRANT/REVOKE verb and its role clause so a grantee
+    // inside a procedural body (`BEGIN GRANT ... TO PUBLIC; END`) is allowed
+    // just like a top-level grant.
+    let verb: "Grant" | "Revoke" | undefined;
+    let granteeClauseSeen = false;
+    for (let scan = statementStart; scan < index; scan += 1) {
+      const scanName = tokenName(tokens[scan]);
+      if (scanName === "Semicolon") {
+        verb = undefined;
+        granteeClauseSeen = false;
+      } else if (scanName === "Grant") {
+        verb = "Grant";
+        granteeClauseSeen = false;
+      } else if (scanName === "Revoke") {
+        verb = "Revoke";
+        granteeClauseSeen = false;
+      } else if (
+        (verb === "Grant" && scanName === "To") ||
+        (verb === "Revoke" && scanName === "From")
+      ) {
+        granteeClauseSeen = true;
+      }
+    }
+    if (granteeClauseSeen) continue;
+    errors.push(
+      errorAt(
+        "NZS019",
+        'PUBLIC is a Netezza keyword and cannot be used as an unquoted identifier; write "PUBLIC" instead.',
+        tokens[index],
       ),
     );
   }

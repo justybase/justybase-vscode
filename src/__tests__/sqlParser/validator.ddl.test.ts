@@ -267,7 +267,7 @@ SELECT S.DEPARTMENT_ID FROM SUMMARY S;`);
     });
 
     it("should validate CREATE VIEW with qualified name", () => {
-      expectValid("CREATE VIEW TESTDB.PUBLIC.V_EMP AS SELECT 1 AS X;");
+      expectValid("CREATE VIEW TESTDB.\"PUBLIC\".V_EMP AS SELECT 1 AS X;");
     });
 
     it("should validate CREATE VIEW with explicit column aliases", () => {
@@ -326,25 +326,25 @@ FROM TESTDB..EMPLOYEES d;`);
   // ========================================================================
   describe("DROP — valid syntax", () => {
     it("should validate DROP TABLE", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES;");
+      expectValid("DROP TABLE TESTDB.\"PUBLIC\".EMPLOYEES;");
     });
 
     it("should validate DROP TABLE with trailing IF EXISTS", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
+      expectValid("DROP TABLE TESTDB.\"PUBLIC\".EMPLOYEES IF EXISTS;");
     });
 
     it("should not require a cached qualified relation with trailing IF EXISTS", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.MISSING_TABLE IF EXISTS;");
+      expectValid("DROP TABLE TESTDB.\"PUBLIC\".MISSING_TABLE IF EXISTS;");
     });
 
     it("should validate DROP TABLE with multiple targets and trailing IF EXISTS", () => {
       expectValid(
-        "DROP TABLE TESTDB.PUBLIC.EMPLOYEES, TESTDB.PUBLIC.DEPARTMENTS IF EXISTS;",
+        "DROP TABLE TESTDB.\"PUBLIC\".EMPLOYEES, TESTDB.\"PUBLIC\".DEPARTMENTS IF EXISTS;",
       );
     });
 
     it("should reject the leading DROP TABLE IF EXISTS form", () => {
-      expectSyntaxError("DROP TABLE IF EXISTS TESTDB.PUBLIC.EMPLOYEES;");
+      expectSyntaxError("DROP TABLE IF EXISTS TESTDB.\"PUBLIC\".EMPLOYEES;");
     });
 
     it("should validate DROP VIEW", () => {
@@ -369,11 +369,11 @@ FROM TESTDB..EMPLOYEES d;`);
     });
 
     it("should validate DROP SEQUENCE", () => {
-      expectValid("DROP SEQUENCE TESTDB.PUBLIC.SEQ_1;");
+      expectValid("DROP SEQUENCE TESTDB.\"PUBLIC\".SEQ_1;");
     });
 
     it("should validate DROP SYNONYM", () => {
-      expectValid("DROP SYNONYM TESTDB.PUBLIC.SYN_1;");
+      expectValid("DROP SYNONYM TESTDB.\"PUBLIC\".SYN_1;");
     });
   });
 
@@ -410,49 +410,49 @@ FROM TESTDB..EMPLOYEES d;`);
   describe("ALTER — valid syntax", () => {
     it("should validate ALTER TABLE ADD CONSTRAINT PRIMARY KEY", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES ADD CONSTRAINT PK_EMP PRIMARY KEY (EMPLOYEE_ID);",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES ADD CONSTRAINT PK_EMP PRIMARY KEY (EMPLOYEE_ID);",
       );
     });
 
     it("should validate ALTER TABLE RENAME TO", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES RENAME TO EMPLOYEES_OLD;",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES RENAME TO EMPLOYEES_OLD;",
       );
     });
 
     it("should validate ALTER TABLE ADD COLUMN", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES ADD COLUMN EMAIL VARCHAR(200);",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES ADD COLUMN EMAIL VARCHAR(200);",
       );
     });
 
     it("should validate ALTER TABLE DROP COLUMN CASCADE", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES DROP COLUMN STATUS CASCADE;",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES DROP COLUMN STATUS CASCADE;",
       );
     });
 
     it("should validate ALTER TABLE with ORGANIZE ON", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES ADD COLUMN NOTE VARCHAR(100) ORGANIZE ON (EMPLOYEE_ID);",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES ADD COLUMN NOTE VARCHAR(100) ORGANIZE ON (EMPLOYEE_ID);",
       );
     });
 
     it("should validate ALTER TABLE MODIFY COLUMN", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES MODIFY COLUMN (EMAIL VARCHAR(500));",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES MODIFY COLUMN (EMAIL VARCHAR(500));",
       );
     });
 
     it("should validate ALTER TABLE SET PRIVILEGES TO", () => {
       expectValid(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES SET PRIVILEGES TO TESTDB.PUBLIC.EMPLOYEES;",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES SET PRIVILEGES TO TESTDB.\"PUBLIC\".EMPLOYEES;",
       );
     });
 
     it("should reject ALTER TABLE DROP multiple columns without RESTRICT/CASCADE", () => {
       expectSyntaxError(
-        "ALTER TABLE TESTDB.PUBLIC.EMPLOYEES DROP COLUMN STATUS, MIDDLE_NAME;",
+        "ALTER TABLE TESTDB.\"PUBLIC\".EMPLOYEES DROP COLUMN STATUS, MIDDLE_NAME;",
       );
     });
 
@@ -465,7 +465,7 @@ FROM TESTDB..EMPLOYEES d;`);
     });
 
     it("should validate ALTER SEQUENCE RESTART WITH", () => {
-      expectValid("ALTER SEQUENCE TESTDB.PUBLIC.SEQ_1 RESTART WITH 1;");
+      expectValid("ALTER SEQUENCE TESTDB.\"PUBLIC\".SEQ_1 RESTART WITH 1;");
     });
 
     it("should validate ALTER USER with PASSWORD", () => {
@@ -473,7 +473,7 @@ FROM TESTDB..EMPLOYEES d;`);
     });
 
     it("should validate ALTER VIEW RENAME TO", () => {
-      expectValid("ALTER VIEW TESTDB.PUBLIC.V_EMP RENAME TO V_EMPLOYEES;");
+      expectValid("ALTER VIEW TESTDB.\"PUBLIC\".V_EMP RENAME TO V_EMPLOYEES;");
     });
   });
   describe("DDL — additional valid patterns", () => {
@@ -578,7 +578,7 @@ FROM TESTDB..EMPLOYEES d;`);
     });
 
     it("should validate DROP TABLE IF EXISTS with schema", () => {
-      expectValid("DROP TABLE TESTDB.PUBLIC.EMPLOYEES IF EXISTS;");
+      expectValid("DROP TABLE TESTDB.\"PUBLIC\".EMPLOYEES IF EXISTS;");
     });
 
     it("should validate CREATE SEQUENCE", () => {
@@ -798,7 +798,9 @@ DROP TABLE JUST_DATA.ADMIN.DIMACCOUNT_BACKUP;`);
     });
 
     it("should validate simple CREATE EXTERNAL TABLE", () => {
-      expectValid("CREATE EXTERNAL TABLE ext_table SAMEAS source_table");
+      expectValid(
+        "CREATE EXTERNAL TABLE ext_table SAMEAS source_table USING (DATAOBJECT ('/tmp/data.csv') FORMAT TEXT)",
+      );
     });
   });
 

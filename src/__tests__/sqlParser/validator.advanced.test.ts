@@ -828,8 +828,8 @@ ORDER BY E.DEPARTMENT_ID, E.SALARY DESC;`);
       expectValid("GRANT SELECT ON my_table TO GROUP dev_team");
     });
 
-    it("should validate GRANT admin privileges", () => {
-      expectValid("GRANT LIST ON SCHEMA my_schema TO admin");
+    it("should reject a schema name after GRANT ON SCHEMA (live-verified)", () => {
+      expectSyntaxError("GRANT LIST ON SCHEMA my_schema TO admin");
     });
 
     it("should validate REVOKE", () => {
@@ -904,7 +904,7 @@ ORDER BY E.DEPARTMENT_ID, E.SALARY DESC;`);
     });
 
     it("should validate GROOM TABLE with schema-qualified name", () => {
-      expectValid("GROOM TABLE TESTDB.PUBLIC.EMPLOYEES VERSIONS");
+      expectValid("GROOM TABLE TESTDB.\"PUBLIC\".EMPLOYEES VERSIONS");
     });
   });
 

@@ -134,6 +134,43 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     expect(preParseCodes("CREATE TABLE T (clob VARCHAR(10));")).not.toContain("NZS015");
   });
 
+  it("rejects unquoted PUBLIC as an identifier but accepts grantee PUBLIC (NZS019, live-verified)", () => {
+    expect(preParseCodes("SELECT PUBLIC FROM T")).toContain("NZS019");
+    expect(preParseCodes("SELECT * FROM TESTDB.PUBLIC.T")).toContain("NZS019");
+    expect(preParseCodes("SELECT ID AS PUBLIC FROM T")).toContain("NZS019");
+    expect(preParseCodes("CREATE TABLE TESTDB.PUBLIC.T (ID INT)")).toContain("NZS019");
+    expect(preParseCodes("GRANT SELECT ON T TO PUBLIC")).not.toContain("NZS019");
+    expect(preParseCodes("REVOKE SELECT ON T FROM PUBLIC")).not.toContain("NZS019");
+    expect(preParseCodes(
+      "CREATE OR REPLACE PROCEDURE P() RETURNS INT4 LANGUAGE NZPLSQL AS BEGIN_PROC BEGIN GRANT SELECT ON T TO PUBLIC; RETURN 1; END; END_PROC;",
+    )).not.toContain("NZS019");
+    expect(preParseCodes(
+      "CREATE OR REPLACE PROCEDURE P() RETURNS INT4 LANGUAGE NZPLSQL AS BEGIN_PROC BEGIN REVOKE SELECT ON T FROM PUBLIC; RETURN 1; END; END_PROC;",
+    )).not.toContain("NZS019");
+    expect(preParseCodes('SELECT * FROM TESTDB."PUBLIC".T')).not.toContain("NZS019");
+    expect(preParseCodes("GRANT SELECT ON TESTDB.PUBLIC.T TO BOB")).toContain("NZS019");
+    expect(
+      preParseCodes("GRANT SELECT ON T TO PUBLIC; SELECT PUBLIC FROM T;"),
+    ).toContain("NZS019");
+  });
+
+  it("requires USING after CREATE EXTERNAL TABLE ... SAMEAS (NZS020, live-verified)", () => {
+    expect(preParseCodes("CREATE EXTERNAL TABLE EXT SAMEAS SRC")).toContain("NZS020");
+    expect(preParseCodes(
+      "CREATE EXTERNAL TABLE EXT SAMEAS SRC USING (DATAOBJECT '/tmp/ext.csv')",
+    )).not.toContain("NZS020");
+    expect(preParseCodes("CREATE EXTERNAL TABLE EXT (ID INT) USING (DATAOBJECT '/tmp/ext.csv')"))
+      .not.toContain("NZS020");
+  });
+
+  it("rejects EXPLAIN CREATE and a schema name after GRANT ON SCHEMA (live-verified)", () => {
+    expect(preParseCodes("EXPLAIN CREATE TABLE TMP_EX AS (SELECT 1 AS C)"))
+      .toContain("NZS021");
+    expect(preParseCodes("EXPLAIN SELECT 1")).not.toContain("NZS021");
+    expect(preParseCodes("GRANT LIST ON SCHEMA my_schema TO admin")).toContain("PAR003");
+    expect(preParseCodes("GRANT LIST ON SCHEMA TO admin")).not.toContain("PAR003");
+  });
+
   it("accepts standalone OFFSET and ORDER BY followed by OFFSET", () => {
     expect(validator.validate("SELECT 1 OFFSET 1").valid).toBe(true);
     expect(validator.validate("SELECT 1 ORDER BY 1 OFFSET 1").valid).toBe(true);

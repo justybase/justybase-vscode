@@ -136,7 +136,7 @@ describe("SQL Validator - Comprehensive Netezza SQL tests", () => {
 
     it("should validate SELECT FROM TABLE WITH FINAL function source", () => {
       expectValid(
-        "SELECT F.* FROM TABLE WITH FINAL (TESTDB.PUBLIC.FLUID_FN()) F;",
+        "SELECT F.* FROM TABLE WITH FINAL (TESTDB.\"PUBLIC\".FLUID_FN()) F;",
       );
     });
 
@@ -1086,11 +1086,11 @@ SELECT * FROM ABC;`);
 
   describe("TRUNCATE — valid syntax", () => {
     it("should validate TRUNCATE TABLE", () => {
-      expectValid("TRUNCATE TABLE TESTDB.PUBLIC.EMPLOYEES;");
+      expectValid("TRUNCATE TABLE TESTDB.\"PUBLIC\".EMPLOYEES;");
     });
 
     it("should validate TRUNCATE without TABLE keyword", () => {
-      expectValid("TRUNCATE TESTDB.PUBLIC.EMPLOYEES;");
+      expectValid("TRUNCATE TESTDB.\"PUBLIC\".EMPLOYEES;");
     });
   });
 
@@ -1108,8 +1108,8 @@ SELECT * FROM ABC;`);
       expectValid("EXPLAIN PLANGRAPH SELECT * FROM TESTDB..EMPLOYEES;");
     });
 
-    it("should validate EXPLAIN with CTAS", () => {
-      expectValid("EXPLAIN CREATE TABLE TMP_EX AS (SELECT 1 AS C);");
+    it("should reject EXPLAIN with CTAS (live-verified)", () => {
+      expectSyntaxError("EXPLAIN CREATE TABLE TMP_EX AS (SELECT 1 AS C);");
     });
   });
 
@@ -1118,16 +1118,16 @@ SELECT * FROM ABC;`);
   // ========================================================================
   describe("GROOM TABLE — valid syntax", () => {
     it("should validate GROOM TABLE VERSIONS", () => {
-      expectValid("GROOM TABLE TESTDB.PUBLIC.EMPLOYEES VERSIONS;");
+      expectValid("GROOM TABLE TESTDB.\"PUBLIC\".EMPLOYEES VERSIONS;");
     });
 
     it("should validate GROOM TABLE RECORDS ALL", () => {
-      expectValid("GROOM TABLE TESTDB.PUBLIC.EMPLOYEES RECORDS ALL;");
+      expectValid("GROOM TABLE TESTDB.\"PUBLIC\".EMPLOYEES RECORDS ALL;");
     });
 
     it("should validate GROOM TABLE PAGES START with RECLAIM BACKUPSET DEFAULT", () => {
       expectValid(
-        "GROOM TABLE TESTDB.PUBLIC.EMPLOYEES PAGES START RECLAIM BACKUPSET DEFAULT;",
+        "GROOM TABLE TESTDB.\"PUBLIC\".EMPLOYEES PAGES START RECLAIM BACKUPSET DEFAULT;",
       );
     });
   });
@@ -1166,7 +1166,7 @@ SELECT * FROM ABC;`);
   describe("COMMENT ON — valid syntax", () => {
     it("should validate COMMENT ON TABLE", () => {
       expectValid(
-        "COMMENT ON TABLE TESTDB.PUBLIC.EMPLOYEES IS 'Main employee table';",
+        "COMMENT ON TABLE TESTDB.\"PUBLIC\".EMPLOYEES IS 'Main employee table';",
       );
     });
 
@@ -1176,7 +1176,7 @@ SELECT * FROM ABC;`);
 
     it("should validate COMMENT ON COLUMN", () => {
       expectValid(
-        "COMMENT ON COLUMN TESTDB.PUBLIC.EMPLOYEES.SALARY IS 'Annual salary';",
+        "COMMENT ON COLUMN TESTDB.\"PUBLIC\".EMPLOYEES.SALARY IS 'Annual salary';",
       );
     });
 
@@ -1332,7 +1332,7 @@ LIMIT 50;`);
   describe("Semantic validation — column/table errors", () => {
     it("should detect reference to non-existent table (qualified)", () => {
       expectErrorCode(
-        "SELECT * FROM TESTDB.PUBLIC.NONEXISTENT_TABLE;",
+        "SELECT * FROM TESTDB.\"PUBLIC\".NONEXISTENT_TABLE;",
         "SQL006",
       );
     });
@@ -2981,7 +2981,7 @@ ORDER BY
     });
 
     it("should validate database.schema.table notation", () => {
-      expectValid("SELECT * FROM TESTDB.PUBLIC.EMPLOYEES;");
+      expectValid("SELECT * FROM TESTDB.\"PUBLIC\".EMPLOYEES;");
     });
 
     it("should validate mixed comment styles in complex query", () => {
