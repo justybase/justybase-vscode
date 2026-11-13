@@ -5,7 +5,7 @@ audience: user
 category: Start here
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.20.6
+product_version: 3.20.7
 ---
 
 # Getting started
