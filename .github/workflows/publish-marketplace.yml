@@ -270,6 +270,7 @@ jobs:
         run: tools/access-ddl-compare/bootstrap.sh
 
       - name: Verify Access release snapshot parity
+        if: ${{ needs.validate-release.outputs.publish_access == 'true' }}
         run: node scripts/verify-access-release-snapshot.js
 
       - name: Lint
@@ -347,7 +348,7 @@ jobs:
           npx jest --runInBand --testPathPatterns="extensions/(${joined})|(${joined}).*(AdvancedFeatures|ExplainParser|ImportTypeMapper|ReferenceProvider|SystemQueries|TuningAdvisor|Connection|ImportExport|ImportPlanner|QueryProfile)\\.test\\.ts"
 
   integration-gate:
-    name: Local Runtime Integration Gate (DuckDB / File SQL / Access)
+    name: Local Runtime Integration Gate
     needs:
       - validate-release
       - quality-gate
@@ -383,7 +384,11 @@ jobs:
         working-directory: extensions/duckdb
         run: npm ci
 
+      # The Access companion extension is optional. Its integration test only
+      # runs when that publish target is selected; the shared Access file
+      # reader is still exercised by the File SQL integration suite in this job.
       - name: Install Access extension dependencies
+        if: ${{ needs.validate-release.outputs.publish_access == 'true' }}
         working-directory: extensions/access
         run: npm ci
 
@@ -394,6 +399,7 @@ jobs:
         run: npm run test:file:integration
 
       - name: Run Access integration tests
+        if: ${{ needs.validate-release.outputs.publish_access == 'true' }}
         run: npm run test:access:integration
 
   build-main:
