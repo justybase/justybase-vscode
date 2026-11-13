@@ -120,3 +120,86 @@ describe("macro sanitizer fast path", () => {
     expect(result.lexResult.errors).toEqual([]);
   });
 });
+
+describe("diagnostic position mapping", () => {
+  it("maps unused-alias warnings on a large script to their own lines", () => {
+    const lines = Array.from(
+      { length: 3000 },
+      (_, index) => `SELECT ID FROM BENCH..T${index % 5} a${index};`,
+    );
+    const result = new NetezzaSqlSemanticValidator().validate(lines.join("\n"));
+    const warnings = result.warnings.filter((warning) => warning.code === "SQL019");
+
+    expect(warnings).toHaveLength(lines.length);
+    expect(warnings[0].position.startLine).toBe(1);
+    expect(warnings[warnings.length - 1].position.startLine).toBe(lines.length);
+    expect(warnings[warnings.length - 1].position.startColumn).toBe(
+      lines[lines.length - 1].indexOf(" a") + 2,
+    );
+  });
+
+  it("remaps incremental diagnostics to the same document positions as full validation", () => {
+    const statementSql = [
+      "SELECT a.ID FROM BENCH..T0 a;",
+      "SELECT b.ID FROM BENCH..T1 b;",
+      "SELECT c.ID FROM BENCH..T2 c;",
+    ];
+    const fullSql = statementSql.join("\n");
+    let offset = 0;
+    const statements = statementSql.map((sql, index) => {
+      const statement = {
+        index,
+        startOffset: offset,
+        endOffset: offset + sql.length,
+        sql,
+      };
+      offset += sql.length + 1;
+      return statement;
+    });
+
+    const validator = new NetezzaSqlSemanticValidator();
+    const incremental = validator.validateIncrementalFromStatements(
+      fullSql,
+      statements,
+      statements.map((statement) => statement.index),
+      new Map(),
+    );
+    const warnings = incremental.warnings.filter((warning) => warning.code === "SQL005");
+
+    expect(warnings.map((warning) => warning.position.startLine)).toEqual([1, 2, 3]);
+    expect(warnings.map((warning) => warning.position.startColumn)).toEqual([10, 10, 10]);
+    expect(incremental.warnings).toEqual(validator.validate(fullSql).warnings);
+  });
+
+  it("remaps a diagnostic from a statement that starts mid-line", () => {
+    const first = "SELECT 1;";
+    const second = "SELECT a.ID FROM BENCH..T0 a;";
+    const fullSql = `${first} ${second}`;
+    const statementSql = [first, second];
+    let offset = 0;
+    const statements = statementSql.map((sql, index) => {
+      const statement = {
+        index,
+        startOffset: offset,
+        endOffset: offset + sql.length,
+        sql,
+      };
+      offset += sql.length + 1;
+      return statement;
+    });
+
+    const validator = new NetezzaSqlSemanticValidator();
+    const incremental = validator.validateIncrementalFromStatements(
+      fullSql,
+      statements,
+      [0, 1],
+      new Map(),
+    );
+
+    expect(incremental.warnings).toEqual(validator.validate(fullSql).warnings);
+    expect(incremental.warnings[0]?.position.startLine).toBe(1);
+    expect(incremental.warnings[0]?.position.startColumn).toBe(
+      fullSql.indexOf("ID") + 1,
+    );
+  });
+});

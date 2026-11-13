@@ -22,7 +22,7 @@ import {
   getAvailableTokenLocation,
   getTokenLocationOr,
 } from "@justybase/sql-core/validation/tokenLocation";
-import { detectNetezzaSyntaxRestrictions, collectKeywordTypos } from "@justybase/sql-core/validation";
+import { detectNetezzaSyntaxRestrictions, collectKeywordTypos, createSqlLineIndex, type SqlLineIndex } from "@justybase/sql-core/validation";
 import type {
   DocumentParseRequest,
   DocumentParseSession,
@@ -155,6 +155,9 @@ export class SqlValidator implements SqlValidationService {
   private visitor: SqlVisitor;
   private schemaProvider?: SchemaProvider;
   private readonly validationProfile: DatabaseSqlValidationProfile;
+  /** Last SQL text and its newline index; diagnostics reuse it instead of rescanning. */
+  private lineIndexSql?: string;
+  private lineIndex?: SqlLineIndex;
 
   constructor(
     schemaProvider?: SchemaProvider,
@@ -880,16 +883,25 @@ export class SqlValidator implements SqlValidationService {
     line: number,
     column: number,
   ): number {
-    let currentLine = 1;
-    let index = statementOffset;
-    while (index < fullSql.length && currentLine < line) {
-      if (fullSql[index] === "\n") {
-        currentLine += 1;
-      }
-      index += 1;
+    if (line <= 1) {
+      return Math.min(
+        fullSql.length,
+        statementOffset + Math.max(0, column - 1),
+      );
     }
-    const lineStart = index;
-    return Math.min(fullSql.length, lineStart + Math.max(0, column - 1));
+    if (statementOffset >= fullSql.length) {
+      return fullSql.length;
+    }
+
+    const lineIndex = this.getLineIndex(fullSql);
+    const targetLine = lineIndex.lineAt(statementOffset) + line - 1;
+    if (targetLine > lineIndex.lineCount) {
+      return fullSql.length;
+    }
+    return Math.min(
+      fullSql.length,
+      lineIndex.lineStart(targetLine) + Math.max(0, column - 1),
+    );
   }
 
   private toParserValidationError(
@@ -1397,24 +1409,23 @@ export class SqlValidator implements SqlValidationService {
     };
   }
 
+  private getLineIndex(sql: string): SqlLineIndex {
+    if (this.lineIndex === undefined || this.lineIndexSql !== sql) {
+      this.lineIndex = createSqlLineIndex(sql);
+      this.lineIndexSql = sql;
+    }
+    return this.lineIndex;
+  }
+
   private offsetToLineColumn(
     sql: string,
     offset: number,
   ): { line: number; column: number } {
-    const safeOffset = Math.max(0, Math.min(offset, sql.length));
-    let line = 1;
-    let column = 1;
-
-    for (let index = 0; index < safeOffset; index++) {
-      if (sql[index] === "\n") {
-        line++;
-        column = 1;
-      } else {
-        column++;
-      }
-    }
-
-    return { line, column };
+    const lineIndex = this.getLineIndex(sql);
+    return {
+      line: lineIndex.lineAt(offset),
+      column: lineIndex.columnAt(offset),
+    };
   }
 
   /**

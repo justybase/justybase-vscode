@@ -13,6 +13,10 @@ export {
   type StatementBoundary,
 } from "./validation/semanticValidator";
 export { NETEZZA_SQL_VALIDATION_PROFILE } from "./validation/netezzaProfile";
+export {
+  createSqlLineIndex,
+  type SqlLineIndex,
+} from "./validation/lineIndex";
 export { GROUPING_AGGREGATE_FUNCTIONS } from "./validation/aggregateFunctions";
 export { detectNetezzaSyntaxRestrictions } from "./validation/netezzaSyntaxRestrictions";
 export { mayContainUnusedSymbolDefinitions } from "./validation/symbols";

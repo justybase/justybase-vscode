@@ -493,6 +493,20 @@ WHERE F.ACCOUNTKEY = 1;`);
       expect(result.warnings.some((w) => w.code === "SQL019")).toBe(true);
     });
 
+    it("should map unused alias warnings to their own lines on a large script", () => {
+      const lines = Array.from(
+        { length: 1200 },
+        (_, index) => `SELECT * FROM TESTDB..EMPLOYEES E${index};`,
+      );
+      const validator = new SqlValidator();
+      const result = validator.validate(lines.join("\n"));
+      const warnings = result.warnings.filter((warning) => warning.code === "SQL019");
+
+      expect(warnings).toHaveLength(lines.length);
+      expect(warnings[0].position.startLine).toBe(1);
+      expect(warnings[warnings.length - 1].position.startLine).toBe(lines.length);
+    });
+
     it("should keep SQL019 for an unused UPDATE alias", () => {
       const validator = new SqlValidator();
       const result = validator.validate(
