@@ -3183,7 +3183,17 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
                     });
                 }
             } else {
-                this._view.webview.html = this._getHtmlForWebview();
+                // The webview document is still bootstrapping. Re-assigning
+                // `webview.html` here navigates the iframe again while VS Code
+                // registers its webview service worker, which can fail with
+                // "The document is in an invalid state" and leave the panel
+                // broken. The webview's `ready` message calls `_forceHydrate()`
+                // with the current state, so defer the update instead.
+                traceResultPanelEvent({
+                    phase: 'update_deferred',
+                    sourceUri: activeSource,
+                    reason: 'webview-not-ready',
+                });
             }
             return;
         }

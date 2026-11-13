@@ -4,7 +4,7 @@ description: Understand streaming, cancellation, retries, result limits, cache p
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-08-19
+last_verified: 2026-11-13
 product_version: 3.20.6
 ---
 
@@ -44,7 +44,24 @@ For Netezza refresh investigations, open [Schema Refresh Details](guide/user/sch
 | Connection dropped | Editor text, cached metadata, completed results | Retry after checking network/credentials. |
 | Result session spilled | Full fetched dataset in local SQLite | Use disk-backed filtering; inline edits are unavailable. |
 | VS Code restarted | Persisted metadata and saved SQL; result behavior depends on result persistence | Re-run the query when the result is not retained. |
+| Panel shows "Could not register service worker" | Editors, connections, and tree views such as **Schema** keep working; only that webview fails to render | Restart VS Code completely; if it returns, clear the VS Code service-worker cache (see below). |
 | Cache appears stale | Existing suggestions and last snapshot | Refresh selected metadata, then inspect cache stats. |
+
+### "Could not register service worker" panels
+
+If a panel shows `Error loading webview: ... Could not register service worker: InvalidStateError: Failed to register a ServiceWorker: The document is in an invalid state`, the failure is in VS Code's webview host, not in JustyBase. VS Code loads every webview through an internal service worker, and the panel never reaches the extension's HTML or JavaScript. Native tree views such as **Schema** do not use a webview, which is why they keep working. The same message is reported by other webview-based extensions (Git Graph, Markdown Preview, and others).
+
+1. Run **Developer: Reload Webviews**. If that does not help, run **Developer: Reload Window**.
+2. Quit **all** VS Code windows and make sure no `Code.exe` process remains. After a VS Code update, an older instance can still hold the service-worker database, which also triggers the error.
+3. If the panel is still broken, delete the VS Code service-worker cache while VS Code is closed:
+   - Windows: `%APPDATA%\Code\Service Worker`
+   - Windows Insiders: `%APPDATA%\Code - Insiders\Service Worker`
+   - macOS: `~/Library/Application Support/Code/Service Worker`
+   - Linux: `~/.config/Code/Service Worker`
+
+   Start VS Code again. The folder is recreated automatically; settings, connections, and SQL files are not affected.
+
+VS Code tracks this as [microsoft/vscode#125993](https://github.com/microsoft/vscode/issues/125993); it is a platform issue, so an extension update cannot fix it.
 
 ## Measuring instead of guessing
 

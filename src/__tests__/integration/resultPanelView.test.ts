@@ -706,6 +706,40 @@ describe('ResultPanelView Integration', () => {
         expect(mockWebview.webview.html).not.toBe(initialHtml);
     });
 
+    test('should not navigate a still-bootstrapping webview document', () => {
+        const freshProvider = new ResultPanelView(mockExtensionUri);
+        const freshWebview = {
+            webview: {
+                options: {},
+                html: '',
+                onDidReceiveMessage: jest.fn(),
+                postMessage: jest.fn().mockImplementation((_msg: unknown) => Promise.resolve(true)),
+                asWebviewUri: jest.fn(),
+                cspSource: 'test-csp'
+            },
+            onDidChangeVisibility: jest.fn(),
+            show: jest.fn(),
+            viewType: 'netezza.resultPanel',
+            onDidDispose: jest.fn(),
+            visible: true
+        };
+
+        freshProvider.resolveWebviewView(
+            freshWebview as unknown as vscode.WebviewView,
+            {} as vscode.WebviewViewResolveContext,
+            {} as vscode.CancellationToken
+        );
+        const initialHtml = freshWebview.webview.html;
+        expect(initialHtml.length).toBeGreaterThan(0);
+
+        // A state change before the webview reports `ready` must not navigate the
+        // document again: VS Code is still registering its webview service worker.
+        freshProvider.startExecution('untitled:Untitled-bootstrap');
+        expect(freshWebview.webview.html).toBe(initialHtml);
+
+        freshProvider.dispose();
+    });
+
     test('should clear view when active source is closed', () => {
         const uriA = 'file:///path/to/A.sql';
 
