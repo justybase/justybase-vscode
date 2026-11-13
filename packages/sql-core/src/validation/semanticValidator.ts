@@ -5,7 +5,7 @@ import {
   type NetezzaSqlParseResult,
 } from "../parser/runtime";
 import { SqlVisitor } from "./visitor/sqlVisitorCore";
-import { collectSqlSymbolUsagesFromCst } from "./symbols";
+import { collectSqlSymbolUsagesFromCst, mayContainUnusedSymbolDefinitions } from "./symbols";
 import { NETEZZA_SQL_VALIDATION_PROFILE } from "./netezzaProfile";
 import type {
   ScopeSeed,
@@ -242,7 +242,7 @@ export class NetezzaSqlSemanticValidator {
     ) {
       this.visitor.setMacroReferenceRanges(parseResult.macroReferenceRanges);
       this.visitor.visit(cst);
-      symbolWarnings.push(...this.buildUnusedSymbolWarnings(sql, cst));
+      symbolWarnings.push(...this.buildUnusedSymbolWarnings(sql, cst, lexResult.tokens));
     } else {
       // Ensure no stale state is returned from a previous validation run.
       this.visitor = new SqlVisitor(this.schemaProvider, this.validationProfile);
@@ -1244,22 +1244,30 @@ export class NetezzaSqlSemanticValidator {
   private buildUnusedSymbolWarnings(
     sql: string,
     cst: CstNode,
+    tokens: readonly IToken[],
   ): ValidationError[] {
+    const databaseKind = this.validationProfile.databaseKind;
+    if (
+      (databaseKind === undefined || databaseKind === "netezza") &&
+      !mayContainUnusedSymbolDefinitions(tokens)
+    ) {
+      return [];
+    }
+
     const symbolUsages = collectSqlSymbolUsagesFromCst(cst);
     const warnings: ValidationError[] = [];
 
     for (const symbol of symbolUsages) {
-      const definition = symbol.occurrences.find(
-        (occurrence) => occurrence.role === "definition",
-      );
-      if (!definition) {
-        continue;
+      let definition: (typeof symbol.occurrences)[number] | undefined;
+      let referenceCount = 0;
+      for (const occurrence of symbol.occurrences) {
+        if (occurrence.role === "definition") {
+          definition ??= occurrence;
+        } else if (occurrence.role === "reference") {
+          referenceCount += 1;
+        }
       }
-
-      const referenceCount = symbol.occurrences.filter(
-        (occurrence) => occurrence.role === "reference",
-      ).length;
-      if (referenceCount > 0) {
+      if (!definition || referenceCount > 0) {
         continue;
       }
 

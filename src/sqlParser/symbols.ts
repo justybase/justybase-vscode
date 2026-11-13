@@ -4,7 +4,7 @@ import {
     resolveSqlRenameSymbol as resolveCoreSymbol,
     collectSqlSymbolUsagesFromCst,
 } from '@justybase/sql-core/validation/symbols'
-export { collectSqlSymbolUsagesFromCst } from '@justybase/sql-core/validation/symbols'
+export { collectSqlSymbolUsagesFromCst, mayContainUnusedSymbolDefinitions } from '@justybase/sql-core/validation/symbols'
 export type {
     SqlRenameOccurrence, SqlRenameResolution, SqlRenameSymbolKind, SqlSymbolUsage,
 } from '@justybase/sql-core/validation/symbols'

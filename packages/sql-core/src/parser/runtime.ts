@@ -385,6 +385,11 @@ interface SanitizedSqlMacroSyntax {
 }
 
 function sanitizeSqlMacroSyntaxWithMetadata(sql: string): SanitizedSqlMacroSyntax {
+  // Macro sanitizers only transform `%` directives/functions and `&`/`$`
+  // references. Skip three full string scans when none can be present.
+  if (!sql.includes("%") && !sql.includes("&") && !sql.includes("$")) {
+    return { sql, macroReferenceRanges: [] };
+  }
   let sanitized = sanitizeMacroQueryFunctions(sanitizeMacroDirectives(sql));
   const macroReferenceRanges: MacroReferenceRange[] = [];
   let index = 0;

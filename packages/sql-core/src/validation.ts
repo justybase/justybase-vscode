@@ -15,6 +15,7 @@ export {
 export { NETEZZA_SQL_VALIDATION_PROFILE } from "./validation/netezzaProfile";
 export { GROUPING_AGGREGATE_FUNCTIONS } from "./validation/aggregateFunctions";
 export { detectNetezzaSyntaxRestrictions } from "./validation/netezzaSyntaxRestrictions";
+export { mayContainUnusedSymbolDefinitions } from "./validation/symbols";
 export {
   CLAUSE_KEYWORDS,
   COMMON_KEYWORD_TYPOS,

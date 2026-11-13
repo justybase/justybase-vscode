@@ -29,6 +29,29 @@ export interface SqlSymbolUsage {
     occurrences: SqlRenameOccurrence[]
 }
 
+/**
+ * Token types that can introduce a CTE or a table alias. If none of them is
+ * present, the unused-symbol warnings (SQL018/SQL019) cannot fire, so callers
+ * can skip the full CST symbol walk.
+ */
+const UNUSED_SYMBOL_TOKEN_NAMES: ReadonlySet<string> = new Set([
+    'With',
+    'From',
+    'Join',
+    'Update',
+    'Delete',
+    'Merge',
+])
+
+export function mayContainUnusedSymbolDefinitions(tokens: readonly IToken[]): boolean {
+    for (const token of tokens) {
+        if (UNUSED_SYMBOL_TOKEN_NAMES.has(token.tokenType.name)) {
+            return true
+        }
+    }
+    return false
+}
+
 interface SqlSymbolDefinition {
     id: string
     kind: SqlRenameSymbolKind
@@ -153,13 +176,15 @@ class SqlSymbolCollector {
 
     private visitChildren(node: CstNode): void {
         const children = node.children ?? {}
-        for (const value of Object.values(children)) {
+        for (const key in children) {
+            const value = children[key]
             if (!Array.isArray(value)) continue
-            value.forEach(child => {
+            for (let index = 0; index < value.length; index++) {
+                const child = value[index]
                 if (isCstNode(child)) {
                     this.visitNode(child)
                 }
-            })
+            }
         }
     }
 
@@ -238,10 +263,24 @@ class SqlSymbolCollector {
         this.pushAliasScope()
         try {
             const bindAliases = (current: CstNode): void => {
-                if (current !== node && ['selectStatement', 'withStatement', 'withAnyStatement'].includes(current.name)) return
+                if (
+                    current !== node
+                    && (current.name === 'selectStatement'
+                        || current.name === 'withStatement'
+                        || current.name === 'withAnyStatement')
+                ) {
+                    return
+                }
                 if (current.name === 'tableSource') this.bindTableSource(current, false)
-                for (const children of Object.values(current.children ?? {}))
-                    for (const child of children) if (isCstNode(child)) bindAliases(child)
+                const children = current.children ?? {}
+                for (const key in children) {
+                    const value = children[key]
+                    if (!Array.isArray(value)) continue
+                    for (let index = 0; index < value.length; index++) {
+                        const child = value[index]
+                        if (isCstNode(child)) bindAliases(child)
+                    }
+                }
             }
             bindAliases(node)
             this.visitChildren(node)
@@ -632,25 +671,29 @@ class SqlSymbolCollector {
 
         const visit = (current: CstNode): void => {
             const children = current.children ?? {}
-            for (const value of Object.values(children)) {
+            for (const key in children) {
+                const value = children[key]
                 if (!Array.isArray(value)) {
                     continue
                 }
 
-                value.forEach(child => {
+                for (let index = 0; index < value.length; index++) {
+                    const child = value[index]
                     if (isToken(child)) {
                         tokens.push(child)
-                        return
+                        continue
                     }
                     if (isCstNode(child)) {
                         visit(child)
                     }
-                })
+                }
             }
         }
 
         visit(node)
-        return tokens.sort((a, b) => (a.startOffset ?? 0) - (b.startOffset ?? 0))
+        return tokens.length > 1
+            ? tokens.sort((a, b) => (a.startOffset ?? 0) - (b.startOffset ?? 0))
+            : tokens
     }
 
     private getFirstTokenFromCst(node: CstNode | undefined): IToken | undefined {
@@ -659,9 +702,11 @@ class SqlSymbolCollector {
         }
 
         const children = node.children ?? {}
-        for (const value of Object.values(children)) {
+        for (const key in children) {
+            const value = children[key]
             if (!Array.isArray(value)) continue
-            for (const child of value) {
+            for (let index = 0; index < value.length; index++) {
+                const child = value[index]
                 if (isToken(child)) {
                     return child
                 }
@@ -907,17 +952,22 @@ function toExternalOccurrence(occurrence: SqlRenameOccurrenceInternal): SqlRenam
 function collectUsagesFromCollector(collector: SqlSymbolCollector): SqlSymbolUsage[] {
     const occurrences = collector.getOccurrences()
     const definitions = collector.getDefinitions()
+    const occurrencesBySymbol = new Map<string, SqlRenameOccurrence[]>()
 
-    return definitions.map(definition => {
-        const symbolOccurrences = occurrences
-            .filter(occurrence => occurrence.symbolId === definition.id)
-            .map(toExternalOccurrence)
-        return {
-            kind: definition.kind,
-            name: definition.displayName,
-            occurrences: symbolOccurrences
+    for (const occurrence of occurrences) {
+        let symbolOccurrences = occurrencesBySymbol.get(occurrence.symbolId)
+        if (!symbolOccurrences) {
+            symbolOccurrences = []
+            occurrencesBySymbol.set(occurrence.symbolId, symbolOccurrences)
         }
-    })
+        symbolOccurrences.push(toExternalOccurrence(occurrence))
+    }
+
+    return definitions.map(definition => ({
+        kind: definition.kind,
+        name: definition.displayName,
+        occurrences: occurrencesBySymbol.get(definition.id) ?? []
+    }))
 }
 
 export function collectSqlSymbolUsagesFromCst(cst: CstNode): SqlSymbolUsage[] {

@@ -224,6 +224,9 @@ export class NetezzaSqlParser extends BaseSqlParser {
 
   /** Guard flag to prevent double-registration of alterTableStatement rule. */
   private _alterTableRuleRegistered = false;
+  /** Lazily built OR alternatives; rebuilding them per rule invocation is hot. */
+  private _netezzaIdentifierAlternatives?: OrAlternative[];
+  private _netezzaRelaxedNameAlternatives?: OrAlternative[];
 
   constructor(tokenBundle: typeof netezzaSqlLexer = netezzaSqlLexer) {
     super(tokenBundle);
@@ -367,13 +370,13 @@ export class NetezzaSqlParser extends BaseSqlParser {
     // permits many keywords in identifier positions, so we reintroduce that
     // broader surface here instead of leaking it back into the base grammar.
     this.OVERRIDE_RULE('identifier', () => {
-      this.OR(this.getTokenAlternatives(this.getNetezzaIdentifierTokens()));
+      this.OR(this.getNetezzaIdentifierAlternatives());
     });
 
     // Shared relaxed-name rule avoids duplicate CONSUME entries when column
     // references allow qualified names (OR / OR1 / OR2 in one rule).
     this.RULE('netezzaRelaxedName', () => {
-      this.OR(this.getTokenAlternatives(this.getNetezzaRelaxedNameTokens()));
+      this.OR(this.getNetezzaRelaxedNameAlternatives());
     });
 
     // Only a narrower keyword subset is accepted in alias/column positions.
@@ -491,6 +494,18 @@ export class NetezzaSqlParser extends BaseSqlParser {
         { ALT: () => this.CONSUME(Parameter) },
       ]);
     });
+  }
+
+  private getNetezzaIdentifierAlternatives(): OrAlternative[] {
+    return (this._netezzaIdentifierAlternatives ??= this.getTokenAlternatives(
+      this.getNetezzaIdentifierTokens(),
+    ));
+  }
+
+  private getNetezzaRelaxedNameAlternatives(): OrAlternative[] {
+    return (this._netezzaRelaxedNameAlternatives ??= this.getTokenAlternatives(
+      this.getNetezzaRelaxedNameTokens(),
+    ));
   }
 
   /** Dialects (e.g. MSSQL bracketed names) may append tokens. */

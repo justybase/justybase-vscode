@@ -493,6 +493,24 @@ WHERE F.ACCOUNTKEY = 1;`);
       expect(result.warnings.some((w) => w.code === "SQL019")).toBe(true);
     });
 
+    it("should keep SQL019 for an unused UPDATE alias", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate(
+        "UPDATE TESTDB..EMPLOYEES E SET ID = 1 WHERE ID = 1;",
+      );
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some((w) => w.code === "SQL019")).toBe(true);
+    });
+
+    it("should not scan for unused symbols in statements without table sources", () => {
+      const validator = new SqlValidator();
+      const result = validator.validate("INSERT INTO TESTDB..EMPLOYEES VALUES (1);");
+
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings.some((w) => w.code === "SQL018" || w.code === "SQL019")).toBe(false);
+    });
+
     it("should report SQL027 for JOIN without ON or USING", () => {
       const validator = new SqlValidator();
       const sql = `SELECT A.ACCOUNTCODEALTERNATEKEY, B.ID FROM JUST_DATA..DIMACCOUNT A

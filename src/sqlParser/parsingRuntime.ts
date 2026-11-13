@@ -572,6 +572,12 @@ interface SanitizedSqlMacroSyntax {
 }
 
 function sanitizeSqlMacroSyntaxWithMetadata(sql: string, databaseKind?: string): SanitizedSqlMacroSyntax {
+  // Macro sanitizers only transform `%` directives/functions and `&`/`$`
+  // references. Skip the scans (and PostgreSQL protected-region rebuild) when
+  // none can be present.
+  if (!sql.includes("%") && !sql.includes("&") && !sql.includes("$")) {
+    return { sql, macroReferenceRanges: [] };
+  }
   let sanitized = sanitizeMacroQueryFunctions(sanitizeMacroDirectives(sql));
   const protectedRegions = databaseKind === 'postgresql' ? buildSqlSourceScanIndex(sql, databaseKind) : undefined;
   if (protectedRegions) {
