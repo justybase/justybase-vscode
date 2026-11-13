@@ -219,34 +219,73 @@ available only in on-demand linting.
 
 Automatic diagnostics are intentionally skipped for very large scripts:
 
-- the SQL language server does not publish parser diagnostics above `150,000` characters or `3,000` lines;
+- the SQL language server publishes parser diagnostics up to `400,000` characters or `10,000` lines;
 - the extension-host linter skips automatic quality lint above `500` lines or `150,000` characters while the LSP is running.
+
+The LSP limits are deliberately separate from `LARGE_SCRIPT_CHAR_THRESHOLD` (`150,000`), which still
+guards expensive extension-host features such as the parser-backed semantic-token path, decorations,
+and code lens. The language server runs in its own process and can afford a larger document.
 
 `Validate SQL (Chevrotain Parser)` is the explicit override. It validates the whole document (or the
 current selection) in the extension host and publishes the findings to the Problems panel under
 `Netezza Parser (on demand)` (or `Netezza Parser (selection)` for a partial selection). The command
-shows a progress notification while the synchronous parse is running; large scripts can block the
-extension host for a few seconds, which is why this path is never used automatically.
+shows a progress notification while the synchronous parse is running; a 10k-line script blocks the
+extension host for roughly 0.15-0.2 s, while much larger scripts can still take noticeably longer,
+which is why this path is never used automatically.
 
 `Lint SQL (On-Demand)` remains the separate command for NZ/NZP quality rules. Procedure fallback
 parsing is cached for one quality-rule evaluation so a procedure is not parsed once per migrated NZP
 rule.
 
-Local benchmark results (`npm run benchmark:large-script`) for a realistic NZPLSQL procedure:
+Local benchmark results (`npm run benchmark:parser`) for a realistic NZPLSQL procedure. The benchmark
+runs the compiled `packages/sql-core/dist` bundle in plain Node; the earlier Jest-based numbers were
+replaced because ts-jest/Babel transformation inflated them by roughly 4-5x:
 
-| Size | Parse + validate | 60fps frames blocked |
-|---|---:|---:|
-| 3k lines / 84k chars | ~0.6 s | ~38 |
-| 5k lines / 140k chars | ~1.0 s | ~59 |
-| 10k lines / 281k chars | ~2.1-3.0 s | ~128-178 |
-| 15k lines / 422k chars | ~3.2 s | ~194 |
+| Size | Parse + validate, before | Parse + validate, after | Improvement |
+|---|---:|---:|---:|
+| 3k lines / 84k chars | ~153 ms | ~47-52 ms | ~66-69% |
+| 5k lines / 140k chars | ~197 ms | ~74-79 ms | ~60-63% |
+| 10k lines / 281k chars | ~389 ms | ~146-195 ms | ~50-62% |
+| 15k lines / 422k chars | ~588 ms | ~220-290 ms | ~51-63% |
 
-The default limits stay at `150,000` characters / `3,000` lines deliberately. Raising them to cover
-10k lines would make the single-threaded language server spend seconds validating after every typing
-pause and would delay completion/hover for the same duration. A modest raise of only the line limit
-to `5,000` is defensible (about one second at 140k characters, after the two-second large-script
-debounce), but it should be treated as an opt-in trade-off rather than the default. Scripts above
-the defaults should use the explicit `Validate SQL` command.
+The dominant hot path was PAR004 keyword-typo detection: a full Levenshtein DP matrix was built for
+every identifier and every clause keyword, which accounted for about 49% of validation CPU. It now
+uses a linear single-edit check plus a per-validation cache, so the typo scan costs roughly 0.5-1 ms
+for a 10k-line procedure.
+
+Full LSP diagnostics pipeline (`npm run benchmark:lsp-pipeline`). It runs the real diagnostics handler,
+metadata bridge, parse/validation sessions, incremental validation, statement indexing, and
+diagnostics conversion; only JSON-RPC transport and metadata I/O are stubbed. Times exclude the 2 s
+large-script debounce:
+
+| Size | Cold first validation | Warm edit | Cold P95 |
+|---|---:|---:|---:|
+| 3k lines / 84k chars (procedure) | ~85-100 ms | ~70-95 ms | ~86-119 ms |
+| 5k lines / 140k chars (procedure) | ~105-135 ms | ~120-180 ms | ~123-166 ms |
+| 10k lines / 281k chars (procedure) | ~230-335 ms | ~210-250 ms | ~280-336 ms |
+| 15k lines / 422k chars (procedure) | ~316-345 ms | ~325-345 ms | ~333-389 ms |
+| 20k lines / 563k chars (procedure) | ~408-492 ms | ~410-423 ms | ~480-560 ms |
+| 5k lines / 184k chars (10k short statements) | ~206 ms | ~204 ms | ~216 ms |
+| 10k lines / 369k chars (10k short statements) | ~389-497 ms | ~450-496 ms | ~426-503 ms |
+
+A real `dist/server/main.js` process confirmed the harness at the boundary: after the 2 s debounce,
+a 10k-line procedure published diagnostics in ~298 ms wall time (~260 ms handler timer), while a
+15k-line document was short-circuited with an empty diagnostic list.
+
+The 10k case takes about 0.23-0.34 s for a single procedure and 0.39-0.50 s for 10k short
+statements. Both stay below a 1 s budget even with slower machines. Based on that
+measurement the automatic LSP limits were raised from `150,000` characters / `3,000` lines to
+`400,000` characters / `10,000` lines. 15k+ scripts remain on the explicit `Validate SQL` path for
+headroom: they still take only ~0.35 s here, but a slower laptop or a cold metadata cache can multiply
+that, and the language server serves completion/hover from the same event loop. The extension-host
+guard remains at `150,000` characters / `500` lines, so the larger LSP window does not turn on the
+expensive extension-host features.
+
+The warm row is not much faster than cold because the procedure fixtures are one large
+`CREATE PROCEDURE` statement: any edit invalidates the whole statement. Multi-statement fixtures also
+show little incremental win because statement indexing still scans the document. That is the
+realistic worst case for large Netezza scripts. Scripts above the defaults should still use the
+explicit `Validate SQL` command.
 
 ### Parser-Based Symbol Rename
 

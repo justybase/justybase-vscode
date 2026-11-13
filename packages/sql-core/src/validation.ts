@@ -15,6 +15,15 @@ export {
 export { NETEZZA_SQL_VALIDATION_PROFILE } from "./validation/netezzaProfile";
 export { GROUPING_AGGREGATE_FUNCTIONS } from "./validation/aggregateFunctions";
 export { detectNetezzaSyntaxRestrictions } from "./validation/netezzaSyntaxRestrictions";
+export {
+  CLAUSE_KEYWORDS,
+  COMMON_KEYWORD_TYPOS,
+  SQL_KEYWORD_SET,
+  SQL_TYPO_KEYWORDS,
+  collectKeywordTypos,
+  isSingleEditAway,
+  type KeywordTypoOptions,
+} from "./validation/keywordTypos";
 export type {
   ColumnInfo,
   CteInfo,

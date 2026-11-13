@@ -13,8 +13,8 @@ import {
 import { SqlCoreBackedValidator } from "../../sqlParser/sqlCoreBackedValidator";
 import type { SqlValidationService } from "../../sqlParser/validationService";
 import {
-  HUGE_SCRIPT_LINE_THRESHOLD,
-  LARGE_SCRIPT_CHAR_THRESHOLD,
+  LSP_DIAGNOSTICS_CHAR_THRESHOLD,
+  LSP_DIAGNOSTICS_LINE_THRESHOLD,
   LARGE_SCRIPT_LINT_DEBOUNCE_MS,
   LSP_LARGE_DIAGNOSTICS_LINE_THRESHOLD,
 } from "../../sqlParser/validationConfig";
@@ -48,6 +48,15 @@ export interface DiagnosticsHandlerDeps {
   metadataBridge: MetadataBridge;
   documentParseSession: DocumentParseSession;
   documentValidationSession: DocumentValidationSession;
+  /**
+   * Optional overrides for the automatic-diagnostics cutoffs. Production uses
+   * the shared `validationConfig` defaults; benchmarks and tests can raise the
+   * cutoffs to measure the pipeline above the normal limits.
+   */
+  diagnosticsLimits?: {
+    maxTextLength: number;
+    maxLineCount: number;
+  };
 }
 
 export interface DiagnosticsHandler {
@@ -65,7 +74,10 @@ export function createDiagnosticsHandler(
     metadataBridge,
     documentParseSession,
     documentValidationSession,
+    diagnosticsLimits,
   } = deps;
+  const maxTextLength = diagnosticsLimits?.maxTextLength ?? LSP_DIAGNOSTICS_CHAR_THRESHOLD;
+  const maxLineCount = diagnosticsLimits?.maxLineCount ?? LSP_DIAGNOSTICS_LINE_THRESHOLD;
   const lintTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const diagnosticsGeneration = new Map<string, number>();
 
@@ -101,8 +113,8 @@ export function createDiagnosticsHandler(
   async function publishDiagnostics(document: TextDocument): Promise<void> {
     const sql = document.getText();
     if (
-      sql.length > LARGE_SCRIPT_CHAR_THRESHOLD ||
-      document.lineCount > HUGE_SCRIPT_LINE_THRESHOLD
+      sql.length > maxTextLength ||
+      document.lineCount > maxLineCount
     ) {
       connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
       return;

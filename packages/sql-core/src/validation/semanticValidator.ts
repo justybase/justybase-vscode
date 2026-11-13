@@ -22,6 +22,7 @@ import type { CstNode, IRecognitionException, IToken } from "chevrotain";
 import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
 import { getAvailableTokenLocation, getTokenLocationOr } from "./tokenLocation";
 import { detectNetezzaSyntaxRestrictions } from "./netezzaSyntaxRestrictions";
+import { collectKeywordTypos } from "./keywordTypos";
 
 import { SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN, SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN, SCRIPT_SCOPE_DROP_STATEMENT_PATTERN, SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN } from "./scriptScopeStatements";
 
@@ -138,84 +139,6 @@ function cloneTableInfo(table: TableInfo): TableInfo {
     columns: table.columns.map((column) => ({ ...column })),
   };
 }
-
-/**
- * Compute Levenshtein edit distance between two strings.
- */
-function levenshtein(a: string, b: string): number {
-  const al = a.length;
-  const bl = b.length;
-  const dp: number[][] = Array.from({ length: al + 1 }, () => Array(bl + 1).fill(0));
-  for (let i = 0; i <= al; i++) dp[i][0] = i;
-  for (let j = 0; j <= bl; j++) dp[0][j] = j;
-  for (let i = 1; i <= al; i++) {
-    for (let j = 1; j <= bl; j++) {
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    }
-  }
-  return dp[al][bl];
-}
-
-const SQL_KEYWORDS = [
-  "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
-  "ON", "AND", "OR", "NOT", "INSERT", "INTO", "UPDATE", "DELETE",
-  "CREATE", "DROP", "ALTER", "TABLE", "VIEW", "INDEX", "ORDER", "BY",
-  "GROUP", "HAVING", "UNION", "ALL", "DISTINCT", "AS", "SET", "VALUES",
-  "NULL", "IN", "BETWEEN", "LIKE", "IS", "EXISTS", "CASE", "WHEN",
-  "THEN", "ELSE", "END", "LIMIT", "OFFSET", "FETCH", "FIRST", "ROWS",
-  "ONLY", "WITH", "CROSS", "FULL", "NATURAL", "USING",
-  "ASC", "DESC", "NULLS", "INTERSECT", "EXCEPT",
-  "RECURSIVE", "LATERAL", "DISTRIBUTE", "ORGANIZE", "HASH", "RANDOM",
-  "TRUNCATE", "GRANT", "REVOKE", "COMMIT", "ROLLBACK", "BEGIN",
-  "EXECUTE", "IMMEDIATE", "RETURN", "RETURNS", "LANGUAGE", "SQL",
-  "DECLARE", "CURSOR", "OPEN", "CLOSE", "FETCH", "FOR", "LOOP",
-  "WHILE", "REPEAT", "UNTIL", "LEAVE", "ITERATE",
-  "RAISE", "NOTICE", "EXCEPTION", "IF", "ELSIF",
-  "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "CHECK",
-  "DEFAULT", "ADD", "COLUMN", "RENAME", "CONSTRAINT",
-  "MERGE", "USING", "MATCHED", "NOT", "REPLACE",
-  "OVERWRITE", "PARTITION", "CLUSTER", "SORT",
-  "COPY", "EXPORT", "IMPORT", "LOAD", "UNLOAD",
-  "ANALYZE", "VERBOSE", "EXPLAIN", "DESCRIBE", "SHOW",
-  "CALL", "SAVEPOINT", "RELEASE", "LOCK", "UNLOCK",
-  "LISTEN", "UNLISTEN", "NOTIFY", "PREPARE", "DEALLOCATE",
-  "DISCARD", "RESET", "SET", "SHOW", "CURSOR",
-  "MATERIALIZED", "TEMPORARY", "TEMP", "FORCE", "IGNORE",
-  "SETOF", "RECORD", "VOID", "TRIGGER", "FUNCTION", "PROCEDURE",
-  "RETURNS", "LANGUAGE", "COST", "ROWS", "SUPPORT",
-  "STABLE", "VOLATILE", "LEAKPROOF", "CALLED", "INPUT",
-  "STRICT", "SECURITY", "DEFINER", "INVOKER",
-  "PARALLEL", "UNSAFE", "RESTRICTED", "SAFE",
-  "COMMENT", "EXTENSION", "SERVER", "SCHEMA",
-  "ROLE", "PUBLICATION", "SUBSCRIPTION",
-  "POLICY", "RULE", "SEQUENCE", "TYPE", "DOMAIN",
-  "OPERATOR", "AGGREGATE", "FAMILY", "COLLATION",
-  "CONVERSION", "TEXT", "SEARCH", "CONFIGURATION",
-  "DIRECTORY", "STATISTICS", "MANUAL", "AUTO",
-  "IDENTITY", "GENERATED", "ALWAYS", "START", "INCREMENT",
-  "CACHE", "CYCLE", "MINVALUE", "MAXVALUE",
-  "DEFERRABLE", "INITIALLY", "IMMEDIATE",
-  "CASCADE", "RESTRICT", "ACTION",
-  "OWNER", "MODE", "VALIDATE", "REINDEX", "REFRESH",
-  "CONCURRENTLY", "BUILD", "INCREMENTAL", "COMPACT",
-  "ACCESS", "METHOD", "STORAGE", "DISK", "MEMORY",
-  "LOGGED", "UNLOGGED",
-  "PLAIN", "EXTENDED", "MAIN",
-  "SYSTEM", "SESSION", "LOCAL", "CURRENT", "TRANSACTION",
-  "ISOLATION", "LEVEL", "SERIALIZABLE", "REPEATABLE", "COMMITTED",
-  "UNCOMMITTED", "READ", "WRITE", "ONLY",
-  "WORK", "DEFERRABLE",
-  "PRIVILEGES", "GRANT", "OPTION",
-  "DIAGNOSTICS", "ROW_COUNT", "SQLSTATE", "RESIGNAL",
-  "SIGNAL", "OTHERS", "NEW", "OLD",
-  "PUBLICATION", "SUBSCRIPTION", "CONNECTION",
-  "STATISTICS", "HANDLER", "INLINE", "VALIDATOR",
-  "TRANSFORM",
-];
 
 export class NetezzaSqlSemanticValidator {
   private visitor: SqlVisitor;
@@ -768,7 +691,7 @@ export class NetezzaSqlSemanticValidator {
       }
     }
 
-    errors.push(...this.detectKeywordTyposInTokens(lexResult.tokens));
+    errors.push(...collectKeywordTypos(lexResult.tokens));
     errors.push(...detectNetezzaSyntaxRestrictions(lexResult.tokens));
 
     return {
@@ -1198,98 +1121,6 @@ export class NetezzaSqlSemanticValidator {
     return {
       message: `Missing closing ')' before '${boundary}'.`,
     };
-  }
-
-  private detectKeywordTyposInTokens(
-    tokens: IToken[],
-  ): ValidationError[] {
-    const results: ValidationError[] = [];
-    // Common known typos for high-frequency keywords (missing letters, transpositions)
-    const COMMON_TYPOS: Record<string, string> = {
-      "FRM": "FROM",
-      "FOM": "FROM",
-      "FRO": "FROM",
-      "FORM": "FROM",
-      "OFRM": "FROM",
-      "FRXM": "FROM",
-      "SELEC": "SELECT",
-      "SELCT": "SELECT",
-      "SELET": "SELECT",
-      "SELKT": "SELECT",
-      "SELCET": "SELECT",
-      "SLEECT": "SELECT",
-      "SELELCT": "SELECT",
-      "SELEECT": "SELECT",
-    };
-
-    // Only the most common clause keywords — avoid false positives on column/table names
-    const CLAUSE_KEYWORDS = [
-      "SELECT", "FROM", "WHERE", "JOIN", "INSERT", "UPDATE", "DELETE",
-      "CREATE", "DROP", "ALTER", "TABLE", "ORDER", "GROUP",
-      "HAVING", "UNION", "LIMIT", "OFFSET",
-    ];
-
-    for (const token of tokens) {
-      if (token.tokenType.name !== "Identifier" && token.tokenType.name !== "Word") {
-        continue;
-      }
-
-      const image = token.image;
-      if (!image || image.length < 3) continue;
-
-      const upper = image.toUpperCase();
-      if (SQL_KEYWORDS.includes(upper)) continue;
-
-      // Check common typos dictionary first (catches transpositions, multi-char errors)
-      const dictFix = COMMON_TYPOS[upper];
-      if (dictFix) {
-        const startOffset = token.startOffset ?? 0;
-        const imageLen = token.image?.length ?? 1;
-        const startCol = (token.startColumn ?? 1);
-        const startLn = (token.startLine ?? 1);
-        results.push({
-          message: `Possible typo: '${image}' looks like keyword '${dictFix}'. Did you mean '${dictFix}'?`,
-          severity: "error",
-          position: {
-            startLine: startLn,
-            startColumn: startCol,
-            endLine: startLn,
-            endColumn: startCol + imageLen,
-            offset: startOffset,
-          },
-          code: "PAR004",
-          suggestedFix: dictFix,
-        });
-        continue;
-      }
-
-      if (image.length < 4) continue;
-
-      for (const kw of CLAUSE_KEYWORDS) {
-        if (levenshtein(upper, kw) === 1 && image.length <= kw.length) {
-          const startOffset = token.startOffset ?? 0;
-          const imageLen = token.image?.length ?? 1;
-          const startCol = (token.startColumn ?? 1);
-          const startLn = (token.startLine ?? 1);
-          results.push({
-            message: `Possible typo: '${image}' looks like keyword '${kw}'. Did you mean '${kw}'?`,
-            severity: "error",
-            position: {
-              startLine: startLn,
-              startColumn: startCol,
-              endLine: startLn,
-              endColumn: startCol + imageLen,
-              offset: startOffset,
-            },
-            code: "PAR004",
-            suggestedFix: kw,
-          });
-          break;
-        }
-      }
-    }
-
-    return results;
   }
 
   private findTokenIndex(tokens: IToken[], token: IToken): number {

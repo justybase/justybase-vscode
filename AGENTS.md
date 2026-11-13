@@ -102,11 +102,15 @@ Root Jest uses up to 50% of available workers by default; use `test:serial` or `
 
 ```bash
 npm run benchmark:lsp                                   # LSP completion/hover/inlay/diagnostics
-npm run benchmark                                       # All benchmarks (suggest + lsp + result-panel)
+npm run benchmark:parser                                # Production-like parser/validator (compiled dist)
+npm run benchmark:lsp-pipeline                          # Full LSP diagnostics handler (cold + warm)
+npm run benchmark                                       # All benchmarks (suggest + lsp + parser + lsp-pipeline + result-panel)
 LSP_BENCHMARK_ENFORCE=1 npm run benchmark:lsp           # Fail when latency budgets are exceeded
+PARSER_PERFORMANCE_ENFORCE=1 npm run benchmark:parser   # Fail when the 10k-line median exceeds budget
+LSP_PIPELINE_ENFORCE=1 npm run benchmark:lsp-pipeline   # Fail when 10k cold/warm medians exceed budget
 ```
 
-Results are written locally to `Benchmark/lspFeature.results.md` and `Benchmark/results.md` (gitignored — never commit benchmark timing artifacts).
+Results are written locally to `Benchmark/lspFeature.results.md`, `Benchmark/parserPerformance.results.md`, `Benchmark/lspPipeline.results.md`, and `Benchmark/results.md` (gitignored — never commit benchmark timing artifacts).
 
 ### Integration and Optional Extension Checks
 

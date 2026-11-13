@@ -46,7 +46,7 @@ When LSP is active, expect **two Problems sources** on SQL/PAR files:
 1. **Parser diagnostics** from the language server (`SQL*`, `PAR*`, `LEX*`) — schema via `LspSchemaProvider` / `metadataBridge`.
 2. **Quality rules** from the extension host (`NZ*`, `NZP*`) — Netezza style and NZPLSQL checks; NZP rules run only when the document contains `CREATE PROCEDURE`.
 
-`netezza.validateSelectedSql` runs the parser for the whole document (or the selected text) and publishes its findings to the Problems panel under `Netezza Parser (on demand)` / `Netezza Parser (selection)`. This is the explicit path for scripts above the automatic LSP limits (`150,000` characters or `3,000` lines); quality rules remain in the separate on-demand `Lint SQL` command.
+`netezza.validateSelectedSql` runs the parser for the whole document (or the selected text) and publishes its findings to the Problems panel under `Netezza Parser (on demand)` / `Netezza Parser (selection)`. This is the explicit path for scripts above the automatic LSP limits (`400,000` characters or `10,000` lines); quality rules remain in the separate on-demand `Lint SQL` command.
 
 Schema parity between LSP and extension-host validation is covered by `src/__tests__/schemaProviderParity.test.ts`. Mirrored system-catalog lookups remain extension-host only.
 
