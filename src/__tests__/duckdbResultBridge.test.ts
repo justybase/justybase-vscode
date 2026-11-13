@@ -1,7 +1,9 @@
 import * as fs from 'fs';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { ExportMetadata } from '../export/exportManager';
 import type { ConnectionDetails, ResultSet } from '../types';
+import { normalizedFilePath } from './helpers/platformPaths';
 
 const mockExecuteWithStreaming = jest.fn();
 const mockUnregisterCommand = jest.fn();
@@ -126,14 +128,14 @@ describe('DuckDbResultBridge', () => {
 
         expect(exportResultSet).toHaveBeenCalledWith(
             resultSet,
-            '/tmp/justybase-duckdb-bridge-12345.csv',
+            path.join('/tmp', 'justybase-duckdb-bridge-12345.csv'),
             expect.objectContaining({ format: 'csv' }),
         );
         expect(connectionManager.saveConnection).toHaveBeenCalledWith(
             expect.objectContaining({
                 name: 'DuckDB Bridge',
                 dbType: 'duckdb',
-                database: '/tmp/justybase-duckdb-bridge.duckdb',
+                database: normalizedFilePath('/tmp/justybase-duckdb-bridge.duckdb'),
             }),
         );
         expect(createConnection).toHaveBeenCalledWith(
@@ -151,7 +153,7 @@ describe('DuckDbResultBridge', () => {
         expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
             'Loaded the active result set into DuckDB table "results".',
         );
-        expect(deleteFile).toHaveBeenCalledWith('/tmp/justybase-duckdb-bridge-12345.csv');
+        expect(deleteFile).toHaveBeenCalledWith(path.join('/tmp', 'justybase-duckdb-bridge-12345.csv'));
     });
 
     it('shows an error when the result set cannot be found', async () => {

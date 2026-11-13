@@ -13,6 +13,15 @@ import {
     serializeFileWorkspace,
     sanitizeViewName,
 } from '../../../extensions/duckdb/src/fileSqlSetup';
+import { normalizedFilePath } from '../helpers/platformPaths';
+
+function sqlPath(filePath: string): string {
+    return normalizedFilePath(filePath);
+}
+
+function escapedSqlPath(filePath: string): string {
+    return sqlPath(filePath).replace(/'/g, "''");
+}
 
 describe('fileSqlSetup', () => {
     describe('detectFileDataFormat', () => {
@@ -210,7 +219,7 @@ describe('fileSqlSetup', () => {
     describe('multi-file workspace setup', () => {
         it('serializes and parses a versioned, deduplicated workspace', () => {
             const encoded = serializeFileWorkspace(['/data/a.csv', '/data/a.csv', '/data/b.xlsx']);
-            expect(parseFileWorkspace(encoded)).toEqual(['/data/a.csv', '/data/b.xlsx']);
+            expect(parseFileWorkspace(encoded)).toEqual([sqlPath('/data/a.csv'), sqlPath('/data/b.xlsx')]);
             expect(parseFileWorkspace('{"version":2,"files":["/data/a.csv"]}')).toBeUndefined();
         });
 
@@ -221,12 +230,12 @@ describe('fileSqlSetup', () => {
             ]);
 
             expect(result.statements).toEqual([
-                'CREATE OR REPLACE VIEW "/data/a.csv" AS SELECT * FROM read_csv(\'/data/a.csv\')',
-                'CREATE OR REPLACE VIEW "/data/b.xlsx#sheet=Orders" AS SELECT * FROM read_xlsx(\'/data/b.xlsx\', sheet=\'Orders\')',
-                'CREATE OR REPLACE VIEW "/data/b.xlsx#sheet=Returns" AS SELECT * FROM read_xlsx(\'/data/b.xlsx\', sheet=\'Returns\')',
-                'CREATE OR REPLACE VIEW "/data/b.xlsx" AS SELECT * FROM read_xlsx(\'/data/b.xlsx\')',
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/a.csv')}" AS SELECT * FROM read_csv('${sqlPath('/data/a.csv')}')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/b.xlsx')}#sheet=Orders" AS SELECT * FROM read_xlsx('${sqlPath('/data/b.xlsx')}', sheet='Orders')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/b.xlsx')}#sheet=Returns" AS SELECT * FROM read_xlsx('${sqlPath('/data/b.xlsx')}', sheet='Returns')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/b.xlsx')}" AS SELECT * FROM read_xlsx('${sqlPath('/data/b.xlsx')}')`,
             ]);
-            expect(result.viewNames).toEqual(['/data/a.csv', '/data/b.xlsx']);
+            expect(result.viewNames).toEqual([sqlPath('/data/a.csv'), sqlPath('/data/b.xlsx')]);
             expect(result.sheetViewNames).toEqual([
                 fileSheetViewName('/data/b.xlsx', 'Orders'),
                 fileSheetViewName('/data/b.xlsx', 'Returns'),
@@ -237,8 +246,10 @@ describe('fileSqlSetup', () => {
             const result = buildFileWorkspaceViewSetupSql([
                 { filePath: "/data/owner's.xlsx", format: 'xlsx', discoveredSheets: ['Bob"s Data'] },
             ]);
-            expect(result.statements[0]).toContain('"/data/owner\'s.xlsx#sheet=Bob""s Data"');
-            expect(result.statements[0]).toContain("read_xlsx('/data/owner''s.xlsx', sheet='Bob\"s Data')");
+            expect(result.statements[0]).toContain(`"${sqlPath("/data/owner's.xlsx")}#sheet=Bob""s Data"`);
+            expect(result.statements[0]).toContain(
+                `read_xlsx('${escapedSqlPath("/data/owner's.xlsx")}', sheet='Bob"s Data')`,
+            );
         });
 
         it('creates xlsb workspace views over converted CSVs', () => {
@@ -257,10 +268,10 @@ describe('fileSqlSetup', () => {
             ]);
 
             expect(result.statements).toEqual([
-                'CREATE OR REPLACE VIEW "/data/sales.xlsb#sheet=Sheet1" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
-                'CREATE OR REPLACE VIEW "/data/sales.xlsb#sheet=Data 2024" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales__Data_2024.csv\')',
-                'CREATE OR REPLACE VIEW "/data/sales.xlsb" AS SELECT * FROM read_csv(\'/tmp/xlsb/sales.csv\')',
-                'CREATE OR REPLACE VIEW "/data/a.csv" AS SELECT * FROM read_csv(\'/data/a.csv\')',
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/sales.xlsb')}#sheet=Sheet1" AS SELECT * FROM read_csv('/tmp/xlsb/sales.csv')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/sales.xlsb')}#sheet=Data 2024" AS SELECT * FROM read_csv('/tmp/xlsb/sales__Data_2024.csv')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/sales.xlsb')}" AS SELECT * FROM read_csv('/tmp/xlsb/sales.csv')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/a.csv')}" AS SELECT * FROM read_csv('${sqlPath('/data/a.csv')}')`,
             ]);
             expect(result.sheetViewNames).toEqual([
                 fileSheetViewName('/data/sales.xlsb', 'Sheet1'),
@@ -288,14 +299,14 @@ describe('fileSqlSetup', () => {
             ]);
 
             expect(result.statements).toEqual([
-                'CREATE OR REPLACE VIEW "/data/orders.mdb#table=Orders" AS SELECT * FROM read_csv(\'/tmp/file-sql/orders__Orders.csv\')',
-                'CREATE OR REPLACE VIEW "/data/orders.mdb#table=Customers" AS SELECT * FROM read_csv(\'/tmp/file-sql/orders__Customers.csv\')',
-                'CREATE OR REPLACE VIEW "/data/a.csv" AS SELECT * FROM read_csv(\'/data/a.csv\')',
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/orders.mdb')}#table=Orders" AS SELECT * FROM read_csv('/tmp/file-sql/orders__Orders.csv')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/orders.mdb')}#table=Customers" AS SELECT * FROM read_csv('/tmp/file-sql/orders__Customers.csv')`,
+                `CREATE OR REPLACE VIEW "${sqlPath('/data/a.csv')}" AS SELECT * FROM read_csv('${sqlPath('/data/a.csv')}')`,
             ]);
             expect(result.viewNames).toEqual([
                 fileTableViewName('/data/orders.mdb', 'Orders'),
                 fileTableViewName('/data/orders.mdb', 'Customers'),
-                '/data/a.csv',
+                sqlPath('/data/a.csv'),
             ]);
             expect(result.sheetViewNames).toEqual([
                 fileTableViewName('/data/orders.mdb', 'Orders'),

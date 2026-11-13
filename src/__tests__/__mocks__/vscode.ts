@@ -156,12 +156,24 @@ export const languages = {
   registerHoverProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerInlayHintsProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerCodeActionsProvider: jest.fn(() => ({ dispose: jest.fn() })),
-  createDiagnosticCollection: jest.fn(() => ({
-    set: jest.fn(),
-    delete: jest.fn(),
-    clear: jest.fn(),
-    dispose: jest.fn(),
-  })),
+  createDiagnosticCollection: jest.fn(() => {
+    const store = new Map<string, Diagnostic[]>();
+    return {
+      set: jest.fn((uri: { toString(): string }, diagnostics: Diagnostic[]) => {
+        store.set(uri.toString(), diagnostics);
+      }),
+      get: jest.fn((uri: { toString(): string }) => store.get(uri.toString())),
+      delete: jest.fn((uri: { toString(): string }) => {
+        store.delete(uri.toString());
+      }),
+      clear: jest.fn(() => {
+        store.clear();
+      }),
+      dispose: jest.fn(() => {
+        store.clear();
+      }),
+    };
+  }),
   registerDocumentSymbolProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerSignatureHelpProvider: jest.fn(() => ({ dispose: jest.fn() })),
   registerFoldingRangeProvider: jest.fn(() => ({ dispose: jest.fn() })),

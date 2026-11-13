@@ -119,7 +119,9 @@ describe('DataWorkspaceService creation and import', () => {
         const { service, saved, createConnection } = createService();
         const details = await service.createWorkspace('Reporting');
 
-        expect(details.database).toBe('/tmp/data-workspace-service-test/data-workspaces/workspace-imported-1.duckdb');
+        expect(details.database).toBe(
+            path.join('/tmp/data-workspace-service-test', 'data-workspaces', 'workspace-imported-1.duckdb'),
+        );
         expect(details.dbType).toBe('duckdb');
         expect(parseDataWorkspace(details.options?.[DATA_WORKSPACE_OPTION])).toEqual({
             version: DATA_WORKSPACE_VERSION,

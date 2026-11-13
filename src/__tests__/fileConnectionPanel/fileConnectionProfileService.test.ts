@@ -18,6 +18,7 @@ import {
     serializeFileWorkspace,
     toFileInfo,
 } from '../../services/fileConnectionProfileService';
+import { normalizedFilePath } from '../helpers/platformPaths';
 
 jest.mock('@justybase/spreadsheet-tasks', () => ({
     ReaderFactory: {
@@ -95,14 +96,15 @@ describe('resolveFileSourceConnectionName', () => {
 describe('workspace serialization', () => {
     it('round-trips workspace files', () => {
         const files = ['/a/x.csv', '/b/y.tsv'];
+        const expected = files.map(normalizedFilePath);
         const serialized = serializeFileWorkspace(files);
-        expect(JSON.parse(serialized)).toEqual({ version: 1, files: ['/a/x.csv', '/b/y.tsv'] });
-        expect(parseFileWorkspace(serialized)).toEqual(['/a/x.csv', '/b/y.tsv']);
+        expect(JSON.parse(serialized)).toEqual({ version: 1, files: expected });
+        expect(parseFileWorkspace(serialized)).toEqual(expected);
     });
 
     it('deduplicates and normalizes paths', () => {
         const serialized = serializeFileWorkspace(['/a/./x.csv', '/a/x.csv', '']);
-        expect(parseFileWorkspace(serialized)).toEqual(['/a/x.csv']);
+        expect(parseFileWorkspace(serialized)).toEqual([normalizedFilePath('/a/x.csv')]);
     });
 
     it('returns undefined for invalid workspace values', () => {
@@ -123,13 +125,16 @@ describe('getFilePaths / isFileWorkspaceProfile', () => {
             dbType: 'file' as const,
             options: { fileWorkspace: serializeFileWorkspace(['/first.csv', '/second.csv']) },
         };
-        expect(getFilePaths(details)).toEqual(['/first.csv', '/second.csv']);
+        expect(getFilePaths(details)).toEqual([
+            normalizedFilePath('/first.csv'),
+            normalizedFilePath('/second.csv'),
+        ]);
         expect(isFileWorkspaceProfile(details)).toBe(true);
     });
 
     it('falls back to the single-file database path', () => {
         const details = { host: 'local', database: '/only.csv', user: 'file', dbType: 'file' as const };
-        expect(getFilePaths(details)).toEqual(['/only.csv']);
+        expect(getFilePaths(details)).toEqual([normalizedFilePath('/only.csv')]);
         expect(isFileWorkspaceProfile(details)).toBe(false);
     });
 
@@ -164,7 +169,7 @@ describe('buildFileConnectionDetails', () => {
 
     it('keeps single-file mode for one file and preserves editable and sheet', () => {
         const { details, modeChanged, editableCleared } = buildFileConnectionDetails('C', ['/a.csv'], single);
-        expect(details.database).toBe('/a.csv');
+        expect(details.database).toBe(normalizedFilePath('/a.csv'));
         expect(details.options?.fileWorkspace).toBeUndefined();
         expect(details.options?.editable).toBe(true);
         expect(details.options?.sheet).toBe('Sheet1');
@@ -182,9 +187,12 @@ describe('buildFileConnectionDetails', () => {
 
     it('converts to a read-only workspace for multiple files and clears the editable copy', () => {
         const { details, modeChanged, editableCleared } = buildFileConnectionDetails('C', ['/a.csv', '/b.csv'], single);
-        expect(details.database).toBe('/a.csv');
+        expect(details.database).toBe(normalizedFilePath('/a.csv'));
         expect(isFileWorkspaceProfile(details)).toBe(true);
-        expect(parseFileWorkspace(details.options?.fileWorkspace)).toEqual(['/a.csv', '/b.csv']);
+        expect(parseFileWorkspace(details.options?.fileWorkspace)).toEqual([
+            normalizedFilePath('/a.csv'),
+            normalizedFilePath('/b.csv'),
+        ]);
         expect(details.options?.editable).toBeUndefined();
         expect(details.options?.sheet).toBeUndefined();
         expect(modeChanged).toBe(true);
@@ -208,7 +216,7 @@ describe('buildFileConnectionDetails', () => {
 
     it('deduplicates files and drops empty paths', () => {
         const { details } = buildFileConnectionDetails('C', ['/a.csv', '/a.csv', ''], undefined);
-        expect(getFilePaths(details)).toEqual(['/a.csv']);
+        expect(getFilePaths(details)).toEqual([normalizedFilePath('/a.csv')]);
     });
 });
 
@@ -222,11 +230,14 @@ describe('applyFilePathsToConnection', () => {
         const details = await applyFilePathsToConnection(manager as unknown as never, 'C', ['/a.csv', '/b.csv']);
         expect(saveConnection).toHaveBeenCalledWith(expect.objectContaining({
             name: 'C',
-            database: '/a.csv',
+            database: normalizedFilePath('/a.csv'),
             dbType: 'file',
         }));
         expect(refreshFileConnection).toHaveBeenCalledWith('C');
-        expect(getFilePaths(details as never)).toEqual(['/a.csv', '/b.csv']);
+        expect(getFilePaths(details as never)).toEqual([
+            normalizedFilePath('/a.csv'),
+            normalizedFilePath('/b.csv'),
+        ]);
     });
 
     it('returns undefined when the connection does not exist', async () => {
@@ -242,7 +253,7 @@ describe('listXlsxSheetNames', () => {
     it('returns worksheet names for xlsx files', async () => {
         const names = await listXlsxSheetNames('/tmp/book.xlsx');
         expect(names).toEqual(['Sheet1', 'Sales Data']);
-        expect(mockReader.open).toHaveBeenCalledWith('/tmp/book.xlsx');
+        expect(mockReader.open).toHaveBeenCalledWith(normalizedFilePath('/tmp/book.xlsx'));
         expect(mockReader.close).toHaveBeenCalled();
     });
 

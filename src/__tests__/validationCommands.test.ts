@@ -107,6 +107,12 @@ jest.mock('../providers/sqlLinterProvider', () => ({
     getSqlLinter: jest.fn(() => mockLinter)
 }));
 
+const isSqlLanguageClientRunningMock = jest.fn(() => false);
+
+jest.mock('../activation/lspRegistration', () => ({
+    isSqlLanguageClientRunning: () => isSqlLanguageClientRunningMock()
+}));
+
 jest.mock('../compatibility/configuration', () => ({
     getExtensionConfiguration: jest.fn(() => ({
         get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue)
@@ -151,7 +157,10 @@ describe('commands/validationCommands', () => {
         jest.clearAllMocks();
         validateMock.mockReset();
         validateMock.mockReturnValue(makeValidationResult());
+        mockLinter.lintDocument.mockReset();
+        mockLinter.lintDocument.mockResolvedValue([]);
         mockLinter.publishValidationErrors.mockReset();
+        isSqlLanguageClientRunningMock.mockReturnValue(false);
     });
 
     describe('registerValidationCommands', () => {
@@ -237,8 +246,63 @@ describe('commands/validationCommands', () => {
             expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No SQL code to validate');
         });
 
-        it('publishes whole-document parser findings to Problems', async () => {
+        it('runs the quality linter once for small whole documents and does not double-parse', async () => {
             const document = makeDocument('SELECT FROM T;');
+            mockLinter.lintDocument.mockResolvedValueOnce([
+                {
+                    ruleId: 'SQL003',
+                    message: 'Syntax error',
+                    severity: 0,
+                    startOffset: 7,
+                    endOffset: 8
+                }
+            ]);
+
+            const handler = getValidateHandler();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document,
+                selection: { isEmpty: true }
+            };
+            await handler();
+
+            // The extension-host linter already includes parser diagnostics when
+            // the LSP is not running, so the command must not parse again.
+            expect(mockLinter.lintDocument).toHaveBeenCalledWith(document, true);
+            expect(validateMock).not.toHaveBeenCalled();
+            expect(mockLinter.publishValidationErrors).not.toHaveBeenCalled();
+            expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+                expect.stringMatching(/found 1 error/i)
+            );
+            expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+                'workbench.actions.view.problems'
+            );
+        });
+
+        it('defers parser diagnostics to the LSP when it owns automatic diagnostics', async () => {
+            isSqlLanguageClientRunningMock.mockReturnValue(true);
+            const document = makeDocument('SELECT FROM T;');
+
+            const handler = getValidateHandler();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (vscode.window as any).activeTextEditor = {
+                document,
+                selection: { isEmpty: true }
+            };
+            await handler();
+
+            expect(mockLinter.lintDocument).toHaveBeenCalledWith(document, true);
+            expect(validateMock).not.toHaveBeenCalled();
+            expect(mockLinter.publishValidationErrors).not.toHaveBeenCalled();
+            expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+                expect.stringMatching(/Parser diagnostics .* Problems panel \(LSP\)/)
+            );
+        });
+
+        it('runs a direct parse for large documents when the LSP skips automatic lint', async () => {
+            isSqlLanguageClientRunningMock.mockReturnValue(true);
+            const text = `SELECT FROM T;${' '.repeat(410_000)}`;
+            const document = makeDocument(text);
             validateMock.mockReturnValue(makeValidationResult([
                 {
                     code: 'SQL003',
@@ -262,7 +326,8 @@ describe('commands/validationCommands', () => {
             };
             await handler();
 
-            expect(validateMock).toHaveBeenCalledWith('SELECT FROM T;');
+            expect(mockLinter.lintDocument).toHaveBeenCalledWith(document, true);
+            expect(validateMock).toHaveBeenCalledWith(text);
             expect(mockLinter.publishValidationErrors).toHaveBeenCalledWith(
                 document,
                 [expect.objectContaining({ code: 'SQL003' })],
@@ -326,11 +391,8 @@ describe('commands/validationCommands', () => {
             (vscode.window as any).activeTextEditor = { document, selection };
             await handler();
 
-            expect(mockLinter.publishValidationErrors).toHaveBeenCalledWith(
-                document,
-                [],
-                { baseOffset: 0, source: 'Netezza Parser (on demand)' }
-            );
+            expect(mockLinter.lintDocument).toHaveBeenCalledWith(document, true);
+            expect(mockLinter.publishValidationErrors).not.toHaveBeenCalled();
             expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
                 'SQL validation passed! No errors or warnings found.'
             );

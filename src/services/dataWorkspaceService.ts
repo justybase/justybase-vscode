@@ -845,7 +845,7 @@ export class DataWorkspaceService {
             );
             if (preflight.error) throw preflight.error;
             if (preflight.totalRows > DATA_WORKSPACE_ROW_LIMIT || preflight.limitReached) {
-                throw new Error(`The source exceeds the ${DATA_WORKSPACE_ROW_LIMIT.toLocaleString()} row limit. Add a WHERE clause or LIMIT to the source SQL.`);
+                throw new Error(`The source exceeds the ${DATA_WORKSPACE_ROW_LIMIT.toLocaleString('en-US')} row limit. Add a WHERE clause or LIMIT to the source SQL.`);
             }
 
             const parquetWriter = new WorkspaceParquetWriter(getParquetModule(), stagedParquetPath);
@@ -867,7 +867,7 @@ export class DataWorkspaceService {
             );
             if (streamed.error) throw streamed.error;
             if (streamed.totalRows > DATA_WORKSPACE_ROW_LIMIT || streamed.limitReached) {
-                throw new Error(`The source exceeded the ${DATA_WORKSPACE_ROW_LIMIT.toLocaleString()} row limit while streaming; the previous local table was kept.`);
+                throw new Error(`The source exceeded the ${DATA_WORKSPACE_ROW_LIMIT.toLocaleString('en-US')} row limit while streaming; the previous local table was kept.`);
             }
             await parquetWriter.finish();
 

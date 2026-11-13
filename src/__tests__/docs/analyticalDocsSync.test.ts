@@ -17,6 +17,11 @@ function generatedBlock(markdown: string): string | null {
     return markdown.slice(start + BEGIN.length, finish).trim();
 }
 
+/** Git may check the guide out with CRLF on Windows; compare logical lines. */
+function normalizeLineEndings(value: string): string {
+    return value.replace(/\r\n?/g, '\n');
+}
+
 describe('Analytical documentation stays in sync with the code', () => {
     const guide = fs.readFileSync(GUIDE_PATH, 'utf8');
     const contract = fs.readFileSync(CONTRACT_PATH, 'utf8');
@@ -25,7 +30,7 @@ describe('Analytical documentation stays in sync with the code', () => {
         const block = generatedBlock(guide);
         expect(block).not.toBeNull();
         // On mismatch the expected table is printed in the failure, ready to paste between the markers.
-        expect(block).toBe(renderRuleCatalogueMarkdown());
+        expect(normalizeLineEndings(block ?? '')).toBe(normalizeLineEndings(renderRuleCatalogueMarkdown()));
     });
 
     it('keeps the rule id list and the rule catalogue identical', () => {

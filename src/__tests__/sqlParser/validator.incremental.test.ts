@@ -3,7 +3,12 @@ jest.unmock("chevrotain");
 import { SqlValidator } from "../../sqlParser/validator";
 import { parseSqlStatements } from "../../sqlParser/parsingRuntime";
 import { createMockSchemaProvider } from "../../sqlParser/schemaProvider";
-import { buildStatementIndex } from "../../sqlParser/statementIndex";
+import {
+  buildStatementIndex,
+  groupDiagnosticsByStatement,
+} from "../../sqlParser/statementIndex";
+import { DocumentValidationSession } from "../../sqlParser/documentValidationSession";
+import { prepareIncrementalValidation } from "../../sqlParser/validationPipeline";
 import type { ValidationError } from "../../sqlParser/types";
 
 describe("SqlValidator incremental validation", () => {
@@ -116,8 +121,8 @@ ${commentSql}`;
         columns: ["EMPLOYEE_ID", "DEPARTMENT_ID"],
       },
     ]);
-    const sql = `CREATE TABLE TESTDB.\"PUBLIC\".CTAS_RESULT AS (SELECT 1 AS A, 2 AS B);
-SELECT A, B FROM TESTDB.\"PUBLIC\".CTAS_RESULT;`;
+    const sql = `CREATE TABLE TESTDB."PUBLIC".CTAS_RESULT AS (SELECT 1 AS A, 2 AS B);
+SELECT A, B FROM TESTDB."PUBLIC".CTAS_RESULT;`;
     const index = buildStatementIndex(sql);
     const validator = new SqlValidator(schemaProvider);
 
@@ -154,8 +159,8 @@ SELECT ID, NAME FROM MY_TEMP;`;
   });
 
   it("seeds script-created views for dirty statement validation", () => {
-    const sql = `CREATE VIEW TESTDB.\"PUBLIC\".V1 AS SELECT 1 AS ID;
-SELECT ID FROM TESTDB.\"PUBLIC\".V1;`;
+    const sql = `CREATE VIEW TESTDB."PUBLIC".V1 AS SELECT 1 AS ID;
+SELECT ID FROM TESTDB."PUBLIC".V1;`;
     const index = buildStatementIndex(sql);
     const validator = new SqlValidator(createMockSchemaProvider([]));
 
@@ -170,9 +175,9 @@ SELECT ID FROM TESTDB.\"PUBLIC\".V1;`;
   });
 
   it("removes dropped script tables from scope seed for downstream validation", () => {
-    const sql = `CREATE TABLE TESTDB.\"PUBLIC\".T1 AS (SELECT 1 AS ID);
-DROP TABLE TESTDB.\"PUBLIC\".T1;
-SELECT ID FROM TESTDB.\"PUBLIC\".T1;`;
+    const sql = `CREATE TABLE TESTDB."PUBLIC".T1 AS (SELECT 1 AS ID);
+DROP TABLE TESTDB."PUBLIC".T1;
+SELECT ID FROM TESTDB."PUBLIC".T1;`;
     const index = buildStatementIndex(sql);
     const validator = new SqlValidator(createMockSchemaProvider([]));
 
@@ -240,5 +245,53 @@ SELECT ID FROM TESTDB.\"PUBLIC\".T1;`;
 
     validateStatementTextSpy.mockRestore();
     buildScopeSeedsSpy.mockRestore();
+  });
+
+  it("remaps cached warnings after an earlier edit shifts later statements", () => {
+    const documentUri = "file:///validator-incremental-remap.sql";
+    const previousSql = "SELECT 1 FROM (SELECT 1 AS X) T0;\nSELECT 2;\nSELECT * FROM (SELECT 1 AS X) T;";
+    const nextSql = "SELECT\n1 FROM (SELECT 1 AS X) T0;\nSELECT 2;\nSELECT * FROM (SELECT 1 AS X) T;";
+    const validator = new SqlValidator(createMockSchemaProvider([]));
+    const session = new DocumentValidationSession();
+
+    const first = session.prepareDocument(documentUri, previousSql);
+    const firstResult = validator.validate(previousSql);
+    const firstGrouped = groupDiagnosticsByStatement(
+      first.nextIndex.statements,
+      [...firstResult.errors, ...firstResult.warnings],
+    );
+    for (const statement of first.nextIndex.statements) {
+      session.storeStatementDiagnostics(
+        documentUri,
+        statement,
+        firstGrouped.get(statement.index) ?? [],
+      );
+    }
+    session.commitDocumentIndex(documentUri, first.nextIndex);
+
+    const prepared = prepareIncrementalValidation({
+      documentUri,
+      sql: nextSql,
+      validationSession: session,
+      requireFullCacheCoverage: true,
+    });
+    expect(prepared.incrementalValidation).toBeDefined();
+    const incrementalOptions = prepared.incrementalValidation!;
+    const incremental = validator.validateIncrementalFromStatements(
+      nextSql,
+      incrementalOptions.statementIndex.statements,
+      incrementalOptions.dirtyIndices,
+      incrementalOptions.cachedDiagnostics,
+    );
+    const full = validator.validate(nextSql);
+
+    const normalize = (issues: readonly ValidationError[]) =>
+      issues
+        .map(
+          (issue) =>
+            `${issue.code}@${issue.position.offset}:${issue.position.startLine}:${issue.position.startColumn}`,
+        )
+        .sort();
+    expect(normalize(incremental.warnings)).toEqual(normalize(full.warnings));
   });
 });

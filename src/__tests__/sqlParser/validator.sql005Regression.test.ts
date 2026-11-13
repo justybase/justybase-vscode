@@ -40,6 +40,8 @@ describe("SQL005 regression - aliased double-dot table with star select", () => 
           index: 0,
           startOffset: 0,
           endOffset: sql.length - 1,
+          startLine: 1,
+          startColumn: 1,
           sql,
           contentHash: "test",
         },

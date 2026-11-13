@@ -13,6 +13,17 @@ describe('result panel clipboard HTML', () => {
     });
 
     it('emits numeric HTML cells with canonical Excel numeric payloads', () => {
+        // The HTML display text is localized for the current runtime. Pin the
+        // decimal separator so this canonical-payload test is locale-independent;
+        // the next test covers the localized comma path explicitly.
+        Intl.NumberFormat = jest.fn(() => ({
+            formatToParts: () => [
+                { type: 'integer', value: '2' },
+                { type: 'decimal', value: '.' },
+                { type: 'fraction', value: '5' }
+            ]
+        })) as unknown as typeof Intl.NumberFormat;
+
         const { __testHooks } = require('../../media/resultPanel/selection.js');
 
         const payload = __testHooks.buildSelectedClipboardPayload({

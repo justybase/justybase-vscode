@@ -129,7 +129,7 @@ export function buildReport({ commit = 'unknown', base = null, dirty = false, je
       : auditMetadata ? 'pass' : 'missing';
   const report = {
     schemaVersion: 1,
-    generatedAt: new Date().toISOString().slice(0, 10),
+    generatedAt: new Date().toISOString(),
     repository: { commit, base, dirty },
     tests: {
       suites: { total: testData.numTotalTestSuites ?? 0, passed: testData.numPassedTestSuites ?? 0, failed: testData.numFailedTestSuites ?? 0 },

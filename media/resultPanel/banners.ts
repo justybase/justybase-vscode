@@ -77,7 +77,7 @@ function collectWarnings(
         warnings.push({
             key: 'row-limit',
             text:
-                `Query row limit reached: ${fetched.toLocaleString()} of ${limit.toLocaleString()} rows fetched. ` +
+                `Query row limit reached: ${fetched.toLocaleString('en-US')} of ${limit.toLocaleString('en-US')} rows fetched. ` +
                 'Increase "justybase.query.rowLimit" in settings to fetch more.',
         });
     }

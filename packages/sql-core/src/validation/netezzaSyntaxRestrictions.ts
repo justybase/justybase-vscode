@@ -55,7 +55,12 @@ import type { ValidationError } from "./types";
  *   immediately after the class; a relation/schema name is rejected (PAR003).
  */
 
-function errorAt(code: string, message: string, token: IToken): ValidationError {
+function diagnosticAt(
+  code: string,
+  message: string,
+  token: IToken,
+  severity: ValidationError["severity"],
+): ValidationError {
   const startLine = token.startLine ?? 1;
   const startColumn = token.startColumn ?? 1;
   const endLine = token.endLine ?? startLine;
@@ -68,7 +73,7 @@ function errorAt(code: string, message: string, token: IToken): ValidationError 
       : startColumn + (token.image?.length ?? 1);
   return {
     message,
-    severity: "error",
+    severity,
     position: {
       startLine,
       startColumn,
@@ -78,6 +83,18 @@ function errorAt(code: string, message: string, token: IToken): ValidationError 
     },
     code,
   };
+}
+
+function errorAt(code: string, message: string, token: IToken): ValidationError {
+  return diagnosticAt(code, message, token, "error");
+}
+
+function warningAt(
+  code: string,
+  message: string,
+  token: IToken,
+): ValidationError {
+  return diagnosticAt(code, message, token, "warning");
 }
 
 function tokenName(token: IToken | undefined): string | undefined {
@@ -729,4 +746,36 @@ export function detectNetezzaSyntaxRestrictions(
   }
 
   return errors;
+}
+
+/**
+ * Warnings for constructs that Netezza parses but rejects later while
+ * evaluating literals. They are intentionally warnings, not parse errors:
+ * `SELECT INTERVAL '1' DAY` reaches literal validation and fails with
+ * "Bad interval external representation '1'".
+ */
+export function detectNetezzaSyntaxRestrictionWarnings(
+  tokens: readonly IToken[],
+): ValidationError[] {
+  const warnings: ValidationError[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index].image.toUpperCase() !== "INTERVAL") {
+      continue;
+    }
+    if (tokenName(tokens[index + 1]) !== "StringLiteral") {
+      continue;
+    }
+    const unit = tokens[index + 2]?.image.toUpperCase() ?? "";
+    if (!/^(?:YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)$/.test(unit)) {
+      continue;
+    }
+    warnings.push(
+      warningAt(
+        "NZS007",
+        "Netezza accepts this INTERVAL syntax but rejects the literal at execution; put the unit inside the literal, e.g. INTERVAL '1 day'.",
+        tokens[index + 2],
+      ),
+    );
+  }
+  return warnings;
 }

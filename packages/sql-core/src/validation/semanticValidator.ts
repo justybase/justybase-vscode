@@ -21,7 +21,7 @@ import type { DatabaseSqlValidationProfile } from "@justybase/contracts";
 import type { CstNode, IRecognitionException, IToken } from "chevrotain";
 import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
 import { getAvailableTokenLocation, getTokenLocationOr } from "./tokenLocation";
-import { detectNetezzaSyntaxRestrictions } from "./netezzaSyntaxRestrictions";
+import { detectNetezzaSyntaxRestrictions, detectNetezzaSyntaxRestrictionWarnings } from "./netezzaSyntaxRestrictions";
 import { collectKeywordTypos } from "./keywordTypos";
 import { createSqlLineIndex, type SqlLineIndex } from "./lineIndex";
 
@@ -697,6 +697,9 @@ export class NetezzaSqlSemanticValidator {
 
     errors.push(...collectKeywordTypos(lexResult.tokens));
     errors.push(...detectNetezzaSyntaxRestrictions(lexResult.tokens));
+    warnings.push(
+      ...detectNetezzaSyntaxRestrictionWarnings(lexResult.tokens),
+    );
 
     return {
       errors,

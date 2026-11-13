@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { SchemaProvider, SchemaItem } from '../../providers/schemaProvider';
 import { ConnectionManager } from '../../core/connectionManager';
 import { MetadataCache } from '../../metadataCache';
+import { normalizedFilePath } from '../helpers/platformPaths';
 
 jest.mock('../../core/queryRunner', () => ({
     runQueryRaw: jest.fn(),
@@ -109,7 +110,11 @@ describe('SchemaProvider handleDrop on File SQL connections', () => {
         const saved = savedDetails[0] as { options: Record<string, string> };
         expect(JSON.parse(saved.options.fileWorkspace as string)).toEqual({
             version: 1,
-            files: ['/data/sales.csv', '/data/sales.xlsx', '/data/extra.csv'],
+            files: [
+                normalizedFilePath('/data/sales.csv'),
+                normalizedFilePath('/data/sales.xlsx'),
+                normalizedFilePath('/data/extra.csv'),
+            ],
         });
         expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
             'netezza.refreshSchema',
@@ -129,7 +134,10 @@ describe('SchemaProvider handleDrop on File SQL connections', () => {
         const saved = savedDetails[0] as { options: Record<string, string> };
         expect(JSON.parse(saved.options.fileWorkspace as string)).toEqual({
             version: 1,
-            files: ['/data/sales.csv', '/data/extra.csv'],
+            files: [
+                normalizedFilePath('/data/sales.csv'),
+                normalizedFilePath('/data/extra.csv'),
+            ],
         });
     });
 

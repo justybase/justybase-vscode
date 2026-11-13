@@ -929,8 +929,8 @@ function flattenExplainText(node: MysqlExplainNode, depth = 0): string[] {
         const metrics = [
             node.actualFirstRowTimeMs !== undefined ? `firstRow=${node.actualFirstRowTimeMs.toFixed(3)} ms` : undefined,
             node.actualTotalTimeMs !== undefined ? `total=${node.actualTotalTimeMs.toFixed(3)} ms` : undefined,
-            node.actualRows !== undefined ? `rows=${Math.round(node.actualRows).toLocaleString()}` : undefined,
-            node.loops !== undefined ? `loops=${Math.round(node.loops).toLocaleString()}` : undefined,
+            node.actualRows !== undefined ? `rows=${Math.round(node.actualRows).toLocaleString('en-US')}` : undefined,
+            node.loops !== undefined ? `loops=${Math.round(node.loops).toLocaleString('en-US')}` : undefined,
         ].filter((value): value is string => Boolean(value));
         if (metrics.length > 0) {
             lines.push(`${indent}   Actual: ${metrics.join(', ')}`);

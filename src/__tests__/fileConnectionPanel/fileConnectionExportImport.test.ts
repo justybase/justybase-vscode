@@ -8,6 +8,7 @@ import {
     serializeFileConnectionExport,
     serializeFileConnectionsExport,
 } from '../../services/fileConnectionProfileService';
+import { normalizedFilePath } from '../helpers/platformPaths';
 
 describe('serializeFileConnectionExport / parseFileConnectionsExport', () => {
     it('round-trips a single-file profile', () => {
@@ -20,7 +21,7 @@ describe('serializeFileConnectionExport / parseFileConnectionsExport', () => {
         });
         expect(entry).toEqual({
             name: 'My Excel',
-            files: ['/data/sales.xlsx'],
+            files: [normalizedFilePath('/data/sales.xlsx')],
             editable: true,
             sheet: 'Arkusz1',
         });
@@ -38,10 +39,18 @@ describe('serializeFileConnectionExport / parseFileConnectionsExport', () => {
             dbType: 'file',
             options: { fileWorkspace: JSON.stringify({ version: 1, files: ['/a.csv', '/b.tsv'] }) },
         });
-        expect(entry).toEqual({ name: 'Files', files: ['/a.csv', '/b.tsv'] });
+        expect(entry).toEqual({
+            name: 'Files',
+            files: [normalizedFilePath('/a.csv'), normalizedFilePath('/b.tsv')],
+        });
 
         const parsed = parseFileConnectionsExport(serializeFileConnectionsExport([entry]));
-        expect(parsed[0]).toEqual({ name: 'Files', files: ['/a.csv', '/b.tsv'], editable: false, sheet: undefined });
+        expect(parsed[0]).toEqual({
+            name: 'Files',
+            files: [normalizedFilePath('/a.csv'), normalizedFilePath('/b.tsv')],
+            editable: false,
+            sheet: undefined,
+        });
     });
 
     it('rejects invalid payloads with user-facing messages', () => {
@@ -60,7 +69,10 @@ describe('serializeFileConnectionExport / parseFileConnectionsExport', () => {
         }]);
         const parsed = parseFileConnectionsExport(json);
         expect(parsed[0].name).toBe('A');
-        expect(parsed[0].files).toEqual(['/x/a.csv', '/b.parquet']);
+        expect(parsed[0].files).toEqual([
+            normalizedFilePath('/x/a.csv'),
+            normalizedFilePath('/b.parquet'),
+        ]);
     });
 });
 
@@ -97,7 +109,10 @@ describe('importFileConnections', () => {
             options: { editable: true },
         });
         expect((saved['Files'] as { options: Record<string, string> }).options.fileWorkspace).toBe(
-            JSON.stringify({ version: 1, files: ['/data/a.csv', '/data/b.csv'] }),
+            JSON.stringify({
+                version: 1,
+                files: [normalizedFilePath('/data/a.csv'), normalizedFilePath('/data/b.csv')],
+            }),
         );
     });
 

@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { DATA_WORKSPACE_OPTION, DATA_WORKSPACE_VERSION, DataWorkspaceService } from '../../services/dataWorkspaceService';
 import type { FileConnectionPanelWebviewToHostMessage } from '../../contracts/webviews/fileConnectionPanelContracts';
 import { FileConnectionPanelView } from '../../views/fileConnectionPanelView';
+import { resolvedFilePath } from '../helpers/platformPaths';
 
 function workspaceProfile(
     name: string,
@@ -275,7 +276,7 @@ describe('FileConnectionPanelView Data Workspace mode', () => {
         await sendMessage(view, { type: 'editWorkspaceSource', sourceId: 'source-12345678' });
 
         expect(mockedCommands.executeCommand).toHaveBeenCalledWith('justybase.duckdb.editFileSource', {
-            filePath: '/data/sales.csv',
+            filePath: resolvedFilePath('/data/sales.csv'),
             connectionName: 'File SQL: sales.csv',
         });
     });
@@ -352,7 +353,7 @@ describe('FileConnectionPanelView Data Workspace mode', () => {
 
         expect(manager.saveConnection).toHaveBeenCalledWith(expect.objectContaining({
             name: 'File SQL: sample.accdb',
-            database: '/data/sample.accdb',
+            database: resolvedFilePath('/data/sample.accdb'),
             dbType: 'access',
             options: expect.objectContaining({ readOnly: false }),
         }));

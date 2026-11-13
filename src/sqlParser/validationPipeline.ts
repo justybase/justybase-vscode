@@ -211,6 +211,7 @@ export async function runValidationPipeline(
       parseSession: input.parseSession,
       parseRequest: input.parseRequest,
       incrementalValidation: prepared?.incrementalValidation,
+      statementIndex: prepared?.validationState.nextIndex,
       validationSession: input.validationSession,
       documentUri: input.documentUri,
     });

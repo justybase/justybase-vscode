@@ -21,12 +21,75 @@ export interface DocumentValidationState {
   diff: StatementIndexDiff;
 }
 
+interface CachedTokenPosition {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+  offset: number;
+}
+
+/**
+ * Diagnostics are cached relative to the owning statement. Statement content is
+ * immutable between edits (the cache is keyed by its hash), but its absolute
+ * start can move when an earlier edit adds or removes lines/characters.
+ */
+type CachedValidationError = Omit<ValidationError, "position"> & {
+  position: CachedTokenPosition;
+};
+
+function toCachedDiagnostic(
+  statement: StatementBoundary,
+  diagnostic: ValidationError,
+): CachedValidationError {
+  const position = diagnostic.position;
+  return {
+    ...diagnostic,
+    position: {
+      startLine: position.startLine - statement.startLine + 1,
+      startColumn:
+        position.startLine === statement.startLine
+          ? position.startColumn - statement.startColumn + 1
+          : position.startColumn,
+      endLine: position.endLine - statement.startLine + 1,
+      endColumn:
+        position.endLine === statement.startLine
+          ? position.endColumn - statement.startColumn + 1
+          : position.endColumn,
+      offset: position.offset - statement.startOffset,
+    },
+  };
+}
+
+function fromCachedDiagnostic(
+  statement: StatementBoundary,
+  diagnostic: CachedValidationError,
+): ValidationError {
+  const position = diagnostic.position;
+  return {
+    ...diagnostic,
+    position: {
+      startLine: statement.startLine + position.startLine - 1,
+      startColumn:
+        position.startLine === 1
+          ? statement.startColumn + position.startColumn - 1
+          : position.startColumn,
+      endLine: statement.startLine + position.endLine - 1,
+      endColumn:
+        position.endLine === 1
+          ? statement.startColumn + position.endColumn - 1
+          : position.endColumn,
+      offset: statement.startOffset + position.offset,
+    },
+  };
+}
+
 interface DocumentDiagnosticsCache {
   statementIndex?: StatementIndex;
   /** Content hash of every validated statement, including clean ones. */
   validatedStatementHashes: Map<number, string>;
   /** Payloads are stored only for statements with at least one diagnostic. */
-  diagnosticsByStatement: Map<number, ValidationError[]>;
+  diagnosticsByStatement: Map<number, CachedValidationError[]>;
   metadataEpoch?: number;
   createdAtMs: number;
 }
@@ -85,7 +148,10 @@ export class DocumentValidationSession {
     if (!cache || statementHash !== statement.contentHash) {
       return undefined;
     }
-    return cache.diagnosticsByStatement.get(statement.index) ?? [];
+    const cached = cache.diagnosticsByStatement.get(statement.index);
+    return cached
+      ? cached.map((diagnostic) => fromCachedDiagnostic(statement, diagnostic))
+      : [];
   }
 
   storeStatementDiagnostics(
@@ -103,7 +169,12 @@ export class DocumentValidationSession {
       // Clean statements keep coverage without a payload.
       cache.diagnosticsByStatement.delete(statement.index);
     } else {
-      cache.diagnosticsByStatement.set(statement.index, diagnostics);
+      cache.diagnosticsByStatement.set(
+        statement.index,
+        diagnostics.map((diagnostic) =>
+          toCachedDiagnostic(statement, diagnostic),
+        ),
+      );
       this.evictStatementDiagnostics(cache);
     }
     cache.createdAtMs = Date.now();

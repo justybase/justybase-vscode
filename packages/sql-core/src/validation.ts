@@ -18,7 +18,7 @@ export {
   type SqlLineIndex,
 } from "./validation/lineIndex";
 export { GROUPING_AGGREGATE_FUNCTIONS } from "./validation/aggregateFunctions";
-export { detectNetezzaSyntaxRestrictions } from "./validation/netezzaSyntaxRestrictions";
+export { detectNetezzaSyntaxRestrictions, detectNetezzaSyntaxRestrictionWarnings } from "./validation/netezzaSyntaxRestrictions";
 export { mayContainUnusedSymbolDefinitions } from "./validation/symbols";
 export {
   CLAUSE_KEYWORDS,

@@ -1645,11 +1645,14 @@ WHERE EMPLOYEE_ID = ANY (
       expectValid("SELECT CURRENT_TIMESTAMP + INTERVAL '1 day' FROM TESTDB..EMPLOYEES;");
     });
 
-    it("should accept interval units outside the literal at parse time (live-verified literal validation)", () => {
-      // Live Netezza 2026-11-13: the statement is accepted by the parser and
-      // fails later at literal validation with "Bad interval external
-      // representation '1'". Only a parse-stage rejection is a parser error.
-      expectValid("SELECT CURRENT_TIMESTAMP + INTERVAL '1' DAY FROM TESTDB..EMPLOYEES;");
+    it("should warn about interval units outside the literal (runtime literal failure)", () => {
+      // Live Netezza 2026-11-13: the statement parses and fails later at
+      // literal validation with "Bad interval external representation '1'".
+      // Keep it as a warning, not a parse error.
+      expectWarningCode(
+        "SELECT CURRENT_TIMESTAMP + INTERVAL '1' DAY FROM TESTDB..EMPLOYEES;",
+        "NZS007",
+      );
     });
   });
 

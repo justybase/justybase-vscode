@@ -1,10 +1,17 @@
 import { simpleHash } from "../providers/parsers/hashUtils";
 import { SqlParser } from "../sql/sqlParser";
-import type { StatementBoundary as CoreStatementBoundary } from "@justybase/sql-core/validation";
+import {
+  createSqlLineIndex,
+  type StatementBoundary as CoreStatementBoundary,
+} from "@justybase/sql-core/validation";
 import type { ValidationError } from "./types";
 
 export interface StatementBoundary extends CoreStatementBoundary {
   contentHash: string;
+  /** 1-based line of `startOffset`; used to remap cached diagnostics. */
+  startLine: number;
+  /** 1-based column of `startOffset`; used to remap cached diagnostics. */
+  startColumn: number;
 }
 
 export interface StatementIndex {
@@ -18,11 +25,14 @@ export interface StatementIndexDiff {
 }
 
 export function buildStatementIndex(fullSql: string, databaseKind?: string): StatementIndex {
+  const lineIndex = createSqlLineIndex(fullSql);
   const statements = SqlParser.splitStatementsWithPositions(fullSql, databaseKind).map(
     (statement, index) => ({
       index,
       startOffset: statement.startOffset,
       endOffset: statement.endOffset,
+      startLine: lineIndex.lineAt(statement.startOffset),
+      startColumn: lineIndex.columnAt(statement.startOffset),
       sql: statement.sql,
       contentHash: simpleHash(statement.sql),
     }),

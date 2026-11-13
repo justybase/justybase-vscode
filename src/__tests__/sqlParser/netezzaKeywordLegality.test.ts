@@ -32,37 +32,37 @@ describe("Netezza SQL - completion keyword legality matrix", () => {
 
   describe("FROM-continuation keywords (after completed table reference)", () => {
     it("JOIN", () => {
-      expectValid(`${E} JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
     });
 
     it("INNER", () => {
-      expectValid(`${E} INNER JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} INNER JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
     });
 
     it("LEFT / LEFT OUTER", () => {
-      expectValid(`${E} LEFT JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
-      expectValid(`${E} LEFT OUTER JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} LEFT JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} LEFT OUTER JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
     });
 
     it("RIGHT", () => {
-      expectValid(`${E} RIGHT JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} RIGHT JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
     });
 
     it("FULL / FULL OUTER", () => {
-      expectValid(`${E} FULL JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
-      expectValid(`${E} FULL OUTER JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} FULL JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
+      expectValid(`${E} FULL OUTER JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
     });
 
     it("OUTER (standalone)", () => {
-      expectSyntaxError(`${E} OUTER JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D ON 1=1;`);
+      expectSyntaxError(`${E} OUTER JOIN TESTDB."PUBLIC".DEPARTMENTS D ON 1=1;`);
     });
 
     it("CROSS", () => {
-      expectValid(`${E} CROSS JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D;`);
+      expectValid(`${E} CROSS JOIN TESTDB."PUBLIC".DEPARTMENTS D;`);
     });
 
     it("NATURAL", () => {
-      expectValid(`${E} NATURAL JOIN TESTDB.\"PUBLIC\".DEPARTMENTS D;`);
+      expectValid(`${E} NATURAL JOIN TESTDB."PUBLIC".DEPARTMENTS D;`);
     });
 
     it("WHERE", () => {
@@ -90,15 +90,15 @@ describe("Netezza SQL - completion keyword legality matrix", () => {
     });
 
     it("UNION", () => {
-      expectValid(`${E} UNION SELECT 1 FROM TESTDB.\"PUBLIC\".DEPARTMENTS;`);
+      expectValid(`${E} UNION SELECT 1 FROM TESTDB."PUBLIC".DEPARTMENTS;`);
     });
 
     it("INTERSECT", () => {
-      expectValid(`${E} INTERSECT SELECT 1 FROM TESTDB.\"PUBLIC\".DEPARTMENTS;`);
+      expectValid(`${E} INTERSECT SELECT 1 FROM TESTDB."PUBLIC".DEPARTMENTS;`);
     });
 
     it("EXCEPT", () => {
-      expectValid(`${E} EXCEPT SELECT 1 FROM TESTDB.\"PUBLIC\".DEPARTMENTS;`);
+      expectValid(`${E} EXCEPT SELECT 1 FROM TESTDB."PUBLIC".DEPARTMENTS;`);
     });
 
     it("OFFSET is legal without a preceding LIMIT", () => {

@@ -377,4 +377,126 @@ END_PROC;
 
         expect(diagnosticCollection.delete).toHaveBeenCalledWith(document.uri);
     });
+
+    it('preserves quality diagnostics while replacing previous on-demand parser diagnostics', () => {
+        const text = 'SELECT FROM T;';
+        const document = {
+            uri: { toString: () => 'file:///quality-preserve.sql' },
+            version: 1,
+            languageId: 'sql',
+            lineCount: 1,
+            getText: jest.fn(() => text),
+            positionAt: jest.fn((offset: number) => new vscode.Position(0, offset))
+        } as unknown as vscode.TextDocument;
+
+        const collection = (
+            provider as unknown as { diagnosticCollection: vscode.DiagnosticCollection }
+        ).diagnosticCollection;
+
+        const qualityDiagnostic = new vscode.Diagnostic(
+            new vscode.Range(0, 0, 0, 6),
+            'quality warning',
+            vscode.DiagnosticSeverity.Warning
+        );
+        qualityDiagnostic.source = 'Netezza Quality';
+        qualityDiagnostic.code = 'NZ001';
+
+        const staleParserDiagnostic = new vscode.Diagnostic(
+            new vscode.Range(0, 7, 0, 8),
+            'stale parser error',
+            vscode.DiagnosticSeverity.Error
+        );
+        staleParserDiagnostic.source = 'Netezza Parser (on demand)';
+        staleParserDiagnostic.code = 'SQL003';
+
+        const otherScopeDiagnostic = new vscode.Diagnostic(
+            new vscode.Range(0, 0, 0, 6),
+            'selection parser error',
+            vscode.DiagnosticSeverity.Error
+        );
+        otherScopeDiagnostic.source = 'Netezza Parser (selection)';
+        otherScopeDiagnostic.code = 'SQL003';
+
+        collection.set(document.uri, [
+            qualityDiagnostic,
+            staleParserDiagnostic,
+            otherScopeDiagnostic
+        ]);
+
+        const parserError = {
+            code: 'SQL003',
+            message: 'Syntax error',
+            severity: 'error' as const,
+            position: {
+                startLine: 1,
+                startColumn: 8,
+                endLine: 1,
+                endColumn: 9,
+                offset: 7
+            }
+        };
+
+        provider.publishValidationErrors(document, [parserError, parserError], {
+            source: 'Netezza Parser (on demand)'
+        });
+
+        const published = collection.get(document.uri) ?? [];
+        expect(published).toHaveLength(3);
+        expect(published[0].code).toBe('NZ001');
+        expect(published[0].source).toBe('Netezza Quality');
+        expect(published[1].source).toBe('Netezza Parser (selection)');
+        expect(published[2].code).toBe('SQL003');
+        expect(published[2].message).toBe('SQL003: Syntax error');
+        expect(published[2].source).toBe('Netezza Parser (on demand)');
+    });
+
+    it('does not let an in-flight lint overwrite an explicit validation result', async () => {
+        const text = 'SELECT FROM T;';
+        const document = {
+            uri: { toString: () => 'file:///generation-guard.sql' },
+            version: 1,
+            languageId: 'sql',
+            lineCount: 1,
+            getText: jest.fn(() => text),
+            positionAt: jest.fn((offset: number) => new vscode.Position(0, offset))
+        } as unknown as vscode.TextDocument;
+
+        let resolveLint: ((issues: never[]) => void) | undefined;
+        const lintPromise = new Promise<never[]>((resolve) => {
+            resolveLint = resolve;
+        });
+        const lintSqlSpy = jest.spyOn(provider, 'lintSql').mockReturnValue(lintPromise);
+
+        const lintDocumentPromise = provider.lintDocument(document, true);
+
+        provider.publishValidationErrors(
+            document,
+            [{
+                code: 'SQL003',
+                message: 'Syntax error',
+                severity: 'error',
+                position: {
+                    startLine: 1,
+                    startColumn: 8,
+                    endLine: 1,
+                    endColumn: 9,
+                    offset: 7
+                }
+            }],
+            { source: 'Netezza Parser (on demand)' }
+        );
+
+        resolveLint?.([]);
+        await lintDocumentPromise;
+
+        const collection = (
+            provider as unknown as { diagnosticCollection: vscode.DiagnosticCollection }
+        ).diagnosticCollection;
+        const published = collection.get(document.uri) ?? [];
+        expect(published).toHaveLength(1);
+        expect(published[0].code).toBe('SQL003');
+        expect(published[0].source).toBe('Netezza Parser (on demand)');
+
+        lintSqlSpy.mockRestore();
+    });
 });

@@ -316,12 +316,17 @@ export function serializeFileConnectionExport(
     name: string,
     details: ConnectionDetails,
 ): FileConnectionExportEntry {
-    return {
+    const entry: FileConnectionExportEntry = {
         name,
         files: getFilePaths(details),
-        editable: details.options?.editable === true ? true : undefined,
-        sheet: typeof details.options?.sheet === 'string' ? details.options.sheet : undefined,
     };
+    if (details.options?.editable === true) {
+        entry.editable = true;
+    }
+    if (typeof details.options?.sheet === 'string') {
+        entry.sheet = details.options.sheet;
+    }
+    return entry;
 }
 
 export function serializeFileConnectionsExport(entries: FileConnectionExportEntry[]): string {

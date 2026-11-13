@@ -194,6 +194,67 @@ describe("DocumentValidationSession", () => {
     expect(prepared.incrementalValidation?.dirtyIndices).toEqual([0]);
     expect(prepared.incrementalValidation?.cachedDiagnostics.size).toBe(1199);
   });
+
+  it("requires complete cache coverage when the caller asks for it", () => {
+    const sql = "SELECT 1;\nSELECT 2;\nSELECT 3;";
+    const session = new DocumentValidationSession();
+    const first = session.prepareDocument(uri, sql);
+    // Only the first statement is cached; statements 1 and 2 are uncovered.
+    session.storeStatementDiagnostics(uri, first.nextIndex.statements[0], []);
+    session.commitDocumentIndex(uri, first.nextIndex);
+
+    const edited = sql.replace("SELECT 3;", "SELECT 33;");
+    const partial = prepareIncrementalValidation({
+      documentUri: uri,
+      sql: edited,
+      validationSession: session,
+      requireFullCacheCoverage: true,
+    });
+    expect(partial.incrementalValidation).toBeUndefined();
+
+    const bestEffort = prepareIncrementalValidation({
+      documentUri: uri,
+      sql: edited,
+      validationSession: session,
+      requireFullCacheCoverage: false,
+    });
+    expect(bestEffort.incrementalValidation).toBeDefined();
+    expect(bestEffort.incrementalValidation?.dirtyIndices).toEqual([2]);
+    expect(bestEffort.incrementalValidation?.cachedDiagnostics.size).toBe(1);
+  });
+
+  it("remaps cached diagnostic positions when an earlier edit shifts the statement", () => {
+    const previousSql = "SELECT 1 FROM (SELECT 1 AS X) T0;\nSELECT 2;\nSELECT * FROM (SELECT 1 AS X) T;";
+    const nextSql = "SELECT\n1 FROM (SELECT 1 AS X) T0;\nSELECT 2;\nSELECT * FROM (SELECT 1 AS X) T;";
+    const session = new DocumentValidationSession();
+    const first = session.prepareDocument(uri, previousSql);
+    const cachedStatement = first.nextIndex.statements[2];
+    const diagnostic: ValidationError = {
+      message: "cached warning",
+      severity: "warning",
+      position: {
+        startLine: cachedStatement.startLine,
+        startColumn: cachedStatement.startColumn + 10,
+        endLine: cachedStatement.startLine,
+        endColumn: cachedStatement.startColumn + 11,
+        offset: cachedStatement.startOffset + 10,
+      },
+      code: "SQL999",
+    };
+    session.storeStatementDiagnostics(uri, cachedStatement, [diagnostic]);
+    session.commitDocumentIndex(uri, first.nextIndex);
+
+    const second = session.prepareDocument(uri, nextSql);
+    const shiftedStatement = second.nextIndex.statements[2];
+    const cached = session.getCachedDiagnostics(uri, shiftedStatement);
+
+    expect(cached).toHaveLength(1);
+    expect(cached?.[0].position).toEqual({
+      ...diagnostic.position,
+      startLine: diagnostic.position.startLine + 1,
+      endLine: diagnostic.position.endLine + 1,
+    });
+  });
 });
 
 describe("groupDiagnosticsByStatement", () => {

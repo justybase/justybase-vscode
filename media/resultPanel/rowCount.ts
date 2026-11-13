@@ -52,7 +52,7 @@ function appendRowLimitWarning(container: HTMLElement): void {
     const warning = document.createElement('span');
     warning.className = 'row-limit-warning';
     warning.title =
-        `Query row limit of ${limit.toLocaleString()} rows was reached. ` +
+        `Query row limit of ${limit.toLocaleString('en-US')} rows was reached. ` +
         'Increase "justybase.query.rowLimit" in settings to fetch more.';
     warning.textContent = ' — limit reached';
     container.appendChild(warning);
@@ -116,9 +116,9 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         const hasFilters = diskQuerySpecHasFilters(rs.diskQuerySpec) || hasActiveGlobalFilter;
         let text: string;
         if (hasFilters && filteredCount !== totalRows) {
-            text = `${filteredCount.toLocaleString()} row${filteredCount !== 1 ? 's' : ''} of ${totalRows.toLocaleString()}`;
+            text = `${filteredCount.toLocaleString('en-US')} row${filteredCount !== 1 ? 's' : ''} of ${totalRows.toLocaleString('en-US')}`;
         } else {
-            text = `${filteredCount.toLocaleString()} row${filteredCount !== 1 ? 's' : ''}`;
+            text = `${filteredCount.toLocaleString('en-US')} row${filteredCount !== 1 ? 's' : ''}`;
         }
         if (activeStreaming) {
             text += ' (streaming…)';
@@ -136,7 +136,7 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
         rowCountInfo.textContent = '';
         rowCountInfo.style.opacity = '';
         const matchCount = sortedMatches.length;
-        const text = `${matchCount.toLocaleString()} row${matchCount !== 1 ? 's' : ''} of ${totalRows.toLocaleString()}`;
+        const text = `${matchCount.toLocaleString('en-US')} row${matchCount !== 1 ? 's' : ''} of ${totalRows.toLocaleString('en-US')}`;
         rowCountInfo.appendChild(document.createTextNode(text));
         if (isResultSetRowLimitReached(rs)) {
             appendRowLimitWarning(rowCountInfo);
@@ -156,9 +156,9 @@ export function renderRowCountInfo(resultSetIndex: number = getActiveGridIndex()
     rowCountInfo.textContent = '';
     rowCountInfo.style.opacity = '';
 
-    let text = `${visibleCount.toLocaleString()} row${visibleCount !== 1 ? 's' : ''}`;
+    let text = `${visibleCount.toLocaleString('en-US')} row${visibleCount !== 1 ? 's' : ''}`;
     if ((isStreamingPreview || (hasFilteredCount && visibleCount !== totalRows)) && totalRows > visibleCount) {
-        text += ` of ${totalRows.toLocaleString()}`;
+        text += ` of ${totalRows.toLocaleString('en-US')}`;
     }
     rowCountInfo.appendChild(document.createTextNode(text));
 

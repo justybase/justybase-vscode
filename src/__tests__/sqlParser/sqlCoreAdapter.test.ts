@@ -82,6 +82,8 @@ describe("sql-core desktop adapter", () => {
       index: 2,
       startOffset: 10,
       endOffset: 20,
+      startLine: 1,
+      startColumn: 11,
       sql: "SELECT 1",
       contentHash: "cached-hash",
     }])).toEqual([{

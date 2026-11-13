@@ -13,6 +13,13 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
       .errors.map((error) => error.code);
   };
 
+  const preParseWarningCodes = (sql: string): string[] => {
+    const parsed = parseNetezzaSqlStatements({ sql });
+    return validator
+      .runPreParseChecks(parsed.lexResult)
+      .warnings.map((warning) => warning.code);
+  };
+
   it.each([
     "SELECT 1 FETCH FIRST 1 ROWS ONLY",
     "SELECT 1 OFFSET 1 FETCH NEXT 1 ROWS ONLY",
@@ -175,5 +182,11 @@ describe("Netezza compatibility-profile syntax restrictions", () => {
     expect(validator.validate("SELECT 1 OFFSET 1").valid).toBe(true);
     expect(validator.validate("SELECT 1 ORDER BY 1 OFFSET 1").valid).toBe(true);
     expect(validator.validate("SELECT 1 LIMIT 2 OFFSET 1").valid).toBe(true);
+  });
+
+  it("warns when an interval unit sits outside the literal (runtime failure)", () => {
+    expect(preParseWarningCodes("SELECT INTERVAL '1' DAY")).toContain("NZS007");
+    expect(preParseWarningCodes("SELECT INTERVAL '1 day'")).not.toContain("NZS007");
+    expect(preParseCodes("SELECT INTERVAL '1' DAY")).not.toContain("NZS007");
   });
 });

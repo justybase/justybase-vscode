@@ -104,6 +104,8 @@ describe('metadata host ↔ LSP coherence', () => {
       index: 0,
       startOffset: 0,
       endOffset: 10,
+      startLine: 1,
+      startColumn: 1,
       sql: 'SELECT 1',
       contentHash: 'hash-1',
     };

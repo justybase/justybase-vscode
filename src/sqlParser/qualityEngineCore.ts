@@ -9,7 +9,10 @@ import type {
   DocumentParseRequest,
   DocumentParseSession,
 } from "../sqlParser/documentParseSession";
-import type { StatementIndex } from "../sqlParser/statementIndex";
+import {
+  groupDiagnosticsByStatement,
+  type StatementIndex,
+} from "../sqlParser/statementIndex";
 import { DocumentValidationSession } from "../sqlParser/documentValidationSession";
 import {
   beginProcedureRuleEvaluation,
@@ -56,6 +59,8 @@ export interface SqlQualityAnalyzeOptions {
     dirtyIndices: readonly number[];
     cachedDiagnostics: Map<number, ValidationError[]>;
   };
+  /** Current document statement index; used to populate the incremental cache. */
+  statementIndex?: StatementIndex;
   validationSession?: DocumentValidationSession;
   documentUri?: string;
 }
@@ -173,21 +178,11 @@ export class QualityEngineCore {
         incrementalValidation.dirtyIndices,
         incrementalValidation.cachedDiagnostics,
       );
-      const allDiagnostics = [...result.errors, ...result.warnings];
-      const dirty = new Set(incrementalValidation.dirtyIndices);
-      for (const statement of incrementalValidation.statementIndex.statements) {
-        if (!dirty.has(statement.index)) continue;
-        const statementDiagnostics = allDiagnostics.filter(
-          (diagnostic) =>
-            diagnostic.position.offset >= statement.startOffset &&
-            diagnostic.position.offset <= statement.endOffset,
-        );
-        validationSession.storeStatementDiagnostics(
-          documentUri,
-          statement,
-          statementDiagnostics,
-        );
-      }
+      this.storeParserDiagnostics(
+        result,
+        options,
+        incrementalValidation.dirtyIndices,
+      );
       return result;
     }
 
@@ -201,14 +196,56 @@ export class QualityEngineCore {
     }
 
     if (!parseSession || !parseRequest) {
-      return this.validator.validate(sql);
+      const result = this.validator.validate(sql);
+      this.storeParserDiagnostics(result, options);
+      return result;
     }
 
     const parseResult = parseSession.getParseResult({
       ...parseRequest,
       sql,
     });
-    return this.validator.validateFromParseResult(sql, parseResult);
+    const result = this.validator.validateFromParseResult(sql, parseResult);
+    this.storeParserDiagnostics(result, options);
+    return result;
+  }
+
+  /**
+   * Populate the statement cache after a full validation and refresh only the
+   * dirty entries after an incremental pass. Storing relative positions is
+   * handled by DocumentValidationSession.
+   */
+  private storeParserDiagnostics(
+    result: ValidationResult,
+    options: SqlQualityAnalyzeOptions,
+    dirtyIndices?: readonly number[],
+  ): void {
+    const {
+      validationSession,
+      documentUri,
+      statementIndex,
+      incrementalValidation,
+    } = options;
+    const index = statementIndex ?? incrementalValidation?.statementIndex;
+    if (!validationSession || !documentUri || !index) {
+      return;
+    }
+
+    const grouped = groupDiagnosticsByStatement(index.statements, [
+      ...result.errors,
+      ...result.warnings,
+    ]);
+    const dirty = dirtyIndices ? new Set(dirtyIndices) : undefined;
+    for (const statement of index.statements) {
+      if (dirty && !dirty.has(statement.index)) {
+        continue;
+      }
+      validationSession.storeStatementDiagnostics(
+        documentUri,
+        statement,
+        grouped.get(statement.index) ?? [],
+      );
+    }
   }
 }
 

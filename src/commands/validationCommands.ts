@@ -3,11 +3,16 @@
  */
 
 import * as vscode from "vscode";
+import { isSqlLanguageClientRunning } from "../activation/lspRegistration";
 import { getLogger } from "../utils/logger";
 import type { MetadataCache } from "../metadataCache";
 import type { ConnectionManager } from "../core/connectionManager";
 import { isSqlAuthoringLanguageId } from "../utils/sqlLanguage";
-import { isLspDiagnosticsSkipExceeded } from "../sqlParser/validationConfig";
+import {
+  isLspDiagnosticsSkipExceeded,
+  shouldIncludeParserDiagnosticsInExtensionLint,
+} from "../sqlParser/validationConfig";
+import type { LintIssue } from "../providers/linterRules";
 import {
   createDesktopSqlValidatorForDocument,
   getDesktopSqlAuthoringForDocument,
@@ -74,12 +79,35 @@ function isWholeDocumentSelection(
   );
 }
 
+function countLintIssuesBySeverity(issues: readonly LintIssue[]): {
+  errorCount: number;
+  warningCount: number;
+} {
+  let errorCount = 0;
+  let warningCount = 0;
+  for (const issue of issues) {
+    if (issue.severity === vscode.DiagnosticSeverity.Error) {
+      errorCount += 1;
+    } else if (issue.severity === vscode.DiagnosticSeverity.Warning) {
+      warningCount += 1;
+    }
+  }
+  return { errorCount, warningCount };
+}
+
 function reportValidationSummary(
   errorCount: number,
   warningCount: number,
   scope: "document" | "selection",
+  lspOwnsParserDiagnostics: boolean,
 ): void {
   if (errorCount === 0 && warningCount === 0) {
+    if (lspOwnsParserDiagnostics) {
+      vscode.window.showInformationMessage(
+        "No quality-rule issues found. Parser diagnostics (if any) are in the Problems panel (LSP).",
+      );
+      return;
+    }
     const message =
       scope === "selection"
         ? "Selection validation passed! No errors or warnings found."
@@ -88,9 +116,12 @@ function reportValidationSummary(
     return;
   }
 
-  const message =
+  let message =
     `SQL validation found ${errorCount} error(s) and ${warningCount} warning(s).`
     + " Check the Problems panel for details.";
+  if (lspOwnsParserDiagnostics) {
+    message += " Parser diagnostics (if any) are in the Problems panel (LSP).";
+  }
   if (errorCount > 0) {
     vscode.window.showErrorMessage(message);
   } else {
@@ -106,8 +137,15 @@ async function validateAndPublish(
   options: { baseOffset: number; source: string },
 ): Promise<ValidationResult> {
   const validator = createSqlValidatorForDocument(document.uri.toString());
+  const documentVersion = document.version;
   const result = validator.validate(sql);
   const { getSqlLinter } = await import("../providers/sqlLinterProvider");
+  if (document.version !== documentVersion) {
+    getLogger().warn(
+      "SQL validation result discarded because the document changed during validation.",
+    );
+    return result;
+  }
   getSqlLinter().publishValidationErrors(
     document,
     [...result.errors, ...result.warnings],
@@ -160,6 +198,14 @@ export function registerValidationCommands(): vscode.Disposable[] {
         document.lineCount,
         sqlToValidate.length,
       );
+      const lspRunning = isSqlLanguageClientRunning();
+      const lspOwnsParserDiagnostics = lspRunning && !lspAutomaticallySkips;
+      const linterIncludesParser = shouldIncludeParserDiagnosticsInExtensionLint(
+        lspRunning,
+        sqlToValidate.length,
+      );
+      const needsDirectParser =
+        !lspOwnsParserDiagnostics && !linterIncludesParser;
 
       try {
         await vscode.window.withProgress(
@@ -175,6 +221,50 @@ export function registerValidationCommands(): vscode.Disposable[] {
             // synchronous parser work starts in the extension host.
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+            if (wholeDocument) {
+              const { getSqlLinter } = await import(
+                "../providers/sqlLinterProvider"
+              );
+              const lintIssues = await getSqlLinter().lintDocument(
+                document,
+                true,
+              );
+              const counts = countLintIssuesBySeverity(lintIssues);
+              let parserIssueCount = 0;
+
+              if (needsDirectParser) {
+                progress.report({
+                  message: lspRunning
+                    ? "Large script: automatic LSP diagnostics were skipped; running a full parse."
+                    : "Large script: running parser and quality validation.",
+                });
+                const result = await validateAndPublish(
+                  document,
+                  sqlToValidate,
+                  {
+                    baseOffset: 0,
+                    source: PARSER_SOURCE_DOCUMENT,
+                  },
+                );
+                counts.errorCount += result.errors.length;
+                counts.warningCount += result.warnings.length;
+                parserIssueCount = result.errors.length + result.warnings.length;
+              }
+
+              reportValidationSummary(
+                counts.errorCount,
+                counts.warningCount,
+                "document",
+                lspOwnsParserDiagnostics,
+              );
+
+              getLogger().info(
+                `SQL validation completed: ${lintIssues.length + parserIssueCount} issues found`
+                + ` (document, ${sqlToValidate.length} chars)`,
+              );
+              return;
+            }
+
             if (lspAutomaticallySkips) {
               progress.report({
                 message:
@@ -183,23 +273,20 @@ export function registerValidationCommands(): vscode.Disposable[] {
             }
 
             const result = await validateAndPublish(document, sqlToValidate, {
-              baseOffset: wholeDocument
-                ? 0
-                : document.offsetAt(selection.start),
-              source: wholeDocument
-                ? PARSER_SOURCE_DOCUMENT
-                : PARSER_SOURCE_SELECTION,
+              baseOffset: document.offsetAt(selection.start),
+              source: PARSER_SOURCE_SELECTION,
             });
 
             reportValidationSummary(
               result.errors.length,
               result.warnings.length,
-              wholeDocument ? "document" : "selection",
+              "selection",
+              false,
             );
 
             getLogger().info(
               `SQL validation completed: ${result.errors.length + result.warnings.length} issues found`
-              + ` (${wholeDocument ? "document" : "selection"}, ${sqlToValidate.length} chars)`,
+              + ` (selection, ${sqlToValidate.length} chars)`,
             );
           },
         );

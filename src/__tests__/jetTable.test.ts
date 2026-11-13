@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { JetPageChannel } from '../../packages/access-file/src/jet/JetPageChannel';
 import { jetLayoutFor } from '../../packages/access-file/src/jet/JetLayout';
 import { JetTable } from '../../packages/access-file/src/jet/JetTable';
@@ -344,11 +345,28 @@ describe('JetTable writes on real Access fixtures', () => {
 import { AccessConnection } from '../../extensions/access/src/accessConnection';
 import type { DatabaseConnectionConfig } from '../contracts/database';
 
+/**
+ * Access DDL/lock tests execute the optional DuckDB mirror. CI installs the
+ * extension dependencies (`extensions/access/npm ci`); a root-only install has
+ * no `@duckdb/node-api`, so skip these runtime tests instead of failing the
+ * whole suite. The pure Jet reader tests above remain active.
+ */
+const accessRequire = createRequire(path.join(__dirname, '../../extensions/access/package.json'));
+const accessDuckDbAvailable = (() => {
+    try {
+        accessRequire.resolve('@duckdb/node-api');
+        return true;
+    } catch {
+        return false;
+    }
+})();
+const describeWithAccessRuntime = accessDuckDbAvailable ? describe : describe.skip;
+
 function createAccessConfig(database: string, readOnly: boolean): DatabaseConnectionConfig {
     return { host: '', database, user: '', options: { readOnly } };
 }
 
-describe('AccessConnection lock file', () => {
+describeWithAccessRuntime('AccessConnection lock file', () => {
     it('creates and releases the .laccdb lock when opening a writable database', async () => {
         const file = copyFixture('sample2007.accdb');
         const lockPath = file.replace(/\.(?:mdb|accdb)$/i, '') + '.laccdb';
@@ -416,7 +434,7 @@ describe('AccessConnection lock file', () => {
     });
 });
 
-describe('AccessConnection DDL', () => {
+describeWithAccessRuntime('AccessConnection DDL', () => {
     async function readAllRows(connection: AccessConnection, sql: string): Promise<unknown[][]> {
         const reader = await connection.createCommand(sql).executeReader();
         const rows: unknown[][] = [];

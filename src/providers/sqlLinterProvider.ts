@@ -66,6 +66,8 @@ export class SqlLinterProvider {
   private readonly parseSession: DocumentParseSession;
   private readonly validationSession: DocumentValidationSession;
   private readonly columnMetadataWarnedConnections = new Set<string>();
+  /** Bumped when an explicit validation publishes; stale lint results are dropped. */
+  private readonly diagnosticGeneration = new Map<string, number>();
   private activationTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
@@ -131,6 +133,7 @@ export class SqlLinterProvider {
     this.disposables.push(
       vscode.workspace.onDidCloseTextDocument((doc) => {
         this.diagnosticCollection.delete(doc.uri);
+        this.diagnosticGeneration.delete(doc.uri.toString());
         this.clearCacheForUri(doc.uri);
       }),
     );
@@ -253,6 +256,8 @@ export class SqlLinterProvider {
     }
 
     const documentVersion = document.version ?? 0;
+    const documentKey = document.uri.toString();
+    const publishGeneration = this.diagnosticGeneration.get(documentKey) ?? 0;
     const cacheKey = this.buildCacheKey(
       document.uri,
       documentVersion,
@@ -262,7 +267,9 @@ export class SqlLinterProvider {
     );
     const cached = this.lintResultCache.get(cacheKey);
     if (cached) {
-      this.diagnosticCollection.set(document.uri, cached.diagnostics);
+      if (this.isCurrentPublishGeneration(documentKey, publishGeneration)) {
+        this.diagnosticCollection.set(document.uri, cached.diagnostics);
+      }
       this.logSlowLint(document, startedAt, true, false);
       return cached.issues;
     }
@@ -279,6 +286,10 @@ export class SqlLinterProvider {
     const diagnostics = this.issuesToDiagnostics(document, issues);
 
     if (!this.isCurrentDocumentVersion(document.uri, documentVersion)) {
+      this.logSlowLint(document, startedAt, false, true);
+      return [];
+    }
+    if (!this.isCurrentPublishGeneration(documentKey, publishGeneration)) {
       this.logSlowLint(document, startedAt, false, true);
       return [];
     }
@@ -428,7 +439,9 @@ export class SqlLinterProvider {
       parseSession: this.parseSession,
       parseRequest,
       validator,
-      incremental: includeParserDiagnostics && !!documentUri,
+      incremental: includeParserDiagnostics && !!documentUri
+        ? { requireFullCacheCoverage: true }
+        : false,
       qualityEngine,
       qualityOptions: {
         rulesConfig,
@@ -459,23 +472,78 @@ export class SqlLinterProvider {
     errors: readonly ValidationError[],
     options: PublishValidationOptions = {},
   ): void {
-    // An explicit validation result must not be overwritten by a pending
-    // automatic lint pass for the same document version.
+    // An explicit validation result must not be overwritten by a pending or
+    // already-running automatic lint pass for the same document version.
     const key = document.uri.toString();
     const pendingLint = this.lintTimers.get(key);
     if (pendingLint) {
       clearTimeout(pendingLint);
       this.lintTimers.delete(key);
     }
+    this.diagnosticGeneration.set(
+      key,
+      (this.diagnosticGeneration.get(key) ?? 0) + 1,
+    );
 
+    const newDiagnostics = this.issuesToDiagnostics(
+      document,
+      errors.map((error) => this.toLintIssue(error)),
+      options,
+    );
+    const existing = this.diagnosticCollection.get(document.uri) ?? [];
+    const preserved = existing.filter(
+      (diagnostic) => !this.isParserDiagnosticFromSource(diagnostic, options.source),
+    );
     this.diagnosticCollection.set(
       document.uri,
-      this.issuesToDiagnostics(
-        document,
-        errors.map((error) => this.toLintIssue(error)),
-        options,
-      ),
+      this.dedupeDiagnostics([...preserved, ...newDiagnostics]),
     );
+  }
+
+  /**
+   * Only the parser diagnostics produced by the same validation scope are
+   * replaced. A selection validation must not wipe a whole-document parser
+   * result (and vice versa), and quality diagnostics are always preserved.
+   */
+  private isParserDiagnosticFromSource(
+    diagnostic: vscode.Diagnostic,
+    source: string | undefined,
+  ): boolean {
+    return source !== undefined && diagnostic.source === source;
+  }
+
+  private isCurrentPublishGeneration(
+    documentKey: string,
+    generation: number,
+  ): boolean {
+    return (this.diagnosticGeneration.get(documentKey) ?? 0) === generation;
+  }
+
+  private dedupeDiagnostics(
+    diagnostics: readonly vscode.Diagnostic[],
+  ): vscode.Diagnostic[] {
+    const seen = new Set<string>();
+    const result: vscode.Diagnostic[] = [];
+    for (const diagnostic of diagnostics) {
+      const code =
+        typeof diagnostic.code === "object"
+          ? diagnostic.code.value
+          : diagnostic.code;
+      const key = [
+        code ?? "",
+        diagnostic.range.start.line,
+        diagnostic.range.start.character,
+        diagnostic.range.end.line,
+        diagnostic.range.end.character,
+        diagnostic.message,
+      ].join("|");
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      result.push(diagnostic);
+    }
+    return result;
   }
 
   private toLintIssue(error: ValidationError): LintIssue {
@@ -549,6 +617,10 @@ export class SqlLinterProvider {
    * Clear diagnostics for a specific document
    */
   public clearDiagnostics(uri: vscode.Uri): void {
+    this.diagnosticGeneration.set(
+      uri.toString(),
+      (this.diagnosticGeneration.get(uri.toString()) ?? 0) + 1,
+    );
     this.diagnosticCollection.delete(uri);
     this.clearCacheForUri(uri);
   }
@@ -557,6 +629,7 @@ export class SqlLinterProvider {
    * Clear all diagnostics
    */
   public clearAllDiagnostics(): void {
+    this.diagnosticGeneration.clear();
     this.diagnosticCollection.clear();
     this.lintResultCache.clear();
   }
@@ -635,6 +708,7 @@ export class SqlLinterProvider {
     }
     this.lintTimers.clear();
     this.lintResultCache.clear();
+    this.diagnosticGeneration.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }

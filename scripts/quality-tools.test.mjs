@@ -437,6 +437,7 @@ test('builds a schema-compatible report and evaluates audit/docs status', () => 
     log: 'Test Suites: 2 passed\n',
   });
   assert.equal(report.repository.commit, 'abc123');
+  assert.match(report.generatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
   assert.equal(report.tests.naturalExit, true);
   assert.deepEqual(report.coverage, { statements: 71, branches: 58, functions: 76, lines: 72 });
   assert.equal(report.dependencies.auditStatus, 'pass');
