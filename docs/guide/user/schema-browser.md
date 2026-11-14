@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-11-10
-product_version: 3.20.7
+product_version: 3.20.8
 ---
 
 # Schema Browser, DDL and metadata cache
