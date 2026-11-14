@@ -306,6 +306,8 @@ Type-aware warnings **require** metadata with types. Without connection/cache, S
 
 **Note:** SQL030 is reserved for grouped-query ORDER BY warnings; procedure codes use SQL037+.
 
+**Structural NZP fallback invariants:** NZP004/005/006/017 only run when the parser reports actionable errors. Their scanner treats every `CASE … END` expression as a CASE closer (Netezza has no `CASE` *statement*), masks strings/comments, matches `END IF`/`END LOOP`/`END CASE`/`END_PROC` as single tokens, and resets CASE depth per statement. Do not reintroduce next-token allowlists for a bare `END` (`END + 1`, `END::INT`, `END WHERE`, `END IS NULL` are valid). An explicit "Validate SQL" result is retained for the same document version so the automatic large-script pass cannot delete it.
+
 **Live-verified grammar (Netezza 11.2.2.1).** The NZPLSQL body is compiled lazily at first `CALL`, not at `CREATE`. `src/__tests__/sqlParser/procedure/procedureMatrixCases.ts` is the shared, live-proven case corpus (each row was executed live and, for negative rows, confirmed rejected). `procedureMatrix.test.ts` locks parser verdicts; `nzplsqlProcedureMatrix.live.integration.test.ts` re-verifies against a running database (opt-in, requires `NZ_DEV_*` + `NZ_DEV_ALLOW_FIXTURE_DDL=1`). Proven constraints to preserve:
 
 - Header: `AS` only (`IS` rejected); `RETURNS` + `LANGUAGE NZPLSQL` required; body must be `BEGIN_PROC..END_PROC` or a quoted string.

@@ -179,13 +179,6 @@ export const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
         fixAllEligible: true,
         rationale: 'Removes a duplicated comma; deterministic parser-compliance rewrite.'
     },
-    PAR004: {
-        code: 'PAR004',
-        title: 'Fix keyword typo',
-        safety: 'safe',
-        fixAllEligible: false,
-        rationale: 'Replaces a recognized keyword typo with the parser-provided intended keyword.'
-    },
     NZ001: {
         code: 'NZ001',
         title: ERROR_CODE_ACTIONS.NZ001.title,
@@ -344,7 +337,7 @@ export const QUICK_FIX_MATRIX: Record<string, QuickFixMatrixEntry> = {
 
 /**
  * Shared SQL conformance Fix All contract: only deterministic, meaning-preserving
- * Safe fixes are eligible. Suggestion fixes (PAR004, SQL048) and NZL006 stay
+ * Safe fixes are eligible. Suggestion fixes (SQL048) and NZL006 stay
  * explicit-only; review-required fixes are never eligible.
  */
 export const SAFE_FIX_ALL_CODES = new Set(
@@ -365,5 +358,5 @@ export function isNetezzaFixAllEligible(code: string): boolean {
 /** Codes whose quick fixes are served by the language server, not the extension. */
 export const LSP_SERVED_CODES = new Set([
     'SQL004', 'SQL007', 'SQL012', 'SQL019', 'SQL048', 'SQL051', 'SQL052', 'SQL053',
-    'PAR003', 'PAR004'
+    'PAR003'
 ]);

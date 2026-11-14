@@ -27,6 +27,7 @@ jest.mock('../activation/lspRegistration', () => ({
 }));
 
 import { SqlLinterProvider } from '../providers/sqlLinterProvider';
+import { LintSeverity } from '../providers/linterRules';
 
 describe('SqlLinterProvider lint modes', () => {
     let provider: SqlLinterProvider;
@@ -219,6 +220,48 @@ END_PROC;
         await provider.lintDocument(document, true);
 
         expect(lintSqlSpy).toHaveBeenCalled();
+        lintSqlSpy.mockRestore();
+    });
+
+    it('keeps an explicit validation result when the automatic large-script pass is skipped', async () => {
+        isSqlLanguageClientRunningMock.mockReturnValue(true);
+        const largeSql = `${'-- filler line for a large procedure script\n'.repeat(520)}SELECT * FROM t;`;
+        const document = {
+            uri: { toString: () => 'file:///explicit-validation.sql' },
+            version: 1,
+            languageId: 'sql',
+            lineCount: largeSql.split('\n').length,
+            getText: jest.fn(() => largeSql),
+            positionAt: jest.fn((offset: number) => new vscode.Position(0, offset))
+        } as unknown as vscode.TextDocument;
+
+        (vscode.workspace as unknown as { textDocuments: vscode.TextDocument[] }).textDocuments = [document];
+        const explicitIssue = {
+            ruleId: 'NZP004',
+            message: 'NZP004: Unmatched BEGIN/END blocks (1 BEGIN vs 0 END)',
+            severity: LintSeverity.Error,
+            startOffset: 0,
+            endOffset: 10,
+        };
+        const lintSqlSpy = jest.spyOn(provider, 'lintSql').mockResolvedValue([explicitIssue]);
+        const diagnosticCollection = (
+            provider as unknown as {
+                diagnosticCollection: { get: jest.Mock; delete: jest.Mock; set: jest.Mock };
+            }
+        ).diagnosticCollection;
+
+        await provider.lintDocument(document, true);
+        expect(diagnosticCollection.get(document.uri)).toHaveLength(1);
+
+        const automaticIssues = await provider.lintDocument(document);
+        expect(automaticIssues).toEqual([explicitIssue]);
+        expect(lintSqlSpy).toHaveBeenCalledTimes(1);
+        expect(diagnosticCollection.get(document.uri)).toHaveLength(1);
+
+        // A new document version invalidates the explicit result.
+        const changedDocument = { ...document, version: 2 } as unknown as vscode.TextDocument;
+        await provider.lintDocument(changedDocument);
+        expect(diagnosticCollection.delete).toHaveBeenCalledWith(document.uri);
         lintSqlSpy.mockRestore();
     });
 

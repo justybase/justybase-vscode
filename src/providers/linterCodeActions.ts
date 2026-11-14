@@ -254,13 +254,6 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
                 }
             }
 
-            if (code === 'PAR004') {
-                const action = this.createKeywordTypoFix(document, diagnostic);
-                if (action) {
-                    actions.push(action);
-                }
-            }
-
             // Handle SQL018 - Unused CTE
             if (code === 'SQL018') {
                 const action = this.createRemoveUnusedCteFix(document, diagnostic);
@@ -649,19 +642,6 @@ export class NetezzaLinterCodeActionProvider implements vscode.CodeActionProvide
         action.isPreferred = true;
         action.edit = new vscode.WorkspaceEdit();
         action.edit.replace(document.uri, diagnostic.range, '');
-        return action;
-    }
-
-    private createKeywordTypoFix(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction | undefined {
-        const message = diagnostic.message;
-        const match = message.match(/Did you mean '(\w+)'\?/);
-        if (!match) return undefined;
-        const fix = match[1];
-        const action = new vscode.CodeAction(`Fix typo: ${fix}`, vscode.CodeActionKind.QuickFix);
-        action.diagnostics = [diagnostic];
-        action.isPreferred = true;
-        action.edit = new vscode.WorkspaceEdit();
-        action.edit.replace(document.uri, diagnostic.range, fix);
         return action;
     }
 

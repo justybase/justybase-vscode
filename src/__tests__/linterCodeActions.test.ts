@@ -1002,11 +1002,10 @@ describe('providers/linterCodeActions', () => {
             );
         });
 
-        it('keeps NZL006 and PAR004 explicit-only', () => {
-            const sql = 'SELECT 1 WHERR x = NULL';
-            const typo = makeDiagnostic('PAR004', "PAR004: Did you mean 'WHERE'?", 9, 14);
-            const equalsNull = makeDiagnostic('NZL006', 'NZL006: Use IS NULL', 17, 18);
-            const { action } = fixAllFor(sql, [typo, equalsNull]);
+        it('keeps NZL006 explicit-only', () => {
+            const sql = 'SELECT 1 WHERE x = NULL';
+            const equalsNull = makeDiagnostic('NZL006', 'NZL006: Use IS NULL', 15, 19);
+            const { action } = fixAllFor(sql, [equalsNull]);
             expect(action).toBeUndefined();
         });
     });

@@ -669,35 +669,71 @@ function isEmbeddedDmlSelect(sql: string, selectOffset: number): boolean {
     || /\bWITH\b[\s\S]*\bAS\s*\(\s*$/i.test(prefix);
 }
 
-const PROCEDURAL_END_PATTERN = /\bEND\b(?!\s*(_PROC|IF|LOOP|CASE|TRANSACTION|WORK)\b)(?!\s*(AS|,|\)))/gi;
+/**
+ * Tokens that participate in NZPLSQL block/CASE nesting.
+ *
+ * `END IF`, `END LOOP`, `END CASE`, `END TRANSACTION`, `END WORK`,
+ * `BEGIN TRANSACTION` and `BEGIN WORK` are matched as a single token so they
+ * never close a plain `BEGIN … END` block. `BEGIN_PROC`/`END_PROC` do not match
+ * `\bBEGIN\b`/`\bEND\b` because `_` is a word character.
+ */
+const PROCEDURAL_BLOCK_TOKEN_PATTERN =
+  /\bEND\s+(?:IF|LOOP|CASE|TRANSACTION|WORK)\b|\bBEGIN\s+(?:TRANSACTION|WORK)\b|\bBEGIN\b|\bEND\b|\bCASE\b/gi;
 
-function hasMatchingSqlCaseEnd(sql: string, caseOffset: number): boolean {
-  const statementEnd = indexOfStatementSemicolon(sql, caseOffset);
-  const segment = sql.substring(caseOffset, statementEnd);
-  let depth = 0;
-  for (const match of findMatches(segment, /\b(CASE|END\s+CASE|END)\b/gi)) {
-    const token = match[0].toUpperCase().replace(/\s+/g, " ");
-    const after = segment.substring(match.index + match[0].length);
-    if (token === "CASE") {
-      depth += 1;
-    } else if (token === "END CASE") {
-      depth -= 1;
-      if (depth === 0) return true;
-    } else if (token === "END") {
-      if (/^\s*(IF|LOOP|CASE|_PROC|TRANSACTION|WORK)\b/i.test(after)) continue;
-      if (depth === 1 && (
-        /^\s*,/.test(after)
-        || /^\s*\)/.test(after)
-        || /^\s*(AS|FROM)\b/i.test(after)
-        || /^\s*;/.test(after)
-        || /^\s*$/.test(after)
-      )) {
-        depth -= 1;
-        if (depth === 0) return true;
+export interface ProceduralBlockBalance {
+  begins: number;
+  ends: number;
+  /** CASE expressions still open at the end of the scanned text. */
+  unmatchedCases: number;
+}
+
+/**
+ * Count procedural `BEGIN … END` blocks against SQL `CASE … END` expressions.
+ *
+ * Netezza has no `CASE` *statement* (live-verified), so every `CASE` token opens
+ * an expression that a bare `END` closes. A bare `END` therefore closes the
+ * innermost open CASE before it can close a `BEGIN` block; counting keywords
+ * with a lookahead on the next token misfires for `END WHERE`, `END + 1`,
+ * `END::INT`, `END IS NULL`, and similar valid expression continuations.
+ */
+export function measureProceduralBlocks(body: string): ProceduralBlockBalance {
+  let begins = 0;
+  let ends = 0;
+  let unmatchedCases = 0;
+
+  // A CASE expression cannot span a statement terminator, so CASE depth is
+  // resolved per statement. Without this, a missing CASE END would silently
+  // consume the next block's END and hide the real imbalance.
+  for (const statement of splitSqlStatementsWithOffsets(body)) {
+    let openCases = 0;
+    for (const match of findMatches(statement.sql, PROCEDURAL_BLOCK_TOKEN_PATTERN)) {
+      const token = match[0].toUpperCase().replace(/\s+/g, " ");
+      if (token === "CASE") {
+        openCases += 1;
+        continue;
       }
+      if (token === "BEGIN") {
+        begins += 1;
+        continue;
+      }
+      if (token.startsWith("END ")) {
+        if (token === "END CASE" && openCases > 0) {
+          openCases -= 1;
+        }
+        continue;
+      }
+      // Bare END: close the innermost CASE expression first; only a block
+      // terminator when no CASE is open.
+      if (openCases > 0) {
+        openCases -= 1;
+        continue;
+      }
+      ends += 1;
     }
+    unmatchedCases += openCases;
   }
-  return false;
+
+  return { begins, ends, unmatchedCases };
 }
 
 function procedureRule(
@@ -792,8 +828,7 @@ const ruleNZP004 = procedureRule(
     if (!shouldUseProcedureRegexFallback(sql, "NZP004")) return [];
     const procedure = procedureBodyOrEmpty(sql);
     if (!procedure) return [];
-    const begins = findMatches(procedure.body, /\bBEGIN\b(?!\s*(_PROC|TRANSACTION|WORK)\b)/gi).length;
-    const ends = findMatches(procedure.body, PROCEDURAL_END_PATTERN).length;
+    const { begins, ends } = measureProceduralBlocks(maskSql(procedure.body));
     return begins === ends
       ? []
       : [procedureIssue("NZP004", "Unmatched BEGIN/END blocks (" + begins + " BEGIN vs " + ends + " END)", 0, procedure.startOffset, procedure.startOffset + 10)];
@@ -809,8 +844,12 @@ const ruleNZP005 = procedureRule(
     if (!shouldUseProcedureRegexFallback(sql, "NZP005")) return [];
     const procedure = procedureBodyOrEmpty(sql);
     if (!procedure) return [];
-    const begins = findMatches(procedure.body, /(?<!ELS|END\s)\bIF\b(?!\s+(?:NOT\s+)?EXISTS\b)/gi).length;
-    const ends = findMatches(procedure.body, /\bEND\s+IF\b/gi).length;
+    const body = maskSql(procedure.body);
+    const begins = findMatches(
+      body,
+      /\bEND\s+IF\b|\bELSEIF\b|\bELSIF\b|\bIF\b(?!\s+(?:NOT\s+)?EXISTS\b)/gi,
+    ).filter((match) => /^IF$/i.test(match[0])).length;
+    const ends = findMatches(body, /\bEND\s+IF\b/gi).length;
     return begins === ends
       ? []
       : [procedureIssue("NZP005", "Unmatched IF statements (" + begins + " IF vs " + ends + " END IF)", 0, procedure.startOffset, procedure.startOffset + 10)];
@@ -826,8 +865,10 @@ const ruleNZP006 = procedureRule(
     if (!shouldUseProcedureRegexFallback(sql, "NZP006")) return [];
     const procedure = procedureBodyOrEmpty(sql);
     if (!procedure) return [];
-    const loops = findMatches(procedure.body, /(?<!END\s)LOOP\b/gi).length;
-    const ends = findMatches(procedure.body, /\bEND\s+LOOP\b/gi).length;
+    const body = maskSql(procedure.body);
+    const loops = findMatches(body, /\bEND\s+LOOP\b|\bLOOP\b/gi)
+      .filter((match) => /^LOOP$/i.test(match[0])).length;
+    const ends = findMatches(body, /\bEND\s+LOOP\b/gi).length;
     return loops === ends
       ? []
       : [procedureIssue("NZP006", "Unmatched LOOP statements (" + loops + " LOOP constructs vs " + ends + " END LOOP)", 0, procedure.startOffset, procedure.startOffset + 10)];
@@ -1018,8 +1059,7 @@ const ruleNZP017 = procedureRule(
     if (!shouldUseProcedureRegexFallback(sql, "NZP017")) return [];
     const procedure = procedureBodyOrEmpty(sql);
     if (!procedure) return [];
-    const unmatchedCases = findMatches(procedure.body, /\bCASE\s+(?:WHEN|[a-z_][a-z0-9_]*\s+WHEN)/gi)
-      .filter((match) => !hasMatchingSqlCaseEnd(procedure.body, match.index)).length;
+    const { unmatchedCases } = measureProceduralBlocks(maskSql(procedure.body));
     return unmatchedCases === 0
       ? []
       : [procedureIssue("NZP017", "Unmatched CASE expressions (" + unmatchedCases + " without matching END or END CASE)", 0, procedure.startOffset, procedure.startOffset + 10)];

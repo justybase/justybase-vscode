@@ -48,7 +48,7 @@ function classifyCallPhase(outcome: CallOutcome): ProcedureMatrixPhase | undefin
   const noticeText = outcome.notices.join("\n");
   if (
     /plpgsql: ERROR during compile of/.test(noticeText) ||
-    /syntax error|unexpected/.test(outcome.message ?? "")
+    /syntax error|unexpected|expecting\s+`?END_P/i.test(outcome.message ?? "")
   ) {
     return "body-compile";
   }

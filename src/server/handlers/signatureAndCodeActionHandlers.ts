@@ -394,23 +394,6 @@ export async function buildLspQuickFixActions(
       } satisfies CodeAction);
     }
 
-    if (code === "PAR004") {
-      const fix = getDiagnosticSuggestedFix(diagnostic);
-      if (fix) {
-        actions.push({
-          title: `Fix typo: ${fix}`,
-          kind: CodeActionKind.QuickFix,
-          diagnostics: [diagnostic],
-          isPreferred: true,
-          edit: {
-            changes: {
-              [document.uri]: [{ range, newText: fix }],
-            },
-          },
-        } satisfies CodeAction);
-      }
-    }
-
     if (isCancellationRequested()) {
       return null;
     }

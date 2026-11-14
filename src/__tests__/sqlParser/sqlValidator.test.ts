@@ -277,59 +277,6 @@ LIMIT 10;`);
       expect(result.errors.some((e) => e.code === "PAR003")).toBe(false);
     });
 
-    it("should produce PAR004 for keyword typo WHERR", () => {
-      const result = validator.validate("SELECT 1 FROM t WHERR 1=1;");
-      expect(result.errors.some((e) => e.code === "PAR004")).toBe(true);
-    });
-
-    it("should produce PAR004 for keyword typo SELECX", () => {
-      const result = validator.validate("SELECX 1 FROM t;");
-      expect(result.errors.some((e) => e.code === "PAR004")).toBe(true);
-    });
-
-    it("should suggest correct keyword in PAR004 message", () => {
-      const result = validator.validate("SELECT 1 FROM t WHERR 1=1;");
-      const err = result.errors.find((e) => e.code === "PAR004");
-      expect(err).toBeDefined();
-      expect(err!.message).toContain("WHERE");
-      expect(err!.suggestedFix).toBe("WHERE");
-    });
-
-    it("should detect FROM typo FRM (missing O)", () => {
-      const result = validator.validate("SELECT 1 FRM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "FROM")).toBe(true);
-    });
-
-    it("should detect FROM typo FORM (transposed OR)", () => {
-      const result = validator.validate("SELECT 1 FORM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "FROM")).toBe(true);
-    });
-
-    it("should detect FROM typo OFRM (transposed FO)", () => {
-      const result = validator.validate("SELECT 1 OFRM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "FROM")).toBe(true);
-    });
-
-    it("should detect FROM typo FRXM (extra X)", () => {
-      const result = validator.validate("SELECT 1 FRXM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "FROM")).toBe(true);
-    });
-
-    it("should detect SELECT typo SELCT (missing E)", () => {
-      const result = validator.validate("SELCT 1 FROM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "SELECT")).toBe(true);
-    });
-
-    it("should detect SELECT typo SELET (missing C)", () => {
-      const result = validator.validate("SELET 1 FROM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "SELECT")).toBe(true);
-    });
-
-    it("should detect SELECT typo SELCET (transposed CE)", () => {
-      const result = validator.validate("SELCET 1 FROM t;");
-      expect(result.errors.some((e) => e.code === "PAR004" && e.suggestedFix === "SELECT")).toBe(true);
-    });
-
     it("should detect trailing comma in SELECT list", () => {
       expectSyntaxError("SELECT 1, 2, FROM TESTDB..EMPLOYEES;");
     });

@@ -60,6 +60,9 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
   duckdbFromFirstStatement!: AnyRule;
   duckdbListLiteral!: AnyRule;
   duckdbNamedArgument!: AnyRule;
+  duckdbStructLiteral!: AnyRule;
+  duckdbOnConflictClause!: AnyRule;
+  duckdbReturningClause!: AnyRule;
 
   public constructor() {
     super(duckdbLexer);
@@ -74,6 +77,10 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
       duckdbLexer.DuckDbUse,
       duckdbLexer.DuckDbWindow,
       duckdbLexer.DuckDbInclude,
+      duckdbLexer.DuckDbReturning,
+      duckdbLexer.DuckDbConflict,
+      duckdbLexer.DuckDbDo,
+      duckdbLexer.DuckDbNothing,
     ];
   }
 
@@ -83,6 +90,24 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
 
   protected getAdditionalPrimaryExpressionAlternatives(): OrAlternative[] {
     return [
+      {
+        GATE: () => this.LA(1).tokenType === duckdbLexer.DuckDbLBrace,
+        ALT: () => this.SUBRULE(this.duckdbStructLiteral),
+      },
+      {
+        GATE: () => {
+          const first = this.LA(1);
+          return (
+            first.tokenType === baseLexer.Identifier
+            && first.image.toUpperCase() === "MAP"
+            && this.LA(2).tokenType === duckdbLexer.DuckDbLBrace
+          );
+        },
+        ALT: () => {
+          this.CONSUME(baseLexer.Identifier);
+          this.SUBRULE1(this.duckdbStructLiteral);
+        },
+      },
       {
         GATE: () => this.LA(1).tokenType === baseLexer.LBracket,
         ALT: () => this.SUBRULE(this.duckdbListLiteral),
@@ -245,6 +270,60 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
       this.SUBRULE(this.identifier);
       this.CONSUME(baseLexer.Assign);
       this.SUBRULE(this.expression);
+    });
+
+    this.RULE('duckdbStructLiteral', () => {
+      this.CONSUME(duckdbLexer.DuckDbLBrace);
+      this.OPTION(() => {
+        this.AT_LEAST_ONE_SEP({
+          SEP: baseLexer.Comma,
+          DEF: () => {
+            this.OR([
+              { ALT: () => this.CONSUME(baseLexer.StringLiteral) },
+              { ALT: () => this.SUBRULE(this.identifier) },
+            ]);
+            this.CONSUME(duckdbLexer.DuckDbColon);
+            this.SUBRULE(this.expression);
+          },
+        });
+      });
+      this.CONSUME(duckdbLexer.DuckDbRBrace);
+    });
+
+    this.RULE('duckdbOnConflictClause', () => {
+      this.CONSUME(baseLexer.On);
+      this.CONSUME(duckdbLexer.DuckDbConflict);
+      this.CONSUME(duckdbLexer.DuckDbDo);
+      this.OR([
+        { ALT: () => this.CONSUME(duckdbLexer.DuckDbNothing) },
+        {
+          ALT: () => {
+            this.CONSUME(baseLexer.Update);
+            this.CONSUME(baseLexer.Set);
+            this.AT_LEAST_ONE_SEP({
+              SEP: baseLexer.Comma,
+              DEF: () => this.SUBRULE(this.updateSetItem),
+            });
+            this.OPTION(() => this.SUBRULE(this.whereClause));
+          },
+        },
+      ]);
+    });
+
+    this.RULE('duckdbReturningClause', () => {
+      this.CONSUME(duckdbLexer.DuckDbReturning);
+      this.OR([
+        { ALT: () => this.SUBRULE(this.starExpression) },
+        {
+          ALT: () => {
+            this.SUBRULE(this.expression);
+            this.MANY(() => {
+              this.CONSUME(baseLexer.Comma);
+              this.SUBRULE1(this.expression);
+            });
+          },
+        },
+      ]);
     });
 
     this.RULE('duckdbQualifyClause', () => {
@@ -451,13 +530,8 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
       this.CONSUME(baseLexer.For);
       this.SUBRULE1(this.identifier);
       this.CONSUME(baseLexer.In);
-      this.CONSUME1(baseLexer.LParen);
-      this.AT_LEAST_ONE_SEP({
-        SEP: baseLexer.Comma,
-        DEF: () => this.SUBRULE2(this.identifier),
-      });
+      this.SUBRULE(this.expressionList);
       this.CONSUME1(baseLexer.RParen);
-      this.CONSUME(baseLexer.RParen);
     });
 
     this.RULE('duckdbMacroArgument', () => {
@@ -632,6 +706,67 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
       ]);
     });
 
+    this.OVERRIDE_RULE('insertStatement', () => {
+      this.CONSUME(baseLexer.Insert);
+      this.CONSUME(baseLexer.Into);
+      this.SUBRULE(this.tableName);
+      this.OPTION(() => {
+        this.CONSUME(baseLexer.LParen);
+        this.AT_LEAST_ONE_SEP({
+          SEP: baseLexer.Comma,
+          DEF: () => this.CONSUME(baseLexer.Identifier),
+        });
+        this.CONSUME(baseLexer.RParen);
+      });
+      this.OR([
+        { ALT: () => this.SUBRULE(this.valuesClause) },
+        { ALT: () => this.SUBRULE(this.selectStatement) },
+        { ALT: () => this.SUBRULE(this.insertWithClause) },
+      ]);
+      this.OPTION1(() => this.SUBRULE(this.duckdbOnConflictClause));
+      this.OPTION2(() => this.SUBRULE(this.duckdbReturningClause));
+    });
+
+    this.OVERRIDE_RULE('updateStatement', () => {
+      this.CONSUME(baseLexer.Update);
+      this.SUBRULE(this.tableName);
+      this.OPTION(() => this.SUBRULE(this.aliasOptional));
+      this.CONSUME(baseLexer.Set);
+      this.AT_LEAST_ONE_SEP({
+        SEP: baseLexer.Comma,
+        DEF: () => this.SUBRULE(this.updateSetItem),
+      });
+      this.OPTION1(() => this.SUBRULE(this.fromClause));
+      this.OPTION2(() => this.SUBRULE(this.whereClause));
+      this.OPTION3(() => this.SUBRULE(this.duckdbReturningClause));
+    });
+
+    this.OVERRIDE_RULE('deleteStatement', () => {
+      this.CONSUME(baseLexer.Delete);
+      this.CONSUME(baseLexer.From);
+      this.SUBRULE(this.tableName);
+      this.OPTION(() => this.SUBRULE(this.aliasOptional));
+      this.OPTION1(() => this.SUBRULE(this.whereClause));
+      this.OPTION2(() => this.SUBRULE(this.duckdbReturningClause));
+    });
+
+    this.OVERRIDE_RULE('typeName', () => {
+      this.AT_LEAST_ONE(() => this.SUBRULE(this.typeNameWord));
+      this.OPTION(() => {
+        this.CONSUME(baseLexer.LParen);
+        this.AT_LEAST_ONE_SEP({
+          SEP: baseLexer.Comma,
+          DEF: () => this.SUBRULE(this.typeArgument),
+        });
+        this.CONSUME(baseLexer.RParen);
+      });
+      // DuckDB list types: INTEGER[], VARCHAR[][], ...
+      this.MANY(() => {
+        this.CONSUME(baseLexer.LBracket);
+        this.CONSUME(baseLexer.RBracket);
+      });
+    });
+
     this.OVERRIDE_RULE('typeArgument', () => {
       this.OR([
         {
@@ -685,7 +820,17 @@ export class DuckDbSqlParser extends NetezzaSqlParser {
                       && this.LA(2).tokenType === baseLexer.Assign,
                     ALT: () => this.SUBRULE(this.duckdbNamedArgument),
                   },
-                  { ALT: () => this.SUBRULE(this.expression) },
+                  {
+                    GATE: () =>
+                      this.LA(1).tokenType === baseLexer.Identifier
+                      && this.LA(2).tokenType === duckdbLexer.DuckDbArrow,
+                    ALT: () => {
+                      this.CONSUME(baseLexer.Identifier);
+                      this.CONSUME(duckdbLexer.DuckDbArrow);
+                      this.SUBRULE(this.expression);
+                    },
+                  },
+                  { ALT: () => this.SUBRULE1(this.expression) },
                 ]);
                 this.OPTION(() => this.SUBRULE(this.duckdbNullHandlingClause));
               },

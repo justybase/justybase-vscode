@@ -16,7 +16,7 @@ import {
     extractProcedureBody,
     hasMatchingSqlCaseEnd,
     isEmbeddedDmlSelect,
-    PROCEDURAL_END_PATTERN,
+    measureProceduralBlocks,
     removeCommentsAndStrings,
     shouldSkipCstMigratedProcedureRule,
 } from '../sqlParser/procedure/procedureAnalysis';
@@ -155,17 +155,13 @@ export const ruleNZP004: LintRule = {
         const procBody = extractProcedureBody(cleaned);
 
         if (procBody) {
-            // Count BEGIN (exclude BEGIN_PROC, BEGIN TRANSACTION, BEGIN WORK)
-            const begins = findPatternMatches(procBody.body, /\bBEGIN\b(?!\s*(_PROC|TRANSACTION|WORK)\b)/gi);
-            // Count END (exclude END_PROC, END IF, END LOOP, END CASE, END TRANSACTION, END WORK)
-            // END can be followed by semicolon, whitespace, or END_PROC/END IF/etc.
-            const ends = findPatternMatches(procBody.body, PROCEDURAL_END_PATTERN);
+            const { begins, ends } = measureProceduralBlocks(procBody.body);
 
-            if (begins.length !== ends.length) {
+            if (begins !== ends) {
                 const offset = procBody.startOffset;
                 issues.push({
                     ruleId: this.id,
-                    message: `${this.id}: Unmatched BEGIN/END blocks (${begins.length} BEGIN vs ${ends.length} END)`,
+                    message: `${this.id}: Unmatched BEGIN/END blocks (${begins} BEGIN vs ${ends} END)`,
                     severity: this.defaultSeverity,
                     startOffset: offset,
                     endOffset: offset + 10
@@ -173,15 +169,14 @@ export const ruleNZP004: LintRule = {
             }
         } else {
             // Fallback: check the entire SQL if we can't extract procedure body
-            const begins = findPatternMatches(cleaned, /\bBEGIN\b(?!\s*(_PROC|TRANSACTION|WORK)\b)/gi);
-            const ends = findPatternMatches(cleaned, PROCEDURAL_END_PATTERN);
+            const { begins, ends } = measureProceduralBlocks(cleaned);
 
-            if (begins.length !== ends.length) {
+            if (begins !== ends) {
                 const createMatch = /\bCREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\b/i.exec(sql);
                 if (createMatch) {
                     issues.push({
                         ruleId: this.id,
-                        message: `${this.id}: Unmatched BEGIN/END blocks (${begins.length} BEGIN vs ${ends.length} END)`,
+                        message: `${this.id}: Unmatched BEGIN/END blocks (${begins} BEGIN vs ${ends} END)`,
                         severity: this.defaultSeverity,
                         startOffset: createMatch.index,
                         endOffset: createMatch.index + createMatch[0].length
@@ -211,9 +206,13 @@ export const ruleNZP005: LintRule = {
 
         if (!procBody) return issues;
 
-        // FIXED: Better pattern - exclude ELSIF and END IF
-        // Only count IF that starts a new conditional block
-        const ifs = findPatternMatches(procBody.body, /(?<!ELS|END\s)\bIF\b(?!\s+(?:NOT\s+)?EXISTS\b)/gi);
+        // Count only keywords that open a new conditional block. ELSIF and
+        // ELSEIF are separate tokens, and END IF is matched as a unit, so
+        // multi-space/comment-separated layouts cannot double count.
+        const ifs = findPatternMatches(
+            procBody.body,
+            /\bEND\s+IF\b|\bELSEIF\b|\bELSIF\b|\bIF\b(?!\s+(?:NOT\s+)?EXISTS\b)/gi
+        ).filter(match => /^IF$/i.test(match[0]));
         const endIfs = findPatternMatches(procBody.body, /\bEND\s+IF\b/gi);
 
         if (ifs.length !== endIfs.length) {
@@ -251,11 +250,14 @@ export const ruleNZP006: LintRule = {
 
         if (!procBody) return issues;
 
-        // Count all LOOP keywords (standalone, FOR...LOOP, WHILE...LOOP all end with LOOP)
-        // Each END LOOP closes exactly one LOOP construct
-        // Use negative lookbehind (?<!END\s) to exclude LOOP that is part of END LOOP
-        const loopMatches = procBody.body.match(/(?<!END\s)LOOP\b/gi) || [];
-        const endLoopMatches = procBody.body.match(/\bEND\s+LOOP\b/gi) || [];
+        // Count all LOOP keywords (standalone, FOR...LOOP, WHILE...LOOP all end
+        // with LOOP). END LOOP is matched as a unit, so any whitespace or
+        // comment layout still balances.
+        const loopMatches = findPatternMatches(
+            procBody.body,
+            /\bEND\s+LOOP\b|\bLOOP\b/gi
+        ).filter(match => /^LOOP$/i.test(match[0]));
+        const endLoopMatches = findPatternMatches(procBody.body, /\bEND\s+LOOP\b/gi);
         const totalLoops = loopMatches.length;
         const endLoops = endLoopMatches.length;
 

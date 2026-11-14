@@ -19,7 +19,6 @@ const path = require("path");
 const {
   NETEZZA_SQL_VALIDATION_PROFILE,
   NetezzaSqlSemanticValidator,
-  collectKeywordTypos,
   parseNetezzaSqlStatements,
 } = require("../packages/sql-core/dist/index.js");
 
@@ -143,7 +142,6 @@ function countDiagnostics(result) {
 function benchmarkFixture(fixture) {
   const parse = measure(() => parseNetezzaSqlStatements({ sql: fixture.sql }));
   const tokens = parse.result.lexResult.tokens;
-  const typoScan = measure(() => collectKeywordTypos(tokens));
   const parseResult = parseNetezzaSqlStatements({ sql: fixture.sql });
 
   const semantic = measure(() => {
@@ -168,7 +166,6 @@ function benchmarkFixture(fixture) {
     chars: fixture.chars,
     tokens: tokens.length,
     parseResult,
-    typoScan,
     parse,
     semantic,
     endToEnd,
@@ -191,14 +188,13 @@ function writeResults(rows) {
     "the previous Jest benchmark inflated medians by roughly 4-5x because of ts-jest",
     "and Babel transformation overhead.",
     "",
-    "| Document | Lines | Chars | Tokens | Parse median | Parse P95 | Typo scan median | Semantic median | Parse + validate median | Parse + validate P95 | Diagnostics |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Document | Lines | Chars | Tokens | Parse median | Parse P95 | Semantic median | Parse + validate median | Parse + validate P95 | Diagnostics |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ...rows.map(
       (row) =>
         `| ${row.doc} | ${row.lines.toLocaleString()} | ${row.chars.toLocaleString()} `
         + `| ${row.tokens.toLocaleString()} `
         + `| ${row.parse.medianMs.toFixed(1)} ms | ${row.parse.p95Ms.toFixed(1)} ms `
-        + `| ${row.typoScan.medianMs.toFixed(1)} ms `
         + `| ${row.semantic.medianMs.toFixed(1)} ms `
         + `| ${row.endToEnd.medianMs.toFixed(1)} ms | ${row.endToEnd.p95Ms.toFixed(1)} ms `
         + `| ${row.diagnostics} |`,
@@ -207,7 +203,6 @@ function writeResults(rows) {
     "## Interpretation",
     "",
     "- **Parse** = sanitize + lex + Chevrotain parse (`parseNetezzaSqlStatements`).",
-    "- **Typo scan** = detached PAR004 keyword-typo detection over the same token array.",
     "- **Semantic** = `validateFromParseResult` (CST visitor and diagnostics, no re-parse).",
     "- **Parse + validate** = what the extension host runs for an explicit validation with a fresh validator.",
     "- Times are medians of " + ITERATIONS + " runs after " + WARMUP + " warmup run.",
@@ -228,7 +223,6 @@ function main() {
       Lines: row.lines,
       Chars: row.chars,
       "Parse ms": row.parse.medianMs.toFixed(1),
-      "Typo ms": row.typoScan.medianMs.toFixed(1),
       "Semantic ms": row.semantic.medianMs.toFixed(1),
       "Parse+validate ms": row.endToEnd.medianMs.toFixed(1),
       "P95 ms": row.endToEnd.p95Ms.toFixed(1),

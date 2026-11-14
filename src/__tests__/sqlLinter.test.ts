@@ -1039,6 +1039,48 @@ END_PROC;`;
             const issues = ruleNZP004.check(sql);
             expect(issues.length).toBe(0);
         });
+
+        it('should ignore CASE expression END tokens when the parser falls back', () => {
+            const sql = `CREATE OR REPLACE PROCEDURE ADMIN.P_TEST()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+    v INT;
+BEGIN
+    PERFORM 1;
+    v := CASE WHEN 1 = 1 THEN 1 ELSE 0 END + 1;
+    UPDATE t SET c = CASE WHEN 1 = 1 THEN 1 ELSE 0 END WHERE id = 1;
+    BEGIN
+        SELECT CASE v WHEN 1 THEN 1 ELSE 0 END INTO v FROM (SELECT 1 AS X) T;
+    END;
+    RAISE NOTICE 'BEGIN END IF END CASE';
+    -- BEGIN END
+    RETURN v;
+END;
+END_PROC;`;
+            const issues = ruleNZP004.check(sql);
+            expect(issues.length).toBe(0);
+        });
+
+        it('should report a genuinely unmatched BEGIN in the fallback path', () => {
+            const sql = `CREATE OR REPLACE PROCEDURE ADMIN.P_TEST()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+    v INT;
+BEGIN
+    PERFORM 1;
+    BEGIN
+        v := CASE WHEN 1 = 1 THEN 1 ELSE 0 END;
+    RETURN v;
+END;
+END_PROC;`;
+            const issues = ruleNZP004.check(sql);
+            expect(issues.length).toBe(1);
+            expect(issues[0].message).toContain('2 BEGIN vs 1 END');
+        });
     });
 
     describe('NZP005 - IF without END IF', () => {
@@ -1095,6 +1137,31 @@ DROP TABLE DIMACCOUNT IF EXISTS;
 
  return 1;
  END;
+END_PROC;`;
+            const issues = ruleNZP005.check(sql);
+            expect(issues.length).toBe(0);
+        });
+
+        it('should not flag ELSIF/ELSEIF chains with spaced END IF in the fallback path', () => {
+            const sql = `CREATE OR REPLACE PROCEDURE ADMIN.P_TEST()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+    v INT;
+BEGIN
+    PERFORM 1;
+    IF v = 1 THEN
+        v := 1;
+    ELSIF v = 2 THEN
+        v := 2;
+    ELSEIF v = 3 THEN
+        v := 3;
+    ELSE
+        v := 0;
+    END   IF;
+    RETURN v;
+END;
 END_PROC;`;
             const issues = ruleNZP005.check(sql);
             expect(issues.length).toBe(0);
@@ -1157,6 +1224,28 @@ END LOOP;
 END_PROC;`;
             const issues = ruleNZP006.check(sql);
             // WHILE...LOOP is matched by END LOOP - no issues expected
+            expect(issues.length).toBe(0);
+        });
+
+        it('should tolerate spaced END LOOP in the fallback path', () => {
+            const sql = `CREATE OR REPLACE PROCEDURE ADMIN.P_TEST()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+    v INT;
+BEGIN
+    PERFORM 1;
+    WHILE v < 3 LOOP
+        v := v + 1;
+    END   LOOP;
+    FOR i IN 1..3 LOOP
+        v := v + i;
+    END LOOP;
+    RETURN v;
+END;
+END_PROC;`;
+            const issues = ruleNZP006.check(sql);
             expect(issues.length).toBe(0);
         });
     });
@@ -2112,6 +2201,45 @@ end_proc;`;
 
         it('should not flag non-procedure SQL', () => {
             const sql = 'SELECT CASE WHEN 1=1 THEN 1 END';
+            const issues = ruleNZP017.check(sql);
+            expect(issues.length).toBe(0);
+        });
+
+        it.each([
+            'SELECT CASE WHEN x = 1 THEN 1 ELSE 0 END + 1 FROM table1;',
+            'SELECT CASE WHEN x = 1 THEN 1 ELSE 0 END::INT FROM table1;',
+            'SELECT CASE WHEN x = 1 THEN 1 ELSE 0 END IS NULL FROM table1;',
+            'UPDATE table1 SET c = CASE WHEN x = 1 THEN 1 ELSE 0 END WHERE id = 1;',
+            'SELECT CASE WHEN x = 1 THEN CASE WHEN y = 2 THEN 1 ELSE 0 END ELSE 2 END FROM table1;',
+        ])('should recognize a bare END terminator in the fallback path: %s', (statement) => {
+            const sql = `CREATE OR REPLACE PROCEDURE ADMIN.P_TEST()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+    v INT;
+BEGIN
+    PERFORM 1;
+    ${statement}
+    RETURN 0;
+END;
+END_PROC;`;
+            const issues = ruleNZP017.check(sql);
+            expect(issues.length).toBe(0);
+        });
+
+        it('should not count CASE keywords inside strings or comments', () => {
+            const sql = `CREATE OR REPLACE PROCEDURE ADMIN.P_TEST()
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+    PERFORM 1;
+    RAISE NOTICE 'CASE WHEN 1=1 THEN 1 END';
+    -- CASE WHEN 1=1 THEN 1
+    RETURN 0;
+END;
+END_PROC;`;
             const issues = ruleNZP017.check(sql);
             expect(issues.length).toBe(0);
         });

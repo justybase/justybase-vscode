@@ -251,9 +251,11 @@ by roughly 4-5x:
 | 5k SELECT with aliases / 254k chars | ~1,240 ms | ~311 ms | ~75% |
 | 10k SELECT with aliases / 509k chars | ~4,020 ms | ~650 ms | ~84% |
 
-The first hot path was PAR004 keyword-typo detection: a full Levenshtein DP matrix was built for every
-identifier and every clause keyword, which accounted for about 49% of validation CPU. It now uses a
-linear single-edit check plus a per-validation cache, so the typo scan costs well under 1 ms.
+The first hot path was keyword-typo detection (the former PAR004): a full Levenshtein DP matrix was
+built for every identifier and every clause keyword, which accounted for about 49% of validation CPU.
+It was later made a linear single-edit check with a per-validation cache — and then removed entirely,
+because the heuristic produced too many false positives on identifiers that merely resembled a
+keyword. Unparseable keywords now surface only through the parser's own diagnostics.
 
 The next, larger hot path was the unused-symbol collector (SQL018/SQL019). It grouped occurrences with
 `definitions.map(definition => occurrences.filter(...))`, which is quadratic for scripts with many

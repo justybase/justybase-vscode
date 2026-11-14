@@ -5,6 +5,50 @@ import * as baseLexer from '../../netezza/sql/lexer';
  * DuckDB lexical additions. Multi-word phrases must precede the shared token
  * bundle so USING SAMPLE and TABLESAMPLE are not split into generic keywords.
  */
+export const DuckDbArrow = createToken({
+  name: 'DuckDbArrow',
+  pattern: /->/,
+});
+
+export const DuckDbLBrace = createToken({
+  name: 'DuckDbLBrace',
+  pattern: /\{/,
+});
+
+export const DuckDbRBrace = createToken({
+  name: 'DuckDbRBrace',
+  pattern: /\}/,
+});
+
+export const DuckDbColon = createToken({
+  name: 'DuckDbColon',
+  pattern: /:(?![:=])/,
+});
+
+export const DuckDbReturning = createToken({
+  name: 'DuckDbReturning',
+  pattern: /RETURNING\b/i,
+  longer_alt: baseLexer.Identifier,
+});
+
+export const DuckDbConflict = createToken({
+  name: 'DuckDbConflict',
+  pattern: /CONFLICT\b/i,
+  longer_alt: baseLexer.Identifier,
+});
+
+export const DuckDbDo = createToken({
+  name: 'DuckDbDo',
+  pattern: /DO\b/i,
+  longer_alt: baseLexer.Identifier,
+});
+
+export const DuckDbNothing = createToken({
+  name: 'DuckDbNothing',
+  pattern: /NOTHING\b/i,
+  longer_alt: baseLexer.Identifier,
+});
+
 export const DuckDbUsingSample = createToken({
   name: 'DuckDbUsingSample',
   pattern: /USING\s+SAMPLE\b/i,
@@ -190,6 +234,14 @@ export const DuckDbRespectNulls = createToken({
 });
 
 const duckDbOnlyTokens = [
+  DuckDbArrow,
+  DuckDbLBrace,
+  DuckDbRBrace,
+  DuckDbColon,
+  DuckDbReturning,
+  DuckDbConflict,
+  DuckDbDo,
+  DuckDbNothing,
   DuckDbUsingSample,
   DuckDbWithOrdinality,
   DuckDbTableSample,

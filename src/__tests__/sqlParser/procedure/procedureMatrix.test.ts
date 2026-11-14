@@ -38,7 +38,9 @@ describe("NZPLSQL procedure matrix (parser)", () => {
       if (testCase.parse === "accept") {
         expect(syntaxErrors).toHaveLength(0);
       } else {
-        expect(syntaxErrors.length).toBeGreaterThan(0);
+        // Reject cases may surface through a friendly syntax code (for example
+        // SQL041 "CASE expression must end with END.") instead of PAR/LEX.
+        expect(result.errors.length).toBeGreaterThan(0);
       }
     });
   }

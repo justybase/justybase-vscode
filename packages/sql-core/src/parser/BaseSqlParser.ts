@@ -1786,7 +1786,7 @@ export class BaseSqlParser extends CstParser {
             this.CONSUME1(RParen);
           },
         },
-        { ALT: () => this.SUBRULE(this.functionCall) },
+        { GATE: () => this.LA(2).tokenType === LParen, ALT: () => this.SUBRULE(this.functionCall) },
         { ALT: () => this.SUBRULE(this.castFunctionExpression) },
         { ALT: () => this.SUBRULE(this.extractExpression) },
         { ALT: () => this.SUBRULE(this.caseExpression) },

@@ -22,7 +22,6 @@ import type { CstNode, IRecognitionException, IToken } from "chevrotain";
 import { isIgnorableTrailingDotParserError } from "./parserErrorUtils";
 import { getAvailableTokenLocation, getTokenLocationOr } from "./tokenLocation";
 import { detectNetezzaSyntaxRestrictions, detectNetezzaSyntaxRestrictionWarnings } from "./netezzaSyntaxRestrictions";
-import { collectKeywordTypos } from "./keywordTypos";
 import { createSqlLineIndex, type SqlLineIndex } from "./lineIndex";
 
 import { SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN, SCRIPT_SCOPE_CREATE_STATEMENT_PATTERN, SCRIPT_SCOPE_DROP_STATEMENT_PATTERN, SCRIPT_SCOPE_SELECT_INTO_TEMP_STATEMENT_PATTERN } from "./scriptScopeStatements";
@@ -695,7 +694,6 @@ export class NetezzaSqlSemanticValidator {
       }
     }
 
-    errors.push(...collectKeywordTypos(lexResult.tokens));
     errors.push(...detectNetezzaSyntaxRestrictions(lexResult.tokens));
     warnings.push(
       ...detectNetezzaSyntaxRestrictionWarnings(lexResult.tokens),

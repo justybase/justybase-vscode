@@ -94,8 +94,75 @@ export function isEmbeddedDmlSelect(sql: string, selectOffset: number): boolean 
   return false;
 }
 
-export const PROCEDURAL_END_PATTERN =
-  /\bEND\b(?!\s*(_PROC|IF|LOOP|CASE|TRANSACTION|WORK)\b)(?!\s*(AS|,|\)))/gi;
+/**
+ * Tokens that participate in NZPLSQL block/CASE nesting.
+ *
+ * `END IF`, `END LOOP`, `END CASE`, `END TRANSACTION`, `END WORK`,
+ * `BEGIN TRANSACTION` and `BEGIN WORK` are matched as a single token so they
+ * never close a plain `BEGIN … END` block. `BEGIN_PROC`/`END_PROC` do not match
+ * `\bBEGIN\b`/`\bEND\b` because `_` is a word character.
+ */
+const PROCEDURAL_BLOCK_TOKEN_PATTERN =
+  /\bEND\s+(?:IF|LOOP|CASE|TRANSACTION|WORK)\b|\bBEGIN\s+(?:TRANSACTION|WORK)\b|\bBEGIN\b|\bEND\b|\bCASE\b/gi;
+
+export interface ProceduralBlockBalance {
+  begins: number;
+  ends: number;
+  /** CASE expressions still open at the end of the scanned text. */
+  unmatchedCases: number;
+}
+
+/**
+ * Count procedural `BEGIN … END` blocks against SQL `CASE … END` expressions.
+ *
+ * Netezza has no `CASE` *statement* (live-verified), so every `CASE` token opens
+ * an expression that a bare `END` closes. A bare `END` therefore closes the
+ * innermost open CASE before it can close a `BEGIN` block.
+ *
+ * Callers must pass sanitized text (comments and string literals removed).
+ */
+export function measureProceduralBlocks(body: string): ProceduralBlockBalance {
+  let begins = 0;
+  let ends = 0;
+  let unmatchedCases = 0;
+
+  // A CASE expression cannot span a statement terminator, so CASE depth is
+  // resolved per statement. Without this, a missing CASE END would silently
+  // consume the next block's END and hide the real imbalance. The input is
+  // sanitized, so a plain split cannot cut through a string or comment.
+  for (const statement of body.split(";")) {
+    let openCases = 0;
+    for (const match of statement.matchAll(
+      new RegExp(PROCEDURAL_BLOCK_TOKEN_PATTERN.source, "gi"),
+    )) {
+      const token = match[0].toUpperCase().replace(/\s+/g, " ");
+      if (token === "CASE") {
+        openCases += 1;
+        continue;
+      }
+      if (token === "BEGIN") {
+        begins += 1;
+        continue;
+      }
+      if (token.startsWith("END ")) {
+        if (token === "END CASE" && openCases > 0) {
+          openCases -= 1;
+        }
+        continue;
+      }
+      // Bare END: close the innermost CASE expression first; only a block
+      // terminator when no CASE is open.
+      if (openCases > 0) {
+        openCases -= 1;
+        continue;
+      }
+      ends += 1;
+    }
+    unmatchedCases += openCases;
+  }
+
+  return { begins, ends, unmatchedCases };
+}
 
 export { shouldUseProcedureRegexFallback } from "./procedureParseGate";
 

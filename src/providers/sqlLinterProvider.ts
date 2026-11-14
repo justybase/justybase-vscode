@@ -68,6 +68,16 @@ export class SqlLinterProvider {
   private readonly columnMetadataWarnedConnections = new Set<string>();
   /** Bumped when an explicit validation publishes; stale lint results are dropped. */
   private readonly diagnosticGeneration = new Map<string, number>();
+  /**
+   * Whole-document results produced by an explicit "Validate SQL" run. The
+   * automatic pass may be skipped for large scripts; without this, the next
+   * automatic lint would silently delete diagnostics the user explicitly asked
+   * for at the same document version.
+   */
+  private readonly explicitValidation = new Map<
+    string,
+    { version: number; issues: LintIssue[] }
+  >();
   private activationTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
@@ -99,6 +109,7 @@ export class SqlLinterProvider {
       }
 
       this.clearCacheForUri(document.uri);
+      this.explicitValidation.delete(document.uri.toString());
       void this.lintDocument(document);
     };
 
@@ -123,6 +134,7 @@ export class SqlLinterProvider {
           // Automatic lint is skipped for this document (large script with a
           // running LSP). Drop on-demand diagnostics so they cannot outlive
           // the content they were produced for.
+          this.explicitValidation.delete(event.document.uri.toString());
           this.diagnosticCollection.delete(event.document.uri);
           this.clearCacheForUri(event.document.uri);
         }
@@ -132,6 +144,7 @@ export class SqlLinterProvider {
     // Clear diagnostics when document is closed
     this.disposables.push(
       vscode.workspace.onDidCloseTextDocument((doc) => {
+        this.explicitValidation.delete(doc.uri.toString());
         this.diagnosticCollection.delete(doc.uri);
         this.diagnosticGeneration.delete(doc.uri.toString());
         this.clearCacheForUri(doc.uri);
@@ -143,6 +156,7 @@ export class SqlLinterProvider {
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (affectsExtensionConfiguration(event, "linter")) {
           this.lintResultCache.clear();
+          this.explicitValidation.clear();
           this.lintAllOpenDocuments();
         }
       }),
@@ -239,6 +253,27 @@ export class SqlLinterProvider {
     onDemand: boolean = false,
   ): Promise<LintIssue[]> {
     const startedAt = performance.now();
+    const documentVersion = document.version ?? 0;
+    const documentKey = document.uri.toString();
+
+    const explicit = this.explicitValidation.get(documentKey);
+    if (explicit && explicit.version !== documentVersion) {
+      this.explicitValidation.delete(documentKey);
+    } else if (!onDemand && explicit) {
+      // An explicit validation produced a superset of the automatic results for
+      // this exact document version. Keep it instead of replacing it with the
+      // (possibly skipped) automatic pass.
+      return explicit.issues;
+    }
+
+    if (onDemand) {
+      this.cancelPendingLint(documentKey);
+      this.diagnosticGeneration.set(
+        documentKey,
+        (this.diagnosticGeneration.get(documentKey) ?? 0) + 1,
+      );
+    }
+
     if (!this.shouldRunExtensionHostLint(document) && !onDemand) {
       this.diagnosticCollection.delete(document.uri);
       this.clearCacheForUri(document.uri);
@@ -255,8 +290,6 @@ export class SqlLinterProvider {
       return [];
     }
 
-    const documentVersion = document.version ?? 0;
-    const documentKey = document.uri.toString();
     const publishGeneration = this.diagnosticGeneration.get(documentKey) ?? 0;
     const cacheKey = this.buildCacheKey(
       document.uri,
@@ -269,6 +302,12 @@ export class SqlLinterProvider {
     if (cached) {
       if (this.isCurrentPublishGeneration(documentKey, publishGeneration)) {
         this.diagnosticCollection.set(document.uri, cached.diagnostics);
+        if (onDemand) {
+          this.explicitValidation.set(documentKey, {
+            version: documentVersion,
+            issues: cached.issues,
+          });
+        }
       }
       this.logSlowLint(document, startedAt, true, false);
       return cached.issues;
@@ -301,8 +340,24 @@ export class SqlLinterProvider {
       diagnostics,
       issues,
     });
+    if (onDemand) {
+      this.explicitValidation.set(documentKey, {
+        version: documentVersion,
+        issues,
+      });
+    } else {
+      this.explicitValidation.delete(documentKey);
+    }
     this.logSlowLint(document, startedAt, false, false);
     return issues;
+  }
+
+  private cancelPendingLint(documentKey: string): void {
+    const pendingLint = this.lintTimers.get(documentKey);
+    if (pendingLint) {
+      clearTimeout(pendingLint);
+      this.lintTimers.delete(documentKey);
+    }
   }
 
   private logSlowLint(
@@ -475,11 +530,7 @@ export class SqlLinterProvider {
     // An explicit validation result must not be overwritten by a pending or
     // already-running automatic lint pass for the same document version.
     const key = document.uri.toString();
-    const pendingLint = this.lintTimers.get(key);
-    if (pendingLint) {
-      clearTimeout(pendingLint);
-      this.lintTimers.delete(key);
-    }
+    this.cancelPendingLint(key);
     this.diagnosticGeneration.set(
       key,
       (this.diagnosticGeneration.get(key) ?? 0) + 1,
@@ -617,10 +668,12 @@ export class SqlLinterProvider {
    * Clear diagnostics for a specific document
    */
   public clearDiagnostics(uri: vscode.Uri): void {
+    const documentKey = uri.toString();
     this.diagnosticGeneration.set(
-      uri.toString(),
-      (this.diagnosticGeneration.get(uri.toString()) ?? 0) + 1,
+      documentKey,
+      (this.diagnosticGeneration.get(documentKey) ?? 0) + 1,
     );
+    this.explicitValidation.delete(documentKey);
     this.diagnosticCollection.delete(uri);
     this.clearCacheForUri(uri);
   }
@@ -630,6 +683,7 @@ export class SqlLinterProvider {
    */
   public clearAllDiagnostics(): void {
     this.diagnosticGeneration.clear();
+    this.explicitValidation.clear();
     this.diagnosticCollection.clear();
     this.lintResultCache.clear();
   }
@@ -709,6 +763,7 @@ export class SqlLinterProvider {
     this.lintTimers.clear();
     this.lintResultCache.clear();
     this.diagnosticGeneration.clear();
+    this.explicitValidation.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }

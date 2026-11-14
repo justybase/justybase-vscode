@@ -78,6 +78,15 @@ describe('DuckDbSqlParser', () => {
     ['intersect all', 'SELECT 1 INTERSECT ALL SELECT 1'],
     ['except all', 'SELECT 1 EXCEPT ALL SELECT 2'],
     ['ignore nulls', 'SELECT first(value IGNORE NULLS) FROM t'],
+    ['standard unpivot numeric values', 'SELECT * FROM cities UNPIVOT (value FOR year IN (2000, 2010))'],
+    ['array type suffix', 'CREATE TABLE nested_values (id INTEGER, items INTEGER[], meta STRUCT(name VARCHAR), labels MAP(VARCHAR, INTEGER))'],
+    ['insert returning', 'INSERT INTO t VALUES (1) RETURNING *'],
+    ['update returning', 'UPDATE t SET id = 2 WHERE id = 1 RETURNING *'],
+    ['delete returning', 'DELETE FROM t WHERE id = 2 RETURNING *'],
+    ['insert on conflict returning', 'INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING RETURNING *'],
+    ['struct and map literals', "SELECT {'a': [1, 2], 'b': NULL}, MAP {'x': 1, 'y': 2}"],
+    ['unnest struct and list', "SELECT unnest([1, 2, 3]), unnest({'a': 42, 'b': 84})"],
+    ['lambda expression', 'SELECT list_transform([1, 2, 3], x -> x + 1)'],
   ])('parses %s without actionable errors', (_name, sql) => {
     const result = parse(sql);
 

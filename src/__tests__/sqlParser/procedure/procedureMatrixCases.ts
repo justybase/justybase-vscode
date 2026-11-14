@@ -1115,6 +1115,201 @@ END_PROC;`,
     create: "ok",
     call: "ok",
   },
+  {
+    id: "ctrl_case_expressions",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  v := CASE WHEN 1 = 1 THEN 1 ELSE 0 END + 20;
+  IF v = 21 THEN
+    v := v + CASE WHEN v > 20 THEN 0 ELSE 1 END;
+  END IF;
+  v := (CASE WHEN 1 = 1 THEN v ELSE 0 END)::INT;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectRows: [[21]],
+    notes: "CASE expressions end with a bare END; END IF/END LOOP belong to control structures.",
+  },
+  {
+    id: "ctrl_case_if_loop_record",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT := 0;
+  r RECORD;
+BEGIN
+  FOR r IN SELECT ID, CASE WHEN MOD(ID, 2) = 0 THEN 'EVEN' ELSE 'ODD' END AS PARITY
+           FROM ${T} T LOOP
+    IF r.PARITY = 'EVEN' THEN
+      v := v + CASE r.ID WHEN 1 THEN 1 ELSE 20 END;
+    ELSE
+      v := v + CASE WHEN r.ID > 0 THEN 2 ELSE 0 END;
+    END IF;
+  END LOOP;
+  WHILE v > 100 LOOP
+    v := v + CASE WHEN v IS NULL THEN 0 ELSE 1 END;
+    EXIT WHEN v >= 100;
+  END LOOP;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectRows: [[22]],
+    notes: "Record FOR loop, IF/ELSE and WHILE with EXIT WHEN, all using CASE expressions.",
+  },
+  {
+    id: "ctrl_nested_if_labeled_loops_case",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT := 0;
+  r RECORD;
+BEGIN
+  <<lbl_loop>> LOOP
+    v := v + 1;
+    IF v = 1 THEN
+      IF v < 5 THEN
+        IF v > 0 THEN
+          v := v + 1;
+        END IF;
+      END IF;
+    ELSE
+      EXIT lbl_loop;
+    END IF;
+  END LOOP;
+  FOR i IN REVERSE 5..3 LOOP
+    v := v + CASE WHEN i = 4 THEN 10 ELSE 1 END;
+  END LOOP;
+  FOR r IN SELECT T.ID, CASE WHEN T.ID = 1 THEN 'A' ELSE 'B' END AS TAG
+           FROM ${T} T
+           JOIN (SELECT 1 AS ID) X
+             ON X.ID = CASE WHEN T.ID = 2 THEN 2 ELSE T.ID END LOOP
+    v := v + CASE r.TAG WHEN 'A' THEN 1 ELSE 2 END;
+  END LOOP;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectRows: [[16]],
+    notes: "Labeled LOOP with EXIT label, three nested IFs, FOR REVERSE and CASE in JOIN/ON.",
+  },
+  {
+    id: "ctrl_nested_exception_case",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  BEGIN
+    SELECT COUNT(*) INTO v FROM ${T} T
+    WHERE CASE WHEN T.ID = 1 THEN 1 ELSE 0 END = 1;
+  EXCEPTION
+    WHEN OTHERS THEN
+      v := -1;
+  END;
+  IF v = 1 THEN
+    RETURN 1;
+  END IF;
+  RETURN 0;
+END;
+END_PROC;`,
+    parse: "accept",
+    create: "ok",
+    call: "ok",
+    expectRows: [[1]],
+    notes: "Nested BEGIN/EXCEPTION block with a CASE expression in the WHERE predicate.",
+  },
+  {
+    id: "ctrl_missing_end_if",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  v := 1;
+  IF v = 1 THEN
+    v := 2;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "syntax error",
+  },
+  {
+    id: "ctrl_missing_begin_end",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  v := 1;
+  BEGIN
+    v := CASE WHEN 1 = 1 THEN 2 ELSE 0 END;
+  RETURN v;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "syntax error",
+  },
+  {
+    id: "ctrl_case_missing_end",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+DECLARE
+  v INT;
+BEGIN
+  v := CASE WHEN 1 = 1 THEN 2 ELSE 0;
+  IF v = 2 THEN
+    RETURN 1;
+  END IF;
+  RETURN 0;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "expecting",
+  },
+  {
+    id: "ctrl_extra_end",
+    group: "control",
+    sql: `CREATE OR REPLACE PROCEDURE ${P}() RETURNS INT4 LANGUAGE NZPLSQL AS
+BEGIN_PROC
+BEGIN
+  RETURN 1;
+END;
+END;
+END_PROC;`,
+    parse: "reject",
+    create: "ok",
+    call: "error",
+    callPhase: "body-compile",
+    errorIncludes: "syntax error",
+  },
 
   // ==========================================================================
   // Embedded SQL

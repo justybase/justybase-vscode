@@ -126,7 +126,7 @@ still behind its implemented functionality; see the quality roadmap.
 | Rename (+ prepare) | ✅ LSP | ✅ WS | ✅ | Quote-aware `formatSqlRenameReplacement` — `prepareRename` + `rename`. |
 | Inlay hints | ✅ LSP (`inlayHintEngine`) | ✅ WS | ✅ | Column/type hints via `LspInlayHintEngine` + `registerInlayHintsProvider`. |
 | Signature help | ✅ LSP (`signatureAndCodeActionHandlers`) | ✅ WS | ✅ | `findFunctionCall` + `getDatabaseSqlAuthoring().signatures` + `registerSignatureHelpProvider`. |
-| Code actions (linter fixes) | ✅ LSP SQL/PAR + ext NZ/NZP | 🟡 WS/LSP | M | Shared core exposes parser fixes, SQL004/007/012/019/048, PAR003/PAR004/PAR101, Netezza guard/limit/normalization fixes, and metadata-backed qualification. Desktop still has richer context-sensitive NZ/NZP actions. |
+| Code actions (linter fixes) | ✅ LSP SQL/PAR + ext NZ/NZP | 🟡 WS/LSP | M | Shared core exposes parser fixes, SQL004/007/012/019/048, PAR003/PAR101, Netezza guard/limit/normalization fixes, and metadata-backed qualification. Desktop still has richer context-sensitive NZ/NZP actions. |
 | Code actions (refactors) | ✅ ext (Extract CTE / Materialize / Inline) | ❌ | M | `sqlRefactorCodeActions`. |
 | Document symbols | 🟡 ext | ✅ WS | ✅ | Parse-session CST + macro scan mirrored from `documentSymbolProvider` into `documentSymbols()`. |
 | Semantic tokens | ✅ ext (`semanticTokensProvider`) | ✅ WS | ✅ | The API adapter composes the vscode-free sql-core lexer and symbol collector into LSP tokens; desktop semantic token ownership remains product-specific. |
