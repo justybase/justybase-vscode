@@ -131,7 +131,9 @@ module.exports = {
   },
   verbose: jestVerbose,
   silent: jestSilent,
-  // Parallel by default (50% CPUs). Set JEST_MAX_WORKERS=1 via test:serial for low-memory runs.
+  // Parallel by default (50% CPUs); coverage uses four workers. Set
+  // JEST_MAX_WORKERS=1 via test:serial (or pass --maxWorkers after --) for
+  // low-memory runs.
   maxWorkers: jestMaxWorkers,
   // Increase heap size for tests (8GB)
   testTimeout: 60000,

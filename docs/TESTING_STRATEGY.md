@@ -26,8 +26,10 @@ test behavior.
 
 The PR baseline is `npm run verify:pr`. Live proprietary databases are nightly
 or manual because they require credentials and controlled infrastructure.
-`npm run test:coverage` enforces the global floors from
-`quality/quality-baseline.json`; on a pull request, the CI unit job also runs
+`npm run test:coverage` runs four Jest workers (validated on 4 vCPU/12 GiB) and
+enforces the global floors from `quality/quality-baseline.json`; on a
+memory-constrained machine pass `-- --maxWorkers=2`. On a pull request, the CI
+unit job also runs
 the changed high-risk gate against the pull request base commit. Locally, the
 equivalent is `npm run test:coverage:changed` after fetching `origin/master`.
 The changed-code input is the repository-wide diff, and the gate merges LCOV
