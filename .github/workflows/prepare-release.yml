@@ -4,10 +4,11 @@ name: Prepare Release
 #
 # Bumps the synchronized version in the core extension, the shared contracts
 # package, every managed companion extension, and the documentation markers,
-# then opens a pull request. The workflow token cannot trigger pull_request
-# workflows, so CI is dispatched explicitly on the release branch. Merge the
-# pull request only after CI is green; `Release` then tags the merge commit
-# without re-running those gates.
+# then pushes release/v<version> and opens a pull request. If the organization
+# forbids GitHub Actions from creating pull requests, the workflow prints a
+# compare link instead; a human-created pull request triggers CI normally.
+# Merge only after CI is green; `Release` then tags the merge commit without
+# re-running those gates.
 
 on:
   workflow_dispatch:
@@ -153,34 +154,49 @@ jobs:
 
           Next steps:
 
-          1. Wait for CI to pass on this pull request.
+          1. Wait for CI to pass on this branch.
           2. Merge it into $TARGET.
           3. Run the Release workflow with release_type=current and select the extension targets.
-
-          CI is dispatched explicitly on the release branch because pull requests
-          created with the workflow token do not start pull_request workflows.
 
           Do not edit version files by hand. Re-run Prepare Release instead.
           EOF
           )
 
+          compare_url="https://github.com/${GITHUB_REPOSITORY}/compare/${TARGET}...${BRANCH}?expand=1"
           number=$(gh pr list --head "$BRANCH" --base "$TARGET" --state open --json number --jq '.[0].number // empty')
 
           if [ -n "$number" ]; then
-            gh pr edit "$number" --title "chore(release): $TAG" --body "$body"
+            if ! edit_output=$(gh pr edit "$number" --title "chore(release): $TAG" --body "$body" 2>&1); then
+              echo "$edit_output" >&2
+              echo "::warning::Could not update pull request #$number; review it manually."
+            fi
             url=$(gh pr view "$number" --json url --jq .url)
+            dispatch_ci=true
             echo "Updated pull request $url."
-          else
-            url=$(gh pr create --base "$TARGET" --head "$BRANCH" --title "chore(release): $TAG" --body "$body")
+          elif create_output=$(gh pr create --base "$TARGET" --head "$BRANCH" --title "chore(release): $TAG" --body "$body" 2>&1); then
+            url="$create_output"
+            dispatch_ci=true
             echo "Created pull request $url."
+          else
+            echo "$create_output" >&2
+            if echo "$create_output" | grep -qi 'not permitted to create'; then
+              echo "::warning::GitHub Actions cannot create pull requests in this organization. Open the release pull request from the compare link below."
+              url="$compare_url"
+              dispatch_ci=false
+            else
+              exit 1
+            fi
           fi
 
           echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "dispatch_ci=$dispatch_ci" >> "$GITHUB_OUTPUT"
 
-      # Pull requests opened with GITHUB_TOKEN do not trigger `pull_request`
-      # workflows. Dispatch CI explicitly for the release branch head so the
-      # pull request still gets the full quality, unit, and integration checks.
+      # If the workflow token created the pull request, the pull_request event
+      # is suppressed. Dispatch CI for the branch head so the pull request still
+      # gets the full quality, unit, and integration checks. A human-created
+      # pull request triggers CI normally.
       - name: Dispatch CI for the release branch
+        if: ${{ steps.pull_request.outputs.dispatch_ci == 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -206,6 +222,7 @@ jobs:
           BRANCH: ${{ steps.version.outputs.branch }}
           TARGET: ${{ github.event.inputs.target_branch }}
           PR_URL: ${{ steps.pull_request.outputs.url }}
+          DISPATCH_CI: ${{ steps.pull_request.outputs.dispatch_ci }}
         run: |
           {
             echo "## Release $TAG prepared"
@@ -214,6 +231,12 @@ jobs:
             echo "- Branch: \`$BRANCH\`"
             echo "- Target: \`$TARGET\`"
             echo "- Pull request: $PR_URL"
+            echo ''
+            if [ "$DISPATCH_CI" = 'true' ]; then
+              echo 'CI was dispatched on the release branch.'
+            else
+              echo 'Open the pull request from the link above; CI starts automatically for a human-created pull request.'
+            fi
             echo ''
             echo 'Merge the pull request only after CI is green, then run **Release** with `release_type=current`.'
           } >> "$GITHUB_STEP_SUMMARY"

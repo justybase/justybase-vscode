@@ -52,8 +52,16 @@ companion extension, and the documentation version markers. It pushes the
 `release/v<version>` branch and opens (or updates) a pull request titled
 `chore(release): v<version>`.
 
+Some organizations disable "Allow GitHub Actions to create and approve pull
+requests". In that case the workflow cannot open the pull request itself and
+prints a compare link in the job summary instead; open the pull request from
+that link. A human-created pull request triggers CI normally. If the workflow
+does create the pull request, it dispatches CI on the branch because pull
+requests created with `GITHUB_TOKEN` do not trigger `pull_request` workflows.
+
 Re-running `Prepare Release` force-pushes that automation branch and updates
-the open pull request. Do not edit version files by hand on the branch.
+the pull request (or the compare link) when possible. Do not edit version files
+by hand on the branch.
 
 ### 3. Merge after CI
 
@@ -82,10 +90,11 @@ publishes the selected extensions to both registries.
 - updates tracked documentation version markers;
 - commits the changes to `release/v<version>` and opens or updates the pull
   request;
-- dispatches the `CI` workflow on the release branch. A pull request created
-  with `GITHUB_TOKEN` does not trigger `pull_request` workflows, so the release
-  phase dispatches CI explicitly to keep the pull request covered by the full
-  quality, unit, and integration gates.
+- falls back to a compare link when the organization forbids GitHub Actions
+  from creating pull requests;
+- dispatches the `CI` workflow on the release branch when the workflow created
+  the pull request, because token-created pull requests do not trigger
+  `pull_request` workflows. A human-created pull request starts CI normally.
 
 `Release`:
 
