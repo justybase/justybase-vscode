@@ -10,7 +10,7 @@ replacement for required GitHub checks.
 depends on reusable workflows, artifact upload/download, `GITHUB_TOKEN`,
 `GITHUB_OUTPUT`, `gh release`, and marketplace secrets. The local runner instead
 executes the same npm scripts and CLI tools the workflows execute, inside a
-pinned Node 22 Linux container.
+pinned Node 24 Linux container.
 
 ## How it works
 
@@ -43,7 +43,7 @@ host checkout (read-only)          Docker named volumes
 - About 15 GiB free for the image, snapshot, dependencies, and coverage output.
 - Network access on the first run (apt packages, npm packages, the pinned
   Access reference clone, and the VS Code Extension Host download).
-- Node.js is **not** required on the host; the container supplies Node 22.
+- Node.js is **not** required on the host; the container supplies Node 24.
 
 ## Quick start
 
@@ -56,7 +56,7 @@ tools/local-ci/run.sh release-dry-run --release-type patch
 tools/local-ci/run.sh all --release-type patch
 ```
 
-The first invocation builds `justybase-local-ci:node22` and copies the working
+The first invocation builds `justybase-local-ci:node24` and copies the working
 tree into a Docker volume. Later runs reuse the image, npm cache, dependency
 installations, and the VS Code download cache.
 

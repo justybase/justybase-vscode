@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)"
 
-IMAGE="${JUSTYBASE_LOCAL_CI_IMAGE:-justybase-local-ci:node22}"
+IMAGE="${JUSTYBASE_LOCAL_CI_IMAGE:-justybase-local-ci:node24}"
 
 usage() {
     cat <<'EOF'

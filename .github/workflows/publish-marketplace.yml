@@ -83,7 +83,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
   OVSX_VERSION: "1.1.1"
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 

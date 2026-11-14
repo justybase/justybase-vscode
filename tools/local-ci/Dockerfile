@@ -1,10 +1,10 @@
 # Local CI runner for justybase-vscode.
 #
-# Matches the GitHub Actions Node version (22) and provides the Linux system
+# Matches the GitHub Actions Node version (24) and provides the Linux system
 # libraries required by Jest, native npm modules, and the VS Code Extension
 # Host under Xvfb. Database engines and publishing tools belong to later
 # stages and are intentionally not installed here.
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \

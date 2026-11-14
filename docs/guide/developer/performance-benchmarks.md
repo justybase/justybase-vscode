@@ -58,7 +58,7 @@ The Node report is written to ignored `Benchmark/data-grid.v1.results.json` and 
 
 Local measurements use two warm-ups and eight samples. Fixture creation, input-file creation, worker setup for warm runs, and SQLite insertion are outside the timed section. The live suite uses two warm-ups and a small configurable sample count (`DATA_GRID_PERF_LIVE_SAMPLES`, default 3) because each sample performs a remote import and cleanup.
 
-`Benchmark/baselines/data-grid.v1.json` is intentionally empty until three stable Ubuntu/Node 22/Chromium runs are available. A missing or incompatible baseline produces `BASELINE_PENDING`; it does not pretend to be a pass. With a compatible baseline, a median regression over 20% or a P95 regression over 25% produces `WARN`. Warnings are reported without failing normal CI. Set `DATA_GRID_PERF_ENFORCE=1` for release/nightly validation to turn those warnings into a failure after the report is written.
+`Benchmark/baselines/data-grid.v1.json` is intentionally empty until three stable Ubuntu/Node 24/Chromium runs are available. A missing or incompatible baseline produces `BASELINE_PENDING`; it does not pretend to be a pass. With a compatible baseline, a median regression over 20% or a P95 regression over 25% produces `WARN`. Warnings are reported without failing normal CI. Set `DATA_GRID_PERF_ENFORCE=1` for release/nightly validation to turn those warnings into a failure after the report is written.
 
 Do not compare a laptop run to a Linux baseline, a different Node major, a different Chromium major, or a different worker count. Populate the baseline only after investigating machine noise and repeating three stable runs.
 

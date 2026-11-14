@@ -39,7 +39,7 @@ The root `package.json` uses npm workspaces for `packages/*`. The desktop build 
 
 ### Toolchain and Local Setup
 
-- Node.js `>=22.12.0` and npm are required by the root and workspace package manifests.
+- Node.js `>=22.12.0` and npm are required by the root and workspace package manifests. GitHub Actions workflows and the local Docker runner use Node 24.
 - The desktop extension targets VS Code `^1.109.0` (required by `contributes.chatSkills` and `contributes.chatPromptFiles`).
 - Run `npm install` from the repository root so workspace links and shared tooling resolve consistently.
 - Optional extensions may require additional native/runtime dependencies; follow the README and verification script for the extension being changed.
