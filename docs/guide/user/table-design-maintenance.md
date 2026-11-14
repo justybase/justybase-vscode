@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Partial
 last_verified: 2026-08-30
-product_version: 3.20.8
+product_version: 3.20.9
 ---
 
 # Table Designer, Alter Table and maintenance
