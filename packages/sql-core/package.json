@@ -109,7 +109,7 @@
   },
   "scripts": {
     "build": "node ../../scripts/build-sql-core.js",
-    "check-types": "tsc -p tsconfig.build.json --noEmit",
+    "check-types": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.build.json --noEmit",
     "test": "jest --runInBand"
   },
   "dependencies": {

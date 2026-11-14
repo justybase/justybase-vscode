@@ -396,7 +396,23 @@ For ambiguous syntax or implicit-cast behavior, a dev Netezza instance can confi
 
 ### TypeScript
 
-- **TypeScript 6+** required (`typescript` in root `package.json`; use `"typescript.tsdk": "node_modules/typescript/lib"` in `.vscode/settings.json` so the IDE and ESLint match the project compiler)
+- **TypeScript 7 compiles and type-checks the repository.** `@typescript/native` in
+  the root `package.json` is the pinned `typescript@7.0.2` compiler. Every build and
+  type check invokes it explicitly as
+  `node ./node_modules/@typescript/native/bin/tsc` (workspaces use
+  `node ../../node_modules/@typescript/native/bin/tsc`). Do not rely on `npx tsc` or
+  `node_modules/.bin/tsc`: the `typescript` package installed for the tooling API
+  owns the same binary name.
+
+  Why two packages: TypeScript 7 has no compiler API yet, and `ts-jest`,
+  `typescript-eslint`, `ts-node`, and the VS Code language service still import the
+  TypeScript 6 API. The root `typescript` dependency stays on `6.0.x` for that API
+  only; it is not the compiler that gates the build.
+- The root program runs with `--skipLibCheck` because `@types/jsdom@21.1.7`
+  (transitive through `jest-environment-jsdom`) declares `["Infinity"]` and `["NaN"]`
+  as `number` properties on a `number`-indexed `Window` interface, which TypeScript 7
+  rejects with TS2411. Workspace `check-types` and declaration emit still run
+  without that flag.
 - `strict: true` with `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`
 - `moduleResolution: bundler` with `module: commonjs` (root); extensions inherit via `extends` — no deprecated `baseUrl`
 - Explicit `types: ["jest", "node"]` in root `tsconfig.json` (TS 6 default is `[]`)

@@ -55,7 +55,7 @@
         "build": "node esbuild.access.js",
         "build:minified": "node esbuild.access.js --minify",
         "build:dev": "node esbuild.access.js",
-        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "check-types": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json --noEmit",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); for (const p of ['node_modules/@duckdb/node-api', 'node_modules/mdb-reader']) { if (!fs.existsSync(p)) { console.error('Missing Access runtime dependency: ' + p); process.exit(1); } }\"",
         "prepackage": "npm run verify:runtime-deps && node ../../scripts/generate-third-party-notices.js .",
         "package": "node ../../scripts/package-optional-vsix.js package"

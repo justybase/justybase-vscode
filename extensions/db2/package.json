@@ -41,7 +41,7 @@
     "build": "node esbuild.db2.js",
     "build:minified": "node esbuild.db2.js --minify",
     "build:dev": "node esbuild.db2.js",
-    "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+    "check-types": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json --noEmit",
     "package": "node scripts/package-vsix.js package",
     "postpackage": "node scripts/verify-vsix.js"
   },

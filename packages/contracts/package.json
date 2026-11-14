@@ -14,8 +14,8 @@
     "url": "https://github.com/justybase/justybase-vscode"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "build:watch": "tsc -p tsconfig.build.json --watch",
+    "build": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.build.json",
+    "build:watch": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.build.json --watch",
     "clean": "rm -rf dist",
     "test": "jest"
   },

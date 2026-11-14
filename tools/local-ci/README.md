@@ -205,7 +205,6 @@ Intentionally out of scope:
   Oracle, PostgreSQL, Vertica, MSSQL, MySQL, ClickHouse, Snowflake);
 - external database servers for live integration tests;
 - the Java Jackcess cross-check;
-- the informational TypeScript 7 compatibility job;
 - the Playwright webview and data-grid performance harnesses (not part of a
   core release);
 - Windows and macOS runner parity. By design every stage runs in the Linux

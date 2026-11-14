@@ -10,7 +10,7 @@ const {
 } = require('./optional-extensions');
 
 const eslintExecutable = path.join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js');
-const tscExecutable = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+const tscExecutable = path.join(repoRoot, 'node_modules', '@typescript', 'native', 'bin', 'tsc');
 
 function fail(message) {
     console.error(message);

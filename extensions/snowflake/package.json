@@ -42,7 +42,7 @@
         "build:minified": "node esbuild.snowflake.js --minify",
         "build:dev": "node esbuild.snowflake.js",
         "lint": "node ../../node_modules/eslint/bin/eslint.js src --ext .ts",
-        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "check-types": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json --noEmit",
         "verify": "npm run lint && npm run check-types && npm run build",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/snowflake-sdk')) { console.error('Missing snowflake-sdk. Run npm install snowflake-sdk in extensions\\\\snowflake before packaging or using the runtime.'); process.exit(1); }\"",
         "prepackage": "npm run verify:runtime-deps",

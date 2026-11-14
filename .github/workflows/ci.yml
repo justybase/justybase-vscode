@@ -128,45 +128,6 @@ jobs:
       - name: Build desktop bundle
         run: npm run build
 
-  typecheck-ts7:
-    name: TypeScript 7 Compatibility (informational)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            extensions/clickhouse/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Bootstrap pinned Access index-code reference
-        run: tools/access-ddl-compare/bootstrap.sh
-
-      - name: Install ClickHouse extension dependencies
-        if: hashFiles('extensions/clickhouse/package-lock.json') != ''
-        working-directory: extensions/clickhouse
-        run: npm ci
-
-      - name: Verify TypeScript compiler version
-        run: npm exec --yes --package=typescript@7.0.2 -- tsc --version
-
-      - name: Type check with TypeScript 7
-        # The root program is checked with --skipLibCheck on purpose: TypeScript 7
-        # reports TS2411 for `["Infinity"]`/`["NaN"]` in @types/jsdom (pulled in by
-        # jest-environment-jsdom), a third-party declaration file we do not own.
-        # Our own sources are still fully checked; the media program keeps its own
-        # skipLibCheck setting from tsconfig.media.json.
-        run: npm run check-types:ts7
-
   completion-parity:
     name: Completion Parity Gate
     runs-on: ubuntu-latest

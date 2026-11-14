@@ -142,7 +142,7 @@
         "build": "node esbuild.duckdb.js",
         "build:minified": "node esbuild.duckdb.js --minify",
         "build:dev": "node esbuild.duckdb.js",
-        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "check-types": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json --noEmit",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/@duckdb/node-api')) { console.error('Missing @duckdb/node-api. Run npm install in extensions\\\\duckdb before packaging.'); process.exit(1); }\"",
         "prepackage": "npm run verify:runtime-deps",
         "package": "node ../../scripts/package-optional-vsix.js package"

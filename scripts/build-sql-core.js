@@ -62,7 +62,7 @@ for (const [name, source] of entries) {
 
 execFileSync(
   process.execPath,
-  [path.join(root, 'node_modules/typescript/bin/tsc'), '-p', path.join(packageRoot, 'tsconfig.build.json')],
+  [path.join(root, 'node_modules/@typescript/native/bin/tsc'), '-p', path.join(packageRoot, 'tsconfig.build.json')],
   { cwd: root, stdio: 'inherit' },
 );
 

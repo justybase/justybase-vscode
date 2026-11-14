@@ -41,7 +41,7 @@
         "build": "node esbuild.mssql.js",
         "build:minified": "node esbuild.mssql.js --minify",
         "build:dev": "node esbuild.mssql.js",
-        "check-types": "node ../../node_modules/typescript/bin/tsc --project tsconfig.json --noEmit",
+        "check-types": "node ../../node_modules/@typescript/native/bin/tsc --project tsconfig.json --noEmit",
         "verify:runtime-deps": "node -e \"const fs = require('fs'); if (!fs.existsSync('node_modules/mssql')) { console.error('Missing mssql. Run npm install in extensions\\\\mssql before packaging.'); process.exit(1); }\"",
         "prepackage": "npm run verify:runtime-deps",
         "package": "node ../../scripts/package-optional-vsix.js package"
