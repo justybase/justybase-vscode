@@ -1,0 +1,219 @@
+name: Prepare Release
+
+# Phase 1 of the release process.
+#
+# Bumps the synchronized version in the core extension, the shared contracts
+# package, every managed companion extension, and the documentation markers,
+# then opens a pull request. The workflow token cannot trigger pull_request
+# workflows, so CI is dispatched explicitly on the release branch. Merge the
+# pull request only after CI is green; `Release` then tags the merge commit
+# without re-running those gates.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Version increment. Choose exact to provide a specific version."
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+          - exact
+      version:
+        description: "Target version when release_type=exact, for example 3.21.0"
+        required: false
+        type: string
+      target_branch:
+        description: "Branch to prepare the release from."
+        required: true
+        default: master
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: prepare-release-${{ github.event.inputs.target_branch }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  prepare:
+    name: Bump versions and open the release pull request
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v7
+        with:
+          ref: refs/heads/${{ github.event.inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            extensions/*/package-lock.json
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type }}
+          EXPLICIT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$RELEASE_TYPE" = 'exact' ] && [ -z "$EXPLICIT_VERSION" ]; then
+            echo 'Input version is required when release_type=exact.' >&2
+            exit 1
+          fi
+
+      - name: Bump synchronized versions
+        shell: bash
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type }}
+          EXPLICIT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$RELEASE_TYPE" = 'exact' ]; then
+            node scripts/version-sync.js set "$EXPLICIT_VERSION" --include-optionals
+          else
+            node scripts/version-sync.js bump "$RELEASE_TYPE" --include-optionals
+          fi
+
+      - name: Resolve release metadata
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          branch="release/$tag"
+
+          node scripts/version-sync.js check --release-tag "$tag" --include-optionals
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists. Choose a different increment or run Release for that tag." >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "Prepared $tag on $branch."
+
+      - name: Commit version bump
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add package.json package-lock.json
+          git add packages/contracts/package.json
+          git add extensions/*/package.json extensions/*/package-lock.json
+          git add docs
+
+          if git diff --cached --quiet; then
+            echo 'No version changes were produced. The target branch may already be at the requested version.' >&2
+            exit 1
+          fi
+
+          git commit -m "chore(release): prepare ${{ steps.version.outputs.tag }}"
+
+      - name: Push release branch
+        shell: bash
+        run: |
+          git push --force origin "HEAD:refs/heads/${{ steps.version.outputs.branch }}"
+
+      - name: Open or update release pull request
+        id: pull_request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+          TARGET: ${{ github.event.inputs.target_branch }}
+        run: |
+          body=$(cat <<EOF
+          Automated release preparation for $TAG.
+
+          - Version: $VERSION (core extension, shared contracts, and all managed companion extensions)
+          - Target branch: $TARGET
+
+          Next steps:
+
+          1. Wait for CI to pass on this pull request.
+          2. Merge it into $TARGET.
+          3. Run the Release workflow with release_type=current and select the extension targets.
+
+          CI is dispatched explicitly on the release branch because pull requests
+          created with the workflow token do not start pull_request workflows.
+
+          Do not edit version files by hand. Re-run Prepare Release instead.
+          EOF
+          )
+
+          number=$(gh pr list --head "$BRANCH" --base "$TARGET" --state open --json number --jq '.[0].number // empty')
+
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "chore(release): $TAG" --body "$body"
+            url=$(gh pr view "$number" --json url --jq .url)
+            echo "Updated pull request $url."
+          else
+            url=$(gh pr create --base "$TARGET" --head "$BRANCH" --title "chore(release): $TAG" --body "$body")
+            echo "Created pull request $url."
+          fi
+
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Pull requests opened with GITHUB_TOKEN do not trigger `pull_request`
+      # workflows. Dispatch CI explicitly for the release branch head so the
+      # pull request still gets the full quality, unit, and integration checks.
+      - name: Dispatch CI for the release branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          head_sha=$(git rev-parse HEAD)
+          existing=$(gh run list --workflow ci.yml --branch "$BRANCH" --limit 20 \
+            --json headSha \
+            --jq "[.[] | select(.headSha == \"$head_sha\")] | length")
+
+          if [ "$existing" -gt 0 ]; then
+            echo "CI is already queued or completed for $head_sha."
+          else
+            gh workflow run ci.yml --ref "$BRANCH"
+            echo "Dispatched CI for $head_sha on $BRANCH."
+          fi
+
+      - name: Write summary
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+          TARGET: ${{ github.event.inputs.target_branch }}
+          PR_URL: ${{ steps.pull_request.outputs.url }}
+        run: |
+          {
+            echo "## Release $TAG prepared"
+            echo ''
+            echo "- Version: \`$VERSION\`"
+            echo "- Branch: \`$BRANCH\`"
+            echo "- Target: \`$TARGET\`"
+            echo "- Pull request: $PR_URL"
+            echo ''
+            echo 'Merge the pull request only after CI is green, then run **Release** with `release_type=current`.'
+          } >> "$GITHUB_STEP_SUMMARY"

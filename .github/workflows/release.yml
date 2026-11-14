@@ -4,24 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: "Release increment type. Choose exact to provide a specific version, or specific to republish an already-existing tag."
+        description: "current = tag the version already committed on the target branch after a merged Prepare Release pull request. specific = republish an existing tag."
         required: true
-        default: patch
+        default: current
         type: choice
         options:
-          - patch
-          - minor
-          - major
-          - prepatch
-          - preminor
-          - premajor
-          - prerelease
-          - exact
+          - current
           - specific
-      version:
-        description: "Explicit version when release_type=exact, for example 1.2.3"
-        required: false
-        type: string
       existing_release_tag:
         description: "Existing tag to republish when release_type=specific, for example v3.16.24"
         required: false
@@ -93,6 +82,7 @@ on:
         type: boolean
 permissions:
   contents: write
+  actions: read
 
 env:
   NODE_VERSION: "24"
@@ -103,7 +93,7 @@ concurrency:
 
 jobs:
   prepare-release:
-    name: Prepare release commit, tag and GitHub Release
+    name: Verify release commit, tag, and create GitHub Release
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.version.outputs.tag }}
@@ -147,12 +137,11 @@ jobs:
 
           echo "Registry publishing secrets are configured."
 
-      - name: Resolve synchronized versions
+      - name: Resolve release metadata
         id: version
         shell: bash
         run: |
           release_type='${{ github.event.inputs.release_type }}'
-          explicit_version='${{ github.event.inputs.version }}'
           existing_release_tag='${{ github.event.inputs.existing_release_tag }}'
 
           if [ "$release_type" = 'specific' ]; then
@@ -161,42 +150,36 @@ jobs:
               exit 1
             fi
 
-            node scripts/version-sync.js check --release-tag "$existing_release_tag" --include-optionals
-          elif [ "$release_type" = 'exact' ]; then
-            if [ -z "$explicit_version" ]; then
-              echo 'Input version is required when release_type=exact.' >&2
+            if ! git ls-remote --exit-code --tags origin "refs/tags/$existing_release_tag" >/dev/null 2>&1; then
+              echo "Remote tag does not exist: $existing_release_tag" >&2
               exit 1
             fi
 
-            node scripts/version-sync.js set "$explicit_version" --include-optionals
+            node scripts/version-sync.js check --release-tag "$existing_release_tag" --include-optionals
+            tag="$existing_release_tag"
+            version="${tag#v}"
           else
-            node scripts/version-sync.js bump "$release_type" --include-optionals
+            version=$(node -p "require('./package.json').version")
+            tag="v$version"
+
+            node scripts/version-sync.js check --release-tag "$tag" --include-optionals
+
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "Remote tag already exists: $tag" >&2
+              exit 1
+            fi
           fi
 
-          version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Resolved release $tag for version $version."
 
-      - name: Validate release metadata
-        run: node scripts/version-sync.js check --release-tag ${{ steps.version.outputs.tag }} --include-optionals
-
-      - name: Ensure release tag does not already exist remotely
+      - name: Verify target commit passed CI
         if: ${{ github.event.inputs.release_type != 'specific' }}
         shell: bash
-        run: |
-          if git ls-remote --exit-code --tags origin refs/tags/${{ steps.version.outputs.tag }} >/dev/null 2>&1; then
-            echo 'Remote tag already exists: ${{ steps.version.outputs.tag }}' >&2
-            exit 1
-          fi
-
-      - name: Ensure release tag exists remotely
-        if: ${{ github.event.inputs.release_type == 'specific' }}
-        shell: bash
-        run: |
-          if ! git ls-remote --exit-code --tags origin refs/tags/${{ steps.version.outputs.tag }} >/dev/null 2>&1; then
-            echo 'Remote tag does not exist: ${{ steps.version.outputs.tag }}' >&2
-            exit 1
-          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release-ci.js --sha "$(git rev-parse HEAD)" --wait-seconds 900
 
       - name: Configure Git identity
         if: ${{ github.event.inputs.release_type != 'specific' }}
@@ -204,31 +187,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-      - name: Commit release version files
-        if: ${{ github.event.inputs.release_type != 'specific' }}
-        shell: bash
-        run: |
-          git add package.json package-lock.json
-          git add packages/contracts/package.json
-          git add extensions/*/package.json extensions/*/package-lock.json
-          git add docs
-
-          if git diff --cached --quiet; then
-            echo 'No version changes detected to commit.' >&2
-            exit 1
-          fi
-
-          git commit -m "chore: release ${{ steps.version.outputs.version }} [skip ci]"
-
       - name: Create annotated tag
         if: ${{ github.event.inputs.release_type != 'specific' }}
-        run: git tag -a ${{ steps.version.outputs.tag }} -m ${{ steps.version.outputs.tag }}
+        run: git tag -a '${{ steps.version.outputs.tag }}' -m '${{ steps.version.outputs.tag }}'
 
-      - name: Push release commit and tag
+      - name: Push release tag
         if: ${{ github.event.inputs.release_type != 'specific' }}
-        run: |
-          git push origin HEAD:${{ github.event.inputs.target_branch }}
-          git push origin ${{ steps.version.outputs.tag }}
+        run: git push origin '${{ steps.version.outputs.tag }}'
 
       - name: Create GitHub Release
         if: ${{ github.event.inputs.release_type != 'specific' }}
@@ -243,7 +208,7 @@ jobs:
           fi
 
           gh release create '${{ steps.version.outputs.tag }}' \
-            --target '${{ github.event.inputs.target_branch }}' \
+            --verify-tag \
             --title '${{ steps.version.outputs.tag }}' \
             --generate-notes \
             "${flags[@]}"
@@ -255,19 +220,20 @@ jobs:
             if [ '${{ github.event.inputs.release_type }}' = 'specific' ]; then
               echo '## Republishing existing tag'
               echo ''
-              echo '- Tag: `${{ steps.version.outputs.tag }}` (already exists, no version bump)'
+              echo '- Tag: `${{ steps.version.outputs.tag }}` (already exists, no tag or release change)'
               echo '- Rebuild and attach selected VSIX files; publish newly missing versions to both registries.'
               echo ''
             else
-              echo '## Release prepared'
+              echo '## Release tagged from a CI-green commit'
               echo ''
               echo '- Version: `${{ steps.version.outputs.version }}`'
               echo '- Tag: `${{ steps.version.outputs.tag }}`'
               echo '- Branch: `${{ github.event.inputs.target_branch }}`'
+              echo "- Commit: \`$(git rev-parse --short HEAD)\` (CI verified)"
               echo '- Pre-release: `${{ github.event.inputs.prerelease }}`'
               echo ''
             fi
-            echo 'The downstream workflow builds, audits, attaches, and publishes the selected VSIX files to both registries.'
+            echo 'The downstream workflow builds, audits, attaches, and publishes the selected VSIX files to both registries without re-running the quality, unit, and integration gates.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   resolve-publish-targets:
@@ -316,4 +282,8 @@ jobs:
     with:
       release_tag: ${{ needs.prepare-release.outputs.release_tag }}
       publish_targets: ${{ needs.resolve-publish-targets.outputs.publish_targets }}
+      # prepare-release already verified the target commit before tagging (or
+      # this is a republish of an existing tag), so the publish workflow does
+      # not repeat the CI verification.
+      verify_ci: false
     secrets: inherit
