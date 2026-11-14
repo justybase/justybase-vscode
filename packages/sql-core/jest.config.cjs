@@ -1,11 +1,12 @@
+const babelTransform = require('../../scripts/jest-babel-transform.cjs');
+
 /** @type {import('jest').Config} */
 module.exports = {
   rootDir: ".",
   testEnvironment: "node",
-  preset: "ts-jest",
   testMatch: ["<rootDir>/__tests__/**/*.test.ts"],
   transform: {
-    "^.+\\.ts$": ["ts-jest", { tsconfig: "tsconfig.test.json" }],
+    "^.+\\.ts$": ["babel-jest", babelTransform.ts],
     "^.+\\.[mc]?js$": [
       "babel-jest",
       {

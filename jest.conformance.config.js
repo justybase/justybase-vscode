@@ -13,7 +13,7 @@ const baseConfig = require("./jest.config.js");
  *   npm run test:postgresql:conformance
  */
 
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+/** @type {import('jest').Config} */
 module.exports = {
   ...baseConfig,
   testMatch: [

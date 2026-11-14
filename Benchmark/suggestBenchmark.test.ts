@@ -6,7 +6,7 @@
  *
  * Run with:
  *   npx jest Benchmark/suggestBenchmark.test.ts --no-cache
- *   (or) npx ts-node Benchmark/run.ts
+ *   (or) npx tsx Benchmark/run.ts
  */
 
 import { performance } from 'perf_hooks';

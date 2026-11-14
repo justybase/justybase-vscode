@@ -1,15 +1,19 @@
+const babelTransform = require('./scripts/jest-babel-transform.cjs');
+
 module.exports = {
   rootDir: '.',
   testEnvironment: 'jsdom',
-  preset: 'ts-jest',
   roots: ['<rootDir>/media'],
   setupFiles: ['<rootDir>/media/__tests__/setup.ts'],
   testMatch: ['<rootDir>/media/**/__tests__/**/*.test.tsx'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   resolver: '<rootDir>/scripts/jest-media-resolver.cjs',
   transform: {
-    '^.+/node_modules/@tanstack/(?:table-core|store)/.+\\.js$': 'babel-jest',
-    '^.+\\.[cm]?[jt]sx?$': ['ts-jest', { tsconfig: 'tsconfig.media.json' }],
+    '^.+\\.[cm]?js$': ['babel-jest', {
+      presets: [['@babel/preset-env', { targets: { node: 'current' }, modules: 'commonjs' }]],
+    }],
+    '^.+\\.tsx$': ['babel-jest', babelTransform.tsx],
+    '^.+\\.ts$': ['babel-jest', babelTransform.ts],
   },
   transformIgnorePatterns: ['/node_modules/(?!@tanstack/(?:table-core|store)/)'],
   moduleNameMapper: {

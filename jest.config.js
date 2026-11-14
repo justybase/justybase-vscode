@@ -3,10 +3,10 @@ const jestVerbose = process.env.JEST_VERBOSE === "1";
 const jestLogHeapUsage = process.env.JEST_LOG_HEAP === "1";
 const jestMaxWorkers = process.env.JEST_MAX_WORKERS ?? "50%";
 const liveDbIgnorePatterns = require("./scripts/jestLiveDbIgnorePatterns.cjs");
+const babelTransform = require("./scripts/jest-babel-transform.cjs");
 
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+/** @type {import('jest').Config} */
 module.exports = {
-  preset: "ts-jest",
   testEnvironment: "node",
   roots: ["<rootDir>/src", "<rootDir>/packages/sql-core"],
   setupFiles: ["<rootDir>/src/__tests__/unitNetworkGuard.setup.ts"],
@@ -24,27 +24,8 @@ module.exports = {
   moduleFileExtensions: ["ts", "tsx", "js", "json"],
   resolver: "<rootDir>/scripts/jest-media-resolver.cjs",
   transform: {
-    "^.+\\/media\\/.+\\.tsx?$": [
-      "ts-jest",
-      {
-        tsconfig: "tsconfig.media.json",
-      },
-    ],
-    // Keep a fallback for media TSX reached through a resolver from a root
-    // test (Jest may normalize the resolved path before applying the scoped
-    // media pattern).
-    "^.+\\.tsx$": [
-      "ts-jest",
-      {
-        tsconfig: "tsconfig.media.json",
-      },
-    ],
-    "^.+\\.ts$": [
-      "ts-jest",
-      {
-        tsconfig: "tsconfig.json",
-      },
-    ],
+    "^.+\\.tsx$": ["babel-jest", babelTransform.tsx],
+    "^.+\\.ts$": ["babel-jest", babelTransform.ts],
     // Chevrotain (+ its deps) are ESM; transform them to CJS for Jest.
     "^.+\\.[mc]?js$": [
       "babel-jest",

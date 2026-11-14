@@ -1,6 +1,6 @@
 /**
  * Manual test script for SQL Parser validation
- * Run with: npx ts-node packages/extension/src/sqlParser/manualTest.ts
+ * Run with: npx tsx src/sqlParser/manualTest.ts
  */
 
 import { SqlValidator } from './validator'

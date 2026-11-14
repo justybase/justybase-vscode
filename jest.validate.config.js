@@ -1,7 +1,7 @@
 const baseConfig = require("./jest.config.js");
 const liveDbIgnorePatterns = require("./scripts/jestLiveDbIgnorePatterns.cjs");
 
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+/** @type {import('jest').Config} */
 module.exports = {
   ...baseConfig,
   testPathIgnorePatterns: [

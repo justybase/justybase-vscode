@@ -28,8 +28,8 @@ const { TextDocument } = require("vscode-languageserver-textdocument");
 
 const repoRoot = path.resolve(__dirname, "..");
 
-// ts-node does not expand tsconfig `paths`; map the workspace aliases used by
-// the server modules to their TypeScript sources.
+// tsx does not expand tsconfig `paths` for these CommonJS server modules;
+// map the workspace aliases to their TypeScript sources.
 const tsconfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "tsconfig.json"), "utf8"),
 );

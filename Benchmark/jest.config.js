@@ -7,18 +7,16 @@
 
 const path = require('path');
 const projectRoot = path.resolve(__dirname, '..');
+const babelTransform = require('../scripts/jest-babel-transform.cjs');
 
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+/** @type {import('jest').Config} */
 module.exports = {
-    preset: 'ts-jest',
     testEnvironment: 'node',
     roots: ['<rootDir>'],
     testMatch: ['**/*.test.ts'],
     moduleFileExtensions: ['ts', 'js', 'json'],
     transform: {
-        '^.+\\.ts$': ['ts-jest', {
-            tsconfig: path.join(projectRoot, 'tsconfig.json')
-        }],
+        '^.+\\.ts$': ['babel-jest', babelTransform.ts],
         '^.+\\.[mc]?js$': ['babel-jest', {
             presets: [['@babel/preset-env', { targets: { node: 'current' }, modules: 'commonjs' }]]
         }]

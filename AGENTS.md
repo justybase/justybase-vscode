@@ -404,10 +404,19 @@ For ambiguous syntax or implicit-cast behavior, a dev Netezza instance can confi
   `node_modules/.bin/tsc`: the `typescript` package installed for the tooling API
   owns the same binary name.
 
-  Why two packages: TypeScript 7 has no compiler API yet, and `ts-jest`,
-  `typescript-eslint`, and the VS Code language service still import the
-  TypeScript 6 API. The root `typescript` dependency stays on `6.0.x` for that API
-  only; it is not the compiler that gates the build.
+  Why two packages: TypeScript 7 has no compiler API yet, and
+  `typescript-eslint`, the repository quality scripts
+  (`scripts/architecture-check.mjs`, `scripts/quality-gate.mjs`), and the VS Code
+  language service still import the TypeScript 6 API. The root `typescript`
+  dependency stays on `6.0.x` for that API only; it is not the compiler that gates
+  the build.
+- Jest transpiles TypeScript with Babel (`scripts/jest-babel-transform.cjs`), not
+  with `ts-jest`, so the test runner does not need the TypeScript API either.
+  `scripts/jest-erase-type-fields-plugin.cjs` erases `field!: Type` declarations
+  (TypeScript erases them for `useDefineForClassFields: false`), and
+  `scripts/jest-hoist-plugin.cjs` hoists `jest.mock` calls and the helpers their
+  factories close over. Type checking is a separate gate; the Babel transform does
+  not type-check.
 - The root program runs with `--skipLibCheck` because `@types/jsdom@21.1.7`
   (transitive through `jest-environment-jsdom`) declares `["Infinity"]` and `["NaN"]`
   as `number` properties on a `number`-indexed `Window` interface, which TypeScript 7

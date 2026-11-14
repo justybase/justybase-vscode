@@ -1,7 +1,8 @@
+const babelTransform = require('../../scripts/jest-babel-transform.cjs');
+
 module.exports = {
   rootDir: '.',
   testEnvironment: 'jsdom',
-  preset: 'ts-jest',
   testMatch: ['<rootDir>/__tests__/**/*.test.ts', '<rootDir>/__tests__/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   moduleNameMapper: {
@@ -10,7 +11,8 @@ module.exports = {
     '^@justybase/ui-core/(.*)$': '<rootDir>/../ui-core/src/$1',
   },
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
+    '^.+\\.tsx$': ['babel-jest', babelTransform.tsx],
+    '^.+\\.ts$': ['babel-jest', babelTransform.ts],
   },
   collectCoverageFrom: ['src/**/*.ts', 'src/**/*.tsx', '!src/**/*.d.ts'],
   coverageDirectory: 'coverage',

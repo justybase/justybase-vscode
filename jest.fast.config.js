@@ -1,6 +1,6 @@
 const baseConfig = require("./jest.config.js");
 
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+/** @type {import('jest').Config} */
 module.exports = {
   ...baseConfig,
   testPathIgnorePatterns: [
