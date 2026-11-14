@@ -63,7 +63,7 @@ Module._resolveFilename = function (request, parent, isMain, options) {
   return originalResolveFilename.call(this, request, parent, isMain, options);
 };
 
-require("ts-node/register/transpile-only");
+require("tsx/cjs");
 
 const {
   createDiagnosticsHandler,

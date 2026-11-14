@@ -6,7 +6,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-require('ts-node/register/transpile-only');
+require('tsx/cjs');
 const { AccessFileSession } = require('../packages/access-file/src');
 const { writeAccessSnapshotChanges } = require('../packages/access-file/src/jet/JetWriter');
 

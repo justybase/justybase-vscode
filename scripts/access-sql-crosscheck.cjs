@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-require('ts-node/register/transpile-only');
+require('tsx/cjs');
 const Module = require('node:module');
 const originalLoad = Module._load;
 Module._load = function load(request, parent, isMain) {
