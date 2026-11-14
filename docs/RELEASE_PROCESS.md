@@ -45,8 +45,9 @@ The workflow:
 - synchronizes versions in the core extension and managed companion extensions;
 - updates tracked documentation version markers;
 - validates the release tag and selected targets;
-- runs the release quality, test, and integration gates;
-- builds and audits the selected VSIX files;
+- runs the release quality, test, and integration gates concurrently, then builds
+  the selected VSIX files in parallel with the Db2 VS Code runtime smoke matrix;
+- audits the built VSIX files;
 - attaches the VSIX files, checksums, review report, and combined archive to the
   GitHub Release;
 - publishes the same VSIX files to the Visual Studio Code Marketplace and Open

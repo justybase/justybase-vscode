@@ -273,17 +273,33 @@ jobs:
         if: ${{ needs.validate-release.outputs.publish_access == 'true' }}
         run: node scripts/verify-access-release-snapshot.js
 
-      - name: Lint
-        run: npm run lint
+      # Lint reads only src/; check-types writes workspace dist/. They do not
+      # share inputs, so run them concurrently to keep the release gate short.
+      - name: Lint and typecheck
+        shell: bash
+        run: |
+          npm run lint > lint.log 2>&1 &
+          lint_pid=$!
+          npm run check-types > typecheck.log 2>&1 &
+          typecheck_pid=$!
 
-      - name: Typecheck
-        run: npm run check-types
+          lint_status=0
+          typecheck_status=0
+          wait "$lint_pid" || lint_status=$?
+          wait "$typecheck_pid" || typecheck_status=$?
+
+          cat lint.log
+          cat typecheck.log
+
+          if [ "$lint_status" -ne 0 ] || [ "$typecheck_status" -ne 0 ]; then
+            echo "Lint exited with ${lint_status}; typecheck exited with ${typecheck_status}." >&2
+            exit 1
+          fi
 
   test-gate:
     name: Fast non-live tests
     needs:
       - validate-release
-      - quality-gate
     runs-on: ubuntu-latest
 
     steps:
@@ -351,8 +367,6 @@ jobs:
     name: Local Runtime Integration Gate
     needs:
       - validate-release
-      - quality-gate
-      - test-gate
     runs-on: ubuntu-latest
 
     steps:
@@ -428,9 +442,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
-
       - name: Package main VSIX
         run: npm run package -- --out justybaselite-netezza-${{ needs.validate-release.outputs.release_version }}.vsix
 
@@ -497,7 +508,6 @@ jobs:
       - quality-gate
       - test-gate
       - integration-gate
-      - verify-db2-vscode-runtime
     if: ${{ needs.validate-release.outputs.publish_db2 == 'true' }}
     runs-on: ubuntu-latest
 
@@ -525,8 +535,8 @@ jobs:
       - name: Install Db2 extension dependencies
         run: npm run install:db2
 
-      - name: Check and build Db2 extension
-        run: npm run check-types:db2 && npm run build:db2
+      - name: Check Db2 extension types
+        run: npm run check-types:db2
 
       - name: Package Db2 VSIX
         run: >
@@ -593,8 +603,8 @@ jobs:
         working-directory: extensions/duckdb
         run: npm ci
 
-      - name: Build DuckDB extension
-        run: npm run build:duckdb
+      - name: Build shared Access file package
+        run: npm run build:access-file
 
       - name: Package DuckDB VSIX
         run: >
@@ -693,8 +703,8 @@ jobs:
         working-directory: extensions/access
         run: npm ci --os=${{ matrix.npm_os }} --cpu=${{ matrix.npm_cpu }}
 
-      - name: Build Access extension
-        run: npm run build:access
+      - name: Build shared Access file package
+        run: npm run build:access-file
 
       - name: Package Access extension
         run: >
@@ -770,9 +780,6 @@ jobs:
       - name: Install extension dependencies
         working-directory: extensions/${{ matrix.id }}
         run: npm ci
-
-      - name: Build extension
-        run: npm run build:${{ matrix.id }}
 
       - name: Package extension VSIX
         run: >
