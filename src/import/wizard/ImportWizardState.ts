@@ -5,6 +5,22 @@ export type ImportWizardExecutionMode = "direct" | "workflow" | "unsupported";
 export type ImportWizardOverrideMode = "inferred" | "user";
 export type ImportWizardIssueSeverity = "error" | "warning";
 export type ImportWizardFileFormat = "csv" | "txt" | "xlsx" | "xlsb";
+export type ImportInvalidRowMode = "abort" | "skip";
+export type ImportExistingTableStatus = "idle" | "loading" | "ready" | "error";
+
+/** A target catalog column used to build an existing-table mapping. */
+export interface ImportTargetColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  hasDefault: boolean;
+}
+
+export interface ImportExistingTableState {
+  status: ImportExistingTableStatus;
+  columns: ImportTargetColumn[];
+  error?: string;
+}
 
 export interface ImportExecutionPlan {
   mode: ImportWizardExecutionMode;
@@ -69,6 +85,10 @@ export interface ImportWizardState {
   hasHeaders: boolean;
   createTable: boolean;
   canAppendToExistingTable: boolean;
+  canMapExistingTableColumns: boolean;
+  /** Catalog columns and load state for an existing-table append. */
+  existingTable: ImportExistingTableState;
+  invalidRowMode: ImportInvalidRowMode;
   targetTable: string;
   targetLocation: ImportTargetLocationState;
   targetLocationCapabilities: ImportTargetLocationCapabilitiesState;

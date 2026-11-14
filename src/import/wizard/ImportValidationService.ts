@@ -5,6 +5,12 @@ import type {
     ImportWizardValidationSummary,
 } from './ImportWizardState';
 import { createImportCellValidator } from './importCellValidation';
+import type { ImportTargetValidationOverride } from './existingTableTargets';
+
+export interface ImportValidationOptions {
+    /** Existing-table target types, keyed by source column index. */
+    targetOverrides?: ReadonlyMap<number, ImportTargetValidationOverride>;
+}
 
 export class ImportValidationService {
     public validate(
@@ -13,6 +19,7 @@ export class ImportValidationService {
         validationSampleSize: number,
         adapter: DatabaseImportWizardAdapter,
         decimalDelimiter?: string,
+        options?: ImportValidationOptions,
     ): ImportWizardValidationSummary {
         const warnings: string[] = [];
         const issues: ImportWizardCellIssue[] = [];
@@ -41,31 +48,47 @@ export class ImportValidationService {
                 seenTargetNames.set(normalizedTarget, column.targetName);
             }
 
-            const typeIssues = adapter.validateTypeOverride(column.selectedType);
-            for (const typeIssue of typeIssues) {
-                warnings.push(`${column.targetName}: ${typeIssue.message}`);
-                if (typeIssue.severity === 'error') {
-                    hasErrors = true;
+            const targetOverride = options?.targetOverrides?.get(column.sourceIndex);
+            // Catalog types are authoritative for existing-table imports, so
+            // do not validate the client-side inferred type in that mode.
+            if (!targetOverride) {
+                const typeIssues = adapter.validateTypeOverride(column.selectedType);
+                for (const typeIssue of typeIssues) {
+                    warnings.push(`${column.targetName}: ${typeIssue.message}`);
+                    if (typeIssue.severity === 'error') {
+                        hasErrors = true;
+                    }
                 }
             }
         }
 
         const rowLimit = Math.min(validationSampleSize, previewRows.length);
-        const validators = columns.map(column =>
-            column.included
-                ? createImportCellValidator(column.selectedType, decimalDelimiter)
-                : null,
-        );
+        const validators = columns.map(column => {
+            if (!column.included) {
+                return null;
+            }
+            const targetOverride = options?.targetOverrides?.get(column.sourceIndex);
+            return createImportCellValidator(
+                targetOverride?.dataType ?? column.selectedType,
+                decimalDelimiter,
+            );
+        });
         for (let rowIndex = 0; rowIndex < rowLimit; rowIndex += 1) {
             const row = previewRows[rowIndex] || [];
             for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+                const column = columns[columnIndex];
                 const validator = validators[columnIndex];
-                if (!validator) {
+                const targetOverride = options?.targetOverrides?.get(column.sourceIndex);
+                const notNull = targetOverride?.nullable === false;
+                if (!validator && !notNull) {
                     continue;
                 }
 
                 const value = row[columnIndex] ?? '';
-                const validationMessage = validator(value);
+                let validationMessage = validator ? validator(value) : null;
+                if (!validationMessage && notNull && !value.trim()) {
+                    validationMessage = 'Column is NOT NULL but the value is empty.';
+                }
                 if (!validationMessage) {
                     continue;
                 }

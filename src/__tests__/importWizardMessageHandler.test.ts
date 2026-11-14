@@ -104,6 +104,378 @@ describe('ImportWizardMessageHandler', () => {
         handler.dispose();
     });
 
+    it('loads and applies target columns when switching to an existing-table import', async () => {
+        const postMessage = jest.fn().mockResolvedValue(true);
+        const state = {
+            id: 'session-existing',
+            targetTable: 'ADMIN.TARGET',
+            targetLocation: { schema: 'ADMIN', tableName: 'TARGET' },
+            createTable: true,
+            canMapExistingTableColumns: true,
+            existingTable: { status: 'idle', columns: [] },
+            columns: [],
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: { mode: 'direct', createTableSql: '', warnings: [] },
+        };
+        const beginTargetColumnLoad = jest.fn(async () => {
+            state.existingTable = { status: 'loading', columns: [] };
+            return state;
+        });
+        const setTargetColumns = jest.fn(async (_id: string, _table: string, columns: unknown[]) => {
+            state.existingTable = { status: 'ready', columns: columns as never };
+            return state;
+        });
+        const service = {
+            createSession: jest.fn().mockResolvedValue(state),
+            setTargetCatalog: jest.fn().mockResolvedValue(undefined),
+            getSessionState: jest.fn().mockReturnValue(state),
+            setCreateTable: jest.fn(async (_id: string, createTable: boolean) => {
+                state.createTable = createTable;
+                return state;
+            }),
+            beginTargetColumnLoad,
+            setTargetColumns,
+            startBackgroundValidation: jest.fn(),
+            disposeSession: jest.fn(),
+        };
+        const connectionManager = {
+            getConnectionNames: jest.fn().mockReturnValue([]),
+            getConnection: jest.fn().mockResolvedValue(undefined),
+            getMetadataCache: jest.fn().mockReturnValue(undefined),
+        };
+        const catalogService = {
+            loadCatalog: jest.fn().mockResolvedValue({ availableDatabases: [], availableSchemas: [] }),
+            loadTableColumns: jest.fn().mockResolvedValue([
+                { name: 'ID', dataType: 'BIGINT', nullable: false, hasDefault: false },
+            ]),
+        };
+        const handler = new ImportWizardMessageHandler({
+            context: {} as never,
+            service: service as never,
+            connectionManager: connectionManager as never,
+            catalogService: catalogService as never,
+            postMessage,
+        });
+
+        await handler.initialize({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'ADMIN.TARGET',
+            connectionDetails: { database: 'SYSTEM' } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+            connectionName: 'NZ',
+        });
+        postMessage.mockClear();
+
+        await handler.handleMessage({ type: 'setCreateTable', createTable: false });
+
+        expect(beginTargetColumnLoad).toHaveBeenCalledWith('session-existing', 'ADMIN.TARGET');
+        expect(catalogService.loadTableColumns).toHaveBeenCalledWith(
+            'NZ',
+            undefined,
+            'ADMIN',
+            'TARGET',
+        );
+        expect(setTargetColumns).toHaveBeenCalledWith(
+            'session-existing',
+            'ADMIN.TARGET',
+            expect.arrayContaining([
+                expect.objectContaining({ name: 'ID', dataType: 'BIGINT' }),
+            ]),
+        );
+        expect(service.startBackgroundValidation).toHaveBeenCalled();
+
+        handler.dispose();
+    });
+
+    it('reloads target columns, maps a column, and updates the invalid-row mode', async () => {
+        const postMessage = jest.fn().mockResolvedValue(true);
+        const state = {
+            id: 'session-existing',
+            targetTable: 'ADMIN.TARGET',
+            targetLocation: { schema: 'ADMIN', tableName: 'TARGET' },
+            createTable: true,
+            canMapExistingTableColumns: true,
+            existingTable: { status: 'ready', columns: [] },
+            columns: [],
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: { mode: 'direct', createTableSql: '', warnings: [] },
+        };
+        const targetColumns = [
+            { name: 'ID', dataType: 'BIGINT', nullable: false, hasDefault: false },
+        ];
+        const beginTargetColumnLoad = jest.fn(async () => state);
+        const setTargetColumns = jest.fn(async () => state);
+        const mapColumnToTarget = jest.fn(async () => state);
+        const setInvalidRowMode = jest.fn(async () => state);
+        const startBackgroundValidation = jest.fn();
+        const service = {
+            createSession: jest.fn().mockResolvedValue(state),
+            setTargetCatalog: jest.fn().mockResolvedValue(undefined),
+            getSessionState: jest.fn().mockReturnValue(state),
+            beginTargetColumnLoad,
+            setTargetColumns,
+            mapColumnToTarget,
+            setInvalidRowMode,
+            startBackgroundValidation,
+            disposeSession: jest.fn(),
+        };
+        const connectionManager = {
+            getConnectionNames: jest.fn().mockReturnValue([]),
+            getConnection: jest.fn().mockResolvedValue(undefined),
+            getMetadataCache: jest.fn().mockReturnValue(undefined),
+        };
+        const catalogService = {
+            loadCatalog: jest.fn().mockResolvedValue({ availableDatabases: [], availableSchemas: [] }),
+            loadTableColumns: jest.fn().mockResolvedValue(targetColumns),
+        };
+        const handler = new ImportWizardMessageHandler({
+            context: {} as never,
+            service: service as never,
+            connectionManager: connectionManager as never,
+            catalogService: catalogService as never,
+            postMessage,
+        });
+
+        await handler.initialize({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'ADMIN.TARGET',
+            connectionDetails: { database: 'SYSTEM' } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+            connectionName: 'NZ',
+        });
+        state.createTable = false;
+        jest.clearAllMocks();
+
+        await handler.handleMessage({ type: 'reloadTargetColumns' });
+        expect(beginTargetColumnLoad).toHaveBeenCalledWith('session-existing', 'ADMIN.TARGET');
+        expect(catalogService.loadTableColumns).toHaveBeenCalledWith(
+            'NZ',
+            undefined,
+            'ADMIN',
+            'TARGET',
+        );
+        expect(setTargetColumns).toHaveBeenCalledWith(
+            'session-existing',
+            'ADMIN.TARGET',
+            targetColumns,
+        );
+        expect(startBackgroundValidation).toHaveBeenCalled();
+
+        await handler.handleMessage({
+            type: 'mapColumnToTarget',
+            sourceIndex: 0,
+            targetName: 'ID',
+        });
+        expect(mapColumnToTarget).toHaveBeenCalledWith('session-existing', 0, 'ID');
+
+        await handler.handleMessage({ type: 'setInvalidRowMode', mode: 'skip' });
+        expect(setInvalidRowMode).toHaveBeenCalledWith('session-existing', 'skip');
+
+        handler.dispose();
+    });
+
+    it('passes a catalog load failure to the session and still validates', async () => {
+        const postMessage = jest.fn().mockResolvedValue(true);
+        const state = {
+            id: 'session-existing',
+            targetTable: 'ADMIN.TARGET',
+            targetLocation: { schema: 'ADMIN', tableName: 'TARGET' },
+            createTable: true,
+            canMapExistingTableColumns: true,
+            existingTable: { status: 'ready', columns: [] },
+            columns: [],
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: { mode: 'direct', createTableSql: '', warnings: [] },
+        };
+        const setTargetColumns = jest.fn(async () => state);
+        const service = {
+            createSession: jest.fn().mockResolvedValue(state),
+            setTargetCatalog: jest.fn().mockResolvedValue(undefined),
+            getSessionState: jest.fn().mockReturnValue(state),
+            beginTargetColumnLoad: jest.fn(async () => state),
+            setTargetColumns,
+            startBackgroundValidation: jest.fn(),
+            disposeSession: jest.fn(),
+        };
+        const connectionManager = {
+            getConnectionNames: jest.fn().mockReturnValue([]),
+            getConnection: jest.fn().mockResolvedValue(undefined),
+            getMetadataCache: jest.fn().mockReturnValue(undefined),
+        };
+        const catalogService = {
+            loadCatalog: jest.fn().mockResolvedValue({ availableDatabases: [], availableSchemas: [] }),
+            loadTableColumns: jest.fn().mockRejectedValue(new Error('metadata unavailable')),
+        };
+        const handler = new ImportWizardMessageHandler({
+            context: {} as never,
+            service: service as never,
+            connectionManager: connectionManager as never,
+            catalogService: catalogService as never,
+            postMessage,
+        });
+
+        await handler.initialize({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'ADMIN.TARGET',
+            connectionDetails: { database: 'SYSTEM' } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+            connectionName: 'NZ',
+        });
+        state.createTable = false;
+        jest.clearAllMocks();
+
+        await handler.handleMessage({ type: 'reloadTargetColumns' });
+
+        expect(setTargetColumns).toHaveBeenCalledWith(
+            'session-existing',
+            'ADMIN.TARGET',
+            [],
+            'metadata unavailable',
+        );
+        expect(service.startBackgroundValidation).toHaveBeenCalled();
+
+        handler.dispose();
+    });
+
+    it('does not load target columns while creating a new table or without a table name', async () => {
+        const state = {
+            id: 'session-existing',
+            targetTable: 'ADMIN.TARGET',
+            targetLocation: { schema: 'ADMIN', tableName: 'TARGET' },
+            createTable: true,
+            canMapExistingTableColumns: true,
+            existingTable: { status: 'idle', columns: [] },
+            columns: [],
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: { mode: 'direct', createTableSql: '', warnings: [] },
+        };
+        const beginTargetColumnLoad = jest.fn(async () => state);
+        const service = {
+            createSession: jest.fn().mockResolvedValue(state),
+            setTargetCatalog: jest.fn().mockResolvedValue(undefined),
+            getSessionState: jest.fn().mockReturnValue(state),
+            beginTargetColumnLoad,
+            startBackgroundValidation: jest.fn(),
+            disposeSession: jest.fn(),
+        };
+        const connectionManager = {
+            getConnectionNames: jest.fn().mockReturnValue([]),
+            getConnection: jest.fn().mockResolvedValue(undefined),
+            getMetadataCache: jest.fn().mockReturnValue(undefined),
+        };
+        const catalogService = {
+            loadCatalog: jest.fn().mockResolvedValue({ availableDatabases: [], availableSchemas: [] }),
+            loadTableColumns: jest.fn(),
+        };
+        const handler = new ImportWizardMessageHandler({
+            context: {} as never,
+            service: service as never,
+            connectionManager: connectionManager as never,
+            catalogService: catalogService as never,
+            postMessage: jest.fn().mockResolvedValue(true),
+        });
+
+        await handler.initialize({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'ADMIN.TARGET',
+            connectionDetails: { database: 'SYSTEM' } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+            connectionName: 'NZ',
+        });
+        jest.clearAllMocks();
+
+        await handler.handleMessage({ type: 'reloadTargetColumns' });
+        expect(beginTargetColumnLoad).not.toHaveBeenCalled();
+
+        state.createTable = false;
+        state.targetLocation.tableName = '';
+        await handler.handleMessage({ type: 'reloadTargetColumns' });
+        expect(beginTargetColumnLoad).not.toHaveBeenCalled();
+        expect(catalogService.loadTableColumns).not.toHaveBeenCalled();
+
+        handler.dispose();
+    });
+
+    it('reloads target columns when the destination location changes', async () => {
+        const state = {
+            id: 'session-existing',
+            targetTable: 'ADMIN.TARGET',
+            targetLocation: { schema: 'ADMIN', tableName: 'TARGET' },
+            createTable: true,
+            canMapExistingTableColumns: true,
+            existingTable: { status: 'ready', columns: [] },
+            columns: [],
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: { mode: 'direct', createTableSql: '', warnings: [] },
+        };
+        const beginTargetColumnLoad = jest.fn(async () => state);
+        const service = {
+            createSession: jest.fn().mockResolvedValue(state),
+            setTargetCatalog: jest.fn().mockResolvedValue(undefined),
+            getSessionState: jest.fn().mockReturnValue(state),
+            setTargetDatabase: jest.fn(async () => state),
+            setTargetSchema: jest.fn(async () => state),
+            setTargetTableName: jest.fn(async () => state),
+            updateAvailableSchemas: jest.fn(async () => state),
+            beginTargetColumnLoad,
+            setTargetColumns: jest.fn(async () => state),
+            startBackgroundValidation: jest.fn(),
+            disposeSession: jest.fn(),
+        };
+        const connectionManager = {
+            getConnectionNames: jest.fn().mockReturnValue([]),
+            getConnection: jest.fn().mockResolvedValue(undefined),
+            getMetadataCache: jest.fn().mockReturnValue(undefined),
+        };
+        const catalogService = {
+            loadCatalog: jest.fn().mockResolvedValue({ availableDatabases: ['SYSTEM'], availableSchemas: ['ADMIN'] }),
+            loadTableColumns: jest.fn().mockResolvedValue([]),
+        };
+        const handler = new ImportWizardMessageHandler({
+            context: {} as never,
+            service: service as never,
+            connectionManager: connectionManager as never,
+            catalogService: catalogService as never,
+            postMessage: jest.fn().mockResolvedValue(true),
+        });
+
+        await handler.initialize({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'ADMIN.TARGET',
+            connectionDetails: { database: 'SYSTEM' } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+            connectionName: 'NZ',
+        });
+        state.createTable = false;
+        jest.clearAllMocks();
+
+        await handler.handleMessage({ type: 'setTargetDatabase', database: 'SYSTEM' });
+        await handler.handleMessage({ type: 'setTargetSchema', schema: 'ADMIN' });
+        await handler.handleMessage({ type: 'setTargetTableName', tableName: 'TARGET' });
+
+        expect(service.setTargetDatabase).toHaveBeenCalledWith('session-existing', 'SYSTEM');
+        expect(service.setTargetSchema).toHaveBeenCalledWith('session-existing', 'ADMIN');
+        expect(service.setTargetTableName).toHaveBeenCalledWith('session-existing', 'TARGET');
+        expect(beginTargetColumnLoad).toHaveBeenCalledTimes(3);
+
+        handler.dispose();
+    });
+
     it('refreshes the target catalog when metadata for the active connection changes', async () => {
         let invalidateListener: ((connectionName?: string) => void) | undefined;
         const metadataCache = {

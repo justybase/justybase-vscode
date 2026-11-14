@@ -83,6 +83,8 @@ For ClickHouse, the companion uses the HTTP runtime and generates a `MergeTree` 
 
 For Netezza, CSV/TSV/TXT, XLSX, and XLSB imports use the driver's virtual external-table stream. The source rows are registered under a transient name and consumed with `FROM EXTERNAL`; they are not first copied to a local data file. This keeps the client-side stream and the driver's external-load protocol ordered and avoids failures caused by a prematurely closed or partially materialized temporary file. The Netezza driver must be version 2.4.4 or newer.
 
+For an existing Netezza table, switch off **Create new table**. The wizard loads the destination catalog, maps source columns onto target columns (automatically where names match), and shows each target type plus required/default status. The catalog type is authoritative: sample values are validated against it, required columns must be mapped unless they have a default, and the external stream is declared with the target type. Choose **Abort the import** or **Skip invalid rows**; skipping uses Netezza `MAXERRORS`, reports rejected rows, and never truncates or replaces existing rows.
+
 Excel header handling is defensive: a row containing numeric values is treated as data rather than a header, missing headers receive `COL_1`, `COL_2`, and repeated names receive suffixes such as `COL_1`. Consequently, a workbook with a first row `1, a` retains that row in the target table.
 
 CSV/TXT/TSV files use a conservative header heuristic: when the first record has no data-like cells and the second record does, the first record becomes the header; ambiguous all-text files keep the historical header-first behavior. Empty header cells become `COLUMN_<n>` placeholders across dialects.

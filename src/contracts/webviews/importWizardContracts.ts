@@ -51,6 +51,9 @@ export type ImportWizardWebviewToHostMessage =
     | { type: 'setTargetDatabase'; database?: string }
     | { type: 'setTargetSchema'; schema?: string }
     | { type: 'setTargetTableName'; tableName: string }
+    | { type: 'reloadTargetColumns' }
+    | { type: 'mapColumnToTarget'; sourceIndex: number; targetName?: string }
+    | { type: 'setInvalidRowMode'; mode: 'abort' | 'skip' }
     | { type: 'requestSqlPreview' }
     | { type: 'copySql'; kind?: ImportWizardPreviewKind }
     | { type: 'openSqlPreview'; kind?: ImportWizardPreviewKind }
@@ -109,6 +112,9 @@ export const IMPORT_WIZARD_WEBVIEW_TO_HOST_TYPES = [
     'setTargetDatabase',
     'setTargetSchema',
     'setTargetTableName',
+    'reloadTargetColumns',
+    'mapColumnToTarget',
+    'setInvalidRowMode',
     'requestSqlPreview',
     'copySql',
     'openSqlPreview',

@@ -2,7 +2,20 @@
 export interface ImportColumnOptions {
   selectedColumnIndexes?: number[];
   forcedColumnTypes?: Record<number, string>;
+  /**
+   * Types declared for the external/source-side columns. Existing-table
+   * imports use the authoritative catalog type here so the database rejects
+   * incompatible rows before they reach the target insert.
+   */
+  externalColumnTypes?: Record<number, string>;
   columnNameOverrides?: Record<number, string>;
+  /**
+   * Exact destination names for an existing-table import. Unlike
+   * `columnNameOverrides`, these are not header-sanitized, so quoted or
+   * mixed-case catalog names (for example `Mixed Name`) can be mapped
+   * safely. Only used by importers that explicitly support target mapping.
+   */
+  targetColumnNameOverrides?: Record<number, string>;
   appendToExistingTable?: boolean;
   hasHeaders?: boolean;
   /**
@@ -76,6 +89,8 @@ export interface ImportResultDetails {
   format?: string;
   rowsProcessed?: number;
   rowsInserted?: number;
+  /** Rows rejected by the database load (for example Netezza MAXERRORS). */
+  rowsRejected?: number;
   processingTime?: string;
   columns?: number;
   detectedDelimiter?: string;

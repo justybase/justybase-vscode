@@ -15,6 +15,14 @@ import {
   backgroundValidationService,
   type BackgroundValidationJob,
 } from "./BackgroundValidationService";
+import {
+  buildTargetValidationOverrides,
+  validateExistingTableMapping,
+} from "./existingTableTargets";
+import type {
+  ImportInvalidRowMode,
+  ImportTargetColumn,
+} from "./ImportWizardState";
 
 export type BackgroundValidationProgressCallback = (
   progress: BackgroundValidationProgress,
@@ -137,6 +145,37 @@ export class ImportWizardService {
     return this.requireSession(sessionId).setTargetTableName(tableName);
   }
 
+  public async beginTargetColumnLoad(
+    sessionId: string,
+    targetTable: string,
+  ): Promise<ImportWizardState> {
+    return this.requireSession(sessionId).beginTargetColumnLoad(targetTable);
+  }
+
+  public async setTargetColumns(
+    sessionId: string,
+    targetTable: string,
+    columns: readonly ImportTargetColumn[],
+    error?: string,
+  ): Promise<ImportWizardState> {
+    return this.requireSession(sessionId).setTargetColumns(targetTable, columns, error);
+  }
+
+  public async mapColumnToTarget(
+    sessionId: string,
+    sourceIndex: number,
+    targetName?: string,
+  ): Promise<ImportWizardState> {
+    return this.requireSession(sessionId).mapColumnToTarget(sourceIndex, targetName);
+  }
+
+  public async setInvalidRowMode(
+    sessionId: string,
+    mode: ImportInvalidRowMode,
+  ): Promise<ImportWizardState> {
+    return this.requireSession(sessionId).setInvalidRowMode(mode);
+  }
+
   public async updateAvailableSchemas(
     sessionId: string,
     availableSchemas: readonly string[],
@@ -182,16 +221,32 @@ export class ImportWizardService {
 
     this.progressCallbacks.set(sessionId, progressCallback);
 
+    const mappingValidation = validateExistingTableMapping(state);
     const job: BackgroundValidationJob = {
       sessionId,
       columns: state.columns,
       importer,
       adapter,
       sampleSize,
+      targetOverrides: buildTargetValidationOverrides(state),
       progressCallback: (progress, summary) => {
         const callback = this.progressCallbacks.get(sessionId);
         if (callback) {
-          callback(progress, summary);
+          callback(
+            progress,
+            summary
+              ? {
+                  ...summary,
+                  warnings: Array.from(new Set([
+                    ...mappingValidation.warnings,
+                    ...mappingValidation.errors,
+                    ...summary.warnings,
+                  ])),
+                  hasErrors:
+                    summary.hasErrors || mappingValidation.errors.length > 0,
+                }
+              : summary,
+          );
         }
 
         if (progress.phase === "complete" || progress.phase === "cancelled") {

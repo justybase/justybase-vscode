@@ -29,7 +29,11 @@ import {
   destroyNetezzaImportStream,
   registerNetezzaImportStream,
 } from "./netezzaVirtualImport";
-import { resolveNetezzaLoadStatusDatabase, startNetezzaLoadStatusMonitor } from "./netezzaLoadStatusMonitor";
+import {
+  readNetezzaLoadStatus,
+  resolveNetezzaLoadStatusDatabase,
+  startNetezzaLoadStatusMonitor,
+} from "./netezzaLoadStatusMonitor";
 import type {
   ImportColumnDescriptor,
   ImportColumnOptions,
@@ -323,6 +327,28 @@ export function getNumericScale(typeName: string): number | null {
   return Number(match[2]);
 }
 
+async function readNetezzaTableRowCount(
+  connection: NzConnection,
+  targetTable: string,
+): Promise<number | undefined> {
+  try {
+    const reader = await connection
+      .createCommand(`SELECT COUNT(*) AS ROW_COUNT FROM ${targetTable}`)
+      .executeReader();
+    try {
+      if (!(await reader.read())) {
+        return undefined;
+      }
+      const value = Number(reader.getValue(0));
+      return Number.isFinite(value) && value >= 0 ? value : undefined;
+    } finally {
+      await reader.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Build a user-facing warning for rows whose field count differed from the
  * header width. Returns undefined when no mismatch was observed.
@@ -366,7 +392,7 @@ export class NetezzaImporter {
   private hasHeadersOverride?: boolean;
   private readonly isCancelled?: ImportCancellationCheck;
   private readonly skipRowCount: number = 0;
-  private readonly maxErrors: number = 1;
+  private maxErrors: number = 1;
   private readonly sourceEncoding: BufferEncoding = "utf-8";
   private availableSheetNames: string[] = [];
   private selectedSheetName?: string;
@@ -390,7 +416,10 @@ export class NetezzaImporter {
   private valuesToEscape: string[] = [];
   private selectedColumnIndexes: number[] = [];
   private forcedColumnTypes: Map<number, string> = new Map();
+  private externalColumnTypes: Map<number, string> = new Map();
   private columnNameOverrides: Map<number, string> = new Map();
+  /** Exact catalog names for existing-table mapping; never header-sanitized. */
+  private targetColumnNameOverrides: Map<number, string> = new Map();
   private readonly typeChooserOptions: ColumnTypeChooserOptions;
 
   constructor(
@@ -558,7 +587,9 @@ export class NetezzaImporter {
     this.csvHasHeaderRow = this.hasHeadersOverride;
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
+    this.externalColumnTypes.clear();
     this.columnNameOverrides.clear();
+    this.targetColumnNameOverrides.clear();
   }
 
   private async selectExcelReaderSheet(reader: IExcelReader): Promise<void> {
@@ -669,11 +700,8 @@ export class NetezzaImporter {
   }
 
   private getEffectiveColumnName(columnIndex: number): string {
-    return (
-      this.columnNameOverrides.get(columnIndex) ||
-      this.sqlHeaders[columnIndex] ||
-      `COLUMN_${columnIndex + 1}`
-    );
+    const targetColumnName = this.targetColumnNameOverrides.get(columnIndex);
+    return targetColumnName || this.columnNameOverrides.get(columnIndex) || this.sqlHeaders[columnIndex] || `COLUMN_${columnIndex + 1}`;
   }
 
   private getImportColumnDescriptors(): Array<{
@@ -681,12 +709,14 @@ export class NetezzaImporter {
     columnName: string;
     sourceType: string;
     forcedType?: string;
+    externalType?: string;
   }> {
     const descriptors: Array<{
       sourceIndex: number;
       columnName: string;
       sourceType: string;
       forcedType?: string;
+      externalType?: string;
     }> = [];
 
     for (const sourceIndex of this.getEffectiveColumnIndexes()) {
@@ -695,6 +725,7 @@ export class NetezzaImporter {
         columnName: this.getEffectiveColumnName(sourceIndex),
         sourceType: this.getInferredDataType(sourceIndex),
         forcedType: this.forcedColumnTypes.get(sourceIndex),
+        externalType: this.externalColumnTypes.get(sourceIndex),
       });
     }
 
@@ -717,10 +748,19 @@ export class NetezzaImporter {
   applyColumnOptions(options?: ImportColumnOptions): void {
     this.selectedColumnIndexes = [];
     this.forcedColumnTypes.clear();
+    this.externalColumnTypes.clear();
     this.columnNameOverrides.clear();
+    this.targetColumnNameOverrides.clear();
 
     if (!options) {
       return;
+    }
+
+    if (options.maxErrors !== undefined) {
+      const normalizedMaxErrors = Math.trunc(Number(options.maxErrors));
+      if (Number.isFinite(normalizedMaxErrors)) {
+        this.maxErrors = Math.max(0, normalizedMaxErrors);
+      }
     }
 
     const allIndexes = this.getAllColumnIndexes();
@@ -769,29 +809,76 @@ export class NetezzaImporter {
       }
     }
 
-    if (!options.columnNameOverrides) {
-      return;
+    if (options.externalColumnTypes) {
+      for (const [rawIndex, rawType] of Object.entries(
+        options.externalColumnTypes,
+      )) {
+        const index = Number(rawIndex);
+        if (
+          !Number.isInteger(index) ||
+          index < 0
+          || index >= this.sqlHeaders.length
+          || !this.selectedColumnIndexes.includes(index)
+          || !rawType
+          || !rawType.trim()
+        ) {
+          continue;
+        }
+        this.externalColumnTypes.set(
+          index,
+          normalizeAndValidateForcedType(rawType),
+        );
+      }
     }
 
-    for (const [rawIndex, rawColumnName] of Object.entries(
-      options.columnNameOverrides,
-    )) {
-      const index = Number(rawIndex);
-      if (
-        !Number.isInteger(index) ||
-        index < 0 ||
-        index >= this.sqlHeaders.length
-      ) {
-        continue;
+    if (options.columnNameOverrides) {
+      for (const [rawIndex, rawColumnName] of Object.entries(
+        options.columnNameOverrides,
+      )) {
+        const index = Number(rawIndex);
+        if (
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= this.sqlHeaders.length
+        ) {
+          continue;
+        }
+        if (!this.selectedColumnIndexes.includes(index)) {
+          continue;
+        }
+        this.columnNameOverrides.set(index, this.cleanColumnName(rawColumnName || ""));
       }
-      if (!this.selectedColumnIndexes.includes(index)) {
-        continue;
+    }
+
+    if (options.targetColumnNameOverrides) {
+      for (const [rawIndex, rawColumnName] of Object.entries(
+        options.targetColumnNameOverrides,
+      )) {
+        const index = Number(rawIndex);
+        if (
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= this.sqlHeaders.length
+        ) {
+          continue;
+        }
+        if (!this.selectedColumnIndexes.includes(index)) {
+          continue;
+        }
+        // Catalog names are authoritative for an existing-table import:
+        // preserve spaces, case and other characters and let the SQL
+        // identifier quoting protect them.
+        const targetColumnName = String(rawColumnName ?? "").trim();
+        if (
+          !targetColumnName
+          || targetColumnName.includes("\r")
+          || targetColumnName.includes("\n")
+          || targetColumnName.includes("\0")
+        ) {
+          continue;
+        }
+        this.targetColumnNameOverrides.set(index, targetColumnName);
       }
-      const normalizedColumnName = this.cleanColumnName(rawColumnName || "");
-      if (!normalizedColumnName) {
-        continue;
-      }
-      this.columnNameOverrides.set(index, normalizedColumnName);
     }
   }
 
@@ -1700,7 +1787,7 @@ export class NetezzaImporter {
     const columnDefinitions = importColumns.map((column) => {
       const quotedColumn = this.quoteIdentifier(column.columnName);
       const targetType = normalizeDataType(
-        column.forcedType ?? column.sourceType,
+        column.externalType ?? column.forcedType ?? column.sourceType,
       );
       return `    ${quotedColumn} ${targetType}`;
     });
@@ -1716,7 +1803,7 @@ export class NetezzaImporter {
 
     const externalColumns = importColumns.map(
       (column) =>
-        `        ${this.quoteIdentifier(column.columnName)} ${column.sourceType}`,
+        `        ${this.quoteIdentifier(column.columnName)} ${column.externalType ?? column.sourceType}`,
     );
     const selectColumns = this.buildImportSelectColumns(importColumns);
     const targetColumns = importColumns
@@ -1744,7 +1831,7 @@ ${this.getExternalUsingClause()};`;
 
     const externalColumns = importColumns.map(
       (column) =>
-        `        ${this.quoteIdentifier(column.columnName)} ${column.sourceType}`,
+        `        ${this.quoteIdentifier(column.columnName)} ${column.externalType ?? column.sourceType}`,
     );
 
     const selectColumns = this.buildImportSelectColumns(importColumns);
@@ -2484,6 +2571,10 @@ export async function importDataToNetezzaAdvanced(
   let importStream: Readable | undefined;
   let unregisterImportStream: (() => void) | undefined;
   let loadMonitor: ReturnType<typeof startNetezzaLoadStatusMonitor> | undefined;
+  let finalLoadStatus: Awaited<ReturnType<typeof readNetezzaLoadStatus>> | undefined;
+  let rowsBeforeLoad: number | undefined;
+  let countedRowsInserted: number | undefined;
+  let countedRowsRejected: number | undefined;
 
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -2634,11 +2725,44 @@ export async function importDataToNetezzaAdvanced(
           }, 2000)
           : undefined;
 
+        // Recoverable rejects (MAXERRORS > 1) need an exact post-load count:
+        // the _V_LOAD_STATUS row disappears when the statement completes.
+        if ((columnOptions?.maxErrors ?? 1) > 1) {
+          rowsBeforeLoad = await readNetezzaTableRowCount(connection, targetTable);
+        }
+
         progressCallback?.("Loading rows from external stream...");
         const loadCommand = connection.createCommand(loadSql);
         loadCommand.commandTimeout = timeout || 3600;
         throwIfImportCancelled(isCancelled);
         await loadCommand.execute();
+
+        if (rowsBeforeLoad !== undefined) {
+          const rowsAfterLoad = await readNetezzaTableRowCount(
+            connection,
+            targetTable,
+          );
+          if (rowsAfterLoad !== undefined) {
+            countedRowsInserted = Math.max(0, rowsAfterLoad - rowsBeforeLoad);
+            countedRowsRejected = Math.max(
+              0,
+              importer.getRowsCount() - countedRowsInserted,
+            );
+          }
+        }
+
+        try {
+          finalLoadStatus = await readNetezzaLoadStatus(connection, {
+            targetTable,
+            databaseName: resolveNetezzaLoadStatusDatabase(
+              targetTable,
+              connectionDetails.database,
+            ),
+            user: connectionDetails.user,
+          });
+        } catch {
+          // `_V_LOAD_STATUS` is optional; the load already succeeded.
+        }
 
         progressCallback?.("Import completed successfully");
       } finally {
@@ -2649,22 +2773,37 @@ export async function importDataToNetezzaAdvanced(
       }
 
     const processingTime = (Date.now() - startTime) / 1000;
+    const rejectedRows = countedRowsRejected ?? finalLoadStatus?.rowsRejected ?? 0;
     return {
       success: true,
-      message: "Import completed successfully",
+      message: rejectedRows > 0
+        ? `Import completed with ${rejectedRows.toLocaleString()} rejected row(s)`
+        : "Import completed successfully",
       details: {
         sourceFile: filePath,
         targetTable,
         fileSize,
         format: fileExt,
         rowsProcessed: importer.getRowsCount(),
-        rowsInserted: importer.getRowsCount(),
+        rowsInserted: countedRowsInserted
+          ?? finalLoadStatus?.rowsInserted
+          ?? importer.getRowsCount(),
+        rowsRejected: countedRowsRejected ?? finalLoadStatus?.rowsRejected,
         processingTime: `${processingTime.toFixed(1)}s`,
         columns: importer.getImportColumnCount(),
         detectedDelimiter: importer.getCsvDelimiter(),
         warnings: (() => {
+          const warnings: string[] = [];
           const warning = buildWidthMismatchWarning(importer.getWidthMismatchCount());
-          return warning ? [warning] : undefined;
+          if (warning) {
+            warnings.push(warning);
+          }
+          if (rejectedRows > 0) {
+            warnings.push(
+              `${rejectedRows.toLocaleString()} row(s) were rejected by the database load.`,
+            );
+          }
+          return warnings.length > 0 ? warnings : undefined;
         })(),
       },
     };

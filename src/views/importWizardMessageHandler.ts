@@ -202,6 +202,9 @@ export class ImportWizardMessageHandler {
 
     // A slow database must not keep the wizard on "Loading..." before it can render the preview.
     void this.loadTargetCatalog(state.id, options);
+    if (!state.createTable && state.canMapExistingTableColumns) {
+      void this.loadTargetColumnsForState();
+    }
   }
 
   /**
@@ -374,7 +377,11 @@ export class ImportWizardMessageHandler {
           this.requireSessionId(),
           Boolean(message.createTable),
         );
-        await this.postState();
+        if (!this.getState().createTable) {
+          await this.loadTargetColumnsForState();
+        } else {
+          await this.postState();
+        }
         return;
       case "setConnection":
         await this.runSessionTransition(() =>
@@ -414,6 +421,7 @@ export class ImportWizardMessageHandler {
           message.database,
         );
         await this.refreshTargetSchemas(message.database);
+        await this.loadTargetColumnsForState();
         await this.postState();
         return;
       case "setTargetSchema":
@@ -421,12 +429,33 @@ export class ImportWizardMessageHandler {
           this.requireSessionId(),
           message.schema,
         );
+        await this.loadTargetColumnsForState();
         await this.postState();
         return;
       case "setTargetTableName":
         await this.deps.service.setTargetTableName(
           this.requireSessionId(),
           String(message.tableName || ""),
+        );
+        await this.loadTargetColumnsForState();
+        await this.postState();
+        return;
+      case "reloadTargetColumns":
+        await this.loadTargetColumnsForState();
+        return;
+      case "mapColumnToTarget":
+        await this.deps.service.mapColumnToTarget(
+          this.requireSessionId(),
+          Number(message.sourceIndex),
+          message.targetName,
+        );
+        await this.postState();
+        this.startBackgroundValidation();
+        return;
+      case "setInvalidRowMode":
+        await this.deps.service.setInvalidRowMode(
+          this.requireSessionId(),
+          message.mode,
         );
         await this.postState();
         return;
@@ -517,6 +546,9 @@ export class ImportWizardMessageHandler {
     try {
       const state = this.getState();
       await this.refreshTargetSchemas(state.targetLocation.database);
+      if (!this.getState().createTable) {
+        await this.loadTargetColumnsForState();
+      }
       await this.postState();
     } catch {
       // The session may have been disposed between the event and the refresh.
@@ -785,6 +817,69 @@ export class ImportWizardMessageHandler {
       this.requireSessionId(),
       catalog.availableSchemas,
     );
+  }
+
+  /**
+   * Load catalog columns for the current existing-table target and feed the
+   * session. A result for a table that changed while the lookup ran is
+   * ignored by the session's target-table guard.
+   */
+  private async loadTargetColumnsForState(): Promise<void> {
+    const sessionId = this.sessionId;
+    const connectionName = this.connectionName;
+    if (!sessionId || !connectionName || this.disposed) {
+      return;
+    }
+
+    const state = this.getState();
+    if (
+      state.createTable
+      || !state.canMapExistingTableColumns
+      || !state.targetLocation.tableName.trim()
+    ) {
+      return;
+    }
+
+    const targetTable = state.targetTable;
+    await this.deps.service.beginTargetColumnLoad(sessionId, targetTable);
+    if (this.webviewReady) {
+      await this.postState();
+    }
+
+    try {
+      const columns = await this.deps.catalogService.loadTableColumns(
+        connectionName,
+        state.targetLocation.database,
+        state.targetLocation.schema,
+        state.targetLocation.tableName,
+      );
+      if (this.disposed || this.sessionId !== sessionId) {
+        return;
+      }
+      await this.deps.service.setTargetColumns(
+        sessionId,
+        targetTable,
+        columns,
+      );
+    } catch (error) {
+      if (this.disposed || this.sessionId !== sessionId) {
+        return;
+      }
+      await this.deps.service.setTargetColumns(
+        sessionId,
+        targetTable,
+        [],
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
+    if (this.disposed || this.sessionId !== sessionId) {
+      return;
+    }
+    if (this.webviewReady) {
+      await this.postState();
+    }
+    this.startBackgroundValidation();
   }
 
   private async postState(initial: boolean = false): Promise<void> {

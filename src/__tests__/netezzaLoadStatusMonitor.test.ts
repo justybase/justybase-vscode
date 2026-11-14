@@ -1,4 +1,8 @@
-import { resolveNetezzaLoadStatusDatabase, startNetezzaLoadStatusMonitor } from '../import/netezzaLoadStatusMonitor';
+import {
+    readNetezzaLoadStatus,
+    resolveNetezzaLoadStatusDatabase,
+    startNetezzaLoadStatusMonitor,
+} from '../import/netezzaLoadStatusMonitor';
 import { createConnectedDatabaseConnectionFromDetails } from '../core/connectionFactory';
 import type { ImportLoadStatus } from '@justybase/contracts';
 
@@ -9,7 +13,17 @@ jest.mock('../core/connectionFactory', () => ({
 const createConnection = createConnectedDatabaseConnectionFromDetails as jest.Mock;
 
 function fakeConnection(rows: Array<Record<string, unknown>>, executeReader?: jest.Mock) {
-    const names = ['PLANID', 'TABLENAME', 'USERNAME', 'ROWSINSERTED', 'ROWSREJECTED', 'BYTESPROCESSED', 'BYTESDOWNLOADED'];
+    const names = [
+        'PLANID',
+        'TABLENAME',
+        'SCHEMANAME',
+        'DATABASENAME',
+        'USERNAME',
+        'ROWSINSERTED',
+        'ROWSREJECTED',
+        'BYTESPROCESSED',
+        'BYTESDOWNLOADED',
+    ];
     let index = -1;
     const reader = {
         fieldCount: names.length,
@@ -78,6 +92,72 @@ describe('NetezzaLoadStatusMonitor', () => {
             bytesDownloaded: 1000,
         }));
         expect(connection.close).toHaveBeenCalled();
+    });
+
+    it('reads the newest matching plan for the database and user', async () => {
+        const { connection } = fakeConnection([
+            { PLANID: 10, TABLENAME: 'TARGET', DATABASENAME: 'JUST_DATA', USERNAME: 'ADMIN', ROWSINSERTED: 4 },
+            { PLANID: 12, TABLENAME: 'TARGET', DATABASENAME: 'JUST_DATA', USERNAME: 'ADMIN', ROWSINSERTED: 8, ROWSREJECTED: 1, BYTESDOWNLOADED: 2048 },
+            { PLANID: 11, TABLENAME: 'TARGET', DATABASENAME: 'OTHER', USERNAME: 'ADMIN', ROWSINSERTED: 6 },
+        ]);
+
+        await expect(readNetezzaLoadStatus(connection as never, {
+            targetTable: 'JUST_DATA.ADMIN.TARGET',
+            databaseName: 'JUST_DATA',
+            user: 'ADMIN',
+        })).resolves.toEqual(expect.objectContaining({
+            planId: 12,
+            tableName: 'TARGET',
+            rowsInserted: 8,
+            rowsRejected: 1,
+            bytesDownloaded: 2048,
+        }));
+
+        expect((connection.createCommand as jest.Mock).mock.calls[0][0]).toMatch(
+            /SELECT \* FROM .*JUST_DATA.*\.\._V_LOAD_STATUS/,
+        );
+    });
+
+    it('falls back to database plans when the user has no matching plan', async () => {
+        const { connection } = fakeConnection([
+            { PLANID: 20, TABLENAME: 'TARGET', DATABASENAME: 'JUST_DATA', USERNAME: 'OTHER', ROWSINSERTED: 3 },
+        ]);
+
+        await expect(readNetezzaLoadStatus(connection as never, {
+            targetTable: 'ADMIN.TARGET',
+            databaseName: 'JUST_DATA',
+            user: 'ADMIN',
+        })).resolves.toEqual(expect.objectContaining({ planId: 20, rowsInserted: 3 }));
+    });
+
+    it('returns undefined when the table or database has no load plan', async () => {
+        const missingTable = fakeConnection([
+            { PLANID: 30, TABLENAME: 'OTHER', DATABASENAME: 'JUST_DATA', USERNAME: 'ADMIN' },
+        ]);
+        await expect(readNetezzaLoadStatus(missingTable.connection as never, {
+            targetTable: 'ADMIN.TARGET',
+            databaseName: 'JUST_DATA',
+        })).resolves.toBeUndefined();
+
+        const missingDatabase = fakeConnection([
+            { PLANID: 31, TABLENAME: 'TARGET', DATABASENAME: 'OTHER', USERNAME: 'ADMIN' },
+        ]);
+        await expect(readNetezzaLoadStatus(missingDatabase.connection as never, {
+            targetTable: 'ADMIN.TARGET',
+            databaseName: 'JUST_DATA',
+        })).resolves.toBeUndefined();
+    });
+
+    it('queries the unqualified view when no database is configured', async () => {
+        const { connection } = fakeConnection([
+            { PLANID: 40, TABLENAME: 'TARGET', USERNAME: 'ADMIN', ROWSINSERTED: 2 },
+        ]);
+
+        await expect(readNetezzaLoadStatus(connection as never, {
+            targetTable: 'ADMIN.TARGET',
+        })).resolves.toEqual(expect.objectContaining({ planId: 40 }));
+
+        expect((connection.createCommand as jest.Mock).mock.calls[0][0]).toBe('SELECT * FROM _V_LOAD_STATUS');
     });
 
     it('stays silent when the view is unavailable and closes its connection', async () => {

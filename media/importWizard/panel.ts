@@ -305,6 +305,141 @@ function isSelectedOption(current: string | undefined, candidate: string): boole
     return (current || '').toUpperCase() === candidate.toUpperCase();
 }
 
+function isExistingTableMapping(session: ImportWizardState): boolean {
+    return !session.createTable && session.canMapExistingTableColumns;
+}
+
+function targetColumnKey(name: string): string {
+    return name.trim().toUpperCase();
+}
+
+function findTargetColumn(
+    session: ImportWizardState,
+    name: string,
+): ImportWizardState['existingTable']['columns'][number] | undefined {
+    const key = targetColumnKey(name);
+    return session.existingTable.columns.find(column => targetColumnKey(column.name) === key);
+}
+
+function findUnmappedRequiredTargets(
+    session: ImportWizardState,
+): ImportWizardState['existingTable']['columns'] {
+    if (!isExistingTableMapping(session) || session.existingTable.status !== 'ready') {
+        return [];
+    }
+    const includedColumns = session.columns.filter(column => column.included);
+    const mappedTargetKeys = new Set(includedColumns.map(column => targetColumnKey(column.targetName)));
+    return session.existingTable.columns.filter(column =>
+        !mappedTargetKeys.has(targetColumnKey(column.name))
+        && !column.nullable
+        && !column.hasDefault,
+    );
+}
+
+function renderExistingTargetPanel(session: ImportWizardState): string {
+    const existing = session.existingTable;
+    const mappedSourceCount = session.columns.filter(column => column.included).length;
+    const missingRequired = findUnmappedRequiredTargets(session);
+    const statusText = existing.status === 'loading'
+        ? 'Loading target columns…'
+        : existing.status === 'error'
+            ? existing.error || 'Could not load the target columns.'
+            : existing.status === 'ready'
+                ? `${existing.columns.length} target column${existing.columns.length === 1 ? '' : 's'} · ${mappedSourceCount} mapped`
+                : 'Load the destination columns to map source fields.';
+    const canReload = existing.status !== 'loading' && !isWizardBusy() && Boolean(session.targetLocation.tableName.trim());
+
+    const statusClass = existing.status;
+    const statusHtml = escapeHtml(statusText);
+    const busyDisabled = isWizardBusy() ? 'disabled' : '';
+    const abortSelected = session.invalidRowMode === 'abort' ? ' selected' : '';
+    const skipSelected = session.invalidRowMode === 'skip' ? ' selected' : '';
+    const reloadDisabled = canReload ? '' : 'disabled';
+    const reloadLabel = existing.status === 'ready' ? 'Reload columns' : 'Load columns';
+    const requiredAlert = missingRequired.length > 0
+        ? `<p class="import-existing-target-error" role="alert">Map required column${missingRequired.length === 1 ? '' : 's'}: ${escapeHtml(missingRequired.map(column => column.name).join(', '))}.</p>`
+        : '';
+
+    return `
+        <div class="import-existing-target-panel ${statusClass}">
+            <div class="import-existing-target-head">
+                <div>
+                    <strong>Existing table mapping</strong>
+                    <span>${statusHtml}</span>
+                </div>
+                <div class="import-existing-target-actions">
+                    <label>On invalid row
+                        <select id="invalid-row-mode" ${busyDisabled}>
+                            <option value="abort"${abortSelected}>Abort the import</option>
+                            <option value="skip"${skipSelected}>Skip invalid rows</option>
+                        </select>
+                    </label>
+                    <button id="reload-target-columns" class="import-secondary-button" ${reloadDisabled}>
+                        ${reloadLabel}
+                    </button>
+                </div>
+            </div>
+            ${requiredAlert}
+        </div>`;
+}
+
+function renderExistingTableMapping(session: ImportWizardState): string {
+    const existing = session.existingTable;
+    const mappedCount = session.columns.filter(column => column.included).length;
+
+    const rows = session.columns.map(column => {
+        const selectedTarget = column.included ? findTargetColumn(session, column.targetName) : undefined;
+        const usedByOther = new Set(
+            session.columns
+                .filter(other => other !== column && other.included)
+                .map(other => targetColumnKey(other.targetName)),
+        );
+        const options = [
+            '<option value="">Not mapped</option>',
+            ...existing.columns.map(target => {
+                const key = targetColumnKey(target.name);
+                const used = usedByOther.has(key);
+                const selected = selectedTarget ? targetColumnKey(selectedTarget.name) === key : false;
+                return `<option value="${escapeHtml(target.name)}"${selected ? ' selected' : ''}${used ? ' disabled' : ''}>${escapeHtml(target.name)} · ${escapeHtml(target.dataType)}${!target.nullable && !target.hasDefault ? ' · required' : ''}${target.hasDefault ? ' · default' : ''}${used ? ' · used' : ''}</option>`;
+            }),
+        ].join('');
+        const targetType = selectedTarget?.dataType ?? 'Not mapped';
+        const requiredMissing = selectedTarget
+            ? false
+            : existing.columns.some(target => !target.nullable && !target.hasDefault && !session.columns.some(other => other.included && targetColumnKey(other.targetName) === targetColumnKey(target.name)));
+        return `<div class="import-existing-map-row${requiredMissing ? ' is-required-missing' : ''}">
+            <span class="import-source-column" title="${escapeHtml(column.sourceName)}">${escapeHtml(column.sourceName)}</span>
+            <span class="import-map-arrow" aria-hidden="true">→</span>
+            <select class="target-column-select" data-source-index="${column.sourceIndex}" aria-label="Target column for ${escapeHtml(column.sourceName)}" ${isWizardBusy() ? 'disabled' : ''}>${options}</select>
+            <span class="import-target-type">${escapeHtml(targetType)}</span>
+        </div>`;
+    }).join('');
+
+    let body: string;
+    if (existing.status === 'idle') {
+        body = '<p class="import-mapping-note">Choose a destination table, then load its columns to build the mapping.</p>';
+    } else if (existing.status === 'loading') {
+        body = '<p class="import-mapping-note"><span class="progress-spinner"></span> Loading target columns…</p>';
+    } else if (existing.status === 'error') {
+        body = `<p class="import-mapping-note error">${escapeHtml(existing.error || 'Could not load the target columns.')}</p>`;
+    } else if (existing.columns.length === 0) {
+        body = '<p class="import-mapping-note">The target table has no columns to map.</p>';
+    } else {
+        body = `<div class="import-existing-map-list">${rows || '<div class="import-no-columns">No source columns are available.</div>'}</div>`;
+    }
+
+    const mappingCountText = `${mappedCount} of ${session.columns.length} mapped`;
+    return `
+        <section class="card import-mapping import-existing-mapping">
+            <div class="import-section-heading compact">
+                <div><span class="import-section-number">03</span><div><h3>Existing table mapping</h3><p>Map each source column to a target column. Target types are authoritative.</p></div></div>
+                <span class="import-mapping-count">${mappingCountText}</span>
+            </div>
+            <div class="import-mapping-head import-existing-mapping-head"><span>Source column</span><span></span><span>Target column</span><span>Target type</span></div>
+            ${body}
+        </section>`;
+}
+
 function renderTargetBanner(session: ImportWizardState): string {
     const caps = session.targetLocationCapabilities;
     const editorOpen = state.targetEditorOpen || !session.targetLocation.tableName.trim();
@@ -314,6 +449,7 @@ function renderTargetBanner(session: ImportWizardState): string {
         ?? 'No connection';
     const includedCount = session.columns.filter(column => column.included).length;
     const targetLabel = session.targetTable?.trim() || 'Choose a destination table';
+    const existingTargetPanel = isExistingTableMapping(session) ? renderExistingTargetPanel(session) : '';
 
     const databaseOptions = session.availableDatabases
         .map(
@@ -385,6 +521,7 @@ function renderTargetBanner(session: ImportWizardState): string {
 					</label>
 					${session.canAppendToExistingTable ? '' : '<p class="import-target-note">Appending is unavailable for this database import workflow.</p>'}
 				</div>
+				${existingTargetPanel}
 			</section>`;
 }
 
@@ -449,6 +586,9 @@ function renderTechnicalDetails(session: ImportWizardState): string {
 }
 
 function renderColumnEditor(session: ImportWizardState): string {
+    if (isExistingTableMapping(session)) {
+        return renderExistingTableMapping(session);
+    }
     const includedCount = session.columns.filter(column => column.included).length;
     return `
 			<section class="card import-mapping">
@@ -473,11 +613,14 @@ function renderColumnEditor(session: ImportWizardState): string {
 
 function renderPreviewGrid(session: ImportWizardState): string {
     const issueMap = buildIssueMap(session);
+    const existingMapping = isExistingTableMapping(session);
     const headerCells = session.columns
-        .map(
-            column =>
-                `<th class="${column.included ? '' : 'is-excluded'}">${escapeHtml(column.sourceName)}</th>`,
-        )
+        .map(column => {
+            const label = existingMapping && column.included
+                ? `${column.sourceName} → ${column.targetName}`
+                : column.sourceName;
+            return `<th class="${column.included ? '' : 'is-excluded'}">${escapeHtml(label)}</th>`;
+        })
         .join('');
     const bodyRows = session.previewRows
         .map((row, rowIndex) => {
@@ -685,6 +828,32 @@ function attachListeners(): void {
     createTable?.addEventListener('change', event => {
         const target = eventTargetAsInput(event);
         postToHost({ type: 'setCreateTable', createTable: Boolean(target?.checked) });
+    });
+
+    const reloadTargetColumns = getElementById('reload-target-columns');
+    reloadTargetColumns?.addEventListener('click', () =>
+        postToHost({ type: 'reloadTargetColumns' }),
+    );
+
+    const invalidRowMode = getElementById<HTMLSelectElement>('invalid-row-mode');
+    invalidRowMode?.addEventListener('change', event => {
+        const target = eventTargetAsSelect(event);
+        postToHost({
+            type: 'setInvalidRowMode',
+            mode: target?.value === 'skip' ? 'skip' : 'abort',
+        });
+    });
+
+    document.querySelectorAll('.target-column-select').forEach(select => {
+        select.addEventListener('change', event => {
+            const target = eventTargetAsSelect(event);
+            const sourceIndex = Number(target?.dataset.sourceIndex);
+            postToHost({
+                type: 'mapColumnToTarget',
+                sourceIndex,
+                targetName: target?.value || undefined,
+            });
+        });
     });
 
     const connection = getElementById<HTMLSelectElement>('target-connection');
@@ -979,10 +1148,11 @@ function render(): void {
 
     const session = state.session;
     const selectedColumnCount = session.columns.filter(column => column.included).length;
-    const canExecute = !isWizardBusy()
-        && !session.hasValidationErrors
-        && selectedColumnCount > 0
-        && Boolean(session.targetLocation.tableName.trim());
+    const mappingReady = session.createTable || !session.canMapExistingTableColumns || session.existingTable.status === 'ready';
+    const requiredTargetsMissing = findUnmappedRequiredTargets(session).length > 0;
+    const canSkipInvalidRows = isExistingTableMapping(session) && session.invalidRowMode === 'skip';
+    const validationReady = !session.hasValidationErrors || canSkipInvalidRows;
+    const canExecute = !isWizardBusy() && validationReady && !requiredTargetsMissing && selectedColumnCount > 0 && mappingReady && Boolean(session.targetLocation.tableName.trim());
     const canCopyVerificationSql = state.importCompleted
         && !isWizardBusy()
         && Boolean(session.targetLocation.tableName.trim());

@@ -422,6 +422,76 @@ describe('import/dataImporter', () => {
             expect(createSql).toContain('MAXERRORS 25');
         });
 
+        it('uses exact catalog target names and external target types for existing-table loads', async () => {
+            const csvPath = writeTempFile(
+                'existing-target.csv',
+                'id,source_name,amount\n1,Alpha,12.50\n',
+            );
+            const importer = new NetezzaImporter(csvPath, 'ADMIN.TARGET');
+            await importer.analyzeDataTypes();
+            importer.applyColumnOptions({
+                selectedColumnIndexes: [0, 1, 2],
+                targetColumnNameOverrides: {
+                    0: 'Id',
+                    1: 'Display Name',
+                    2: 'Amount',
+                },
+                externalColumnTypes: {
+                    0: 'BIGINT',
+                    1: 'NVARCHAR(20)',
+                    2: 'NUMERIC(10,2)',
+                },
+                appendToExistingTable: true,
+            });
+
+            const sql = importer.generateLoadIntoExistingTableSql();
+            expect(sql).toContain('("Id", "Display Name", "Amount")');
+            expect(sql).toContain('"Display Name" NVARCHAR(20)');
+            expect(sql).toContain('"Amount" NUMERIC(10,2)');
+            expect(sql).not.toContain('CAST(');
+        });
+
+        it('ignores invalid override entries and keeps valid catalog mappings', async () => {
+            const csvPath = writeTempFile('override-validation.csv', 'id,name\n1,Alpha\n');
+            const importer = new NetezzaImporter(csvPath, 'ADMIN.TARGET');
+            await importer.analyzeDataTypes();
+            importer.applyColumnOptions({
+                selectedColumnIndexes: [0, 1],
+                externalColumnTypes: {
+                    99: 'BIGINT',
+                    0: '   ',
+                    2: 'INTEGER',
+                    1: 'NVARCHAR(20)',
+                },
+                columnNameOverrides: {
+                    99: 'IGNORED',
+                    2: 'IGNORED',
+                    1: 'Customer',
+                },
+                targetColumnNameOverrides: {
+                    99: 'IGNORED',
+                    2: 'IGNORED',
+                    0: '',
+                    1: 'Customer Name',
+                },
+            });
+
+            const descriptors = importer.getEffectiveColumnDescriptors();
+            expect(descriptors.map((descriptor) => descriptor.columnName))
+                .toEqual(['ID', 'Customer Name']);
+            expect(importer.generateLoadIntoExistingTableSql())
+                .toContain('"Customer Name" NVARCHAR(20)');
+        });
+
+        it('applies a changed maxErrors budget before generating SQL', async () => {
+            const csvPath = writeTempFile('maxerrors-option.csv', 'id\n1\n');
+            const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');
+            await importer.analyzeDataTypes();
+            importer.applyColumnOptions({ maxErrors: 7 });
+
+            expect(importer.generateLoadIntoExistingTableSql()).toContain('MAXERRORS 7');
+        });
+
         it('counts rows whose column count differs from the header', async () => {
             const csvPath = writeTempFile('width-mismatch.csv', 'a,b\n1,2\n3,4,extra\n');
             const importer = new NetezzaImporter(csvPath, 'TEST_TABLE');

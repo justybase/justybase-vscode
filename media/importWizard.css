@@ -784,6 +784,34 @@ body {
 .import-map-row .move-buttons button { width: 19px; min-width: 19px; height: 22px; min-height: 22px; padding: 0; border: 1px solid var(--vscode-panel-border); border-radius: 4px; font-size: 10px; }
 .import-no-columns { padding: 14px; border: 1px dashed var(--vscode-panel-border); border-radius: 6px; color: var(--vscode-descriptionForeground); font-size: 10px; line-height: 1.5; text-align: center; }
 
+.import-existing-target-panel { display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--vscode-panel-border); }
+.import-existing-target-panel.error .import-existing-target-head > div > span { color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground)); }
+.import-existing-target-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.import-existing-target-head > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.import-existing-target-head strong { color: var(--vscode-foreground); font-size: 10px; font-weight: 650; }
+.import-existing-target-head span { color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.4; }
+.import-existing-target-actions { display: flex; align-items: flex-end; gap: 8px; flex: none; }
+.import-existing-target-actions label { display: grid; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 8px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.import-existing-target-actions select { height: 28px; min-height: 28px; padding: 0 7px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 9px; }
+.import-secondary-button { height: 28px; min-height: 28px; padding: 0 10px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--vscode-foreground); font-size: 9px; cursor: pointer; }
+.import-secondary-button:hover:not(:disabled) { border-color: var(--vscode-textLink-foreground); }
+.import-secondary-button:disabled { opacity: 0.5; cursor: default; }
+.import-existing-target-error { margin: 0; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 38%, var(--vscode-panel-border)); border-radius: 5px; background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground)); font-size: 9px; line-height: 1.4; }
+
+.import-existing-mapping-head,
+.import-existing-map-row { display: grid; grid-template-columns: minmax(90px, 0.8fr) 14px minmax(130px, 1.25fr) minmax(80px, 0.7fr); align-items: center; gap: 7px; }
+.import-existing-mapping-head { padding: 0 7px 7px; color: var(--vscode-descriptionForeground); font-size: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.import-existing-map-list { display: grid; gap: 5px; }
+.import-existing-map-row { min-width: 0; padding: 5px 6px; border: 1px solid transparent; border-radius: 6px; background: var(--vscode-editor-background); }
+.import-existing-map-row:hover { border-color: var(--vscode-panel-border); }
+.import-existing-map-row.is-required-missing { border-color: color-mix(in srgb, var(--vscode-errorForeground) 42%, transparent); }
+.import-existing-map-row .import-source-column { min-width: 0; overflow: hidden; color: var(--vscode-foreground); font-size: 10px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.import-existing-map-row select.target-column-select { width: 100%; min-width: 0; height: 29px; min-height: 29px; padding: 0 7px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font-size: 9px; }
+.import-existing-map-row select.target-column-select:focus { border-color: var(--vscode-focusBorder); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
+.import-target-type { min-width: 0; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.import-mapping-note { margin: 0; padding: 10px; border: 1px dashed var(--vscode-panel-border); border-radius: 6px; color: var(--vscode-descriptionForeground); font-size: 10px; line-height: 1.5; }
+.import-mapping-note.error { border-color: color-mix(in srgb, var(--vscode-errorForeground) 38%, var(--vscode-panel-border)); color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground)); }
+
 .import-destination-card { display: flex; flex-direction: column; gap: 13px; }
 .import-destination-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 11px; }
 .import-destination-fields label { min-width: 0; display: grid; gap: 6px; color: var(--vscode-descriptionForeground); font-size: 9px; font-weight: 650; }
@@ -1445,6 +1473,46 @@ body {
   .import-map-arrow {
     grid-column: 4;
     grid-row: 1 / span 2;
+  }
+
+  .import-existing-target-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .import-existing-target-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .import-existing-mapping-head {
+    display: none;
+  }
+
+  .import-existing-map-row {
+    grid-template-columns: minmax(0, 1fr) 12px minmax(0, 1.25fr);
+    grid-template-rows: auto auto;
+    gap: 5px;
+  }
+
+  .import-existing-map-row .import-source-column {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .import-existing-map-row .import-map-arrow {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .import-existing-map-row select.target-column-select {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .import-existing-map-row .import-target-type {
+    grid-column: 3;
+    grid-row: 2;
   }
 }
 

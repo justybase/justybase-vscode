@@ -13,6 +13,7 @@ import {
 
 export class NetezzaImportWizardAdapter extends BaseImportWizardAdapter {
     public readonly kind = 'netezza' as const;
+    public supportsTargetColumnMapping = true;
 
     public constructor() {
         super('direct');

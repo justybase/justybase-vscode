@@ -1,6 +1,8 @@
 import { createTabularDataImporter } from '../import/tabularDataImporter';
 import { getImportWizardAdapter } from '../import/wizard/adapters';
 import { ImportWizardService } from '../import/wizard/ImportWizardService';
+import { ImportWizardSession } from '../import/wizard/ImportWizardSession';
+import { backgroundValidationService } from '../import/wizard/BackgroundValidationService';
 import type { ImportColumnOptions, ImportResult } from '../import/dataImporter';
 
 jest.mock('../import/tabularDataImporter', () => ({
@@ -74,6 +76,10 @@ describe('ImportWizardService', () => {
         getHasHeaders: jest.fn(() => true),
         getDelegate: jest.fn(() => ({})),
     };
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -276,6 +282,101 @@ describe('ImportWizardService', () => {
                 columnOptions: expect.objectContaining({ appendToExistingTable: false }),
             }),
         );
+    });
+
+    it('delegates existing-table mapping operations to the session', async () => {
+        const service = new ImportWizardService();
+        const state = await service.createSession({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'public.orders',
+            connectionDetails: {
+                dbType: 'postgresql',
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'postgres',
+            } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        });
+        const beginTargetColumnLoad = jest
+            .spyOn(ImportWizardSession.prototype, 'beginTargetColumnLoad')
+            .mockResolvedValue(state);
+        const setTargetColumns = jest
+            .spyOn(ImportWizardSession.prototype, 'setTargetColumns')
+            .mockResolvedValue(state);
+        const mapColumnToTarget = jest
+            .spyOn(ImportWizardSession.prototype, 'mapColumnToTarget')
+            .mockResolvedValue(state);
+        const setInvalidRowMode = jest
+            .spyOn(ImportWizardSession.prototype, 'setInvalidRowMode')
+            .mockResolvedValue(state);
+        const setTargetTableName = jest
+            .spyOn(ImportWizardSession.prototype, 'setTargetTableName')
+            .mockResolvedValue(state);
+
+        await service.beginTargetColumnLoad(state.id, 'public.orders');
+        expect(beginTargetColumnLoad).toHaveBeenCalledWith('public.orders');
+
+        const columns = [
+            { name: 'id', dataType: 'BIGINT', nullable: false, hasDefault: false },
+        ];
+        await service.setTargetColumns(state.id, 'public.orders', columns, 'lookup failed');
+        expect(setTargetColumns).toHaveBeenCalledWith('public.orders', columns, 'lookup failed');
+
+        await service.mapColumnToTarget(state.id, 0, 'id');
+        expect(mapColumnToTarget).toHaveBeenCalledWith(0, 'id');
+
+        await service.setInvalidRowMode(state.id, 'skip');
+        expect(setInvalidRowMode).toHaveBeenCalledWith('skip');
+
+        await service.setTargetTableName(state.id, 'public.orders');
+        expect(setTargetTableName).toHaveBeenCalledWith('public.orders');
+    });
+
+    it('wraps background validation summaries with mapping warnings and errors', async () => {
+        const service = new ImportWizardService();
+        const state = await service.createSession({
+            filePath: '/tmp/orders.csv',
+            targetTable: 'public.orders',
+            connectionDetails: {
+                dbType: 'postgresql',
+                host: 'localhost',
+                database: 'warehouse',
+                user: 'postgres',
+            } as never,
+            previewRowCount: 2,
+            validationSampleSize: 10,
+        });
+        const startValidation = jest
+            .spyOn(backgroundValidationService, 'startValidation')
+            .mockImplementation((job) => {
+                job.progressCallback(
+                    {
+                        phase: 'complete',
+                        rowsProcessed: 2,
+                        totalRows: 2,
+                        issuesFound: 0,
+                    },
+                    {
+                        issues: [],
+                        warnings: ['base warning'],
+                        hasErrors: false,
+                    },
+                );
+            });
+        const progressCallback = jest.fn();
+
+        service.startBackgroundValidation(state.id, 10, progressCallback);
+
+        expect(startValidation).toHaveBeenCalled();
+        expect(progressCallback).toHaveBeenCalledWith(
+            expect.objectContaining({ phase: 'complete' }),
+            expect.objectContaining({
+                warnings: ['base warning'],
+                hasErrors: false,
+            }),
+        );
+        expect(service.isBackgroundValidationActive(state.id)).toBe(false);
     });
 
     it('propagates the selected worksheet to import execution', async () => {

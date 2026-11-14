@@ -20,6 +20,10 @@ import { getDatabaseDialect } from '../../core/connectionFactory';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import { importClipboardDataToNetezza } from '../../import/clipboardImporter';
 import { importDataToNetezza, importDataToNetezzaAdvanced } from '../../import/dataImporter';
+import { ImportPreviewService } from '../../import/wizard/ImportPreviewService';
+import { ImportValidationService } from '../../import/wizard/ImportValidationService';
+import { ImportWizardSession } from '../../import/wizard/ImportWizardSession';
+import { NetezzaImportWizardAdapter } from '../../import/wizard/adapters/NetezzaImportWizardAdapter';
 import { MigrationService } from '../../migration/migrationService';
 import type { MigrationRequest } from '../../migration/types';
 import type { ConnectionDetails } from '../../types';
@@ -406,6 +410,264 @@ describeIfNetezza('Live Netezza virtual import and migration coverage', () => {
 
             const imported = await readNetezzaRows(`SELECT COUNT(*) FROM ${target}`);
             expectRowCount(imported.rows, 2);
+        } finally {
+            await dropNetezzaTable(target);
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }, 180000);
+
+    it('maps source columns onto an existing table and preserves target types', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-existing-live-'));
+        const csvPath = path.join(tempDir, 'existing.csv');
+        const table = uniqueTable('JBL_EXISTING_IMPORT');
+        const target = tableReference(sourceSchema, table);
+        fs.writeFileSync(
+            csvPath,
+            'id,source_label,source_amount\n1,Alpha,12.50\n2,Beta,8.25\n',
+        );
+
+        const connection = await openNetezza();
+        try {
+            await connection.createCommand(
+                `CREATE TABLE ${target} ("Id" BIGINT NOT NULL, "Display Name" NVARCHAR(20), "Amount" NUMERIC(10,2) DEFAULT 0)`,
+            ).execute();
+            await connection.createCommand(
+                `INSERT INTO ${target} ("Id", "Display Name", "Amount") VALUES (0, 'seed', 1.00)`,
+            ).execute();
+        } finally {
+            await connection.close().catch(() => undefined);
+        }
+
+        try {
+            const result = await importDataToNetezzaAdvanced(
+                csvPath,
+                target,
+                buildNetezzaDetails(),
+                undefined,
+                undefined,
+                {
+                    selectedColumnIndexes: [0, 1, 2],
+                    targetColumnNameOverrides: {
+                        0: 'Id',
+                        1: 'Display Name',
+                        2: 'Amount',
+                    },
+                    externalColumnTypes: {
+                        0: 'BIGINT',
+                        1: 'NVARCHAR(20)',
+                        2: 'NUMERIC(10,2)',
+                    },
+                    appendToExistingTable: true,
+                    hasHeaders: true,
+                },
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+            expect(result.details?.rowsInserted).toBe(2);
+            expect(result.details?.rowsRejected ?? 0).toBe(0);
+
+            const imported = await readNetezzaRows(
+                `SELECT "Id", "Display Name", "Amount" FROM ${target} ORDER BY "Id"`,
+            );
+            expect(imported.rows.map(row => [
+                String(row[0]),
+                String(row[1]),
+                String(row[2]),
+            ])).toEqual([
+                ['0', 'seed', '1.00'],
+                ['1', 'Alpha', '12.50'],
+                ['2', 'Beta', '8.25'],
+            ]);
+        } finally {
+            await dropNetezzaTable(target);
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }, 180000);
+
+    it('skips invalid rows in an existing-table load when MAXERRORS allows them', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-skip-live-'));
+        const csvPath = path.join(tempDir, 'skip-invalid.csv');
+        const table = uniqueTable('JBL_SKIP_IMPORT');
+        const target = tableReference(sourceSchema, table);
+        fs.writeFileSync(
+            csvPath,
+            'id,amount\n1,10.00\n2,not-a-number\n3,30.00\n',
+        );
+
+        const connection = await openNetezza();
+        try {
+            await connection.createCommand(
+                `CREATE TABLE ${target} (ID BIGINT NOT NULL, AMOUNT NUMERIC(10,2))`,
+            ).execute();
+        } finally {
+            await connection.close().catch(() => undefined);
+        }
+
+        try {
+            const result = await importDataToNetezzaAdvanced(
+                csvPath,
+                target,
+                buildNetezzaDetails(),
+                undefined,
+                undefined,
+                {
+                    selectedColumnIndexes: [0, 1],
+                    targetColumnNameOverrides: { 0: 'ID', 1: 'AMOUNT' },
+                    externalColumnTypes: { 0: 'BIGINT', 1: 'NUMERIC(10,2)' },
+                    appendToExistingTable: true,
+                    hasHeaders: true,
+                    maxErrors: 2147483647,
+                },
+            );
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+            expect(result.success).toBe(true);
+            expect(result.details?.rowsRejected).toBe(1);
+            expect(result.details?.rowsInserted).toBe(2);
+            expect(
+                result.details?.warnings?.some(warning => warning.includes('rejected')),
+            ).toBe(true);
+
+            const imported = await readNetezzaRows(
+                `SELECT ID FROM ${target} ORDER BY ID`,
+            );
+            expect(imported.rows.map(row => String(row[0]))).toEqual(['1', '3']);
+        } finally {
+            await dropNetezzaTable(target);
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }, 180000);
+
+    it('runs the full wizard existing-table mapping session against the live database', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-wizard-live-'));
+        const csvPath = path.join(tempDir, 'wizard-existing.csv');
+        const table = uniqueTable('JBL_WIZARD_IMPORT');
+        const target = tableReference(sourceSchema, table);
+        fs.writeFileSync(
+            csvPath,
+            'source_id,source_label,source_amount\n1,Alpha,12.50\n2,Beta,8.25\n',
+        );
+
+        const connection = await openNetezza();
+        try {
+            await connection.createCommand(
+                `CREATE TABLE ${target} ("Id" BIGINT NOT NULL, "Display Name" NVARCHAR(20), "Amount" NUMERIC(10,2) DEFAULT 0)`,
+            ).execute();
+        } finally {
+            await connection.close().catch(() => undefined);
+        }
+
+        try {
+            const session = new ImportWizardSession(
+                {
+                    filePath: csvPath,
+                    targetTable: target,
+                    connectionDetails: buildNetezzaDetails(),
+                    previewRowCount: 10,
+                    validationSampleSize: 10,
+                },
+                new NetezzaImportWizardAdapter(),
+                new ImportPreviewService(),
+                new ImportValidationService(),
+            );
+            const initialized = await session.initialize();
+            await session.setCreateTable(false);
+            await session.setTargetColumns(initialized.targetTable, [
+                { name: 'Id', dataType: 'BIGINT', nullable: false, hasDefault: false },
+                { name: 'Display Name', dataType: 'NVARCHAR(20)', nullable: true, hasDefault: false },
+                { name: 'Amount', dataType: 'NUMERIC(10,2)', nullable: true, hasDefault: true },
+            ]);
+            await session.mapColumnToTarget(0, 'Id');
+            await session.mapColumnToTarget(1, 'Display Name');
+            await session.mapColumnToTarget(2, 'Amount');
+
+            const mapped = session.getState();
+            expect(mapped.hasValidationErrors).toBe(false);
+            expect(mapped.executionPlan.loadSql).toContain('"Display Name" NVARCHAR(20)');
+
+            const result = await session.executeImport();
+            expect(result.success).toBe(true);
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+            expect(result.details?.rowsInserted).toBe(2);
+            expect(result.details?.rowsRejected ?? 0).toBe(0);
+
+            const imported = await readNetezzaRows(
+                `SELECT "Id", "Display Name", "Amount" FROM ${target} ORDER BY "Id"`,
+            );
+            expect(imported.rows.map(row => [
+                String(row[0]),
+                String(row[1]),
+                String(row[2]),
+            ])).toEqual([
+                ['1', 'Alpha', '12.50'],
+                ['2', 'Beta', '8.25'],
+            ]);
+        } finally {
+            await dropNetezzaTable(target);
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    }, 180000);
+
+    it('runs the wizard skip-invalid-row mode against the live database', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'netezza-import-wizard-skip-'));
+        const csvPath = path.join(tempDir, 'wizard-skip.csv');
+        const table = uniqueTable('JBL_WIZARD_SKIP');
+        const target = tableReference(sourceSchema, table);
+        fs.writeFileSync(csvPath, 'id,amount\n1,10.00\n2,not-a-number\n3,30.00\n');
+
+        const connection = await openNetezza();
+        try {
+            await connection.createCommand(
+                `CREATE TABLE ${target} (ID BIGINT NOT NULL, AMOUNT NUMERIC(10,2))`,
+            ).execute();
+        } finally {
+            await connection.close().catch(() => undefined);
+        }
+
+        try {
+            const session = new ImportWizardSession(
+                {
+                    filePath: csvPath,
+                    targetTable: target,
+                    connectionDetails: buildNetezzaDetails(),
+                    previewRowCount: 10,
+                    validationSampleSize: 10,
+                },
+                new NetezzaImportWizardAdapter(),
+                new ImportPreviewService(),
+                new ImportValidationService(),
+            );
+            const initialized = await session.initialize();
+            await session.setCreateTable(false);
+            await session.setTargetColumns(initialized.targetTable, [
+                { name: 'ID', dataType: 'BIGINT', nullable: false, hasDefault: false },
+                { name: 'AMOUNT', dataType: 'NUMERIC(10,2)', nullable: true, hasDefault: false },
+            ]);
+            await session.mapColumnToTarget(0, 'ID');
+            await session.mapColumnToTarget(1, 'AMOUNT');
+
+            expect(session.getState().hasValidationErrors).toBe(true);
+            await expect(session.executeImport()).rejects.toThrow(
+                'Fix validation errors before executing the import.',
+            );
+
+            await session.setInvalidRowMode('skip');
+            const result = await session.executeImport();
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+            expect(result.details?.rowsInserted).toBe(2);
+            expect(result.details?.rowsRejected).toBe(1);
+
+            const imported = await readNetezzaRows(
+                `SELECT ID FROM ${target} ORDER BY ID`,
+            );
+            expect(imported.rows.map(row => String(row[0]))).toEqual(['1', '3']);
         } finally {
             await dropNetezzaTable(target);
             fs.rmSync(tempDir, { recursive: true, force: true });

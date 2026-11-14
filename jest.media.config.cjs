@@ -55,6 +55,7 @@ module.exports = {
     'media/snippets.ts',
     'media/snippets/model.ts',
     'media/snippets/panel.ts',
+    'media/importWizard/panel.ts',
     '!media/**/*.d.ts',
   ],
   coverageDirectory: 'coverage/media',

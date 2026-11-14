@@ -77,7 +77,10 @@ export class TabularDataImporter {
     private inferredTypes: string[] = [];
     private selectedColumnIndexes: number[] = [];
     private forcedColumnTypes = new Map<number, string>();
+    private externalColumnTypes = new Map<number, string>();
     private columnNameOverrides = new Map<number, string>();
+    private targetColumnNameOverrides = new Map<number, string>();
+    private maxErrors?: number;
 
     public constructor(filePath: string, targetTable: string, options?: string | TabularDataImporterOptions) {
         const resolvedOptions = typeof options === 'string'
@@ -85,6 +88,7 @@ export class TabularDataImporter {
             : options;
         this.kind = normalizeKind(resolvedOptions?.kind);
         this.targetTable = targetTable;
+        this.maxErrors = resolvedOptions?.maxErrors;
         this.importer = new NetezzaImporter(filePath, targetTable, resolvedOptions?.logDir, {
             inferBoolean: resolvedOptions?.inferBoolean === true,
             hasHeaders: resolvedOptions?.hasHeaders,
@@ -128,7 +132,8 @@ export class TabularDataImporter {
     }
 
     private getEffectiveColumnName(index: number): string {
-        return this.columnNameOverrides.get(index) || this.normalizedHeaders[index] || `COLUMN_${index + 1}`;
+        const targetColumnName = this.targetColumnNameOverrides.get(index);
+        return targetColumnName || this.columnNameOverrides.get(index) || this.normalizedHeaders[index] || `COLUMN_${index + 1}`;
     }
 
     private getEffectiveDataType(index: number): string {
@@ -139,7 +144,10 @@ export class TabularDataImporter {
         return {
             selectedColumnIndexes: this.getEffectiveColumnIndexes(),
             forcedColumnTypes: Object.fromEntries(this.forcedColumnTypes.entries()),
+            externalColumnTypes: Object.fromEntries(this.externalColumnTypes.entries()),
             columnNameOverrides: Object.fromEntries(this.columnNameOverrides.entries()),
+            targetColumnNameOverrides: Object.fromEntries(this.targetColumnNameOverrides.entries()),
+            maxErrors: this.maxErrors,
         };
     }
 
@@ -158,10 +166,16 @@ export class TabularDataImporter {
         this.ensureAnalyzed();
         this.selectedColumnIndexes = [];
         this.forcedColumnTypes.clear();
+        this.externalColumnTypes.clear();
         this.columnNameOverrides.clear();
+        this.targetColumnNameOverrides.clear();
 
         if (!options) {
             return;
+        }
+
+        if (options.maxErrors !== undefined) {
+            this.maxErrors = options.maxErrors;
         }
 
         const allIndexes = this.getAllColumnIndexes();
@@ -185,6 +199,20 @@ export class TabularDataImporter {
             }
         }
 
+        if (options.externalColumnTypes) {
+            for (const [rawIndex, rawType] of Object.entries(options.externalColumnTypes)) {
+                const index = Number(rawIndex);
+                if (
+                    !this.selectedColumnIndexes.includes(index)
+                    || !rawType
+                    || !rawType.trim()
+                ) {
+                    continue;
+                }
+                this.externalColumnTypes.set(index, normalizeAndValidateForcedType(rawType));
+            }
+        }
+
         if (options.columnNameOverrides) {
             for (const [rawIndex, rawColumnName] of Object.entries(options.columnNameOverrides)) {
                 const index = Number(rawIndex);
@@ -196,6 +224,25 @@ export class TabularDataImporter {
                     continue;
                 }
                 this.columnNameOverrides.set(index, normalizedColumnName);
+            }
+        }
+
+        if (options.targetColumnNameOverrides) {
+            for (const [rawIndex, rawColumnName] of Object.entries(options.targetColumnNameOverrides)) {
+                const index = Number(rawIndex);
+                if (!this.selectedColumnIndexes.includes(index)) {
+                    continue;
+                }
+                const targetColumnName = String(rawColumnName ?? '').trim();
+                if (
+                    !targetColumnName
+                    || targetColumnName.includes('\r')
+                    || targetColumnName.includes('\n')
+                    || targetColumnName.includes('\0')
+                ) {
+                    continue;
+                }
+                this.targetColumnNameOverrides.set(index, targetColumnName);
             }
         }
     }
@@ -251,7 +298,9 @@ export class TabularDataImporter {
         this.inferredTypes = [];
         this.selectedColumnIndexes = [];
         this.forcedColumnTypes.clear();
+        this.externalColumnTypes.clear();
         this.columnNameOverrides.clear();
+        this.targetColumnNameOverrides.clear();
     }
 
     public getSelectedSheet(): string | undefined {
@@ -264,7 +313,9 @@ export class TabularDataImporter {
         this.inferredTypes = [];
         this.selectedColumnIndexes = [];
         this.forcedColumnTypes.clear();
+        this.externalColumnTypes.clear();
         this.columnNameOverrides.clear();
+        this.targetColumnNameOverrides.clear();
     }
 
     public getHasHeaders(): boolean {
@@ -295,6 +346,10 @@ export class TabularDataImporter {
     }
 
     public getDelegate(): NetezzaImporter {
+        // The delegate generates the SQL previews used by the wizard; keep its
+        // column selection, names, types and external types in sync with the
+        // session state instead of exposing a stale analyzer instance.
+        this.importer.applyColumnOptions(this.buildDelegateColumnOptions());
         return this.importer;
     }
 

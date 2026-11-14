@@ -13,6 +13,12 @@ export interface NetezzaLoadStatusMonitorOptions {
     onStatus: (status: ImportLoadStatus) => void;
 }
 
+export interface NetezzaLoadStatusQueryOptions {
+    targetTable: string;
+    databaseName?: string;
+    user?: string;
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const LOAD_STATUS_QUERY_TIMEOUT_SECONDS = 20;
 
@@ -68,6 +74,85 @@ export function resolveNetezzaLoadStatusDatabase(
 
 function quoteDatabase(database: string): string {
     return formatIdentifierForSql(database, 'netezza');
+}
+
+function selectNetezzaLoadStatus(
+    rows: Array<Record<string, unknown>>,
+    options: NetezzaLoadStatusQueryOptions,
+): ImportLoadStatus | undefined {
+    const table = targetTableName(options.targetTable)?.toUpperCase();
+    if (!table) {
+        return undefined;
+    }
+
+    const tableRows = rows.filter(row => asText(row.TABLENAME)?.toUpperCase() === table);
+    if (tableRows.length === 0) {
+        return undefined;
+    }
+
+    const database = options.databaseName?.toUpperCase();
+    const databaseRows = database
+        ? tableRows.filter(row => {
+            const name = asText(row.DATABASENAME)?.toUpperCase();
+            return !name || name === database;
+        })
+        : tableRows;
+    if (databaseRows.length === 0) {
+        return undefined;
+    }
+
+    const user = options.user?.toUpperCase();
+    const userRows = user
+        ? databaseRows.filter(row => asText(row.USERNAME)?.toUpperCase() === user)
+        : [];
+    const candidates = userRows.length > 0 ? userRows : databaseRows;
+    candidates.sort((left, right) => (asNumber(right.PLANID) ?? 0) - (asNumber(left.PLANID) ?? 0));
+
+    const row = candidates[0];
+    return {
+        planId: asNumber(row.PLANID),
+        databaseName: asText(row.DATABASENAME),
+        tableName: asText(row.TABLENAME),
+        schemaName: asText(row.SCHEMANAME),
+        userName: asText(row.USERNAME),
+        bytesProcessed: asNumber(row.BYTESPROCESSED),
+        rowsInserted: asNumber(row.ROWSINSERTED),
+        rowsRejected: asNumber(row.ROWSREJECTED),
+        bytesDownloaded: asNumber(row.BYTESDOWNLOADED),
+    };
+}
+
+/**
+ * Read the `_V_LOAD_STATUS` row for a target table using an existing
+ * connection. Callers use this after a load completes to report inserted and
+ * rejected rows without opening a second connection.
+ */
+export async function readNetezzaLoadStatus(
+    connection: NzConnection,
+    options: NetezzaLoadStatusQueryOptions,
+): Promise<ImportLoadStatus | undefined> {
+    const database = options.databaseName?.trim();
+    const sql = database
+        ? `SELECT * FROM ${quoteDatabase(database)}.._V_LOAD_STATUS`
+        : 'SELECT * FROM _V_LOAD_STATUS';
+    const command = connection.createCommand(sql);
+    command.commandTimeout = LOAD_STATUS_QUERY_TIMEOUT_SECONDS;
+
+    const reader = await command.executeReader();
+    const rows: Array<Record<string, unknown>> = [];
+    try {
+        while (await reader.read()) {
+            const row: Record<string, unknown> = {};
+            for (let index = 0; index < reader.fieldCount; index++) {
+                row[reader.getName(index).toUpperCase()] = reader.getValue(index);
+            }
+            rows.push(row);
+        }
+    } finally {
+        await reader.close();
+    }
+
+    return selectNetezzaLoadStatus(rows, options);
 }
 
 /**
@@ -131,71 +216,11 @@ export class NetezzaLoadStatusMonitor {
             return undefined;
         }
 
-        const database = this.options.databaseName?.trim();
-        const sql = database
-            ? `SELECT * FROM ${quoteDatabase(database)}.._V_LOAD_STATUS`
-            : 'SELECT * FROM _V_LOAD_STATUS';
-        const command = connection.createCommand(sql);
-        command.commandTimeout = LOAD_STATUS_QUERY_TIMEOUT_SECONDS;
-
-        const reader = await command.executeReader();
-        const rows: Array<Record<string, unknown>> = [];
-        try {
-            while (await reader.read()) {
-                const row: Record<string, unknown> = {};
-                for (let index = 0; index < reader.fieldCount; index++) {
-                    row[reader.getName(index).toUpperCase()] = reader.getValue(index);
-                }
-                rows.push(row);
-            }
-        } finally {
-            await reader.close();
-        }
-
-        return this.selectStatus(rows);
-    }
-
-    private selectStatus(rows: Array<Record<string, unknown>>): ImportLoadStatus | undefined {
-        const table = targetTableName(this.options.targetTable)?.toUpperCase();
-        if (!table) {
-            return undefined;
-        }
-
-        const tableRows = rows.filter(row => asText(row.TABLENAME)?.toUpperCase() === table);
-        if (tableRows.length === 0) {
-            return undefined;
-        }
-
-        const database = this.options.databaseName?.toUpperCase();
-        const databaseRows = database
-            ? tableRows.filter(row => {
-                const name = asText(row.DATABASENAME)?.toUpperCase();
-                return !name || name === database;
-            })
-            : tableRows;
-        if (databaseRows.length === 0) {
-            return undefined;
-        }
-
-        const user = asText(this.options.connectionDetails.user)?.toUpperCase();
-        const userRows = user
-            ? databaseRows.filter(row => asText(row.USERNAME)?.toUpperCase() === user)
-            : [];
-        const candidates = userRows.length > 0 ? userRows : databaseRows;
-        candidates.sort((left, right) => (asNumber(right.PLANID) ?? 0) - (asNumber(left.PLANID) ?? 0));
-
-        const row = candidates[0];
-        return {
-            planId: asNumber(row.PLANID),
-            databaseName: asText(row.DATABASENAME),
-            tableName: asText(row.TABLENAME),
-            schemaName: asText(row.SCHEMANAME),
-            userName: asText(row.USERNAME),
-            bytesProcessed: asNumber(row.BYTESPROCESSED),
-            rowsInserted: asNumber(row.ROWSINSERTED),
-            rowsRejected: asNumber(row.ROWSREJECTED),
-            bytesDownloaded: asNumber(row.BYTESDOWNLOADED),
-        };
+        return readNetezzaLoadStatus(connection, {
+            targetTable: this.options.targetTable,
+            databaseName: this.options.databaseName,
+            user: this.options.connectionDetails.user,
+        });
     }
 
     private emit(status: ImportLoadStatus): void {

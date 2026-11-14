@@ -69,6 +69,72 @@ test.describe('Import Wizard webview', () => {
         await expect(lines.nth(1)).toContainText('Plan 46');
         await expect(lines.nth(1)).toContainText('173,226 inserted');
     });
+
+    test('renders catalog target mapping with required and default badges', async ({ page }) => {
+        await page.goto('/test-harness/import-wizard.html');
+        await page.waitForSelector('.import-target-name');
+        await page.evaluate(() => {
+            (window as unknown as { __showExistingTableMapping: () => void }).__showExistingTableMapping();
+        });
+
+        await expect(page.locator('.import-existing-target-panel')).toBeVisible();
+        await expect(page.locator('.import-existing-map-row')).toHaveCount(7);
+        await expect(page.locator('.import-mapping-count')).toHaveText('3 of 7 mapped');
+        await expect(page.locator('.import-existing-target-head')).toContainText('4 target columns · 3 mapped');
+        await expect(page.locator('.import-existing-target-error')).toContainText('Required Note');
+        await expect(page.locator('#execute-import')).toBeDisabled();
+
+        const productKey = page.locator('select[data-source-index="0"]');
+        await expect(productKey).toHaveValue('Product Key');
+        await expect(productKey.locator('option[value="Product Key"]')).toContainText('required');
+        await expect(productKey.locator('option[value="Unit Cost"]')).toContainText('default');
+        await expect(page.locator('select[data-source-index="1"]')).toHaveValue('');
+    });
+
+    test('allows sample validation errors only when invalid rows are skipped', async ({ page }) => {
+        await page.goto('/test-harness/import-wizard.html');
+        await page.waitForSelector('.import-target-name');
+
+        await page.evaluate(() => {
+            (window as unknown as { __showExistingTableMapping: (options?: unknown) => void })
+                .__showExistingTableMapping({ mapRequiredNote: true, hasValidationErrors: true });
+        });
+        await expect(page.locator('.import-existing-target-error')).toHaveCount(0);
+        await expect(page.locator('#execute-import')).toBeDisabled();
+
+        await page.evaluate(() => {
+            (window as unknown as { __showExistingTableMapping: (options?: unknown) => void })
+                .__showExistingTableMapping({
+                    mapRequiredNote: true,
+                    hasValidationErrors: true,
+                    invalidRowMode: 'skip',
+                });
+        });
+        await expect(page.locator('#invalid-row-mode')).toHaveValue('skip');
+        await expect(page.locator('#execute-import')).toBeEnabled();
+    });
+
+    test('posts mapping, invalid-row, and reload messages to the host', async ({ page }) => {
+        await page.goto('/test-harness/import-wizard.html');
+        await page.waitForSelector('.import-target-name');
+        await page.evaluate(() => {
+            (window as unknown as { __showExistingTableMapping: () => void }).__showExistingTableMapping();
+        });
+        await expect(page.locator('.import-existing-map-row')).toHaveCount(7);
+
+        await page.locator('select[data-source-index="0"]').selectOption('');
+        await page.locator('#invalid-row-mode').selectOption('skip');
+        await page.locator('#reload-target-columns').click();
+
+        const messages = await page.evaluate(
+            () => (window as unknown as { __postedMessages: unknown[] }).__postedMessages,
+        );
+        expect(messages).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'mapColumnToTarget', sourceIndex: 0 }),
+            expect.objectContaining({ type: 'setInvalidRowMode', mode: 'skip' }),
+            expect.objectContaining({ type: 'reloadTargetColumns' }),
+        ]));
+    });
 });
 
 test.describe('Table Designer webview', () => {

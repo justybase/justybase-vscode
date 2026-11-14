@@ -11,11 +11,20 @@ import type { ImportValidationService } from "./ImportValidationService";
 import type { DatabaseImportWizardAdapter } from "./adapters/DatabaseImportWizardAdapter";
 import type {
   ImportExecutionPlan,
+  ImportInvalidRowMode,
+  ImportTargetColumn,
   ImportWizardColumn,
   ImportWizardSessionOptions,
   ImportWizardState,
   ImportTargetLocationCapabilitiesState,
 } from "./ImportWizardState";
+import {
+  applyAutoTargetMapping,
+  buildTargetValidationOverrides,
+  isExistingTableMappingActive,
+  mapSourceColumnToTarget,
+  validateExistingTableMapping,
+} from "./existingTableTargets";
 import type { TabularDataImporter } from "../tabularDataImporter";
 import {
   composeImportTargetTable,
@@ -86,6 +95,9 @@ export class ImportWizardSession {
         ? (this.options.createTable ?? true)
         : true,
       canAppendToExistingTable: this.adapter.supportsAppendToExistingTable,
+      canMapExistingTableColumns: this.adapter.supportsTargetColumnMapping === true,
+      existingTable: { status: "idle", columns: [] },
+      invalidRowMode: "abort",
       targetTable: this.options.targetTable,
       targetLocation,
       targetLocationCapabilities,
@@ -133,6 +145,10 @@ export class ImportWizardSession {
       },
       typeOptions: [...state.typeOptions],
       targetLocation: { ...state.targetLocation },
+      existingTable: {
+        ...state.existingTable,
+        columns: state.existingTable.columns.map((column) => ({ ...column })),
+      },
       availableDatabases: [...state.availableDatabases],
       availableSchemas: [...state.availableSchemas],
       availableConnections: state.availableConnections.map((connection) => ({ ...connection })),
@@ -149,6 +165,20 @@ export class ImportWizardSession {
     );
     if (!column) {
       throw new Error(`Unknown import column: ${sourceIndex}`);
+    }
+
+    if (
+      isExistingTableMappingActive(state)
+      && state.existingTable.status === "ready"
+    ) {
+      mapSourceColumnToTarget(
+        state.columns,
+        state.existingTable.columns,
+        sourceIndex,
+        targetName,
+      );
+      await this.refreshDerivedState();
+      return this.getState();
     }
 
     const normalizedName = targetName.trim()
@@ -212,6 +242,10 @@ export class ImportWizardSession {
     selectedType: string,
   ): Promise<ImportWizardState> {
     const state = this.requireState();
+    if (isExistingTableMappingActive(state)) {
+      // Target catalog types are authoritative for an existing table.
+      return this.getState();
+    }
     const column = state.columns.find(
       (item) => item.sourceIndex === sourceIndex,
     );
@@ -256,6 +290,12 @@ export class ImportWizardSession {
     state.hasHeaders = importer.getHasHeaders();
     state.sourceHeaders = preview.sourceHeaders;
     state.columns = preview.columns;
+    if (
+      isExistingTableMappingActive(state)
+      && state.existingTable.status === "ready"
+    ) {
+      applyAutoTargetMapping(state.columns, state.existingTable.columns);
+    }
     state.previewRows = [];
     state.issues = [];
     state.warnings = [];
@@ -270,6 +310,99 @@ export class ImportWizardSession {
   public async setCreateTable(createTable: boolean): Promise<ImportWizardState> {
     const state = this.requireState();
     state.createTable = state.canAppendToExistingTable ? createTable : true;
+    if (
+      !state.createTable
+      && state.canMapExistingTableColumns
+      && state.existingTable.status === "ready"
+    ) {
+      applyAutoTargetMapping(state.columns, state.existingTable.columns);
+    }
+    await this.refreshDerivedState();
+    return this.getState();
+  }
+
+  /** Mark the catalog lookup as in progress for the current target table. */
+  public async beginTargetColumnLoad(
+    targetTable: string,
+  ): Promise<ImportWizardState> {
+    const state = this.requireState();
+    if (
+      !isExistingTableMappingActive(state)
+      || state.targetTable !== targetTable
+    ) {
+      return this.getState();
+    }
+
+    state.existingTable = { status: "loading", columns: [] };
+    await this.refreshDerivedState();
+    return this.getState();
+  }
+
+  /**
+   * Apply the authoritative target catalog. Results for a target table that
+   * changed while the lookup was running are ignored.
+   */
+  public async setTargetColumns(
+    targetTable: string,
+    columns: readonly ImportTargetColumn[],
+    error?: string,
+  ): Promise<ImportWizardState> {
+    const state = this.requireState();
+    if (
+      !isExistingTableMappingActive(state)
+      || state.targetTable !== targetTable
+    ) {
+      return this.getState();
+    }
+
+    if (error) {
+      state.existingTable = { status: "error", columns: [], error };
+    } else if (columns.length === 0) {
+      state.existingTable = {
+        status: "error",
+        columns: [],
+        error: `No columns were found for ${targetTable}. Check the table name or refresh the metadata cache.`,
+      };
+    } else {
+      state.existingTable = {
+        status: "ready",
+        columns: columns.map((column) => ({ ...column })),
+      };
+      applyAutoTargetMapping(state.columns, state.existingTable.columns);
+    }
+
+    await this.refreshDerivedState();
+    return this.getState();
+  }
+
+  /** Map one source column to an existing target column, or unmap it. */
+  public async mapColumnToTarget(
+    sourceIndex: number,
+    targetName?: string,
+  ): Promise<ImportWizardState> {
+    const state = this.requireState();
+    if (
+      !isExistingTableMappingActive(state)
+      || state.existingTable.status !== "ready"
+    ) {
+      throw new Error("Load the target table columns before mapping a column.");
+    }
+
+    mapSourceColumnToTarget(
+      state.columns,
+      state.existingTable.columns,
+      sourceIndex,
+      targetName,
+    );
+    await this.refreshDerivedState();
+    return this.getState();
+  }
+
+  public async setInvalidRowMode(
+    mode: ImportInvalidRowMode,
+  ): Promise<ImportWizardState> {
+    const state = this.requireState();
+    state.invalidRowMode = mode === "skip" ? "skip" : "abort";
     await this.refreshDerivedState();
     return this.getState();
   }
@@ -400,6 +533,12 @@ export class ImportWizardSession {
     state.decimalDelimiter = preview.decimalDelimiter;
     state.sourceHeaders = preview.sourceHeaders;
     state.columns = preview.columns;
+    if (
+      isExistingTableMappingActive(state)
+      && state.existingTable.status === "ready"
+    ) {
+      applyAutoTargetMapping(state.columns, state.existingTable.columns);
+    }
     this.rawSampleRows = preview.rawPreviewRows;
     await this.refreshDerivedState(preview.rawPreviewRows);
     return this.getState();
@@ -415,7 +554,20 @@ export class ImportWizardSession {
     isCancelled?: ImportCancellationCheck,
     options?: { ignoreValidationErrors?: boolean },
   ): Promise<ImportResult> {
-    if (this.requireState().hasValidationErrors && !options?.ignoreValidationErrors) {
+    const state = this.requireState();
+    const mapping = validateExistingTableMapping(state);
+    if (mapping.active && mapping.errors.length > 0) {
+      throw new Error(mapping.errors[0]);
+    }
+    // Sample rows that do not fit the target types are recoverable when the
+    // database load is allowed to skip rejected rows. Structural mapping
+    // errors above are never recoverable.
+    const skipInvalidRows = state.invalidRowMode === "skip" && isExistingTableMappingActive(state);
+    if (
+      state.hasValidationErrors
+      && !skipInvalidRows
+      && !options?.ignoreValidationErrors
+    ) {
       throw new Error("Fix validation errors before executing the import.");
     }
 
@@ -474,6 +626,10 @@ export class ImportWizardSession {
       this.options.connectionDetails,
       this.adapter.kind,
     );
+    if (targetTable !== state.targetTable) {
+      // The old catalog does not describe the new destination.
+      state.existingTable = { status: "idle", columns: [] };
+    }
     this.options.targetTable = targetTable;
     state.targetTable = targetTable;
     this.requireImporter().updateTargetTable(targetTable);
@@ -486,12 +642,37 @@ export class ImportWizardSession {
       .filter((column) => column.included)
       .map((column) => column.sourceIndex);
     const forcedColumnTypes: Record<number, string> = {};
+    const externalColumnTypes: Record<number, string> = {};
     const columnNameOverrides: Record<number, string> = {};
+    const targetColumnNameOverrides: Record<number, string> = {};
+    const mappingActive = isExistingTableMappingActive(state) && state.existingTable.status === "ready";
+    const targetLookup = new Map(
+      state.existingTable.columns.map((column) => [
+        column.name.trim().toUpperCase(),
+        column,
+      ]),
+    );
 
     for (const column of state.columns) {
       if (!column.included) {
         continue;
       }
+
+      if (mappingActive) {
+        const target = targetLookup.get(
+          column.targetName.trim().toUpperCase(),
+        );
+        // The catalog name is authoritative and must not be header-sanitized.
+        targetColumnNameOverrides[column.sourceIndex] = target?.name ?? column.targetName;
+        if (target) {
+          // Declare the external stream with the real target type so the
+          // database rejects incompatible rows (and MAXERRORS can skip them)
+          // before the target INSERT starts.
+          externalColumnTypes[column.sourceIndex] = target.dataType;
+        }
+        continue;
+      }
+
       if (column.selectedType !== column.inferredType) {
         forcedColumnTypes[column.sourceIndex] = column.selectedType;
       }
@@ -506,13 +687,25 @@ export class ImportWizardSession {
         Object.keys(forcedColumnTypes).length > 0
           ? forcedColumnTypes
           : undefined,
+      externalColumnTypes:
+        Object.keys(externalColumnTypes).length > 0
+          ? externalColumnTypes
+          : undefined,
       columnNameOverrides:
         Object.keys(columnNameOverrides).length > 0
           ? columnNameOverrides
           : undefined,
+      targetColumnNameOverrides:
+        Object.keys(targetColumnNameOverrides).length > 0
+          ? targetColumnNameOverrides
+          : undefined,
       appendToExistingTable: !state.createTable,
       hasHeaders: state.hasHeaders,
       sheetName: state.sheetName,
+      maxErrors:
+        this.adapter.kind === "netezza"
+          ? (state.invalidRowMode === "skip" ? 2147483647 : 1)
+          : undefined,
     };
   }
 
@@ -563,13 +756,16 @@ export class ImportWizardSession {
     const validationRows = this.buildPreviewRows(
       rawRows.slice(0, state.validationSampleSize),
     );
+    const targetOverrides = buildTargetValidationOverrides(state);
     const validation = this.validationService.validate(
       state.columns,
       validationRows,
       state.validationSampleSize,
       this.adapter,
       state.decimalDelimiter,
+      targetOverrides.size > 0 ? { targetOverrides } : undefined,
     );
+    const mappingValidation = validateExistingTableMapping(state);
 
     const executionPlan = this.adapter.buildExecutionPlan({
       filePath: state.filePath,
@@ -586,9 +782,14 @@ export class ImportWizardSession {
     state.previewRows = previewRows;
     state.issues = validation.issues;
     state.warnings = Array.from(
-      new Set([...validation.warnings, ...executionPlan.warnings]),
+      new Set([
+        ...validation.warnings,
+        ...mappingValidation.warnings,
+        ...mappingValidation.errors,
+        ...executionPlan.warnings,
+      ]),
     );
-    state.hasValidationErrors = validation.hasErrors;
+    state.hasValidationErrors = validation.hasErrors || mappingValidation.errors.length > 0;
     state.executionPlan = executionPlan;
     state.detectedDelimiter = importer.getCsvDelimiter();
     state.decimalDelimiter = importer.getDecimalDelimiter() as "." | ",";

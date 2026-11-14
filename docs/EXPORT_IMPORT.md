@@ -274,7 +274,21 @@ Use **Open SQL** in the manager to query the local tables. Right-clicking a CSV 
 - SQL preview for both the table-creation step and the load step when direct load SQL is available
 - Plan / workflow preview for dialects that use a guided or staged import path instead of direct load SQL
 
-Programmatic callers can pass `delimiter`, `skipRows`, `maxErrors`, and `encoding` through `ImportColumnOptions`. Netezza targets accept `TABLE`, `SCHEMA.TABLE`, `DATABASE.SCHEMA.TABLE`, and the database-only `DATABASE..TABLE` notation.
+Programmatic callers can pass `delimiter`, `skipRows`, `maxErrors`, `externalColumnTypes`, `targetColumnNameOverrides`, and `encoding` through `ImportColumnOptions`. Netezza targets accept `TABLE`, `SCHEMA.TABLE`, `DATABASE.SCHEMA.TABLE`, and the database-only `DATABASE..TABLE` notation.
+
+### Existing-table imports (Netezza)
+
+Switch off **Create new table** to append to an existing Netezza table. The wizard then:
+
+- Loads the target catalog columns (name, type, nullability, default) from the metadata cache/provider.
+- Auto-maps source headers by name and lets you select the exact target for every source column, including quoted or mixed-case catalog names.
+- Treats the catalog type as authoritative for sample validation. Source values are checked against the target type, and mapped `NOT NULL` columns reject empty values.
+- Blocks execution when a mapped target column does not exist, when two source columns target the same column, or when a `NOT NULL` target without a default is not mapped.
+- Shows omitted nullable/default targets as warnings; omitted defaults are applied by Netezza.
+- Declares the external stream with the target column type so incompatible rows are rejected by the database before the final `INSERT`.
+- Offers **Abort the import** (default) or **Skip invalid rows**. Skipping uses Netezza `MAXERRORS` and reports rejected rows in the result warnings; the target is never truncated or replaced.
+
+The target type is also used in the generated load SQL, so the preview matches what will execute.
 
 ### Advanced Import Wizard details
 
@@ -284,7 +298,7 @@ It provides:
 
 1. A prominent import-target banner with the fully qualified destination table and an on-demand editor for connection, database, schema, table name, and create/append mode.
 2. A source card with the file format, worksheet, and preview-row controls; technical metadata is kept in a collapsed section.
-3. A column-mapping editor for target names, inclusion, ordering, and selected database types.
+3. A column-mapping editor for target names, inclusion, ordering, and selected database types. For Netezza appends, the editor becomes a catalog-driven target-column mapping with required/default/type badges and an invalid-row policy.
 4. A collapsible preview grid with cell-level issue highlighting from validation.
 5. Collapsed SQL Preview cards for `CREATE TABLE`, direct load SQL, or a generated execution plan when the adapter runs in workflow mode.
 6. Background validation progress so larger files can keep surfacing issues after the initial preview is already usable. The default sample is 20,000 rows; the parsed sample is cached per sheet/header selection, so column edits do not re-read the file, and only a bounded number of issue details is sent to the webview while the full count is reported.

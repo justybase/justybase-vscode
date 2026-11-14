@@ -33,6 +33,12 @@
 <body>
     <div id="app" class="import-wizard-root"></div>
     <script>
+        window.__postedMessages = [];
+        window.acquireVsCodeApi = () => ({
+            postMessage: (message) => window.__postedMessages.push(message),
+            setState() {},
+            getState() { return undefined; },
+        });
         window.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'sessionInitialized') {
                 document.body.dataset.sessionReady = 'true';
@@ -61,65 +67,102 @@
             overrideMode: name === 'UNITCOST' ? 'user' : 'inferred',
         }));
 
+        const baseState = {
+            id: 'harness-session',
+            filePath: '/tmp/justybase/sales.xlsb',
+            sourceKind: 'file',
+            sourceName: 'sales.xlsb',
+            fileName: 'sales.xlsb',
+            fileFormat: 'xlsb',
+            sheetName: 'Sheet1',
+            availableSheets: ['Sheet1', 'Sheet2'],
+            canChangeSheet: true,
+            connectionName: 'JustData',
+            availableConnections: [
+                { name: 'JustData', label: 'JustData (ADMIN)', database: 'JUST_DATA', databaseKind: 'netezza' },
+            ],
+            databaseKind: 'netezza',
+            hasHeaders: true,
+            createTable: true,
+            canAppendToExistingTable: true,
+            canMapExistingTableColumns: true,
+            existingTable: { status: 'idle', columns: [] },
+            invalidRowMode: 'abort',
+            targetTable: 'JUST_DATA.ADMIN.QUERY_RESULTS_20261024_6031',
+            targetLocation: {
+                database: 'JUST_DATA',
+                schema: 'ADMIN',
+                tableName: 'QUERY_RESULTS_20261024_6031',
+            },
+            targetLocationCapabilities: {
+                supportsDatabaseSelection: true,
+                supportsSchemaSelection: true,
+                enforceActiveDatabase: false,
+            },
+            availableDatabases: ['JUST_DATA', 'SANDBOX'],
+            availableSchemas: ['ADMIN', 'PUBLIC'],
+            previewRowCount: 10,
+            validationSampleSize: 25,
+            detectedDelimiter: undefined,
+            decimalDelimiter: '.',
+            sourceHeaders: columns.map(column => column.sourceName),
+            columns,
+            previewRows: [
+                ['1001', '20260101', '2026-01-01 08:15:00', '12.50', '8', '0', '8'],
+                ['1002', '20260101', '2026-01-01 09:30:00', '9.99', '3', '1', '2'],
+                ['1003', '20260102', '2026-01-02 10:05:00', '125.00', '20', '4', '16'],
+            ],
+            issues: [],
+            warnings: [],
+            hasValidationErrors: false,
+            executionPlan: {
+                mode: 'direct',
+                createTableSql: 'CREATE TABLE "JUST_DATA"."ADMIN"."QUERY_RESULTS_20261024_6031"\n(\n  "PRODUCTKEY" BIGINT,\n  "DATEKEY" BIGINT,\n  "MOVEMENTDATE" DATETIME,\n  "UNITCOST" INTEGER,\n  "UNITSIN" BIGINT,\n  "UNITSOUT" BIGINT,\n  "UNITS_BALANCE" BIGINT\n) DISTRIBUTE ON RANDOM;',
+                loadSql: 'INSERT INTO "JUST_DATA"."ADMIN"."QUERY_RESULTS_20261024_6031"\n("PRODUCTKEY", "DATEKEY", "MOVEMENTDATE", "UNITCOST", "UNITSIN", "UNITSOUT", "UNITS_BALANCE")\nSELECT "PRODUCTKEY", "DATEKEY", "MOVEMENTDATE", "UNITCOST", "UNITSIN", "UNITSOUT", "UNITS_BALANCE"\nFROM EXTERNAL \'virtual_import_1.txt\'',
+                warnings: [],
+                nextSteps: [],
+            },
+            typeOptions: ['BIGINT', 'INTEGER', 'NUMERIC(16,2)', 'TIMESTAMP', 'NVARCHAR(255)'],
+        };
+
         setTimeout(() => {
+            window.postMessage({ type: 'sessionInitialized', state: baseState }, '*');
+        }, 100);
+
+        window.__showExistingTableMapping = (options = {}) => {
+            const targetColumns = [
+                { name: 'Product Key', dataType: 'BIGINT', nullable: false, hasDefault: false },
+                { name: 'Movement Date', dataType: 'TIMESTAMP', nullable: true, hasDefault: false },
+                { name: 'Unit Cost', dataType: 'NUMERIC(16,2)', nullable: true, hasDefault: true },
+                { name: 'Required Note', dataType: 'NVARCHAR(50)', nullable: false, hasDefault: false },
+            ];
+            const mappedColumns = columns.map(column => {
+                if (column.sourceIndex === 0) {
+                    return { ...column, targetName: 'Product Key' };
+                }
+                if (column.sourceIndex === 1 && options.mapRequiredNote) {
+                    return { ...column, targetName: 'Required Note' };
+                }
+                if (column.sourceIndex === 2) {
+                    return { ...column, targetName: 'Movement Date' };
+                }
+                if (column.sourceIndex === 3) {
+                    return { ...column, targetName: 'Unit Cost' };
+                }
+                return { ...column, included: false };
+            });
             window.postMessage({
                 type: 'sessionInitialized',
                 state: {
-                    id: 'harness-session',
-                    filePath: '/tmp/justybase/sales.xlsb',
-                    sourceKind: 'file',
-                    sourceName: 'sales.xlsb',
-                    fileName: 'sales.xlsb',
-                    fileFormat: 'xlsb',
-                    sheetName: 'Sheet1',
-                    availableSheets: ['Sheet1', 'Sheet2'],
-                    canChangeSheet: true,
-                    connectionName: 'JustData',
-                    availableConnections: [
-                        { name: 'JustData', label: 'JustData (ADMIN)', database: 'JUST_DATA', databaseKind: 'netezza' },
-                    ],
-                    databaseKind: 'netezza',
-                    hasHeaders: true,
-                    createTable: true,
-                    canAppendToExistingTable: true,
-                    targetTable: 'JUST_DATA.ADMIN.QUERY_RESULTS_20261024_6031',
-                    targetLocation: {
-                        database: 'JUST_DATA',
-                        schema: 'ADMIN',
-                        tableName: 'QUERY_RESULTS_20261024_6031',
-                    },
-                    targetLocationCapabilities: {
-                        supportsDatabaseSelection: true,
-                        supportsSchemaSelection: true,
-                        enforceActiveDatabase: false,
-                    },
-                    availableDatabases: ['JUST_DATA', 'SANDBOX'],
-                    availableSchemas: ['ADMIN', 'PUBLIC'],
-                    previewRowCount: 10,
-                    validationSampleSize: 25,
-                    detectedDelimiter: undefined,
-                    decimalDelimiter: '.',
-                    sourceHeaders: columns.map(column => column.sourceName),
-                    columns,
-                    previewRows: [
-                        ['1001', '20260101', '2026-01-01 08:15:00', '12.50', '8', '0', '8'],
-                        ['1002', '20260101', '2026-01-01 09:30:00', '9.99', '3', '1', '2'],
-                        ['1003', '20260102', '2026-01-02 10:05:00', '125.00', '20', '4', '16'],
-                    ],
-                    issues: [],
-                    warnings: [],
-                    hasValidationErrors: false,
-                    executionPlan: {
-                        mode: 'direct',
-                        createTableSql: 'CREATE TABLE "JUST_DATA"."ADMIN"."QUERY_RESULTS_20261024_6031"\n(\n  "PRODUCTKEY" BIGINT,\n  "DATEKEY" BIGINT,\n  "MOVEMENTDATE" DATETIME,\n  "UNITCOST" INTEGER,\n  "UNITSIN" BIGINT,\n  "UNITSOUT" BIGINT,\n  "UNITS_BALANCE" BIGINT\n) DISTRIBUTE ON RANDOM;',
-                        loadSql: 'INSERT INTO "JUST_DATA"."ADMIN"."QUERY_RESULTS_20261024_6031"\n("PRODUCTKEY", "DATEKEY", "MOVEMENTDATE", "UNITCOST", "UNITSIN", "UNITSOUT", "UNITS_BALANCE")\nSELECT "PRODUCTKEY", "DATEKEY", "MOVEMENTDATE", "UNITCOST", "UNITSIN", "UNITSOUT", "UNITS_BALANCE"\nFROM EXTERNAL \'virtual_import_1.txt\'',
-                        warnings: [],
-                        nextSteps: [],
-                    },
-                    typeOptions: ['BIGINT', 'INTEGER', 'NUMERIC(16,2)', 'TIMESTAMP', 'NVARCHAR(255)'],
+                    ...baseState,
+                    createTable: false,
+                    invalidRowMode: options.invalidRowMode ?? 'abort',
+                    hasValidationErrors: Boolean(options.hasValidationErrors),
+                    existingTable: { status: 'ready', columns: targetColumns },
+                    columns: mappedColumns,
                 },
             }, '*');
-        }, 100);
+        };
 
         window.__showImportProgress = () => {
             window.postMessage({ type: 'executionStarted' }, '*');

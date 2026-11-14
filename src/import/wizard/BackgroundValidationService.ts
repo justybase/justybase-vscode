@@ -7,6 +7,7 @@ import type {
   ImportWizardValidationSummary,
 } from "./ImportWizardState";
 import { createImportCellValidator } from "./importCellValidation";
+import type { ImportTargetValidationOverride } from "./existingTableTargets";
 import type { TabularDataImporter } from "../tabularDataImporter";
 
 export interface BackgroundValidationJob {
@@ -15,6 +16,8 @@ export interface BackgroundValidationJob {
   importer: TabularDataImporter;
   adapter: DatabaseImportWizardAdapter;
   sampleSize: number;
+  /** Existing-table target types, keyed by source column index. */
+  targetOverrides?: ReadonlyMap<number, ImportTargetValidationOverride>;
   progressCallback: (
     progress: BackgroundValidationProgress,
     summary?: ImportWizardValidationSummary,
@@ -220,11 +223,16 @@ export class BackgroundValidationService {
       const totalRows = rawRows.length;
       const issues: ImportWizardCellIssue[] = [];
       const warnings: string[] = [];
-      const validators = columns.map((column) =>
-        column.included
-          ? createImportCellValidator(column.selectedType, decimalDelimiter)
-          : null,
-      );
+      const validators = columns.map((column) => {
+        if (!column.included) {
+          return null;
+        }
+        const targetOverride = job.targetOverrides?.get(column.sourceIndex);
+        return createImportCellValidator(
+          targetOverride?.dataType ?? column.selectedType,
+          decimalDelimiter,
+        );
+      });
       let issueCount = 0;
       let lastProgressTime = Date.now();
 
@@ -255,14 +263,19 @@ export class BackgroundValidationService {
           columnIndex < columns.length;
           columnIndex += 1
         ) {
+          const column = columns[columnIndex];
           const validator = validators[columnIndex];
-          if (!validator) {
+          const targetOverride = job.targetOverrides?.get(column.sourceIndex);
+          const notNull = targetOverride?.nullable === false;
+          if (!validator && !notNull) {
             continue;
           }
 
-          const column = columns[columnIndex];
           const value = row[column.sourceIndex] ?? "";
-          const validationMessage = validator(value);
+          let validationMessage = validator ? validator(value) : null;
+          if (!validationMessage && notNull && !value.trim()) {
+            validationMessage = "Column is NOT NULL but the value is empty.";
+          }
           if (!validationMessage) {
             continue;
           }
@@ -297,7 +310,11 @@ export class BackgroundValidationService {
         }
       }
 
-      const columnWarnings = this.validateColumns(columns, adapter);
+      const columnWarnings = this.validateColumns(
+        columns,
+        adapter,
+        job.targetOverrides,
+      );
       warnings.push(...columnWarnings);
       if (effectiveSampleSize < sampleSize) {
         warnings.push(
@@ -337,6 +354,7 @@ export class BackgroundValidationService {
   private validateColumns(
     columns: readonly ImportWizardColumn[],
     adapter: DatabaseImportWizardAdapter,
+    targetOverrides?: ReadonlyMap<number, ImportTargetValidationOverride>,
   ): string[] {
     const warnings: string[] = [];
     const includedColumns = columns.filter((column) => column.included);
@@ -363,9 +381,11 @@ export class BackgroundValidationService {
         seenTargetNames.set(normalizedTarget, column.targetName);
       }
 
-      const typeIssues = adapter.validateTypeOverride(column.selectedType);
-      for (const typeIssue of typeIssues) {
-        warnings.push(`${column.targetName}: ${typeIssue.message}`);
+      if (!targetOverrides?.get(column.sourceIndex)) {
+        const typeIssues = adapter.validateTypeOverride(column.selectedType);
+        for (const typeIssue of typeIssues) {
+          warnings.push(`${column.targetName}: ${typeIssue.message}`);
+        }
       }
     }
 

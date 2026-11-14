@@ -89,6 +89,12 @@ export function withImportSheetOption(
 export interface DatabaseImportWizardAdapter {
     readonly kind: DatabaseKind;
     supportsAppendToExistingTable: boolean;
+    /**
+     * When true, the wizard can load the target table catalog and map each
+     * source column to an existing target column. The target types and
+     * nullability are authoritative instead of the inferred source types.
+     */
+    supportsTargetColumnMapping?: boolean;
     normalizeTargetColumnName(name: string): string;
     getSupportedTypeOptions(): string[];
     mapInferredType(typeName: string): string;
@@ -138,6 +144,7 @@ export function formatQualifiedImportTarget(targetTable: string, kind: DatabaseK
 export abstract class BaseImportWizardAdapter implements DatabaseImportWizardAdapter {
     public abstract readonly kind: DatabaseKind;
     public supportsAppendToExistingTable = true;
+    public supportsTargetColumnMapping = false;
 
     protected constructor(private readonly executionMode: ImportWizardExecutionMode = 'direct') {}
 
