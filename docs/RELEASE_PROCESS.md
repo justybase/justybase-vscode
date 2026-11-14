@@ -116,6 +116,14 @@ manually to rebuild or republish an existing tag.
 script checks the GitHub Actions API for a successful `ci.yml` run on the exact
 commit. If CI is still running it waits; if CI failed, it stops the release.
 
+A newly created merge, squash, or rebase commit does not need its own completed
+CI run when a commit with the **identical git tree** already passed CI. The
+script compares the tree with the commit parents and with the head of the
+associated pull request, then accepts that green commit. This avoids a second
+full CI run on the merge commit after the release pull request is already green.
+Tree equivalence only skips waiting for a run that has not failed: a failed CI
+run on the tagged commit is always fatal.
+
 The publish workflow does not re-run the quality, unit, or integration gates.
 It still validates the release metadata, builds and audits every selected VSIX,
 and keeps the Db2 VS Code runtime smoke matrix in the release path.
@@ -208,7 +216,9 @@ node scripts/verify-release-ci.js --sha "$(git rev-parse HEAD)" --repo owner/nam
 
 The script prints the CI run URL and the conclusion it found. A common cause is
 starting `Release` before CI on the merge commit has finished; the script waits
-up to 15 minutes, then fails.
+up to 15 minutes, then fails. If a merge commit is new, the script first accepts
+a green commit with the identical git tree (the release pull request head or a
+parent), so the merge does not need its own completed run.
 
 CI runs automatically for pushes and pull requests targeting `master` and
 `main`. If `target_branch` is a different branch, dispatch `CI` manually for

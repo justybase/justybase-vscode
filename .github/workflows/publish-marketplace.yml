@@ -259,6 +259,7 @@ jobs:
           --sha "$(git rev-parse HEAD)"
           --wait-seconds 900
           --allow-version-only-parent
+          --allow-tree-equivalent
 
       - name: Bootstrap pinned Access index-code reference
         if: ${{ steps.targets.outputs.publish_access == 'true' }}

@@ -23,6 +23,11 @@
  *                                  parent passed CI. Needed only for tags
  *                                  created before the release-PR flow, when the
  *                                  bump commit itself carried [skip ci].
+ *   --allow-tree-equivalent        Accept a green commit with the identical git
+ *                                  tree (the merged pull request head or a
+ *                                  parent) instead of waiting for this commit's
+ *                                  own CI run. A failed run on the tagged commit
+ *                                  is still fatal.
  *   --help                         Print this help.
  *
  * Exit codes: 0 verified, 1 not verified, 2 usage/configuration error.
@@ -100,6 +105,32 @@ function classifyRuns(runs) {
   return { state: "none" };
 }
 
+/**
+ * Returns candidate commits whose git tree could match the target commit:
+ * the commit parents and the heads of pull requests associated with it.
+ * Squash and rebase merges keep the pull request head tree, while a merge
+ * commit keeps the tested tree as its second parent.
+ */
+function collectTreeEquivalentCandidates(commit, pulls) {
+  const treeSha = commit?.commit?.tree?.sha;
+  if (!treeSha) {
+    return [];
+  }
+
+  const candidates = new Set();
+  for (const parent of commit.parents || []) {
+    if (parent?.sha) {
+      candidates.add(parent.sha);
+    }
+  }
+  for (const pull of Array.isArray(pulls) ? pulls : []) {
+    if (pull?.head?.sha) {
+      candidates.add(pull.head.sha);
+    }
+  }
+  return [...candidates];
+}
+
 function requireValue(argv, index, flag) {
   const value = argv[index];
   if (!value || value.startsWith("--")) {
@@ -115,6 +146,7 @@ function parseArgs(argv) {
     workflow: DEFAULT_WORKFLOW,
     waitSeconds: DEFAULT_WAIT_SECONDS,
     allowVersionOnlyParent: false,
+    allowTreeEquivalent: false,
     help: false,
   };
 
@@ -142,6 +174,9 @@ function parseArgs(argv) {
       case "--allow-version-only-parent":
         options.allowVersionOnlyParent = true;
         break;
+      case "--allow-tree-equivalent":
+        options.allowTreeEquivalent = true;
+        break;
       case "--help":
       case "-h":
         options.help = true;
@@ -165,6 +200,9 @@ function printUsage() {
       "  --wait-seconds <seconds>       Defaults to 900.",
       "  --allow-version-only-parent    Accept a legacy version-only release commit",
       "                                 whose parent passed CI.",
+      "  --allow-tree-equivalent        Accept a green commit with the identical git tree",
+      "                                 (pull request head or parent) instead of waiting",
+      "                                 for this commit's own CI run.",
       "  --help                         Show this help.",
       "",
     ].join("\n"),
@@ -209,6 +247,54 @@ async function getCommit({ repo, sha, token }) {
   return githubRequest(`/repos/${repo}/commits/${sha}`, token);
 }
 
+async function listAssociatedPulls({ repo, sha, token }) {
+  try {
+    const pulls = await githubRequest(`/repos/${repo}/commits/${sha}/pulls`, token);
+    return Array.isArray(pulls) ? pulls : [];
+  } catch {
+    // The endpoint is best effort: without it we still compare parents.
+    return [];
+  }
+}
+
+/**
+ * Finds a commit with the same git tree that already passed CI. This covers
+ * merge commits (the tested pull request head is a parent), squash merges and
+ * rebase merges (the pull request head keeps the same tree).
+ */
+async function findTreeEquivalentGreenCommit({ repo, workflow, sha, token, commit }) {
+  const treeSha = commit?.commit?.tree?.sha;
+  if (!treeSha) {
+    return null;
+  }
+
+  const pulls = await listAssociatedPulls({ repo, sha, token });
+  for (const candidate of collectTreeEquivalentCandidates(commit, pulls)) {
+    if (candidate === sha) {
+      continue;
+    }
+
+    let candidateCommit;
+    try {
+      candidateCommit = await getCommit({ repo, sha: candidate, token });
+    } catch {
+      continue;
+    }
+
+    if (candidateCommit?.commit?.tree?.sha !== treeSha) {
+      continue;
+    }
+
+    const runs = await listWorkflowRuns({ repo, workflow, sha: candidate, token });
+    const outcome = classifyRuns(runs);
+    if (outcome.state === "success") {
+      return { sha: candidate, run: outcome.run };
+    }
+  }
+
+  return null;
+}
+
 async function resolveCommitSha({ repo, sha, token }) {
   if (/^[0-9a-f]{40}$/i.test(sha)) {
     return sha;
@@ -224,7 +310,15 @@ function describeRun(run) {
   return `${run.status}/${run.conclusion ?? "pending"}${run.html_url ? ` (${run.html_url})` : ""}`;
 }
 
-async function verifySha({ repo, workflow, sha, token, deadline, allowVersionOnlyParent }) {
+async function verifySha({
+  repo,
+  workflow,
+  sha,
+  token,
+  deadline,
+  allowVersionOnlyParent,
+  allowTreeEquivalent,
+}) {
   let checkedSha = await resolveCommitSha({ repo, sha, token });
   let checkedParent = false;
 
@@ -237,6 +331,23 @@ async function verifySha({ repo, workflow, sha, token, deadline, allowVersionOnl
         `CI verified for ${checkedSha}${checkedParent ? " (parent of a version-only release commit)" : ""}: ${describeRun(outcome.run)}\n`,
       );
       return true;
+    }
+
+    if ((outcome.state === "none" || outcome.state === "pending") && allowTreeEquivalent) {
+      const commit = await getCommit({ repo, sha: checkedSha, token });
+      const equivalent = await findTreeEquivalentGreenCommit({
+        repo,
+        workflow,
+        sha: checkedSha,
+        token,
+        commit,
+      });
+      if (equivalent) {
+        process.stdout.write(
+          `CI verified for ${equivalent.sha} (identical git tree to ${checkedSha}): ${describeRun(equivalent.run)}\n`,
+        );
+        return true;
+      }
     }
 
     if (outcome.state === "failed") {
@@ -343,6 +454,7 @@ async function main(argv) {
       token,
       deadline,
       allowVersionOnlyParent: options.allowVersionOnlyParent,
+      allowTreeEquivalent: options.allowTreeEquivalent,
     });
     return verified ? 0 : 1;
   } catch (error) {
@@ -353,6 +465,8 @@ async function main(argv) {
 
 module.exports = {
   classifyRuns,
+  collectTreeEquivalentCandidates,
+  findTreeEquivalentGreenCommit,
   isVersionOnlyFile,
   isVersionOnlyReleaseCommit,
   parseArgs,

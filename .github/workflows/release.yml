@@ -179,7 +179,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release-ci.js --sha "$(git rev-parse HEAD)" --wait-seconds 900
+        run: node scripts/verify-release-ci.js --sha "$(git rev-parse HEAD)" --wait-seconds 900 --allow-tree-equivalent
 
       - name: Configure Git identity
         if: ${{ github.event.inputs.release_type != 'specific' }}

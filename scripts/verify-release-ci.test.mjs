@@ -5,10 +5,41 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const {
   classifyRuns,
+  collectTreeEquivalentCandidates,
+  findTreeEquivalentGreenCommit,
   isVersionOnlyFile,
   isVersionOnlyReleaseCommit,
   parseArgs,
 } = require("./verify-release-ci.js");
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function installFetchMock({ commits, pulls = {}, runs = {} }) {
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    const parts = url.pathname.split("/");
+
+    if (parts[4] === "commits" && parts[6] === "pulls") {
+      return jsonResponse(pulls[parts[5]] ?? []);
+    }
+
+    if (parts[4] === "commits") {
+      const commit = commits[parts[5]];
+      return commit ? jsonResponse(commit) : jsonResponse({ message: "Not Found" }, 404);
+    }
+
+    if (url.pathname.includes("/actions/workflows/") && url.pathname.endsWith("/runs")) {
+      return jsonResponse({ workflow_runs: runs[url.searchParams.get("head_sha")] ?? [] });
+    }
+
+    return jsonResponse({ message: `unexpected ${url.pathname}` }, 404);
+  };
+}
 
 test("isVersionOnlyFile accepts files written by version-sync", () => {
   const accepted = [
@@ -110,6 +141,7 @@ test("parseArgs parses the documented flags", () => {
     "--wait-seconds",
     "60",
     "--allow-version-only-parent",
+    "--allow-tree-equivalent",
   ]);
 
   assert.equal(options.sha, "abc123");
@@ -117,6 +149,7 @@ test("parseArgs parses the documented flags", () => {
   assert.equal(options.workflow, "ci.yml");
   assert.equal(options.waitSeconds, 60);
   assert.equal(options.allowVersionOnlyParent, true);
+  assert.equal(options.allowTreeEquivalent, true);
   assert.equal(options.help, false);
 });
 
@@ -127,4 +160,131 @@ test("parseArgs rejects missing values and unknown flags", () => {
     () => parseArgs(["--sha", "abc", "--wait-seconds", "-1"]),
     /Invalid --wait-seconds/,
   );
+});
+
+test("collectTreeEquivalentCandidates uses parents and pull request heads", () => {
+  const commit = {
+    commit: { tree: { sha: "tree" } },
+    parents: [{ sha: "base" }, { sha: "merge-parent" }],
+  };
+  const pulls = [{ head: { sha: "pr-head" } }];
+
+  assert.deepEqual(
+    collectTreeEquivalentCandidates(commit, pulls).sort(),
+    ["base", "merge-parent", "pr-head"],
+  );
+});
+
+test("collectTreeEquivalentCandidates ignores commits without a tree", () => {
+  assert.deepEqual(collectTreeEquivalentCandidates({}, []), []);
+  assert.deepEqual(collectTreeEquivalentCandidates({ commit: {} }, []), []);
+});
+
+test("findTreeEquivalentGreenCommit accepts a green merge parent with the same tree", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    installFetchMock({
+      commits: {
+        merge: { commit: { tree: { sha: "T" } }, parents: [{ sha: "base" }, { sha: "head" }] },
+        base: { commit: { tree: { sha: "B" } }, parents: [] },
+        head: { commit: { tree: { sha: "T" } }, parents: [] },
+      },
+      runs: { head: [{ status: "completed", conclusion: "success", html_url: "run" }] },
+    });
+
+    const result = await findTreeEquivalentGreenCommit({
+      repo: "o/r",
+      workflow: "ci.yml",
+      sha: "merge",
+      token: "token",
+      commit: {
+        commit: { tree: { sha: "T" } },
+        parents: [{ sha: "base" }, { sha: "head" }],
+      },
+    });
+
+    assert.equal(result?.sha, "head");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("findTreeEquivalentGreenCommit accepts a green pull request head after a squash merge", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    installFetchMock({
+      commits: {
+        squash: { commit: { tree: { sha: "T" } }, parents: [{ sha: "base" }] },
+        base: { commit: { tree: { sha: "B" } }, parents: [] },
+        "pr-head": { commit: { tree: { sha: "T" } }, parents: [] },
+      },
+      pulls: { squash: [{ head: { sha: "pr-head" } }] },
+      runs: { "pr-head": [{ status: "completed", conclusion: "success" }] },
+    });
+
+    const result = await findTreeEquivalentGreenCommit({
+      repo: "o/r",
+      workflow: "ci.yml",
+      sha: "squash",
+      token: "token",
+      commit: {
+        commit: { tree: { sha: "T" } },
+        parents: [{ sha: "base" }],
+      },
+    });
+
+    assert.equal(result?.sha, "pr-head");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("findTreeEquivalentGreenCommit rejects a different tree", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    installFetchMock({
+      commits: {
+        merge: { commit: { tree: { sha: "T" } }, parents: [{ sha: "head" }] },
+        head: { commit: { tree: { sha: "OTHER" } }, parents: [] },
+      },
+      runs: { head: [{ status: "completed", conclusion: "success" }] },
+    });
+
+    const result = await findTreeEquivalentGreenCommit({
+      repo: "o/r",
+      workflow: "ci.yml",
+      sha: "merge",
+      token: "token",
+      commit: { commit: { tree: { sha: "T" } }, parents: [{ sha: "head" }] },
+    });
+
+    assert.equal(result, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("findTreeEquivalentGreenCommit rejects a same-tree candidate with failed CI", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    installFetchMock({
+      commits: {
+        merge: { commit: { tree: { sha: "T" } }, parents: [{ sha: "head" }] },
+        head: { commit: { tree: { sha: "T" } }, parents: [] },
+      },
+      runs: { head: [{ status: "completed", conclusion: "failure" }] },
+    });
+
+    const result = await findTreeEquivalentGreenCommit({
+      repo: "o/r",
+      workflow: "ci.yml",
+      sha: "merge",
+      token: "token",
+      commit: { commit: { tree: { sha: "T" } }, parents: [{ sha: "head" }] },
+    });
+
+    assert.equal(result, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
