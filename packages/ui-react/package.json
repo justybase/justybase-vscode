@@ -22,6 +22,7 @@
   "dependencies": {
     "@justybase/contracts": "*",
     "@justybase/ui-core": "*",
+    "@tanstack/react-virtual": "3.14.26",
     "react": "^19.2.0"
   },
   "devDependencies": {

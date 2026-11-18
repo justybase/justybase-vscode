@@ -553,6 +553,22 @@ body,
   pointer-events: none;
 }
 
+/* Windowing spacers preserve the full table extent without mounting every
+   off-screen column. They must not look like cells or react to the pointer. */
+.ui-data-grid .ui-data-grid-column-spacer {
+  width: auto;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 0;
+  pointer-events: none;
+}
+
+.ui-data-grid th.ui-data-grid-column-spacer:hover {
+  background: transparent;
+}
+
 .ui-data-grid tr.ui-data-grid-row-even td,
 .ui-data-grid tr.ui-data-grid-row-even th[scope='row'] {
   background: var(--justybase-grid-bg);

@@ -87,6 +87,7 @@
     "packages/ui-react/src/**"
   ],
   "pureExternalImports": [
+    "@tanstack/react-virtual",
     "chevrotain"
   ],
   "pureExternalExceptions": [
@@ -108,6 +109,13 @@
       "source": "packages/ui-react/src/dataGrid.tsx",
       "target": "react",
       "reason": "The shared result grid is a React presentation component consumed by the VS Code webview adapter.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/dataGridRow.tsx",
+      "target": "react",
+      "reason": "The memoised result-grid row is part of the shared React grid consumed by the VS Code webview adapter.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     },

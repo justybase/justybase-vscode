@@ -19,6 +19,7 @@ import {
   SqlDialectSelect,
   UiShell,
   WorkspaceTabs,
+  calculateDataGridColumnWindow,
   calculateDataGridVirtualWindow,
   createDataGridClipboardPayload,
   downloadBlobFile,
@@ -26,6 +27,7 @@ import {
   formatDataGridClipboard,
   processDataGridRows,
   reorderDataGridGrouping,
+  resolveDataGridNavigationTarget,
   resolveDataGridScrollTop,
 } from '../src';
 
@@ -1128,5 +1130,157 @@ describe('shared React presentation', () => {
     expect(screen.getByText('SCAN orders')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
     expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('calculates a pinned-aware column window with stable spacer extents', () => {
+    const widths = Array.from({ length: 100 }, () => 100);
+    const near = calculateDataGridColumnWindow(widths, 0, 1_000, 1);
+    expect(near.windowed).toBe(true);
+    expect(near.startIndex).toBe(1);
+    expect(near.paddingLeft).toBe(0);
+    expect(near.paddingRight).toBeGreaterThan(0);
+
+    const far = calculateDataGridColumnWindow(widths, 5_000, 1_000, 0);
+    expect(far.windowed).toBe(true);
+    expect(far.startIndex).toBe(48);
+    expect(far.paddingLeft).toBe(4_800);
+    expect(far.endIndex).toBe(62);
+    expect(far.paddingRight).toBe(3_800);
+
+    const narrow = calculateDataGridColumnWindow(widths.slice(0, 20), 0, 1_000, 0);
+    expect(narrow).toMatchObject({ startIndex: 0, endIndex: 20, paddingLeft: 0, paddingRight: 0, windowed: false });
+    expect(calculateDataGridColumnWindow([], 0, 800, 0).windowed).toBe(false);
+  });
+
+  it('maps Excel-style navigation keys without taking over Tab', () => {
+    const base = { row: 5, column: 2, rowCount: 10, columnCount: 5, pageRows: 3 } as const;
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'ArrowDown' })).toEqual({ row: 6, column: 2, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'ArrowUp', shiftKey: true })).toEqual({ row: 4, column: 2, extend: true });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'ArrowRight' })).toEqual({ row: 5, column: 3, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'Home' })).toEqual({ row: 5, column: 0, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'End', ctrlKey: true })).toEqual({ row: 9, column: 4, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'PageDown' })).toEqual({ row: 8, column: 2, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'PageUp', ctrlKey: true })).toEqual({ row: 0, column: 2, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'ArrowUp', row: 0 })).toEqual({ row: 0, column: 2, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'ArrowRight', column: 4 })).toEqual({ row: 5, column: 4, extend: false });
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'Tab' })).toBeUndefined();
+    expect(resolveDataGridNavigationTarget({ ...base, key: 'Enter' })).toBeUndefined();
+  });
+
+  it('mounts only a window of wide result columns and keeps pinned columns mounted', () => {
+    jest.useFakeTimers();
+    try {
+      const columns = Array.from({ length: 80 }, (_value, index) => ({ name: `COL_${index}`, type: 'INTEGER' }));
+      const rows = [Array.from({ length: 80 }, (_value, index) => index)];
+      const { container } = render(<DataGrid
+        resultSetId="wide-grid"
+        columns={columns}
+        rows={rows}
+        view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [], pinnedColumns: ['COL_0'] }}
+      />);
+      const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+      expect(scroller).not.toBeNull();
+      if (!scroller) return;
+      Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 600 });
+      act(() => { jest.runOnlyPendingTimers(); });
+
+      const mountedHeaders = (): readonly string[] => Array.from(
+        container.querySelectorAll<HTMLElement>('.ui-data-grid-header-label > span:first-child'),
+      ).map(element => element.textContent ?? '');
+      const headerSpacers = (): readonly HTMLElement[] => Array.from(
+        container.querySelectorAll<HTMLElement>('thead .ui-data-grid-column-spacer'),
+      );
+
+      expect(mountedHeaders()).toContain('COL_0');
+      expect(mountedHeaders()).toContain('COL_1');
+      expect(mountedHeaders().length).toBeLessThan(80);
+      expect(mountedHeaders()).not.toContain('COL_70');
+      expect(headerSpacers().length).toBeGreaterThan(0);
+      expect(headerSpacers().reduce((sum, spacer) => sum + Number.parseFloat(spacer.style.width || '0'), 0)).toBeGreaterThan(0);
+
+      scroller.scrollLeft = 9_600;
+      fireEvent.scroll(scroller);
+      act(() => { jest.runOnlyPendingTimers(); });
+      expect(mountedHeaders()).toContain('COL_0');
+      expect(mountedHeaders()).not.toContain('COL_1');
+      expect(mountedHeaders().length).toBeLessThan(80);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('navigates and extends the shared grid selection from the keyboard', () => {
+    const onSelectionChange = jest.fn();
+    const onRowSelect = jest.fn();
+    const { container } = render(<DataGrid
+      resultSetId="keyboard-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }, { name: 'OWNER' }]}
+      rows={Array.from({ length: 40 }, (_value, index) => [index + 1, `row-${index + 1}`, 'alice'])}
+      onSelectionChange={onSelectionChange}
+      onRowSelect={onRowSelect}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 260 });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 40 * 26 });
+
+    fireEvent.keyDown(scroller, { key: 'ArrowDown' });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 1, anchorColumn: 0, focusRow: 1, focusColumn: 0 });
+    fireEvent.keyDown(scroller, { key: 'Enter' });
+    expect(onRowSelect).toHaveBeenLastCalledWith(1);
+    fireEvent.keyDown(scroller, { key: 'ArrowDown' });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 2, anchorColumn: 0, focusRow: 2, focusColumn: 0 });
+    fireEvent.keyDown(scroller, { key: 'ArrowRight', shiftKey: true });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 2, anchorColumn: 0, focusRow: 2, focusColumn: 1 });
+    fireEvent.keyDown(scroller, { key: 'End' });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 2, anchorColumn: 2, focusRow: 2, focusColumn: 2 });
+    fireEvent.keyDown(scroller, { key: 'PageDown' });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 8, anchorColumn: 2, focusRow: 8, focusColumn: 2 });
+    fireEvent.keyDown(scroller, { key: 'End', ctrlKey: true });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 39, anchorColumn: 2, focusRow: 39, focusColumn: 2 });
+    expect(scroller.scrollTop).toBe(780);
+    // The programmatic scroll must immediately move the TanStack window; the
+    // native scroll event is not required for the next committed frame.
+    expect(screen.getByRole('row', { name: '40 row-40 alice' })).toBeInTheDocument();
+    fireEvent.keyDown(scroller, { key: 'a', ctrlKey: true });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ anchorRow: 0, anchorColumn: 0, focusRow: 39, focusColumn: 2 });
+    fireEvent.keyDown(scroller, { key: 'Escape' });
+    expect(onSelectionChange).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('leaves keyboard navigation to focused filter inputs', () => {
+    const onSelectionChange = jest.fn();
+    render(<DataGrid
+      resultSetId="keyboard-filter-input"
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1]]}
+      onSelectionChange={onSelectionChange}
+    />);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Filter ID' }), { key: 'ArrowDown' });
+    expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  it('re-renders only the rows whose selection actually changed', () => {
+    const getCellMetadata = jest.fn((value: unknown) => ({ type: typeof value === 'number' ? 'INTEGER' : 'TEXT' }));
+    render(<DataGrid
+      resultSetId="memo-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }]}
+      rows={Array.from({ length: 20 }, (_value, index) => [index, `row-${index}`])}
+      getCellMetadata={getCellMetadata}
+    />);
+    const initialCalls = getCellMetadata.mock.calls.length;
+    fireEvent.mouseDown(screen.getByRole('cell', { name: 'row-3' }), { button: 0 });
+    const selectionCalls = getCellMetadata.mock.calls.length - initialCalls;
+    expect(selectionCalls).toBeLessThanOrEqual(4);
+    fireEvent.mouseEnter(screen.getByRole('cell', { name: 'row-4' }));
+    const horizontalCalls = getCellMetadata.mock.calls.length - initialCalls - selectionCalls;
+    expect(horizontalCalls).toBeLessThanOrEqual(4);
+  });
+
+  it('marks canonical boolean values for the shared cell palette', () => {
+    const { container } = render(<DataGrid resultSetId="boolean-class" columns={[{ name: 'FLAG', type: 'BOOLEAN' }]} rows={[[true], [false]]} />);
+    expect(container.querySelectorAll('.ui-data-grid-value-boolean-true')).toHaveLength(1);
+    expect(container.querySelectorAll('.ui-data-grid-value-boolean-false')).toHaveLength(1);
   });
 });

@@ -197,7 +197,7 @@ The grid can export query results to XLSB, XLSX, CSV, CSV.GZ, CSV.ZST, JSON, XML
 
 ## Large-data limits
 
-Virtualization reduces DOM cost, streaming reduces time-to-first-row, and SQLite spill reduces webview memory pressure. Neither changes the database workload. Use a predicate, a stable order, and a bounded limit before enabling database-scope exploration. Inspect [Performance and Reliability](guide/user/performance-reliability/) for thresholds and recovery behavior.
+Virtualization reduces DOM cost, streaming reduces time-to-first-row, and SQLite spill reduces webview memory pressure. Neither changes the database workload. Use a predicate, a stable order, and a bounded limit before enabling database-scope exploration. Inspect [Performance and Reliability](guide/user/performance-reliability/) for thresholds and recovery behavior. Body rows (data and grouping) share a fixed height, which keeps the virtual window and restored scroll anchors exact.
 
 Fetched rows are capped by `justybase.query.rowLimit` (default 200,000). When the cap is reached, a warning appears above the grid with the fetched and configured row counts. Close it with the **✕** button to keep working — the warning stays dismissed for that result set and only returns for a new execution or after you change the result. The adjoining row counter keeps a small `— limit reached` marker as a reminder. A result that spills to SQLite or streams in chunks shows the warning only once the host reports the limit, so it never flickers while rows are still arriving.
 
