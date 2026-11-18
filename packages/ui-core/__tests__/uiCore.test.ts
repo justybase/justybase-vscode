@@ -400,10 +400,11 @@ describe('ui-core lifecycle', () => {
 });
 
 describe('ui-core mode and store contracts', () => {
-  it('defaults unknown mode values to legacy and notifies subscribers only on transitions', () => {
+  it('defaults unknown mode values to the shared surface and notifies subscribers only on transitions', () => {
     expect(resolveUiMode('shared')).toBe('shared');
     expect(resolveUiMode('legacy')).toBe('legacy');
-    expect(resolveUiMode('unexpected')).toBe('legacy');
+    expect(resolveUiMode(undefined)).toBe('shared');
+    expect(resolveUiMode('unexpected')).toBe('shared');
     const store = createUiStore(initial());
     const listener = jest.fn();
     const unsubscribe = store.subscribe(listener);

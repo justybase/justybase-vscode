@@ -3911,11 +3911,11 @@
         "justybase.ui.mode": {
           "type": "string",
           "enum": [
-            "legacy",
-            "shared"
+            "shared",
+            "legacy"
           ],
-          "default": "legacy",
-          "description": "Presentation mode for host-owned VS Code UI surfaces. Shared UI is available for supported panels."
+          "default": "shared",
+          "description": "Presentation mode for host-owned VS Code UI surfaces. Shared React is the default; legacy is a temporary rollback to the DOM renderer."
         },
         "justybase.highlightActiveStatement": {
           "type": "boolean",

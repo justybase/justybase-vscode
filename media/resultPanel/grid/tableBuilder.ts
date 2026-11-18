@@ -126,6 +126,11 @@ import { setTanStackTableData } from '../../shared/tanstackShims.js';
 
 type GridRowVirtualizer = InstanceType<typeof VirtualCore.Virtualizer>;
 
+/**
+ * @deprecated The shared React grid in `packages/ui-react` is the result-grid
+ * surface. This DOM renderer is the explicit `justybase.ui.mode=legacy`
+ * rollback path and is scheduled for deletion once edit/analysis parity lands.
+ */
 export function createResultSetGrid(
     rs: ResultSetWithExtras,
     rsIndex: number,

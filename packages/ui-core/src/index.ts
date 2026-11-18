@@ -75,6 +75,28 @@ export {
 export type { SchemaContextMenuLabel } from './schemaContextMenu';
 export { createAggregateAnalysisTable, createGroupAnalysisTable, createPivotAnalysisTable } from './resultAnalysis';
 export type { UiResultAnalysisKind, UiResultAnalysisTable } from './resultAnalysis';
+export {
+  formatCellsAsInList,
+  formatCellsAsInsert,
+  formatCellsAsJson,
+  INSERT_TARGET_PLACEHOLDER,
+  insertTargetName,
+} from './resultCopyFormats';
+export type { CopyFormatCell, CopyFormatTarget } from './resultCopyFormats';
+export {
+  formatGridCellId,
+  getGridSelectionBounds,
+  getSelectedGridRowIndices,
+  gridSelectionColumnRange,
+  gridSelectionContains,
+  normalizeGridSelection,
+  parseGridCellId,
+} from './resultGridSelection';
+export type {
+  ParsedGridCellId,
+  UiGridSelection,
+  UiGridSelectionBounds,
+} from './resultGridSelection';
 export { hasUiResultQuery, resolveUiResultColumnIndex, toUiResultQueryOptions } from './resultQuery';
 export type { UiResultQueryOptions } from './resultQuery';
 export { resolveUiMode } from './mode';

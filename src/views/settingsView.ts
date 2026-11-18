@@ -175,10 +175,10 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
             {
                 id: 'ui-mode',
                 label: 'Cross-product UI Mode',
-                description: 'Choose the legacy host renderer or the opt-in shared React presentation for migrated surfaces',
+                description: 'Shared React Result Panel is the default. Legacy is a temporary rollback to the DOM renderer.',
                 type: 'select',
                 configKey: 'ui.mode',
-                defaultValue: 'legacy',
+                defaultValue: 'shared',
                 options: [
                     { label: 'Legacy', value: 'legacy' },
                     { label: 'Shared', value: 'shared' }

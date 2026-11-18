@@ -19,7 +19,7 @@ export interface ResultsHtmlOptions {
   defaultCopyFormat?: string;
   /** Default Excel format for the Export menu: `xlsb` (binary, faster) or `xlsx`. */
   defaultExcelFormat?: 'xlsb' | 'xlsx';
-  /** Enables the opt-in cross-product React Result Panel adapter. */
+  /** Set to false for the explicit legacy DOM-grid rollback. */
   sharedUiMode?: boolean;
 }
 
@@ -55,7 +55,7 @@ export class ResultsHtmlGenerator {
       options.resultGridFontFamily || DEFAULT_RESULTS_GRID_FONT_FAMILY,
     );
     const resultGridFontSize = options.resultGridFontSize || 12;
-    const uiMode = options.sharedUiMode === true ? 'shared' : 'legacy';
+    const uiMode = options.sharedUiMode === false ? 'legacy' : 'shared';
     const responsiveCollapseMenuItem = buildResponsiveCollapseMenuItemMarkup();
     return `<!DOCTYPE html>
         <html lang="en">

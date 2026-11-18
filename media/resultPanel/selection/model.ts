@@ -1,4 +1,10 @@
 import type { SelectionStatsProcessor } from './statsWorker.js';
+import {
+    formatGridCellId,
+    getGridSelectionBounds,
+    getSelectedGridRowIndices,
+    parseGridCellId,
+} from '@justybase/ui-core';
 
 /** Mutable per-grid selection state. Owned by `setupCellSelectionEvents`, shared by selection submodules. */
 export interface SelectionModel {
@@ -40,23 +46,6 @@ export interface ParsedCellId {
     col: number;
 }
 
-export function parseCellId(cellId: string): ParsedCellId | null {
-    const parts = cellId.split('-');
-    if (parts.length !== 2) {
-        return null;
-    }
-    const row = Number(parts[0]);
-    const col = Number(parts[1]);
-    if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0) {
-        return null;
-    }
-    return { row, col };
-}
-
-export function formatCellId(row: number, col: number): string {
-    return `${row}-${col}`;
-}
-
 export interface SelectionBounds {
     minRow: number;
     maxRow: number;
@@ -64,49 +53,23 @@ export interface SelectionBounds {
     maxCol: number;
 }
 
-/** Bounding rectangle over a set of `row-col` cell ids. Returns null when empty or unparseable. */
-export function getSelectionBounds(cells: ReadonlySet<string>): SelectionBounds | null {
-    let minRow = Infinity;
-    let maxRow = -Infinity;
-    let minCol = Infinity;
-    let maxCol = -Infinity;
-    let found = false;
-    cells.forEach(cellId => {
-        const parsed = parseCellId(cellId);
-        if (!parsed) {
-            return;
-        }
-        found = true;
-        if (parsed.row < minRow) {
-            minRow = parsed.row;
-        }
-        if (parsed.row > maxRow) {
-            maxRow = parsed.row;
-        }
-        if (parsed.col < minCol) {
-            minCol = parsed.col;
-        }
-        if (parsed.col > maxCol) {
-            maxCol = parsed.col;
-        }
-    });
-    if (!found) {
-        return null;
-    }
-    return { minRow, maxRow, minCol, maxCol };
+// Legacy names stay stable for the DOM grid and its tests; the implementation
+// now lives in the renderer-neutral @justybase/ui-core module.
+export function parseCellId(cellId: string): ParsedCellId | null {
+    const parsed = parseGridCellId(cellId);
+    return parsed ? { row: parsed.row, col: parsed.column } : null;
 }
 
-/** Unique row indices referenced by a set of `row-col` cell ids. */
-export function getSelectedRowIndices(cells: ReadonlySet<string>): Set<number> {
-    const rows = new Set<number>();
-    cells.forEach(cellId => {
-        const parsed = parseCellId(cellId);
-        if (parsed) {
-            rows.add(parsed.row);
-        }
-    });
-    return rows;
+export const formatCellId = formatGridCellId;
+
+export function getSelectionBounds(cells: ReadonlySet<string>): SelectionBounds | null {
+    const bounds = getGridSelectionBounds(cells);
+    return bounds
+        ? { minRow: bounds.minRow, maxRow: bounds.maxRow, minCol: bounds.minColumn, maxCol: bounds.maxColumn }
+        : null;
 }
+
+export const getSelectedRowIndices = getSelectedGridRowIndices;
 
 /** Reset identity/selection fields without touching the DOM. DOM cleanup stays in render/operations. */
 export function resetSelectionModelState(model: SelectionModel): void {

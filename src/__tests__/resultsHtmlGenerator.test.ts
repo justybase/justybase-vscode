@@ -192,9 +192,9 @@ describe('ResultsHtmlGenerator', () => {
             fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
         };
 
-        expect(generator.generateHtml(uris)).toContain('window.__JUSTYBASE_UI_MODE__ = "legacy";');
-        expect(generator.generateHtml(uris, { sharedUiMode: true })).toContain('window.__JUSTYBASE_UI_MODE__ = "shared";');
-        expect(generator.generateHtml(uris, { sharedUiMode: true })).toContain('id="shared-ui-root"');
+        expect(generator.generateHtml(uris)).toContain('window.__JUSTYBASE_UI_MODE__ = "shared";');
+        expect(generator.generateHtml(uris, { sharedUiMode: false })).toContain('window.__JUSTYBASE_UI_MODE__ = "legacy";');
+        expect(generator.generateHtml(uris)).toContain('id="shared-ui-root"');
     });
 
     it('loads the package-owned shared grid skin after the legacy webview skin', () => {

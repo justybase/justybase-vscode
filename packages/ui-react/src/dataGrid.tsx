@@ -3,6 +3,7 @@ import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, 
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Range, Virtualizer } from '@tanstack/react-virtual';
 import type { UiResultColumnFilterDefinition, UiResultViewState } from '@justybase/ui-core';
+import { gridSelectionColumnRange, normalizeGridSelection } from '@justybase/ui-core';
 import {
   formatDataGridCellValue,
   inferDataGridColumnMetadata,
@@ -648,31 +649,6 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
   return rendered;
 }
 
-function selectedRange(selection: DataGridSelection | undefined): { minRow: number; maxRow: number; minColumn: number; maxColumn: number } | undefined {
-  if (!selection) return undefined;
-  return {
-    minRow: Math.min(selection.anchorRow, selection.focusRow),
-    maxRow: Math.max(selection.anchorRow, selection.focusRow),
-    minColumn: Math.min(selection.anchorColumn, selection.focusColumn),
-    maxColumn: Math.max(selection.anchorColumn, selection.focusColumn),
-  };
-}
-
-function selectedColumnPositionRange(
-  selection: DataGridSelection | undefined,
-  visibleColumnIndexes: readonly number[],
-): { minColumn: number; maxColumn: number } | undefined {
-  if (!selection) return undefined;
-  const anchor = visibleColumnIndexes.indexOf(selection.anchorColumn);
-  const focus = visibleColumnIndexes.indexOf(selection.focusColumn);
-  const anchorPosition = anchor >= 0 ? anchor : selection.anchorColumn;
-  const focusPosition = focus >= 0 ? focus : selection.focusColumn;
-  return {
-    minColumn: Math.min(anchorPosition, focusPosition),
-    maxColumn: Math.max(anchorPosition, focusPosition),
-  };
-}
-
 export function DataGrid({
   sourceId,
   resultSetId,
@@ -1081,8 +1057,8 @@ export function DataGrid({
       return changed ? merged : previous;
     });
   }, [columnMetadataSignature, hasColumnFilterSurface, mountedColumnSignature, resolvedColumns, showInlineColumnFilters, visibleColumnIndexSet, visibleColumnSignature]);
-  const range = selectedRange(selection);
-  const columnRange = selectedColumnPositionRange(selection, visibleColumnIndexes);
+  const range = normalizeGridSelection(selection);
+  const columnRange = gridSelectionColumnRange(selection, visibleColumnIndexes);
   const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
   const requestMoreRows = useCallback((): void => {
     const loader = onLoadMoreRef.current;

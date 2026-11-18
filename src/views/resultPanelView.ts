@@ -17,6 +17,7 @@ import type {
     ResultPanelTestBridgeResult,
 } from '../contracts/webviews';
 import { parseResultPanelWebviewMessage } from '../contracts/webviews/resultPanelRuntime';
+import { resolveUiMode } from '@justybase/ui-core';
 import type { ConnectionManager } from '../core/connectionManager';
 import { ResultStateManager } from '../state/resultStateManager';
 import type { StartExecutionOptions } from '../state/resultStateManager';
@@ -3309,7 +3310,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             resultGridFontSize: this._getResultGridFontSize(),
             defaultCopyFormat: vscode.workspace.getConfiguration('justybase.results').get<string>('copyFormat', 'markdown'),
             defaultExcelFormat: this._getDefaultExcelFormat(),
-            sharedUiMode: vscode.workspace.getConfiguration('justybase.ui').get<string>('mode', 'legacy') === 'shared',
+            sharedUiMode: resolveUiMode(vscode.workspace.getConfiguration('justybase.ui').get<string>('mode')) === 'shared',
         });
     }
 

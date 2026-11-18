@@ -13,6 +13,10 @@ import {
 import { updateAllRefreshFailureBanners } from '../refreshFailureBanner.js';
 import { createResultSetGrid } from './tableBuilder.js';
 
+/**
+ * @deprecated Legacy result-panel renderer. Prefer the shared React panel;
+ * this function only runs when `justybase.ui.mode` is explicitly `legacy`.
+ */
 export function renderGrids() {
     const container = document.getElementById('gridContainer');
     if (!container) return;

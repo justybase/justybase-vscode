@@ -97,6 +97,14 @@ identity: Logs can move to index zero, pinned results can shift indices, and
 two executions can share a millisecond. Grid state stores the stable ID with
 the source/index projection and reads the legacy timestamp fallback.
 
+The VS Code Result Panel defaults to the shared React surface
+(`justybase.ui.mode = "shared"`). The DOM renderer in
+`media/resultPanel/grid/tableBuilder.ts` is a deprecated, explicit `legacy`
+rollback and is scheduled for deletion after edit and analysis parity land.
+Selection geometry and typed copy formats live in `@justybase/ui-core`
+(`resultGridSelection`, `resultCopyFormats`) so both renderers share the same
+range and clipboard semantics.
+
 ## Desktop execution lifecycle
 
 `@justybase/database-runtime/execution` owns the product-neutral single,
