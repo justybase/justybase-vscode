@@ -398,7 +398,7 @@ test('ignores pure identifier interpolation lines inside HTML template strings',
 
 test('does not require an LCOV record for changed declaration-only files', () => {
   const result = checkChangedCoverage({
-    diff: '+++ b/media/resultPanel/databaseGrouping.ts\n@@ -30 +31 @@\n',
+    diff: '+++ b/media/resultPanel/selectionStatsTypes.ts\n@@ -1 +2 @@\n',
     lcov: '',
     baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['media/resultPanel/'] } },
   });
