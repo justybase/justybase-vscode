@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Partial
 last_verified: 2026-10-21
-product_version: 3.20.10
+product_version: 3.20.11
 ---
 
 # Visual Query Builder and ERD
