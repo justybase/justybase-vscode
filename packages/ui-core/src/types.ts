@@ -8,7 +8,6 @@ import type {
   RedactedConnectionProfile,
   UiAuthState,
   UiIdentity,
-  UiMode,
   UiOperationStatus,
 } from '@justybase/contracts';
 
@@ -207,7 +206,6 @@ export interface UiDesignerState {
 
 export interface UiState {
   readonly contractVersion: typeof UI_CONTRACT_VERSION;
-  readonly mode: UiMode;
   readonly identity: UiIdentity;
   readonly auth: UiAuthState;
   readonly capabilities: readonly CapabilityDescriptor[];
@@ -243,7 +241,6 @@ export type UiResultEvent =
   | (UiResultEventBase & { readonly type: 'cancelled'; readonly totalRowCount: number; readonly message?: string });
 
 export type UiAction =
-  | { readonly type: 'mode/set'; readonly mode: UiMode }
   | { readonly type: 'auth/set'; readonly auth: UiAuthState }
   | { readonly type: 'capabilities/set'; readonly capabilities: readonly CapabilityDescriptor[] }
   | { readonly type: 'shell/status'; readonly status: UiOperationStatus; readonly message?: string }

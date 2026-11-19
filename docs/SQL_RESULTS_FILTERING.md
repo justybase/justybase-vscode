@@ -80,9 +80,9 @@ See also: [EXECUTION_CONTRACT.md](./EXECUTION_CONTRACT.md) (disk-backed spill co
 
 | Area | Path |
 |------|------|
-| Client filter UI | `media/resultPanel/filter.ts` |
+| Client filter UI | `media/resultPanel/sharedView.tsx`, `packages/ui-react/src/dataGrid.tsx` |
 | Database filter SQL | `src/results/databaseFilterSql.ts` |
 | Disk filter SQL | `src/core/resultDataProvider/diskQueryBuilder.ts` |
-| Shared filter helpers | `src/core/resultDataProvider/columnFilterShared.ts` |
-| Webview DB filter RPC | `media/resultPanel/databaseFilters.ts` |
-| Disk grid queries | `media/resultPanel/diskBackedGrid.ts` |
+| Shared filter helpers | `src/core/resultDataProvider/columnFilterShared.ts`, `packages/ui-core/src/resultQuery.ts` |
+| Webview filter protocol | `media/resultPanel/protocol.ts`, `media/resultPanel/hostContracts.ts` |
+| Disk grid queries | `src/core/resultDataProvider/diskQueryBuilder.ts`, `media/resultPanel/sharedView.tsx` |

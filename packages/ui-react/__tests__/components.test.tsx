@@ -14,6 +14,7 @@ import {
   HistoryView,
   PivotDialog,
   ResultColumnSidebar,
+  ResultErrorView,
   ResultLayoutSwitcher,
   ResultTabs,
   ResultAnalysisPanel,
@@ -409,6 +410,28 @@ describe('shared React presentation', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Cancelled');
     rerender(<AsyncStateView state="ready">ready content</AsyncStateView>);
     expect(screen.getByText('ready content')).toBeInTheDocument();
+  });
+
+  it('offers a Copilot fix action for failed SQL and keeps the driver caret text intact', () => {
+    const onFixWithAi = jest.fn();
+    const message = "ERROR: 'SELECT 1,2 FROM DIMDATE'\nerror           ^ found \",\" (at char 10) expecting an identifier";
+    render(<ResultErrorView message={message} onFixWithAi={onFixWithAi} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('found "," (at char 10)');
+    fireEvent.click(screen.getByRole('button', { name: 'Fix with Copilot' }));
+    expect(onFixWithAi).toHaveBeenCalledTimes(1);
+  });
+
+  it('flattens newlines inside the quoted SQL so the caret line stays aligned', () => {
+    const message = "ERROR:    'SELECT 1,2\nFROM DIMDATE WHERE 1,,5'\nerror                    ^ found \",\" (at char 34) expecting a keyword";
+    const { container } = render(<ResultErrorView message={message} />);
+    expect(container.querySelector('.ui-result-error-message')?.textContent).toBe(
+      "ERROR:    'SELECT 1,2 FROM DIMDATE WHERE 1,,5'\nerror                    ^ found \",\" (at char 34) expecting a keyword",
+    );
+  });
+
+  it('hides the Copilot fix action when no SQL is available', () => {
+    render(<ResultErrorView message="Connection lost" />);
+    expect(screen.queryByRole('button', { name: 'Fix with Copilot' })).not.toBeInTheDocument();
   });
 
   it('keeps capability differences visible and guards writes', () => {

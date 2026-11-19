@@ -181,15 +181,17 @@ The static webview fixture is deterministic and tests the actual bundled DOM:
 
 ```bash
 npx playwright install --with-deps chromium
-npx playwright test --config=test-harness/playwright.config.ts \
-  test-harness/tests/table-rendering.spec.ts
+npx playwright test --config=test-harness/data-grid-visual.playwright.config.ts \
+  test-harness/tests/result-panel-parity.spec.ts
 ```
 
 It asserts rendered row counts and records after global/column filtering,
-opens the grouping panel and verifies grouped rows, covers hidden-view recovery,
-and exercises the Logs-before-streamed-rows protocol plus missing-shell hydrate
-recovery. This suite complements the Extension Host gate; an external live
-Netezza workspace is not a substitute for either deterministic check.
+opens the grouping panel and verifies grouped rows, and exercises the shared
+Charts, Mini Charts, Diff, Explore, Analytical, Pivot and Row View layouts plus
+the shared-only shell contract. Logs-before-streamed-rows and missing-shell
+hydrate recovery remain covered by the Extension Host suite. This suite
+complements the Extension Host gate; an external live Netezza workspace is not
+a substitute for either deterministic check.
 
 ## WSL2 and Remote-WSL
 

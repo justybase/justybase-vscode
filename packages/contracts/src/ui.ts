@@ -8,8 +8,6 @@
 
 export const UI_CONTRACT_VERSION = 1 as const;
 
-export type UiMode = 'legacy' | 'shared';
-
 /** Identity axes must stay separate; a tab index is not an identity. */
 export interface UiIdentity {
   readonly productId: string;

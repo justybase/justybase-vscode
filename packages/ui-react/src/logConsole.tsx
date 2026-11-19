@@ -94,9 +94,9 @@ function cellText(value: unknown): string {
  * exact DOM structure and class names of the legacy `createLogLineElement`
  * (`console-view` / `console-line` / `console-time` / `console-msg` /
  * `log-status` / `log-line-sql` / `log-meta-inline` / `log-error-hint`) so the
- * shared panel looks identical to the legacy panel through the same
- * `media/resultPanel.css`. It follows streaming output while the user stays at
- * the bottom, and stops following as soon as they scroll up to inspect history.
+ * shared panel looks identical to the legacy panel. It follows streaming
+ * output while the user stays at the bottom, and stops following as soon as
+ * they scroll up to inspect history.
  */
 export function LogConsole({ rows, columns, emptyLabel = 'No log messages yet.' }: LogConsoleProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);

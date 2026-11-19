@@ -131,6 +131,8 @@ export function ResultRefreshFailureBanner({ message, onRetry, onDismiss }: Resu
 export interface ResultErrorViewProps {
   readonly message?: string;
   readonly details?: DatabaseErrorDetails;
+  /** Prepares a Copilot Chat prompt for this error; omitted when no SQL is available. */
+  readonly onFixWithAi?: () => void;
   readonly children?: ReactNode;
 }
 
@@ -143,11 +145,43 @@ function resultErrorNextSteps(message: string | undefined): string | undefined {
   return undefined;
 }
 
-export function ResultErrorView({ message, details, children }: ResultErrorViewProps): ReactNode {
+/**
+ * Driver errors quote the executed SQL. Multi-line SQL keeps its newlines in
+ * that quote, while the driver's caret line is measured against a single line,
+ * so the caret appears under the wrong character. Flatten only the quoted SQL
+ * (everything before the closing quote) and leave the caret line untouched.
+ */
+function flattenQuotedSqlInErrorMessage(message: string): string {
+  const lines = message.split(/\r?\n/u);
+  const caretIndex = lines.findIndex(line => line.includes('^'));
+  if (caretIndex <= 0) return message;
+  let sqlEndLine = -1;
+  for (let index = 0; index < caretIndex; index += 1) {
+    if ((lines[index] ?? '').trimEnd().endsWith("'")) sqlEndLine = index;
+  }
+  if (sqlEndLine <= 0) return message;
+  const head = [(lines[0] ?? '').trimEnd()];
+  for (let index = 1; index <= sqlEndLine; index += 1) {
+    const continuation = (lines[index] ?? '').trim();
+    if (continuation) head.push(continuation);
+  }
+  return [head.join(' '), ...lines.slice(sqlEndLine + 1)].join('\n');
+}
+
+export function ResultErrorView({ message, details, onFixWithAi, children }: ResultErrorViewProps): ReactNode {
   const nextSteps = resultErrorNextSteps(message);
+  const displayMessage = message === undefined ? 'Something went wrong.' : flattenQuotedSqlInErrorMessage(message);
   return <section className="ui-result-error" role="alert" aria-label="Result error">
-    <div className="ui-result-error-message">{message ?? 'Something went wrong.'}</div>
+    <div className="ui-result-error-message">{displayMessage}</div>
     {nextSteps && <p className="ui-result-error-next">{nextSteps}</p>}
+    {onFixWithAi && <div className="ui-result-error-actions">
+      <button
+        type="button"
+        className="ui-result-error-fix"
+        title="Prepare a Copilot Chat prompt with the SQL, error and referenced table DDL"
+        onClick={onFixWithAi}
+      >Fix with Copilot</button>
+    </div>}
     {details && <ErrorDiagnostics details={details} />}
     {children}
   </section>;

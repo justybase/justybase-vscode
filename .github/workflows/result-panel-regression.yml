@@ -101,7 +101,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test --config=test-harness/playwright.config.ts test-harness/tests/table-rendering.spec.ts
+      - run: npx playwright test --config=test-harness/data-grid-visual.playwright.config.ts test-harness/tests/result-panel-parity.spec.ts
       - name: Upload Playwright diagnostics
         if: always()
         uses: actions/upload-artifact@v7

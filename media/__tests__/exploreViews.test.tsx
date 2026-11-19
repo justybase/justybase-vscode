@@ -1,12 +1,13 @@
 import type { ExploreFilterModel, ExploreResponse } from '@justybase/contracts';
 import type { ResultSet } from '../resultPanel/types.js';
-import { renderExploreView, disposeExploreView, computeExploreOverview } from '../resultPanel/explore/explorePanel.js';
+import { renderExploreView as renderExploreViewRaw, disposeExploreView, computeExploreOverview as computeExploreOverviewRaw } from '../resultPanel/explore/explorePanel.js';
 import { renderRankingTab, disposeRankingChart } from '../resultPanel/explore/rankingTab.js';
 import { renderComposerTab } from '../resultPanel/explore/composerTab.js';
 import { renderPivotTab } from '../resultPanel/explore/pivotTab.js';
 import { renderFullStatsCard } from '../resultPanel/explore/fullStatsCard.js';
 import { requestExploreOperation, requestExploreComposer, requestExplorePivot, requestExploreFullStats, openExploreSqlInEditor } from '../resultPanel/explore/hostBridge.js';
-import { fetchRowsFromHost } from '../resultPanel/diskBackedGrid.js';
+import { fetchExploreRows } from '../resultPanel/explore/rows.js';
+import { setExploreContext } from '../resultPanel/explore/context.js';
 
 const chartEvents = new Map<string, (event: unknown) => void>();
 jest.mock('echarts/core', () => ({ use: jest.fn(), init: jest.fn(() => ({
@@ -21,11 +22,12 @@ jest.mock('../resultPanel/explore/hostBridge.js', () => ({ requestExploreOperati
     previewExploreFilteredSql: jest.fn(async () => 'SELECT preview'), openExploreSqlInEditor: jest.fn(),
 }));
 let results: ResultSet[] = [];
+const syncOwner = (index: number) => setExploreContext({ sourceUri: 'file:///explore.sql', resultSetIndex: index, resultSet: results[index] });
+const renderExploreView = (index: number) => { syncOwner(index); renderExploreViewRaw(index); };
+const computeExploreOverview = (index: number) => { syncOwner(index); return computeExploreOverviewRaw(index); };
 let saved: Record<string, unknown> = {};
-jest.mock('../resultPanel/types.js', () => ({ getActiveSourceUri: () => 'file:///explore.sql', getResultSetAt: (index: number) => results[index] }));
-jest.mock('../resultPanel/state.js', () => ({ getActiveGridIndex: () => 0 }));
 jest.mock('../resultPanel/protocol.js', () => ({ getHostState: () => saved, setHostState: (value: Record<string, unknown>) => { saved = value; }, postHostMessage: jest.fn() }));
-jest.mock('../resultPanel/diskBackedGrid.js', () => ({ fetchRowsFromHost: jest.fn() }));
+jest.mock('../resultPanel/explore/rows.js', () => ({ fetchExploreRows: jest.fn() }));
 const empty = (): ExploreFilterModel => ({ dimensions: [], dates: [], measures: [] });
 const columns = [{ name: 'CATEGORY', type: 'VARCHAR', index: 0, role: 'dimension' as const },
     { name: 'AMOUNT', type: 'DECIMAL', index: 1, role: 'measure' as const },
@@ -123,9 +125,9 @@ describe('Explore views and lifecycle', () => {
     });
     it('reads an unfiltered disk sample and never substitutes sample stats after a database failure', async () => {
         results[0].storageMode = 'sqlite'; results[0].totalRowCount = 90000;
-        jest.mocked(fetchRowsFromHost).mockResolvedValue(rows);
+        jest.mocked(fetchExploreRows).mockResolvedValue(rows);
         renderExploreView(0); await settle();
-        expect(fetchRowsFromHost).toHaveBeenCalledWith('file:///explore.sql', 0, 0, 50000, true);
+        expect(fetchExploreRows).toHaveBeenCalledWith('file:///explore.sql', 0, 0, 50000);
         expect(root.textContent).toContain(`${(90000).toLocaleString()} loaded rows`);
         jest.mocked(requestExploreFullStats).mockRejectedValue(new Error('Database unavailable'));
         click(root, 'Σ Full stats'); await settle();
@@ -133,7 +135,7 @@ describe('Explore views and lifecycle', () => {
     });
     it('rejects stale loads after replacing the owner and handles an empty/error overview', async () => {
         let finish!: (data: unknown[][]) => void;
-        results[0].storageMode = 'sqlite'; jest.mocked(fetchRowsFromHost).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        results[0].storageMode = 'sqlite'; jest.mocked(fetchExploreRows).mockReturnValue(new Promise(resolve => { finish = resolve; }));
         renderExploreView(0); disposeExploreView(); root.replaceChildren(); finish(rows); await settle(); expect(root.textContent).toBe('');
         results[0].isError = true; await expect(computeExploreOverview(0)).rejects.toThrow('No tabular');
         results[0] = { ...results[0], isError: false, storageMode: 'memory', data: [], columns: [] };

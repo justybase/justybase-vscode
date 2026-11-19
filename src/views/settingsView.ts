@@ -173,18 +173,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 actionLabel: 'Open'
             },
             {
-                id: 'ui-mode',
-                label: 'Cross-product UI Mode',
-                description: 'Shared React Result Panel is the default. Legacy is a temporary rollback to the DOM renderer.',
-                type: 'select',
-                configKey: 'ui.mode',
-                defaultValue: 'shared',
-                options: [
-                    { label: 'Legacy', value: 'legacy' },
-                    { label: 'Shared', value: 'shared' }
-                ]
-            },
-            {
                 id: 'clear-cache',
                 label: 'Clear Autocomplete Cache',
                 description: 'Remove all cached databases, schemas, tables, and columns. Cache will rebuild on next use.',

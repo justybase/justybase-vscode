@@ -15,12 +15,12 @@ test.afterAll(() => rmSync(work, { recursive: true, force: true }));
 test('Logs presents parallel sessions, safe controls and restores overview after source switching', async ({ page }) => {
     await page.setContent('<div class="console-wrapper"><div class="console-view">Existing transcript</div></div>');
     await page.evaluate(() => {
-        Object.assign(window, { activeSource: 'file:///query.sql#query-a', messages: [], acquireVsCodeApi: () => ({ postMessage: (message: unknown) => (window as unknown as {messages: unknown[]}).messages.push(message) }) });
+        Object.assign(window, { messages: [], acquireVsCodeApi: () => ({ postMessage: (message: unknown) => (window as unknown as {messages: unknown[]}).messages.push(message) }) });
     });
     await page.addScriptTag({ path: bundle });
     const state = [{ sourceKey: 'lane', sourceUri: 'file:///query.sql', paused: false, maxConcurrency: 20,
         running: [{ id: 'a', executionUri: 'file:///query.sql#query-a', status: 'running', sql: '<script>bad</script>' }, { id: 'b', status: 'cancelling', sql: 'SELECT 2' }], queued: [{ id: 'c', status: 'queued', sql: 'SELECT 3' }] }];
-    await page.evaluate(json => (window as unknown as {queueLogs: {updateSqlQueueLogs:(json:string)=>void}}).queueLogs.updateSqlQueueLogs(json), JSON.stringify(state));
+    await page.evaluate(json => (window as unknown as {queueLogs: {updateSqlQueueLogs:(json:string, sourceUri:string)=>void}}).queueLogs.updateSqlQueueLogs(json, 'file:///query.sql#query-a'), JSON.stringify(state));
     await expect(page.getByText('2 running / 20 · 1 queued', { exact: true })).toBeVisible();
     await expect(page.locator('.sql-queue-job')).toHaveCount(3);
     await page.locator('.sql-queue-job-summary').first().click();
@@ -35,9 +35,9 @@ test('Logs presents parallel sessions, safe controls and restores overview after
         { command: 'sqlQueueAction', sourceKey: 'lane', action: 'remove', jobId: 'c' },
         { command: 'sqlQueueAction', sourceKey: 'lane', action: 'clear' },
     ]);
-    await page.evaluate(() => { const w = window as unknown as {activeSource:string;queueLogs:{updateSqlQueueLogs:()=>void}}; w.activeSource='file:///other.sql'; w.queueLogs.updateSqlQueueLogs(); });
+    await page.evaluate(() => { const w = window as unknown as {queueLogs:{updateSqlQueueLogs:(json?:string, sourceUri?:string)=>void}}; w.queueLogs.updateSqlQueueLogs(undefined, 'file:///other.sql'); });
     await expect(page.locator('.sql-queue-overview')).toHaveCount(0);
-    await page.evaluate(() => { const w = window as unknown as {activeSource:string;queueLogs:{updateSqlQueueLogs:()=>void}}; w.activeSource='file:///query.sql#query-a'; w.queueLogs.updateSqlQueueLogs(); });
+    await page.evaluate(() => { const w = window as unknown as {queueLogs:{updateSqlQueueLogs:(json?:string, sourceUri?:string)=>void}}; w.queueLogs.updateSqlQueueLogs(undefined, 'file:///query.sql#query-a'); });
     await expect(page.locator('.sql-queue-job')).toHaveCount(3);
     await expect(page.locator('.console-view')).toHaveText('Existing transcript');
 });

@@ -24,8 +24,8 @@ desktop build. The deterministic result-panel gates additionally run:
 
 ```bash
 npm run test:extension-host
-npx playwright test --config=test-harness/playwright.config.ts \
-  test-harness/tests/table-rendering.spec.ts
+npx playwright test --config=test-harness/data-grid-visual.playwright.config.ts \
+  test-harness/tests/result-panel-parity.spec.ts
 ```
 
 The quality ratchet can be run independently while iterating:

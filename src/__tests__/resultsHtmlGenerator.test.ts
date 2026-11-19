@@ -1,111 +1,36 @@
 import { ResultsHtmlGenerator } from '../views/resultsHtmlGenerator';
 
-const SWITCHER_URIS = {
-    scriptUri: { toString: () => 'script.js' } as never,
-    virtualUri: { toString: () => 'virtual.js' } as never,
-    mainScriptUri: { toString: () => 'main.js' } as never,
-    styleUri: { toString: () => 'style.css' } as never,
-    workerUri: { toString: () => 'worker.js' } as never,
+const SHARED_URIS = {
+    sharedScriptUri: { toString: () => 'shared-panel.js' } as never,
+    sharedGridStyleUri: { toString: () => 'shared-grid.css' } as never,
     fontRegularUri: { toString: () => 'fonts/a.woff2' } as never,
     fontBoldUri: { toString: () => 'fonts/b.woff2' } as never,
     fontMediumUri: { toString: () => 'fonts/c.woff2' } as never,
 };
 
 describe('ResultsHtmlGenerator', () => {
-    it('includes row view and value viewer surfaces in the result panel HTML', () => {
-        const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        });
+    it('emits a shared-only shell', () => {
+        const html = new ResultsHtmlGenerator('test-csp').generateHtml(SHARED_URIS);
 
-        expect(html).toContain('id="rowViewPanel"');
-        expect(html).toContain('id="rowViewBtn"');
-        expect(html).toContain('Select 1 to 10 rows to view details or compare');
-        expect(html).not.toContain('data-action="row-view"');
-        expect(html).toContain('id="valueViewerOverlay"');
-        expect(html).toContain('id="valueViewerBody"');
-        expect(html).toContain('Copy Value');
-        expect(html).toContain('data-action="responsive-collapse"');
-        expect(html).toContain('role="menuitemcheckbox" aria-checked="false"');
-    });
-
-    it('keeps the variant-C toolbar to one line with filter actions in the overflow menu', () => {
-        const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        });
-
-        // History, refresh and clear no longer occupy toolbar slots…
-        expect(html).not.toContain('id="undoFilterBtn"');
-        expect(html).not.toContain('id="redoFilterBtn"');
-        expect(html).not.toContain('id="refreshResultBtn"');
-        expect(html).not.toContain('id="clearFiltersBtn"');
-        expect(html).not.toContain('filter-history-controls');
-        // …they live in the "⋯" Filter section with shortcut hints…
-        expect(html).toContain('data-action="filter-undo"');
-        expect(html).toContain('Undo filter (Alt+Z)');
-        expect(html).toContain('data-action="filter-redo"');
-        expect(html).toContain('Redo filter (Alt+Y)');
-        expect(html).toContain('data-action="filter-clear"');
-        expect(html).toContain('data-action="filter-refresh"');
-        expect(html).toContain('data-action="find-column"');
-        // …Escape clears the filter field…
-        expect(html).toContain('onGlobalFilterKeydown(event)');
-        expect(html).toContain('Esc = clear');
-        // …the Export button always opens its menu (it never repeats a remembered format)…
-        expect(html).toContain('handleExportPrimaryClick(event)');
-        // …and no separate statusline is rendered under the grid.
-        expect(html).not.toContain('id="resultStatusline"');
-        expect(html).toContain('id="rowCountInfo"');
-        // The overflow-menu label is wrapped so narrow panels can iconify it.
-        expect(html).toContain('aria-label="More actions"');
-        expect(html).not.toContain('toolbar-more-btn__label');
-    });
-
-    it('does not acquire the VS Code API in the inline bootstrap script', () => {
-        const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        });
-
-        expect(html).not.toContain('const vscode = acquireVsCodeApi();');
-        expect(html).toContain('const workerUri = "worker.js";');
-        expect(html).toContain('init();');
+        expect(html).toContain('id="shared-ui-root"');
+        expect(html).toContain('href="shared-grid.css"');
+        expect(html).toContain('src="shared-panel.js"');
+        expect(html).toContain('body class="shared-ui-mode"');
+        expect(html).not.toContain('id="layoutWrapper"');
+        expect(html).not.toContain('toolbar-group--search');
+        expect(html).not.toContain('id="globalFilter"');
+        expect(html).not.toContain('id="rowViewPanel"');
+        expect(html).not.toContain('resultPanel.css');
+        expect(html).not.toContain('resultPanel.js');
+        expect(html).not.toContain('tanstack-table-core');
+        expect(html).not.toContain('tanstack-virtual-core');
+        expect(html).not.toContain('init();');
+        expect(html).not.toContain('__JUSTYBASE_UI_MODE__');
     });
 
     it('injects the configured results grid font family into the webview', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        }, {
+        const html = generator.generateHtml(SHARED_URIS, {
             resultGridFontFamily: 'JetBrains Mono, Consolas, monospace'
         });
 
@@ -113,120 +38,31 @@ describe('ResultsHtmlGenerator', () => {
         expect(html).toContain('JetBrains Mono, Consolas, monospace');
     });
 
-    it('uses host-managed copy and keeps a single Export menu', () => {
+    it('injects the configured default copy format into the shared shell', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        });
 
-        expect(html).toContain('window.justybaseUseHostCopyShortcut = true;');
-
-        // One button and one menu: no second ▾ arrow with a parallel list of options.
-        expect(html).toContain('id="exportPrimaryMenu"');
-        expect(html).not.toContain('exportSplitMenu');
-        expect(html).not.toContain('toggleExportSplitMenu');
-        expect(html).toContain('aria-haspopup="menu"');
-    });
-
-    it('groups the compact toolbar with a single Sidebar/Diff view switcher and scoped export labels', () => {
-        const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        });
-
-        expect(html).toContain('data-layout="sidebar"');
-        expect(html).toContain('aria-label="Sidebar layout"');
-        // Diff is an analysis view and lives in the Analyze menu.
-        expect(html).toContain('data-layout="diff"');
-        expect(html).not.toContain('data-layout="table2"');
-        expect(html).not.toContain('>Table2</button>');
-        expect(html).not.toContain('id="viewSplitBtn"');
-        expect(html).not.toContain('id="viewModeLabel"');
-        expect(html).not.toContain('id="rowViewBarBtn"');
-        expect(html).toContain('toolbar-group--view');
-        expect(html).toContain('toolbar-group--search');
-        expect(html).toContain('toolbar-group--export');
-        expect(html).toContain('toolbar-group--table');
-        expect(html).not.toContain('Excel (.xlsb — fast, active view)');
-        expect(html).toContain('data-action="query-duckdb"');
-        expect(html).not.toContain('fast xlsb export');
-        // Legacy table2 layout choice still resolves to the sidebar.
-        expect(html).toContain("mode === 'table2' ? 'sidebar' : mode");
-        expect(html).toContain("layout === 'table2' ? 'sidebar' : layout");
+        expect(generator.generateHtml(SHARED_URIS)).toContain('window.defaultCopyFormat = "markdown";');
+        expect(generator.generateHtml(SHARED_URIS, { defaultCopyFormat: 'csv' }))
+            .toContain('window.defaultCopyFormat = "csv";');
     });
 
     it('injects the configured default Excel format for the export menu', () => {
         const generator = new ResultsHtmlGenerator('test-csp');
 
-        expect(generator.generateHtml(SWITCHER_URIS)).toContain('window.defaultExcelFormat = "xlsb";');
-        expect(generator.generateHtml(SWITCHER_URIS, { defaultExcelFormat: 'xlsx' }))
+        expect(generator.generateHtml(SHARED_URIS)).toContain('window.defaultExcelFormat = "xlsb";');
+        expect(generator.generateHtml(SHARED_URIS, { defaultExcelFormat: 'xlsx' }))
             .toContain('window.defaultExcelFormat = "xlsx";');
-        expect(generator.generateHtml(SWITCHER_URIS, { defaultExcelFormat: 'xlsx' }))
+        expect(generator.generateHtml(SHARED_URIS, { defaultExcelFormat: 'xlsx' }))
             .not.toContain('window.defaultExcelFormat = "xlsb";');
     });
 
-    it('marks the shared Result Panel mode explicitly while keeping the legacy default', () => {
-        const generator = new ResultsHtmlGenerator('test-csp');
-        const uris = {
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'style.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        };
+    it('keeps the webview CSP strict and loads only the shared assets', () => {
+        const html = new ResultsHtmlGenerator('test-csp').generateHtml(SHARED_URIS);
 
-        expect(generator.generateHtml(uris)).toContain('window.__JUSTYBASE_UI_MODE__ = "shared";');
-        expect(generator.generateHtml(uris, { sharedUiMode: false })).toContain('window.__JUSTYBASE_UI_MODE__ = "legacy";');
-        expect(generator.generateHtml(uris)).toContain('id="shared-ui-root"');
-    });
-
-    it('loads the package-owned shared grid skin after the legacy webview skin', () => {
-        const generator = new ResultsHtmlGenerator('test-csp');
-        const html = generator.generateHtml({
-            scriptUri: { toString: () => 'script.js' } as never,
-            virtualUri: { toString: () => 'virtual.js' } as never,
-            mainScriptUri: { toString: () => 'main.js' } as never,
-            styleUri: { toString: () => 'legacy.css' } as never,
-            sharedGridStyleUri: { toString: () => 'shared-grid.css' } as never,
-            workerUri: { toString: () => 'worker.js' } as never,
-            fontRegularUri: { toString: () => 'fonts/JetBrainsMono-Regular.woff2' } as never,
-            fontBoldUri: { toString: () => 'fonts/JetBrainsMono-Bold.woff2' } as never,
-            fontMediumUri: { toString: () => 'fonts/JetBrainsMono-Medium.woff2' } as never,
-        });
-        expect(html.indexOf('href="legacy.css"')).toBeLessThan(html.indexOf('href="shared-grid.css"'));
-    });
-
-    it('groups the analysis views under one Analyze menu and keeps Sidebar as an icon toggle', () => {
-        const html = new ResultsHtmlGenerator('test-csp').generateHtml(SWITCHER_URIS);
-        const switcherStart = html.indexOf('id="layoutSwitcher"');
-        const switcherEnd = html.indexOf('id="viewModeSelect"', switcherStart);
-        const switcher = html.slice(switcherStart, switcherEnd);
-
-        expect(switcher).toContain('data-layout="table"');
-        expect(switcher).toContain('data-layout="analyze"');
-        expect(switcher).toContain('id="layoutAnalyzeMenu"');
-        expect(switcher).toContain('layout-switcher__btn--icon" data-layout="sidebar"');
-        // The four analysis views live in the menu, not as top-level switcher buttons.
-        for (const view of ['charts', 'diff', 'explore', 'analytical']) {
-            expect(switcher).toContain(`class="layout-switcher__menu-item" role="menuitemradio" aria-checked="false" data-layout="${view}"`);
-            expect(switcher).not.toContain(`class="layout-switcher__btn" data-layout="${view}"`);
-        }
+        expect(html).toContain("default-src 'none'");
+        expect(html).toContain('script-src test-csp');
+        expect(html).toContain('font-src test-csp');
+        expect(html.match(/shared-panel\.js/gu)).toHaveLength(1);
+        expect(html.match(/shared-grid\.css/gu)).toHaveLength(1);
     });
 });

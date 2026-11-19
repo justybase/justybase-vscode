@@ -96,12 +96,13 @@ describe('Extension Host queue fixture contract', () => {
         expect(getQueryExecutionCoordinator().getSnapshot()).toHaveLength(0);
     });
 
-    it('checks renderer Logs preferences in both modes and restores connection policy', async () => {
+    it('activates the result tab even when Logs was selected in both modes and restores connection policy', async () => {
         const { document } = fixture();
         let selected = 0;
         const provider = {setActiveSource: jest.fn(),runResultPanelTestBridge: jest.fn(async (action: string, args?: {resultSetIndex:number}) => {
             if(action === 'switchResultSet') selected=args!.resultSetIndex;
-            return {activeResultSetIndex:selected};
+            // A snapshot after the query must show the tabular result, not Logs.
+            return {activeResultSetIndex: action === 'snapshot' ? 1 : selected};
         })} as unknown as ResultPanelView;
         const mode=jest.fn();
         await runQueryQueueLogsRegression(document,provider,mode);
@@ -109,11 +110,11 @@ describe('Extension Host queue fixture contract', () => {
         expect(provider.runResultPanelTestBridge).toHaveBeenCalledTimes(8);
         expect(provider.setActiveSource).toHaveBeenCalledTimes(2);
     });
-    it.each([0, 1])('rejects renderer selection regressions and restores connection mode (%s)', async wrongIndex => {
+    it('rejects a renderer that leaves Logs active after executing SQL and restores connection mode', async () => {
         const {document}=fixture();
-        const provider={setActiveSource:jest.fn(),runResultPanelTestBridge:jest.fn(async()=>({activeResultSetIndex:wrongIndex}))} as unknown as ResultPanelView;
+        const provider={setActiveSource:jest.fn(),runResultPanelTestBridge:jest.fn(async()=>({activeResultSetIndex:0}))} as unknown as ResultPanelView;
         const mode=jest.fn();
-        await expect(runQueryQueueLogsRegression(document,provider,mode)).rejects.toThrow(wrongIndex ? 'displaced' : 'did not resume');
+        await expect(runQueryQueueLogsRegression(document,provider,mode)).rejects.toThrow('did not activate');
         expect(mode.mock.calls.slice(-1)[0]).toEqual([true]);
     });
 });

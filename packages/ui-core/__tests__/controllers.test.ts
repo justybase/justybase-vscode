@@ -157,7 +157,6 @@ describe('ui-core product controllers', () => {
 describe('ui-core reducer action coverage', () => {
   it('handles shell, workspace, connection, result-view, metadata, history and designer transitions', () => {
     let state = createInitialUiState(identity);
-    state = reduceUiState(state, { type: 'mode/set', mode: 'shared' });
     state = reduceUiState(state, { type: 'auth/set', auth: { status: 'authenticated', userId: 'user-1' } });
     state = reduceUiState(state, { type: 'capabilities/set', capabilities: [] });
     state = reduceUiState(state, { type: 'shell/status', status: 'running', message: 'starting' });
@@ -196,7 +195,6 @@ describe('ui-core reducer action coverage', () => {
     state = reduceUiState(state, { type: 'designer/target', targetId: 'table-1' });
     state = reduceUiState(state, { type: 'designer/dirty', dirty: true });
     state = reduceUiState(state, { type: 'workspace/close-document', documentId: 'document-1' });
-    expect(state.mode).toBe('shared');
     expect(state.workspace.documentOrder).toEqual([]);
     expect(state.results.byResultSetId['source-1\u0000result-1']?.view.scrollLeft).toBe(50);
   });

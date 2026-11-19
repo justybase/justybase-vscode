@@ -38,7 +38,6 @@ export type {
   RedactedConnectionProfile,
   UiAuthState,
   UiIdentity,
-  UiMode,
   UiOperationState,
   UiOperationStatus,
 } from './ui';

@@ -1,6 +1,6 @@
 /*
  * Edit Data panel.
- * Grid visuals follow the Results grid (media/resultPanel.css): mono 12px cells,
+ * Grid visuals follow the shared Results grid: mono 12px cells,
  * accent rule under the header, 4-letter type badges, typed value colors.
  * Chrome follows DataGrip/DBeaver data editors: toolbar groups, WHERE/ORDER BY
  * filter bar, row-number gutter with change markers, and a status bar.

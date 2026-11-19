@@ -9,11 +9,10 @@ import {
     displaySharedRows,
     disposeSharedResultPanel,
     buildSharedFilterState,
-    mountSharedResultPanelIfConfigured,
+    mountSharedResultPanel,
     normalizeSharedColumns,
     normalizeSharedResultSet,
     sharedAnalysisQuerySpec,
-    sharedResultPanelMode,
 } from '../sharedView.js';
 import { asHostMessage } from '../protocol.js';
 
@@ -52,16 +51,12 @@ function appendMessage(overrides: Record<string, unknown> = {}): unknown {
 afterEach(() => {
     cleanup();
     disposeSharedResultPanel();
-    delete (globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__;
     document.body.innerHTML = '';
     document.head.querySelectorAll('#justybase-shared-result-panel-styles').forEach(node => node.remove());
 });
 
 describe('shared VS Code Result Panel adapter', () => {
     it('normalizes host payloads and applies filtering and sorting without leaking buffers to ui-core', () => {
-        expect(sharedResultPanelMode('shared')).toBe(true);
-        expect(sharedResultPanelMode('legacy')).toBe(false);
-        expect(sharedResultPanelMode({ mode: 'shared' })).toBe(false);
         expect(normalizeSharedColumns(undefined)).toEqual([]);
         expect(normalizeSharedColumns([{ name: 'id', type: 'INTEGER' }, { name: 'amount', type: 'NUMERIC', scale: 2 }, { header: 'name' }, null, { name: '' }])).toEqual([
             { name: 'id', type: 'INTEGER' },
@@ -859,17 +854,15 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
     });
 
-    it('mounts only for explicit shared mode, consumes host messages, and cleans up idempotently', async () => {
-        document.body.innerHTML = '<div id="shared-ui-root" style="display:none"></div><div class="layout-wrapper"></div>';
-        expect(mountSharedResultPanelIfConfigured()).toBe(false);
-        (globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__ = 'shared';
+    it('mounts the shared panel, consumes host messages, and cleans up idempotently', async () => {
+        document.body.innerHTML = '<div id="shared-ui-root" style="display:none"></div>';
         act(() => {
-            expect(mountSharedResultPanelIfConfigured()).toBe(true);
+            expect(mountSharedResultPanel()).toBe(true);
         });
         expect(document.body).toHaveClass('shared-ui-mode');
         expect(document.getElementById('shared-ui-root')).toHaveStyle({ display: 'block' });
         expect(document.getElementById('justybase-shared-result-panel-styles')).not.toBeNull();
-        expect(mountSharedResultPanelIfConfigured()).toBe(true);
+        expect(mountSharedResultPanel()).toBe(true);
         act(() => window.dispatchEvent(new MessageEvent('message', { data: hydrateMessage([
             { resultSetId: 'listener-result', columns: [{ name: 'id' }], data: [[7]], totalRowCount: 1 },
         ]) })));

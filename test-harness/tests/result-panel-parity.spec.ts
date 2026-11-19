@@ -8,17 +8,6 @@ async function settleLayout(page: Page): Promise<void> {
   });
 }
 
-test('legacy result grid baseline stays available for comparison', async ({ page }) => {
-  await page.goto('/test-harness/table-rendering.html', { waitUntil: 'networkidle' });
-  const grid = page.locator('#gridContainer .grid-wrapper.active');
-  await expect(grid).toBeVisible({ timeout: 15_000 });
-  await expect(grid.locator('thead th[data-col-id]').first()).toBeVisible();
-  await expect(page.locator('#globalFilter')).toBeVisible();
-  await settleLayout(page);
-  await expect(page.locator('body')).toHaveScreenshot('legacy-result-panel.png');
-  await expect(page.locator('#gridContainer')).toHaveScreenshot('legacy-result-grid.png');
-});
-
 test('column filter dialog stays inside a short result panel', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 420 });
   await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
@@ -154,14 +143,28 @@ test('shared result panel keeps Excel-style filtering, grouping and inline editi
   await panel.getByRole('button', { name: 'Group by ID' }).click();
   await expect(panel.locator('.ui-data-grid-group-panel')).toContainText('ID');
   await expect(panel.locator('.ui-data-grid-group-row').first()).toBeVisible();
+  const groupToggle = panel.locator('.ui-data-grid-group-toggle').first();
+  const groupMarker = groupToggle.locator('.ui-data-grid-group-marker');
+  await groupToggle.hover();
+  expect(await groupToggle.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
+  const toggleBox = await groupToggle.boundingBox();
+  const markerBox = await groupMarker.boundingBox();
+  expect(toggleBox).not.toBeNull();
+  expect(markerBox).not.toBeNull();
+  expect(Math.abs((toggleBox!.x + toggleBox!.width / 2) - (markerBox!.x + markerBox!.width / 2))).toBeLessThan(2);
+  expect(Math.abs((toggleBox!.y + toggleBox!.height / 2) - (markerBox!.y + markerBox!.height / 2))).toBeLessThan(2);
   // Group bands stay anchored to the left edge while data scrolls sideways.
   const groupCell = panel.locator('.ui-data-grid-group-cell').first();
+  const groupContent = panel.locator('.ui-data-grid-group-content').first();
   await panel.locator('.ui-data-grid-scroll').evaluate(element => {
     element.scrollLeft = 640;
     element.dispatchEvent(new Event('scroll', { bubbles: true }));
   });
-  await expect.poll(async () => Math.round((await groupCell.boundingBox())?.x ?? -999)).toBeLessThan(60);
-  await expect(groupCell).toBeInViewport();
+  await expect.poll(async () => Math.round((await groupContent.boundingBox())?.x ?? -999)).toBeGreaterThanOrEqual(0);
+  const contentBox = await groupContent.boundingBox();
+  expect(contentBox).not.toBeNull();
+  expect(contentBox!.x).toBeLessThan(160);
+  await expect(groupContent).toBeInViewport();
   await expect(groupCell).toContainText('ID');
   await panel.locator('.ui-data-grid-scroll').evaluate(element => {
     element.scrollLeft = 0;
@@ -484,4 +487,43 @@ test('dragging a header reveals the grouping drop strip', async ({ page }) => {
   await page.mouse.up();
   await expect(panel.locator('.ui-data-grid-group-panel')).toContainText('Group by');
   await expect(panel.locator('.ui-data-grid-group-chip')).toContainText('ID');
+});
+
+test('shared-only shell keeps the row gutter compact and drops legacy scaffolding', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await page.goto('/test-harness/shared-result-panel.html', { waitUntil: 'networkidle' });
+  const panel = page.locator('#shared-ui-root');
+  await expect(panel.locator('.ui-result-grid')).toBeVisible();
+  await expect(panel.getByRole('toolbar', { name: 'Result view controls' })).toBeVisible();
+  await expect(page.locator('#layoutWrapper')).toHaveCount(0);
+  await expect(page.locator('#globalFilter')).toHaveCount(0);
+  await expect(page.locator('link[href*="resultPanel.css"]')).toHaveCount(0);
+
+  const metrics = await page.evaluate(() => {
+    const gutter = document.querySelector<HTMLElement>('.ui-data-grid thead .ui-data-grid-row-number');
+    const toolbar = document.querySelector<HTMLElement>('.ui-result-toolbar');
+    const table = document.querySelector<HTMLElement>('.ui-data-grid');
+    const root = document.getElementById('shared-ui-root');
+    const rect = (element: HTMLElement | null) => element ? element.getBoundingClientRect() : null;
+    const gutterRect = rect(gutter);
+    const toolbarRect = rect(toolbar);
+    const tableRect = rect(table);
+    const rootRect = rect(root);
+    return {
+      gutterWidth: gutterRect?.width ?? -1,
+      toolbarLeft: toolbarRect?.left ?? -1,
+      tableLeft: tableRect?.left ?? -1,
+      rootLeft: rootRect?.left ?? -1,
+      bodyPaddingLeft: getComputedStyle(document.body).paddingLeft,
+    };
+  });
+  // The fixed-width row gutter must not absorb the table's spare width: that
+  // used to leave a wide empty strip between the panel edge and the row
+  // numbers. The trailing fill column owns the slack instead.
+  expect(metrics.gutterWidth).toBeGreaterThan(0);
+  expect(metrics.gutterWidth).toBeLessThanOrEqual(56);
+  expect(metrics.bodyPaddingLeft).toBe('0px');
+  expect(Math.abs(metrics.toolbarLeft - metrics.tableLeft)).toBeLessThan(2);
+  expect(Math.abs(metrics.toolbarLeft - metrics.rootLeft)).toBeLessThan(2);
+  expect(Math.abs(metrics.tableLeft - metrics.rootLeft)).toBeLessThan(2);
 });

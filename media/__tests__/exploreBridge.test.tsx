@@ -1,16 +1,19 @@
 import * as bridge from '../resultPanel/explore/hostBridge.js';
 import { postHostMessage } from '../resultPanel/protocol.js';
-import { getActiveSourceUri } from '../resultPanel/types.js';
+import { setExploreContext } from '../resultPanel/explore/context.js';
 
 jest.mock('../resultPanel/protocol.js', () => ({ postHostMessage: jest.fn() }));
-jest.mock('../resultPanel/types.js', () => ({ getActiveSourceUri: jest.fn(() => 'file:///source.sql'), getResultSetAt: () => ({ resultSetId: 'stable-owner' }) }));
-jest.mock('../resultPanel/state.js', () => ({ getActiveGridIndex: () => 2 }));
 const filters = { dimensions: [], dates: [], measures: [] };
 const last = () => jest.mocked(postHostMessage).mock.calls.at(-1)![0] as { requestId: number; command: string };
 const reply = (result: Record<string, unknown>, command = 'exploreOperationResult') => bridge.handleExploreHostMessage({ command, requestId: last().requestId, result, ...result });
 
 describe('Explore owned request bridge', () => {
-    beforeEach(() => { jest.useFakeTimers(); jest.clearAllMocks(); jest.mocked(getActiveSourceUri).mockReturnValue('file:///source.sql'); });
+    const setOwner = (sourceUri: string | undefined) => setExploreContext({
+        sourceUri,
+        resultSetIndex: 2,
+        resultSet: { resultSetId: 'stable-owner', columns: [], data: [] },
+    });
+    beforeEach(() => { jest.useFakeTimers(); jest.clearAllMocks(); setOwner('file:///source.sql'); });
     afterEach(() => { bridge.cancelExploreRequests(); jest.useRealTimers(); });
     it('captures stable owner and settles a database result exactly once', async () => {
         const pending = bridge.requestExploreOperation({ kind: 'rows', filters });
@@ -47,7 +50,7 @@ describe('Explore owned request bridge', () => {
         bridge.openExploreSqlInEditor('SELECT only', 'Details'); expect(postHostMessage).toHaveBeenLastCalledWith({ command: 'openExploreSqlInEditor', sql: 'SELECT only', label: 'Details' });
     });
     it('rejects requests without an active source and ignores unrelated messages', () => {
-        jest.mocked(getActiveSourceUri).mockReturnValue(undefined);
+        setOwner(undefined);
         expect(() => bridge.requestExploreOperation({ kind: 'rows', filters })).toThrow('No active source');
         expect(() => bridge.handleExploreHostMessage({ command: 'unrelated' })).not.toThrow();
     });

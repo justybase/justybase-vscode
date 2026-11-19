@@ -429,7 +429,7 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
                     void vscode.env.clipboard.writeText(msg.text).then(() => {
                         void vscode.window.setStatusBarMessage('Copied to clipboard', 2000);
                     });
-                } else if (msg.command === 'initiateExport' || msg.command === 'handleClickExport') {
+                } else if (msg.command === 'initiateExport' || msg.command === 'handleClickExport' || msg.command === 'initiateExportWithSelection') {
                     if (await waitForStream()) {
                         void this._handleExport(allData, webviewPanel);
                     }
@@ -749,37 +749,22 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
                                 : ext === '.nzpreview' ? 'Results Preview' : 'File';
 
         const cspSource = webviewPanel.webview.cspSource;
-        const tanstackUri = webviewPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'media', 'tanstack-table-core.js')
-        );
-        const virtualUri = webviewPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'media', 'tanstack-virtual-core.js')
-        );
         const styleUri = webviewPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'media', 'resultPanel.css')
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'sharedResultGrid.css')
         );
         const mainScriptUri = webviewPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'resultPanel.js')
-        );
-        const workerUri = webviewPanel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'searchWorker.js')
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'media', 'sharedResultPanel.js')
         );
 
-        const stats = fs.statSync(filePath);
-        const fileSizeStr = stats.size < 1024 * 1024
-            ? `${(stats.size / 1024).toFixed(1)} KB`
-            : `${(stats.size / (1024 * 1024)).toFixed(2)} MB`;
-        const workspaceAction = ['.csv', '.xlsx'].includes(ext)
-            ? '<button id="add-file-to-data-workspace" class="primary" title="Add this file to a new or existing Data Workspace">Add to Data Workspace</button>'
-            : '';
-
-        const resultSetsJson = JSON.stringify(allData.map(d => ({
+        const resultSetsPayload = JSON.stringify(allData.map((d, index) => ({
+            resultSetId: `file-preview-${index}`,
             columns: d.columns,
             data: d.rows,
             executionTimestamp: Date.now(),
             name: d.formatLabel || 'Sheet',
+            totalRowCount: d.rows.length,
             limitReached: d.limitReached,
-        })));
+        }))).replace(/</g, '\\u003c');
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -788,99 +773,26 @@ export class FilePreviewEditor implements vscode.CustomReadonlyEditorProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} 'unsafe-inline'; worker-src ${cspSource} blob:; connect-src ${cspSource}; style-src ${cspSource} 'unsafe-inline';">
     <title>${formatLabel} Preview</title>
-    <script src="${tanstackUri}"></script>
-    <script src="${virtualUri}"></script>
     <link rel="stylesheet" href="${styleUri}">
-    <style>
-        .file-header-info{flex-shrink:0;padding:2px 8px 4px;font-size:11px;color:var(--vscode-descriptionForeground,#888);border-bottom:1px solid var(--vscode-panel-border,#444);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        #sourceTabs{display:none!important}
-        .source-tabs{display:none!important}
-    </style>
 </head>
-<body>
-    <div class="file-header-info">${escHtml(path.basename(filePath))} &middot; ${fileSizeStr} &middot; ${formatLabel}</div>
-    <div id="sourceTabs" class="source-tabs"></div>
-    <div id="resultSetTabs" class="result-set-tabs" style="display: none;"></div>
-    <div id="executionStatusBanner" class="execution-status-banner" style="display: none;"></div>
-
-    <div id="loadingOverlay" class="loading-overlay">
-        <div class="spinner"></div>
-        <div class="executing-text">Loading file...</div>
-        <button id="cancelQueryBtn" class="secondary" title="Cancel">Cancel</button>
-    </div>
-    <div class="controls">
-        <input type="text" id="globalFilter" class="global-filter-input" placeholder="Filter..." onkeyup="onFilterChanged()">
-        <div class="column-search-wrapper">
-            <input type="text" id="columnSearch" class="column-search-input" placeholder="Find column..." autocomplete="off" oninput="onColumnSearchChanged()" onkeydown="onColumnSearchKeydown(event)" onblur="onColumnSearchBlur()" onfocus="onColumnSearchFocus()">
-            <div id="columnSearchDropdown" class="column-search-dropdown" style="display: none;"></div>
-        </div>
-        <button onclick="toggleRowView()" title="Toggle Row View"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3c-3 0-6 2.5-6 5s3 5 6 5 6-2.5 6-5-3-5-6-5zm0 9c-2.5 0-4.5-2-4.5-4S5.5 4 8 4s4.5 2 4.5 4-2 4.5-4.5 4.5z"/><circle cx="8" cy="8" r="2"/></svg> Row View</button>
-        <div class="view-mode-group">
-            <select id="viewModeSelect" class="view-mode-select" title="Switch result view mode">
-                <option value="table">Table</option>
-                <option value="chart">Charts</option>
-            </select>
-        </div>
-        <button onclick="handleClickExport()" title="Export results"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3h8v10H6V3zm-1 0H3v10h2V3zm-2-1h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M6 6h8v1H6V6zm0 2h8v1H6V8zm0 2h8v1H6v-1z"/></svg> Export</button>
-        ${workspaceAction}
-        <button onclick="copySelection(false)" title="Copy selected cells to clipboard"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h7v2H4V4zm0 4h7v2H4V8zm0 4h7v2H4v-2zM2 1h12v14H2V1zm1 1v12h10V2H3z"/></svg> Copy</button>
-        <button onclick="copySelection(true)" title="Copy selected cells with headers"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h7v2H4V4zm0 4h7v2H4V8zm0 4h7v2H4v-2zM2 1h12v14H2V1zm1 1v12h10V2H3z"/></svg> Copy w/ Headers</button>
-        <div class="toolbar-separator"></div>
-        <button onclick="clearAllFilters()" title="Clear all filters"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 7.293l4.146-4.147.708.708L8.707 8l4.147 4.146-.708.708L8 8.707l-4.146 4.147-.708-.708L7.293 8 3.146 3.854l.708-.708L8 7.293z"/></svg> Clear Filters</button>
-        <span id="rowCountInfo" class="row-count-info"></span>
-    </div>
-
-    <div id="groupingPanel" class="grouping-panel" ondragover="onDragOverGroup(event)" ondragleave="onDragLeaveGroup(event)" ondrop="onDropGroup(event)">
-        <span class="drag-hint">Drag headers here to group</span>
-    </div>
-
-    <div id="mainSplitView" class="main-split-view">
-        <div id="gridContainer"></div>
-        <div id="analysisContainer" class="analysis-container" style="display: none;"></div>
-        <div id="rowViewPanel" class="row-view-panel">
-            <div class="row-view-header">
-                <span>Row Details & Comparison</span>
-                <span class="row-view-close" onclick="toggleRowView()">&times;</span>
-            </div>
-            <div id="rowViewContent" class="row-view-content">
-                <div class="row-view-placeholder">Select 1 to 10 rows to view details or compare</div>
-            </div>
-        </div>
-    </div>
-    <div id="valueViewerOverlay" class="value-viewer-overlay">
-        <div class="value-viewer-modal">
-            <div class="value-viewer-header">
-                <div>
-                    <div id="valueViewerTitle" class="value-viewer-title">Cell Value</div>
-                    <div id="valueViewerMeta" class="value-viewer-meta"></div>
-                </div>
-                <button id="valueViewerCloseBtn" class="value-viewer-close" title="Close Value Viewer">&times;</button>
-            </div>
-            <div id="valueViewerBody" class="value-viewer-body"></div>
-            <div class="value-viewer-actions">
-                <button id="valueViewerCopyBtn" class="primary">Copy Value</button>
-                <button id="valueViewerDismissBtn">Close</button>
-            </div>
-        </div>
-    </div>
-
+<body class="shared-ui-mode">
+    <div id="shared-ui-root"></div>
     <script>
-        window.sources = ['file-preview'];
-        window.pinnedSources = new Set();
-        window.pinnedResults = [];
-        window.activeSource = 'file-preview';
-        window.resultSets = ${resultSetsJson};
-        window.executingSources = new Set();
-        window.justybaseUseHostCopyShortcut = true;
         window.defaultCopyFormat = 'markdown';
-
-        let grids = [];
-        let activeGridIndex = 0;
-        const workerUri = "${workerUri}";
+        window.defaultExcelFormat = 'xlsb';
     </script>
     <script src="${mainScriptUri}"></script>
     <script>
-        init();
+        window.postMessage({
+            command: 'hydrate',
+            data: {
+                resultSetsJson: ${JSON.stringify(resultSetsPayload)},
+                activeSourceJson: ${JSON.stringify(JSON.stringify('file-preview'))},
+                activeResultSetIndex: 0,
+                executingSourcesJson: '[]',
+                pinnedResultsJson: '[]',
+            },
+        }, '*');
     </script>
 </body>
 </html>`;

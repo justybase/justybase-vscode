@@ -1,6 +1,5 @@
 import { updateSqlQueueLogs, renderSqlQueueLogs } from '../sqlQueueLogs';
 import { appendRunLogRows } from '../logRunGroups';
-import { getResultPanelWindow } from '../types';
 
 const posted = jest.fn();
 jest.mock('../protocol', () => ({ postHostMessage: (message: unknown) => posted(message) }));
@@ -8,15 +7,14 @@ jest.mock('../protocol', () => ({ postHostMessage: (message: unknown) => posted(
 describe('SQL queue and grouped Logs', () => {
     beforeEach(() => {
         document.body.innerHTML = '<div class="console-wrapper"><div class="console-view"></div></div>';
-        getResultPanelWindow().activeSource = 'file:///a.sql';
         posted.mockClear();
-        updateSqlQueueLogs('[]');
+        updateSqlQueueLogs('[]', 'file:///a.sql');
     });
     const lane = () => ({ sourceUri:'file:///a.sql',sourceKey:'lane',maxConcurrency:20,paused:false,
         running:[{id:'a',status:'running',sql:'SELECT <unsafe>',executionUri:'file:///a.sql#query-a',database:'DB'}],
         queued:[{id:'b',status:'queued',sql:'SELECT 2'}, {id:'c',status:'preparing',sql:'SELECT 3'}] });
     test('counts, disclosures, escaping and distinct control semantics', () => {
-        updateSqlQueueLogs(JSON.stringify([lane()]));
+        updateSqlQueueLogs(JSON.stringify([lane()]), 'file:///a.sql');
         expect(document.querySelector('strong')?.textContent).toBe('1 running / 20 · 2 queued');
         expect(document.querySelector('unsafe')).toBeNull();
         const buttons=[...document.querySelectorAll('button')];
@@ -28,29 +26,26 @@ describe('SQL queue and grouped Logs', () => {
         expect(posted.mock.calls[2][0].jobId).toBe('a');
         const job=document.querySelector<HTMLDetailsElement>('details')!;
         job.open=true;job.dispatchEvent(new Event('toggle'));
-        updateSqlQueueLogs(JSON.stringify([lane()]));
+        updateSqlQueueLogs(JSON.stringify([lane()]), 'file:///a.sql');
         expect(document.querySelector<HTMLDetailsElement>('details')!.open).toBe(true);
         expect(document.querySelector('.sql-queue-job-detail')?.textContent).toContain('Database: DB');
     });
     test('pause, cancellation, standalone mode, no lane, malformed JSON, and completed archives', () => {
-        updateSqlQueueLogs('invalid JSON');
+        updateSqlQueueLogs('invalid JSON', 'file:///a.sql');
         expect(document.querySelector('.sql-queue-overview')).toBeNull();
         const state={...lane(),maxConcurrency:1,paused:true,queued:[],running:[{id:'a',status:'cancelling',sql:'SELECT 1'}]};
-        updateSqlQueueLogs(JSON.stringify([state]));
+        updateSqlQueueLogs(JSON.stringify([state]), 'file:///a.sql');
         expect(document.querySelector('strong')?.textContent).toBe('1 running · 0 queued · Paused');
         document.querySelector('button')!.click();expect(posted.mock.calls[0][0].action).toBe('resume');
         expect(document.querySelector<HTMLButtonElement>('.sql-queue-job button')!.disabled).toBe(true);
-        getResultPanelWindow().activeSource='file:///other.sql';updateSqlQueueLogs();
+        updateSqlQueueLogs(undefined, 'file:///other.sql');
         expect(document.querySelector('.sql-queue-overview')).toBeNull();
-        getResultPanelWindow().activeSource='file:///a.sql#query-finished';
         const archive={sourceUri:'file:///a.sql#query-old',rows:[['now','✓ SUCCESS: SELECT 4',{executionId:'old',event:'end',status:'success'}]]};
-        updateSqlQueueLogs(JSON.stringify([{...lane(),running:[],queued:[],sources:['file:///a.sql#query-finished'],archive:[archive]}]));
+        updateSqlQueueLogs(JSON.stringify([{...lane(),running:[],queued:[],sources:['file:///a.sql#query-finished'],archive:[archive]}]), 'file:///a.sql#query-finished');
         expect(document.querySelector('.log-run-summary')?.textContent).toContain('SUCCESS');
         expect(document.querySelector('.sql-queue-overview')).toBeNull();
-        getResultPanelWindow().activeSource='file:///a.sql#query-a';
-        updateSqlQueueLogs(JSON.stringify([lane()]));expect(document.querySelector('.sql-queue-overview')).not.toBeNull();
-        getResultPanelWindow().activeSource='file:///a.sql#query-last';
-        updateSqlQueueLogs(JSON.stringify([{...lane(),lastExecutionUri:'file:///a.sql#query-last'}]));
+        updateSqlQueueLogs(JSON.stringify([lane()]), 'file:///a.sql#query-a');expect(document.querySelector('.sql-queue-overview')).not.toBeNull();
+        updateSqlQueueLogs(JSON.stringify([{...lane(),lastExecutionUri:'file:///a.sql#query-last'}]), 'file:///a.sql#query-last');
         expect(document.querySelector('.sql-queue-overview')).not.toBeNull();
         renderSqlQueueLogs(document.createElement('div'));
     });

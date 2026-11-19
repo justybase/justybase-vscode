@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shared Result Panel shell</title>
+  <link rel="stylesheet" href="/dist/media/sharedResultGrid.css">
+  <style>
+    :root {
+      --vscode-editor-background: #1e1e1e;
+      --vscode-editor-foreground: #cccccc;
+      --vscode-editorGroupHeader-tabsBackground: #252526;
+      --vscode-panel-border: #3c3c3c;
+      --vscode-focusBorder: #007fd4;
+      --vscode-descriptionForeground: #9d9d9d;
+      --vscode-list-activeSelectionBackground: #094771;
+      --vscode-list-hoverBackground: #2a2d2e;
+      --vscode-scrollbarSlider-background: #79797966;
+      --justybase-results-grid-font-family: Consolas, monospace;
+      --justybase-results-grid-font-size: 12px;
+    }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { overflow: hidden; background: #1e1e1e; }
+  </style>
+</head>
+<body class="shared-ui-mode">
+  <div id="shared-ui-root"></div>
+  <script>
+    window.__postedMessages = [];
+    window.acquireVsCodeApi = function () {
+      return {
+        postMessage: function (message) { window.__postedMessages.push(message); },
+        getState: function () { return undefined; },
+        setState: function () {},
+      };
+    };
+  </script>
+  <script src="/dist/media/sharedResultPanel.js"></script>
+  <script>
+    window.addEventListener('load', function () {
+      var resultSets = [{
+        resultSetId: 'prod-result-1',
+        name: 'Result 1',
+        statementIndex: 0,
+        executionTimestamp: 1,
+        columns: [
+          { name: 'DATEKEY', type: 'INTEGER' },
+          { name: 'FULLDATE', type: 'DATE' },
+          { name: 'AMOUNT', type: 'NUMERIC' },
+        ],
+        data: [
+          [20050101, '2005-01-01', 10.5],
+          [20050102, '2005-01-02', 20.25],
+        ],
+        totalRowCount: 2,
+      }];
+      window.postMessage({
+        command: 'hydrate',
+        data: {
+          resultSetsJson: JSON.stringify(resultSets),
+          activeSourceJson: JSON.stringify('file:///query.sql'),
+          activeResultSetIndex: 0,
+          executingSourcesJson: '[]',
+        },
+      }, '*');
+    });
+  </script>
+</body>
+</html>

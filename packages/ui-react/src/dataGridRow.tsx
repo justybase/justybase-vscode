@@ -194,5 +194,6 @@ export const DataGridRow = memo(function DataGridRow({
       >{cell.text}</td>;
     })}
     {rightSpacer > 0 && <td aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: rightSpacer, minWidth: rightSpacer }} />}
+    <td aria-hidden="true" className="ui-data-grid-column-spacer ui-data-grid-fill-spacer" />
   </tr>;
 });

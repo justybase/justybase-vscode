@@ -4,9 +4,9 @@ import { renderFullStatsCard, type FullStatsSnapshot } from './fullStatsCard.js'
 // in the webview host state (_exploreStates).
 
 import { getElementById, asHtml } from '../dom.js';
-import { getActiveSourceUri, getResultSetAt } from '../types.js';
+import { getExploreResultSetAt, getExploreSourceUri } from './context.js';
 import { getHostState, setHostState } from '../protocol.js';
-import { fetchRowsFromHost } from '../diskBackedGrid.js';
+import { fetchExploreRows } from './rows.js';
 import { classifyColumnRole } from './columnClassification.js';
 import { computeColumnOverviews } from './columnOverview.js';
 import { filterExploreRows, columnsMetaForRows } from './filtering.js';
@@ -147,16 +147,16 @@ function buildEmptyState(message: string): HTMLDivElement {
 // ---------------------------------------------------------------------------
 
 async function loadSampleRows(rsIndex: number): Promise<{ rows: unknown[][]; sampleMode: 'memory' | 'disk' }> {
-    const resultSet = getResultSetAt(rsIndex);
+    const resultSet = getExploreResultSetAt(rsIndex);
     if (!resultSet) {
         return { rows: [], sampleMode: 'memory' };
     }
     if (resultSet.storageMode === 'sqlite') {
-        const sourceUri = getActiveSourceUri();
+        const sourceUri = getExploreSourceUri();
         if (!sourceUri) {
             return { rows: [], sampleMode: 'disk' };
         }
-        const rows = await fetchRowsFromHost(sourceUri, rsIndex, 0, EXPLORE_SAMPLE_ROWS, true);
+        const rows = await fetchExploreRows(sourceUri, rsIndex, 0, EXPLORE_SAMPLE_ROWS);
         return { rows, sampleMode: 'disk' };
     }
     const data = Array.isArray(resultSet.data) ? resultSet.data : [];
@@ -164,7 +164,7 @@ async function loadSampleRows(rsIndex: number): Promise<{ rows: unknown[][]; sam
 }
 
 export async function computeExploreOverview(rsIndex: number): Promise<ExploreOverviewResult> {
-    const resultSet = getResultSetAt(rsIndex);
+    const resultSet = getExploreResultSetAt(rsIndex);
     if (!resultSet || resultSet.isLog || resultSet.isError) {
         throw new Error('No tabular result set to explore.');
     }
@@ -374,7 +374,7 @@ function updateScope(view: ExploreViewState): void {
     if (!root || !data || !view.filterState) return;
     const matched = getFilteredSample(view, data, view.filterState.filters).rows.length;
     root.textContent = `${data.truncated ? 'Sample' : 'All loaded rows'} · First ${data.sampledRows.toLocaleString()} of ${data.totalRows.toLocaleString()} loaded rows · ${matched.toLocaleString()} matching rows in the sample · First rows; not a random sample`;
-    const result = getResultSetAt(Number(document.getElementById('exploreTabContent')?.dataset.resultIndex ?? '-1'));
+    const result = getExploreResultSetAt(Number(document.getElementById('exploreTabContent')?.dataset.resultIndex ?? '-1'));
     if (data.databaseReason) root.textContent += ` · ${data.databaseReason}`;
     if (result?.limitReached) root.textContent += ' · Row limit reached';
     if (result?.isCancelled) root.textContent += ' · Partial result';
@@ -630,9 +630,9 @@ export function renderExploreView(rsIndex: number): void {
     disposeComposerChart();
     disposeRankingView();
 
-    const sourceUri = getActiveSourceUri() || '';
+    const sourceUri = getExploreSourceUri() || '';
     if (activeViewKey) { const previous = viewStates.get(activeViewKey); if (previous) previous.data = null; }
-    const owner = getResultSetAt(rsIndex);
+    const owner = getExploreResultSetAt(rsIndex);
     const schemaKey = JSON.stringify(owner?.columns.map(column => [column.name, column.type]));
     const key = `${sourceUri}\u001f${owner?.resultSetId ?? `ts:${owner?.executionTimestamp ?? 0}:${rsIndex}`}`;
     activeViewKey = key;
@@ -701,14 +701,14 @@ export function renderExploreView(rsIndex: number): void {
             if (!view || activeViewKey !== key || generation !== renderGeneration) {
                 return;
             }
-            const sourceColumns = getResultSetAt(rsIndex)?.columns ?? [];
+            const sourceColumns = getExploreResultSetAt(rsIndex)?.columns ?? [];
             const columnsMeta = columnsMetaForRows(sourceColumns, rows, classifyColumnRole);
             const overviews = computeColumnOverviews(columnsMeta, rows, rows.length);
             for (const column of columnsMeta) {
                 const overview = overviews[column.index];
                 column.exploreTopValues = overview?.topValues?.map(top => top.value);
             }
-            const resultSet = getResultSetAt(rsIndex);
+            const resultSet = getExploreResultSetAt(rsIndex);
             const totalRows = resultSet?.totalRowCount ?? (Array.isArray(resultSet?.data) ? resultSet.data.length : rows.length);
             view.data = {
                 key,

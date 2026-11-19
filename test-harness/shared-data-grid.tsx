@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { encode } from '@msgpack/msgpack';
 import { DataGrid, processDataGridRows } from '../packages/ui-react/src/dataGrid';
 import type { DataGridColumn, DataGridViewState, GridScrollPosition } from '../packages/ui-react/src/dataGrid';
-import { mountSharedResultPanelIfConfigured } from '../media/resultPanel/sharedView';
+import { mountSharedResultPanel } from '../media/resultPanel/sharedView';
 import '../packages/ui-react/src/resultGrid.css';
 
 type HarnessRow = readonly unknown[];
@@ -219,15 +219,8 @@ function App(): ReactElement {
 }
 
 if (profile === 'panel') {
-  if (new URLSearchParams(window.location.search).has('legacycss')) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = '/media/resultPanel.css';
-    document.head.appendChild(link);
-  }
-  (globalThis as { __JUSTYBASE_UI_MODE__?: string }).__JUSTYBASE_UI_MODE__ = 'shared';
   document.body.innerHTML = '<div id="shared-ui-root"></div>';
-  if (mountSharedResultPanelIfConfigured()) {
+  if (mountSharedResultPanel()) {
     const panelColumns = columns.slice(0, 8);
     const panelRows = rows.slice(0, 200).map(row => row.slice(0, 8));
     const withBaseline = new URLSearchParams(window.location.search).has('baseline');

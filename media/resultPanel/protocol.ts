@@ -333,3 +333,14 @@ export function asHostMessage(message: unknown): ResultPanelHostToWebviewMessage
     }
     return validateHostMessage(message) ? message as ResultPanelHostToWebviewMessage : undefined;
 }
+
+/**
+ * Invoke an optional panel callback exposed by the host-injected webview
+ * globals without repeating typeof guards.
+ */
+export function callPanelMethod(method: string, ...args: unknown[]): void {
+    const fn = (globalThis as Record<string, unknown>)[method];
+    if (typeof fn === 'function') {
+        (fn as (...params: unknown[]) => unknown)(...args);
+    }
+}

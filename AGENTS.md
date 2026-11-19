@@ -182,17 +182,17 @@ npm run lint:extended && npm run docs:check && npm run version:check
 
 ### Result Panel webview layout
 
-`media/resultPanel/grid.ts` and `media/resultPanel/selection.ts` are thin esbuild entry facades. Implementation lives in subfolders:
+The VS Code Result Panel is shared-only. `media/sharedResultPanel.ts` mounts the React surface in `media/resultPanel/sharedView.tsx`; the legacy DOM renderer, its `grid/` and `selection/` modules, and the `justybase.ui.mode` setting were removed.
 
 | Area | Path | Role |
 |------|------|------|
-| Grid facade | `media/resultPanel/grid.ts` | Re-exports; `scrollToColumn` |
-| Grid modules | `media/resultPanel/grid/*` | `sizing`, `columns`, `aggregation`, `alternateViews`, `orchestration`, `persistence`, `tableBuilder`, `types` |
-| Selection facade | `media/resultPanel/selection.ts` | `setupCellSelectionEvents` orchestrator |
-| Selection modules | `media/resultPanel/selection/*` | `clipboard`, `contextMenu`, `interaction` |
-| Banners | `media/resultPanel/banners.ts` | `updateResultLimitBanner` (leaf — no `tabs`/`messages` imports) |
+| Shared entry | `media/sharedResultPanel.ts` | Webview bootstrap; mounts the shared panel |
+| Shared panel | `media/resultPanel/sharedView.tsx` | Host protocol, tabs, toolbar, grid and layout orchestration |
+| Shared adapters | `media/resultPanel/shared*.ts(x)` | Analytical, range charts, clipboard |
+| Explore | `media/resultPanel/explore/*` | DOM feature module hosted by React |
+| Shared packages | `packages/ui-core`, `packages/ui-react` | State, grid, charts, dialogs, row view |
 
-Grid state persistence (`saveAllGridStates`, `SavedGridState`) is in `grid/persistence.ts` — not `messages.ts`. Result/limit banners live in `banners.ts`. Avoid reintroducing `grid` ↔ `messages` or `messages` ↔ `tabs` import cycles.
+`media/resultPanel.css` was removed with the legacy renderer. Every webview now ships its own stylesheet; the Result Panel loads `dist/media/sharedResultGrid.css` and `dist/media/sharedResultPanel.js`.
 
 ### Optional Database Extensions
 
@@ -560,7 +560,7 @@ Logs-before-data delivery, hidden-view initialization, and missing-shell
 recovery:
 
 ```bash
-npm run test:playwright -- test-harness/tests/table-rendering.spec.ts
+npx playwright test --config=test-harness/data-grid-visual.playwright.config.ts test-harness/tests/result-panel-parity.spec.ts
 ```
 
 Run the Extension Host command inside WSL2 for a local WSL check. Remote-WSL is

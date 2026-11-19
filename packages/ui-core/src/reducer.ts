@@ -1,5 +1,5 @@
 import { UI_CONTRACT_VERSION } from '@justybase/contracts';
-import type { CapabilityDescriptor, UiAuthState, UiIdentity, UiMode, PersistenceScope } from '@justybase/contracts';
+import type { CapabilityDescriptor, UiAuthState, UiIdentity, PersistenceScope } from '@justybase/contracts';
 import type {
   UiAction,
   UiDocumentState,
@@ -12,7 +12,6 @@ import type {
 } from './types';
 
 export interface InitialUiStateOptions {
-  readonly mode?: UiMode;
   readonly persistenceScope?: PersistenceScope;
   readonly auth?: UiAuthState;
   readonly capabilities?: readonly CapabilityDescriptor[];
@@ -30,7 +29,6 @@ const emptyResultView = (): UiResultViewState => ({
 export function createInitialUiState(identity: UiIdentity, options: InitialUiStateOptions = {}): UiState {
   return {
     contractVersion: UI_CONTRACT_VERSION,
-    mode: options.mode ?? 'legacy',
     identity: { ...identity },
     auth: options.auth ?? { status: 'unauthenticated' },
     capabilities: [...(options.capabilities ?? [])],
@@ -399,8 +397,6 @@ function setShellStatus(state: UiState, status: UiState['shell']['status'], mess
 /** Pure, immutable reducer for all portable UI transitions. */
 export function reduceUiState(state: UiState, action: UiAction): UiState {
   switch (action.type) {
-    case 'mode/set':
-      return state.mode === action.mode ? state : { ...state, mode: action.mode };
     case 'auth/set':
       return { ...state, auth: { ...action.auth } };
     case 'capabilities/set':

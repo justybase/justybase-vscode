@@ -86,8 +86,21 @@ export async function runQueryQueueLogsRegression(document: vscode.TextDocument,
             await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: 0 });
             await vscode.window.showTextDocument(document, { preview: false });
             await vscode.commands.executeCommand('netezza.runQuery');
-            const logs = await provider.runResultPanelTestBridge('snapshot') as { activeResultSetIndex: number };
-            if (logs.activeResultSetIndex !== 0) throw new Error('New queued results displaced manually selected Logs.');
+            const activationStartedAt = Date.now();
+            let logs = await provider.runResultPanelTestBridge('snapshot') as {
+                activeResultSetIndex: number;
+                resultSets?: Array<{ isLog?: boolean; isError?: boolean; rowCount?: number }>;
+            };
+            while (logs.activeResultSetIndex < 1 && Date.now() - activationStartedAt < 5_000) {
+                await new Promise(resolve => setTimeout(resolve, 30));
+                logs = await provider.runResultPanelTestBridge('snapshot') as typeof logs;
+            }
+            if (logs.activeResultSetIndex < 1) {
+                throw new Error(
+                    'Executing SQL while Logs was selected did not activate the result tab '
+                    + `(active=${logs.activeResultSetIndex}, resultSets=${JSON.stringify(logs.resultSets ?? [])}).`,
+                );
+            }
             await provider.runResultPanelTestBridge('switchResultSet', { resultSetIndex: 1 });
             await vscode.window.showTextDocument(document, { preview: false });
             await vscode.commands.executeCommand('netezza.runQuery');

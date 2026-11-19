@@ -7,10 +7,8 @@ import { readFileSync } from 'node:fs';
 
 const work = mkdtempSync(path.join(tmpdir(), 'log-console-layout-'));
 const runsBundle = path.join(work, 'runs.js');
-const stylesBundle = path.join(work, 'styles.js');
 test.beforeAll(() => {
     buildSync({ entryPoints: [path.resolve(__dirname, '../../media/resultPanel/logRunGroups.ts')], bundle: true, format: 'iife', globalName: 'runLogs', outfile: runsBundle });
-    buildSync({ entryPoints: [path.resolve(__dirname, '../../media/resultPanel/styles.ts')], bundle: true, format: 'iife', globalName: 'panelStyles', outfile: stylesBundle });
 });
 test.afterAll(() => rmSync(work, { recursive: true, force: true }));
 
@@ -18,12 +16,13 @@ async function renderTranscript(page: import('@playwright/test').Page, cards: nu
     await page.setContent(
         '<div style="height:600px;display:flex;flex-direction:column">' +
         '<div id="gridContainer" style="flex:1;position:relative;overflow:hidden">' +
-        '<div class="grid-wrapper console-wrapper" data-index="0" style="display:block">' +
+        '<div class="ui-result-grid ui-legacy-log" data-index="0" style="height:100%">' +
         '<div class="console-view"></div></div></div></div>',
     );
-    await page.addStyleTag({ content: readFileSync(path.resolve(__dirname, '../../media/resultPanel.css'), 'utf8') });
-    await page.addScriptTag({ path: stylesBundle });
-    await page.evaluate(() => (window as unknown as { panelStyles: { injectStyles: () => void } }).panelStyles.injectStyles());
+    const tokens = readFileSync(path.resolve(__dirname, '../../packages/ui-react/src/tokens.css'), 'utf8');
+    const grid = readFileSync(path.resolve(__dirname, '../../packages/ui-react/src/resultGrid.css'), 'utf8')
+        .replace(/@import\s+['"]\.\/tokens\.css['"];?/u, '');
+    await page.addStyleTag({ content: `${tokens}\n${grid}` });
     await page.addScriptTag({ path: runsBundle });
     await page.evaluate(({ cards, lines }) => {
         const api = window as unknown as { runLogs: { appendRunLogRows: (c: HTMLElement, r: unknown[][], f: (row: unknown[]) => HTMLElement) => void } };

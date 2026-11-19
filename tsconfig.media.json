@@ -18,7 +18,7 @@
     "strictNullChecks": true
   },
   "include": [
-    "media/resultPanel.ts",
+    "media/sharedResultPanel.ts",
     "media/searchWorker.ts",
     "media/queryHistory.ts",
     "media/queryHistoryExtended.ts",

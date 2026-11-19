@@ -7,10 +7,6 @@ async function configureRegressionSettings() {
     const global = vscode.ConfigurationTarget.Global;
     const root = vscode.workspace.getConfiguration('justybase');
     const results = vscode.workspace.getConfiguration('justybase.results');
-    const uiMode = (process.env.JUSTYBASE_UI_MODE || '').trim();
-    if (uiMode === 'shared' || uiMode === 'legacy') {
-        await vscode.workspace.getConfiguration('justybase.ui').update('mode', uiMode, global);
-    }
     await root.update('enableStreaming', true, global);
     await root.update('streamingChunkSize', 2, global);
     await root.update('safeExecute.enabled', false, global);
@@ -31,7 +27,6 @@ async function run() {
     const engine = process.env.JUSTYBASE_EXTENSION_HOST_ENGINE === 'netezza' ? 'netezza' : 'sqlite';
     const reportPath = process.env.JUSTYBASE_EXTENSION_HOST_REPORT_PATH;
     const tracePath = process.env.JUSTYBASE_EXTENSION_HOST_TRACE_PATH;
-    const uiMode = (process.env.JUSTYBASE_UI_MODE || 'shared').trim() === 'legacy' ? 'legacy' : 'shared';
     const screenshotMode = process.env.JUSTYBASE_EXTENSION_HOST_SCREENSHOTS === '1';
     if (screenshotMode) {
         // Visual capture mode deliberately does not depend on the legacy
@@ -39,7 +34,7 @@ async function run() {
         // host scenario is still preparing its deterministic streams.
         const scenarioPromise = vscode.commands.executeCommand('justybase.test.extensionHostScenario', { engine });
         await new Promise(resolve => setTimeout(resolve, 3000));
-        await requestScreenshot(`result-panel-${uiMode}`);
+        await requestScreenshot('result-panel-shared');
         await scenarioPromise.catch(error => {
             console.warn(
                 'Extension Host scenario did not finish after the visual capture:',

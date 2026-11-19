@@ -415,7 +415,9 @@ describe('FilePreviewEditor spreadsheet presentation', () => {
             expect(csvHtml).toContain('"sheets"');
 
             const parquetHtml = build(parquetFile);
-            expect(parquetHtml).toContain('resultPanel.js');
+            expect(parquetHtml).toContain('sharedResultPanel.js');
+            expect(parquetHtml).toContain('sharedResultGrid.css');
+            expect(parquetHtml).not.toContain('resultPanel.js');
             expect(parquetHtml).not.toContain('spreadsheetPreview.js');
         } finally {
             fs.rmSync(csvFile, { force: true });

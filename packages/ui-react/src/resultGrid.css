@@ -8,6 +8,8 @@ body,
   width: 100%;
   min-height: 100%;
   margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .ui-result-grid {
@@ -1789,17 +1791,37 @@ body,
 }
 
 .ui-data-grid-group-row td {
-  /* The group band is a single full-width cell. Keeping it sticky makes the
-     label stay put instead of scrolling out of view with the data columns. */
-  position: sticky;
-  left: 0;
+  /* The group band is a single full-width cell. The label itself is sticky
+     (see .ui-data-grid-group-content) so it stays visible while the data
+     columns scroll sideways, without making the wide cell sticky. */
+  position: relative;
   z-index: 4;
   height: var(--jb-grid-row-height, 26px);
-  padding: 0 10px;
+  padding: 0;
   color: var(--vscode-textLink-foreground, #93c5fd);
   background: color-mix(in srgb, var(--justybase-grid-surface) 88%, var(--justybase-grid-accent));
   font-weight: 600;
   line-height: 20px;
+  vertical-align: middle;
+}
+
+.ui-data-grid td.ui-data-grid-group-cell {
+  max-width: none;
+  overflow: visible;
+}
+
+.ui-data-grid-group-content {
+  position: sticky;
+  left: 48px;
+  z-index: 1;
+  display: inline-flex;
+  max-width: calc(100vw - 60px);
+  height: var(--jb-grid-row-height, 26px);
+  align-items: center;
+  overflow: hidden;
+  padding-right: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   vertical-align: middle;
 }
 
@@ -1827,14 +1849,34 @@ body,
 }
 
 .ui-data-grid-group-marker {
-  display: inline-block;
+  display: inline-flex;
   width: 18px;
-  color: var(--justybase-grid-muted);
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.ui-data-grid-group-marker::before {
+  width: 0;
+  height: 0;
+  border-top: 5px solid currentColor;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  content: '';
+  transform: translateY(1px);
+}
+
+.ui-data-grid-group-toggle[aria-expanded='false'] .ui-data-grid-group-marker::before {
+  transform: rotate(-90deg) translateX(1px);
 }
 
 .ui-data-grid-group-toggle {
+  display: inline-flex;
   width: 22px;
   height: 22px;
+  align-items: center;
+  justify-content: center;
   margin: -2px 2px -2px -4px;
   padding: 0;
   border: 0;
@@ -1842,17 +1884,22 @@ body,
   background: transparent;
   cursor: pointer;
   font: inherit;
-  text-align: left;
 }
 
 .ui-data-grid-group-toggle[aria-expanded='false'] {
   color: var(--justybase-grid-accent);
 }
 
-.ui-data-grid-group-toggle:hover,
+.ui-data-grid-group-toggle:hover {
+  color: var(--justybase-grid-accent);
+  background: transparent;
+}
+
 .ui-data-grid-group-toggle:focus-visible {
+  border-radius: 2px;
   color: var(--justybase-grid-accent);
   outline: 1px solid var(--justybase-grid-accent);
+  outline-offset: -2px;
 }
 
 .ui-data-grid-group-count {
@@ -1910,6 +1957,13 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.ui-result-toolbar,
+.ui-result-tabs {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* Grid internals are compact by design; never inherit the 26px shell control
@@ -2462,9 +2516,9 @@ body,
   opacity: 1;
 }
 
-/* Shared log console reuses the legacy DOM (.console-view / .console-line /
-   .log-status …) so it looks identical with or without media/resultPanel.css
-   (the test harness only bundles this file). */
+/* Shared log console reuses the historical DOM (.console-view / .console-line /
+   .log-status …) so it matches the legacy log surface without depending on the
+   retired legacy stylesheet. */
 /* Legacy logs sit inside a 10px padded surface; keep that breathing room. */
 .ui-legacy-log {
   box-sizing: border-box;
@@ -2532,6 +2586,7 @@ body,
 }
 
 .ui-result-grid .console-view > .console-line { flex: 0 0 auto; }
+.ui-result-grid .console-view > details.log-run { flex: 0 0 auto; }
 
 .ui-result-grid .console-line {
   display: flex;
@@ -2566,9 +2621,8 @@ body,
 .ui-result-grid .log-error-hint { display: block; margin-top: 2px; color: #f14c4c; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 .ui-result-grid .console-line--empty .console-msg { opacity: .6; }
 
-/* Statement cards inside the shared Logs transcript. The legacy renderer emits
-   the same markup; these rules keep the harness (which does not load
-   media/resultPanel.css) visually identical to VS Code. */
+/* Statement cards inside the shared Logs transcript. The legacy renderer emitted
+   the same markup; these rules keep the shared DOM visually identical to VS Code. */
 .ui-legacy-log .log-run { display: block; margin: 2px 0; overflow: hidden; border: 1px solid var(--justybase-grid-border); border-left-width: 3px; border-radius: 3px; background: var(--justybase-grid-bg); }
 .ui-legacy-log .log-run:first-of-type { margin-top: 0; }
 .ui-legacy-log .log-run[data-status='success'] { border-left-color: var(--vscode-testing-iconPassed, #4ec94e); }
@@ -2591,6 +2645,83 @@ body,
 .ui-legacy-log .log-run-sql { max-height: 240px; margin: 0 0 4px; padding: 6px 8px; overflow: auto; border: 1px solid var(--justybase-grid-border); border-radius: 3px; background: var(--vscode-textCodeBlock-background, #1e1e1e); color: var(--justybase-grid-text); font-family: var(--justybase-results-grid-font-family, ui-monospace, monospace); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ui-legacy-log .log-error-line { align-items: flex-start; }
 .ui-legacy-log .log-error-hint { display: block; margin-top: 2px; color: var(--vscode-errorForeground, #f14c4c); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+
+/* SQL queue overview (pause/resume/recover/cancel) shares the log surface. */
+.ui-legacy-log .sql-queue-overview {
+  box-sizing: border-box;
+  max-height: 45%;
+  flex-shrink: 0;
+  padding: 6px 0;
+  overflow: auto;
+  border-bottom: 1px solid var(--justybase-grid-border);
+  background: var(--vscode-sideBar-background, var(--justybase-grid-surface));
+  color: var(--justybase-grid-text);
+}
+.ui-legacy-log .sql-queue-controls { display: flex; gap: 6px; margin: 4px 0; }
+.ui-legacy-log .sql-queue-job { display: block; padding: 0; border-top: 1px solid var(--justybase-grid-border); }
+.ui-legacy-log .sql-queue-job-summary {
+  display: grid;
+  grid-template-columns: 115px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.ui-legacy-log .sql-queue-job code {
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-legacy-log .sql-queue-job-status {
+  display: inline-block;
+  width: fit-content;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--vscode-badge-background, var(--justybase-grid-surface));
+  color: var(--vscode-badge-foreground, var(--justybase-grid-text));
+  font-size: 11px;
+}
+.ui-legacy-log .sql-queue-job[data-status='running'] .sql-queue-job-status {
+  border: 1px solid var(--vscode-progressBar-background, #3794ff);
+  background: var(--justybase-grid-bg);
+  color: var(--vscode-progressBar-background, #3794ff);
+}
+.ui-legacy-log .sql-queue-job[data-status='cancelling'] .sql-queue-job-status {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+.ui-legacy-log .sql-queue-overview button {
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  background: var(--vscode-button-secondaryBackground, var(--justybase-grid-surface));
+  color: var(--vscode-button-secondaryForeground, var(--justybase-grid-text));
+  cursor: pointer;
+}
+.ui-legacy-log .sql-queue-overview button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--justybase-grid-hover));
+}
+.ui-legacy-log .sql-queue-overview button:disabled { opacity: .55; cursor: default; }
+.ui-legacy-log .sql-queue-overview > strong { display: block; font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+.ui-legacy-log .sql-queue-job-detail,
+.ui-legacy-log .log-run-sql {
+  max-height: 240px;
+  margin: 0 0 4px;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--justybase-grid-border);
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--justybase-grid-bg));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ui-legacy-log .log-run-archive { display: flex; flex-direction: column; gap: 3px; margin-bottom: 3px; }
+
+@media (max-width: 550px) {
+  .ui-legacy-log .sql-queue-job-summary { grid-template-columns: 95px minmax(0, 1fr) auto; gap: 6px; }
+  .ui-legacy-log .sql-queue-overview { padding: 6px; }
+}
 
 .ui-editor-surface {
   display: flex;
@@ -3640,10 +3771,12 @@ body,
 
 .ui-result-main-split {
   display: flex;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .ui-result-main-split > .ui-result-grid,
@@ -4076,9 +4209,14 @@ body,
 .ui-refresh-failure-icon { background: var(--vscode-errorForeground, #f48771); color: #1e1e1e; }
 .ui-refresh-failure-message { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.ui-result-error { display: grid; gap: 10px; padding: 14px; overflow: auto; }
-.ui-result-error-message { color: var(--vscode-errorForeground, #f48771); font-weight: 600; white-space: pre-wrap; }
+.ui-result-error { display: grid; align-content: start; gap: 10px; padding: 14px; overflow: auto; }
+/* Driver messages embed a caret line under the failing SQL token. The
+   editor font keeps that caret aligned with the reported character. */
+.ui-result-error-message { max-width: 100%; overflow-x: auto; color: var(--vscode-errorForeground, #f48771); font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 12px); font-variant-ligatures: none; font-weight: 400; tab-size: 4; white-space: pre; }
 .ui-result-error-next { margin: 0; color: var(--vscode-descriptionForeground); }
+.ui-result-error-actions { display: flex; gap: 6px; }
+.ui-result-error-fix { min-height: 24px; padding: 2px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); font: inherit; cursor: pointer; }
+.ui-result-error-fix:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
 
 .ui-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgb(0 0 0 / 45%); }
 .ui-refresh-limit-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 14px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background, #252526); color: var(--vscode-editorWidget-foreground, #ccc); box-shadow: 0 8px 28px rgb(0 0 0 / 45%); }

@@ -3908,15 +3908,6 @@
       "type": "object",
       "title": "Netezza Configuration",
       "properties": {
-        "justybase.ui.mode": {
-          "type": "string",
-          "enum": [
-            "shared",
-            "legacy"
-          ],
-          "default": "shared",
-          "description": "Presentation mode for host-owned VS Code UI surfaces. Shared React is the default; legacy is a temporary rollback to the DOM renderer."
-        },
         "justybase.highlightActiveStatement": {
           "type": "boolean",
           "default": true,

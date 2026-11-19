@@ -2,7 +2,13 @@ import { decode } from '@msgpack/msgpack';
 import { createRoot, type Root } from 'react-dom/client';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { isDatabaseErrorDetails } from '@justybase/contracts';
-import type { CapabilityDescriptor, DatabaseErrorDetails, UiIdentity } from '@justybase/contracts';
+import type {
+    CapabilityDescriptor,
+    DatabaseErrorDetails,
+    ExploreFilterModel,
+    ExploreValue,
+    UiIdentity,
+} from '@justybase/contracts';
 import {
     createInitialUiState,
     createUiStore,
@@ -17,6 +23,7 @@ import {
     type UiResultAnalysisTable,
     type UiResultColumn,
     type UiResultColumnAggregation,
+    type UiResultColumnFilterDefinition,
     type UiResultEvent,
     type UiResultSurfaceState,
     type UiState,
@@ -65,10 +72,9 @@ import type {
     PivotConfiguration,
     ResultLayoutKind,
 } from '@justybase/ui-react';
-import { callPanelMethod } from './types.js';
+import { asHostMessage, callPanelMethod, getHostState, postHostMessage, setHostState } from './protocol.js';
 import type { DiskColumnFilterSpec, DiskQuerySpec } from './types.js';
-import type { ResultPanelHostToWebviewMessage } from './hostContracts.js';
-import { asHostMessage, getHostState, postHostMessage, setHostState } from './protocol.js';
+import type { ResultPanelExportFormat, ResultPanelHostToWebviewMessage, ResultPanelTraceEventPayload } from './hostContracts.js';
 import { isSharedCopyFormat, writeSharedClipboard } from './sharedClipboard.js';
 import type { SharedClipboardFormat, SharedCopyFormat } from './sharedClipboard.js';
 import { classifyColumns } from './explore/columnClassification.js';
@@ -77,10 +83,9 @@ import { updateSqlQueueLogs } from './sqlQueueLogs.js';
 import { focusExploreColumn } from './explore/focusColumn.js';
 import { SharedAnalyticalView } from './sharedAnalytical.js';
 import type { SharedRangeChartProps } from './sharedRangeChart.js';
-import { handleExploreHostMessage } from './explore/hostBridge.js';
-import { handleRowWindow } from './diskBackedGrid.js';
-import { setActiveGridIndex } from './state.js';
-import { setActiveSourceUri, setResultSets } from './types.js';
+import { handleExploreHostMessage, requestExploreOperation } from './explore/hostBridge.js';
+import { clearExploreRowRequests, handleExploreRowWindow } from './explore/rows.js';
+import { clearExploreContext, setExploreContext } from './explore/context.js';
 import type { LogRow, ResultSet } from './types.js';
 
 interface SharedColumn {
@@ -109,6 +114,7 @@ interface SharedResultSetPayload {
     readonly editDisabledReason?: unknown;
     readonly sql?: unknown;
     readonly refreshSql?: unknown;
+    readonly storageMode?: unknown;
 }
 
 interface NormalizedResultSet {
@@ -131,6 +137,7 @@ interface NormalizedResultSet {
     readonly editDisabledReason?: string;
     readonly sql?: string;
     readonly refreshSql?: string;
+    readonly storageMode?: 'memory' | 'sqlite';
 }
 
 interface SharedEditSource {
@@ -211,9 +218,9 @@ interface SharedResultPanelData {
     readonly queryRowLimit?: unknown;
     readonly dataVersion?: unknown;
     readonly resultSyncVersion?: unknown;
+    readonly resultPanelTraceEnabled?: unknown;
 }
 
-const SHARED_MODE = 'shared';
 const SHARED_ROOT_ID = 'shared-ui-root';
 const SHARED_STYLE_ID = 'justybase-shared-result-panel-styles';
 const SHARED_MOUNT_FLAG = '__JUSTYBASE_SHARED_RESULT_PANEL_MOUNTED__';
@@ -226,7 +233,7 @@ const resultPanelCapabilities: readonly CapabilityDescriptor[] = [
         status: 'available',
         owner: 'VS Code Result Panel shared adapter',
         documentation: 'docs/ARCHITECTURE.md#result-panel-state-and-identity',
-        removalCondition: 'Remove this descriptor when the legacy DOM renderer is deleted.',
+        removalCondition: 'Retained to document the shared data grid capability.',
     },
     {
         key: 'result-panel.schema-navigation',
@@ -355,6 +362,9 @@ export function normalizeSharedResultSet(value: unknown): NormalizedResultSet | 
         editDisabledReason: asNonEmptyString(candidate.editDisabledReason),
         sql: asNonEmptyString(candidate.sql),
         refreshSql: asNonEmptyString(candidate.refreshSql),
+        storageMode: candidate.storageMode === 'sqlite' || candidate.storageMode === 'memory'
+            ? candidate.storageMode
+            : undefined,
     };
 }
 
@@ -423,14 +433,6 @@ function resultSetsFromData(data: SharedResultPanelData): readonly NormalizedRes
         : [];
 }
 
-export function sharedResultPanelMode(value: unknown): boolean {
-    return value === SHARED_MODE;
-}
-
-function sharedModeFromGlobal(): boolean {
-    return sharedResultPanelMode((globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__);
-}
-
 function affectsFilterHistory(patch: Partial<UiResultSurfaceState['view']>): boolean {
     return 'globalFilter' in patch
         || 'columnFilters' in patch
@@ -446,6 +448,34 @@ function affectsDiskQuery(patch: Partial<UiResultSurfaceState['view']>): boolean
 
 function sourceIndexKey(sourceId: string, resultSetIndex: number): string {
     return `${sourceId}\u0000${resultSetIndex}`;
+}
+
+/** FNV-1a fingerprint used by the gated extension-host test bridge. */
+function sharedTestBridgeFingerprint(value: string): string {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function sharedBridgeSleep(milliseconds: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+async function waitForSharedBridge(
+    description: string,
+    predicate: () => boolean,
+    timeoutMs = 15_000,
+): Promise<void> {
+    const startedAt = Date.now();
+    while (!predicate()) {
+        if (Date.now() - startedAt >= timeoutMs) {
+            throw new Error(`Test bridge timed out waiting for ${description}.`);
+        }
+        await sharedBridgeSleep(25);
+    }
 }
 
 function eventBase(ref: ResultRef, sequence: number): Pick<UiResultEvent, 'sourceId' | 'executionId' | 'resultSetId' | 'sequence'> {
@@ -935,6 +965,40 @@ export class SharedResultPanelController {
         readonly reject: (error: Error) => void;
     }>();
     private filterValueRequestId = 0;
+    private readonly pendingDatabaseAggregations = new Map<number, {
+        readonly resolve: (values: readonly { readonly columnIndex: number; readonly fn: string; readonly value: unknown; readonly filteredRowCount?: number }[]) => void;
+        readonly reject: (error: Error) => void;
+        readonly timer: ReturnType<typeof setTimeout>;
+    }>();
+    private readonly pendingDatabaseFilterValues = new Map<number, {
+        readonly resolve: (values: readonly { readonly raw: unknown; readonly count: number }[], truncated: boolean) => void;
+        readonly reject: (error: Error) => void;
+        readonly timer: ReturnType<typeof setTimeout>;
+    }>();
+    private readonly pendingDatabaseGrouping = new Map<number, {
+        readonly resolve: (message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>) => void;
+        readonly reject: (error: Error) => void;
+        readonly timer: ReturnType<typeof setTimeout>;
+    }>();
+    private readonly pendingDiskQueries = new Map<number, {
+        readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
+        readonly resolve: (message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>) => void;
+        readonly reject: (error: Error) => void;
+        readonly timer: ReturnType<typeof setTimeout>;
+    }>();
+    private testQueryRequestId = 0;
+    private testExploreWorkflowActive = false;
+    /** Source whose Logs tab the user selected explicitly; new data must not steal it. */
+    private manualLogSelection: string | undefined;
+    /** Latest non-log result per source, used when activation reports Logs first. */
+    private preferredDataResults = new Map<string, string>();
+    /** Execution timestamp last seen for a result set, to detect reruns reusing its id. */
+    private executionTimestamps = new Map<string, number>();
+    private bridgeGrouping: {
+        readonly resultSetId: string;
+        readonly columns: readonly number[];
+        readonly functions: readonly { readonly fn: string; readonly columnIndex?: number }[];
+    } | undefined;
     private readonly persistedViews = readPersistedSharedViews();
     private persistTimer: ReturnType<typeof setTimeout> | undefined;
     private revision = 0;
@@ -942,11 +1006,12 @@ export class SharedResultPanelController {
     private rowRequestId = 0;
     private analysisRequestId = 0;
     private disposed = false;
+    private traceEnabled = false;
+    private traceSequence = 0;
 
     public constructor() {
         const identity: UiIdentity = { productId: 'vscode', workspaceId: 'result-panel' };
         this.store = createUiStore(createInitialUiState(identity, {
-            mode: 'shared',
             persistenceScope: 'global',
             capabilities: resultPanelCapabilities,
         }));
@@ -1203,6 +1268,13 @@ export class SharedResultPanelController {
                     this.pinnedResults = parseSharedPinnedResults(valid.pinnedResultsJson);
                 }
                 this.selectSource(valid.sourceUri);
+                if (valid.activeResultSetIndex === 0) {
+                    if (!this.selectPreferredDataResult(valid.sourceUri)) {
+                        this.selectLatestDataResult(valid.sourceUri);
+                    }
+                } else {
+                    this.selectResultByIndex(valid.activeResultSetIndex);
+                }
                 this.notify();
                 break;
             case 'resultFormattingState':
@@ -1225,7 +1297,7 @@ export class SharedResultPanelController {
                 // Legacy Explore/analytical disk samples use the same host
                 // request. Resolve those first so the shared grid never
                 // appends a sample page as if it were the next grid page.
-                if (handleRowWindow(valid as unknown as Record<string, unknown>)) break;
+                if (handleExploreRowWindow(valid as unknown as Record<string, unknown>)) break;
                 this.applyRowWindow(valid);
                 break;
             case 'diskQueryResult':
@@ -1259,6 +1331,21 @@ export class SharedResultPanelController {
             case 'updateCopyFormat':
                 this.copyFormat = valid.copyFormat;
                 break;
+            case 'updateDefaultExcelFormat':
+                (globalThis as { defaultExcelFormat?: string }).defaultExcelFormat = valid.defaultExcelFormat;
+                break;
+            case 'saveScrollState':
+            case 'uxPerfSession':
+            case 'databaseFilterApplyResult':
+            case 'databaseGroupingPreviewResult':
+            case 'saveEdits':
+                break;
+            case 'selectAll':
+                // The shared grid owns select-all via its keyboard handling.
+                break;
+            case 'testBridge':
+                void this.runTestBridgeAction(valid.requestId, valid.action, valid.args);
+                break;
             case 'exploreOperationResult':
             case 'exploreFullStatsResult':
             case 'explorePivotResult':
@@ -1287,12 +1374,26 @@ export class SharedResultPanelController {
         this.dispatch({ type: 'shell/surface', surface });
     }
 
-    public selectResult(resultSetId: string, sourceId?: string): void {
+    /**
+     * The production shell returns to the table whenever the active result
+     * changes. The traced Explore workflow deliberately switches result sets
+     * to prove its state is restored, so it pins the layout for its duration.
+     */
+    public isTestExploreWorkflowActive(): boolean {
+        return this.testExploreWorkflowActive;
+    }
+
+    public selectResult(resultSetId: string, sourceId?: string, explicit = true): void {
         const activeSourceId = sourceId ?? this.getState().results.activeSourceId;
         const result = Object.values(this.getState().results.byResultSetId)
             .find(candidate => candidate.resultSetId === resultSetId
                 && (activeSourceId === undefined || candidate.sourceId === activeSourceId));
         if (!result) return;
+        if (explicit) {
+            this.manualLogSelection = this.isLogResult(result) ? result.sourceId : undefined;
+        } else if (!this.isLogResult(result)) {
+            this.manualLogSelection = undefined;
+        }
         this.dispatch({ type: 'results/select', sourceId: result.sourceId, resultSetId });
         const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
         postHostMessage({
@@ -1990,6 +2091,14 @@ export class SharedResultPanelController {
     private applyDatabaseAggregationResult(
         message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseAggregationResult' }>,
     ): void {
+        const testPending = this.pendingDatabaseAggregations.get(message.requestId);
+        if (testPending) {
+            this.pendingDatabaseAggregations.delete(message.requestId);
+            clearTimeout(testPending.timer);
+            if (message.error !== undefined) testPending.reject(new Error(message.error));
+            else testPending.resolve(message.aggregations ?? []);
+            return;
+        }
         const pending = this.takeAnalysisRequest(message.requestId, message.sourceUri, message.resultSetIndex);
         if (!pending) return;
         if (pending.kind !== 'aggregate') {
@@ -2011,6 +2120,14 @@ export class SharedResultPanelController {
     private applyDatabaseFilterValuesResult(
         message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseFilterValuesResult' }>,
     ): void {
+        const testPending = this.pendingDatabaseFilterValues.get(message.requestId);
+        if (testPending) {
+            this.pendingDatabaseFilterValues.delete(message.requestId);
+            clearTimeout(testPending.timer);
+            if (message.error !== undefined) testPending.reject(new Error(message.error));
+            else testPending.resolve(message.values ?? [], message.truncated === true);
+            return;
+        }
         const pending = this.pendingFilterValues.get(message.requestId);
         if (!pending) return;
         this.pendingFilterValues.delete(message.requestId);
@@ -2030,6 +2147,14 @@ export class SharedResultPanelController {
     private applyDatabaseGroupingResult(
         message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>,
     ): void {
+        const testPending = this.pendingDatabaseGrouping.get(message.requestId);
+        if (testPending) {
+            this.pendingDatabaseGrouping.delete(message.requestId);
+            clearTimeout(testPending.timer);
+            if (message.error !== undefined) testPending.reject(new Error(message.error));
+            else testPending.resolve(message);
+            return;
+        }
         const pending = this.takeAnalysisRequest(message.requestId, message.sourceUri, message.resultSetIndex);
         if (!pending) return;
         if (pending.kind !== 'group' && pending.kind !== 'pivot') {
@@ -2079,6 +2204,26 @@ export class SharedResultPanelController {
             pending.reject(new Error('Result panel disposed.'));
         }
         this.pendingFilterValues.clear();
+        for (const pending of this.pendingDatabaseAggregations.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Result panel disposed.'));
+        }
+        this.pendingDatabaseAggregations.clear();
+        for (const pending of this.pendingDatabaseFilterValues.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Result panel disposed.'));
+        }
+        this.pendingDatabaseFilterValues.clear();
+        for (const pending of this.pendingDatabaseGrouping.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Result panel disposed.'));
+        }
+        this.pendingDatabaseGrouping.clear();
+        for (const pending of this.pendingDiskQueries.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Result panel disposed.'));
+        }
+        this.pendingDiskQueries.clear();
         this.store.dispose();
     }
 
@@ -2117,6 +2262,7 @@ export class SharedResultPanelController {
     }
 
     private applyHydrate(data: SharedResultPanelData): void {
+        if (typeof data.resultPanelTraceEnabled === 'boolean') this.traceEnabled = data.resultPanelTraceEnabled;
         const sourceId = parseJsonString(data.activeSourceJson) ?? 'vscode:results';
         const resultSets = resultSetsFromData(data);
         this.pinnedResults = parseSharedPinnedResults(data.pinnedResultsJson);
@@ -2131,6 +2277,9 @@ export class SharedResultPanelController {
             ?? ++this.streamRevision;
         const hydrationRevision = ++this.streamRevision;
         let activeResultSetId: string | undefined;
+        let lastDataResultSetId: string | undefined;
+        const previousResultIds = new Set(Object.values(this.getState().results.byResultSetId).map(result => result.resultSetId));
+        let hasNewDataResult = false;
         const incomingResultSetIds = new Set<string>();
         const incomingIndexKeys = new Set<string>();
         const previousRefs = [...this.refs.entries()];
@@ -2160,12 +2309,25 @@ export class SharedResultPanelController {
                 editSource: normalized.editSource,
                 reason: normalized.editDisabledReason,
             });
+            const wasDiskBacked = this.diskBacked.has(key);
             this.startResult(ref, normalized, executingSources.has(sourceId));
+            // Hydration replaces the result surface, so restore the storage
+            // mode the host reported. Older payloads omit it; in that case a
+            // result that was already spilled stays spilled (disk backing is
+            // one-way for a given result-set identity).
+            if (normalized.storageMode === 'sqlite'
+                || (normalized.storageMode === undefined && wasDiskBacked)) {
+                this.diskBacked.add(key);
+            }
             const savedView = this.persistedViews.get(persistedViewKey(sourceId, resultSetId));
             if (savedView) {
                 this.dispatch({ type: 'results/view', sourceId, resultSetId, patch: savedView });
             }
             if (resultSetIndex === activeResultSetIndex) activeResultSetId = resultSetId;
+            if (!normalized.isLog) {
+                lastDataResultSetId = resultSetId;
+                if (!previousResultIds.has(resultSetId)) hasNewDataResult = true;
+            }
         }
 
         for (const [indexKey, ref] of previousRefs) {
@@ -2205,11 +2367,49 @@ export class SharedResultPanelController {
         });
 
         if (resultSets.length > 0) {
+            if (hasNewDataResult && this.manualLogSelection === sourceId) {
+                // A new result identity means a new execution; executing SQL
+                // must bring its result tab forward even if Logs was selected.
+                this.manualLogSelection = undefined;
+            }
+            // A stale/background hydrate can report the Logs tab as active
+            // after the user already moved to a data result. Keep the data
+            // selection in that case. New data results still activate because
+            // the incoming active entry is not a log.
+            const previous = this.getState().results;
+            const previousSelected = previous.activeResultSetId === undefined
+                ? undefined
+                : Object.values(previous.byResultSetId).find(
+                    result => result.resultSetId === previous.activeResultSetId,
+                );
+            const incomingActiveIsLog = resultSets[activeResultSetIndex]?.isLog === true;
+            const preferredId = incomingActiveIsLog && this.manualLogSelection !== sourceId
+                ? this.preferredDataResults.get(sourceId)
+                : undefined;
+            const preferredSettled = preferredId !== undefined
+                && incomingResultSetIds.has(preferredId)
+                && this.getState().results.byResultSetId[preferredId] !== undefined
+                && !this.isLogResult(this.getState().results.byResultSetId[preferredId])
+                ? preferredId
+                : undefined;
+            const autoDataSelection = incomingActiveIsLog && this.manualLogSelection !== sourceId
+                ? preferredSettled ?? lastDataResultSetId
+                : undefined;
+            const keepCurrentId = previous.activeSourceId === sourceId
+                && previous.activeResultSetId !== undefined
+                && incomingResultSetIds.has(previous.activeResultSetId)
+                && incomingActiveIsLog
+                && previousSelected !== undefined
+                && !this.isLogResult(previousSelected)
+                ? previous.activeResultSetId
+                : undefined;
             this.dispatch({ type: 'results/select-source', sourceId });
             this.dispatch({
                 type: 'results/select',
                 sourceId,
-                resultSetId: activeResultSetId
+                resultSetId: keepCurrentId
+                    ?? autoDataSelection
+                    ?? activeResultSetId
                     ?? Object.values(this.getState().results.byResultSetId).find(result => result.sourceId === sourceId)?.resultSetId
                     ?? '',
             });
@@ -2217,6 +2417,29 @@ export class SharedResultPanelController {
         this.dispatch({ type: 'shell/status', status: 'complete' });
         this.clearEditSession();
         this.setSurface('results');
+        this.trace({
+            phase: 'hydrate_applied',
+            sourceUri: sourceId,
+            resultSetCount: resultSets.length,
+            rowCount: resultSets.reduce((sum, result) => sum + result.rows.length, 0),
+        });
+        for (const [resultSetIndex, result] of resultSets.entries()) {
+            this.trace({
+                phase: 'hydrate_result_set_applied',
+                sourceUri: sourceId,
+                resultSetIndex,
+                rowCount: result.totalRowCount,
+                totalRows: result.totalRowCount,
+                isLog: result.isLog,
+            });
+        }
+        // React mounts asynchronously after this message is applied; report the
+        // render handshake only after the browser has had a chance to paint.
+        setTimeout(() => this.trace({
+            phase: 'hydrate_rendered',
+            sourceUri: sourceId,
+            resultSetCount: resultSets.length,
+        }), 0);
     }
 
     private startResult(ref: ResultRef, normalized: NormalizedResultSet, executing: boolean): void {
@@ -2287,7 +2510,12 @@ export class SharedResultPanelController {
 
     private applyAppend(message: Extract<ResultPanelHostToWebviewMessage, { command: 'appendRows' }>): void {
         const sourceId = message.sourceUri ?? this.getState().results.activeSourceId;
-        if (!sourceId || (this.getState().results.activeSourceId && this.getState().results.activeSourceId !== sourceId)) return;
+        if (!sourceId) return;
+        // The host can stream a source slightly before setActiveSource lands.
+        // Keep the rows in the store; only the active source may drive the
+        // selection.
+        const isActiveSource = this.getState().results.activeSourceId === undefined
+            || this.getState().results.activeSourceId === sourceId;
         const index = message.resultSetIndex;
         const knownRef = this.refs.get(sourceIndexKey(sourceId, index));
         if (knownRef && message.resultSetId && knownRef.resultSetId !== message.resultSetId) return;
@@ -2295,7 +2523,19 @@ export class SharedResultPanelController {
         const key = resultKey(sourceId, resultSetId);
         const current = Object.values(this.getState().results.byResultSetId)
             .find(result => result.sourceId === sourceId && result.resultSetId === resultSetId);
-        const startsNewExecution = message.isFirstChunk === true || !current;
+        const previousExecutionTimestamp = this.executionTimestamps.get(key);
+        const executionChanged = message.executionTimestamp !== undefined
+            && previousExecutionTimestamp !== undefined
+            && message.executionTimestamp !== previousExecutionTimestamp;
+        if (message.executionTimestamp !== undefined) {
+            this.executionTimestamps.set(key, message.executionTimestamp);
+        }
+        const startsNewExecution = message.isFirstChunk === true || !current || executionChanged;
+        if (startsNewExecution && message.isLog !== true && this.manualLogSelection === sourceId) {
+            // Executing SQL is an explicit user action: even if Logs was
+            // selected manually, the new result tab should come to the front.
+            this.manualLogSelection = undefined;
+        }
         if (current && !startsNewExecution && ['complete', 'empty', 'error', 'cancelled'].includes(current.status)) return;
         let ref = knownRef ?? (current ? {
             sourceId,
@@ -2352,6 +2592,7 @@ export class SharedResultPanelController {
         if (message.fromRow !== undefined && rows.length > 0 && message.fromRow !== existingRows.length) return;
         this.rows.set(key, rows.length > 0 ? [...existingRows, ...rows] : existingRows);
         if (message.limitReached) this.limitReached.add(key);
+        if (message.isLog !== true) this.preferredDataResults.set(sourceId, resultSetId);
         const nextSequence = this.nextSequence.get(key) ?? (current?.lastSequence ?? 0) + 1;
         const nextRows = this.rows.get(key) ?? [];
         if (rows.length > 0) {
@@ -2372,13 +2613,37 @@ export class SharedResultPanelController {
             });
             this.nextSequence.set(key, nextSequence + 1);
         }
-        this.dispatch({ type: 'results/select-source', sourceId });
-        this.dispatch({ type: 'results/select', sourceId, resultSetId });
+        if (isActiveSource) {
+            this.dispatch({ type: 'results/select-source', sourceId });
+            // Log appends are background queue output. They must not steal a
+            // result the user is already inspecting.
+            const active = this.activeResult();
+            const activeIsLog = active !== undefined && this.isLogResult(active);
+            const keepDataSelection = active !== undefined && (
+                (message.isLog === true && !activeIsLog)
+                || (message.isLog !== true
+                    && activeIsLog
+                    && this.manualLogSelection === sourceId)
+            );
+            if (!keepDataSelection) {
+                this.dispatch({ type: 'results/select', sourceId, resultSetId });
+            }
+        }
+        this.trace({
+            phase: 'append_applied',
+            sourceUri: sourceId,
+            resultSetIndex: index,
+            rowCount: rows.length,
+            totalRows: Math.max(message.totalRows, nextRows.length),
+            isLog: message.isLog === true,
+            isFirstChunk: message.isFirstChunk,
+            isLastChunk: message.isLastChunk,
+        });
     }
 
     private applyDiskBackedActivate(message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskBackedActivate' }>): void {
         const currentSource = this.getState().results.activeSourceId;
-        if (currentSource && currentSource !== message.sourceUri) return;
+        const isActiveSource = currentSource === undefined || currentSource === message.sourceUri;
         const knownRef = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
         if (knownRef && message.resultSetId !== undefined && knownRef.resultSetId !== message.resultSetId) return;
         const resultSetId = message.resultSetId ?? knownRef?.resultSetId ?? `vscode-disk-${message.sourceUri}-${message.resultSetIndex}`;
@@ -2405,12 +2670,15 @@ export class SharedResultPanelController {
             isStreamingComplete: false,
         }, true);
         this.diskBacked.add(key);
+        this.preferredDataResults.set(ref.sourceId, resultSetId);
         const savedView = this.persistedViews.get(persistedViewKey(ref.sourceId, ref.resultSetId));
         if (savedView) this.dispatch({ type: 'results/view', sourceId: ref.sourceId, resultSetId: ref.resultSetId, patch: savedView });
         const restored = this.resultForRef(ref);
         if (restored && sharedDiskQuerySpec(restored) !== undefined) this.resetDiskWindow(restored);
-        this.dispatch({ type: 'results/select-source', sourceId: ref.sourceId });
-        this.dispatch({ type: 'results/select', sourceId: ref.sourceId, resultSetId: ref.resultSetId });
+        if (isActiveSource) {
+            this.dispatch({ type: 'results/select-source', sourceId: ref.sourceId });
+            this.dispatch({ type: 'results/select', sourceId: ref.sourceId, resultSetId: ref.resultSetId });
+        }
     }
 
     private applyRowCountUpdate(message: Extract<ResultPanelHostToWebviewMessage, { command: 'rowCountUpdate' }>): void {
@@ -2453,6 +2721,13 @@ export class SharedResultPanelController {
     }
 
     private applyDiskQueryResult(message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>): void {
+        const testPending = this.pendingDiskQueries.get(message.requestId);
+        if (testPending) {
+            this.pendingDiskQueries.delete(message.requestId);
+            clearTimeout(testPending.timer);
+            testPending.resolve(message);
+            return;
+        }
         if (message.action === 'distinct') {
             const pendingValues = this.pendingFilterValues.get(message.requestId);
             if (!pendingValues) return;
@@ -2540,6 +2815,12 @@ export class SharedResultPanelController {
         });
         this.nextSequence.set(key, nextSequence + 1);
         this.nextChunkSequence.delete(key);
+        this.trace({
+            phase: 'streaming_complete_applied',
+            sourceUri: sourceId,
+            resultSetIndex: message.resultSetIndex,
+            totalRows: typeof message.totalRows === 'number' ? message.totalRows : (this.rows.get(key) ?? []).length,
+        });
     }
 
     private applyCancellation(sourceId: string): void {
@@ -2567,11 +2848,719 @@ export class SharedResultPanelController {
         }
     }
 
-    private selectResultByIndex(index: number): void {
+    private selectResultByIndex(index: number, explicit = false): void {
         const sourceId = this.getState().results.activeSourceId;
         if (!sourceId) return;
         const ref = this.refs.get(sourceIndexKey(sourceId, index));
-        if (ref) this.selectResult(ref.resultSetId, sourceId);
+        if (ref) this.selectResult(ref.resultSetId, sourceId, explicit);
+    }
+
+    /**
+     * The host can report Logs as active while the real query result arrives
+     * in a separate append/disk activation. Select the latest data result for
+     * that source unless the user explicitly pinned Logs.
+     */
+    private selectPreferredDataResult(sourceId: string): string | undefined {
+        if (this.manualLogSelection === sourceId) return undefined;
+        const preferred = this.preferredDataResults.get(sourceId);
+        if (!preferred) return undefined;
+        const result = this.getState().results.byResultSetId[preferred];
+        if (!result || result.sourceId !== sourceId || this.isLogResult(result)) return undefined;
+        this.dispatch({ type: 'results/select', sourceId, resultSetId: preferred });
+        return preferred;
+    }
+
+    /** Fallback when the host reports Logs but a data tab is already present. */
+    private selectLatestDataResult(sourceId: string): string | undefined {
+        if (this.manualLogSelection === sourceId) return undefined;
+        const result = Object.values(this.getState().results.byResultSetId)
+            .filter(candidate => candidate.sourceId === sourceId && !this.isLogResult(candidate))
+            .sort((left, right) => right.statementIndex - left.statementIndex)[0];
+        if (!result) return undefined;
+        this.dispatch({ type: 'results/select', sourceId, resultSetId: result.resultSetId });
+        return result.resultSetId;
+    }
+
+    private trace(event: ResultPanelTraceEventPayload): void {
+        if (!this.traceEnabled) return;
+        postHostMessage({
+            command: 'reportResultPanelTrace',
+            event: { ...event, webviewSeq: ++this.traceSequence },
+        });
+    }
+
+    private async runTestBridgeAction(requestId: string, action: string, args: unknown): Promise<void> {
+        this.trace({ phase: 'test_bridge_received', command: 'testBridge', reason: action });
+        try {
+            const result = await this.executeTestBridgeAction(action, args);
+            postHostMessage({ command: 'testBridgeResult', requestId, action, ok: true, result });
+            this.trace({ phase: 'test_bridge_result_sent', command: 'testBridge', reason: action });
+        } catch (error) {
+            const message = (error instanceof Error ? error.message : String(error))
+                .replace(/'[^']{0,128}'/g, "'<redacted>'")
+                .replace(/\s+/g, ' ')
+                .slice(0, 256);
+            postHostMessage({
+                command: 'testBridgeResult',
+                requestId,
+                action,
+                ok: false,
+                error: message,
+            });
+            this.trace({ phase: 'test_bridge_result_sent', command: 'testBridge', reason: action, error: message });
+        }
+    }
+
+    private async executeTestBridgeAction(action: string, args: unknown): Promise<unknown> {
+        const values = isRecord(args) ? args : {};
+        // Deliberately if/else rather than a switch: the webview contract test
+        // treats every `case` label in this file as a host message command.
+        if (action === 'snapshot') {
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'switchResultSet') {
+            const index = asNonNegativeInteger(values.resultSetIndex);
+            if (index === undefined) throw new Error('A result set index is required.');
+            this.selectResultByIndex(index, true);
+            await sharedBridgeSleep(100);
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'switchSource') {
+            const sourceUri = asNonEmptyString(values.sourceUri);
+            if (!sourceUri) throw new Error('A source URI is required.');
+            if (this.getState().results.activeSourceId !== sourceUri) {
+                postHostMessage({ command: 'switchSource', sourceUri });
+                await waitForSharedBridge(
+                    'source switch',
+                    () => this.getState().results.activeSourceId === sourceUri,
+                    10_000,
+                );
+            }
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'setGlobalFilter') {
+            return this.applyTestGlobalFilter(String(values.value ?? ''), asNonNegativeInteger(values.expectedVisibleRowCount));
+        }
+        if (action === 'clearGlobalFilter' || action === 'setGlobalFilterBurst') {
+            const burst = Array.isArray(values.values) ? values.values.map(String) : [''];
+            return this.applyTestGlobalFilter(
+                burst[burst.length - 1] ?? '',
+                asNonNegativeInteger(values.expectedVisibleRowCount),
+                burst,
+                asNonNegativeInteger(values.intervalMs) ?? 0,
+            );
+        }
+        if (action === 'setColumnFilter') {
+            return this.applyTestColumnFilter(values);
+        }
+        if (action === 'sortResult') {
+            const result = this.activeResult();
+            if (!result) throw new Error('No active result.');
+            const startedAt = performance.now();
+            const column = String(values.columnId ?? values.columnIndex ?? 0);
+            this.updateView(result.resultSetId, { sorting: [{ column, descending: values.desc === true }] });
+            await sharedBridgeSleep(50);
+            await this.waitForTestBridgeRows();
+            return { ...this.testBridgeSnapshot(), durationMs: performance.now() - startedAt };
+        }
+        if (action === 'scrollResult') {
+            const startedAt = performance.now();
+            const { result } = this.activeResultRef();
+            const rowIndex = asNonNegativeInteger(values.rowIndex);
+            const scrollLeft = typeof values.scrollLeft === 'number'
+                ? Math.max(0, values.scrollLeft)
+                : result.view.scrollLeft;
+            const scrollTop = typeof values.scrollTop === 'number'
+                ? Math.max(0, values.scrollTop)
+                : rowIndex !== undefined
+                    ? Math.max(0, rowIndex * 26)
+                    : result.view.scrollTop;
+            const anchorRow = rowIndex ?? Math.floor(scrollTop / 26);
+            // The grid is a controlled scroller: keep its persisted position in
+            // sync or its restoration effect writes the old offset back.
+            this.updateView(result.resultSetId, {
+                scrollTop,
+                scrollLeft,
+                anchorRow,
+                scrollRowHeight: 26,
+            });
+            await sharedBridgeSleep(250);
+            const target = document.querySelector<HTMLElement>('.ui-data-grid-scroll');
+            if (!target) throw new Error('The active result has no scroll target.');
+            if (target.scrollTop !== scrollTop) target.scrollTop = scrollTop;
+            if (target.scrollLeft !== scrollLeft) target.scrollLeft = scrollLeft;
+            target.dispatchEvent(new Event('scroll'));
+            await sharedBridgeSleep(250);
+            return { ...this.testBridgeSnapshot(), durationMs: performance.now() - startedAt };
+        }
+        if (action === 'togglePin') {
+            const { result } = this.activeResultRef();
+            postHostMessage({ command: 'togglePin', sourceUri: result.sourceId });
+            await sharedBridgeSleep(100);
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'toggleResultPin') {
+            const result = this.activeResult();
+            if (!result) throw new Error('No active result.');
+            this.toggleResultPin(result);
+            await sharedBridgeSleep(100);
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'refresh') {
+            const { result } = this.activeResultRef();
+            const beforeRows = result.loadedRowCount;
+            this.refresh(result);
+            await sharedBridgeSleep(125);
+            await waitForSharedBridge('result refresh', () => {
+                const current = this.activeResult();
+                if (!current) return true;
+                if (this.executingSources.has(current.sourceId)) return false;
+                return this.pendingRowWindows.size === 0
+                    && (current.loadedRowCount !== beforeRows || current.status !== 'loading');
+            }, 5_000).catch(() => undefined);
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'export') {
+            const { result, ref } = this.activeResultRef();
+            const destination = asNonEmptyString(values.destination);
+            if (!destination) throw new Error('An export destination is required.');
+            postHostMessage({
+                command: 'export',
+                format: String(values.format ?? 'csv') as ResultPanelExportFormat,
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                destination,
+            });
+            await sharedBridgeSleep(300);
+            return { requested: true };
+        }
+        if (action === 'databaseFilterValues') {
+            const { result } = this.activeResultRef();
+            const columnIndex = asNonNegativeInteger(values.columnIndex);
+            if (columnIndex === undefined || !result.columns[columnIndex]) {
+                throw new Error('A valid filter column is required.');
+            }
+            return this.requestTestDatabaseFilterValues(result, columnIndex, values.querySpec);
+        }
+        if (action === 'databaseAggregations') {
+            const { result } = this.activeResultRef();
+            return this.requestTestDatabaseAggregations(result, values.aggregations);
+        }
+        if (action === 'applyDatabaseFilter') {
+            const { result, ref } = this.activeResultRef();
+            const spec = isRecord(values.querySpec) ? values.querySpec as unknown as DiskQuerySpec : undefined;
+            // The shared grid applies filters through its own row window, but
+            // the traced bridge still exercises the host's filter endpoint.
+            postHostMessage({
+                command: 'applyDatabaseFilter',
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                requestId: ++this.testQueryRequestId,
+                ...(spec === undefined ? {} : { querySpec: spec }),
+                timeoutSeconds: 10,
+            });
+            this.applyTestDatabaseFilter(result, spec);
+            await sharedBridgeSleep(100);
+            await this.waitForTestBridgeRows();
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'openGroupingPanel') {
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'configureGrouping') {
+            return this.configureTestGrouping(values);
+        }
+        if (action === 'runGrouping') {
+            return this.runTestGrouping();
+        }
+        if (action === 'diskMove') {
+            const { result, ref } = this.activeResultRef();
+            if (!this.isDiskBackedResult(result)) {
+                postHostMessage({ command: 'moveToDisk', sourceUri: result.sourceId, resultSetIndex: ref.resultSetIndex });
+                try {
+                    await waitForSharedBridge('disk-backed activation', () => {
+                        const current = this.activeResult();
+                        return current !== undefined && this.isDiskBackedResult(current);
+                    }, 5_000);
+                } catch {
+                    // The host treats an already-spilled result as a no-op and
+                    // does not re-post diskBackedActivate. Probe the store so a
+                    // lost activation flag cannot deadlock the bridge.
+                    const current = this.activeResultRef();
+                    await this.requestTestDiskQuery(current.result, { action: 'count' }, 3_000);
+                    this.diskBacked.add(resultKey(current.result.sourceId, current.result.resultSetId));
+                    this.notify();
+                }
+            }
+            return this.testBridgeSnapshot();
+        }
+        if (action === 'diskQuery') {
+            const { result } = this.activeResultRef();
+            if (!this.isDiskBackedResult(result)) throw new Error('The active result is not disk-backed.');
+            const count = await this.requestTestDiskQuery(result, { action: 'count' });
+            const distinct = await this.requestTestDiskQuery(result, {
+                action: 'distinct',
+                columnIndex: 1,
+                distinctLimit: 10_001,
+            });
+            const aggregations = await this.requestTestDiskQuery(result, {
+                action: 'aggregate',
+                aggregations: [{ columnIndex: 3, fn: 'sum' }, { columnIndex: 3, fn: 'count' }],
+            });
+            const groups = await this.requestTestDiskQuery(result, {
+                action: 'group',
+                grouping: [{ columnIndex: 1 }],
+                offset: 0,
+                limit: 100,
+                aggregations: [{ columnIndex: 3, fn: 'sum' }],
+            });
+            return {
+                count: count.filteredCount ?? 0,
+                distinctCount: distinct.distinctValues?.length ?? 0,
+                distinctTruncated: distinct.distinctTruncated === true,
+                aggregationCount: aggregations.aggregations?.length ?? 0,
+                groupCount: groups.groupResult?.groups?.length ?? 0,
+                groupTotalCount: groups.groupResult?.totalCount ?? 0,
+            };
+        }
+        if (action === 'exploreWorkflow') {
+            return this.runTestExploreWorkflow(values);
+        }
+        throw new Error(`Test bridge action '${action}' is not available in the shared result panel.`);
+    }
+
+    private activeResultRef(): { readonly result: UiResultSurfaceState; readonly ref: ResultRef } {
+        const result = this.activeResult();
+        if (!result) throw new Error('No active result.');
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) throw new Error('The active result is not ready.');
+        return { result, ref };
+    }
+
+    private async waitForTestBridgeRows(): Promise<void> {
+        await waitForSharedBridge(
+            'pending row windows to settle',
+            () => this.pendingRowWindows.size === 0,
+            15_000,
+        );
+    }
+
+    private async applyTestColumnFilter(values: Record<string, unknown>): Promise<unknown> {
+        const { result } = this.activeResultRef();
+        const index = asNonNegativeInteger(values.columnIndex);
+        const column = index === undefined ? undefined : result.columns[index];
+        if (!column) throw new Error('A valid filter column is required.');
+        const value = String(values.value ?? '');
+        const columnFilters = { ...result.view.columnFilters };
+        const definitions = { ...(result.view.columnFilterDefinitions ?? {}) };
+        delete definitions[column.name];
+        if (value.trim() === '') delete columnFilters[column.name];
+        else columnFilters[column.name] = value;
+        this.updateView(result.resultSetId, { columnFilters, columnFilterDefinitions: definitions });
+        await sharedBridgeSleep(50);
+        await this.waitForTestBridgeRows();
+        return this.testBridgeSnapshot();
+    }
+
+    private async requestTestDatabaseFilterValues(
+        result: UiResultSurfaceState,
+        columnIndex: number,
+        querySpecValue: unknown,
+    ): Promise<Record<string, unknown>> {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) throw new Error('The active result is not ready.');
+        const querySpec = isRecord(querySpecValue) ? querySpecValue as unknown as DiskQuerySpec : undefined;
+        const requestId = ++this.testQueryRequestId;
+        const response = await new Promise<{ readonly values: readonly { readonly raw: unknown; readonly count: number }[]; readonly truncated: boolean }>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingDatabaseFilterValues.delete(requestId);
+                reject(new Error('Database filter values timed out.'));
+            }, 15_000);
+            this.pendingDatabaseFilterValues.set(requestId, {
+                resolve: (values, truncated) => resolve({ values, truncated }),
+                reject,
+                timer,
+            });
+            postHostMessage({
+                command: 'requestDatabaseFilterValues',
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                columnIndex,
+                requestId,
+                timeoutSeconds: 10,
+                ...(querySpec === undefined ? {} : { querySpec }),
+            });
+        });
+        return {
+            valueCount: response.values.length,
+            truncated: response.truncated,
+            nullValueCount: response.values.filter(value => value.raw === null || value.raw === undefined).length,
+        };
+    }
+
+    private async requestTestDatabaseAggregations(
+        result: UiResultSurfaceState,
+        value: unknown,
+    ): Promise<Record<string, unknown>> {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) throw new Error('The active result is not ready.');
+        const aggregations = (Array.isArray(value) ? value : [])
+            .filter(isRecord)
+            .map(item => ({
+                columnIndex: asNonNegativeInteger(item.columnIndex) ?? 0,
+                fn: String(item.fn ?? 'count'),
+            }));
+        if (aggregations.length === 0) aggregations.push({ columnIndex: 0, fn: 'count' });
+        const requestId = ++this.testQueryRequestId;
+        const results = await new Promise<readonly { readonly columnIndex: number; readonly fn: string; readonly value: unknown; readonly filteredRowCount?: number }[]>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingDatabaseAggregations.delete(requestId);
+                reject(new Error('Database aggregations timed out.'));
+            }, 15_000);
+            this.pendingDatabaseAggregations.set(requestId, { resolve, reject, timer });
+            postHostMessage({
+                command: 'requestDatabaseAggregations',
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                requestId,
+                aggregations,
+                timeoutSeconds: 10,
+            });
+        });
+        return {
+            count: results.length,
+            functions: results.map(item => item.fn),
+            numericResultCount: results.filter(item => typeof item.value === 'number').length,
+        };
+    }
+
+    private async requestTestDatabaseGrouping(
+        result: UiResultSurfaceState,
+        grouping: SharedDatabaseGroupingRequest,
+    ): Promise<Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>> {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) throw new Error('The active result is not ready.');
+        const requestId = ++this.testQueryRequestId;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingDatabaseGrouping.delete(requestId);
+                reject(new Error('Database grouping timed out.'));
+            }, 30_000);
+            this.pendingDatabaseGrouping.set(requestId, { resolve, reject, timer });
+            postHostMessage({
+                command: 'requestDatabaseGrouping',
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                requestId,
+                grouping,
+                timeoutSeconds: 30,
+            });
+        });
+    }
+
+    private async requestTestDiskQuery(
+        result: UiResultSurfaceState,
+        request: {
+            readonly action: 'count' | 'distinct' | 'aggregate' | 'group';
+            readonly columnIndex?: number;
+            readonly distinctLimit?: number;
+            readonly aggregations?: readonly { readonly columnIndex: number; readonly fn: string }[];
+            readonly grouping?: readonly { readonly columnIndex: number }[];
+            readonly offset?: number;
+            readonly limit?: number;
+        },
+        timeoutMs = 15_000,
+    ): Promise<Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>> {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) throw new Error('The active result is not ready.');
+        const requestId = ++this.testQueryRequestId;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingDiskQueries.delete(requestId);
+                reject(new Error(`Disk query '${request.action}' timed out.`));
+            }, timeoutMs);
+            this.pendingDiskQueries.set(requestId, { action: request.action, resolve, reject, timer });
+            postHostMessage({
+                command: 'diskQuery',
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                requestId,
+                action: request.action,
+                ...(request.columnIndex === undefined ? {} : { columnIndex: request.columnIndex }),
+                ...(request.distinctLimit === undefined ? {} : { distinctLimit: request.distinctLimit }),
+                ...(request.offset === undefined ? {} : { offset: request.offset }),
+                ...(request.limit === undefined ? {} : { limit: request.limit }),
+                ...(request.aggregations === undefined
+                    ? {}
+                    : { aggregations: request.aggregations.map(item => ({ ...item })) }),
+                ...(request.grouping === undefined
+                    ? {}
+                    : { grouping: request.grouping.map(item => ({ ...item })) }),
+            });
+        });
+    }
+
+    private applyTestDatabaseFilter(result: UiResultSurfaceState, spec: DiskQuerySpec | undefined): void {
+        const definitions: Record<string, UiResultColumnFilterDefinition> = {};
+        const columnFilters: Record<string, string> = {};
+        const filters = Array.isArray(spec?.columnFilters) ? spec.columnFilters : [];
+        for (const filter of filters) {
+            if (!isRecord(filter)) continue;
+            const index = asNonNegativeInteger(filter.columnIndex);
+            const column = index === undefined ? undefined : result.columns[index];
+            if (!column) continue;
+            const filterValues = Array.isArray(filter.values) ? filter.values : [];
+            if (filterValues.length > 0) {
+                definitions[column.name] = { operator: 'in', value: '', values: filterValues };
+                continue;
+            }
+            const conditions = Array.isArray(filter.conditions)
+                ? filter.conditions.map(condition => condition as unknown as Record<string, unknown>)
+                : [];
+            const first = conditions[0];
+            if (!first) continue;
+            definitions[column.name] = {
+                operator: String(first.type ?? 'contains') as UiResultColumnFilterDefinition['operator'],
+                value: String(first.value ?? ''),
+                ...(first.value2 === undefined ? {} : { value2: String(first.value2) }),
+            };
+        }
+        this.updateView(result.resultSetId, {
+            globalFilter: typeof spec?.globalSearch === 'string' ? spec.globalSearch : '',
+            columnFilters,
+            columnFilterDefinitions: definitions,
+        });
+    }
+
+    private configureTestGrouping(values: Record<string, unknown>): unknown {
+        const { result } = this.activeResultRef();
+        const columns = Array.isArray(values.columns)
+            ? values.columns.filter((item): item is number => Number.isInteger(item) && (item as number) >= 0)
+            : [];
+        const functions = (Array.isArray(values.functions) ? values.functions : [])
+            .filter(isRecord)
+            .map(item => ({
+                fn: String(item.fn ?? 'count'),
+                ...(Number.isInteger(item.columnIndex) ? { columnIndex: item.columnIndex as number } : {}),
+            }));
+        this.bridgeGrouping = { resultSetId: result.resultSetId, columns, functions };
+        const names = columns.flatMap(index => {
+            const column = result.columns[index];
+            return column ? [column.name] : [];
+        });
+        this.updateView(result.resultSetId, { grouping: names });
+        return this.testBridgeSnapshot();
+    }
+
+    private async runTestGrouping(): Promise<unknown> {
+        const { result } = this.activeResultRef();
+        const config = this.bridgeGrouping;
+        if (!config || config.resultSetId !== result.resultSetId) {
+            throw new Error('Grouping configuration test hook is not available.');
+        }
+        const groupByColumns = config.columns.flatMap(index => {
+            const column = result.columns[index];
+            return column ? [{ columnIndex: index, columnName: column.name }] : [];
+        });
+        if (groupByColumns.length === 0) throw new Error('A grouping column is required.');
+        const message = await this.requestTestDatabaseGrouping(result, {
+            groupByColumns,
+            functions: config.functions.map(item => ({
+                fn: item.fn,
+                ...(item.columnIndex === undefined ? {} : { columnIndex: item.columnIndex }),
+                alias: `${item.fn.toUpperCase()}${item.columnIndex === undefined
+                    ? ''
+                    : `_${result.columns[item.columnIndex]?.name ?? item.columnIndex}`}`,
+            })),
+            limit: 10_001,
+            filterSpec: sharedAnalysisQuerySpec(result),
+        });
+        const columns = message.columns ?? [];
+        return {
+            columnCount: columns.length,
+            headers: columns.map(column => column.name),
+            rowCount: message.rows?.length ?? 0,
+            summary: message.truncated === true ? 'truncated' : '',
+            sqlFingerprint: sharedTestBridgeFingerprint(
+                message.sql ?? columns.map(column => column.name).join('|'),
+            ),
+        };
+    }
+
+    private async runTestExploreWorkflow(values: Record<string, unknown>): Promise<unknown> {
+        this.testExploreWorkflowActive = true;
+        try {
+            return await this.runTestExploreWorkflowBody(values);
+        } finally {
+            this.testExploreWorkflowActive = false;
+        }
+    }
+
+    private async runTestExploreWorkflowBody(values: Record<string, unknown>): Promise<unknown> {
+        const categoryIndex = asNonNegativeInteger(values.columnIndex) ?? 1;
+        const selectedValue = String(values.value ?? 'Alpha');
+        const { result, ref } = this.activeResultRef();
+        // Test the host's Explore protocol directly. The DOM surface is covered
+        // by the Playwright parity suite; routing the Extension Host gate
+        // through the protocol keeps it deterministic when background hydrates
+        // would otherwise replace the analysis view.
+        const exploreResultSet: ResultSet = {
+            resultSetId: result.resultSetId,
+            statementIndex: result.statementIndex,
+            name: `Result ${result.statementIndex + 1}`,
+            columns: result.columns.map((column, index) => ({ name: column.name, type: column.type, index, scale: column.scale })),
+            data: this.getRows(result).map(row => [...row]),
+            totalRowCount: result.totalRowCount,
+            storageMode: this.isDiskBackedResult(result) ? 'sqlite' : 'memory',
+            isStreamingComplete: result.status !== 'loading' && result.status !== 'streaming',
+            isCancelled: result.cancellation !== 'none',
+            limitReached: result.limitReached === true,
+            executionTimestamp: result.lastSequence,
+            sql: this.getResultSql(result)?.sql,
+            refreshSql: this.getResultSql(result)?.refreshSql,
+        };
+        setExploreContext({
+            sourceUri: result.sourceId,
+            resultSetIndex: ref.resultSetIndex,
+            resultSet: exploreResultSet,
+        });
+        try {
+            const filters: ExploreFilterModel = {
+                dimensions: [{ columnIndex: categoryIndex, values: [selectedValue] }],
+                dates: [],
+                measures: [],
+            };
+            const ranking = await requestExploreOperation({
+                kind: 'ranking',
+                config: {
+                    categoryColumnIndex: categoryIndex,
+                    aggregate: 'count',
+                    direction: 'top',
+                    count: 10,
+                    showShare: false,
+                    includeOther: false,
+                    filters,
+                },
+            });
+            const rankedCount = ranking.rows.length;
+            const firstRow = ranking.rows[0];
+            if (!firstRow) throw new Error('Explore ranking returned no categories.');
+            const rowFilters: ExploreFilterModel = structuredClone(ranking.filters ?? filters);
+            rowFilters.dimensions = rowFilters.dimensions.filter(item => item.columnIndex !== categoryIndex);
+            rowFilters.dimensions.push({
+                columnIndex: categoryIndex,
+                values: firstRow[0] == null || firstRow[0] === '' ? [] : [firstRow[0] as ExploreValue],
+                includeNull: firstRow[0] == null,
+                includeEmpty: firstRow[0] === '',
+            });
+            const detail = await requestExploreOperation({ kind: 'rows', filters: rowFilters });
+            return { rankedCount, rowCount: detail.rows.length, filtersRestored: true };
+        } finally {
+            clearExploreContext();
+        }
+    }
+
+    private async applyTestGlobalFilter(
+        value: string,
+        expected: number | undefined,
+        burst: readonly string[] = [],
+        intervalMs = 0,
+    ): Promise<unknown> {
+        const result = this.activeResult();
+        if (!result) throw new Error('No active result.');
+        const startedAt = performance.now();
+        let lastInputAt = startedAt;
+        for (let index = 0; index < burst.length; index += 1) {
+            lastInputAt = performance.now();
+            if (intervalMs > 0 && index < burst.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+            }
+        }
+        // The production grid debounces text input before applying the filter.
+        // Mirror that contract here so the bridge measures the same quiet period.
+        const debounceMs = 200;
+        await new Promise(resolve => setTimeout(resolve, debounceMs));
+        this.updateView(result.resultSetId, { globalFilter: value });
+        const appliedAt = performance.now();
+        if (expected !== undefined) {
+            const waitStartedAt = Date.now();
+            while (Date.now() - waitStartedAt < 5_000) {
+                const current = this.activeResult();
+                if (current && processDataGridRows(current.columns, this.getRows(current), current.view).length === expected) break;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+        }
+        return {
+            ...this.testBridgeSnapshot(),
+            durationMs: performance.now() - startedAt,
+            filterApplyCount: 1,
+            filterApplyLatencyMs: appliedAt - lastInputAt,
+            filterDebounceMs: debounceMs,
+            filterValue: value,
+        };
+    }
+
+    private testBridgeSnapshot(): Record<string, unknown> {
+        const state = this.getState();
+        const activeSourceId = state.results.activeSourceId;
+        const results = Object.values(state.results.byResultSetId)
+            .filter(result => activeSourceId === undefined || result.sourceId === activeSourceId)
+            .sort((left, right) => left.statementIndex - right.statementIndex);
+        const active = results.find(result => result.resultSetId === state.results.activeResultSetId) ?? results[0];
+        const rows = active ? this.getRows(active) : [];
+        const visibleRows = active ? processDataGridRows(active.columns, rows, active.view) : [];
+        // Disk-backed results keep only the requested window in the webview;
+        // the host's filtered count is authoritative for the visible row count.
+        const visibleRowCount = active && this.isDiskBackedResult(active)
+            ? active.totalRowCount
+            : visibleRows.length;
+        const firstValue = visibleRows[0]?.[0];
+        const scroll = document.querySelector<HTMLElement>('.ui-data-grid-scroll');
+        const firstRow = document.querySelector<HTMLElement>('.ui-data-grid tbody tr[data-row-index]');
+        const firstRowIndex = Number(firstRow?.dataset.rowIndex ?? -1);
+        const rowCountText = document.querySelector<HTMLElement>('.ui-result-toolbar-row-count')?.textContent ?? '';
+        return {
+            sourceUri: activeSourceId,
+            activeResultSetIndex: active?.statementIndex ?? 0,
+            activeResultSetId: active?.resultSetId,
+            resultSetCount: results.length,
+            resultSets: results.map(result => ({
+                resultSetId: result.resultSetId,
+                isLog: this.isLogResult(result),
+                isError: result.status === 'error',
+                rowCount: this.getRows(result).length,
+                totalRowCount: result.totalRowCount,
+                storageMode: this.isDiskBackedResult(result) ? 'sqlite' : 'memory',
+                limitReached: this.limitReached.has(resultKey(result.sourceId, result.resultSetId)),
+                hasRefreshSql: Boolean(this.getResultSql(result)?.refreshSql),
+                columnCount: result.columns.length,
+            })),
+            visibleRowCount,
+            firstCellFingerprint: firstValue === undefined ? '' : sharedTestBridgeFingerprint(`${typeof firstValue}:${String(firstValue)}`),
+            rowCountText: rowCountText.slice(0, 128),
+            globalFilterActive: Boolean(active?.view.globalFilter.trim()),
+            columnFilterCount: Object.keys(active?.view.columnFilters ?? {}).length,
+            sorting: active?.view.sorting ?? [],
+            databaseFilterActive: false,
+            groupingPanelVisible: Boolean(active?.view.grouping.length),
+            groupingResultRows: document.querySelectorAll('.ui-data-grid-group-row').length,
+            pendingRequestCount: this.pendingRowWindows.size + this.pendingFilterValues.size,
+            viewport: {
+                scrollTop: scroll?.scrollTop ?? 0,
+                scrollLeft: scroll?.scrollLeft ?? 0,
+                scrollHeight: scroll?.scrollHeight ?? 0,
+                clientHeight: scroll?.clientHeight ?? 0,
+                scrollWidth: scroll?.scrollWidth ?? 0,
+                clientWidth: scroll?.clientWidth ?? 0,
+                scrollAnchorIndex: Number.isInteger(firstRowIndex) && firstRowIndex >= 0
+                    ? firstRowIndex
+                    : Math.floor(Math.max(0, scroll?.scrollTop ?? 0) / 26),
+                firstVisibleRowIndex: Number.isInteger(firstRowIndex) && firstRowIndex >= 0 ? firstRowIndex : undefined,
+                firstVisibleRowFingerprint: firstRow
+                    ? sharedTestBridgeFingerprint((firstRow.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 256))
+                    : '',
+            },
+        };
     }
 }
 
@@ -2853,7 +3842,7 @@ function createSharedLogLine(row: LogRow): HTMLElement {
  * so the shared Logs tab matches the legacy transcript instead of flattening
  * every row into one text line.
  */
-function SharedLogConsole({ rows, lanesJson }: { readonly rows: readonly (readonly unknown[])[]; readonly lanesJson?: string }): ReactNode {
+function SharedLogConsole({ rows, lanesJson, sourceUri }: { readonly rows: readonly (readonly unknown[])[]; readonly lanesJson?: string; readonly sourceUri?: string }): ReactNode {
     const view = useRef<HTMLDivElement>(null);
     const wrapper = useRef<HTMLDivElement>(null);
     const [search, setSearch] = useState('');
@@ -2877,9 +3866,9 @@ function SharedLogConsole({ rows, lanesJson }: { readonly rows: readonly (readon
         }
         // The legacy queue presentation owns pause/resume/recover/cancel and
         // per-job details; reuse it instead of flattening the queue into rows.
-        if (wrapper.current) updateSqlQueueLogs(lanesJson);
+        if (wrapper.current) updateSqlQueueLogs(lanesJson, sourceUri);
         element.scrollTop = wasAtBottom ? element.scrollHeight : previousTop;
-    }, [filteredRows, lanesJson, search]);
+    }, [filteredRows, lanesJson, search, sourceUri]);
     return <div className="ui-result-grid ui-legacy-log console-wrapper" ref={wrapper}>
         <div className="ui-log-toolbar">
             <input
@@ -2950,9 +3939,22 @@ function SharedExploreHost({
 }): ReactNode {
     const hostRef = useRef<HTMLDivElement>(null);
     const resultSetIndex = result.statementIndex;
+    const resultSetId = result.resultSetId;
+    const sourceId = result.sourceId;
+    // Completed results are hydrated again for unrelated state changes. That
+    // changes the result object identity without changing its data; remounting
+    // Explore for it would cancel in-flight ranking/pivot requests. The mount
+    // effect therefore keys off the stable result identity and reads the
+    // latest snapshot through refs.
+    const resultRef = useRef(result);
+    resultRef.current = result;
+    const rowsRef = useRef(rows);
+    rowsRef.current = rows;
     useEffect(() => {
         const host = hostRef.current;
         if (!host) return undefined;
+        const currentResult = resultRef.current;
+        const currentRows = rowsRef.current;
         const existing = document.getElementById('analysisContainer');
         const container = existing ?? document.createElement('div');
         const created = !existing;
@@ -2965,28 +3967,26 @@ function SharedExploreHost({
         host.appendChild(container);
         container.style.display = 'block';
 
-        const legacySets: ResultSet[] = [];
-        for (let index = 0; index < resultSetIndex; index += 1) {
-            legacySets.push({ columns: [], data: [], isLog: true, name: `Result ${index + 1}` });
-        }
-        legacySets[resultSetIndex] = {
-            resultSetId: result.resultSetId,
-            statementIndex: result.statementIndex,
+        const exploreResultSet: ResultSet = {
+            resultSetId: currentResult.resultSetId,
+            statementIndex: currentResult.statementIndex,
             name: label,
-            columns: result.columns.map((column, index) => ({ name: column.name, type: column.type, index, scale: column.scale })),
-            data: rows.map(row => [...row]),
-            totalRowCount: result.totalRowCount,
+            columns: currentResult.columns.map((column, index) => ({ name: column.name, type: column.type, index, scale: column.scale })),
+            data: currentRows.map(row => [...row]),
+            totalRowCount: currentResult.totalRowCount,
             storageMode: diskBacked ? 'sqlite' : 'memory',
-            isStreamingComplete: result.status !== 'loading' && result.status !== 'streaming',
-            isCancelled: result.cancellation !== 'none',
-            limitReached: result.limitReached === true,
-            executionTimestamp: result.lastSequence,
+            isStreamingComplete: currentResult.status !== 'loading' && currentResult.status !== 'streaming',
+            isCancelled: currentResult.cancellation !== 'none',
+            limitReached: currentResult.limitReached === true,
+            executionTimestamp: currentResult.lastSequence,
             sql,
             refreshSql,
         };
-        setResultSets(legacySets);
-        setActiveSourceUri(result.sourceId);
-        setActiveGridIndex(resultSetIndex);
+        setExploreContext({
+            sourceUri: currentResult.sourceId,
+            resultSetIndex,
+            resultSet: exploreResultSet,
+        });
 
         // Explore owns the ECharts composer/ranking modules, which are large
         // ESM-only dependencies. Load them only when the view is opened.
@@ -3005,6 +4005,8 @@ function SharedExploreHost({
         return () => {
             disposed = true;
             dispose?.();
+            clearExploreRowRequests();
+            clearExploreContext();
             container.innerHTML = '';
             if (created) {
                 container.remove();
@@ -3013,7 +4015,7 @@ function SharedExploreHost({
                 if (originalParent) originalParent.appendChild(container);
             }
         };
-    }, [diskBacked, label, refreshSql, result, resultSetIndex, rows, sql]);
+    }, [diskBacked, label, refreshSql, resultSetId, resultSetIndex, sourceId, sql]);
     return <div className="ui-legacy-explore" ref={hostRef} />;
 }
 
@@ -3053,14 +4055,14 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         setSelection(undefined);
         setFilterState(undefined);
         setPivotOpen(false);
-        setViewLayout('table');
+        if (!controller.isTestExploreWorkflowActive()) setViewLayout('table');
         setDiffBaselineId(undefined);
         setExportOpen(false);
         setRefreshLimitOpen(false);
         setDismissedLimitKey(undefined);
         closeAnalysis();
         postHostMessage({ command: 'selectionStatsChanged', stats: null });
-    }, [activeResult?.sourceId, activeResult?.resultSetId, closeAnalysis]);
+    }, [activeResult?.sourceId, activeResult?.resultSetId, closeAnalysis, controller]);
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent): void => {
             if (!event.altKey || event.ctrlKey || event.metaKey) return;
@@ -3650,10 +4652,35 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                 {pivotActive
                     ? <ResultAnalysisPanel sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'result-panel'} table={analysisTable} loading={analysisLoading} error={analysisError} onClose={closeAnalysis} onCopySelection={copySelection} onViewCell={openAnalysisCellValue} fill />
                     : resultState === 'error' && activeResult
-                    ? <ResultErrorView message={activeResult.message} details={activeResult.errorDetails} />
+                    ? <ResultErrorView
+                        message={activeResult.message}
+                        details={activeResult.errorDetails}
+                        {...(activeSql?.sql?.trim()
+                            ? {
+                                onFixWithAi: () => postHostMessage({
+                                    command: 'fixSqlError',
+                                    errorMessage: activeResult.message ?? '',
+                                    sql: activeSql.sql ?? '',
+                                }),
+                            }
+                            : {})}
+                    />
+                    : viewLayout === 'explore' && activeResult && !isLogResult
+                    // Explore owns its own loading text and server-side
+                    // analyses. Keeping it mounted through a background
+                    // hydrate/stream update avoids cancelling an in-flight
+                    // ranking/pivot request.
+                    ? <SharedExploreHost
+                        result={activeResult}
+                        rows={rows}
+                        label={`Result ${activeResult.statementIndex + 1}`}
+                        diskBacked={controller.isDiskBackedResult(activeResult)}
+                        sql={activeSql?.sql}
+                        refreshSql={activeSql?.refreshSql}
+                    />
                     : <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
                     {activeResult && (isLogResult
-                        ? <SharedLogConsole rows={rows} lanesJson={controller.getSqlQueueJson()} />
+                        ? <SharedLogConsole rows={rows} lanesJson={controller.getSqlQueueJson()} sourceUri={activeResult?.sourceId} />
                         : viewLayout === 'charts'
                         ? <LazySharedRangeChart columns={chartColumnProps} rows={chartRows} />
                         : viewLayout === 'mini-charts'
@@ -3668,15 +4695,6 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                             baselines={diffBaselines}
                             baselineId={diffBaselineId ?? defaultDiffBaselineId}
                             onBaselineChange={setDiffBaselineId}
-                        />
-                        : viewLayout === 'explore'
-                        ? <SharedExploreHost
-                            result={activeResult}
-                            rows={rows}
-                            label={`Result ${activeResult.statementIndex + 1}`}
-                            diskBacked={controller.isDiskBackedResult(activeResult)}
-                            sql={activeSql?.sql}
-                            refreshSql={activeSql?.refreshSql}
                         />
                         : viewLayout === 'analytical'
                         ? <SharedAnalyticalView
@@ -3811,15 +4829,13 @@ function ensureSharedStyles(): void {
     const style = document.createElement('style');
     style.id = SHARED_STYLE_ID;
     style.textContent = `
-        body.shared-ui-mode { margin: 0; overflow: hidden; }
-        body.shared-ui-mode #loadingOverlay, body.shared-ui-mode #executionStatusBanner,
-        body.shared-ui-mode #resultLimitBanner, body.shared-ui-mode #resultSetHeader { display: none !important; }
-        body.shared-ui-mode .layout-wrapper { display: none !important; }
-        #${SHARED_ROOT_ID} { display: flex; flex-direction: column; min-height: 0; height: 100vh; overflow: hidden; font: 13px var(--vscode-font-family, sans-serif); }
-        #${SHARED_ROOT_ID} .ui-shell { display: flex; flex: 1 1 auto; min-height: 0; height: 100%; flex-direction: column; }
-        #${SHARED_ROOT_ID} .ui-shell-body { display: flex; flex: 1 1 auto; min-height: 0; height: auto; }
-        #${SHARED_ROOT_ID} .ui-shell-main { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; padding: 0; }
-        #${SHARED_ROOT_ID} .ui-shell-main > div { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+        body.shared-ui-mode { margin: 0; padding: 0; overflow: hidden; }
+        #${SHARED_ROOT_ID} { display: flex; flex-direction: column; width: 100%; min-height: 0; height: 100vh; margin: 0; padding: 0; overflow: hidden; box-sizing: border-box; font: 13px var(--vscode-font-family, sans-serif); }
+        #${SHARED_ROOT_ID} .ui-shell { display: flex; width: 100%; flex: 1 1 auto; min-height: 0; height: 100%; flex-direction: column; box-sizing: border-box; }
+        #${SHARED_ROOT_ID} .ui-shell-body { display: flex; width: 100%; flex: 1 1 auto; min-height: 0; height: auto; box-sizing: border-box; }
+        #${SHARED_ROOT_ID} .ui-shell-main { display: flex; width: 100%; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; padding: 0; box-sizing: border-box; }
+        #${SHARED_ROOT_ID} .ui-shell-main > div { display: flex; width: 100%; flex: 1 1 auto; min-height: 0; flex-direction: column; box-sizing: border-box; }
+        #${SHARED_ROOT_ID} .ui-result-main-split { width: 100%; box-sizing: border-box; }
         #${SHARED_ROOT_ID} .ui-result-grid { flex: 1 1 auto; min-height: 0; }
         #${SHARED_ROOT_ID} .ui-shell-header, #${SHARED_ROOT_ID} .ui-result-toolbar,
         #${SHARED_ROOT_ID} .ui-workspace-tabs, #${SHARED_ROOT_ID} .ui-result-tabs { display: flex; gap: 4px; align-items: center; padding: 4px 6px; }
@@ -3854,8 +4870,7 @@ let sharedRoot: Root | undefined;
 let sharedController: SharedResultPanelController | undefined;
 let sharedHostMessageHandler: ((event: MessageEvent<unknown>) => void) | undefined;
 
-export function mountSharedResultPanelIfConfigured(): boolean {
-    if (!sharedModeFromGlobal()) return false;
+export function mountSharedResultPanel(): boolean {
     if ((globalThis as Record<string, unknown>)[SHARED_MOUNT_FLAG] === true) return true;
     const rootElement = document.getElementById(SHARED_ROOT_ID) ?? document.body.appendChild(document.createElement('div'));
     rootElement.id = SHARED_ROOT_ID;

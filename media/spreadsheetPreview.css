@@ -1,4 +1,4 @@
-/* Excel-like file preview (XLSX, XLSB, CSV, TSV). Independent of resultPanel.css. */
+/* Excel-like file preview (XLSX, XLSB, CSV, TSV). Independent of the shared result grid. */
 
 /*
  * Excel-like palette. Values are overridden per VS Code theme below; the base set is the

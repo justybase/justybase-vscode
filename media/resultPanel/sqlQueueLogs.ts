@@ -1,7 +1,6 @@
 import { appendRunLogRows } from './logRunGroups.js';
 import type { LogRow } from './types.js';
 import { postHostMessage } from './protocol.js';
-import { getActiveSourceUri } from './types.js';
 
 interface QueueJob { id: string; sql: string; status: string; executionUri?: string; database?: string }
 interface QueueLane { sourceKey: string; sourceUri: string; lastExecutionUri?: string; paused: boolean; recoveryRequired?: boolean; workspace?: boolean; maxConcurrency: number; running: QueueJob[]; queued: QueueJob[]; sources?: string[]; archive?: {sourceUri: string; rows: LogRow[]}[] }
@@ -9,19 +8,19 @@ let lanes: QueueLane[] = [];
 const disclosures = new Map<string, boolean>();
 
 /** A presentation of coordinator state; this module never owns scheduling. */
-export function updateSqlQueueLogs(json?: string): void {
+export function updateSqlQueueLogs(json?: string, sourceUri?: string): void {
     if (json !== undefined) {
         try { lanes = JSON.parse(json) as QueueLane[];
             const live = new Set(lanes.flatMap(lane => [...lane.running, ...lane.queued].map(job => job.id)));
             for (const id of disclosures.keys()) if (!live.has(id)) disclosures.delete(id);
         } catch { return; }
     }
-    document.querySelectorAll<HTMLElement>('.console-wrapper').forEach(renderSqlQueueLogs);
+    document.querySelectorAll<HTMLElement>('.console-wrapper').forEach(wrapper => renderSqlQueueLogs(wrapper, sourceUri));
 }
 
-export function renderSqlQueueLogs(wrapper: HTMLElement): void {
+export function renderSqlQueueLogs(wrapper: HTMLElement, sourceUri?: string): void {
     wrapper.querySelector('.sql-queue-overview')?.remove();
-    const source = getActiveSourceUri();
+    const source = sourceUri;
     const lane = lanes.find(item => item.sourceUri === source || item.running.some(job => job.executionUri === source)
         || (source !== undefined && (item.lastExecutionUri === source || item.sources?.includes(source))));
     const transcript = wrapper.querySelector<HTMLElement>('.console-view');

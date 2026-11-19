@@ -28,7 +28,7 @@ The deterministic generator uses a fixed seed and locale-independent values. It 
 
 The Node/Jest matrix currently measures CSV preview/type analysis/validation/SQL generation, full import-stream preparation and consumption, CSV/CSV.GZ/CSV.ZST/JSON/XLSX/XLSB exports, inline search, worker cold and warm search, and SQLite `queryRows()` plus `countRows()`. XML, SQL, Markdown, Parquet, and XPT are registered as `SKIP` cases until they become part of the reference export matrix.
 
-The Playwright matrix loads the real `dist/media/resultPanel.js`, the real `searchWorker.js`, deterministic browser data, and the Result Panel DOM. It measures first grid render, search-hit positions, clearing, the 19,999/20,000 switch, the 4,000 × 32 inline filtered-row model and render count, cold/warm worker behavior, rapid-query ordering, and host payload preparation for full and filtered CSV exports. File writing by the host is intentionally outside the payload-preparation metric.
+The Playwright matrix loads the real `dist/media/sharedResultPanel.js`, the shared grid harness (`test-harness/shared-data-grid.html`), and deterministic browser data. It measures shared renderer filtering, sorting, scrolling, viewport restoration after reload, and append anchoring. The former legacy `dist/media/resultPanel.js` matrix (worker threshold, inline filter model, and export payload preparation) was retired together with the legacy renderer.
 
 ## Metrics and boundaries
 
@@ -76,7 +76,7 @@ Do not compare a laptop run to a Linux baseline, a different Node major, a diffe
 - A worker cold result includes data loading; compare it with worker warm only when the user workflow actually reuses loaded data.
 - A slow XLSX/XLSB result may be writer finalization or workbook serialization. It is not the same as CSV payload preparation.
 - A search count mismatch is a correctness failure and should be fixed before interpreting timings.
-- If Playwright cannot load `dist/media/resultPanel.js`, run the build first or use the dedicated Playwright script. If the browser emits errors, inspect the retained trace and the fixture console capture.
+- If Playwright cannot load `dist/media/sharedResultPanel.js`, run the build first or use the dedicated Playwright script. If the browser emits errors, inspect the retained trace and the fixture console capture.
 - For live Netezza failures, verify the five required variables, schema privilege, table cleanup, and whether the driver accepted the generated external stream SQL. Credentials must remain in the environment, never in a fixture or report.
 
 ## What the benchmark does not measure

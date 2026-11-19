@@ -41,27 +41,18 @@ import {
 type MessagePropertyName = "command" | "type";
 
 const RESULT_PANEL_FRONTEND_MESSAGE_FILES = [
-  "media/resultPanel/export.ts",
-  "media/resultPanel/formatting.ts",
-  "media/resultPanel/grid.ts",
-  "media/resultPanel/init.ts",
-  "media/resultPanel/selection.ts",
-  "media/resultPanel/tabs.ts",
-  "media/resultPanel/utils.ts",
-  "media/resultPanel/trace.ts",
-];
-
-const RESULT_PANEL_GRID_PROTOCOL_FILES = [
-  "media/resultPanel/grid/alternateViews.ts",
-  "media/resultPanel/selection/clipboard.ts",
+  "media/resultPanel/sharedView.tsx",
+  "media/resultPanel/explore/hostBridge.ts",
+  "media/resultPanel/explore/rows.ts",
+  "media/resultPanel/explore/composerTab.ts",
+  "media/resultPanel/explore/filterBar.ts",
+  "media/resultPanel/explore/pivotTab.ts",
+  "media/resultPanel/explore/previewModal.ts",
+  "media/resultPanel/sqlQueueLogs.ts",
 ];
 
 const RESULT_PANEL_FRONTEND_CONTRACT_FILES = [
-  ...RESULT_PANEL_FRONTEND_MESSAGE_FILES.filter(
-    (file) => file !== "media/resultPanel/grid.ts",
-  ),
-  ...RESULT_PANEL_GRID_PROTOCOL_FILES,
-  "media/resultPanel/messages.ts",
+  ...RESULT_PANEL_FRONTEND_MESSAGE_FILES,
 ];
 
 const RESULT_PANEL_PROTOCOL_FILE = "media/resultPanel/protocol.ts";
@@ -407,7 +398,7 @@ describe("Webview contract sync", () => {
       (source) => extractObjectPropertyValues(source, "command"),
     );
     const frontendHandledCommands = extractCaseLabels(
-      readWorkspaceFile("media/resultPanel/messages.ts"),
+      readWorkspaceFile("media/resultPanel/sharedView.tsx"),
     );
 
     expectSetEqual(hostSentCommands, RESULT_PANEL_OUTBOUND_COMMANDS);
@@ -428,7 +419,7 @@ describe("Webview contract sync", () => {
 
     RESULT_PANEL_FRONTEND_CONTRACT_FILES.map(readWorkspaceFile).forEach(
       (source) => {
-        expect(source).toContain("./protocol.js");
+        expect(source).toContain("protocol.js");
       },
     );
   });

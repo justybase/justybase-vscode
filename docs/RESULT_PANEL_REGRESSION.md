@@ -20,17 +20,16 @@ npx jest --runInBand \
   src/__tests__/integration/resultPanelView.test.ts \
   src/__tests__/resultPanelHydrateDedup.test.ts
 npm run build
-npx playwright test --config=test-harness/playwright.config.ts \
-  test-harness/tests/table-rendering.spec.ts \
-  --grep "hidden|Untitled"
+npx playwright test --config=test-harness/data-grid-visual.playwright.config.ts \
+  test-harness/tests/result-panel-parity.spec.ts
 ```
 
-The Playwright fixture exercises a real bundled webview. `?protocol=1` starts with
-only the Logs result set, then delivers the first and final tabular chunks.
-`?protocol=missing-shell` reproduces the affected 3.16.41 client state: tabular
-rows arrive for result-set index 1 while the client has no Logs shell. The webview
-must request authoritative state and render the returned Logs and data grid. The
-hidden/observer case covers the zero-geometry initialization path.
+The Playwright fixture exercises the real bundled shared webview. It covers
+Excel-style filtering, grouping and inline editing, the Charts, Mini Charts,
+Diff, Explore, Analytical, Pivot and Row View layouts, and the shared-only shell
+contract (compact row gutter, no legacy DOM/CSS). Logs-before-data delivery and
+missing-shell hydrate recovery remain covered by the deterministic
+host-streaming scenarios in the Extension Host suite.
 
 ## Real Extension Host
 

@@ -1,11 +1,9 @@
 import type { ExploreOperation, ExploreResponse } from '@justybase/contracts';
-import { getResultSetAt } from '../types.js';
 // Host bridge for Explore server-side operations (full stats, pivot, composer,
 // SQL previews). Mirrors the pending-request pattern of databaseGrouping.ts.
 
 import { postHostMessage } from '../protocol.js';
-import { getActiveSourceUri } from '../types.js';
-import { getActiveGridIndex } from '../state.js';
+import { getExploreResultSetAt, getExploreResultSetIndex, getExploreSourceUri } from './context.js';
 import type {
     ExploreComposerConfig,
     ExploreFilterModel,
@@ -106,11 +104,11 @@ export function handleExploreHostMessage(message: { command: string; requestId?:
 }
 
 function sourceAndIndex(): { sourceUri: string; resultSetIndex: number } {
-    const sourceUri = getActiveSourceUri();
+    const sourceUri = getExploreSourceUri();
     if (!sourceUri) {
         throw new Error('No active source');
     }
-    return { sourceUri, resultSetIndex: getActiveGridIndex() };
+    return { sourceUri, resultSetIndex: getExploreResultSetIndex() };
 }
 
 export interface FullStatisticsPayload {
@@ -189,7 +187,7 @@ export function openExploreSqlInEditor(sql: string, label?: string): void {
 export function requestExploreOperation(operation: ExploreOperation, preview = false, timeoutSeconds = operation.kind === 'values' || operation.kind === 'fullStats' ? 120 : 300): Promise<ExploreResponse> {
     const scope = sourceAndIndex();
     return waitForRequest<ExploreResponse>('requestExploreOperation', { ...scope,
-        resultSetId: getResultSetAt(scope.resultSetIndex)?.resultSetId, operation, preview, timeoutSeconds }, preview ? 30 : timeoutSeconds);
+        resultSetId: getExploreResultSetAt(scope.resultSetIndex)?.resultSetId, operation, preview, timeoutSeconds }, preview ? 30 : timeoutSeconds);
 }
 
 /** Reject pending work on view replacement; the host cancels only its owned executions. */

@@ -13,7 +13,6 @@ import {
   reduceUiState,
   createUiStore,
   hasUiResultQuery,
-  resolveUiMode,
   toUiResultQueryOptions,
 } from '../src';
 import type { Disposable, UiAction } from '../src';
@@ -399,25 +398,21 @@ describe('ui-core lifecycle', () => {
   });
 });
 
-describe('ui-core mode and store contracts', () => {
-  it('defaults unknown mode values to the shared surface and notifies subscribers only on transitions', () => {
-    expect(resolveUiMode('shared')).toBe('shared');
-    expect(resolveUiMode('legacy')).toBe('legacy');
-    expect(resolveUiMode(undefined)).toBe('shared');
-    expect(resolveUiMode('unexpected')).toBe('shared');
+describe('ui-core store contracts', () => {
+  it('notifies subscribers only on state transitions', () => {
     const store = createUiStore(initial());
     const listener = jest.fn();
     const unsubscribe = store.subscribe(listener);
-    const action: UiAction = { type: 'mode/set', mode: 'shared' };
-    expect(store.dispatch(action).mode).toBe('shared');
-    expect(store.dispatch(action).mode).toBe('shared');
+    const action: UiAction = { type: 'shell/sidebar', open: false };
+    expect(store.dispatch(action).shell.sidebarOpen).toBe(false);
+    expect(store.dispatch(action)).toBe(store.getState());
     expect(listener).toHaveBeenCalledTimes(1);
     unsubscribe();
-    store.dispatch({ type: 'mode/set', mode: 'legacy' });
+    store.dispatch({ type: 'shell/sidebar', open: true });
     expect(listener).toHaveBeenCalledTimes(1);
     store.dispose();
     store.dispose();
-    expect(store.dispatch({ type: 'mode/set', mode: 'shared' })).toBe(store.getState());
+    expect(store.dispatch({ type: 'shell/sidebar', open: false })).toBe(store.getState());
     expect(store.subscribe(() => undefined)()).toBeUndefined();
   });
 });

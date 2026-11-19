@@ -1549,7 +1549,7 @@ export function DataGrid({
   );
   const leftColumnSpacer = columnWindow.windowed ? columnWindow.paddingLeft : 0;
   const rightColumnSpacer = columnWindow.windowed ? columnWindow.paddingRight : 0;
-  const mountedCellCount = 1 + mountedColumns.length + (leftColumnSpacer > 0 ? 1 : 0) + (rightColumnSpacer > 0 ? 1 : 0);
+  const mountedCellCount = 2 + mountedColumns.length + (leftColumnSpacer > 0 ? 1 : 0) + (rightColumnSpacer > 0 ? 1 : 0);
   const mountedColumnSignature = mountedColumns.map(entry => `${entry.columnIndex}:${entry.key}`).join(',');
   selectionMetricsRef.current = {
     rowCount: visibleGroupedRows?.length ?? visibleRowCount,
@@ -2452,6 +2452,7 @@ export function DataGrid({
         </td>;
       })}
       {rightColumnSpacer > 0 && <td aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: rightColumnSpacer, minWidth: rightColumnSpacer }} />}
+      <td aria-hidden="true" className="ui-data-grid-column-spacer ui-data-grid-fill-spacer" />
     </tr>;
   };
 
@@ -2549,6 +2550,7 @@ export function DataGrid({
             </th>;
           })}
           {rightColumnSpacer > 0 && <th aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: rightColumnSpacer, minWidth: rightColumnSpacer }} />}
+          <th aria-hidden="true" className="ui-data-grid-column-spacer ui-data-grid-fill-spacer" />
         </tr>
         {columnAggregationRows.top.map((cells, rowIndex) => renderAggregationRow(cells, 'top', rowIndex))}
         </thead>
@@ -2562,7 +2564,7 @@ export function DataGrid({
             if (rendered === undefined) return null;
             if (rendered.kind === 'group') {
               const collapsed = collapsedGroups.has(rendered.id);
-              return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} aria-level={rendered.level + 1} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={mountedCellCount} style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><span className="ui-data-grid-group-tree-indent" aria-hidden="true">{Array.from({ length: rendered.level }, (_value, level) => <span key={level} />)}</span><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} aria-expanded={!collapsed} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
+              return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} aria-level={rendered.level + 1} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={mountedCellCount}><div className="ui-data-grid-group-content" style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><span className="ui-data-grid-group-tree-indent" aria-hidden="true">{Array.from({ length: rendered.level }, (_value, level) => <span key={level} />)}</span><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} aria-expanded={!collapsed} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker" aria-hidden="true" /></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></div></td></tr>;
             }
             return <DataGridRow
               key={`${resultSetId}:${rendered.sourceIndex}`}

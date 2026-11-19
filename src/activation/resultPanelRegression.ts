@@ -412,6 +412,55 @@ function resultHasTerminalResult(resultSets: ReturnType<ResultPanelView['getResu
     return Boolean(resultSets?.some(resultSet => !resultSet?.isLog));
 }
 
+/**
+ * Query completion is a host-state signal; the webview applies the matching
+ * hydrate/append messages asynchronously. Snapshotting immediately can still
+ * observe the previous source, so wait for the webview to catch up before the
+ * scenario inspects rows.
+ */
+async function waitForWebviewSnapshot(
+    provider: ResultPanelView,
+    sourceUri: string,
+): Promise<Record<string, unknown>> {
+    const hostResults = provider.getResultsForSource(sourceUri) ?? [];
+    const dataResults = hostResults.filter(resultSet => !resultSet.isLog);
+    // A single data tab can be row-counted exactly. A batch can expose
+    // several tabular results; its active tab is asserted later by the
+    // scenario after an explicit switch.
+    const expectedRows = dataResults.length === 1
+        ? typeof dataResults[0].totalRowCount === 'number'
+            ? dataResults[0].totalRowCount
+            : dataResults[0].data.length
+        : 0;
+    const requireRows = dataResults.length === 1 && expectedRows > 0;
+    const startedAt = Date.now();
+    let lastSnapshot: Record<string, unknown> | undefined;
+    while (true) {
+        lastSnapshot = asRecord(await provider.runResultPanelTestBridge('snapshot'));
+        const snapshot = lastSnapshot;
+        const countMatches = asNumber(snapshot.resultSetCount, -1) === hostResults.length;
+        // The user expectation is explicit: executing SQL while Logs is open
+        // switches to a tabular/error tab. Waiting for a non-Logs active index
+        // also catches the host/webview ordering race.
+        const dataSelected = dataResults.length === 0 || asNumber(snapshot.activeResultSetIndex, 0) > 0;
+        const pendingSettled = asNumber(snapshot.pendingRequestCount, -1) === 0;
+        const rowsMatch = !requireRows || asNumber(snapshot.visibleRowCount, -1) === expectedRows;
+        if (snapshot.sourceUri === sourceUri && countMatches && dataSelected && pendingSettled && rowsMatch) {
+            return snapshot;
+        }
+        if (Date.now() - startedAt >= SCENARIO_TIMEOUT_MS) {
+            throw new Error(
+                `Extension Host scenario timed out waiting for the webview result state `
+                + `(source=${sourceUri}, expectedResults=${hostResults.length}, expectedRows=${expectedRows}, `
+                + `lastSource=${String(lastSnapshot.sourceUri)}, lastResults=${String(lastSnapshot.resultSetCount)}, `
+                + `lastRows=${String(lastSnapshot.visibleRowCount)}, lastActiveIndex=${String(lastSnapshot.activeResultSetIndex)}, `
+                + `lastPending=${String(lastSnapshot.pendingRequestCount)}).`,
+            );
+        }
+        await sleep(30);
+    }
+}
+
 async function executeProductionQuery(
     provider: ResultPanelView,
     document: vscode.TextDocument,
@@ -428,7 +477,7 @@ async function executeProductionQuery(
         !provider.getExecutingSources().includes(sourceUri)
         && resultHasTerminalResult(provider.getResultsForSource(sourceUri)),
     );
-    return asRecord(await provider.runResultPanelTestBridge('snapshot'));
+    return waitForWebviewSnapshot(provider, sourceUri);
 }
 
 async function openUntitledSql(sql: string): Promise<vscode.TextDocument> {

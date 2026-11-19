@@ -82,10 +82,7 @@ async function main() {
 
   // Webview scripts bundle (IIFE — these do NOT need to export)
   const webviewEntryPoints = [
-    './media/resultPanel.ts',
-    './media/resultPanel/filter.ts',
-    './media/resultPanel/grid.ts',
-    './media/resultPanel/selection.ts',
+    './media/sharedResultPanel.ts',
     './media/searchWorker.ts',
     './media/spreadsheetPreview.ts',
     './media/editDataPanel.ts',
