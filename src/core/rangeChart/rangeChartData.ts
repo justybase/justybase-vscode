@@ -358,7 +358,7 @@ export function rebuildRangeChartData(
             ? selectedColumns.find((column) => column.id === options.categoryColumnId)
             : selectedColumns.find((column) => column.id === dataset.categoryColumnId);
 
-    const seriesColumnIds = options.seriesColumnIds && options.seriesColumnIds.length > 0
+    const seriesColumnIds = options.seriesColumnIds !== undefined
         ? options.seriesColumnIds
         : dataset.series.map((item) => item.columnId);
 

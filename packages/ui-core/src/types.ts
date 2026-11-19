@@ -93,11 +93,29 @@ export interface UiExecutionsState {
   readonly byExecutionId: Readonly<Record<string, UiExecutionState>>;
 }
 
-/** Typed filter state shared by the grid renderer and query adapters. */
-export interface UiResultColumnFilterDefinition {
+/** One Excel-style condition. Values-tab filters use `operator: 'in'` instead. */
+export interface UiResultColumnFilterCondition {
   readonly operator: QueryColumnFilterOperator;
   readonly value: string;
+  /** Upper bound for the `between` operator. */
+  readonly value2?: string;
   readonly values?: readonly unknown[];
+}
+
+/** Typed filter state shared by the grid renderer and query adapters. */
+export interface UiResultColumnFilterDefinition extends UiResultColumnFilterCondition {
+  /** Additional conditions evaluated together with the first one. */
+  readonly conditions?: readonly UiResultColumnFilterCondition[];
+  /** How `conditions` combine; defaults to `and`. */
+  readonly logic?: 'and' | 'or';
+}
+
+export type UiResultAggregationFunction = 'sum' | 'count' | 'countDistinct' | 'avg' | 'min' | 'max' | 'stdev' | 'median';
+
+/** Excel-style footer aggregation configured for one result column. */
+export interface UiResultColumnAggregation {
+  readonly fn: UiResultAggregationFunction;
+  readonly position?: 'top' | 'bottom';
 }
 
 export interface UiResultViewState {
@@ -108,6 +126,8 @@ export interface UiResultViewState {
   readonly sorting: readonly { readonly column: string; readonly descending: boolean }[];
   readonly grouping: readonly string[];
   readonly aggregation?: string;
+  /** Per-column footer aggregates, for example SUM on AMOUNT and COUNT on ID. */
+  readonly columnAggregations?: Readonly<Record<string, readonly UiResultColumnAggregation[]>>;
   readonly pivotColumn?: string;
   /** Optional grid presentation state shared by host shells. */
   readonly columnVisibility?: Readonly<Record<string, boolean>>;
@@ -249,6 +269,7 @@ export type UiAction =
     readonly loadedRowCount: number;
     readonly totalRowCount?: number;
     readonly columns?: readonly UiResultColumn[];
+    readonly limitReached?: boolean;
   }
   | { readonly type: 'execution/cancel-requested'; readonly sourceId: string; readonly executionId: string; readonly requestId: string }
   | { readonly type: 'execution/cancel-acknowledged'; readonly sourceId: string; readonly executionId: string; readonly requestId: string }

@@ -6,9 +6,10 @@ import type { UiExecutionState, UiResultSurfaceState } from '@justybase/ui-core'
 import type { UiResultViewState } from '@justybase/ui-core';
 import { formatDataGridCellValue } from './dataGrid';
 import type { DataGridColumn } from './dataGrid';
+import { MenuIcon } from './menuIcons';
 import type { ResultAnalysisKind } from './resultAnalysis';
 export { DataGrid, formatDataGridCellValue, ResultGrid } from './dataGrid';
-export type { DataGridCellContext, DataGridColumn, DataGridColumnFilterRequest, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
+export type { DataGridCellContext, DataGridCellEdit, DataGridColumn, DataGridColumnFilterRequest, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridSelectionRange, DataGridViewState, DataGridVirtualWindow, GridScrollPosition } from './dataGrid';
 export { createDataGridClipboardPayload, formatDataGridClipboard } from './dataGridClipboard';
 export { downloadBlobFile } from './download';
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
@@ -63,6 +64,127 @@ export function ErrorDiagnostics({ details }: ErrorDiagnosticsProps): ReactNode 
   </section>;
 }
 
+export type ResultExecutionBannerStatus = 'idle' | 'loading' | 'finalizing' | 'retrying' | 'cancelled' | 'error' | 'success';
+
+export interface ResultExecutionBannerProps {
+  readonly status: ResultExecutionBannerStatus;
+  readonly message?: string;
+  readonly cancelling?: boolean;
+  readonly onCancel?: () => void;
+}
+
+/**
+ * Compact execution lifecycle strip for the shared result panel. The legacy
+ * panel kept this information in a separate DOM banner; shared mode owns the
+ * same status surface so Cancel is never hidden behind the grid.
+ */
+export function ResultExecutionBanner({ status, message, cancelling = false, onCancel }: ResultExecutionBannerProps): ReactNode {
+  if (status === 'idle' || status === 'success') return null;
+  const label = status === 'loading'
+    ? 'Running query…'
+    : status === 'finalizing'
+      ? 'Finalizing result…'
+      : status === 'retrying'
+        ? 'Retrying query…'
+        : status === 'cancelled'
+          ? 'Query cancelled.'
+          : message ?? 'Query failed.';
+  const canCancel = onCancel !== undefined && (status === 'loading' || status === 'retrying');
+  return <div className={`ui-execution-banner ui-execution-${status}`} role={status === 'error' ? 'alert' : 'status'} aria-live="polite">
+    <span className="ui-execution-banner-icon" aria-hidden="true">{status === 'cancelled' ? '⊘' : status === 'error' ? '✗' : '▶'}</span>
+    <span className="ui-execution-banner-message">{label}</span>
+    {canCancel && <button type="button" className="ui-execution-banner-cancel" disabled={cancelling} onClick={onCancel}>{cancelling ? 'Cancelling…' : 'Cancel'}</button>}
+  </div>;
+}
+
+export interface ResultLimitBannerProps {
+  readonly limitReached: boolean;
+  readonly limit: number;
+  readonly rowCount?: number;
+  readonly onDismiss?: () => void;
+}
+
+export function ResultLimitBanner({ limitReached, limit, rowCount, onDismiss }: ResultLimitBannerProps): ReactNode {
+  if (!limitReached) return null;
+  return <div className="ui-result-limit-banner" role="alert">
+    <span className="ui-result-limit-icon" aria-hidden="true">!</span>
+    <span>Query row limit of {limit.toLocaleString('en-US')} rows was reached{rowCount === undefined ? '' : ` (${rowCount.toLocaleString('en-US')} rows loaded)`}. Increase <code>justybase.query.rowLimit</code> to fetch more.</span>
+    {onDismiss && <button type="button" className="ui-result-limit-dismiss" aria-label="Dismiss row limit warning" onClick={onDismiss}>×</button>}
+  </div>;
+}
+
+export interface ResultRefreshFailureBannerProps {
+  readonly message: string;
+  readonly onRetry?: () => void;
+  readonly onDismiss?: () => void;
+}
+
+export function ResultRefreshFailureBanner({ message, onRetry, onDismiss }: ResultRefreshFailureBannerProps): ReactNode {
+  return <div className="ui-refresh-failure-banner" role="alert">
+    <span className="ui-refresh-failure-icon" aria-hidden="true">!</span>
+    <span className="ui-refresh-failure-message">Refresh failed: {message}</span>
+    {onRetry && <button type="button" onClick={onRetry}>Retry refresh</button>}
+    {onDismiss && <button type="button" onClick={onDismiss}>Dismiss</button>}
+  </div>;
+}
+
+export interface ResultErrorViewProps {
+  readonly message?: string;
+  readonly details?: DatabaseErrorDetails;
+  readonly children?: ReactNode;
+}
+
+function resultErrorNextSteps(message: string | undefined): string | undefined {
+  const text = (message ?? '').toLowerCase();
+  if (/(connect|connection|socket|network|timeout|host|port)/u.test(text)) return 'Check that the server is running and reachable (host/port, VPN or SSH tunnel), then retry. Review Logs for details.';
+  if (/(syntax|parse|unexpected token|near )/u.test(text)) return 'Review the SQL near the reported position, fix it, and run the query again.';
+  if (/(permission|denied|privilege|not authorized)/u.test(text)) return 'Check the object and schema permissions for the active connection, then retry.';
+  if (/(not found|does not exist|unknown column|unknown table)/u.test(text)) return 'Verify the object name, schema and search path, then retry.';
+  return undefined;
+}
+
+export function ResultErrorView({ message, details, children }: ResultErrorViewProps): ReactNode {
+  const nextSteps = resultErrorNextSteps(message);
+  return <section className="ui-result-error" role="alert" aria-label="Result error">
+    <div className="ui-result-error-message">{message ?? 'Something went wrong.'}</div>
+    {nextSteps && <p className="ui-result-error-next">{nextSteps}</p>}
+    {details && <ErrorDiagnostics details={details} />}
+    {children}
+  </section>;
+}
+
+export interface RefreshLimitDialogProps {
+  readonly sql?: string;
+  readonly initialLimit?: string;
+  readonly onSubmit: (limit: string) => void;
+  readonly onCancel: () => void;
+}
+
+/** Refresh-time LIMIT editor matching the legacy trailing-LIMIT workflow. */
+export function RefreshLimitDialog({ sql, initialLimit = '', onSubmit, onCancel }: RefreshLimitDialogProps): ReactNode {
+  const [limit, setLimit] = useState(initialLimit);
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') onCancel();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+  const submit = (): void => {
+    if (!/^\d+$/u.test(limit.trim())) return;
+    onSubmit(limit.trim());
+  };
+  return <div className="ui-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onCancel(); }}>
+    <section className="ui-refresh-limit-dialog" role="dialog" aria-modal="true" aria-labelledby="ui-refresh-limit-title">
+      <header><h2 id="ui-refresh-limit-title">Refresh limit</h2><button type="button" aria-label="Close refresh limit" onClick={onCancel}>×</button></header>
+      <p>The query ends with a LIMIT. Choose the limit for this refresh.</p>
+      {sql && <pre className="ui-refresh-limit-sql">{sql}</pre>}
+      <label>LIMIT<input autoFocus inputMode="numeric" value={limit} onChange={event => setLimit(event.target.value.replace(/[^\d]/gu, ''))} onKeyDown={event => { if (event.key === 'Enter') submit(); }} /></label>
+      <footer><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="primary" disabled={!/^\d+$/u.test(limit.trim())} onClick={submit}>Refresh</button></footer>
+    </section>
+  </div>;
+}
+
 export interface CapabilityGateProps {
   readonly capability?: CapabilityDescriptor;
   readonly children: ReactNode;
@@ -77,7 +199,8 @@ export function CapabilityGate({ capability, children, fallback, allowReadOnly =
 }
 
 export interface UiShellProps {
-  readonly title: string;
+  /** Optional: hosts that already render a title bar can omit the shell header. */
+  readonly title?: string;
   readonly className?: string;
   readonly activeSurface: string;
   readonly onSurfaceChange?: (surface: string) => void;
@@ -88,7 +211,10 @@ export interface UiShellProps {
 
 export function UiShell({ title, className, activeSurface, onSurfaceChange, surfaces = [], sidebar, children }: UiShellProps): ReactNode {
   return <div className={['ui-shell', className].filter(Boolean).join(' ')} data-active-surface={activeSurface}>
-    <header className="ui-shell-header"><h1>{title}</h1><nav aria-label="Workspace surfaces">{surfaces.map(surface => <button type="button" key={surface.id} aria-current={surface.id === activeSurface ? 'page' : undefined} onClick={() => onSurfaceChange?.(surface.id)}>{surface.label}</button>)}</nav></header>
+    {(title || surfaces.length > 0) && <header className="ui-shell-header">
+      {title && <h1>{title}</h1>}
+      {surfaces.length > 0 && <nav aria-label="Workspace surfaces">{surfaces.map(surface => <button type="button" key={surface.id} aria-current={surface.id === activeSurface ? 'page' : undefined} onClick={() => onSurfaceChange?.(surface.id)}>{surface.label}</button>)}</nav>}
+    </header>}
     <div className="ui-shell-body">{sidebar && <aside className="ui-shell-sidebar" aria-label="Sidebar">{sidebar}</aside>}<main className="ui-shell-main">{children}</main></div>
   </div>;
 }
@@ -152,7 +278,7 @@ export function FocusOnMount({ children }: { readonly children: ReactNode }): Re
   return <div ref={ref} tabIndex={-1}>{children}</div>;
 }
 
-export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect, execution }: ResultTabsProps): ReactNode {
+export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect, execution, getLabel, isPinned, onTogglePin, onClose }: ResultTabsProps): ReactNode {
   const matchingActiveResults = results.filter(result => result.resultSetId === activeResultSetId);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const focusTab = (index: number): void => {
@@ -171,13 +297,90 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
         : result.sourceId === activeSourceId);
     const tabIndex = active || (activeResultSetId === undefined && index === 0) ? 0 : -1;
     const statement = execution?.statements[result.statementIndex];
-    return <button type="button" role="tab" key={`${result.sourceId}:${result.resultSetId}`} ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} data-result-status={result.status} data-statement-index={result.statementIndex} data-statement-status={statement?.status} title={statement ? `Statement ${result.statementIndex + 1}: ${statement.status}` : undefined} onKeyDown={event => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault();
-      const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? results.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + results.length) % results.length;
-      focusTab(nextIndex);
-    }} onClick={() => onSelect(result.resultSetId, result.sourceId)}>Result {index + 1}{result.status === 'streaming' ? ' · streaming' : ''}</button>;
+    const label = getLabel?.(result, index) ?? `Result ${index + 1}`;
+    const pinned = isPinned?.(result) === true;
+    return <div className={`ui-result-tab${active ? ' ui-result-tab-active' : ''}${pinned ? ' ui-result-tab-pinned' : ''}`} key={`${result.sourceId}:${result.resultSetId}`}>
+      <button type="button" role="tab" className="ui-result-tab-label" ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} data-result-status={result.status} data-statement-index={result.statementIndex} data-statement-status={statement?.status} title={statement ? `Statement ${result.statementIndex + 1}: ${statement.status}` : undefined} onKeyDown={event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? results.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + results.length) % results.length;
+        focusTab(nextIndex);
+      }} onClick={() => onSelect(result.resultSetId, result.sourceId)}>{label}{result.status === 'streaming' ? ' · streaming' : ''}{result.status === 'error' ? <span className="ui-result-tab-badge ui-result-tab-badge-error">Error</span> : result.status === 'cancelled' ? <span className="ui-result-tab-badge ui-result-tab-badge-partial">Partial</span> : result.status === 'empty' ? <span className="ui-result-tab-badge ui-result-tab-badge-empty">Empty</span> : null}</button>
+      {onTogglePin && <button
+        type="button"
+        className="ui-result-tab-pin"
+        aria-label={pinned ? `Unpin ${label}` : `Pin ${label}`}
+        aria-pressed={pinned}
+        title={pinned ? 'Unpin this result (pinned — kept across re-runs)' : 'Pin this result (keep across re-runs)'}
+        onClick={() => onTogglePin(result)}
+      ><MenuIcon name="pin" /></button>}
+      {onClose && <button type="button" className="ui-result-tab-close" aria-label={`Close ${label}`} title="Close this result" onClick={() => onClose(result)}>×</button>}
+    </div>;
   })}</div>;
+}
+
+export type ResultLayoutKind = 'table' | 'charts' | 'mini-charts' | 'diff' | 'explore' | 'analytical' | 'pivot';
+
+export interface ResultLayoutSwitcherProps {
+  readonly active: ResultLayoutKind;
+  readonly onSelect: (layout: ResultLayoutKind) => void;
+  readonly busy?: boolean;
+}
+
+/**
+ * Legacy-style layout switcher: Table is the grid, Analyze opens the analysis
+ * layouts. Kept as its own component so the toolbar stays product-neutral.
+ */
+export function ResultLayoutSwitcher({ active, onSelect, busy = false }: ResultLayoutSwitcherProps): ReactNode {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (event: MouseEvent): void => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+  const choose = (layout: ResultLayoutKind): void => {
+    setOpen(false);
+    onSelect(layout);
+  };
+  return <div className="ui-result-layout-switcher" ref={rootRef} role="group" aria-label="Result view">
+    <button
+      type="button"
+      className={`ui-result-layout-btn${active === 'table' ? ' active' : ''}`}
+      aria-pressed={active === 'table'}
+      onClick={() => choose('table')}
+    >Table</button>
+    <div className="ui-result-layout-analyze">
+      <button
+        type="button"
+        className={`ui-result-layout-btn${active !== 'table' ? ' active' : ''}`}
+        aria-label="Analyze"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => setOpen(value => !value)}
+      >Analyze <span aria-hidden="true">▾</span></button>
+      {open && <div className="ui-result-layout-menu" role="menu" aria-label="Analysis views">
+        <button type="button" role="menuitemradio" aria-checked={active === 'charts'} onClick={() => choose('charts')}>Charts</button>
+        <button type="button" role="menuitemradio" aria-checked={active === 'mini-charts'} onClick={() => choose('mini-charts')}>Mini Charts</button>
+        <button type="button" role="menuitemradio" aria-checked={active === 'diff'} onClick={() => choose('diff')}>Diff</button>
+        <button type="button" role="menuitemradio" aria-checked={active === 'explore'} onClick={() => choose('explore')}>Explore</button>
+        <button type="button" role="menuitemradio" aria-checked={active === 'analytical'} onClick={() => choose('analytical')}>Analytical</button>
+        <button type="button" role="menuitemradio" aria-checked={active === 'pivot'} onClick={() => choose('pivot')}>Pivot…</button>
+      </div>}
+    </div>
+  </div>;
 }
 
 export interface ResultViewToolbarProps {
@@ -194,29 +397,54 @@ export interface ResultViewToolbarProps {
   readonly onAggregate?: () => void;
   readonly onGroup?: () => void;
   readonly onPivot?: () => void;
+  /** Opens the vertical comparison of the selected rows (legacy Row View). */
+  readonly onRowView?: () => void;
+  readonly rowViewActive?: boolean;
   readonly activeAnalysis?: ResultAnalysisKind;
   readonly analysisBusy?: boolean;
   readonly columnMenu?: ReactNode;
+  /** Layout switcher or other view selector rendered before the table controls. */
+  readonly leading?: ReactNode;
+  /** Adapter-owned actions (editing, formatting) rendered with the shared controls. */
+  readonly actions?: ReactNode;
+  /** Total logical rows, rendered as the legacy "N rows" status at the end. */
+  readonly rowCount?: number;
+  /** Hides the aggregate/group/pivot analysis actions for non-tabular results such as Logs. */
+  readonly showAnalysis?: boolean;
+  /** Hides the table filter/sort controls for non-tabular results such as Logs. */
+  readonly showTableControls?: boolean;
+  /** Hides the toolbar sort shortcut; column headers remain sortable. */
+  readonly showSort?: boolean;
+  /** Hides the toolbar group shortcut; header actions and the grouping panel remain. */
+  readonly showGroup?: boolean;
 }
 
 /** Product-neutral controls for the common result view state. */
-export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onCopyAll, copyingAll = false, copyAllLabel, onExport, onAggregate, onGroup, onPivot, activeAnalysis, analysisBusy = false, columnMenu }: ResultViewToolbarProps): ReactNode {
+export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onCopyAll, copyingAll = false, copyAllLabel, onExport, onAggregate, onGroup, onPivot, onRowView, rowViewActive = false, activeAnalysis, analysisBusy = false, columnMenu, leading, actions, rowCount, showAnalysis = true, showTableControls = true, showSort = true, showGroup = true }: ResultViewToolbarProps): ReactNode {
   const firstColumn = columns[0]?.name;
   const canSelectColumn = firstColumn !== undefined;
   const aggregateActive = activeAnalysis === 'aggregate' || (activeAnalysis === undefined && view.aggregation !== undefined);
   const groupActive = activeAnalysis === 'group' || (activeAnalysis === undefined && view.grouping.length > 0);
   const pivotActive = activeAnalysis === 'pivot' || (activeAnalysis === undefined && view.pivotColumn !== undefined);
+  const sortDescending = view.sorting[0]?.descending === true;
   return <div className="ui-result-toolbar" role="toolbar" aria-label="Result view controls">
-    <label>Filter<input aria-label="Filter results" value={view.globalFilter} onChange={event => onChange({ globalFilter: event.target.value })} /></label>
-    <button type="button" aria-pressed={view.sorting.length > 0} disabled={!canSelectColumn && view.sorting.length === 0} onClick={() => onChange({ sorting: view.sorting.length > 0 ? [] : firstColumn === undefined ? [] : [{ column: firstColumn, descending: false }] })}>Sort</button>
-    <button type="button" aria-pressed={groupActive} disabled={analysisBusy || (!canSelectColumn && view.grouping.length === 0)} onClick={() => onGroup ? onGroup() : onChange({ grouping: view.grouping.length > 0 ? [] : firstColumn === undefined ? [] : [firstColumn] })}>Group</button>
-    <button type="button" aria-pressed={aggregateActive} disabled={analysisBusy} onClick={() => onAggregate ? onAggregate() : onChange({ aggregation: view.aggregation === undefined ? 'count' : undefined })}>Aggregate</button>
-    <button type="button" aria-pressed={pivotActive} disabled={analysisBusy || (!canSelectColumn && view.pivotColumn === undefined)} onClick={() => onPivot ? onPivot() : onChange({ pivotColumn: view.pivotColumn === undefined ? firstColumn : undefined })}>Pivot</button>
-    {onRefresh && <button type="button" onClick={onRefresh}>Refresh</button>}
-    {onCopy && <button type="button" onClick={onCopy}>Copy</button>}
-    {onCopyAll && <button type="button" aria-label={copyAllLabel ?? 'Copy full result (all rows)'} title="Copy every filtered row from the server spool, not just the loaded page" onClick={onCopyAll}>{copyingAll ? 'Copying…' : 'Copy all'}</button>}
-    {onExport && <button type="button" onClick={onExport}>Export</button>}
+    {leading}
+    {showTableControls && <div className="ui-result-toolbar-search">
+      <span className="ui-result-toolbar-search-icon" aria-hidden="true"><MenuIcon name="search" /></span>
+      <input aria-label="Filter results" placeholder="Search all columns…" value={view.globalFilter} onChange={event => onChange({ globalFilter: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onChange({ globalFilter: '' }); } }} />
+    </div>}
+    {showTableControls && showSort && <button type="button" className="ui-result-toolbar-icon" aria-label="Sort" title={view.sorting.length > 0 ? (sortDescending ? 'Sort ascending' : 'Sort descending') : 'Sort ascending'} aria-pressed={view.sorting.length > 0} disabled={!canSelectColumn && view.sorting.length === 0} onClick={() => onChange({ sorting: view.sorting.length > 0 ? (sortDescending ? [] : [{ column: view.sorting[0]?.column ?? firstColumn ?? '', descending: true }]) : firstColumn === undefined ? [] : [{ column: firstColumn, descending: false }] })}><MenuIcon name={view.sorting.length > 0 && sortDescending ? 'arrow-down' : 'arrow-up'} /></button>}
+    {showAnalysis && showGroup && <button type="button" className="ui-result-toolbar-icon" aria-label="Group" title="Group" aria-pressed={groupActive} disabled={analysisBusy || (!canSelectColumn && view.grouping.length === 0)} onClick={() => onGroup ? onGroup() : onChange({ grouping: view.grouping.length > 0 ? [] : firstColumn === undefined ? [] : [firstColumn] })}><MenuIcon name="layers" /></button>}
+    {showAnalysis && <button type="button" className="ui-result-toolbar-icon" aria-label="Aggregate" title="Aggregate" aria-pressed={aggregateActive} disabled={analysisBusy} onClick={() => onAggregate ? onAggregate() : onChange({ aggregation: view.aggregation === undefined ? 'count' : undefined })}><MenuIcon name="bar-chart" /></button>}
+    {showAnalysis && <button type="button" className="ui-result-toolbar-icon" aria-label="Pivot" title="Pivot: choose rows, columns, values and aggregation" aria-pressed={pivotActive} disabled={analysisBusy || (!canSelectColumn && view.pivotColumn === undefined)} onClick={() => onPivot ? onPivot() : onChange({ pivotColumn: view.pivotColumn === undefined ? firstColumn : undefined })}><MenuIcon name="git-branch" /></button>}
+    {onRowView && <button type="button" className="ui-result-toolbar-icon" aria-label="Row View" title="Row View (select 1–10 rows to compare vertically)" aria-pressed={rowViewActive} onClick={onRowView}><MenuIcon name="rows" /></button>}
+    {onRefresh && <button type="button" className="ui-result-toolbar-icon" aria-label="Refresh" title="Refresh" onClick={onRefresh}><MenuIcon name="refresh" /></button>}
+    {onCopy && <button type="button" className="ui-result-toolbar-icon" aria-label="Copy" title="Copy" onClick={onCopy}><MenuIcon name="copy" /></button>}
+    {onCopyAll && <button type="button" className="ui-result-toolbar-icon" aria-label={copyAllLabel ?? 'Copy full result (all rows)'} title={copyingAll ? 'Copying all rows…' : 'Copy every filtered row from the server spool, not just the loaded page'} disabled={copyingAll} onClick={onCopyAll}><MenuIcon name="file-spreadsheet" /></button>}
+    {onExport && <button type="button" className="ui-result-toolbar-icon" aria-label="Export" title="Export" onClick={onExport}><MenuIcon name="download" /></button>}
+    {actions}
     {columnMenu}
+    {rowCount !== undefined && <span className="ui-result-toolbar-row-count" role="status">{rowCount.toLocaleString()} rows</span>}
   </div>;
 }
 
@@ -376,6 +604,12 @@ export interface ResultTabsProps {
   readonly activeSourceId?: string;
   readonly onSelect: (id: string, sourceId?: string) => void;
   readonly execution?: UiExecutionState;
+  /** Host-specific tab labels (for example the Logs result set). */
+  readonly getLabel?: (result: UiResultSurfaceState, index: number) => string | undefined;
+  /** Whole-result pins survive re-runs; the host decides which IDs are pinned. */
+  readonly isPinned?: (result: UiResultSurfaceState) => boolean;
+  readonly onTogglePin?: (result: UiResultSurfaceState) => void;
+  readonly onClose?: (result: UiResultSurfaceState) => void;
 }
 
 export interface SchemaTreeProps {

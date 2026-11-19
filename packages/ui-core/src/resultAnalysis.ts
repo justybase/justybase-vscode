@@ -71,21 +71,31 @@ export function createGroupAnalysisTable(response: QueryGroupResponse): UiResult
  */
 export function createPivotAnalysisTable(
   columns: readonly UiResultColumn[],
-  response: QueryGroupResponse,
+  response: QueryGroupResponse & { readonly truncated?: boolean },
   rowColumnIndex: number,
   _pivotColumnIndex: number,
   valueColumnIndex: number,
+  aggregationLabel?: string,
 ): UiResultAnalysisTable {
   /** Bounds the rendered matrix: pivot cardinality is unbounded server-side. */
   const MAX_PIVOT_VALUES = 500;
-  const pivotValues = [...new Set(response.rows.map(row => String(row[1] ?? 'NULL')))];
-  const rowValues = [...new Set(response.rows.map(row => String(row[0] ?? 'NULL')))];
-  const visiblePivotValues = pivotValues.slice(0, MAX_PIVOT_VALUES);
-  const visiblePivotSet = new Set(visiblePivotValues);
+  /** Distinguishes SQL NULL from the literal string "NULL" in pivot keys. */
+  const keyOf = (value: unknown): string => value === null || value === undefined ? '\u0000NULL' : String(value);
+  const labelOf = (value: unknown): string => value === null || value === undefined ? 'NULL' : String(value);
+  const pivotLabels = new Map<string, string>();
+  const rowLabels = new Map<string, string>();
+  for (const row of response.rows) {
+    pivotLabels.set(keyOf(row[1]), labelOf(row[1]));
+    rowLabels.set(keyOf(row[0]), labelOf(row[0]));
+  }
+  const pivotKeys = [...pivotLabels.keys()];
+  const rowKeys = [...rowLabels.keys()];
+  const visiblePivotKeys = pivotKeys.slice(0, MAX_PIVOT_VALUES);
+  const visiblePivotSet = new Set(visiblePivotKeys);
   const rowMap = new Map<string, Map<string, unknown>>();
   for (const row of response.rows) {
-    const rowKey = String(row[0] ?? 'NULL');
-    const pivotKey = String(row[1] ?? 'NULL');
+    const rowKey = keyOf(row[0]);
+    const pivotKey = keyOf(row[1]);
     if (!visiblePivotSet.has(pivotKey)) continue;
     const values = rowMap.get(rowKey) ?? new Map<string, unknown>();
     values.set(pivotKey, row[2] ?? null);
@@ -94,24 +104,29 @@ export function createPivotAnalysisTable(
   const valueColumn = columns[valueColumnIndex];
   const pivotColumns: UiResultColumn[] = [
     columnType(columns[rowColumnIndex]),
-    ...visiblePivotValues.map(value => ({
-      name: value,
+    ...visiblePivotKeys.map(key => ({
+      name: pivotLabels.get(key) ?? 'NULL',
       ...(valueColumn?.type === undefined ? {} : { type: valueColumn.type }),
       ...(valueColumn?.scale === undefined ? {} : { scale: valueColumn.scale }),
     })),
   ];
-  const rows = rowValues.map(rowValue => [rowValue, ...visiblePivotValues.map(pivotValue => rowMap.get(rowValue)?.get(pivotValue) ?? null)]);
-  const truncated = response.totalGroups > response.rows.length;
-  const baseSummary = `${rowValues.length.toLocaleString()} rows · ${visiblePivotValues.length.toLocaleString()} pivot values`;
-  const pivotCapped = pivotValues.length > visiblePivotValues.length
-    ? `${baseSummary} · first ${visiblePivotValues.length.toLocaleString()} of ${pivotValues.length.toLocaleString()} pivot values`
+  const rows = rowKeys.map(rowKey => [rowLabels.get(rowKey) ?? 'NULL', ...visiblePivotKeys.map(pivotKey => rowMap.get(rowKey)?.get(pivotKey) ?? null)]);
+  const partial = response.truncated === true;
+  const truncated = partial || response.totalGroups > response.rows.length;
+  const baseSummary = `${rowKeys.length.toLocaleString()} rows · ${visiblePivotKeys.length.toLocaleString()} pivot values`;
+  const pivotCapped = pivotKeys.length > visiblePivotKeys.length
+    ? `${baseSummary} · first ${visiblePivotKeys.length.toLocaleString()} of ${pivotKeys.length.toLocaleString()} pivot values`
     : baseSummary;
+  const summaryPrefix = aggregationLabel ? `${aggregationLabel} · ` : '';
+  const truncationNote = partial
+    ? `partial: first ${response.rows.length.toLocaleString()} groups`
+    : `first ${response.rows.length.toLocaleString()} of ${response.totalGroups.toLocaleString()} groups`;
   return {
     kind: 'pivot',
     title: 'Pivot result',
     summary: truncated
-      ? `${pivotCapped} · first ${response.rows.length.toLocaleString()} of ${response.totalGroups.toLocaleString()} groups`
-      : pivotCapped,
+      ? `${summaryPrefix}${pivotCapped} · ${truncationNote}`
+      : `${summaryPrefix}${pivotCapped}`,
     columns: pivotColumns,
     rows,
     totalRowCount: rows.length,

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { DataGrid } from './dataGrid';
 import type { DataGridCellContext, DataGridColumn, DataGridCopyPayload, DataGridViewState } from './dataGrid';
@@ -31,6 +32,8 @@ export interface ResultAnalysisPanelProps {
   readonly onClose: () => void;
   readonly onCopySelection?: (payload: DataGridCopyPayload, format?: DataGridClipboardFormat) => void;
   readonly onViewCell?: (context: DataGridCellContext) => void;
+  /** Fills the result body when the analysis is a layout (Pivot) instead of a compact panel. */
+  readonly fill?: boolean;
 }
 
 const emptyView: DataGridViewState = {
@@ -54,12 +57,19 @@ export function ResultAnalysisPanel({
   onClose,
   onCopySelection,
   onViewCell,
+  fill = false,
 }: ResultAnalysisPanelProps): ReactNode {
-  return <section className="ui-result-analysis" aria-label="Result analysis" data-analysis-kind={table?.kind ?? 'none'}>
+  const [view, setView] = useState<DataGridViewState>(emptyView);
+  const columnSignature = table?.columns.map(column => column.name).join('\u0000') ?? '';
+  // A new pivot/group result must not inherit filters or sorting from the
+  // previous matrix, which could hide every row of the new table.
+  useEffect(() => { setView(emptyView); }, [columnSignature]);
+  return <section className={`ui-result-analysis${fill ? ' ui-result-analysis-fill' : ''}`} aria-label="Result analysis" data-analysis-kind={table?.kind ?? 'none'}>
     <header className="ui-result-analysis-header">
       <div>
         <h2>{table?.title ?? 'Result analysis'}</h2>
         {table?.summary && <small>{table.summary}</small>}
+        <span className="ui-result-analysis-kind" aria-hidden="true">{table?.kind ?? 'analysis'}</span>
       </div>
       <button type="button" aria-label="Close result analysis" onClick={onClose}>Close</button>
     </header>
@@ -72,11 +82,11 @@ export function ResultAnalysisPanel({
         columns={table.columns}
         rows={table.rows}
         totalRowCount={table.totalRowCount ?? table.rows.length}
-        view={emptyView}
-        onViewChange={() => undefined}
-        clientProcessing={false}
+        view={view}
+        onViewChange={patch => setView(current => ({ ...current, ...patch }))}
         showContextMenu
         showColumnMenu={false}
+        showGroupingPanel={false}
         getCellMetadata={table.getCellMetadata}
         onCopySelection={onCopySelection}
         onViewCell={onViewCell}

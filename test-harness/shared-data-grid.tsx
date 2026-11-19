@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
+import { encode } from '@msgpack/msgpack';
 import { DataGrid, processDataGridRows } from '../packages/ui-react/src/dataGrid';
 import type { DataGridColumn, DataGridViewState, GridScrollPosition } from '../packages/ui-react/src/dataGrid';
+import { mountSharedResultPanelIfConfigured } from '../media/resultPanel/sharedView';
 import '../packages/ui-react/src/resultGrid.css';
 
 type HarnessRow = readonly unknown[];
@@ -44,9 +46,11 @@ declare global {
 }
 
 const profile = new URLSearchParams(window.location.search).get('profile') ?? 'comparison';
-const profileDefinition = profile === 'filter-4000x32'
-  ? { rowCount: 4_000, columnCount: 32 }
-  : { rowCount: 10_000, columnCount: 16 };
+const profileDefinition = profile === 'panel'
+  ? { rowCount: 500, columnCount: 8 }
+  : profile === 'filter-4000x32'
+    ? { rowCount: 4_000, columnCount: 32 }
+    : { rowCount: 10_000, columnCount: 16 };
 
 const columnNames = ['ID', 'AMOUNT', 'NAME', 'EVENT_DATE', 'EVENT_AT', 'ACTIVE', 'CATEGORY', 'PAYLOAD', 'RANKING', 'SEARCH_LABEL', 'REFERENCE', 'QUANTITY', 'OPTIONAL_TEXT', 'RATIO', 'GROUP_KEY', 'DETAILS'];
 const columnTypes = ['INTEGER', 'NUMERIC(18,2)', 'VARCHAR(160)', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'VARCHAR(32)', 'VARCHAR(256)', 'INTEGER', 'VARCHAR(64)', 'VARCHAR(48)', 'INTEGER', 'VARCHAR(180)', 'DOUBLE', 'VARCHAR(32)', 'VARCHAR(512)'];
@@ -214,4 +218,70 @@ function App(): ReactElement {
   </main>;
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+if (profile === 'panel') {
+  if (new URLSearchParams(window.location.search).has('legacycss')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/media/resultPanel.css';
+    document.head.appendChild(link);
+  }
+  (globalThis as { __JUSTYBASE_UI_MODE__?: string }).__JUSTYBASE_UI_MODE__ = 'shared';
+  document.body.innerHTML = '<div id="shared-ui-root"></div>';
+  if (mountSharedResultPanelIfConfigured()) {
+    const panelColumns = columns.slice(0, 8);
+    const panelRows = rows.slice(0, 200).map(row => row.slice(0, 8));
+    const withBaseline = new URLSearchParams(window.location.search).has('baseline');
+    const panelResultSets: Array<Record<string, unknown>> = [
+            {
+              resultSetId: 'panel-logs',
+              columns: [{ name: 'Time', type: 'VARCHAR' }, { name: 'Message', type: 'VARCHAR' }],
+              data: [
+                ['12:00:00', 'Shared panel fixture ready'],
+                ['12:00:00', '--- Run 1 ---'],
+                ['12:00:01', '▶ RUNNING: SELECT ID, NAME FROM PEOPLE | DEV | 12ms | 200 rows', { executionId: 'run-1', event: 'start', status: 'running', sql: 'SELECT ID, NAME FROM PEOPLE', connectionName: 'DEV' }],
+                ['12:00:01', 'Fetched page 1', { executionId: 'run-1', event: 'message', status: 'running' }],
+                ['12:00:01', '✓ SUCCESS: SELECT ID, NAME FROM PEOPLE | DEV | 42ms | 200 rows', { executionId: 'run-1', event: 'end', status: 'success', durationMs: 42, rowCount: 200 }],
+                ['12:00:02', '✗ ERROR: SELECT * FROM MISSING | DEV | 8ms | relation "MISSING" does not exist', { executionId: 'run-2', event: 'start', status: 'error', sql: 'SELECT * FROM MISSING', connectionName: 'DEV' }],
+                ['12:00:02', '✗ ERROR: SELECT * FROM MISSING | DEV | 8ms | relation "MISSING" does not exist', { executionId: 'run-2', event: 'end', status: 'error', durationMs: 8 }],
+                ['12:00:03', '▶ RUNNING: SELECT COUNT(*) FROM PAYLOAD | DEV', { executionId: 'run-3', event: 'start', status: 'running', sql: 'SELECT COUNT(*) FROM PAYLOAD', connectionName: 'DEV' }],
+              ],
+              totalRowCount: 8,
+              isLog: true,
+            },
+            {
+              resultSetId: 'panel-result',
+              columns: panelColumns,
+              data: panelRows,
+              totalRowCount: panelRows.length,
+              isEditable: true,
+              editSource: { db: 'DEV', schema: 'PUBLIC', table: 'PEOPLE' },
+              sql: 'SELECT ID, AMOUNT, NAME, CATEGORY, ACTIVE, CREATED, SCORE, RATIO FROM PEOPLE',
+            },
+    ];
+    if (withBaseline) {
+      const baselineRows = panelRows.map((row, index) => index === 1
+        ? [row[0], -999.99, 'baseline-changed', ...row.slice(3)]
+        : row);
+      panelResultSets.push({
+        resultSetId: 'panel-baseline',
+        columns: panelColumns,
+        data: baselineRows,
+        totalRowCount: baselineRows.length,
+      });
+    }
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        command: 'hydrate',
+        data: {
+          activeSourceJson: JSON.stringify('file:///panel.sql'),
+          activeResultSetIndex: 1,
+          executingSourcesJson: '[]',
+          resultSetsMsgPack: encode(panelResultSets),
+          resultSyncVersion: 1,
+        },
+      },
+    }));
+  }
+} else {
+  createRoot(document.getElementById('root')!).render(<App />);
+}

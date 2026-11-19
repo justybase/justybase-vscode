@@ -7,14 +7,19 @@ import {
   CapabilityGate,
   DataGrid,
   DesignerForm,
+  DiffView,
   EditorSurface,
   ExplainView,
   FocusOnMount,
   HistoryView,
+  PivotDialog,
+  ResultColumnSidebar,
+  ResultLayoutSwitcher,
   ResultTabs,
   ResultAnalysisPanel,
   ResultViewToolbar,
   RowDetail,
+  RowViewPanel,
   SchemaTree,
   SqlDialectSelect,
   UiShell,
@@ -66,6 +71,72 @@ describe('shared React presentation', () => {
     fireEvent.contextMenu(screen.getByRole('cell', { name: '2' }));
     await user.click(screen.getByRole('menuitem', { name: 'Export selection as JSON' }));
     expect(onExportSelection).toHaveBeenLastCalledWith(expect.anything(), 'json');
+  });
+
+  it('commits a validated inline edit only in edit mode', () => {
+    const onCellEdit = jest.fn();
+    render(<DataGrid
+      resultSetId="edit-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'VARCHAR' }]}
+      rows={[[1, 'Ada']]}
+      editMode
+      onCellEdit={onCellEdit}
+    />);
+    const integerCell = screen.getByRole('cell', { name: '1' });
+    fireEvent.doubleClick(integerCell);
+    const editor = screen.getByRole('textbox', { name: 'Edit ID' });
+    fireEvent.change(editor, { target: { value: '2' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onCellEdit).toHaveBeenCalledWith({
+      rowIndex: 0,
+      columnIndex: 0,
+      oldValue: 1,
+      newValue: '2',
+    });
+
+    // The editor stays open and reports the typed validation error.
+    fireEvent.doubleClick(integerCell);
+    const invalidEditor = screen.getByRole('textbox', { name: 'Edit ID' });
+    fireEvent.change(invalidEditor, { target: { value: '1.5' } });
+    fireEvent.keyDown(invalidEditor, { key: 'Enter' });
+    expect(screen.getByRole('alert')).toHaveTextContent('whole number');
+    expect(onCellEdit).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(invalidEditor, { key: 'Escape' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('does not open the inline editor without edit mode', () => {
+    const onCellEdit = jest.fn();
+    render(<DataGrid
+      resultSetId="read-only-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1]]}
+      onCellEdit={onCellEdit}
+    />);
+    fireEvent.doubleClick(screen.getByRole('cell', { name: '1' }));
+    expect(screen.queryByRole('textbox', { name: 'Edit ID' })).toBeNull();
+    expect(onCellEdit).not.toHaveBeenCalled();
+  });
+
+  it('commits NULL through the inline editor toggle', () => {
+    const onCellEdit = jest.fn();
+    render(<DataGrid
+      resultSetId="null-edit-grid"
+      columns={[{ name: 'NAME', type: 'VARCHAR' }]}
+      rows={[['Ada']]}
+      editMode
+      onCellEdit={onCellEdit}
+    />);
+    fireEvent.doubleClick(screen.getByRole('cell', { name: 'Ada' }));
+    const editor = screen.getByRole('textbox', { name: 'Edit NAME' });
+    fireEvent.click(screen.getByRole('button', { name: 'Set NULL' }));
+    fireEvent.blur(editor);
+    expect(onCellEdit).toHaveBeenCalledWith({
+      rowIndex: 0,
+      columnIndex: 0,
+      oldValue: 'Ada',
+      newValue: null,
+    });
   });
 
   it('attaches the download anchor to the document for Firefox compatibility', () => {
@@ -126,6 +197,24 @@ describe('shared React presentation', () => {
     }, 'csv')).toBe('ID\n2');
   });
 
+  it('aligns copied HTML cells like the grid and keeps pasted rows compact', () => {
+    const payload = createDataGridClipboardPayload({
+      columns: [
+        { name: 'AMOUNT', type: 'NUMERIC' },
+        { name: 'LABEL', type: 'VARCHAR' },
+      ],
+      rows: [[12.5, 'text']],
+    });
+    // Numbers match the grid's right alignment; text stays left.
+    expect(payload.html).toContain('align="right" style="border:1px solid #d1d1d1;padding:2px 8px;text-align:right');
+    expect(payload.html).toContain('align="left" style="border:1px solid #d1d1d1;padding:2px 8px;text-align:left');
+    // Word/Outlook paragraph spacing must be neutralised inside every cell.
+    expect(payload.html).toContain('mso-line-height-rule:exactly');
+    expect(payload.html).toContain('<p style="margin:0;line-height:1.15');
+    expect(payload.html).not.toContain('padding:6px 8px');
+    expect(payload.html).not.toContain('line-height:1.4');
+  });
+
   it('filters formatted values using compact separators and excludes NULL cells', () => {
     const columns = [{ name: 'VALUE', type: 'INTEGER' }];
     expect(processDataGridRows(columns, [[1234567], [null], [42]], {
@@ -144,6 +233,147 @@ describe('shared React presentation', () => {
     render(<RowDetail columns={[{ name: 'DATE', type: 'INTEGER', inferredDateInteger: true }, { name: 'AMOUNT', type: 'NUMERIC', scale: 2 }]} row={[20260315, '1234.5']} onClose={onClose} />);
     expect(screen.getByText('2026 03 15')).toBeInTheDocument();
     expect(screen.getByText('1 234.50')).toBeInTheDocument();
+  });
+
+  it('compares selected rows vertically and highlights only differing columns', () => {
+    const onClose = jest.fn();
+    const { container } = render(<RowViewPanel
+      columns={[
+        { name: 'SAME', type: 'INTEGER' },
+        { name: 'ID', type: 'INTEGER' },
+        { name: 'NOTE', type: 'VARCHAR' },
+      ]}
+      rows={[[1, 1, null], [1, 2, 'NULL']]}
+      onClose={onClose}
+    />);
+    expect(screen.getByRole('complementary', { name: 'Row details and comparison' })).toBeInTheDocument();
+    expect(screen.getAllByText('Row 1')).toHaveLength(3);
+    expect(screen.getAllByText('Row 2')).toHaveLength(3);
+    const sections = [...container.querySelectorAll('.row-view-section')];
+    expect(sections[0]).not.toHaveClass('diff');
+    expect(sections[1]).toHaveClass('diff');
+    expect(sections[2]).toHaveClass('diff');
+    // SQL NULL and the literal text "NULL" must not be treated as equal.
+    expect(container.querySelectorAll('.row-view-val.null')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Close row view' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches between the table and analysis layouts from the view switcher', async () => {
+    const user = userEvent.setup();
+    const onSelect = jest.fn();
+    render(<ResultLayoutSwitcher active="table" onSelect={onSelect} />);
+    expect(screen.getByRole('button', { name: 'Table' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Analyze' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Analytical' }));
+    expect(onSelect).toHaveBeenCalledWith('analytical');
+  });
+
+  it('builds a pivot from explicit row, column, value and aggregation choices', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn();
+    const onClose = jest.fn();
+    render(<PivotDialog
+      columns={[
+        { name: 'ID', type: 'INTEGER' },
+        { name: 'AMOUNT', type: 'NUMERIC' },
+        { name: 'CATEGORY', type: 'VARCHAR' },
+      ]}
+      defaults={{ rowColumnIndex: 0, pivotColumnIndex: 2, valueColumnIndex: 1, aggregation: 'sum' }}
+      onSubmit={onSubmit}
+      onClose={onClose}
+    />);
+    expect(screen.getByRole('combobox', { name: 'Pivot rows' })).toHaveValue('0');
+    expect(screen.getByRole('combobox', { name: 'Pivot columns' })).toHaveValue('2');
+    expect(screen.getByRole('combobox', { name: 'Pivot values' })).toHaveValue('1');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Pivot aggregation' }), 'avg');
+    await user.click(screen.getByRole('button', { name: 'Create pivot' }));
+    expect(onSubmit).toHaveBeenCalledWith({
+      rowColumnIndex: 0,
+      pivotColumnIndex: 2,
+      valueColumnIndex: 1,
+      aggregation: 'avg',
+    });
+  });
+
+  it('exports the row view as Markdown and XLSB from its export menu', async () => {
+    const user = userEvent.setup();
+    const onExportXlsb = jest.fn();
+    const onNotify = jest.fn();
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText, write: jest.fn().mockResolvedValue(undefined) },
+    });
+    render(<RowViewPanel
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NOTE', type: 'VARCHAR' }]}
+      rows={[[1, 'a'], [2, 'b']]}
+      onClose={jest.fn()}
+      onExportXlsb={onExportXlsb}
+      onNotify={onNotify}
+    />);
+    await user.click(screen.getByRole('button', { name: 'Export row view' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Copy as Markdown' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith('| ID | NOTE |\n| --- | --- |\n| 1 | a |\n| 2 | b |');
+    expect(onNotify).toHaveBeenCalledWith('Row view copied as Markdown');
+
+    await user.click(screen.getByRole('button', { name: 'Export row view' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Download as XLSB' }));
+    expect(onExportXlsb).toHaveBeenCalledTimes(1);
+  });
+
+  it('copies the row view as a PNG ClipboardItem', async () => {
+    const user = userEvent.setup();
+    const write = jest.fn().mockResolvedValue(undefined);
+    const onNotify = jest.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: jest.fn().mockResolvedValue(undefined), write },
+    });
+    class MockClipboardItem {
+      constructor(readonly data: Record<string, Blob>) {}
+      get types(): string[] { return Object.keys(this.data); }
+      async getType(type: string): Promise<Blob> { return this.data[type]!; }
+    }
+    Object.defineProperty(globalThis, 'ClipboardItem', { configurable: true, value: MockClipboardItem });
+    const context = {
+      scale: jest.fn(), fillRect: jest.fn(), beginPath: jest.fn(), moveTo: jest.fn(), lineTo: jest.fn(),
+      quadraticCurveTo: jest.fn(), closePath: jest.fn(), stroke: jest.fn(), fill: jest.fn(), fillText: jest.fn(),
+      measureText: jest.fn(() => ({ width: 20 })), textBaseline: '', textAlign: '', font: '', fillStyle: '', strokeStyle: '', lineWidth: 1,
+    };
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    jest.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(callback => callback(new Blob(['png'], { type: 'image/png' }), 'image/png'));
+    render(<RowViewPanel
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1], [2]]}
+      onClose={jest.fn()}
+      onNotify={onNotify}
+    />);
+    await user.click(screen.getByRole('button', { name: 'Export row view' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Copy as Image' }));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    const items = write.mock.calls[0]![0] as MockClipboardItem[];
+    expect(items[0]!.types).toEqual(['image/png']);
+    expect(items[0]!.data['image/png']).toBeInstanceOf(Blob);
+    expect(onNotify).toHaveBeenCalledWith('Row view copied as image');
+  });
+
+  it('resizes the row-view key column with the keyboard and persists the width', () => {
+    window.localStorage.clear();
+    render(<RowViewPanel
+      columns={[{ name: 'ID', type: 'INTEGER' }]}
+      rows={[[1]]}
+      onClose={jest.fn()}
+    />);
+    const splitter = screen.getByRole('separator', { name: 'Resize the column-name column' });
+    expect(splitter).toHaveAttribute('aria-valuenow', '42');
+    fireEvent.keyDown(splitter, { key: 'ArrowRight' });
+    expect(splitter).toHaveAttribute('aria-valuenow', '44');
+    expect(window.localStorage.getItem('justybase.row-view.key-column-width.v1')).toBe('44');
+    fireEvent.keyDown(splitter, { key: 'ArrowLeft', shiftKey: true });
+    expect(splitter).toHaveAttribute('aria-valuenow', '36');
+    expect(window.localStorage.getItem('justybase.row-view.key-column-width.v1')).toBe('36');
   });
 
   it('renders a safe large-value viewer with copy and Escape close actions', async () => {
@@ -479,7 +709,7 @@ describe('shared React presentation', () => {
       onCopySelection={onCopySelection}
     />);
 
-    expect(screen.getByRole('columnheader', { name: '#' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select all rows' })).toBeInTheDocument();
     expect(screen.getByText('INT')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /ID Not sorted/ }));
     expect(onViewChange).toHaveBeenCalledWith({ sorting: [{ column: 'ID', descending: false }] });
@@ -577,7 +807,7 @@ describe('shared React presentation', () => {
 
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row' }));
-    expect(onCopySelection).toHaveBeenLastCalledWith(expect.objectContaining({ rows: [[2, 'beta']] }));
+    expect(onCopySelection).toHaveBeenLastCalledWith(expect.objectContaining({ rows: [[2, 'beta']] }), 'tsv');
 
     fireEvent.contextMenu(beta, { clientX: 40, clientY: 60 });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy row as JSON' }));
@@ -736,6 +966,53 @@ describe('shared React presentation', () => {
     />);
     expect(screen.getAllByRole('cell')).toHaveLength(1);
     expect(getCellMetadata.mock.calls.some(call => call[0] === 2)).toBe(true);
+  });
+
+  it('inserts a SQL-ready cell value on double-click outside edit mode', () => {
+    const onInsertCellContent = jest.fn();
+    render(<DataGrid
+      resultSetId="sql-insert-grid"
+      columns={[
+        { name: 'ID', type: 'INTEGER' },
+        { name: 'NAME', type: 'VARCHAR(20)' },
+        { name: 'AMOUNT', type: 'NUMERIC(10,2)', scale: 2 },
+        { name: 'EVENT_DATE', type: 'DATE' },
+        { name: 'ACTIVE', type: 'BOOLEAN' },
+      ]}
+      rows={[[1, "O'Reilly", '1234.50', '2024-01-01', true]]}
+      onInsertCellContent={onInsertCellContent}
+    />);
+    const cells = screen.getAllByRole('cell');
+    fireEvent.doubleClick(cells[1]!);
+    expect(onInsertCellContent).toHaveBeenLastCalledWith({
+      text: "O'Reilly",
+      dataType: 'VARCHAR(20)',
+      sqlText: "'O''Reilly'",
+    });
+    fireEvent.doubleClick(cells[0]!);
+    expect(onInsertCellContent).toHaveBeenLastCalledWith({
+      text: '1',
+      dataType: 'INTEGER',
+      sqlText: '1',
+    });
+    fireEvent.doubleClick(cells[2]!);
+    expect(onInsertCellContent).toHaveBeenLastCalledWith({
+      text: '1234.50',
+      dataType: 'NUMERIC(10,2)',
+      sqlText: '1234.50',
+    });
+    fireEvent.doubleClick(cells[3]!);
+    expect(onInsertCellContent).toHaveBeenLastCalledWith({
+      text: '2024-01-01',
+      dataType: 'DATE',
+      sqlText: "'2024-01-01'",
+    });
+    fireEvent.doubleClick(cells[4]!);
+    expect(onInsertCellContent).toHaveBeenLastCalledWith({
+      text: 'true',
+      dataType: 'BOOLEAN',
+      sqlText: 'TRUE',
+    });
   });
 
   it('matches canonical typed sorting and keeps selection coordinates in display order', () => {
@@ -901,6 +1178,18 @@ describe('shared React presentation', () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith(expect.any(Object));
     rerender(<DataGrid resultSetId="selection-two" columns={[{ name: 'ID' }]} rows={[[2]]} onSelectionChange={onSelectionChange} />);
     expect(onSelectionChange).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('can hide the redundant toolbar sort and group shortcuts', () => {
+    render(<ResultViewToolbar
+      columns={[{ name: 'ID' }]}
+      view={{ globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined }}
+      onChange={jest.fn()}
+      showSort={false}
+      showGroup={false}
+    />);
+    expect(screen.queryByRole('button', { name: 'Sort' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Group' })).not.toBeInTheDocument();
   });
 
   it('exposes shared filter, grouping, aggregation, pivot and row-detail actions', async () => {
@@ -1209,6 +1498,51 @@ describe('shared React presentation', () => {
     }
   });
 
+  it('toggles discontiguous cells with Ctrl+click and copies their bounding rectangle', () => {
+    const onSelectionChange = jest.fn();
+    const onCopySelection = jest.fn();
+    render(<DataGrid
+      resultSetId="multi-select-grid"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }]}
+      rows={[[1, 'a'], [2, 'b'], [3, 'c']]}
+      onSelectionChange={onSelectionChange}
+      onCopySelection={onCopySelection}
+    />);
+    const first = screen.getByRole('cell', { name: 'a' });
+    const last = screen.getByRole('cell', { name: 'c' });
+
+    fireEvent.mouseDown(first, { button: 0 });
+    fireEvent.mouseDown(last, { button: 0, ctrlKey: true });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      anchorRow: 2,
+      anchorColumn: 1,
+      focusRow: 2,
+      focusColumn: 1,
+      additionalRanges: [{ minRow: 0, maxRow: 0, minColumn: 1, maxColumn: 1 }],
+    });
+    expect(first).toHaveClass('ui-data-grid-cell-selected');
+    expect(last).toHaveClass('ui-data-grid-cell-selected');
+
+    // Ctrl+click the active cell again toggles it off and promotes the
+    // remaining discontiguous cell back to the active rectangle.
+    fireEvent.mouseDown(last, { button: 0, ctrlKey: true });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      anchorRow: 0,
+      anchorColumn: 1,
+      focusRow: 0,
+      focusColumn: 1,
+    });
+    expect(first).toHaveClass('ui-data-grid-cell-selected');
+    expect(last).not.toHaveClass('ui-data-grid-cell-selected');
+
+    fireEvent.mouseDown(last, { button: 0, ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
+    expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({
+      columns: [expect.objectContaining({ name: 'NAME' })],
+      rows: [['a'], ['b'], ['c']],
+    }));
+  });
+
   it('navigates and extends the shared grid selection from the keyboard', () => {
     const onSelectionChange = jest.fn();
     const onRowSelect = jest.fn();
@@ -1282,5 +1616,63 @@ describe('shared React presentation', () => {
     const { container } = render(<DataGrid resultSetId="boolean-class" columns={[{ name: 'FLAG', type: 'BOOLEAN' }]} rows={[[true], [false]]} />);
     expect(container.querySelectorAll('.ui-data-grid-value-boolean-true')).toHaveLength(1);
     expect(container.querySelectorAll('.ui-data-grid-value-boolean-false')).toHaveLength(1);
+  });
+
+  it('combines multiple column filter conditions with AND/OR logic', () => {
+    const columns = [{ name: 'NAME', type: 'VARCHAR' }, { name: 'AMOUNT', type: 'NUMERIC' }];
+    const rows = [['abz', 1], ['abc', 2], ['zbz', 3]];
+    const view = (logic: 'and' | 'or') => ({
+      globalFilter: '',
+      columnFilters: {},
+      columnFilterDefinitions: {
+        NAME: {
+          operator: 'startsWith' as const,
+          value: 'a',
+          conditions: [
+            { operator: 'startsWith' as const, value: 'a' },
+            { operator: 'endsWith' as const, value: 'z' },
+          ],
+          logic,
+        },
+      },
+      sorting: [],
+      grouping: [],
+    });
+    expect(processDataGridRows(columns, rows, view('and'))).toEqual([['abz', 1]]);
+    expect(processDataGridRows(columns, rows, view('or'))).toEqual([['abz', 1], ['abc', 2], ['zbz', 3]]);
+  });
+
+  it('renders the shared column sidebar and reports visibility changes', () => {
+    const onToggleVisibility = jest.fn();
+    render(<ResultColumnSidebar
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME', type: 'VARCHAR' }]}
+      visibility={{ NAME: false }}
+      onToggleVisibility={onToggleVisibility}
+    />);
+    expect(screen.getByRole('checkbox', { name: 'Show ID' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Show NAME' })).not.toBeChecked();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Find column' }), { target: { value: 'na' } });
+    expect(screen.queryByRole('button', { name: 'ID' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show NAME' }));
+    expect(onToggleVisibility).toHaveBeenCalledWith(expect.objectContaining({ name: 'NAME' }), 1);
+  });
+
+  it('supports case and whitespace tolerant result diffs', () => {
+    render(<DiffView
+      target={{ label: 'Target', columns: [{ name: 'NAME', type: 'VARCHAR' }], rows: [[' abc ']] }}
+      baselines={[{ id: 'base', label: 'Baseline', columns: [{ name: 'NAME', type: 'VARCHAR' }], rows: [['ABC']] }]}
+      baselineId="base"
+      onBaselineChange={jest.fn()}
+    />);
+    expect(screen.getByText(/Changed:/)).toHaveTextContent('Changed: 1');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Ignore case/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Ignore whitespace/ }));
+    expect(screen.getByText(/Changed:/)).toHaveTextContent('Changed: 0');
+    expect(screen.getByText('No differences detected.')).toBeInTheDocument();
+  });
+
+  it('exposes aria-busy while the shared grid is loading', () => {
+    const { container } = render(<DataGrid resultSetId="busy-grid" columns={[{ name: 'ID', type: 'INTEGER' }]} rows={[[1]]} busy />);
+    expect(container.querySelector('.ui-result-grid')).toHaveAttribute('aria-busy', 'true');
   });
 });

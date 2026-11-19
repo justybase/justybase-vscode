@@ -1,13 +1,14 @@
 import { encode } from '@msgpack/msgpack';
 import '@testing-library/jest-dom';
 import { act } from 'react';
-import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup } from '@testing-library/react';
 import {
     SharedResultPanelApp,
     SharedResultPanelController,
     decodeSharedRows,
     displaySharedRows,
     disposeSharedResultPanel,
+    buildSharedFilterState,
     mountSharedResultPanelIfConfigured,
     normalizeSharedColumns,
     normalizeSharedResultSet,
@@ -81,8 +82,18 @@ describe('shared VS Code Result Panel adapter', () => {
             data: [[2], [1]],
             totalRowCount: 1,
             message: 'done',
+            sql: 'SELECT ID FROM PEOPLE',
+            refreshSql: 'SELECT * FROM PEOPLE',
         });
-        expect(normalized).toMatchObject({ resultSetId: 'result-1', totalRowCount: 2, rows: [[2], [1]] });
+        expect(normalized).toMatchObject({
+            resultSetId: 'result-1',
+            totalRowCount: 2,
+            rows: [[2], [1]],
+            sql: 'SELECT ID FROM PEOPLE',
+            refreshSql: 'SELECT * FROM PEOPLE',
+        });
+        expect(normalizeSharedResultSet({ data: [], columns: [], sql: 42, refreshSql: '' })?.sql).toBeUndefined();
+        expect(normalizeSharedResultSet({ data: [], columns: [], sql: 42, refreshSql: '' })?.refreshSql).toBeUndefined();
         expect(normalizeSharedResultSet(null)).toBeUndefined();
         expect(normalizeSharedResultSet({ data: 'bad', columns: 'bad', isError: true })).toMatchObject({
             rows: [],
@@ -190,6 +201,164 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
         controller.dispose();
         expect(() => controller.handleHostMessage(hydrateMessage([]))).not.toThrow();
+    });
+
+    it('records, previews, discards and saves pending edits for editable results', () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'result-editable',
+                columns: [{ name: 'id', type: 'INTEGER' }, { name: 'label', type: 'VARCHAR' }],
+                data: [[1, 'one']],
+                totalRowCount: 1,
+                isEditable: true,
+                editSource: { db: 'DEV', schema: 'ADMIN', table: 'PEOPLE' },
+            },
+            {
+                resultSetId: 'result-read-only',
+                columns: [{ name: 'id', type: 'INTEGER' }],
+                data: [[1]],
+                totalRowCount: 1,
+                isEditable: false,
+                editDisabledReason: 'The query does not select a single table.',
+            },
+        ], 0));
+
+        const editable = controller.activeResult();
+        expect(controller.getEditInfo(editable)).toEqual({
+            isEditable: true,
+            editSource: { db: 'DEV', schema: 'ADMIN', table: 'PEOPLE' },
+            reason: undefined,
+        });
+        expect(controller.isEditMode()).toBe(false);
+        controller.toggleEditMode(editable);
+        expect(controller.isEditMode()).toBe(true);
+
+        controller.recordCellEdit(editable!, {
+            rowIndex: 0,
+            columnIndex: 1,
+            oldValue: 'one',
+            newValue: 'two',
+        });
+        expect(controller.getPendingEditCount(editable)).toBe(1);
+        expect(controller.getRows(editable)).toEqual([[1, 'two']]);
+
+        controller.discardEdits(editable);
+        expect(controller.getPendingEditCount(editable)).toBe(0);
+        expect(controller.getRows(editable)).toEqual([[1, 'one']]);
+        controller.toggleEditMode(editable);
+        expect(controller.isEditMode()).toBe(false);
+
+        controller.selectResult('result-read-only');
+        const readOnly = controller.activeResult();
+        expect(controller.getEditInfo(readOnly)).toMatchObject({
+            isEditable: false,
+            reason: 'The query does not select a single table.',
+        });
+        controller.toggleEditMode(readOnly);
+        expect(controller.isEditMode()).toBe(false);
+
+        // Hydration starts a fresh session, matching the DOM grid.
+        controller.handleHostMessage(hydrateMessage([{
+            resultSetId: 'result-read-only',
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            data: [[2]],
+            totalRowCount: 1,
+        }]));
+        expect(controller.isEditMode()).toBe(false);
+        controller.dispose();
+    });
+
+    it('labels the Logs result and reports selection statistics for tabular results', () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'logs-result',
+                columns: [{ name: 'Time' }, { name: 'Message' }],
+                data: [['12:00', 'ready']],
+                totalRowCount: 1,
+                isLog: true,
+            },
+            {
+                resultSetId: 'stats-result',
+                columns: [{ name: 'id', type: 'INTEGER' }, { name: 'label', type: 'VARCHAR' }],
+                data: [[1, 'one'], [2, 'two']],
+                totalRowCount: 2,
+            },
+        ], 1));
+
+        const results = controller.getState().results.byResultSetId;
+        const logs = Object.values(results).find(result => result.resultSetId === 'logs-result');
+        const data = Object.values(results).find(result => result.resultSetId === 'stats-result');
+        expect(controller.isLogResult(logs)).toBe(true);
+        expect(controller.getResultLabel(logs!)).toBe('Logs');
+        expect(controller.getResultLabel(data!)).toBeUndefined();
+
+        expect(controller.calculateSelectionStats(data, {
+            anchorRow: 0,
+            anchorColumn: 0,
+            focusRow: 1,
+            focusColumn: 0,
+        })).toEqual({
+            cellCount: 2,
+            type: 'numeric',
+            count: 2,
+            distinctCount: 2,
+            sum: 3,
+            min: 1,
+            max: 2,
+        });
+
+        expect(controller.calculateSelectionStats(data, {
+            anchorRow: 0,
+            anchorColumn: 0,
+            focusRow: 0,
+            focusColumn: 0,
+            additionalRanges: [{ minRow: 1, maxRow: 1, minColumn: 1, maxColumn: 1 }],
+        })).toMatchObject({
+            cellCount: 2,
+            type: 'mixed',
+            count: 2,
+            distinctCount: 2,
+        });
+
+        controller.updateView('stats-result', { grouping: ['label'] });
+        expect(controller.calculateSelectionStats(controller.activeResult(), {
+            anchorRow: 0,
+            anchorColumn: 0,
+            focusRow: 0,
+            focusColumn: 0,
+        })).toBeNull();
+        controller.dispose();
+    });
+
+    it('renders the Logs tab without editing or analysis controls', () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'logs-result',
+                columns: [{ name: 'Time' }, { name: 'Message' }],
+                data: [['12:00', 'ready']],
+                totalRowCount: 1,
+                isLog: true,
+            },
+            {
+                resultSetId: 'data-result',
+                columns: [{ name: 'id', type: 'INTEGER' }],
+                data: [[1]],
+                totalRowCount: 1,
+                isEditable: true,
+                editSource: { table: 'PEOPLE' },
+            },
+        ], 1));
+        render(<SharedResultPanelApp controller={controller} />);
+        fireEvent.click(screen.getByRole('tab', { name: 'Logs' }));
+        expect(screen.getByRole('button', { name: 'Clear Logs' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Edit data' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Group' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('textbox', { name: 'Filter results' })).not.toBeInTheDocument();
+        expect(screen.getByRole('log', { name: 'Query log' })).toHaveTextContent('ready');
+        controller.dispose();
     });
 
     it('rejects foreign, duplicated and delayed stream messages and completes cancellation explicitly', () => {
@@ -538,35 +707,38 @@ describe('shared VS Code Result Panel adapter', () => {
             },
         ]));
         render(<SharedResultPanelApp controller={controller} />);
-        expect(screen.getByRole('heading', { name: 'query.sql' })).toBeInTheDocument();
+        // The redundant file-name header was removed from the shared panel.
+        expect(screen.queryByRole('heading', { name: 'query.sql' })).not.toBeInTheDocument();
+        expect(screen.getByRole('tablist', { name: 'Result sets' })).toBeInTheDocument();
         expect(screen.getByRole('table')).toBeInTheDocument();
         expect(screen.getByText('one')).toBeInTheDocument();
         fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: 'two' } });
         expect(screen.queryByText('one')).not.toBeInTheDocument();
         fireEvent.change(screen.getByRole('textbox', { name: 'Filter results' }), { target: { value: '' } });
-        fireEvent.change(screen.getByRole('textbox', { name: 'Filter label' }), { target: { value: 'one' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Open filter for label' }));
+        fireEvent.change(screen.getByRole('combobox', { name: 'Filter condition for label' }), { target: { value: 'contains' } });
+        fireEvent.change(screen.getByRole('textbox', { name: 'Filter value for label' }), { target: { value: 'one' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
         expect(screen.getByText('one')).toBeInTheDocument();
         expect(screen.queryByText('two')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Group by label' }));
         expect(screen.getByText(/1 rows/)).toBeInTheDocument();
-        expect(controller.activeResult()?.view).toMatchObject({ columnFilters: { label: 'one' }, grouping: ['label'] });
+        expect(controller.activeResult()?.view).toMatchObject({
+            columnFilterDefinitions: { label: { operator: 'contains', value: 'one' } },
+            grouping: ['label'],
+        });
         const selectedCell = screen.getByRole('cell', { name: 'one' });
         fireEvent.mouseDown(selectedCell, { button: 0 });
         expect(selectedCell).toHaveClass('ui-data-grid-cell-selected');
-        fireEvent.change(screen.getByRole('textbox', { name: 'Filter label' }), { target: { value: '' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Open filter for label' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+        fireEvent.click(screen.getByTitle('Sort by id. Shift+Click to add another sort column. Drag to grouping panel.'));
         fireEvent.click(screen.getByRole('row', { name: '2 two' }));
-        expect(screen.getByRole('heading', { name: 'Row details' })).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
         expect(screen.queryByRole('heading', { name: 'Row details' })).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Schema' }));
-        expect(screen.getByText('Schema navigation is not available in this Result Panel yet.')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'History' }));
-        expect(screen.getByText('History remains available through the host until the shared HistoryPort adapter is enabled.')).toBeInTheDocument();
         controller.dispose();
     });
 
-    it('renders host-backed analysis with the same shared DataGrid', async () => {
+    it('toggles Excel-style footer aggregates and configures a column summary', () => {
         const controller = new SharedResultPanelController();
         controller.handleHostMessage(hydrateMessage([
             {
@@ -580,44 +752,110 @@ describe('shared VS Code Result Panel adapter', () => {
                 totalRowCount: 2,
             },
         ]));
-        render(<SharedResultPanelApp controller={controller} />);
+        const { container } = render(<SharedResultPanelApp controller={controller} />);
+
+        // The toolbar action toggles sums on numeric columns as footer rows.
         fireEvent.click(screen.getByRole('button', { name: 'Aggregate' }));
-        act(() => controller.handleHostMessage({
-            command: 'databaseAggregationResult',
-            sourceUri: 'file:///query.sql',
-            resultSetIndex: 0,
-            requestId: 1,
-            aggregations: [
-                { columnIndex: 2, fn: 'count', value: 2, filteredRowCount: 2 },
-                { columnIndex: 2, fn: 'sum', value: '17' },
-                { columnIndex: 2, fn: 'avg', value: '8.5' },
-                { columnIndex: 2, fn: 'min', value: '7' },
-                { columnIndex: 2, fn: 'max', value: '10' },
-            ],
-        }));
-        expect(await screen.findByRole('heading', { name: 'Aggregates' })).toBeInTheDocument();
-        expect(screen.getByRole('region', { name: 'Result analysis' })).toHaveTextContent('17');
-        const openValueViewer = jest.fn();
-        (window as unknown as { openValueViewer: typeof openValueViewer }).openValueViewer = openValueViewer;
-        const analysisRegion = screen.getByRole('region', { name: 'Result analysis' });
-        fireEvent.contextMenu(within(analysisRegion).getByRole('cell', { name: '17' }), { clientX: 24, clientY: 36 });
-        fireEvent.click(within(analysisRegion).getByRole('menuitem', { name: 'View Cell Value' }));
-        expect(openValueViewer).toHaveBeenCalledWith(expect.objectContaining({ value: '17', columnName: 'Sum' }));
-        fireEvent.contextMenu(within(analysisRegion).getByRole('cell', { name: '17' }), { clientX: 24, clientY: 36 });
-        fireEvent.click(within(analysisRegion).getByRole('menuitem', { name: 'Copy row as JSON' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Close result analysis' }));
-        expect(screen.queryByRole('heading', { name: 'Aggregates' })).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Group' }));
-        const groupRequestId = (controller as unknown as { analysisRequestId: number }).analysisRequestId;
-        act(() => controller.handleHostMessage({
-            command: 'databaseGroupingResult',
-            sourceUri: 'file:///query.sql',
-            resultSetIndex: 0,
-            requestId: groupRequestId,
-            error: 'grouping failed',
-        }));
-        expect(await screen.findByRole('alert')).toHaveTextContent('grouping failed');
-        fireEvent.click(screen.getByRole('button', { name: 'Close result analysis' }));
+        const aggregateRow = container.querySelector<HTMLElement>('.ui-data-grid-aggregation-row-bottom');
+        expect(aggregateRow?.textContent).toContain('Σ');
+        expect(aggregateRow?.textContent).toContain('17');
+        fireEvent.click(screen.getByRole('button', { name: 'Aggregate' }));
+        expect(container.querySelector('.ui-data-grid-aggregation-row')).toBeNull();
+
+        // The column menu exposes the same aggregate through the Filter/Summary toggle.
+        fireEvent.click(screen.getByRole('button', { name: 'Open filter for AMOUNT' }));
+        expect(screen.getByRole('dialog', { name: 'Filter AMOUNT' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('tab', { name: 'Summary' }));
+        fireEvent.click(screen.getByRole('checkbox', { name: /Average/ }));
+        expect(controller.activeResult()?.view.columnAggregations).toMatchObject({ AMOUNT: [{ fn: 'avg', position: 'bottom' }] });
+        fireEvent.click(screen.getByRole('checkbox', { name: /Sum/ }));
+        expect(controller.activeResult()?.view.columnAggregations).toMatchObject({ AMOUNT: [{ fn: 'avg', position: 'bottom' }, { fn: 'sum', position: 'bottom' }] });
+        fireEvent.click(screen.getByRole('checkbox', { name: /Sum/ }));
+        fireEvent.click(screen.getByRole('radio', { name: 'Top' }));
+        expect(controller.activeResult()?.view.columnAggregations).toMatchObject({ AMOUNT: [{ fn: 'avg', position: 'top' }] });
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        expect(screen.queryByRole('dialog', { name: 'Filter AMOUNT' })).not.toBeInTheDocument();
+        controller.dispose();
+    });
+
+    it('edits a cell through the shared panel and exposes the pending save action', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([{
+            resultSetId: 'editable-result',
+            columns: [{ name: 'id', type: 'INTEGER' }, { name: 'label', type: 'VARCHAR' }],
+            data: [[1, 'one']],
+            totalRowCount: 1,
+            isEditable: true,
+            editSource: { db: 'DEV', schema: 'ADMIN', table: 'PEOPLE' },
+        }]));
+        render(<SharedResultPanelApp controller={controller} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Edit data' }));
+        fireEvent.doubleClick(screen.getByRole('cell', { name: 'one' }));
+        const editor = screen.getByRole('textbox', { name: 'Edit label' });
+        fireEvent.change(editor, { target: { value: 'two' } });
+        fireEvent.keyDown(editor, { key: 'Enter' });
+        expect(await screen.findByRole('cell', { name: 'two' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Save 1 change' })).toBeEnabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+        expect(await screen.findByRole('cell', { name: 'one' })).toBeInTheDocument();
+        controller.dispose();
+    });
+
+    it('builds Excel-style filter state from loaded rows and column definitions', () => {
+        const request = {
+            columnIndex: 1,
+            column: { name: 'label', type: 'VARCHAR' },
+            anchor: { left: 20, bottom: 40, width: 80, height: 20 } as DOMRect,
+        };
+        const view = {
+            globalFilter: '',
+            columnFilters: {},
+            sorting: [],
+            grouping: [],
+            scrollTop: 0,
+            scrollLeft: 0,
+        };
+        const rows = [[1, 'Beta'], [2, 'Alpha'], [3, 'Alpha'], [4, null]];
+        const all = buildSharedFilterState(request, rows, view);
+        expect(all.options.map(option => option.label)).toEqual(['Alpha', 'Beta']);
+        expect(all.selectedKeys).toHaveLength(2);
+        expect(all.operator).toBe('in');
+
+        const contains = buildSharedFilterState(request, rows, {
+            ...view,
+            columnFilterDefinitions: { label: { operator: 'contains', value: 'Al' } },
+        });
+        expect(contains.operator).toBe('contains');
+        expect(contains.value).toBe('Al');
+
+        const selected = buildSharedFilterState(request, rows, {
+            ...view,
+            columnFilterDefinitions: { label: { operator: 'in', value: '', values: ['Beta'] } },
+        });
+        expect(selected.selectedKeys).toEqual(['"Beta"']);
+    });
+
+    it('applies and clears the Excel-style column filter from the shared panel', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([{
+            resultSetId: 'filter-result',
+            columns: [{ name: 'id', type: 'INTEGER' }, { name: 'label', type: 'VARCHAR' }],
+            data: [[1, 'one'], [2, 'two']],
+            totalRowCount: 2,
+        }]));
+        render(<SharedResultPanelApp controller={controller} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Open filter for label' }));
+        expect(screen.getByRole('dialog', { name: 'Filter label' })).toBeInTheDocument();
+        fireEvent.change(screen.getByRole('combobox', { name: 'Filter condition for label' }), { target: { value: 'contains' } });
+        fireEvent.change(screen.getByRole('textbox', { name: 'Filter value for label' }), { target: { value: 'tw' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+        expect(screen.queryByRole('cell', { name: 'one' })).toBeNull();
+        expect(await screen.findByRole('cell', { name: 'two' })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Open filter for label' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+        expect(await screen.findByRole('cell', { name: 'one' })).toBeInTheDocument();
+        expect(screen.getByRole('cell', { name: 'two' })).toBeInTheDocument();
         controller.dispose();
     });
 

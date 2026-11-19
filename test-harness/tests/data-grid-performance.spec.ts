@@ -680,12 +680,18 @@ test.describe('Data Grid performance webview', () => {
         const sharedScrollBeforeReload = sharedScrollLast;
         await page.reload({ waitUntil: 'networkidle' });
         await page.waitForFunction(() => document.querySelector<HTMLElement>('.shared-grid-harness')?.dataset.ready === 'true', undefined, { timeout: 45_000 });
-        await page.waitForFunction(() => {
+        // Chrome can briefly report an intermediate native scroll offset while
+        // the controlled grid re-applies the persisted position after reload.
+        // Wait for the final position instead of the first nonzero sample so a
+        // transient offset cannot beat the restoration frame.
+        const minimumReloadTop = sharedScrollBeforeReload.scrollTop * 0.8;
+        const minimumReloadLeft = sharedScrollBeforeReload.scrollLeft * 0.8;
+        await page.waitForFunction(({ top, left }) => {
             const snapshot = window.__sharedDataGrid?.snapshot();
-            return (snapshot?.scrollTop ?? 0) > 0
-                && (snapshot?.scrollLeft ?? 0) > 0
+            return (snapshot?.scrollTop ?? 0) >= top
+                && (snapshot?.scrollLeft ?? 0) >= left
                 && (snapshot?.anchorRow ?? 0) > 0;
-        }, undefined, { timeout: 45_000 });
+        }, { top: minimumReloadTop, left: minimumReloadLeft }, { timeout: 45_000 });
         const sharedScrollAfterReload = await page.evaluate(() => window.__sharedDataGrid.snapshot());
         expect(sharedScrollAfterReload.scrollTop).toBeGreaterThanOrEqual(sharedScrollBeforeReload.scrollTop * 0.8);
         expect(sharedScrollAfterReload.scrollLeft).toBeGreaterThanOrEqual(sharedScrollBeforeReload.scrollLeft * 0.8);

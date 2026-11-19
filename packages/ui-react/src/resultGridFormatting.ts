@@ -483,11 +483,37 @@ export function formatCanonicalDataGridCellValue(
   return String(value);
 }
 
+/**
+ * Formats a raw cell value as a SQL literal for insertion into an editor.
+ * Mirrors the legacy result grid: numbers stay unquoted, booleans become
+ * TRUE/FALSE, and dates/text are quoted with doubled single quotes.
+ */
+export function formatDataGridCellValueForSql(
+  value: unknown,
+  metadata: DataGridCellMetadata = {},
+): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  const numericKind = resolveNumericKind(metadata, value, {});
+  if (numericKind !== undefined) {
+    return sanitizeNumericString(value) ?? String(value);
+  }
+  const lowerType = normalizeTypeName(metadata.type);
+  if ((lowerType === 'bool' || lowerType === 'boolean') && typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === 'true' || trimmed === 'false') return trimmed.toUpperCase();
+  }
+  const formatted = formatCanonicalDataGridCellValue(value, { ...metadata, inferredDateInteger: false });
+  if (formatted === null || formatted === undefined) return 'NULL';
+  return `'${formatted.replace(/'/g, "''")}'`;
+}
+
 /** Formats the value exactly as it appears in the shared React grid. */
 export function formatDataGridCellValue(
   value: unknown,
   type?: string,
   metadata: Omit<DataGridCellMetadata, 'type'> & { readonly type?: string } = {},
+  formatting: DataGridFormattingOptions = {},
 ): string {
   const cellMetadata: DataGridCellMetadata = { ...metadata, type: type ?? metadata.type };
   if (value === undefined) return cellMetadata.undefinedPlaceholder ?? 'NULL';
@@ -497,7 +523,7 @@ export function formatDataGridCellValue(
       || (typeof value === 'string' && ['t', 'true', 'yes'].includes(value.trim().toLowerCase()));
     return isTrue ? '✓ true' : '✗ false';
   }
-  return formatCanonicalDataGridCellValue(value, cellMetadata) ?? 'NULL';
+  return formatCanonicalDataGridCellValue(value, cellMetadata, formatting) ?? 'NULL';
 }
 
 const DATA_GRID_FILTER_GROUPING_PATTERN = /[\s\u00A0\u202F,]/gu;

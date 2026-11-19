@@ -18,16 +18,21 @@ export interface QuerySortSpec {
 
 export type QueryColumnFilterOperator =
   | 'contains'
+  | 'notContains'
   | 'equals'
   | 'notEquals'
   | 'startsWith'
   | 'endsWith'
+  | 'like'
   | 'greaterThan'
   | 'greaterThanOrEqual'
   | 'lessThan'
   | 'lessThanOrEqual'
+  | 'between'
   | 'isNull'
   | 'isNotNull'
+  | 'isEmpty'
+  | 'isNotEmpty'
   | 'in';
 
 /**
@@ -38,6 +43,8 @@ export type QueryColumnFilterOperator =
 export interface QueryColumnFilterSpec {
   columnIndex: number;
   value: string;
+  /** Upper bound for the `between` operator. */
+  value2?: string;
   operator?: QueryColumnFilterOperator;
   values?: readonly unknown[];
 }

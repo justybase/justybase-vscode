@@ -55,6 +55,25 @@ export function gridSelectionContains(bounds: UiGridSelectionBounds | undefined,
     && column <= bounds.maxColumn;
 }
 
+/**
+ * Projects a selection rectangle onto display-order positions, ignoring hidden
+ * columns at either edge. Used by discontiguous Ctrl/Cmd selections where the
+ * range may not start or end on a visible column.
+ */
+export function gridSelectionRangeColumnRange(
+  range: UiGridSelectionBounds,
+  visibleColumnIndexes: readonly number[],
+): { readonly minColumn: number; readonly maxColumn: number } | undefined {
+  let minColumn = Infinity;
+  let maxColumn = -Infinity;
+  visibleColumnIndexes.forEach((columnIndex, position) => {
+    if (columnIndex < range.minColumn || columnIndex > range.maxColumn) return;
+    if (position < minColumn) minColumn = position;
+    if (position > maxColumn) maxColumn = position;
+  });
+  return minColumn === Infinity ? undefined : { minColumn, maxColumn };
+}
+
 export interface ParsedGridCellId {
   readonly row: number;
   readonly column: number;

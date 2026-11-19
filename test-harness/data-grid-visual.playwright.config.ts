@@ -5,7 +5,7 @@ const repositoryRoot = path.resolve(__dirname, '..');
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: /data-grid-visual\.spec\.ts/,
+  testMatch: /(data-grid-visual|result-panel-parity)\.spec\.ts/,
   timeout: 60_000,
   expect: {
     timeout: 20_000,

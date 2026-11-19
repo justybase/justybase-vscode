@@ -2,18 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Range, Virtualizer } from '@tanstack/react-virtual';
-import type { UiResultColumnFilterDefinition, UiResultViewState } from '@justybase/ui-core';
-import { gridSelectionColumnRange, normalizeGridSelection } from '@justybase/ui-core';
+import type { UiResultAggregationFunction, UiResultColumnAggregation, UiResultColumnFilterDefinition, UiResultViewState } from '@justybase/ui-core';
+import { editValuesEqual, gridSelectionColumnRange, gridSelectionRangeColumnRange, normalizeGridSelection, parseTypedEditValue, resolveGridCellEditKind, toEditableCellText } from '@justybase/ui-core';
+import type { GridCellEditKind } from '@justybase/ui-core';
+import { AGGREGATION_FUNCTION_LABELS, AGGREGATION_LABELS, calculateDataGridAggregations } from './dataGridAggregation';
+import type { DataGridAggregationCell } from './dataGridAggregation';
 import {
   formatDataGridCellValue,
+  formatDataGridCellValueForSql,
   inferDataGridColumnMetadata,
+  isDataGridBinaryType,
   isDataGridNumericColumn,
   isDataGridTemporalColumn,
   matchesDataGridFilterValue,
 } from './resultGridFormatting';
-import type { DataGridCellMetadata } from './resultGridFormatting';
+import type { DataGridCellMetadata, DataGridFormattingOptions } from './resultGridFormatting';
 import type { DataGridClipboardFormat } from './dataGridClipboard';
-import type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
+import type { DataGridColumn, DataGridCopyPayload, DataGridSelection, DataGridSelectionRange } from './dataGridTypes';
 import { DataGridRow } from './dataGridRow';
 import type { DataGridCellMetadataResolver, DataGridColumnLayout } from './dataGridRow';
 import {
@@ -33,12 +38,12 @@ import {
 import { MenuIcon } from './menuIcons';
 
 export { formatDataGridCellValue } from './resultGridFormatting';
-export type { DataGridColumn, DataGridCopyPayload, DataGridSelection } from './dataGridTypes';
+export type { DataGridColumn, DataGridCopyPayload, DataGridSelection, DataGridSelectionRange } from './dataGridTypes';
 export { calculateDataGridColumnWindow, calculateDataGridVirtualWindow, resolveDataGridNavigationTarget, resolveDataGridScrollTop } from './dataGridVirtualization';
 export type { DataGridColumnWindow, DataGridNavigationRequest, DataGridNavigationTarget, DataGridVirtualWindow } from './dataGridVirtualization';
 
 export type DataGridViewState = Pick<UiResultViewState, 'globalFilter' | 'columnFilters' | 'columnFilterDefinitions' | 'sorting' | 'grouping'> &
-  Partial<Pick<UiResultViewState, 'columnVisibility' | 'columnOrder' | 'pinnedColumns' | 'columnWidths'>>;
+  Partial<Pick<UiResultViewState, 'columnVisibility' | 'columnOrder' | 'pinnedColumns' | 'columnWidths' | 'columnAggregations'>>;
 
 export interface GridScrollPosition {
   readonly sourceId?: string;
@@ -58,10 +63,164 @@ export interface DataGridCellContext {
   readonly clientY: number;
 }
 
+/** A validated inline edit applied to one raw result cell. */
+export interface DataGridCellEdit {
+  /** Index into the supplied raw rows, not the filtered or sorted display list. */
+  readonly rowIndex: number;
+  readonly columnIndex: number;
+  readonly oldValue: unknown;
+  readonly newValue: unknown;
+}
+
 export interface DataGridColumnFilterRequest {
   readonly columnIndex: number;
   readonly column: DataGridColumn;
   readonly anchor: DOMRect;
+}
+
+/** Catalog actions mirrored from the legacy column context menu. */
+export type DataGridColumnAction =
+  | 'copyName'
+  | 'copyQualifiedName'
+  | 'addToSelect'
+  | 'commentOnColumn'
+  | 'findReferences'
+  | 'toggleFavorite';
+
+interface CellEditorLayout {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface ActiveCellEditor {
+  readonly rowIndex: number;
+  readonly columnIndex: number;
+  readonly columnName: string;
+  readonly columnType?: string;
+  readonly oldValue: unknown;
+  readonly kind: GridCellEditKind;
+  readonly initialText: string;
+  readonly initialNull: boolean;
+  readonly layout: CellEditorLayout;
+}
+
+interface DataGridInlineEditorProps extends ActiveCellEditor {
+  readonly onCommit: (value: unknown) => void;
+  readonly onCancel: () => void;
+}
+
+/**
+ * One-cell editor rendered inside the scroll container, so it moves with the
+ * virtual row instead of floating over unrelated content. Validation and value
+ * parsing come from `@justybase/ui-core`, matching the legacy DOM grid.
+ */
+function DataGridInlineEditor({
+  columnName,
+  columnType,
+  oldValue,
+  kind,
+  initialText,
+  initialNull,
+  layout,
+  onCommit,
+  onCancel,
+}: DataGridInlineEditorProps): ReactNode {
+  const [text, setText] = useState(initialText);
+  const [nullValue, setNullValue] = useState(initialNull);
+  const [error, setError] = useState<string | undefined>();
+  const finishedRef = useRef(false);
+
+  const finish = (value: unknown): void => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    if (editValuesEqual(oldValue, value)) onCancel();
+    else onCommit(value);
+  };
+
+  const commit = (): void => {
+    if (finishedRef.current) return;
+    const parsed = parseTypedEditValue(
+      text,
+      columnType,
+      kind === 'boolean' ? text === 'NULL' : nullValue,
+    );
+    if (!parsed.valid) {
+      setError(parsed.message);
+      return;
+    }
+    finish(parsed.value);
+  };
+
+  const cancel = (): void => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onCancel();
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    if (kind === 'textarea' && !event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    commit();
+  };
+
+  const editorProps = {
+    className: 'ui-data-grid-cell-editor-input',
+    'aria-label': `Edit ${columnName}`,
+    autoFocus: true,
+    disabled: kind !== 'boolean' && nullValue,
+    onKeyDown: handleKeyDown,
+    onBlur: commit,
+  };
+  const editor = kind === 'boolean'
+    ? <select
+      {...editorProps}
+      value={text}
+      onChange={event => { setText(event.target.value); setError(undefined); }}
+    >
+      <option value="NULL">NULL</option>
+      <option value="true">TRUE</option>
+      <option value="false">FALSE</option>
+    </select>
+    : kind === 'textarea'
+      ? <textarea
+        {...editorProps}
+        rows={3}
+        value={text}
+        onChange={event => { setText(event.target.value); setError(undefined); }}
+      />
+      : <input
+        {...editorProps}
+        type={kind === 'date' ? 'date' : 'text'}
+        inputMode={kind === 'number' ? 'decimal' : undefined}
+        value={text}
+        onFocus={event => event.currentTarget.select()}
+        onChange={event => { setText(event.target.value); setError(undefined); }}
+      />;
+
+  return <div
+    className={`ui-data-grid-cell-editor ui-data-grid-cell-editor-${kind}`}
+    style={{ left: layout.left, top: layout.top, width: layout.width, minHeight: layout.height }}
+    onMouseDown={event => event.stopPropagation()}
+    onDoubleClick={event => event.stopPropagation()}
+  >
+    {kind !== 'boolean' && <button
+      type="button"
+      className="ui-data-grid-cell-editor-null"
+      aria-pressed={nullValue}
+      onMouseDown={event => event.preventDefault()}
+      onClick={() => { setNullValue(value => !value); setError(undefined); }}
+    >{nullValue ? 'Use value' : 'Set NULL'}</button>}
+    {editor}
+    {error !== undefined && <span className="ui-data-grid-cell-editor-error" role="alert">{error}</span>}
+  </div>;
 }
 
 interface ScrollRestorationState {
@@ -83,6 +242,8 @@ export interface DataGridProps {
   readonly rows: readonly (readonly unknown[])[];
   /** Provides value metadata when a column's cells have heterogeneous source types. */
   readonly getCellMetadata?: (value: unknown, rowIndex: number, columnIndex: number, column: DataGridColumn) => DataGridCellMetadata;
+  /** Host formatting preferences (grouping, decimal scale and separators) per column. */
+  readonly getColumnFormatting?: (column: DataGridColumn, columnIndex: number) => DataGridFormattingOptions | undefined;
   readonly totalRowCount?: number;
   readonly scroll?: GridScrollPosition;
   readonly onScroll?: (position: GridScrollPosition) => void;
@@ -92,6 +253,12 @@ export interface DataGridProps {
   readonly onRowSelect?: (rowIndex: number) => void;
   /** Opens the host-owned guarded row editor for the context-menu row. */
   readonly onEditRow?: (context: DataGridCellContext) => void;
+  /** Enables double-click inline editing of typed cells. */
+  readonly editMode?: boolean;
+  /** Receives a validated edit after the inline editor commits. */
+  readonly onCellEdit?: (edit: DataGridCellEdit) => void;
+  /** Receives a SQL-ready cell representation on a non-editing double-click. */
+  readonly onInsertCellContent?: (payload: { readonly text: string; readonly dataType?: string; readonly sqlText: string }) => void;
   readonly selectedRowIndex?: number;
   readonly view?: DataGridViewState;
   readonly onViewChange?: (patch: Partial<UiResultViewState>) => void;
@@ -108,6 +275,10 @@ export interface DataGridProps {
   readonly onViewCell?: (context: DataGridCellContext) => void;
   /** Opens the host-specific full-row detail view for a context-menu row. */
   readonly onViewRow?: (context: DataGridCellContext) => void;
+  /** Marks a row for deletion in edit mode (or restores it). */
+  readonly onDeleteRow?: (rowIndex: number) => void;
+  /** Returns true when the raw row is staged for deletion. */
+  readonly isRowDeleted?: (rowIndex: number) => boolean;
   /** Opens the host-specific result formatting surface. */
   readonly onOpenResultFormatting?: () => void;
   /** Enables the shared copy/filter/sort/row-detail context menu. */
@@ -118,8 +289,16 @@ export interface DataGridProps {
   readonly showGroupingPanel?: boolean;
   /** Opens the host-owned Excel-like filter surface for a column. */
   readonly onOpenColumnFilter?: (request: DataGridColumnFilterRequest) => void;
+  /** Runs a catalog-aware column action from the context menu. */
+  readonly onColumnAction?: (context: DataGridCellContext, action: DataGridColumnAction) => void;
+  /** Enables catalog actions that need a single bound table (edit source). */
+  readonly catalogBound?: boolean;
+  /** Switches to the column profile surface for the context column. */
+  readonly onProfileColumn?: (context: DataGridCellContext) => void;
   /** Keeps the legacy inline text field for hosts without a filter surface. */
   readonly showInlineColumnFilters?: boolean;
+  /** Marks the grid as loading without unmounting virtualized rows. */
+  readonly busy?: boolean;
 }
 
 export interface DataGridColumnMenuProps {
@@ -164,6 +343,7 @@ const COLUMN_HEADER_HEIGHT = DATA_GRID_COLUMN_HEADER_HEIGHT;
 const COMPACT_COLUMN_HEADER_HEIGHT = DATA_GRID_COMPACT_COLUMN_HEADER_HEIGHT;
 const DEFAULT_VIEWPORT_HEIGHT = DATA_GRID_DEFAULT_VIEWPORT_HEIGHT;
 const VIRTUAL_OVERSCAN_ROWS = DATA_GRID_VIRTUAL_OVERSCAN_ROWS;
+const EMPTY_SELECTION_RANGES: readonly DataGridSelectionRange[] = Object.freeze([]);
 const COLUMN_WINDOW_THRESHOLD = DATA_GRID_COLUMN_WINDOW_THRESHOLD;
 
 /**
@@ -176,7 +356,7 @@ function estimateRowHeight(): number {
 }
 
 function DataGridFilterIcon(): ReactNode {
-  return <svg aria-hidden="true" viewBox="0 0 24 24" width="12" height="12"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5Z" /></svg>;
+  return <MenuIcon name="filter" />;
 }
 
 /**
@@ -219,6 +399,7 @@ function normaliseView(view: DataGridViewState | undefined): DataGridViewState {
     columnOrder: view?.columnOrder,
     pinnedColumns: view?.pinnedColumns,
     columnWidths: view?.columnWidths,
+    columnAggregations: view?.columnAggregations,
   };
 }
 
@@ -344,10 +525,14 @@ function columnWidthFor(
     ?? widths?.[column.name]
     ?? widths?.[String(index)]
     ?? DEFAULT_COLUMN_WIDTH;
+  const measuredWidth = measuredWidths[columnKey(column, index)];
+  // The DOM measurement is the real header minimum: once it exists, using the
+  // heuristic too would leave an empty strip after the last header action.
+  if (measuredWidth !== undefined) return Math.max(configuredWidth, measuredWidth);
   const estimatedTextWidth = Math.max(40, column.name.length * 7.25);
   const estimatedTypeWidth = typeBadge(column).length * 6 + 8;
   const estimatedHeaderWidth = Math.ceil(14 + estimatedTextWidth + 12 + estimatedTypeWidth + headerActionCount * 20 + (headerActionCount + 1) * 3);
-  return Math.max(configuredWidth, estimatedHeaderWidth, measuredWidths[columnKey(column, index)] ?? 0);
+  return Math.max(configuredWidth, estimatedHeaderWidth);
 }
 
 function measuredHeaderMinimumWidth(column: DataGridColumn, cell: HTMLTableCellElement, inlineFilter: boolean): number {
@@ -356,20 +541,22 @@ function measuredHeaderMinimumWidth(column: DataGridColumn, cell: HTMLTableCellE
   const sort = content?.querySelector<HTMLElement>('.ui-data-grid-sort');
   const type = content?.querySelector<HTMLElement>('.ui-data-grid-type-badge');
   const actions = content
-    ? [...content.querySelectorAll<HTMLElement>('.ui-data-grid-drag-handle, .ui-data-grid-header-action, .ui-data-grid-filter-action, .ui-data-grid-group-action')]
+    ? [...content.querySelectorAll<HTMLElement>('.ui-data-grid-drag-handle, .ui-data-grid-header-action, .ui-data-grid-column-action, .ui-data-grid-group-action, .ui-data-grid-filter-action, .ui-data-grid-aggregation-action')]
     : [];
   const textWidth = Math.max(
     labelText?.scrollWidth ?? 0,
     labelText?.getBoundingClientRect().width ?? 0,
-    column.name.length * 7.25,
+    40,
   );
   const sortWidth = Math.max(sort?.scrollWidth ?? 0, sort?.getBoundingClientRect().width ?? 0, 12);
   const typeWidth = Math.max(type?.scrollWidth ?? 0, type?.getBoundingClientRect().width ?? 0, typeBadge(column).length * 6 + 8);
-  const actionWidth = actions.reduce((total, action) => total + Math.max(action.getBoundingClientRect().width, action.scrollWidth, 20), 0);
-  const childCount = content?.children.length ?? 0;
-  const gapWidth = Math.max(0, childCount - 1) * 3;
+  const actionWidth = actions.reduce((total, action) => total + Math.max(action.getBoundingClientRect().width, action.scrollWidth, 17), 0);
+  // Six grid items (drag, label, type, filter/summary, pin, grouping) with 2px gaps.
+  const gapWidth = 10;
   const filterMinimum = inlineFilter ? 96 : 0;
-  const required = Math.ceil(14 + textWidth + sortWidth + typeWidth + actionWidth + gapWidth);
+  // The th contributes 10px horizontal padding and 2px borders; the resizer is
+  // absolute and must not reserve another action slot.
+  const required = Math.ceil(12 + textWidth + sortWidth + typeWidth + actionWidth + gapWidth);
   return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, filterMinimum, required));
 }
 
@@ -416,6 +603,12 @@ function filterDefinition(view: DataGridViewState, column: DataGridColumn, index
   return definitions[columnKey(column, index)] ?? definitions[column.name] ?? definitions[String(index)];
 }
 
+function columnAggregations(view: DataGridViewState, column: DataGridColumn, index: number): readonly UiResultColumnAggregation[] {
+  const definitions = view.columnAggregations;
+  if (!definitions) return [];
+  return definitions[columnKey(column, index)] ?? definitions[column.name] ?? definitions[String(index)] ?? [];
+}
+
 function filterValueKey(value: unknown): string {
   if (value === undefined) return 'undefined';
   try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
@@ -435,6 +628,22 @@ function resolveColumnIndex(columns: readonly DataGridColumn[], key: string): nu
 export function DataGridColumnMenu({ columns, view, onViewChange }: DataGridColumnMenuProps): ReactNode {
   const activeView = normaliseView(view);
   const visibleColumnIndexes = resolveDataGridColumnIndexes(columns, activeView);
+  const [draggedColumn, setDraggedColumn] = useState<number | undefined>(undefined);
+  const [dropTarget, setDropTarget] = useState<{ readonly columnIndex: number; readonly after: boolean } | undefined>(undefined);
+  const [search, setSearch] = useState('');
+  const filteredColumns = columns
+    .map((column, columnIndex) => ({ column, columnIndex }))
+    .filter(({ column }) => column.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+
+  function setAllVisibility(visible: boolean): void {
+    const visibility = { ...(activeView.columnVisibility ?? {}) };
+    columns.forEach((column, columnIndex) => {
+      const id = columnKey(column, columnIndex);
+      if (visible) delete visibility[id];
+      else visibility[id] = false;
+    });
+    onViewChange({ columnVisibility: visibility });
+  }
 
   function toggleColumnVisibility(columnIndex: number, visible: boolean): void {
     const column = columns[columnIndex];
@@ -457,15 +666,93 @@ export function DataGridColumnMenu({ columns, view, onViewChange }: DataGridColu
     onViewChange({ pinnedColumns: pinned });
   }
 
+  /** Normalises persisted name/position keys into one canonical ordering. */
+  function canonicalColumnOrder(): string[] {
+    const keys = columns.map((column, index) => columnKey(column, index));
+    const order: string[] = [];
+    for (const key of activeView.columnOrder ?? keys) {
+      const index = resolveColumnIndex(columns, key);
+      if (index >= 0 && !order.includes(keys[index]!)) order.push(keys[index]!);
+    }
+    for (const key of keys) {
+      if (!order.includes(key)) order.push(key);
+    }
+    return order;
+  }
+
+  function moveColumn(sourceIndex: number, targetIndex: number, after: boolean): void {
+    if (sourceIndex === targetIndex) return;
+    const sourceKey = columnKey(columns[sourceIndex]!, sourceIndex);
+    const targetKey = columnKey(columns[targetIndex]!, targetIndex);
+    const order = canonicalColumnOrder().filter(key => key !== sourceKey);
+    const targetPosition = order.indexOf(targetKey);
+    if (targetPosition < 0) return;
+    order.splice(targetPosition + (after ? 1 : 0), 0, sourceKey);
+    onViewChange({ columnOrder: order });
+  }
+
   return <details className="ui-data-grid-column-menu">
     <summary><span className="ui-data-grid-column-menu-title">Columns</span><span className="ui-data-grid-column-menu-count">{visibleColumnIndexes.length}/{columns.length}</span></summary>
     <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
       <div className="ui-data-grid-column-menu-heading"><strong>Visible columns</strong><span>{visibleColumnIndexes.length} of {columns.length}</span></div>
-      {columns.map((column, columnIndex) => {
+      <div className="ui-data-grid-column-menu-tools">
+        <input aria-label="Find column" placeholder="Find column…" value={search} onChange={event => setSearch(event.target.value)} />
+        <button type="button" onClick={() => setAllVisibility(true)}>Show all</button>
+        <button type="button" onClick={() => setAllVisibility(false)}>Hide all</button>
+      </div>
+      {filteredColumns.map(({ column, columnIndex }) => {
         const id = columnKey(column, columnIndex);
         const visible = visibleColumnIndexes.includes(columnIndex);
         const pinned = activeView.pinnedColumns?.some(key => columnMatchesKey(column, columnIndex, key)) ?? false;
-        return <div className="ui-data-grid-column-menu-item" key={`${columnIndex}:${id}`}>
+        const dragging = draggedColumn === columnIndex;
+        const dropBefore = dropTarget?.columnIndex === columnIndex && !dropTarget.after;
+        const dropAfter = dropTarget?.columnIndex === columnIndex && dropTarget.after;
+        return <div
+          className={[
+            'ui-data-grid-column-menu-item',
+            dragging ? 'ui-data-grid-column-menu-item-dragging' : '',
+            dropBefore ? 'ui-data-grid-column-menu-item-drop-before' : '',
+            dropAfter ? 'ui-data-grid-column-menu-item-drop-after' : '',
+          ].filter(Boolean).join(' ')}
+          key={`${columnIndex}:${id}`}
+          onDragOver={event => {
+            if (draggedColumn === undefined) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = 'move';
+            const rect = event.currentTarget.getBoundingClientRect();
+            setDropTarget({ columnIndex, after: event.clientY > rect.top + rect.height / 2 });
+          }}
+          onDrop={event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const raw = event.dataTransfer.getData('application/x-justybase-column-menu');
+            const source = raw === '' ? draggedColumn : Number(raw);
+            if (source !== undefined && Number.isInteger(source)) {
+              moveColumn(source, columnIndex, dropTarget?.columnIndex === columnIndex ? dropTarget.after : false);
+            }
+            setDraggedColumn(undefined);
+            setDropTarget(undefined);
+          }}
+        >
+          <button
+            type="button"
+            className="ui-data-grid-column-menu-drag"
+            draggable
+            aria-label={`Reorder ${column.name} in column list`}
+            title="Drag to reorder column"
+            onDragStart={event => {
+              setDraggedColumn(columnIndex);
+              setDropTarget(undefined);
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('application/x-justybase-column-menu', String(columnIndex));
+              event.dataTransfer.setData('text/plain', String(columnIndex));
+            }}
+            onDragEnd={() => {
+              setDraggedColumn(undefined);
+              setDropTarget(undefined);
+            }}
+          ><MenuIcon name="rows" /></button>
           <label title={column.name}><input type="checkbox" checked={visible} onChange={event => toggleColumnVisibility(columnIndex, event.target.checked)} /><span className="ui-data-grid-column-menu-name">{column.name}</span></label>
           <button type="button" className={`ui-data-grid-column-menu-pin${pinned ? ' active' : ''}`} aria-label={pinned ? `Unpin ${column.name} in column menu` : `Pin ${column.name} in column menu`} title={pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m14.4 3.2 6.4 6.4-2.2 2.2-1.8-1.8-4.2 4.2 1.8 1.8-2.2 2.2-6.4-6.4L8 9.6 6.2 7.8l2.2-2.2L10.2 7l4.2-4.2Z" /><path d="m11.8 13.8-7.2 7.2M4.6 21H3v-1.6" /></svg></button>
         </div>;
@@ -514,6 +801,50 @@ function compareValues(left: unknown, right: unknown, leftColumn: DataGridCellMe
 
 type CellMetadataResolver = DataGridCellMetadataResolver;
 
+function matchesFilterCondition(
+  value: unknown,
+  metadata: DataGridCellMetadata,
+  condition: Pick<UiResultColumnFilterDefinition, 'operator' | 'value' | 'value2' | 'values'>,
+): boolean {
+  switch (condition.operator) {
+    case 'isNull': return value === null || value === undefined;
+    case 'isNotNull': return value !== null && value !== undefined;
+    case 'isEmpty': return value === null || value === undefined || cellText(value, metadata) === '';
+    case 'isNotEmpty': return value !== null && value !== undefined && cellText(value, metadata) !== '';
+    case 'in': return condition.values?.some(candidate => filterValueKey(candidate) === filterValueKey(value)) ?? false;
+    default: break;
+  }
+  const left = cellText(value, metadata).toLocaleLowerCase();
+  const right = condition.value.toLocaleLowerCase();
+  switch (condition.operator) {
+    case 'contains': return left.includes(right);
+    case 'notContains': return value === null || value === undefined || !left.includes(right);
+    case 'equals': return left === right;
+    case 'notEquals': return value === null || value === undefined || left !== right;
+    case 'startsWith': return left.startsWith(right);
+    case 'endsWith': return left.endsWith(right);
+    case 'like': return left === right;
+    case 'greaterThan': return compareValues(value, condition.value, metadata) > 0;
+    case 'greaterThanOrEqual': return compareValues(value, condition.value, metadata) >= 0;
+    case 'lessThan': return compareValues(value, condition.value, metadata) < 0;
+    case 'lessThanOrEqual': return compareValues(value, condition.value, metadata) <= 0;
+    case 'between': return compareValues(value, condition.value, metadata) >= 0
+      && compareValues(value, condition.value2 ?? '', metadata) <= 0;
+    default: return true;
+  }
+}
+
+function matchesFilterDefinition(
+  value: unknown,
+  metadata: DataGridCellMetadata,
+  definition: UiResultColumnFilterDefinition,
+): boolean {
+  const conditions = definition.conditions;
+  if (conditions === undefined || conditions.length === 0) return matchesFilterCondition(value, metadata, definition);
+  const matches = conditions.map(condition => matchesFilterCondition(value, metadata, condition));
+  return definition.logic === 'or' ? matches.some(Boolean) : matches.every(Boolean);
+}
+
 function matchesRow(
   columns: readonly DataGridColumn[],
   values: readonly unknown[],
@@ -531,24 +862,7 @@ function matchesRow(
     const filter = filterValue(view, column, columnIndex).trim();
     const metadata = getCellMetadata?.(values[columnIndex], sourceIndex, columnIndex, column) ?? column;
     const definition = filterDefinition(view, column, columnIndex);
-    if (definition) {
-      if (definition.operator === 'isNull') return values[columnIndex] === null || values[columnIndex] === undefined;
-      if (definition.operator === 'isNotNull') return values[columnIndex] !== null && values[columnIndex] !== undefined;
-      if (definition.operator === 'in') return definition.values?.some(candidate => filterValueKey(candidate) === filterValueKey(values[columnIndex])) ?? false;
-      const left = cellText(values[columnIndex], metadata).toLocaleLowerCase();
-      const right = definition.value.toLocaleLowerCase();
-      switch (definition.operator) {
-        case 'contains': return left.includes(right);
-        case 'equals': return left === right;
-        case 'notEquals': return left !== right;
-        case 'startsWith': return left.startsWith(right);
-        case 'endsWith': return left.endsWith(right);
-        case 'greaterThan': return compareValues(values[columnIndex], definition.value, metadata) > 0;
-        case 'greaterThanOrEqual': return compareValues(values[columnIndex], definition.value, metadata) >= 0;
-        case 'lessThan': return compareValues(values[columnIndex], definition.value, metadata) < 0;
-        case 'lessThanOrEqual': return compareValues(values[columnIndex], definition.value, metadata) <= 0;
-      }
-    }
+    if (definition) return matchesFilterDefinition(values[columnIndex], metadata, definition);
     return !filter || matchesDataGridFilterValue(values[columnIndex], filter, metadata);
   });
 }
@@ -611,6 +925,98 @@ function indexedRows(
   return processIndexedRows(columns, rows, view, clientProcessing, getCellMetadata);
 }
 
+function primarySelectionRange(selection: DataGridSelection): DataGridSelectionRange {
+  return {
+    minRow: Math.min(selection.anchorRow, selection.focusRow),
+    maxRow: Math.max(selection.anchorRow, selection.focusRow),
+    minColumn: Math.min(selection.anchorColumn, selection.focusColumn),
+    maxColumn: Math.max(selection.anchorColumn, selection.focusColumn),
+  };
+}
+
+/** The active rectangle followed by every discontiguous Ctrl/Cmd rectangle. */
+function selectionRanges(selection: DataGridSelection | undefined): readonly DataGridSelectionRange[] {
+  if (!selection) return [];
+  return [primarySelectionRange(selection), ...(selection.additionalRanges ?? [])];
+}
+
+function rangeContainsCell(range: DataGridSelectionRange, row: number, column: number): boolean {
+  return row >= range.minRow && row <= range.maxRow && column >= range.minColumn && column <= range.maxColumn;
+}
+
+/** Splits a rectangle around one cell so the remaining cells stay selectable. */
+function splitSelectionRange(range: DataGridSelectionRange, row: number, column: number): readonly DataGridSelectionRange[] {
+  const pieces: DataGridSelectionRange[] = [];
+  if (row > range.minRow) pieces.push({ ...range, maxRow: row - 1 });
+  if (row < range.maxRow) pieces.push({ ...range, minRow: row + 1 });
+  if (column > range.minColumn) {
+    pieces.push({ minRow: row, maxRow: row, minColumn: range.minColumn, maxColumn: column - 1 });
+  }
+  if (column < range.maxColumn) {
+    pieces.push({ minRow: row, maxRow: row, minColumn: column + 1, maxColumn: range.maxColumn });
+  }
+  return pieces;
+}
+
+function selectionFromRanges(ranges: readonly DataGridSelectionRange[]): DataGridSelection | undefined {
+  if (ranges.length === 0) return undefined;
+  const [primary, ...additional] = ranges;
+  return {
+    anchorRow: primary!.minRow,
+    anchorColumn: primary!.minColumn,
+    focusRow: primary!.maxRow,
+    focusColumn: primary!.maxColumn,
+    ...(additional.length === 0 ? {} : { additionalRanges: additional }),
+  };
+}
+
+/** Excel-style Ctrl/Cmd+click: add a cell, or remove it from the current ranges. */
+function toggleSelectionCell(
+  selection: DataGridSelection | undefined,
+  row: number,
+  column: number,
+): DataGridSelection | undefined {
+  const ranges = selectionRanges(selection);
+  const containing = ranges.findIndex(range => rangeContainsCell(range, row, column));
+  if (containing < 0) {
+    return selectionFromRanges([
+      { minRow: row, maxRow: row, minColumn: column, maxColumn: column },
+      ...ranges,
+    ]);
+  }
+  const remaining = ranges.flatMap((range, index) =>
+    index === containing ? splitSelectionRange(range, row, column) : [range]);
+  return selectionFromRanges(remaining);
+}
+
+function overallSelectionBounds(selection: DataGridSelection | undefined): DataGridSelectionRange | undefined {
+  const ranges = selectionRanges(selection);
+  if (ranges.length === 0) return undefined;
+  return ranges.reduce((bounds, range) => ({
+    minRow: Math.min(bounds.minRow, range.minRow),
+    maxRow: Math.max(bounds.maxRow, range.maxRow),
+    minColumn: Math.min(bounds.minColumn, range.minColumn),
+    maxColumn: Math.max(bounds.maxColumn, range.maxColumn),
+  }));
+}
+
+/** Display-position bounding box across the active and discontiguous ranges. */
+function overallSelectionColumnRange(
+  selection: DataGridSelection,
+  visibleColumnIndexes: readonly number[],
+): { readonly minColumn: number; readonly maxColumn: number } | undefined {
+  const primary = gridSelectionColumnRange(selection, visibleColumnIndexes);
+  let minColumn = primary?.minColumn;
+  let maxColumn = primary?.maxColumn;
+  for (const range of selection.additionalRanges ?? []) {
+    const columns = gridSelectionRangeColumnRange(range, visibleColumnIndexes);
+    if (columns === undefined) continue;
+    minColumn = minColumn === undefined ? columns.minColumn : Math.min(minColumn, columns.minColumn);
+    maxColumn = maxColumn === undefined ? columns.maxColumn : Math.max(maxColumn, columns.maxColumn);
+  }
+  return minColumn === undefined || maxColumn === undefined ? undefined : { minColumn, maxColumn };
+}
+
 function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow[], grouping: readonly string[], getCellMetadata?: CellMetadataResolver): readonly RenderedRow[] {
   if (grouping.length === 0) return rows.map((row, displayIndex) => ({ ...row, kind: 'data', displayIndex, ancestorIds: [] }));
   const rendered: RenderedRow[] = [];
@@ -655,12 +1061,16 @@ export function DataGrid({
   columns,
   rows,
   getCellMetadata,
+  getColumnFormatting,
   totalRowCount = rows.length,
   scroll,
   onScroll,
   onLoadMore,
   onRowSelect,
   onEditRow,
+  editMode = false,
+  onCellEdit,
+  onInsertCellContent,
   selectedRowIndex,
   view,
   onViewChange,
@@ -672,15 +1082,23 @@ export function DataGrid({
   clipboardWriter,
   onViewCell,
   onViewRow,
+  onDeleteRow,
+  isRowDeleted,
   onOpenResultFormatting,
   showContextMenu = true,
   showColumnMenu = true,
   showGroupingPanel = true,
   onOpenColumnFilter,
   showInlineColumnFilters = true,
+  onColumnAction,
+  catalogBound = false,
+  onProfileColumn,
+  busy = false,
 }: DataGridProps): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
+  const [activeCellEditor, setActiveCellEditor] = useState<ActiveCellEditor | undefined>(undefined);
+  const [aggregationMenu, setAggregationMenu] = useState<{ readonly columnIndex: number; readonly left: number; readonly top: number } | undefined>(undefined);
   // Result surfaces also persist scroll coordinates in their view object. Do
   // not rebuild the processing view for every scroll event; doing so would
   // re-filter/re-sort all loaded rows while the browser is trying to paint.
@@ -688,6 +1106,14 @@ export function DataGrid({
   // hand-maintained dependency list.
   const activeViewKey = viewSignature(view ?? internalView);
   const activeView = useMemo(() => normaliseView(view ?? internalView), [activeViewKey]);
+  useEffect(() => {
+    // A filter/sort/group change moves cells under the editor; committing into
+    // a stale coordinate would edit the wrong row. Discard and re-open.
+    setActiveCellEditor(undefined);
+  }, [activeViewKey, resultSetId, rows]);
+  useEffect(() => {
+    if (!editMode) setActiveCellEditor(undefined);
+  }, [editMode]);
   const resolvedColumnsCacheRef = useRef<{
     readonly resultSetId: string;
     readonly signature: string;
@@ -723,6 +1149,7 @@ export function DataGrid({
   }, [columnMetadataSignature, columns, resultSetId, rows]);
   const [selection, setSelection] = useState<DataGridSelection | undefined>(undefined);
   const selectionRef = useRef<DataGridSelection | undefined>(undefined);
+  const rowSelectionRangeCacheRef = useRef(new Map<string, readonly DataGridSelectionRange[]>());
   const selectionPointerRef = useRef<{ readonly clientX: number; readonly clientY: number } | undefined>(undefined);
   const selectionAutoScrollFrameRef = useRef<number | undefined>(undefined);
   const columnHeaderRefs = useRef(new Map<string, HTMLTableCellElement>());
@@ -732,6 +1159,9 @@ export function DataGrid({
   const [contextMenuPosition, setContextMenuPosition] = useState({ left: 8, top: 8 });
   const dragSelectingRef = useRef(false);
   const draggedColumnRef = useRef<number | undefined>(undefined);
+  const headerDragRevealTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [draggedHeaderColumn, setDraggedHeaderColumn] = useState<number | undefined>(undefined);
+  const [columnDropTarget, setColumnDropTarget] = useState<{ readonly columnIndex: number; readonly after: boolean } | undefined>(undefined);
   const draggedGroupingRef = useRef<number | undefined>(undefined);
   const [groupingDropIndex, setGroupingDropIndex] = useState<number | undefined>(undefined);
   const resizeRef = useRef<{ columnId: string; startX: number; startWidth: number } | undefined>(undefined);
@@ -826,6 +1256,10 @@ export function DataGrid({
     scrollRestorationRef.current = undefined;
     nativeScrollRef.current = undefined;
     pendingScrollRestorationRef.current = undefined;
+    if (headerDragRevealTimerRef.current !== undefined) {
+      clearTimeout(headerDragRevealTimerRef.current);
+      headerDragRevealTimerRef.current = undefined;
+    }
   }, []);
 
   const updateView = (patch: Partial<UiResultViewState>): void => {
@@ -833,6 +1267,78 @@ export function DataGrid({
     onViewChange?.(patch);
   };
   updateViewRef.current = updateView;
+
+  useEffect(() => {
+    if (!aggregationMenu) return undefined;
+    const close = (event: globalThis.MouseEvent): void => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.ui-data-grid-aggregation-menu, .ui-data-grid-aggregation-action')) return;
+      setAggregationMenu(undefined);
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setAggregationMenu(undefined);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [aggregationMenu]);
+
+  const updateColumnAggregations = (
+    columnIndex: number,
+    change: (current: readonly UiResultColumnAggregation[]) => readonly UiResultColumnAggregation[],
+  ): void => {
+    const column = resolvedColumns[columnIndex];
+    if (!column) return;
+    const key = columnKey(column, columnIndex);
+    const definitions = { ...(activeView.columnAggregations ?? {}) };
+    const next = change(columnAggregations(activeView, column, columnIndex));
+    if (next.length === 0) delete definitions[key];
+    else definitions[key] = next;
+    updateView({ columnAggregations: definitions });
+  };
+
+  const toggleColumnAggregation = (columnIndex: number, fn: UiResultAggregationFunction): void => {
+    updateColumnAggregations(columnIndex, current => current.some(entry => entry.fn === fn)
+      ? current.filter(entry => entry.fn !== fn)
+      : [...current, { fn }]);
+  };
+
+  const setColumnAggregationPosition = (columnIndex: number, position: 'top' | 'bottom'): void => {
+    updateColumnAggregations(columnIndex, current => current.map(entry => ({ ...entry, position })));
+  };
+
+  const clearColumnAggregations = (columnIndex: number): void => {
+    updateColumnAggregations(columnIndex, () => []);
+  };
+
+  /** Double-click on the resizer fits the header and a small data sample. */
+  const autoFitColumn = (columnIndex: number): void => {
+    const column = resolvedColumns[columnIndex];
+    if (!column) return;
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const font = scroller.current === null
+      ? '12px sans-serif'
+      : getComputedStyle(scroller.current).font || '12px sans-serif';
+    context.font = font;
+    const formatting = getColumnFormatting?.(column, columnIndex);
+    let width = context.measureText(column.name).width + typeBadge(column).length * 7 + 128;
+    for (const row of rows.slice(0, 250)) {
+      const text = formatDataGridCellValue(row[columnIndex], column.type, column, formatting);
+      width = Math.max(width, context.measureText(text).width + 22);
+    }
+    const nextWidth = Math.max(MIN_COLUMN_WIDTH, Math.min(600, Math.ceil(width)));
+    updateView({
+      columnWidths: {
+        ...(activeViewRef.current.columnWidths ?? {}),
+        [columnKey(column, columnIndex)]: nextWidth,
+      },
+    });
+  };
 
   useEffect(() => {
     const handleMouseUp = (): void => {
@@ -926,7 +1432,14 @@ export function DataGrid({
     };
   }, [columns.length, resultSetId, rows.length]);
 
-  const visibleColumnIndexes = useMemo(() => orderColumns(resolvedColumns, activeView), [resolvedColumns, activeView]);
+  const visibleColumnIndexes = useMemo(() => {
+    const ordered = orderColumns(resolvedColumns, activeView);
+    const pinned = ordered.filter(columnIndex => activeView.pinnedColumns?.some(key => columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, key)) ?? false);
+    if (pinned.length === 0) return ordered;
+    // Excel keeps pinned columns against the row-number gutter. Moving them
+    // to the front guarantees their sticky offsets never collide.
+    return [...pinned, ...ordered.filter(columnIndex => !pinned.includes(columnIndex))];
+  }, [resolvedColumns, activeView]);
   const processedRows = useMemo(() => indexedRows(resolvedColumns, rows, activeView, clientProcessing, getCellMetadata), [resolvedColumns, rows, activeView, clientProcessing, getCellMetadata]);
   // Grouping is a renderer concern for every host. Server-backed adapters may
   // page/filter the input rows, but a group must still be a tree row in this
@@ -941,10 +1454,44 @@ export function DataGrid({
     () => groupedRows?.filter(row => !row.ancestorIds.some(groupId => collapsedGroups.has(groupId))),
     [collapsedGroups, groupedRows],
   );
+  const columnAggregationRows = useMemo(() => {
+    const definitions = activeView.columnAggregations;
+    if (!definitions || visibleColumnIndexes.length === 0) return { top: [], bottom: [] } as const;
+    const definitionsFor = (columnIndex: number): readonly UiResultColumnAggregation[] => {
+      const column = resolvedColumns[columnIndex];
+      if (!column) return [];
+      return definitions[columnKey(column, columnIndex)] ?? definitions[column.name] ?? definitions[String(columnIndex)] ?? [];
+    };
+    let maxTop = 0;
+    let maxBottom = 0;
+    for (const columnIndex of visibleColumnIndexes) {
+      const entries = definitionsFor(columnIndex);
+      const topCount = entries.filter(entry => entry.position === 'top').length;
+      maxTop = Math.max(maxTop, topCount);
+      maxBottom = Math.max(maxBottom, entries.length - topCount);
+    }
+    if (maxTop === 0 && maxBottom === 0) return { top: [], bottom: [] } as const;
+    const allValues = processedRows.map(row => row.values);
+    const buildRows = (position: 'top' | 'bottom', count: number) => {
+      const rows: Array<readonly (DataGridAggregationCell | undefined)[]> = [];
+      for (let rowIndex = 0; rowIndex < count; rowIndex += 1) {
+        rows.push(visibleColumnIndexes.map(columnIndex => {
+          const column = resolvedColumns[columnIndex];
+          if (!column) return undefined;
+          const entry = definitionsFor(columnIndex).filter(item => (item.position ?? 'bottom') === position)[rowIndex];
+          if (!entry) return undefined;
+          return calculateDataGridAggregations(column, columnIndex, allValues, [entry])[0];
+        }));
+      }
+      return rows;
+    };
+    return { top: buildRows('top', maxTop), bottom: buildRows('bottom', maxBottom) };
+  }, [activeView.columnAggregations, processedRows, resolvedColumns, visibleColumnIndexes]);
   const columnHeaderHeight = onOpenColumnFilter && !showInlineColumnFilters ? COMPACT_COLUMN_HEADER_HEIGHT : COLUMN_HEADER_HEIGHT;
   columnHeaderHeightRef.current = columnHeaderHeight;
   visibleColumnIndexesRef.current = visibleColumnIndexes;
-  const headerActionCount = onOpenColumnFilter ? 5 : 4;
+  // Drag handle, filter/aggregate, pin and grouping are always rendered.
+  const headerActionCount = 4;
   // One pass computes the sticky offset of every column. The previous
   // renderer repeated this O(columns) walk inside every header and body cell,
   // which became quadratic for wide result sets.
@@ -1059,6 +1606,49 @@ export function DataGrid({
   }, [columnMetadataSignature, hasColumnFilterSurface, mountedColumnSignature, resolvedColumns, showInlineColumnFilters, visibleColumnIndexSet, visibleColumnSignature]);
   const range = normalizeGridSelection(selection);
   const columnRange = gridSelectionColumnRange(selection, visibleColumnIndexes);
+  // Project every selected rectangle to display positions once; rows only do
+  // a handful of primitive comparisons per cell. The primary rectangle uses
+  // the anchor/focus projection so reordered columns copy as the user sees
+  // them, not as their raw indexes happen to fall.
+  const displaySelectionRanges = useMemo<readonly DataGridSelectionRange[]>(() => {
+    if (!selection) return [];
+    const primary = primarySelectionRange(selection);
+    const primaryColumns = gridSelectionColumnRange(selection, visibleColumnIndexes);
+    const projected: DataGridSelectionRange[] = primaryColumns === undefined ? [] : [{
+      ...primary,
+      minColumn: primaryColumns.minColumn,
+      maxColumn: primaryColumns.maxColumn,
+    }];
+    for (const range of selection.additionalRanges ?? []) {
+      const columns = gridSelectionRangeColumnRange(range, visibleColumnIndexes);
+      if (columns === undefined) continue;
+      projected.push({ ...range, minColumn: columns.minColumn, maxColumn: columns.maxColumn });
+    }
+    return projected;
+  }, [selection, visibleColumnIndexes]);
+  // Keep one stable array per distinct per-row selection shape so a pointer
+  // drag re-renders only rows whose selected columns actually changed.
+  const selectionRangesForRow = (displayIndex: number): readonly DataGridSelectionRange[] => {
+    const matching = displaySelectionRanges.filter(range =>
+      displayIndex >= range.minRow && displayIndex <= range.maxRow);
+    if (matching.length === 0) return EMPTY_SELECTION_RANGES;
+    const key = matching
+      .map(range => `${range.minRow}:${range.maxRow}:${range.minColumn}:${range.maxColumn}`)
+      .join(',');
+    const cache = rowSelectionRangeCacheRef.current;
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+    cache.set(key, matching);
+    return matching;
+  };
+  const selectableRowCount = visibleGroupedRows?.length ?? visibleRowCount;
+  const allSelected = selectableRowCount > 0
+    && range !== undefined
+    && range.minRow === 0
+    && range.maxRow >= selectableRowCount - 1
+    && columnRange !== undefined
+    && columnRange.minColumn === 0
+    && columnRange.maxColumn >= visibleColumnIndexes.length - 1;
   const hasMoreRows = onLoadMore !== undefined && rows.length < totalRowCount;
   const requestMoreRows = useCallback((): void => {
     const loader = onLoadMoreRef.current;
@@ -1345,6 +1935,13 @@ export function DataGrid({
     if (event.button !== 0) return;
     event.preventDefault();
     scroller.current?.focus({ preventScroll: true });
+    if (event.ctrlKey || event.metaKey) {
+      // Ctrl/Cmd+click toggles one cell without starting a drag. The clicked
+      // cell becomes the active rectangle so keyboard navigation follows it.
+      dragSelectingRef.current = false;
+      setSelectionValue(toggleSelectionCell(selectionRef.current, rowIndex, columnIndex));
+      return;
+    }
     const previous = selectionRef.current;
     const next = event.shiftKey && previous
       ? { anchorRow: previous.anchorRow, anchorColumn: previous.anchorColumn, focusRow: rowIndex, focusColumn: columnIndex }
@@ -1354,8 +1951,16 @@ export function DataGrid({
   }, [setSelectionValue]);
 
   const handleCellMouseEnter = useCallback((rowIndex: number, columnIndex: number): void => {
-    if (!dragSelectingRef.current || !selectionRef.current) return;
-    setSelectionValue({ ...selectionRef.current, focusRow: rowIndex, focusColumn: columnIndex });
+    const current = selectionRef.current;
+    if (!dragSelectingRef.current || !current) return;
+    // Dragging extends the active rectangle; discontiguous Ctrl+click cells
+    // are intentionally dropped, matching the legacy grid's range drag.
+    setSelectionValue({
+      anchorRow: current.anchorRow,
+      anchorColumn: current.anchorColumn,
+      focusRow: rowIndex,
+      focusColumn: columnIndex,
+    });
   }, [setSelectionValue]);
 
   const handleRowNumberMouseDown = useCallback((rowIndex: number, event: ReactMouseEvent<HTMLElement>): void => {
@@ -1380,6 +1985,7 @@ export function DataGrid({
   }, [setSelectionValue]);
 
   const handleRowClick = useCallback((sourceIndex: number): void => {
+    scroller.current?.focus({ preventScroll: true });
     onRowSelectRef.current?.(sourceIndex);
   }, []);
 
@@ -1389,6 +1995,60 @@ export function DataGrid({
     onContextMenuRef.current?.(context);
     if (showContextMenu) setContextMenu(context);
   }, [showContextMenu]);
+
+  const handleCellDoubleClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (!editMode && onInsertCellContent === undefined) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.closest('input, textarea, select, button, a, [contenteditable="true"]') !== null) return;
+    const cell = target.closest('td');
+    const rowElement = target.closest('tr');
+    if (!(cell instanceof HTMLTableCellElement) || !(rowElement instanceof HTMLTableRowElement)) return;
+    if (cell.classList.contains('ui-data-grid-column-spacer')) return;
+    const columnIndex = Number.parseInt(cell.dataset.columnIndex ?? '', 10);
+    const rowIndex = Number.parseInt(rowElement.dataset.sourceIndex ?? '', 10);
+    if (!Number.isInteger(columnIndex) || !Number.isInteger(rowIndex)) return;
+    const column = resolvedColumns[columnIndex];
+    const row = rows[rowIndex];
+    if (column === undefined || row === undefined) return;
+    const metadata = getCellMetadata?.(row[columnIndex], rowIndex, columnIndex, column);
+    const columnType = metadata?.type ?? column.type;
+    const value = row[columnIndex];
+
+    if (editMode && onCellEdit !== undefined) {
+      const scrollerElement = scroller.current;
+      if (scrollerElement === null || isDataGridBinaryType(columnType)) return;
+      const cellRect = cell.getBoundingClientRect();
+      const scrollerRect = scrollerElement.getBoundingClientRect();
+      event.preventDefault();
+      setContextMenu(undefined);
+      setActiveCellEditor({
+        rowIndex,
+        columnIndex,
+        columnName: column.name,
+        columnType,
+        oldValue: value,
+        kind: resolveGridCellEditKind(columnType, value),
+        initialText: toEditableCellText(value, columnType),
+        initialNull: value === null || value === undefined,
+        layout: {
+          left: cellRect.left - scrollerRect.left + scrollerElement.scrollLeft,
+          top: cellRect.top - scrollerRect.top + scrollerElement.scrollTop,
+          width: Math.max(cellRect.width, 160),
+          height: cellRect.height,
+        },
+      });
+      return;
+    }
+
+    if (onInsertCellContent === undefined) return;
+    const sqlText = formatDataGridCellValueForSql(value, { ...column, ...metadata, type: columnType });
+    if (!sqlText) return;
+    onInsertCellContent({
+      text: value === null || value === undefined ? 'NULL' : String(value),
+      ...(columnType === undefined ? {} : { dataType: columnType }),
+      sqlText,
+    });
+  };
 
   /** Keeps a keyboard target below the sticky header and outside pinned columns. */
   function scrollCellIntoView(rowIndex: number, columnIndex: number): void {
@@ -1419,14 +2079,26 @@ export function DataGrid({
     if (topChanged) bumpRowWindow();
   }
 
-  function sortColumn(columnIndex: number): void {
-    const id = columnKey(resolvedColumns[columnIndex]!, columnIndex);
-    const current = activeView.sorting.find(item => columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, item.column));
+  function sortColumn(columnIndex: number, extend = false): void {
+    const column = resolvedColumns[columnIndex]!;
+    const id = columnKey(column, columnIndex);
+    const current = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
+    if (!extend) {
+      const nextSorting = current === undefined
+        ? [{ column: id, descending: false }]
+        : current.descending
+          ? activeView.sorting.filter(item => !columnMatchesKey(column, columnIndex, item.column))
+          : activeView.sorting.map(item => columnMatchesKey(column, columnIndex, item.column) ? { ...item, descending: true } : item);
+      updateView({ sorting: nextSorting });
+      return;
+    }
+    // Shift+Click adds another sort column, or cycles its direction without
+    // discarding the other priority entries.
     const nextSorting = current === undefined
-      ? [{ column: id, descending: false }]
+      ? [...activeView.sorting, { column: id, descending: false }]
       : current.descending
-        ? activeView.sorting.filter(item => !columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, item.column))
-        : activeView.sorting.map(item => columnMatchesKey(resolvedColumns[columnIndex]!, columnIndex, item.column) ? { ...item, descending: true } : item);
+        ? activeView.sorting.filter(item => !columnMatchesKey(column, columnIndex, item.column))
+        : activeView.sorting.map(item => columnMatchesKey(column, columnIndex, item.column) ? { ...item, descending: true } : item);
     updateView({ sorting: nextSorting });
   }
 
@@ -1462,7 +2134,7 @@ export function DataGrid({
     updateView({ columnVisibility: visibility });
   }
 
-  function reorderColumn(columnIndex: number, targetIndex: number): void {
+  function reorderColumn(columnIndex: number, targetIndex: number, after = false): void {
     const current = [...(activeView.columnOrder ?? resolvedColumns.map((_column, index) => columnKey(resolvedColumns[index]!, index)))];
     const sourceId = columnKey(resolvedColumns[columnIndex]!, columnIndex);
     const targetId = columnKey(resolvedColumns[targetIndex]!, targetIndex);
@@ -1470,15 +2142,23 @@ export function DataGrid({
     const targetPosition = current.indexOf(targetId);
     if (sourcePosition < 0 || targetPosition < 0 || sourcePosition === targetPosition) return;
     current.splice(sourcePosition, 1);
-    current.splice(sourcePosition < targetPosition ? targetPosition - 1 : targetPosition, 0, sourceId);
+    const insertion = sourcePosition < targetPosition ? targetPosition - 1 : targetPosition;
+    current.splice(insertion + (after ? 1 : 0), 0, sourceId);
     updateView({ columnOrder: current });
   }
 
   function selectionPayload(): DataGridCopyPayload {
-    const selected = range;
+    // Legacy copies the bounding rectangle of a Ctrl+click selection, not just
+    // the toggled cells, so copy/export stay identical between renderers.
+    const selected = overallSelectionBounds(selection);
     const minRow = selected?.minRow ?? 0;
     const maxRow = selected?.maxRow ?? Math.max(0, processedRows.length - 1);
-    const selectedColumns = visibleColumnIndexes.filter((_columnIndex, position) => columnRange === undefined || (position >= columnRange.minColumn && position <= columnRange.maxColumn));
+    const selectedRangeColumns = selection === undefined
+      ? undefined
+      : overallSelectionColumnRange(selection, visibleColumnIndexes);
+    const selectedColumns = visibleColumnIndexes.filter((_columnIndex, position) =>
+      selectedRangeColumns === undefined
+      || (position >= selectedRangeColumns.minColumn && position <= selectedRangeColumns.maxColumn));
     const columnIndexes = selectedColumns.length > 0 ? selectedColumns : visibleColumnIndexes;
     const selectedRows = processedRows.slice(minRow, maxRow + 1).map(row => row.values);
     return { columns: columnIndexes.map(index => resolvedColumns[index]!), rows: selectedRows.map(row => columnIndexes.map(index => row[index])), selection, includeHeaders: true };
@@ -1508,14 +2188,15 @@ export function DataGrid({
 
   function exportSelection(format: 'csv' | 'json'): void {
     if (!onExportSelection) return;
-    onExportSelection(range === undefined ? contextRowPayload() ?? selectionPayload() : selectionPayload(), format);
+    onExportSelection(overallSelectionBounds(selection) === undefined ? contextRowPayload() ?? selectionPayload() : selectionPayload(), format);
     setContextMenu(undefined);
   }
 
   function copyContextPayload(payload: DataGridCopyPayload, format: DataGridClipboardFormat = 'text'): void {
     if (onCopySelection) {
-      if (format === 'text') onCopySelection(payload);
-      else onCopySelection(payload, format);
+      // Pass the format explicitly: a host-level configured copy format must
+      // not turn "Copy value" into a Markdown table.
+      onCopySelection(payload, format);
       return;
     }
     void clipboardWriter?.(payload, format);
@@ -1524,13 +2205,13 @@ export function DataGrid({
   function copyContextValue(context: DataGridCellContext, row: readonly unknown[]): void {
     const column = resolvedColumns[context.columnIndex];
     if (!column) return;
-    copyContextPayload({ columns: [column], rows: [[row[context.columnIndex]]], includeHeaders: false });
+    copyContextPayload({ columns: [column], rows: [[row[context.columnIndex]]], includeHeaders: false }, 'text');
     setContextMenu(undefined);
   }
 
   function copyContextRow(row: readonly unknown[]): void {
     const columnIndexes = visibleColumnIndexes;
-    copyContextPayload({ columns: columnIndexes.map(index => resolvedColumns[index]!), rows: [columnIndexes.map(index => row[index])], includeHeaders: false });
+    copyContextPayload({ columns: columnIndexes.map(index => resolvedColumns[index]!), rows: [columnIndexes.map(index => row[index])], includeHeaders: false }, 'tsv');
     setContextMenu(undefined);
   }
 
@@ -1586,6 +2267,37 @@ export function DataGrid({
   function groupingInsertionIndex(event: ReactDragEvent<HTMLElement>, targetIndex: number): number {
     const bounds = event.currentTarget.getBoundingClientRect();
     return event.clientX > bounds.left + bounds.width / 2 ? targetIndex + 1 : targetIndex;
+  }
+
+  /**
+   * Reveals the grouping panel only after the drag has actually started.
+   * Inserting the panel synchronously from dragstart changes layout inside the
+   * drag-start task, which makes Chromium cancel the drag; the panel then
+   * disappears before the user can drop onto it.
+   */
+  function startHeaderColumnDrag(event: ReactDragEvent<HTMLElement>, columnIndex: number): void {
+    draggedColumnRef.current = columnIndex;
+    setColumnDropTarget(undefined);
+    event.dataTransfer?.setData('application/x-justybase-column-index', String(columnIndex));
+    event.dataTransfer?.setData('text/plain', String(columnIndex));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    if (headerDragRevealTimerRef.current !== undefined) {
+      clearTimeout(headerDragRevealTimerRef.current);
+    }
+    headerDragRevealTimerRef.current = setTimeout(() => {
+      headerDragRevealTimerRef.current = undefined;
+      setDraggedHeaderColumn(columnIndex);
+    }, 0);
+  }
+
+  function endHeaderColumnDrag(): void {
+    if (headerDragRevealTimerRef.current !== undefined) {
+      clearTimeout(headerDragRevealTimerRef.current);
+      headerDragRevealTimerRef.current = undefined;
+    }
+    draggedColumnRef.current = undefined;
+    setDraggedHeaderColumn(undefined);
+    setColumnDropTarget(undefined);
   }
 
   function handleGroupingDragStart(event: ReactDragEvent<HTMLButtonElement>, groupingIndex: number): void {
@@ -1703,6 +2415,13 @@ export function DataGrid({
     dragSelectingRef.current = false;
     setSelectionValue({ anchorRow, anchorColumn, focusRow: navigation.row, focusColumn });
     scrollCellIntoView(navigation.row, focusColumn);
+    if (commandKey && (key === 'ArrowDown' || key === 'PageDown' || key === 'ArrowUp' || key === 'PageUp')) {
+      const element = scroller.current;
+      if (element) element.scrollTop = key === 'ArrowDown' || key === 'PageDown' ? element.scrollHeight : 0;
+    } else if (commandKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+      const element = scroller.current;
+      if (element) element.scrollLeft = key === 'ArrowRight' ? element.scrollWidth : 0;
+    }
   }
 
   if (resolvedColumns.length === 0 || (rows.length === 0 && !hasMoreRows)) return <div className="ui-grid-empty" role="status">No rows to display.</div>;
@@ -1712,10 +2431,34 @@ export function DataGrid({
   const contextRow = contextMenu ? rows[contextMenu.rowIndex] : undefined;
   const contextColumn = contextMenu ? resolvedColumns[contextMenu.columnIndex] : undefined;
 
-  return <div className={`ui-result-grid result-grid${onOpenColumnFilter && !showInlineColumnFilters ? ' ui-data-grid-compact' : ''}`}>
+  const renderAggregationRow = (
+    cells: readonly (DataGridAggregationCell | undefined)[],
+    position: 'top' | 'bottom',
+    rowIndex: number,
+  ): ReactNode => {
+    const cellsByColumn = new Map<number, DataGridAggregationCell | undefined>();
+    visibleColumnIndexes.forEach((columnIndex, index) => cellsByColumn.set(columnIndex, cells[index]));
+    return <tr className={`ui-data-grid-aggregation-row ui-data-grid-aggregation-row-${position}`} key={`aggregation:${position}:${rowIndex}`} data-aggregation-row={position}>
+      <td className="ui-data-grid-row-number ui-data-grid-aggregation-rownum" aria-hidden="true" />
+      {leftColumnSpacer > 0 && <td aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: leftColumnSpacer, minWidth: leftColumnSpacer }} />}
+      {mountedColumns.map(entry => {
+        const cell = cellsByColumn.get(entry.columnIndex);
+        return <td
+          key={`${entry.position}:${entry.key}:${rowIndex}`}
+          className={entry.pinned ? 'ui-data-grid-pinned' : undefined}
+          style={{ width: entry.width, minWidth: entry.width, ...(entry.left === undefined ? {} : { left: entry.left }) }}
+        >
+          {cell && <><span className="ui-data-grid-aggregation-label">{cell.label}</span><span className="ui-data-grid-aggregation-value">{cell.value}</span></>}
+        </td>;
+      })}
+      {rightColumnSpacer > 0 && <td aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: rightColumnSpacer, minWidth: rightColumnSpacer }} />}
+    </tr>;
+  };
+
+  return <div className={`ui-result-grid result-grid${onOpenColumnFilter && !showInlineColumnFilters ? ' ui-data-grid-compact' : ''}`} aria-busy={busy || undefined}>
     {showColumnMenu && <DataGridColumnMenu columns={resolvedColumns} view={activeView} onViewChange={updateView} />}
-    {showGroupingPanel && <div
-      className={`ui-data-grid-group-panel${activeView.grouping.length > 0 ? ' ui-data-grid-group-panel-active' : ''}`}
+    {(showGroupingPanel || draggedHeaderColumn !== undefined) && <div
+      className={`ui-data-grid-group-panel${activeView.grouping.length > 0 ? ' ui-data-grid-group-panel-active' : ''}${draggedHeaderColumn !== undefined ? ' ui-data-grid-group-panel-dragging' : ''}`}
       role="group"
       aria-label="Grouping panel"
       onDragOver={event => {
@@ -1726,7 +2469,7 @@ export function DataGrid({
         event.preventDefault();
         const source = draggedColumnRef.current;
         if (source !== undefined) addDraggedGrouping(source);
-        draggedColumnRef.current = undefined;
+        endHeaderColumnDrag();
         draggedGroupingRef.current = undefined;
         setGroupingDropIndex(undefined);
       }}
@@ -1756,33 +2499,59 @@ export function DataGrid({
           <button type="button" aria-label={`Remove grouping ${label}`} onClick={() => removeGrouping(key)}>×</button>
         </div>;
       })}
-      <span className="ui-data-grid-group-panel-placeholder">{activeView.grouping.length > 0 ? 'Drag another column here' : 'Drag columns here to group'}</span>
+      <span className="ui-data-grid-group-panel-placeholder">{activeView.grouping.length > 0 ? 'Drag another column here' : (draggedHeaderColumn !== undefined ? 'Drop the column here to group' : 'Drag columns here to group')}</span>
     </div>}
-    <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}>
+    <div ref={scroller} className="ui-data-grid-scroll" onScroll={handleScroll} onDoubleClick={handleCellDoubleClick} onKeyDown={handleKeyDown} tabIndex={0} aria-label={`Data grid with ${totalRowCount} rows`}>
       {processedRows.length === 0 ? <div className="ui-grid-empty" role="status">No matching rows.{hasMoreRows && <button type="button" onClick={requestMoreRows}>Load more rows</button>}</div> : <table className="ui-data-grid" aria-rowcount={displayRowCount + 1} aria-colcount={visibleColumnIndexes.length + 1}>
         <thead><tr>
-          <th scope="col" className="ui-data-grid-row-number">#</th>
+          <th scope="col" className="ui-data-grid-row-number ui-data-grid-select-all">
+            <input
+              type="checkbox"
+              aria-label={allSelected ? 'Clear selection' : 'Select all rows'}
+              title={allSelected ? 'Clear selection' : 'Select all rows'}
+              checked={allSelected}
+              ref={element => { if (element) element.indeterminate = selection !== undefined && !allSelected; }}
+              onChange={() => {
+                if (allSelected) {
+                  setSelectionValue(undefined);
+                  return;
+                }
+                if (visibleColumnIndexes.length === 0 || selectableRowCount === 0) return;
+                setSelectionValue({
+                  anchorRow: 0,
+                  anchorColumn: visibleColumnIndexes[0]!,
+                  focusRow: selectableRowCount - 1,
+                  focusColumn: visibleColumnIndexes[visibleColumnIndexes.length - 1]!,
+                });
+              }}
+            />
+          </th>
           {leftColumnSpacer > 0 && <th aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: leftColumnSpacer, minWidth: leftColumnSpacer }} />}
           {mountedColumns.map(entry => {
             const columnIndex = entry.columnIndex;
             const column = resolvedColumns[columnIndex]!;
             const id = entry.key;
             const sort = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
-            return <th scope="col" key={`${entry.position}:${id}`} ref={element => { const refKey = `${id}:${columnIndex}`; if (element) columnHeaderRefs.current.set(refKey, element); else columnHeaderRefs.current.delete(refKey); }} className={entry.pinned ? 'ui-data-grid-pinned' : undefined} style={{ width: entry.width, minWidth: entry.width, ...(entry.left === undefined ? {} : { left: entry.left }) }} onDragOver={event => event.preventDefault()} onDrop={() => { const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex); draggedColumnRef.current = undefined; }}>
+            const filterActive = filterValue(activeView, column, columnIndex) !== '' || filterDefinition(activeView, column, columnIndex) !== undefined;
+            return <th scope="col" key={`${entry.position}:${id}`} ref={element => { const refKey = `${id}:${columnIndex}`; if (element) columnHeaderRefs.current.set(refKey, element); else columnHeaderRefs.current.delete(refKey); }} className={[entry.pinned ? 'ui-data-grid-pinned' : '', columnDropTarget?.columnIndex === columnIndex ? (columnDropTarget.after ? 'ui-data-grid-column-drop-after' : 'ui-data-grid-column-drop-before') : ''].filter(Boolean).join(' ') || undefined} style={{ width: entry.width, minWidth: entry.width, ...(entry.left === undefined ? {} : { left: entry.left }) }} onDragOver={event => { if (draggedHeaderColumn === undefined) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; const rect = event.currentTarget.getBoundingClientRect(); setColumnDropTarget({ columnIndex, after: event.clientX > rect.left + rect.width / 2 }); }} onDrop={event => { event.preventDefault(); event.stopPropagation(); const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex, columnDropTarget?.columnIndex === columnIndex ? columnDropTarget.after : false); endHeaderColumnDrag(); }}>
               <div className="ui-data-grid-header-content">
-                <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} onDragStart={event => { draggedColumnRef.current = columnIndex; event.dataTransfer?.setData('application/x-justybase-column-index', String(columnIndex)); event.dataTransfer?.setData('text/plain', String(columnIndex)); }} onDragEnd={() => { draggedColumnRef.current = undefined; }}>⠿</button>
-                <button type="button" className="ui-data-grid-header-label" onClick={() => sortColumn(columnIndex)} title={`Sort by ${column.name}`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : sort.descending ? 'Sorted descending' : 'Sorted ascending'}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}</span></button>
+                <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} title="Drag to reorder or to grouping panel" onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag}><svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" fill="currentColor"><circle cx="5" cy="4" r="1.1" /><circle cx="11" cy="4" r="1.1" /><circle cx="5" cy="8" r="1.1" /><circle cx="11" cy="8" r="1.1" /><circle cx="5" cy="12" r="1.1" /><circle cx="11" cy="12" r="1.1" /></svg></button>
+                <button type="button" className="ui-data-grid-header-label" draggable onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag} onClick={event => sortColumn(columnIndex, event.shiftKey)} title={`Sort by ${column.name}. Shift+Click to add another sort column. Drag to grouping panel.`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : `${sort.descending ? 'Sorted descending' : 'Sorted ascending'}${activeView.sorting.length > 1 ? `, priority ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}`}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}{sort !== undefined && activeView.sorting.length > 1 ? ` ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}</span></button>
                 <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column)}`}>{typeBadge(column)}</span>
-                <button type="button" className={`ui-data-grid-header-action ${entry.pinned ? 'active' : ''}`} aria-label={entry.pinned ? `Unpin ${column.name}` : `Pin ${column.name}`} title={entry.pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}>📌</button>
-                {onOpenColumnFilter && <button type="button" className={`ui-data-grid-filter-action ${filterValue(activeView, column, columnIndex) ? 'active' : ''}`} aria-label={`Open filter for ${column.name}`} title={`Filter ${column.name}`} onClick={event => { event.stopPropagation(); onOpenColumnFilter({ columnIndex, column, anchor: event.currentTarget.getBoundingClientRect() }); }}><DataGridFilterIcon /></button>}
+                {onOpenColumnFilter
+                  ? <button type="button" className={`ui-data-grid-filter-action ${filterActive || columnAggregations(activeView, column, columnIndex).length > 0 ? 'active' : ''}`} aria-label={`Open filter for ${column.name}`} title={`Filter and summarize ${column.name}`} onClick={event => { event.stopPropagation(); onOpenColumnFilter({ columnIndex, column, anchor: event.currentTarget.getBoundingClientRect() }); }}><DataGridFilterIcon /></button>
+                  : <button type="button" className={`ui-data-grid-aggregation-action ${columnAggregations(activeView, column, columnIndex).length > 0 ? 'active' : ''}`} aria-label={`Aggregate ${column.name}`} title="Aggregate column" onClick={event => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); setAggregationMenu({ columnIndex, left: Math.max(8, Math.min(rect.left, window.innerWidth - 292)), top: Math.min(rect.bottom + 4, Math.max(8, window.innerHeight - 430)) }); }}><MenuIcon name="bar-chart" /></button>}
+                <button type="button" className={`ui-data-grid-header-action ${entry.pinned ? 'active' : ''}`} aria-label={entry.pinned ? `Unpin ${column.name}` : `Pin ${column.name}`} title={entry.pinned ? 'Unpin column' : 'Pin column'} onClick={() => togglePin(columnIndex)}><MenuIcon name="pin" /></button>
                 {(!onOpenColumnFilter || showInlineColumnFilters) && <input className="ui-data-grid-column-filter" aria-label={`Filter ${column.name}`} placeholder="filter…" value={filterValue(activeView, column, columnIndex)} onChange={event => filterColumn(columnIndex, event.target.value)} />}
-                <button type="button" className="ui-data-grid-group-action" aria-label={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? `Ungroup ${column.name}` : `Group by ${column.name}`} title={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? 'Remove grouping' : 'Group by column'} onClick={() => { const grouping = activeView.grouping.filter(key => !columnMatchesKey(column, columnIndex, key)); if (grouping.length === activeView.grouping.length) grouping.push(id); updateView({ grouping }); }}>▦</button>
-                <span className="ui-data-grid-resizer" role="separator" aria-label={`Resize ${column.name}`} onMouseDown={event => { event.preventDefault(); event.stopPropagation(); resizeRef.current = { columnId: id, startX: event.clientX, startWidth: entry.width }; }} />
+                <button type="button" className="ui-data-grid-group-action" aria-label={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? `Ungroup ${column.name}` : `Group by ${column.name}`} title={activeView.grouping.some(key => columnMatchesKey(column, columnIndex, key)) ? 'Remove grouping' : 'Group by column'} onClick={() => { const grouping = activeView.grouping.filter(key => !columnMatchesKey(column, columnIndex, key)); if (grouping.length === activeView.grouping.length) grouping.push(id); updateView({ grouping }); }}><MenuIcon name="layers" /></button>
+                <span className="ui-data-grid-resizer" role="separator" aria-label={`Resize ${column.name}`} title="Drag to resize; double-click to fit" onMouseDown={event => { event.preventDefault(); event.stopPropagation(); resizeRef.current = { columnId: id, startX: event.clientX, startWidth: entry.width }; }} onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); autoFitColumn(columnIndex); }} />
               </div>
             </th>;
           })}
           {rightColumnSpacer > 0 && <th aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: rightColumnSpacer, minWidth: rightColumnSpacer }} />}
-        </tr></thead>
+        </tr>
+        {columnAggregationRows.top.map((cells, rowIndex) => renderAggregationRow(cells, 'top', rowIndex))}
+        </thead>
         <tbody>
           {virtualTopSpacer > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={mountedCellCount}><div className="ui-data-grid-virtual-spacer-inner" style={{ height: virtualTopSpacer }} /></td></tr>}
           {virtualItems.map(item => {
@@ -1795,10 +2564,6 @@ export function DataGrid({
               const collapsed = collapsedGroups.has(rendered.id);
               return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} aria-level={rendered.level + 1} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={mountedCellCount} style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><span className="ui-data-grid-group-tree-indent" aria-hidden="true">{Array.from({ length: rendered.level }, (_value, level) => <span key={level} />)}</span><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} aria-expanded={!collapsed} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker">{collapsed ? '▸' : '▾'}</span></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></td></tr>;
             }
-            const rowInSelection = range !== undefined
-              && columnRange !== undefined
-              && rendered.displayIndex >= range.minRow
-              && rendered.displayIndex <= range.maxRow;
             return <DataGridRow
               key={`${resultSetId}:${rendered.sourceIndex}`}
               resultSetId={resultSetId}
@@ -1808,10 +2573,10 @@ export function DataGrid({
               columns={mountedColumns}
               resolvedColumns={resolvedColumns}
               getCellMetadata={getCellMetadata}
+              getColumnFormatting={getColumnFormatting}
+              deleted={isRowDeleted?.(rendered.sourceIndex) === true}
               hostSelected={selectedRowIndex === rendered.sourceIndex}
-              rowInSelection={rowInSelection}
-              selectionMinColumn={rowInSelection ? columnRange?.minColumn ?? 0 : 0}
-              selectionMaxColumn={rowInSelection ? columnRange?.maxColumn ?? -1 : -1}
+              selectionRanges={selectionRangesForRow(rendered.displayIndex)}
               leftSpacer={leftColumnSpacer}
               rightSpacer={rightColumnSpacer}
               onRowClick={handleRowClick}
@@ -1825,11 +2590,59 @@ export function DataGrid({
           })}
           {virtualBottomSpacer > 0 && <tr className="ui-data-grid-virtual-spacer" aria-hidden="true"><td colSpan={mountedCellCount}><div className="ui-data-grid-virtual-spacer-inner" style={{ height: virtualBottomSpacer }} /></td></tr>}
         </tbody>
+        {columnAggregationRows.bottom.length > 0 && <tfoot>{columnAggregationRows.bottom.map((cells, rowIndex) => renderAggregationRow(cells, 'bottom', rowIndex))}</tfoot>}
       </table>}
+      {activeCellEditor && <DataGridInlineEditor
+        {...activeCellEditor}
+        onCommit={value => {
+          onCellEdit?.({
+            rowIndex: activeCellEditor.rowIndex,
+            columnIndex: activeCellEditor.columnIndex,
+            oldValue: activeCellEditor.oldValue,
+            newValue: value,
+          });
+          setActiveCellEditor(undefined);
+        }}
+        onCancel={() => setActiveCellEditor(undefined)}
+      />}
     </div>
+    {aggregationMenu && (() => {
+      const column = resolvedColumns[aggregationMenu.columnIndex];
+      if (!column) return null;
+      const current = columnAggregations(activeView, column, aggregationMenu.columnIndex);
+      const position = current[0]?.position ?? 'bottom';
+      return <div className="ui-data-grid-aggregation-menu" role="menu" aria-label={`Aggregations for ${column.name}`} style={{ left: aggregationMenu.left, top: aggregationMenu.top }} onMouseDown={event => event.stopPropagation()}>
+        <strong className="ui-data-grid-aggregation-menu-title">Aggregate {column.name}</strong>
+        <small className="ui-data-grid-aggregation-menu-hint">Calculated from the filtered loaded rows.</small>
+        <div className="ui-data-grid-aggregation-options">
+          {(Object.keys(AGGREGATION_FUNCTION_LABELS) as UiResultAggregationFunction[]).map(fn => <label key={fn}>
+            <input type="checkbox" checked={current.some(entry => entry.fn === fn)} onChange={() => toggleColumnAggregation(aggregationMenu.columnIndex, fn)} />
+            <span className="ui-data-grid-aggregation-symbol" aria-hidden="true">{AGGREGATION_LABELS[fn]}</span>
+            <span>{AGGREGATION_FUNCTION_LABELS[fn]}</span>
+          </label>)}
+        </div>
+        <div className="ui-data-grid-aggregation-position">
+          <span>Position</span>
+          <button type="button" aria-pressed={position === 'bottom'} onClick={() => setColumnAggregationPosition(aggregationMenu.columnIndex, 'bottom')}>Bottom</button>
+          <button type="button" aria-pressed={position === 'top'} onClick={() => setColumnAggregationPosition(aggregationMenu.columnIndex, 'top')}>Top</button>
+        </div>
+        <div className="ui-data-grid-aggregation-actions">
+          <button type="button" disabled={current.length === 0} onClick={() => clearColumnAggregations(aggregationMenu.columnIndex)}>Clear</button>
+          <button type="button" onClick={() => setAggregationMenu(undefined)}>Done</button>
+        </div>
+      </div>;
+    })()}
     {showContextMenu && contextMenu && contextRow && contextColumn && <div ref={contextMenuElementRef} className="ui-data-grid-context-menu" role="menu" aria-label={`Actions for row ${contextMenu.rowIndex + 1}`} style={{ left: contextMenuPosition.left, top: contextMenuPosition.top }} onClick={event => event.stopPropagation()}>
       <strong>{contextColumn.name}</strong>
       <button type="button" role="menuitem" onClick={() => copyContextValue(contextMenu, contextRow)}><MenuIcon name="copy" />Copy value</button>
+      {onColumnAction && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'copyName'); setContextMenu(undefined); }}><MenuIcon name="copy" />Copy Name</button>}
+      {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'copyQualifiedName'); setContextMenu(undefined); }}><MenuIcon name="clipboard-copy" />Copy Qualified Name</button>}
+      {onColumnAction && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'addToSelect'); setContextMenu(undefined); }}><MenuIcon name="plus" />Add to SELECT</button>}
+      {onOpenColumnFilter && <button type="button" role="menuitem" onClick={() => { const anchor = contextMenuElementRef.current?.getBoundingClientRect() ?? new DOMRect(contextMenu.clientX, contextMenu.clientY, 0, 0); onOpenColumnFilter({ columnIndex: contextMenu.columnIndex, column: contextColumn, anchor }); setContextMenu(undefined); }}><MenuIcon name="check-square" />Select Distinct</button>}
+      {onProfileColumn && <button type="button" role="menuitem" onClick={() => { onProfileColumn(contextMenu); setContextMenu(undefined); }}><MenuIcon name="bar-chart" />Profile Column</button>}
+      {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'commentOnColumn'); setContextMenu(undefined); }}><MenuIcon name="message-square" />Comment on Column…</button>}
+      {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'findReferences'); setContextMenu(undefined); }}><MenuIcon name="git-branch" />Find References</button>}
+      {onColumnAction && catalogBound && <button type="button" role="menuitem" onClick={() => { onColumnAction(contextMenu, 'toggleFavorite'); setContextMenu(undefined); }}><MenuIcon name="star" />Add to favorites</button>}
       <button type="button" role="menuitem" onClick={() => copyContextRow(contextRow)}><MenuIcon name="rows" />Copy row</button>
       <button type="button" role="menuitem" onClick={() => copyContextRowAs('tsv')}><MenuIcon name="file-spreadsheet" />Copy row as TSV</button>
       <button type="button" role="menuitem" onClick={() => copyContextRowAs('markdown')}><MenuIcon name="file-text" />Copy row as Markdown</button>
@@ -1845,6 +2658,7 @@ export function DataGrid({
       <button type="button" role="menuitem" onClick={() => toggleContextGrouping(contextMenu.columnIndex)}><MenuIcon name="layers" />{activeView.grouping.some(key => columnMatchesKey(contextColumn, contextMenu.columnIndex, key)) ? 'Ungroup This Column' : 'Group by This Column'}</button>
       <button type="button" role="menuitem" onClick={() => hideContextColumn(contextMenu.columnIndex)}><MenuIcon name="eye-off" />Hide Column</button>
       <hr />
+      {onDeleteRow && <button type="button" role="menuitem" onClick={() => { onDeleteRow(contextMenu.rowIndex); setContextMenu(undefined); }}><MenuIcon name="trash" />{isRowDeleted?.(contextMenu.rowIndex) ? 'Restore row' : 'Delete row'}</button>}
       <button type="button" role="menuitem" onClick={() => selectContextRow(contextMenu)}><MenuIcon name="panel-right" />View full row</button>
       {onViewCell && <button type="button" role="menuitem" onClick={() => viewContextCell(contextMenu)}><MenuIcon name="eye" />View Cell Value</button>}
       {onOpenResultFormatting && <button type="button" role="menuitem" onClick={() => { onOpenResultFormatting(); setContextMenu(undefined); }}><MenuIcon name="wrench" />Result Formatting…</button>}

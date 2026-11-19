@@ -1,6 +1,6 @@
 import { decode } from '@msgpack/msgpack';
 import { createRoot, type Root } from 'react-dom/client';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { isDatabaseErrorDetails } from '@justybase/contracts';
 import type { CapabilityDescriptor, DatabaseErrorDetails, UiIdentity } from '@justybase/contracts';
 import {
@@ -9,11 +9,14 @@ import {
     createAggregateAnalysisTable,
     createGroupAnalysisTable,
     createPivotAnalysisTable,
+    calculateGridSelectionStats,
+    normalizeGridSelection,
     resultKey,
     resultAsyncState as getResultAsyncState,
     type UiResultAnalysisKind,
     type UiResultAnalysisTable,
     type UiResultColumn,
+    type UiResultColumnAggregation,
     type UiResultEvent,
     type UiResultSurfaceState,
     type UiState,
@@ -21,26 +24,64 @@ import {
 } from '@justybase/ui-core';
 import {
     AsyncStateView,
-    CapabilityGate,
     DataGrid,
-    formatDataGridClipboard,
+    DataGridColumnFilterPanel,
+    DataGridColumnMenu,
+    DiffView,
     formatDataGridCellValue,
+    isDataGridNumericColumn,
     processDataGridRowIndices,
     processDataGridRows,
     resolveDataGridColumns,
     FocusOnMount,
+    HistoryView,
+    MenuIcon,
+    MiniChartsView,
+    parseRunLogMessage,
+    PivotDialog,
+    RefreshLimitDialog,
+    ResultErrorView,
+    ResultExecutionBanner,
+    ResultLayoutSwitcher,
+    ResultLimitBanner,
+    ResultRefreshFailureBanner,
     ResultTabs,
     ResultAnalysisPanel,
+    ResultColumnSidebar,
     ResultViewToolbar,
-    RowDetail,
+    RowViewPanel,
     UiShell,
-    WorkspaceTabs,
 } from '@justybase/ui-react';
-import type { DataGridClipboardFormat, DataGridCellContext } from '@justybase/ui-react';
+import type {
+    DataGridCellContext,
+    DataGridClipboardFormat,
+    DataGridColumnFilterRequest,
+    DataGridFormattingOptions,
+    DataGridColumnFilterState,
+    DataGridFilterValueOption,
+    DataGridSelection,
+    DiffBaseline,
+    PivotAggregation,
+    PivotConfiguration,
+    ResultLayoutKind,
+} from '@justybase/ui-react';
 import { callPanelMethod } from './types.js';
-import type { DiskQuerySpec } from './types.js';
+import type { DiskColumnFilterSpec, DiskQuerySpec } from './types.js';
 import type { ResultPanelHostToWebviewMessage } from './hostContracts.js';
-import { asHostMessage, postHostMessage } from './protocol.js';
+import { asHostMessage, getHostState, postHostMessage, setHostState } from './protocol.js';
+import { isSharedCopyFormat, writeSharedClipboard } from './sharedClipboard.js';
+import type { SharedClipboardFormat, SharedCopyFormat } from './sharedClipboard.js';
+import { classifyColumns } from './explore/columnClassification.js';
+import { appendRunLogRows } from './logRunGroups.js';
+import { updateSqlQueueLogs } from './sqlQueueLogs.js';
+import { focusExploreColumn } from './explore/focusColumn.js';
+import { SharedAnalyticalView } from './sharedAnalytical.js';
+import type { SharedRangeChartProps } from './sharedRangeChart.js';
+import { handleExploreHostMessage } from './explore/hostBridge.js';
+import { handleRowWindow } from './diskBackedGrid.js';
+import { setActiveGridIndex } from './state.js';
+import { setActiveSourceUri, setResultSets } from './types.js';
+import type { LogRow, ResultSet } from './types.js';
 
 interface SharedColumn {
     readonly name: string;
@@ -60,6 +101,14 @@ interface SharedResultSetPayload {
     readonly isCancelled?: unknown;
     readonly isStreamingComplete?: unknown;
     readonly totalRowCount?: unknown;
+    readonly limitReached?: unknown;
+    readonly isTextContent?: unknown;
+    readonly refreshFailure?: unknown;
+    readonly isEditable?: unknown;
+    readonly editSource?: unknown;
+    readonly editDisabledReason?: unknown;
+    readonly sql?: unknown;
+    readonly refreshSql?: unknown;
 }
 
 interface NormalizedResultSet {
@@ -74,6 +123,33 @@ interface NormalizedResultSet {
     readonly isCancelled: boolean;
     readonly isStreamingComplete?: boolean;
     readonly totalRowCount: number;
+    readonly limitReached?: boolean;
+    readonly isTextContent?: boolean;
+    readonly refreshFailure?: SharedRefreshFailure;
+    readonly isEditable?: boolean;
+    readonly editSource?: SharedEditSource;
+    readonly editDisabledReason?: string;
+    readonly sql?: string;
+    readonly refreshSql?: string;
+}
+
+interface SharedEditSource {
+    readonly db?: string;
+    readonly schema?: string;
+    readonly table: string;
+}
+
+interface SharedPendingEdit {
+    readonly rowIndex: number;
+    readonly columnIndex: number;
+    readonly oldValue: unknown;
+    readonly newValue: unknown;
+}
+
+interface SharedEditInfo {
+    readonly isEditable: boolean;
+    readonly editSource?: SharedEditSource;
+    readonly reason?: string;
 }
 
 interface ResultRef {
@@ -83,13 +159,56 @@ interface ResultRef {
     readonly executionId: string;
 }
 
+interface SharedPinnedResult {
+    readonly id: string;
+    readonly sourceUri: string;
+    readonly resultSetIndex: number;
+}
+
+interface SharedRefreshFailure {
+    readonly message: string;
+    readonly sql?: string;
+    readonly failedAt: number;
+}
+
+function defaultSharedCopyFormat(): SharedCopyFormat {
+    const configured = (globalThis as { defaultCopyFormat?: unknown }).defaultCopyFormat;
+    return isSharedCopyFormat(configured) ? configured : 'markdown';
+}
+
+function parseSharedPinnedResults(value: unknown): readonly SharedPinnedResult[] {
+    let parsed: unknown = value;
+    if (typeof value === 'string') {
+        try {
+            parsed = JSON.parse(value);
+        } catch {
+            return [];
+        }
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap(candidate => {
+        if (!isRecord(candidate)) return [];
+        const sourceUri = asNonEmptyString(candidate.sourceUri);
+        const resultSetIndex = asNonNegativeInteger(candidate.resultSetIndex);
+        if (!sourceUri || resultSetIndex === undefined) return [];
+        return [{
+            id: asNonEmptyString(candidate.id) ?? `${sourceUri}:${resultSetIndex}`,
+            sourceUri,
+            resultSetIndex,
+        }];
+    });
+}
+
 interface SharedResultPanelData {
     readonly resultSetsMsgPack?: unknown;
     readonly resultSetsJson?: unknown;
+    readonly sqlQueueJson?: unknown;
     readonly activeSourceJson?: unknown;
     readonly activeResultSetIndex?: unknown;
     readonly executingSourcesJson?: unknown;
+    readonly pinnedResultsJson?: unknown;
     readonly formatSettings?: unknown;
+    readonly queryRowLimit?: unknown;
     readonly dataVersion?: unknown;
     readonly resultSyncVersion?: unknown;
 }
@@ -98,6 +217,8 @@ const SHARED_MODE = 'shared';
 const SHARED_ROOT_ID = 'shared-ui-root';
 const SHARED_STYLE_ID = 'justybase-shared-result-panel-styles';
 const SHARED_MOUNT_FLAG = '__JUSTYBASE_SHARED_RESULT_PANEL_MOUNTED__';
+const SHARED_VIEW_STATE_KEY = '_sharedGridViewState';
+const SHARED_VIEW_STATE_LIMIT = 80;
 
 const resultPanelCapabilities: readonly CapabilityDescriptor[] = [
     {
@@ -117,11 +238,10 @@ const resultPanelCapabilities: readonly CapabilityDescriptor[] = [
     },
     {
         key: 'result-panel.guarded-edit',
-        status: 'read-only',
+        status: 'available',
         owner: 'VS Code Result Panel host',
-        reason: 'The shared Result Panel currently exposes read-only result data.',
         documentation: 'docs/TESTING_STRATEGY.md#stateful-and-asynchronous-behavior',
-        removalCondition: 'Route edit previews and guarded writes through ResultPort.',
+        removalCondition: 'Move the confirmation and statement builder behind ResultPort when the host adapter is extracted.',
     },
 ];
 
@@ -227,7 +347,56 @@ export function normalizeSharedResultSet(value: unknown): NormalizedResultSet | 
             ? candidate.isStreamingComplete
             : undefined,
         totalRowCount,
+        limitReached: candidate.limitReached === true,
+        isTextContent: candidate.isTextContent === true,
+        refreshFailure: normalizeSharedRefreshFailure(candidate.refreshFailure),
+        isEditable: candidate.isEditable === true,
+        editSource: normalizeSharedEditSource(candidate.editSource),
+        editDisabledReason: asNonEmptyString(candidate.editDisabledReason),
+        sql: asNonEmptyString(candidate.sql),
+        refreshSql: asNonEmptyString(candidate.refreshSql),
     };
+}
+
+function normalizeSharedRefreshFailure(value: unknown): SharedRefreshFailure | undefined {
+    if (!isRecord(value)) return undefined;
+    const message = asNonEmptyString(value.message);
+    if (!message) return undefined;
+    return {
+        message,
+        ...(asNonEmptyString(value.sql) === undefined ? {} : { sql: asNonEmptyString(value.sql)! }),
+        failedAt: typeof value.failedAt === 'number' && Number.isFinite(value.failedAt) ? value.failedAt : Date.now(),
+    };
+}
+
+function normalizeSharedEditSource(value: unknown): SharedEditSource | undefined {
+    if (!isRecord(value)) return undefined;
+    const table = asNonEmptyString(value.table);
+    if (!table) return undefined;
+    const db = asNonEmptyString(value.db);
+    const schema = asNonEmptyString(value.schema);
+    return {
+        ...(db === undefined ? {} : { db }),
+        ...(schema === undefined ? {} : { schema }),
+        table,
+    };
+}
+
+function persistedViewKey(sourceId: string, resultSetId: string): string {
+    return `${sourceId}\u0000${resultSetId}`;
+}
+
+function readPersistedSharedViews(): Map<string, UiResultSurfaceState['view']> {
+    const state = getHostState();
+    const stored = isRecord(state) && isRecord(state[SHARED_VIEW_STATE_KEY])
+        ? state[SHARED_VIEW_STATE_KEY] as Record<string, unknown>
+        : {};
+    const views = new Map<string, UiResultSurfaceState['view']>();
+    for (const [key, value] of Object.entries(stored)) {
+        if (!isRecord(value)) continue;
+        views.set(key, value as unknown as UiResultSurfaceState['view']);
+    }
+    return views;
 }
 
 function resultSetsFromData(data: SharedResultPanelData): readonly NormalizedResultSet[] {
@@ -260,6 +429,19 @@ export function sharedResultPanelMode(value: unknown): boolean {
 
 function sharedModeFromGlobal(): boolean {
     return sharedResultPanelMode((globalThis as { __JUSTYBASE_UI_MODE__?: unknown }).__JUSTYBASE_UI_MODE__);
+}
+
+function affectsFilterHistory(patch: Partial<UiResultSurfaceState['view']>): boolean {
+    return 'globalFilter' in patch
+        || 'columnFilters' in patch
+        || 'columnFilterDefinitions' in patch;
+}
+
+function affectsDiskQuery(patch: Partial<UiResultSurfaceState['view']>): boolean {
+    return 'globalFilter' in patch
+        || 'columnFilters' in patch
+        || 'columnFilterDefinitions' in patch
+        || 'sorting' in patch;
 }
 
 function sourceIndexKey(sourceId: string, resultSetIndex: number): string {
@@ -300,8 +482,90 @@ function rowsAsCsv(columns: readonly SharedColumn[], rows: readonly (readonly un
     return [header, body].filter(Boolean).join('\n');
 }
 
-function rowsAsText(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
-    return formatDataGridClipboard({ columns, rows }, 'text');
+function rowsAsJson(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
+    return JSON.stringify(rows.map(row => Object.fromEntries(columns.map((column, index) => [column.name, row[index] ?? null]))), null, 2);
+}
+
+function xmlEscape(value: string): string {
+    return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/'/gu, '&apos;');
+}
+
+function xmlElementName(name: string): string {
+    const cleaned = name.replace(/[^A-Za-z0-9_.-]/gu, '_');
+    return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
+}
+
+function rowsAsXml(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
+    const names = columns.map((column, index) => {
+        const base = xmlElementName(column.name || `column_${index + 1}`);
+        return columns.slice(0, index).some(previous => xmlElementName(previous.name) === base) ? `${base}_${index + 1}` : base;
+    });
+    const body = rows.map(row => `  <row>${names.map((name, index) => {
+        const value = row[index];
+        return value === null || value === undefined
+            ? `<${name} />`
+            : `<${name}>${xmlEscape(rawCell(value))}</${name}>`;
+    }).join('')}</row>`).join('\n');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<rows>\n${body}\n</rows>`;
+}
+
+function sqlIdentifier(name: string): string {
+    return `"${name.replace(/"/gu, '""')}"`;
+}
+
+function sqlLiteral(value: unknown): string {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+    if (value instanceof Uint8Array) return `X'${[...value].map(byte => byte.toString(16).padStart(2, '0')).join('')}'`;
+    return `'${String(value).replace(/'/gu, "''")}'`;
+}
+
+function rowsAsSqlInsert(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
+    const columnList = columns.map(column => sqlIdentifier(column.name)).join(', ');
+    return rows.map(row => `INSERT INTO ${sqlIdentifier('result')} (${columnList}) VALUES (${row.map(sqlLiteral).join(', ')});`).join('\n');
+}
+
+function rowsAsMarkdown(columns: readonly SharedColumn[], rows: readonly (readonly unknown[])[]): string {
+    const cell = (value: unknown): string => rawCell(value).replace(/\|/gu, '\\|').replace(/\r?\n/gu, ' ');
+    const header = `| ${columns.map(column => cell(column.name)).join(' | ')} |`;
+    const separator = `| ${columns.map(() => '---').join(' | ')} |`;
+    return [header, separator, ...rows.map(row => `| ${row.map(cell).join(' | ')} |`)].join('\n');
+}
+
+/** Returns the numeric LIMIT at the end of a refresh statement, if present. */
+export function sharedRefreshLimit(sql: string | undefined): string | undefined {
+    if (!sql) return undefined;
+    const match = /(?:^|\s)limit\s+(\d+)\s*;?\s*$/iu.exec(sql.trim());
+    return match?.[1];
+}
+
+function sharedColumnFormatting(
+    settings: unknown,
+    column: { readonly name: string },
+    columnIndex: number,
+): DataGridFormattingOptions | undefined {
+    if (!isRecord(settings)) return undefined;
+    const global = isRecord(settings.global) ? settings.global : {};
+    const connection = isRecord(settings.connection) ? settings.connection : {};
+    const overrides = isRecord(settings.columnOverrides) ? settings.columnOverrides : {};
+    const override = overrides[column.name] ?? overrides[String(columnIndex)];
+    const columnOverride = isRecord(override) ? override : {};
+    const integer = {
+        ...(isRecord(global.integer) ? global.integer : {}),
+        ...(isRecord(connection.integer) ? connection.integer : {}),
+        ...(isRecord(columnOverride.integer) ? columnOverride.integer : {}),
+    };
+    const decimal = {
+        ...(isRecord(global.decimal) ? global.decimal : {}),
+        ...(isRecord(connection.decimal) ? connection.decimal : {}),
+        ...(isRecord(columnOverride.decimal) ? columnOverride.decimal : {}),
+    };
+    if (Object.keys(integer).length === 0 && Object.keys(decimal).length === 0) return undefined;
+    return {
+        ...(Object.keys(integer).length === 0 ? {} : { integer }),
+        ...(Object.keys(decimal).length === 0 ? {} : { decimal }),
+    } as DataGridFormattingOptions;
 }
 
 function asyncStateFor(result: UiResultSurfaceState | undefined, rowCount: number) {
@@ -325,34 +589,159 @@ export function displaySharedRows(
     });
 }
 
+const SHARED_FILTER_VALUE_LIMIT = 10_000;
+
+function sharedFilterValueKey(value: unknown): string {
+    if (value === undefined) return 'undefined';
+    try {
+        return JSON.stringify(value) ?? String(value);
+    } catch {
+        return String(value);
+    }
+}
+
+/** Builds the Excel-style filter state from the currently loaded, unfiltered rows. */
+export function buildSharedFilterState(
+    request: DataGridColumnFilterRequest,
+    rows: readonly (readonly unknown[])[],
+    view: UiResultSurfaceState['view'],
+): DataGridColumnFilterState {
+    const column = request.column;
+    const options: DataGridFilterValueOption[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+        const value = row[request.columnIndex];
+        if (value === null || value === undefined) continue;
+        const key = sharedFilterValueKey(value);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        options.push({ key, value, label: formatDataGridCellValue(value, column.type, column) });
+        if (options.length >= SHARED_FILTER_VALUE_LIMIT) break;
+    }
+    options.sort((left, right) => left.label.localeCompare(right.label));
+    const definition = view.columnFilterDefinitions?.[column.name];
+    const legacyValue = view.columnFilters[column.name]?.trim() ?? '';
+    const operator = definition?.operator ?? (legacyValue ? 'contains' : 'in');
+    const primaryValue = definition?.value ?? legacyValue;
+    const primaryValue2 = definition?.value2 ?? '';
+    const conditions = operator === 'in'
+        ? undefined
+        : definition?.conditions !== undefined && definition.conditions.length > 0
+            ? definition.conditions.map(condition => ({
+                operator: condition.operator,
+                value: condition.value,
+                ...(condition.value2 === undefined ? {} : { value2: condition.value2 }),
+            }))
+            : [{ operator, value: primaryValue, ...(primaryValue2 === '' ? {} : { value2: primaryValue2 }) }];
+    const selectedKeys = definition?.operator === 'in' && definition.values !== undefined
+        ? definition.values.map(sharedFilterValueKey).filter(key => seen.has(key))
+        : options.map(option => option.key);
+    const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
+    const margin = 8;
+    const spaceBelow = viewportHeight - request.anchor.bottom - 4 - margin;
+    const spaceAbove = request.anchor.top - 4 - margin;
+    // A filter menu anchored near the bottom of a short result panel used to
+    // extend past the viewport and hide its footer buttons. Flip it above the
+    // header and cap both cases to the space that actually exists.
+    const openAbove = spaceBelow < 300 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(140, Math.min(520, openAbove ? spaceAbove : spaceBelow));
+    return {
+        columnIndex: request.columnIndex,
+        columnName: column.name,
+        left: Math.max(8, Math.min(request.anchor.left, viewportWidth - 356)),
+        top: openAbove ? Math.max(margin, request.anchor.top - 4 - maxHeight) : Math.max(margin, request.anchor.bottom + 4),
+        maxHeight,
+        options,
+        selectedKeys,
+        operator,
+        value: primaryValue,
+        value2: primaryValue2,
+        ...(conditions === undefined ? {} : { conditions }),
+        ...(definition?.logic === undefined ? {} : { conditionLogic: definition.logic }),
+        search: '',
+        loading: false,
+        truncated: options.length >= SHARED_FILTER_VALUE_LIMIT,
+        dirty: false,
+    };
+}
+
 interface SharedDatabaseGroupingRequest {
     readonly groupByColumns: readonly { readonly columnIndex: number; readonly columnName: string }[];
     readonly functions: readonly { readonly fn: string; readonly columnIndex?: number; readonly alias?: string }[];
     readonly limit?: number | null;
     readonly filterSpec?: DiskQuerySpec;
+    /** Output-column indexes; pivots order by row and pivot dimensions, never by the measure. */
+    readonly orderBy?: readonly { readonly columnIndex: number; readonly desc?: boolean }[];
 }
 
 function isNumericSharedColumn(column: Pick<SharedColumn, 'type'>): boolean {
     return /(?:bigint|smallint|tinyint|integer|int|serial|decimal|numeric|number|double|float|real|money|^dec)/iu.test(column.type ?? '');
 }
 
-export function sharedAnalysisQuerySpec(result: UiResultSurfaceState): DiskQuerySpec | undefined {
+export function sharedAnalysisQuerySpec(
+    result: UiResultSurfaceState,
+    excludeColumnName?: string,
+): DiskQuerySpec | undefined {
     const globalSearch = result.view.globalFilter.trim();
-    const columnFilters = Object.entries(result.view.columnFilters).flatMap(([name, value]) => {
-        const normalized = value.trim();
-        if (!normalized) return [];
+    const definitions = result.view.columnFilterDefinitions ?? {};
+    const columnFilters: DiskColumnFilterSpec[] = [];
+    for (const [name, definition] of Object.entries(definitions)) {
+        if (name === excludeColumnName) continue;
         const columnIndex = result.columns.findIndex(column => column.name === name);
-        if (columnIndex < 0) return [];
-        return [{
+        if (columnIndex < 0) continue;
+        if (definition.operator === 'in') {
+            if ((definition.values?.length ?? 0) > 0) {
+                columnFilters.push({ columnIndex, values: [...(definition.values ?? [])] });
+            }
+            continue;
+        }
+        const conditions = (definition.conditions !== undefined && definition.conditions.length > 0
+            ? definition.conditions
+            : [definition])
+            .filter(condition => condition.operator !== 'in');
+        if (conditions.length === 0) continue;
+        columnFilters.push({
+            columnIndex,
+            conditions: conditions.map(condition => ({
+                type: condition.operator,
+                value: condition.value,
+                ...(condition.value2 === undefined ? {} : { value2: condition.value2 }),
+            })),
+            ...(conditions.length > 1 ? { conditionLogic: definition.logic ?? 'and' } : {}),
+        });
+    }
+    for (const [name, value] of Object.entries(result.view.columnFilters)) {
+        if (name === excludeColumnName) continue;
+        if (definitions[name] !== undefined) continue;
+        const normalized = value.trim();
+        if (!normalized) continue;
+        const columnIndex = result.columns.findIndex(column => column.name === name);
+        if (columnIndex < 0) continue;
+        columnFilters.push({
             columnIndex,
             conditions: [{ type: 'contains', value: normalized }],
-        }];
-    });
+        });
+    }
     const spec: DiskQuerySpec = {
         ...(globalSearch ? { globalSearch } : {}),
         ...(columnFilters.length > 0 ? { columnFilters } : {}),
     };
     return spec.globalSearch || (spec.columnFilters?.length ?? 0) > 0 ? spec : undefined;
+}
+
+/** Disk-window query spec: the same filters plus the grid's sort order. */
+export function sharedDiskQuerySpec(
+    result: UiResultSurfaceState,
+    excludeColumnName?: string,
+): DiskQuerySpec | undefined {
+    const base = sharedAnalysisQuerySpec(result, excludeColumnName);
+    const sorting = result.view.sorting.flatMap(item => {
+        const columnIndex = result.columns.findIndex(column => column.name === item.column);
+        return columnIndex < 0 ? [] : [{ columnIndex, desc: item.descending }];
+    });
+    if (sorting.length === 0) return base;
+    return { ...(base ?? {}), sorting };
 }
 
 function toAggregateAnalysisTable(
@@ -414,7 +803,7 @@ function toGroupAnalysisTable(
 function toPivotAnalysisTable(
     columns: readonly UiResultColumn[],
     message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>,
-    valueColumnIndex: number,
+    plan: SharedPivotPlan,
 ): UiResultAnalysisTable {
     return createPivotAnalysisTable(
         columns,
@@ -422,19 +811,78 @@ function toPivotAnalysisTable(
             columns: (message.columns ?? []).map(column => ({ name: column.name, type: column.type })),
             rows: message.rows ?? [],
             totalGroups: message.totalRows ?? message.rows?.length ?? 0,
+            truncated: message.truncated === true,
         },
-        0,
-        1,
-        valueColumnIndex,
+        plan.rowColumnIndex,
+        plan.pivotColumnIndex,
+        plan.valueColumnIndex,
+        `${PIVOT_AGGREGATION_LABELS[plan.aggregation]} of ${columns[plan.valueColumnIndex]?.name ?? 'value'}`,
     );
 }
+
+interface SharedPivotPlan {
+    readonly rowColumnIndex: number;
+    readonly pivotColumnIndex: number;
+    readonly valueColumnIndex: number;
+    readonly aggregation: PivotAggregation;
+}
+
+const PIVOT_AGGREGATION_LABELS: Record<PivotAggregation, string> = {
+    sum: 'Sum',
+    count: 'Count',
+    avg: 'Average',
+    min: 'Min',
+    max: 'Max',
+};
 
 interface PendingAnalysisRequest {
     readonly kind: UiResultAnalysisKind;
     readonly ref: ResultRef;
+    readonly pivot?: SharedPivotPlan;
     readonly resolve: (table: UiResultAnalysisTable) => void;
     readonly reject: (error: Error) => void;
     readonly timer: ReturnType<typeof setTimeout>;
+}
+
+function sampledDistinctCount(rows: readonly (readonly unknown[])[], columnIndex: number, limit = 200): number {
+    const values = new Set<string>();
+    const sampleSize = Math.min(rows.length, 200);
+    for (let index = 0; index < sampleSize && values.size < limit; index += 1) {
+        const value = rows[index]?.[columnIndex];
+        values.add(value === null || value === undefined ? '\u0000NULL' : String(value));
+    }
+    return values.size;
+}
+
+/**
+ * Matches the legacy Explore Pivot defaults: the first dimension supplies the
+ * rows and a numeric measure supplies the values. The column dimension is the
+ * most compact categorical column so a quick pivot does not explode into
+ * hundreds of columns when the second dimension happens to be an identifier.
+ * A configured pivot (the Explore tab) remains authoritative for exact choice.
+ */
+function chooseSharedPivotPlan(
+    columns: readonly SharedColumn[],
+    rows: readonly (readonly unknown[])[],
+): SharedPivotPlan | undefined {
+    if (columns.length < 3) return undefined;
+    const roles = classifyColumns(columns.map(column => ({ name: column.name, type: column.type })), rows);
+    const dimensions = roles
+        .map((role, index) => ({ role, index }))
+        .filter(item => item.role !== 'measure');
+    const measures = roles
+        .map((role, index) => ({ role, index }))
+        .filter(item => item.role === 'measure');
+    const row = dimensions[0]?.index;
+    if (row === undefined) return undefined;
+    const columnCandidates = dimensions.filter(item => item.index !== row);
+    if (columnCandidates.length === 0) return undefined;
+    const pivot = columnCandidates.reduce((best, candidate) =>
+        sampledDistinctCount(rows, candidate.index) < sampledDistinctCount(rows, best.index) ? candidate : best,
+    ).index;
+    const value = measures.find(item => item.index !== row && item.index !== pivot)?.index;
+    if (value === undefined) return undefined;
+    return { rowColumnIndex: row, pivotColumnIndex: pivot, valueColumnIndex: value, aggregation: 'sum' };
 }
 
 function capability(capabilities: readonly CapabilityDescriptor[], key: string): CapabilityDescriptor | undefined {
@@ -446,12 +894,49 @@ export class SharedResultPanelController {
     private readonly listeners = new Set<() => void>();
     private readonly rows = new Map<string, readonly unknown[][]>();
     private readonly refs = new Map<string, ResultRef>();
+    private readonly editability = new Map<string, SharedEditInfo>();
+    private readonly resultKinds = new Map<string, { readonly isLog: boolean; readonly isTextContent: boolean }>();
+    private readonly pendingEdits = new Map<string, Map<string, SharedPendingEdit>>();
+    private readonly pendingDeletes = new Map<string, Set<number>>();
+    private readonly filterHistory = new Map<string, {
+        readonly past: UiResultSurfaceState['view'][];
+        readonly future: UiResultSurfaceState['view'][];
+    }>();
+    private applyingFilterHistory = false;
+    private editMode = false;
     private readonly nextSequence = new Map<string, number>();
     private readonly nextChunkSequence = new Map<string, number>();
     private readonly cancelRequests = new Map<string, string>();
     private readonly pendingRowWindows = new Map<number, { readonly ref: ResultRef; readonly offset: number }>();
+    private readonly pendingRowFetches = new Map<number, {
+        readonly ref: ResultRef;
+        readonly offset: number;
+        readonly resolve: (rows: readonly unknown[][], totalRows: number | undefined) => void;
+        readonly reject: (error: Error) => void;
+        readonly timer: ReturnType<typeof setTimeout>;
+    }>();
     private readonly pendingAnalysisRequests = new Map<number, PendingAnalysisRequest>();
+    private readonly diskBacked = new Set<string>();
+    private readonly resultSql = new Map<string, { readonly sql?: string; readonly refreshSql?: string }>();
+    private copyFormat: SharedCopyFormat = defaultSharedCopyFormat();
+    private pinnedResults: readonly SharedPinnedResult[] = [];
     private formatSettings: unknown;
+    private queryRowLimit = 200_000;
+    private sqlQueueJson: string | undefined;
+    private executingSources = new Set<string>();
+    private readonly refreshFailures = new Map<string, SharedRefreshFailure>();
+    private readonly limitReached = new Set<string>();
+    private readonly diskQuerySpecKeys = new Map<string, string>();
+    private readonly pendingFilterValues = new Map<number, {
+        readonly ref: ResultRef;
+        readonly columnIndex: number;
+        readonly column: UiResultColumn;
+        readonly resolve: (values: readonly DataGridFilterValueOption[], truncated: boolean) => void;
+        readonly reject: (error: Error) => void;
+    }>();
+    private filterValueRequestId = 0;
+    private readonly persistedViews = readPersistedSharedViews();
+    private persistTimer: ReturnType<typeof setTimeout> | undefined;
     private revision = 0;
     private streamRevision = 0;
     private rowRequestId = 0;
@@ -475,9 +960,226 @@ export class SharedResultPanelController {
         return this.revision;
     }
 
+    public isDiskBackedResult(result: UiResultSurfaceState | undefined): boolean {
+        return result ? this.diskBacked.has(resultKey(result.sourceId, result.resultSetId)) : false;
+    }
+
+    public getResultSql(result: UiResultSurfaceState | undefined): { readonly sql?: string; readonly refreshSql?: string } | undefined {
+        return result ? this.resultSql.get(resultKey(result.sourceId, result.resultSetId)) : undefined;
+    }
+
     public getRows(result: UiResultSurfaceState | undefined): readonly unknown[][] {
         if (!result) return [];
-        return this.rows.get(resultKey(result.sourceId, result.resultSetId)) ?? [];
+        const key = resultKey(result.sourceId, result.resultSetId);
+        const base = this.rows.get(key) ?? [];
+        const edits = this.pendingEdits.get(key);
+        if (!edits || edits.size === 0) return base;
+        const next = [...base];
+        for (const edit of edits.values()) {
+            const row = next[edit.rowIndex];
+            if (!row) continue;
+            const copy = [...row];
+            copy[edit.columnIndex] = edit.newValue;
+            next[edit.rowIndex] = copy;
+        }
+        return next;
+    }
+
+    public getEditInfo(result: UiResultSurfaceState | undefined): SharedEditInfo | undefined {
+        return result ? this.editability.get(resultKey(result.sourceId, result.resultSetId)) : undefined;
+    }
+
+    public isLogResult(result: UiResultSurfaceState | undefined): boolean {
+        return result ? this.resultKinds.get(resultKey(result.sourceId, result.resultSetId))?.isLog === true : false;
+    }
+
+    public isTextContentResult(result: UiResultSurfaceState | undefined): boolean {
+        return result ? this.resultKinds.get(resultKey(result.sourceId, result.resultSetId))?.isTextContent === true : false;
+    }
+
+    public getResultLabel(result: UiResultSurfaceState): string | undefined {
+        if (this.isLogResult(result)) return 'Logs';
+        if (this.isTextContentResult(result)) return 'MD Export';
+        return undefined;
+    }
+
+    public getQueryRowLimit(): number {
+        return this.queryRowLimit;
+    }
+
+    public getSqlQueueJson(): string | undefined {
+        return this.sqlQueueJson;
+    }
+
+    public isSourceExecuting(sourceId: string | undefined): boolean {
+        return sourceId !== undefined && this.executingSources.has(sourceId);
+    }
+
+    public getRefreshFailure(result: UiResultSurfaceState | undefined): SharedRefreshFailure | undefined {
+        return result ? this.refreshFailures.get(resultKey(result.sourceId, result.resultSetId)) : undefined;
+    }
+
+    public getCopyFormat(): SharedCopyFormat {
+        return this.copyFormat;
+    }
+
+    public getFormattingForColumn(column: { readonly name: string }, columnIndex: number): DataGridFormattingOptions | undefined {
+        return sharedColumnFormatting(this.formatSettings, column, columnIndex);
+    }
+
+    public postColumnAction(
+        result: UiResultSurfaceState,
+        columnIndex: number,
+        action: 'copyName' | 'copyQualifiedName' | 'addToSelect' | 'commentOnColumn' | 'findReferences' | 'toggleFavorite',
+    ): void {
+        const column = result.columns[columnIndex];
+        if (!column) return;
+        if (action === 'copyName') {
+            postHostMessage({ command: 'copyToClipboard', text: column.name });
+            return;
+        }
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        const info = this.getEditInfo(result);
+        postHostMessage({
+            command: 'columnAction',
+            sourceUri: result.sourceId,
+            resultSetIndex: ref?.resultSetIndex ?? result.statementIndex,
+            action,
+            columnName: column.name,
+            ...(info?.editSource ? { editSource: info.editSource } : {}),
+        });
+    }
+
+    public isResultPinned(result: UiResultSurfaceState): boolean {
+        return this.pinnedResults.some(pin =>
+            pin.sourceUri === result.sourceId && pin.resultSetIndex === result.statementIndex,
+        );
+    }
+
+    public toggleResultPin(result: UiResultSurfaceState): void {
+        postHostMessage({
+            command: 'toggleResultPin',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+        });
+    }
+
+    public closeResult(result: UiResultSurfaceState): void {
+        postHostMessage({
+            command: 'closeResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: result.statementIndex,
+        });
+    }
+
+    public clearLogs(sourceId: string | undefined): void {
+        if (!sourceId) return;
+        postHostMessage({ command: 'clearLogs', sourceUri: sourceId });
+    }
+
+    public calculateSelectionStats(
+        result: UiResultSurfaceState | undefined,
+        selection: DataGridSelection | undefined,
+    ): ReturnType<typeof calculateGridSelectionStats> | null {
+        if (!result || !selection || result.view.grouping.length > 0) return null;
+        const bounds = normalizeGridSelection(selection);
+        if (!bounds) return null;
+        // Ctrl/Cmd+click keeps several rectangles; stats cover exactly the
+        // toggled cells. The legacy grid skipped summaries above 100 cells.
+        const ranges = [bounds, ...(selection.additionalRanges ?? [])];
+        const cellCount = ranges.reduce(
+            (count, range) => count + (range.maxRow - range.minRow + 1) * (range.maxColumn - range.minColumn + 1),
+            0,
+        );
+        if (cellCount > 100) return null;
+        const rows = this.getRows(result);
+        const rowIndices = processDataGridRowIndices(result.columns, rows, result.view);
+        const values: unknown[] = [];
+        for (const range of ranges) {
+            for (let row = range.minRow; row <= range.maxRow; row += 1) {
+                const sourceIndex = rowIndices[row];
+                const rowValues = sourceIndex === undefined ? undefined : rows[sourceIndex];
+                if (!rowValues) continue;
+                for (let column = range.minColumn; column <= range.maxColumn; column += 1) {
+                    values.push(rowValues[column]);
+                }
+            }
+        }
+        return calculateGridSelectionStats(values);
+    }
+
+    public isEditMode(): boolean {
+        return this.editMode;
+    }
+
+    public getPendingEditCount(result: UiResultSurfaceState | undefined): number {
+        if (!result) return 0;
+        const key = resultKey(result.sourceId, result.resultSetId);
+        return (this.pendingEdits.get(key)?.size ?? 0) + (this.pendingDeletes.get(key)?.size ?? 0);
+    }
+
+    public isRowDeleted(result: UiResultSurfaceState | undefined, rowIndex: number): boolean {
+        return result ? this.pendingDeletes.get(resultKey(result.sourceId, result.resultSetId))?.has(rowIndex) === true : false;
+    }
+
+    public toggleRowDelete(result: UiResultSurfaceState, rowIndex: number): void {
+        const key = resultKey(result.sourceId, result.resultSetId);
+        const deletes = new Set(this.pendingDeletes.get(key) ?? []);
+        if (deletes.has(rowIndex)) deletes.delete(rowIndex);
+        else deletes.add(rowIndex);
+        if (deletes.size === 0) this.pendingDeletes.delete(key);
+        else this.pendingDeletes.set(key, deletes);
+        this.notify();
+    }
+
+    public toggleEditMode(result: UiResultSurfaceState | undefined): void {
+        const info = this.getEditInfo(result);
+        if (!result || !info?.isEditable) return;
+        this.editMode = !this.editMode;
+        // Matches the DOM grid: leaving or entering edit mode starts a clean session.
+        this.pendingEdits.clear();
+        this.pendingDeletes.clear();
+        this.notify();
+    }
+
+    public recordCellEdit(result: UiResultSurfaceState, edit: SharedPendingEdit): void {
+        const key = resultKey(result.sourceId, result.resultSetId);
+        const edits = this.pendingEdits.get(key) ?? new Map<string, SharedPendingEdit>();
+        edits.set(`${edit.rowIndex}:${edit.columnIndex}`, edit);
+        this.pendingEdits.set(key, edits);
+        this.notify();
+    }
+
+    public discardEdits(result: UiResultSurfaceState | undefined): void {
+        if (!result) return;
+        const key = resultKey(result.sourceId, result.resultSetId);
+        this.pendingEdits.delete(key);
+        this.pendingDeletes.delete(key);
+        this.notify();
+    }
+
+    public saveEdits(result: UiResultSurfaceState | undefined): void {
+        if (!result) return;
+        const info = this.getEditInfo(result);
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        const key = resultKey(result.sourceId, result.resultSetId);
+        const edits = [...(this.pendingEdits.get(key)?.values() ?? [])];
+        const deleteRowIndices = [...(this.pendingDeletes.get(key) ?? [])];
+        if (!info?.isEditable || info.editSource === undefined || !ref || (edits.length === 0 && deleteRowIndices.length === 0)) return;
+        postHostMessage({
+            command: 'saveEdits',
+            sourceUri: result.sourceId,
+            resultSetIndex: ref.resultSetIndex,
+            editSource: info.editSource,
+            edits,
+            ...(deleteRowIndices.length === 0 ? {} : { deleteRowIndices }),
+        });
+    }
+
+    private clearEditSession(): void {
+        this.editMode = false;
+        this.pendingEdits.clear();
+        this.pendingDeletes.clear();
     }
 
     public subscribe(listener: () => void): () => void {
@@ -496,7 +1198,12 @@ export class SharedResultPanelController {
                 break;
             case 'setActiveSource':
                 if (valid.formatSettings !== undefined) this.formatSettings = valid.formatSettings;
+                this.executingSources = new Set(parseJsonStrings(valid.executingSourcesJson));
+                if (valid.pinnedResultsJson !== undefined) {
+                    this.pinnedResults = parseSharedPinnedResults(valid.pinnedResultsJson);
+                }
                 this.selectSource(valid.sourceUri);
+                this.notify();
                 break;
             case 'resultFormattingState':
                 this.formatSettings = valid.data;
@@ -515,6 +1222,10 @@ export class SharedResultPanelController {
                 this.applyRowCountUpdate(valid);
                 break;
             case 'rowWindow':
+                // Legacy Explore/analytical disk samples use the same host
+                // request. Resolve those first so the shared grid never
+                // appends a sample page as if it were the next grid page.
+                if (handleRowWindow(valid as unknown as Record<string, unknown>)) break;
                 this.applyRowWindow(valid);
                 break;
             case 'diskQueryResult':
@@ -522,6 +1233,9 @@ export class SharedResultPanelController {
                 break;
             case 'databaseAggregationResult':
                 this.applyDatabaseAggregationResult(valid);
+                break;
+            case 'databaseFilterValuesResult':
+                this.applyDatabaseFilterValuesResult(valid);
                 break;
             case 'databaseGroupingResult':
                 this.applyDatabaseGroupingResult(valid);
@@ -532,8 +1246,27 @@ export class SharedResultPanelController {
             case 'switchToResultSet':
                 this.selectResultByIndex(valid.resultSetIndex);
                 break;
+            case 'sqlQueueState':
+                this.sqlQueueJson = valid.lanesJson;
+                this.notify();
+                break;
             case 'refreshView':
                 this.notify();
+                break;
+            case 'copySelection':
+                this.copyActive();
+                break;
+            case 'updateCopyFormat':
+                this.copyFormat = valid.copyFormat;
+                break;
+            case 'exploreOperationResult':
+            case 'exploreFullStatsResult':
+            case 'explorePivotResult':
+            case 'explorePivotPreviewResult':
+            case 'exploreComposerResult':
+            case 'exploreComposerPreviewResult':
+            case 'exploreFilteredSqlPreviewResult':
+                handleExploreHostMessage(valid as unknown as { command: string; requestId?: number; error?: string } & Record<string, unknown>);
                 break;
             default:
                 break;
@@ -572,12 +1305,109 @@ export class SharedResultPanelController {
     public updateView(resultSetId: string, patch: Partial<UiResultSurfaceState['view']>): void {
         const sourceId = this.getState().results.activeSourceId;
         if (!sourceId) return;
+        const key = `${sourceId}\u0000${resultSetId}`;
+        const before = Object.values(this.getState().results.byResultSetId)
+            .find(result => result.sourceId === sourceId && result.resultSetId === resultSetId);
+        if (!this.applyingFilterHistory && before && affectsFilterHistory(patch)) {
+            const history = this.filterHistory.get(key) ?? { past: [], future: [] };
+            const past = [...history.past, before.view].slice(-10);
+            this.filterHistory.set(key, { past, future: [] });
+        }
         this.dispatch({ type: 'results/view', sourceId, resultSetId, patch });
+        const result = Object.values(this.getState().results.byResultSetId)
+            .find(candidate => candidate.sourceId === sourceId && candidate.resultSetId === resultSetId);
+        if (!result) return;
+        this.schedulePersistView(result);
+        if (affectsDiskQuery(patch) && this.isDiskBackedResult(result)) this.resetDiskWindow(result);
     }
 
-    public refresh(): void {
-        const sourceId = this.getState().results.activeSourceId;
-        if (sourceId) this.postResultSync(sourceId, 'shared-refresh');
+    private schedulePersistView(result: UiResultSurfaceState): void {
+        this.persistedViews.set(persistedViewKey(result.sourceId, result.resultSetId), result.view);
+        if (this.persistTimer !== undefined) clearTimeout(this.persistTimer);
+        this.persistTimer = setTimeout(() => {
+            this.persistTimer = undefined;
+            if (this.disposed) return;
+            const entries = [...this.persistedViews.entries()].slice(-SHARED_VIEW_STATE_LIMIT);
+            const state = isRecord(getHostState()) ? { ...(getHostState() as Record<string, unknown>) } : {};
+            state[SHARED_VIEW_STATE_KEY] = Object.fromEntries(entries);
+            setHostState(state);
+        }, 200);
+    }
+
+    public refresh(result: UiResultSurfaceState | undefined = this.activeResult(), limitValue?: string): void {
+        if (!result) return;
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        const refreshSql = this.getResultSql(result)?.refreshSql?.trim();
+        if (!ref || !refreshSql) {
+            this.postResultSync(result.sourceId, 'shared-refresh');
+            return;
+        }
+        postHostMessage({
+            command: 'refreshResult',
+            sourceUri: result.sourceId,
+            resultSetIndex: ref.resultSetIndex,
+            ...(limitValue === undefined ? {} : { limitValue }),
+        });
+    }
+
+    public clearAllFilters(result: UiResultSurfaceState | undefined): void {
+        if (!result) return;
+        this.updateView(result.resultSetId, {
+            globalFilter: '',
+            columnFilters: {},
+            columnFilterDefinitions: {},
+            columnAggregations: {},
+        });
+    }
+
+    public canUndoFilter(result: UiResultSurfaceState | undefined): boolean {
+        if (!result) return false;
+        return (this.filterHistory.get(`${result.sourceId}\u0000${result.resultSetId}`)?.past.length ?? 0) > 0;
+    }
+
+    public canRedoFilter(result: UiResultSurfaceState | undefined): boolean {
+        if (!result) return false;
+        return (this.filterHistory.get(`${result.sourceId}\u0000${result.resultSetId}`)?.future.length ?? 0) > 0;
+    }
+
+    public undoFilter(result: UiResultSurfaceState | undefined): void {
+        this.moveFilterHistory(result, 'undo');
+    }
+
+    public redoFilter(result: UiResultSurfaceState | undefined): void {
+        this.moveFilterHistory(result, 'redo');
+    }
+
+    private moveFilterHistory(result: UiResultSurfaceState | undefined, direction: 'undo' | 'redo'): void {
+        if (!result) return;
+        const key = `${result.sourceId}\u0000${result.resultSetId}`;
+        const history = this.filterHistory.get(key);
+        if (!history) return;
+        const source = direction === 'undo' ? history.past : history.future;
+        if (source.length === 0) return;
+        const target = source[source.length - 1]!;
+        const current = result.view;
+        const nextPast = direction === 'undo' ? history.past.slice(0, -1) : [...history.past, current].slice(-10);
+        const nextFuture = direction === 'undo' ? [...history.future, current] : history.future.slice(0, -1);
+        this.filterHistory.set(key, { past: nextPast, future: nextFuture });
+        this.applyingFilterHistory = true;
+        this.updateView(result.resultSetId, {
+            globalFilter: target.globalFilter,
+            columnFilters: target.columnFilters,
+            columnFilterDefinitions: target.columnFilterDefinitions ?? {},
+        });
+        this.applyingFilterHistory = false;
+    }
+
+    public clearRefreshFailure(result: UiResultSurfaceState | undefined): void {
+        if (!result) return;
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) return;
+        postHostMessage({
+            command: 'clearRefreshFailure',
+            sourceUri: result.sourceId,
+            resultSetIndex: ref.resultSetIndex,
+        });
     }
 
     public loadMore(result: UiResultSurfaceState): void {
@@ -591,6 +1421,7 @@ export class SharedResultPanelController {
         if (alreadyPending) return;
         const requestId = ++this.rowRequestId;
         this.pendingRowWindows.set(requestId, { ref, offset });
+        const querySpec = this.isDiskBackedResult(result) ? sharedDiskQuerySpec(result) : undefined;
         postHostMessage({
             command: 'requestRows',
             sourceUri: result.sourceId,
@@ -598,10 +1429,81 @@ export class SharedResultPanelController {
             offset,
             limit: 2_000,
             requestId,
+            ...(querySpec === undefined ? {} : { querySpec }),
         });
     }
 
-    public requestAnalysis(kind: UiResultAnalysisKind, result: UiResultSurfaceState): Promise<UiResultAnalysisTable> {
+    /** Re-queries the spilled dataset from row 0 after a filter or sort change. */
+    private resetDiskWindow(result: UiResultSurfaceState): void {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref || ref.resultSetId !== result.resultSetId) return;
+        const key = resultKey(result.sourceId, result.resultSetId);
+        for (const [requestId, request] of this.pendingRowWindows.entries()) {
+            if (request.ref === ref) this.pendingRowWindows.delete(requestId);
+        }
+        this.rows.set(key, []);
+        this.dispatch({
+            type: 'results/hydrate',
+            sourceId: ref.sourceId,
+            executionId: ref.executionId,
+            resultSetId: ref.resultSetId,
+            loadedRowCount: 0,
+            totalRowCount: result.totalRowCount,
+        });
+        const querySpec = sharedDiskQuerySpec(result);
+        const requestId = ++this.rowRequestId;
+        this.pendingRowWindows.set(requestId, { ref, offset: 0 });
+        postHostMessage({
+            command: 'requestRows',
+            sourceUri: result.sourceId,
+            resultSetIndex: ref.resultSetIndex,
+            offset: 0,
+            limit: 2_000,
+            requestId,
+            ...(querySpec === undefined ? {} : { querySpec }),
+        });
+    }
+
+    /**
+     * Loads the distinct values for one column from the spilled dataset. The
+     * grid's own filter for that column is excluded so the value list remains
+     * complete while the user edits it.
+     */
+    public requestFilterValues(
+        result: UiResultSurfaceState,
+        columnIndex: number,
+    ): Promise<{ readonly values: readonly DataGridFilterValueOption[]; readonly truncated: boolean }> {
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        const column = result.columns[columnIndex];
+        if (!ref || !column) return Promise.reject(new Error('The result set is no longer active.'));
+        const requestId = ++this.filterValueRequestId;
+        return new Promise((resolve, reject) => {
+            this.pendingFilterValues.set(requestId, {
+                ref,
+                columnIndex,
+                column,
+                resolve: (values, truncated) => resolve({ values, truncated }),
+                reject,
+            });
+            const querySpec = sharedAnalysisQuerySpec(result, column.name);
+            postHostMessage({
+                command: 'diskQuery',
+                sourceUri: result.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                requestId,
+                action: 'distinct',
+                columnIndex,
+                distinctLimit: SHARED_FILTER_VALUE_LIMIT,
+                ...(querySpec === undefined ? {} : { querySpec }),
+            });
+        });
+    }
+
+    public requestAnalysis(
+        kind: UiResultAnalysisKind,
+        result: UiResultSurfaceState,
+        pivotOverride?: SharedPivotPlan,
+    ): Promise<UiResultAnalysisTable> {
         const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
         if (!ref || ref.resultSetId !== result.resultSetId) {
             return Promise.reject(new Error('The result set is no longer active.'));
@@ -610,6 +1512,9 @@ export class SharedResultPanelController {
             .map((column, index) => ({ column, index }))
             .filter(item => isNumericSharedColumn(item.column));
         const querySpec = sharedAnalysisQuerySpec(result);
+        const pivotPlan = kind === 'pivot'
+            ? pivotOverride ?? chooseSharedPivotPlan(result.columns, this.getRows(result))
+            : undefined;
         const requestId = ++this.analysisRequestId;
 
         return new Promise((resolve, reject) => {
@@ -619,7 +1524,7 @@ export class SharedResultPanelController {
                 this.pendingAnalysisRequests.delete(requestId);
                 pending.reject(new Error(`${kind} analysis timed out.`));
             }, 300_000);
-            this.pendingAnalysisRequests.set(requestId, { kind, ref, resolve, reject, timer });
+            this.pendingAnalysisRequests.set(requestId, { kind, ref, pivot: pivotPlan, resolve, reject, timer });
 
             if (kind === 'aggregate') {
                 const aggregations = result.columns.flatMap((_column, columnIndex) => {
@@ -673,19 +1578,35 @@ export class SharedResultPanelController {
                 return;
             }
 
-            const pivotColumn = result.columns[1];
-            const valueColumn = numericColumns.find(item => item.index > 1);
-            if (!pivotColumn || !valueColumn) {
-                this.rejectAnalysis(requestId, new Error('Pivot needs two dimensions and a numeric value column.'));
+            if (!pivotPlan) {
+                this.rejectAnalysis(requestId, new Error('Pivot needs a row dimension, a column dimension, and a numeric value column.'));
                 return;
             }
+            const pivotColumn = result.columns[pivotPlan.pivotColumnIndex];
+            const valueColumn = result.columns[pivotPlan.valueColumnIndex];
+            if (!pivotColumn || !valueColumn) {
+                this.rejectAnalysis(requestId, new Error('Pivot columns are no longer available.'));
+                return;
+            }
+            const functionName = pivotPlan.aggregation === 'avg' ? 'avg' : pivotPlan.aggregation;
             const grouping: SharedDatabaseGroupingRequest = {
                 groupByColumns: [
-                    { columnIndex: 0, columnName: firstColumn.name },
-                    { columnIndex: 1, columnName: pivotColumn.name },
+                    { columnIndex: pivotPlan.rowColumnIndex, columnName: result.columns[pivotPlan.rowColumnIndex]!.name },
+                    { columnIndex: pivotPlan.pivotColumnIndex, columnName: pivotColumn.name },
                 ],
-                functions: [{ fn: 'sum', columnIndex: valueColumn.index, alias: `SUM_${valueColumn.column.name}` }],
-                limit: 2_000,
+                functions: [{
+                    fn: functionName,
+                    ...(functionName === 'count' ? {} : { columnIndex: pivotPlan.valueColumnIndex }),
+                    alias: `${functionName.toUpperCase()}_${valueColumn.name}`,
+                }],
+                // A pivot is a matrix, not a top-N ranking. Without an explicit
+                // order the grouping endpoint sorts by the aggregate value and
+                // silently returns only the highest cells (the old default made
+                // every date row a Saturday because SUM(day)=7 sorted first).
+                orderBy: [{ columnIndex: 0, desc: false }, { columnIndex: 1, desc: false }],
+                // The host caps grouping output at 10,000 rows; asking for one
+                // extra row lets it report that the matrix is partial.
+                limit: 10_001,
                 filterSpec: querySpec,
             };
             postHostMessage({
@@ -719,35 +1640,299 @@ export class SharedResultPanelController {
     public copyActive(): void {
         const result = this.activeResult();
         if (!result) return;
-        postHostMessage({
-            command: 'copyToClipboard',
-            text: rowsAsText(result.columns, processDataGridRows(result.columns, this.getRows(result), result.view)),
+        const loadedRows = this.getRows(result);
+        const rows = processDataGridRows(result.columns, loadedRows, result.view);
+        if (rows.length === 0) return;
+        writeSharedClipboard(
+            { columns: resolveDataGridColumns(result.columns, loadedRows), rows, includeHeaders: true },
+            this.copyFormat,
+        );
+    }
+
+    /** Fetches one page for copy-all without disturbing the visible row window. */
+    private requestRowsForCopy(ref: ResultRef, offset: number, limit: number): Promise<{ readonly rows: readonly unknown[][]; readonly totalRows?: number }> {
+        const result = this.resultForRef(ref);
+        const querySpec = result !== undefined && this.isDiskBackedResult(result) ? sharedDiskQuerySpec(result) : undefined;
+        const requestId = ++this.rowRequestId;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingRowFetches.delete(requestId);
+                reject(new Error('Timed out while reading rows for copy.'));
+            }, 60_000);
+            this.pendingRowFetches.set(requestId, {
+                ref,
+                offset,
+                resolve: (rows, totalRows) => resolve({ rows, ...(totalRows === undefined ? {} : { totalRows }) }),
+                reject,
+                timer,
+            });
+            postHostMessage({
+                command: 'requestRows',
+                sourceUri: ref.sourceId,
+                resultSetIndex: ref.resultSetIndex,
+                offset,
+                limit,
+                requestId,
+                ...(querySpec === undefined ? {} : { querySpec }),
+            });
         });
     }
 
+    /**
+     * Copies every filtered row, including disk-backed pages that are not yet
+     * loaded into the grid. Returns the number of copied rows.
+     */
+    public async copyAllActive(): Promise<number> {
+        const result = this.activeResult();
+        if (!result) return 0;
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) return 0;
+        let rows: readonly unknown[][] = this.getRows(result);
+        if (this.isDiskBackedResult(result)) {
+            const pageSize = 5_000;
+            const maxRows = Math.max(result.totalRowCount, rows.length);
+            const collected: unknown[][] = [];
+            let offset = 0;
+            while (offset < maxRows) {
+                const page = await this.requestRowsForCopy(ref, offset, Math.min(pageSize, maxRows - offset));
+                if (page.rows.length === 0) break;
+                for (const row of page.rows) collected.push([...row]);
+                offset += page.rows.length;
+                if (page.rows.length < pageSize) break;
+            }
+            rows = collected;
+        }
+        const displayRows = processDataGridRows(result.columns, rows, result.view);
+        if (displayRows.length === 0) return 0;
+        writeSharedClipboard(
+            { columns: resolveDataGridColumns(result.columns, rows), rows: displayRows, includeHeaders: true },
+            this.copyFormat,
+        );
+        return displayRows.length;
+    }
+
+    /** Copies the active result in an explicit clipboard format. */
+    public copyActiveAs(format: SharedClipboardFormat): void {
+        const result = this.activeResult();
+        if (!result) return;
+        const loadedRows = this.getRows(result);
+        const rows = processDataGridRows(result.columns, loadedRows, result.view);
+        if (rows.length === 0) return;
+        writeSharedClipboard(
+            { columns: resolveDataGridColumns(result.columns, loadedRows), rows, includeHeaders: true },
+            format,
+        );
+    }
+
+    /** Routes the legacy "Query Locally (DuckDB)" action through the host bridge. */
+    public queryLocallyDuckDB(result: UiResultSurfaceState | undefined): void {
+        if (!result) return;
+        const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+        if (!ref) return;
+        postHostMessage({
+            command: 'queryLocallyDuckDB',
+            data: { sourceUri: result.sourceId, resultSetIndex: ref.resultSetIndex },
+        });
+    }
+
+    /**
+     * Renders the filtered grid to a PNG (up to 500 rows) and copies it to the
+     * clipboard, matching the legacy "Copy grid as image" action. When the
+     * webview clipboard cannot accept images the PNG is downloaded instead.
+     */
+    public async copyGridAsImage(result: UiResultSurfaceState | undefined): Promise<void> {
+        if (!result) return;
+        const loadedRows = this.getRows(result);
+        const resolved = resolveDataGridColumns(result.columns, loadedRows);
+        const visibleColumns = resolved
+            .map((column, columnIndex) => ({ column, columnIndex }))
+            .filter(({ column, columnIndex }) =>
+                result.view.columnVisibility?.[column.name] !== false
+                && result.view.columnVisibility?.[String(columnIndex)] !== false,
+            );
+        const sourceIndices = processDataGridRowIndices(result.columns, loadedRows, result.view);
+        const displayIndices = sourceIndices.slice(0, 500);
+        if (visibleColumns.length === 0 || displayIndices.length === 0) return;
+        const bodyStyle = typeof document === 'undefined' ? undefined : getComputedStyle(document.body);
+        const readColor = (name: string, fallback: string): string => bodyStyle?.getPropertyValue(name).trim() || fallback;
+        const background = readColor('--vscode-editor-background', '#1e1e1e');
+        const foreground = readColor('--vscode-editor-foreground', '#cccccc');
+        const border = readColor('--vscode-panel-border', '#333333');
+        const headerBackground = readColor('--vscode-sideBar-background', '#252526');
+        const muted = readColor('--vscode-descriptionForeground', '#888888');
+        const numericColor = readColor('--vscode-charts-blue', '#519aba');
+        const temporalColor = '#d8b4fe';
+        const fontFamily = bodyStyle?.fontFamily || 'monospace';
+        const font = `12px ${fontFamily}`;
+        const fontBold = `600 12px ${fontFamily}`;
+        const rowHeight = 24;
+        const headerHeight = 30;
+        const padding = 8;
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        const format = (value: unknown, column: { readonly type?: string; readonly name: string }, columnIndex: number): string => {
+            if (value === null || value === undefined) return 'NULL';
+            return formatDataGridCellValue(value, column.type, column, this.getFormattingForColumn(column, columnIndex));
+        };
+        const widths = visibleColumns.map(({ column, columnIndex }) => {
+            context.font = fontBold;
+            let width = context.measureText(column.name).width + padding * 3;
+            context.font = font;
+            for (const displayIndex of displayIndices.slice(0, 100)) {
+                const sourceIndex = sourceIndices[displayIndex];
+                const value = sourceIndex === undefined ? undefined : loadedRows[sourceIndex]?.[columnIndex];
+                width = Math.max(width, Math.min(260, context.measureText(format(value, column, columnIndex)).width + padding * 2));
+            }
+            return Math.max(80, Math.min(260, Math.ceil(width)));
+        });
+        const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+        canvas.width = Math.max(1, totalWidth);
+        canvas.height = headerHeight + displayIndices.length * rowHeight + 1;
+        context.fillStyle = background;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        let x = 0;
+        context.font = fontBold;
+        context.fillStyle = headerBackground;
+        context.fillRect(0, 0, canvas.width, headerHeight);
+        context.fillStyle = foreground;
+        context.textBaseline = 'middle';
+        for (let index = 0; index < visibleColumns.length; index += 1) {
+            const width = widths[index]!;
+            const text = visibleColumns[index]!.column.name;
+            context.fillText(text, x + padding, headerHeight / 2, width - padding * 2);
+            x += width;
+            context.strokeStyle = border;
+            context.beginPath();
+            context.moveTo(x, 0);
+            context.lineTo(x, canvas.height);
+            context.stroke();
+        }
+        context.font = font;
+        for (let rowIndex = 0; rowIndex < displayIndices.length; rowIndex += 1) {
+            const y = headerHeight + rowIndex * rowHeight;
+            if (rowIndex % 2 === 1) {
+                context.fillStyle = 'rgba(255,255,255,0.04)';
+                context.fillRect(0, y, canvas.width, rowHeight);
+            }
+            const sourceIndex = sourceIndices[displayIndices[rowIndex]!];
+            const row = sourceIndex === undefined ? undefined : loadedRows[sourceIndex];
+            let cellX = 0;
+            for (let index = 0; index < visibleColumns.length; index += 1) {
+                const { column, columnIndex } = visibleColumns[index]!;
+                const width = widths[index]!;
+                const value = row?.[columnIndex];
+                const text = format(value, column, columnIndex);
+                if (value === null || value === undefined) context.fillStyle = muted;
+                else if (isDataGridNumericColumn(column)) context.fillStyle = numericColor;
+                else if (/date|time/iu.test(column.type ?? '')) context.fillStyle = temporalColor;
+                else context.fillStyle = foreground;
+                context.fillText(text, cellX + padding, y + rowHeight / 2, width - padding * 2);
+                cellX += width;
+            }
+            context.strokeStyle = border;
+            context.beginPath();
+            context.moveTo(0, y + rowHeight + 0.5);
+            context.lineTo(canvas.width, y + rowHeight + 0.5);
+            context.stroke();
+        }
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) return;
+        const clipboardItem = typeof ClipboardItem === 'undefined' ? undefined : ClipboardItem;
+        try {
+            if (clipboardItem && typeof navigator !== 'undefined' && navigator.clipboard?.write) {
+                await navigator.clipboard.write([new clipboardItem({ 'image/png': blob })]);
+                postHostMessage({ command: 'info', text: 'Grid image copied to clipboard' });
+                return;
+            }
+        } catch {
+            // Fall through to the download so the action still produces an image.
+        }
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'result-grid.png';
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1_000);
+        postHostMessage({ command: 'info', text: 'Grid image downloaded' });
+    }
+
     public exportActive(): void {
+        this.exportActiveWithOptions('csv', 'file', 'loaded');
+    }
+
+    public exportAllResults(): void {
+        const state = this.getState();
+        const activeSourceId = state.results.activeSourceId;
+        if (!activeSourceId) return;
+        const results = Object.values(state.results.byResultSetId)
+            .filter(result => result.sourceId === activeSourceId && result.status !== 'error' && !this.isLogResult(result))
+            .sort((left, right) => left.statementIndex - right.statementIndex)
+            .flatMap(result => {
+                const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
+                const rows = this.getRows(result);
+                if (!ref || rows.length === 0) return [];
+                return [{
+                    resultSetIndex: ref.resultSetIndex,
+                    rowIndices: rows.map((_row, index) => index),
+                    columnIds: result.columns.map((_column, index) => String(index)),
+                    name: this.getResultLabel(result) ?? `Result ${result.statementIndex + 1}`,
+                    isActive: result.resultSetId === state.results.activeResultSetId,
+                }];
+            });
+        if (results.length === 0) {
+            postHostMessage({ command: 'info', text: 'No data available to export.' });
+            return;
+        }
+        postHostMessage({
+            command: 'exportAllResultSetsToExcel',
+            data: { sourceUri: activeSourceId, results },
+        });
+    }
+
+    /** Opens the host export pipeline with the format/destination picked in the panel. */
+    public exportActiveWithOptions(
+        format: string,
+        destination: 'file' | 'open' | 'temp' | 'clipboard',
+        rowScope: 'loaded' | 'all',
+    ): void {
         const result = this.activeResult();
         if (!result) return;
         const rows = this.getRows(result);
+        const visibleRows = processDataGridRows(result.columns, rows, result.view);
         const rowIndices = processDataGridRowIndices(result.columns, rows, result.view);
         const ref = this.refs.get(sourceIndexKey(result.sourceId, result.statementIndex));
         const formatSettings = isRecord(this.formatSettings) ? this.formatSettings : undefined;
         const globalSettings = formatSettings && isRecord(formatSettings.global) ? formatSettings.global : undefined;
         const useFormattedValues = globalSettings?.useFormattedValuesForExport === true;
         if (!ref || rowIndices.length === 0) {
-            postHostMessage({
-                command: 'exportCsv',
-                data: rowsAsCsv(result.columns, processDataGridRows(result.columns, rows, result.view), useFormattedValues),
-            });
+            // Detached fixtures (and empty live grids) still support the text
+            // formats through the legacy data commands.
+            const serialized = format === 'csv'
+                ? { command: 'exportCsv' as const, data: rowsAsCsv(result.columns, visibleRows, useFormattedValues) }
+                : format === 'json'
+                    ? { command: 'exportJson' as const, data: rowsAsJson(result.columns, visibleRows) }
+                    : format === 'xml'
+                        ? { command: 'exportXml' as const, data: rowsAsXml(result.columns, visibleRows) }
+                        : format === 'sql'
+                            ? { command: 'exportSqlInsert' as const, data: rowsAsSqlInsert(result.columns, visibleRows) }
+                            : format === 'markdown'
+                                ? { command: 'exportMarkdown' as const, data: rowsAsMarkdown(result.columns, visibleRows) }
+                                : undefined;
+            if (serialized === undefined) {
+                postHostMessage({ command: 'info', text: 'Choose a text format for the loaded rows in this result.' });
+                return;
+            }
+            postHostMessage(serialized);
             return;
         }
         postHostMessage({
-            command: 'exportCsv',
+            command: 'initiateExportWithSelection',
             data: {
                 sourceUri: result.sourceId,
                 resultSetIndex: ref.resultSetIndex,
                 rowIndices: [...rowIndices],
-                rowScope: 'loaded',
+                rowScope,
                 formatting: globalSettings && typeof globalSettings.useFormattedValuesForExport === 'boolean'
                     ? {
                         useFormattedValues: globalSettings.useFormattedValuesForExport,
@@ -755,6 +1940,9 @@ export class SharedResultPanelController {
                     }
                     : undefined,
             },
+            format,
+            destination,
+            rowScope,
         });
     }
 
@@ -820,6 +2008,25 @@ export class SharedResultPanelController {
         pending.resolve(toAggregateAnalysisTable(result.columns, result, message.aggregations ?? []));
     }
 
+    private applyDatabaseFilterValuesResult(
+        message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseFilterValuesResult' }>,
+    ): void {
+        const pending = this.pendingFilterValues.get(message.requestId);
+        if (!pending) return;
+        this.pendingFilterValues.delete(message.requestId);
+        if (message.error !== undefined) {
+            pending.reject(new Error(message.error));
+            return;
+        }
+        const values = (message.values ?? []).map(item => ({
+            key: sharedFilterValueKey(item.raw),
+            value: item.raw,
+            label: formatDataGridCellValue(item.raw, pending.column.type, pending.column),
+        }));
+        values.sort((left, right) => left.label.localeCompare(right.label));
+        pending.resolve(values, message.truncated === true);
+    }
+
     private applyDatabaseGroupingResult(
         message: Extract<ResultPanelHostToWebviewMessage, { command: 'databaseGroupingResult' }>,
     ): void {
@@ -842,20 +2049,23 @@ export class SharedResultPanelController {
             pending.resolve(toGroupAnalysisTable(message));
             return;
         }
-        const valueColumnIndex = result.columns.findIndex((column, index) => index > 1 && isNumericSharedColumn(column));
-        if (valueColumnIndex < 0) {
-            pending.reject(new Error('Pivot value column is no longer available.'));
+        if (!pending.pivot) {
+            pending.reject(new Error('Pivot configuration is no longer available.'));
             return;
         }
-        pending.resolve(toPivotAnalysisTable(result.columns, message, valueColumnIndex));
+        pending.resolve(toPivotAnalysisTable(result.columns, message, pending.pivot));
     }
 
     public dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
+        if (this.persistTimer !== undefined) clearTimeout(this.persistTimer);
+        this.persistTimer = undefined;
         this.listeners.clear();
         this.rows.clear();
         this.refs.clear();
+        this.diskBacked.clear();
+        this.resultSql.clear();
         this.nextSequence.clear();
         this.nextChunkSequence.clear();
         this.cancelRequests.clear();
@@ -865,6 +2075,10 @@ export class SharedResultPanelController {
             pending.reject(new Error('Result panel disposed.'));
         }
         this.pendingAnalysisRequests.clear();
+        for (const pending of this.pendingFilterValues.values()) {
+            pending.reject(new Error('Result panel disposed.'));
+        }
+        this.pendingFilterValues.clear();
         this.store.dispose();
     }
 
@@ -905,9 +2119,13 @@ export class SharedResultPanelController {
     private applyHydrate(data: SharedResultPanelData): void {
         const sourceId = parseJsonString(data.activeSourceJson) ?? 'vscode:results';
         const resultSets = resultSetsFromData(data);
+        this.pinnedResults = parseSharedPinnedResults(data.pinnedResultsJson);
         this.formatSettings = data.formatSettings;
+        if (typeof data.sqlQueueJson === 'string') this.sqlQueueJson = data.sqlQueueJson;
+        this.queryRowLimit = asNonNegativeInteger(data.queryRowLimit) ?? this.queryRowLimit;
         const activeResultSetIndex = asNonNegativeInteger(data.activeResultSetIndex) ?? 0;
         const executingSources = new Set(parseJsonStrings(data.executingSourcesJson));
+        this.executingSources = executingSources;
         const version = asNonNegativeInteger(data.dataVersion)
             ?? asNonNegativeInteger(data.resultSyncVersion)
             ?? ++this.streamRevision;
@@ -932,7 +2150,21 @@ export class SharedResultPanelController {
             incomingIndexKeys.add(indexKey);
             this.replaceRef(indexKey, ref);
             this.rows.set(key, normalized.rows);
+            this.resultKinds.set(key, { isLog: normalized.isLog, isTextContent: normalized.isTextContent === true });
+            if (normalized.refreshFailure) this.refreshFailures.set(key, normalized.refreshFailure);
+            else this.refreshFailures.delete(key);
+            if (normalized.limitReached) this.limitReached.add(key);
+            else this.limitReached.delete(key);
+            this.editability.set(key, {
+                isEditable: normalized.isEditable === true,
+                editSource: normalized.editSource,
+                reason: normalized.editDisabledReason,
+            });
             this.startResult(ref, normalized, executingSources.has(sourceId));
+            const savedView = this.persistedViews.get(persistedViewKey(sourceId, resultSetId));
+            if (savedView) {
+                this.dispatch({ type: 'results/view', sourceId, resultSetId, patch: savedView });
+            }
             if (resultSetIndex === activeResultSetIndex) activeResultSetId = resultSetId;
         }
 
@@ -945,11 +2177,25 @@ export class SharedResultPanelController {
             if (incomingResultSetIds.has(ref.resultSetId)) continue;
             const key = resultKey(ref.sourceId, ref.resultSetId);
             this.rows.delete(key);
+            this.editability.delete(key);
+            this.resultKinds.delete(key);
+            this.resultSql.delete(key);
+            this.pendingEdits.delete(key);
+            this.pendingDeletes.delete(key);
+            this.refreshFailures.delete(key);
+            this.limitReached.delete(key);
+            this.diskQuerySpecKeys.delete(key);
             this.nextSequence.delete(key);
             this.nextChunkSequence.delete(key);
             this.cancelRequests.delete(indexKey);
             for (const [requestId, request] of this.pendingRowWindows.entries()) {
                 if (request.ref.sourceId === ref.sourceId && request.ref.resultSetId === ref.resultSetId) this.pendingRowWindows.delete(requestId);
+            }
+            for (const [requestId, request] of this.pendingFilterValues.entries()) {
+                if (request.ref.sourceId === ref.sourceId && request.ref.resultSetId === ref.resultSetId) {
+                    this.pendingFilterValues.delete(requestId);
+                    request.reject(new Error('The result set is no longer available.'));
+                }
             }
         }
         this.dispatch({
@@ -969,10 +2215,18 @@ export class SharedResultPanelController {
             });
         }
         this.dispatch({ type: 'shell/status', status: 'complete' });
+        this.clearEditSession();
         this.setSurface('results');
     }
 
     private startResult(ref: ResultRef, normalized: NormalizedResultSet, executing: boolean): void {
+        this.diskBacked.delete(resultKey(ref.sourceId, ref.resultSetId));
+        if (normalized.sql !== undefined || normalized.refreshSql !== undefined) {
+            this.resultSql.set(resultKey(ref.sourceId, ref.resultSetId), {
+                sql: normalized.sql,
+                refreshSql: normalized.refreshSql,
+            });
+        }
         const base = { type: 'execution/start' as const, ...ref, statementIndex: ref.resultSetIndex };
         this.dispatch(base);
         let sequence = 1;
@@ -1016,7 +2270,16 @@ export class SharedResultPanelController {
         } else if (normalized.totalRowCount === 0) {
             this.dispatch({ type: 'execution/event', event: { ...eventBase(ref, sequence++), type: 'empty', message: normalized.message } });
         } else {
-            this.dispatch({ type: 'execution/event', event: { ...eventBase(ref, sequence++), type: 'complete', totalRowCount: normalized.totalRowCount, message: normalized.message } });
+            this.dispatch({
+                type: 'execution/event',
+                event: {
+                    ...eventBase(ref, sequence++),
+                    type: 'complete',
+                    totalRowCount: normalized.totalRowCount,
+                    message: normalized.message,
+                    ...(normalized.limitReached ? { limitReached: true } : {}),
+                },
+            });
         }
         this.nextSequence.set(resultKey(ref.sourceId, ref.resultSetId), sequence);
         this.nextChunkSequence.delete(resultKey(ref.sourceId, ref.resultSetId));
@@ -1049,6 +2312,11 @@ export class SharedResultPanelController {
                 executionId: `vscode-stream-execution-${sourceId}-${resultSetId}-${message.executionTimestamp ?? ++this.streamRevision}`,
             };
             this.rows.set(key, []);
+            this.editability.delete(key);
+            this.resultKinds.set(key, { isLog: message.isLog === true, isTextContent: false });
+            this.refreshFailures.delete(key);
+            this.limitReached.delete(key);
+            this.clearEditSession();
             this.nextChunkSequence.set(key, 0);
         }
         if (!ref) {
@@ -1059,6 +2327,8 @@ export class SharedResultPanelController {
                 executionId: `vscode-stream-execution-${sourceId}-${resultSetId}-${++this.streamRevision}`,
             };
             this.rows.set(key, []);
+            this.resultKinds.set(key, { isLog: message.isLog === true, isTextContent: false });
+            this.clearEditSession();
             this.nextChunkSequence.set(key, 0);
             this.startResult(ref, {
                 resultSetId,
@@ -1081,6 +2351,7 @@ export class SharedResultPanelController {
         const existingRows = this.rows.get(key) ?? [];
         if (message.fromRow !== undefined && rows.length > 0 && message.fromRow !== existingRows.length) return;
         this.rows.set(key, rows.length > 0 ? [...existingRows, ...rows] : existingRows);
+        if (message.limitReached) this.limitReached.add(key);
         const nextSequence = this.nextSequence.get(key) ?? (current?.lastSequence ?? 0) + 1;
         const nextRows = this.rows.get(key) ?? [];
         if (rows.length > 0) {
@@ -1121,6 +2392,7 @@ export class SharedResultPanelController {
         const key = resultKey(ref.sourceId, ref.resultSetId);
         this.replaceRef(sourceIndexKey(ref.sourceId, ref.resultSetIndex), ref);
         this.rows.set(key, rows);
+        this.resultKinds.set(key, { isLog: false, isTextContent: false });
         this.nextChunkSequence.delete(key);
         this.startResult(ref, {
             resultSetId,
@@ -1132,6 +2404,11 @@ export class SharedResultPanelController {
             isCancelled: false,
             isStreamingComplete: false,
         }, true);
+        this.diskBacked.add(key);
+        const savedView = this.persistedViews.get(persistedViewKey(ref.sourceId, ref.resultSetId));
+        if (savedView) this.dispatch({ type: 'results/view', sourceId: ref.sourceId, resultSetId: ref.resultSetId, patch: savedView });
+        const restored = this.resultForRef(ref);
+        if (restored && sharedDiskQuerySpec(restored) !== undefined) this.resetDiskWindow(restored);
         this.dispatch({ type: 'results/select-source', sourceId: ref.sourceId });
         this.dispatch({ type: 'results/select', sourceId: ref.sourceId, resultSetId: ref.resultSetId });
     }
@@ -1148,10 +2425,22 @@ export class SharedResultPanelController {
             resultSetId: ref.resultSetId,
             loadedRowCount: this.rows.get(resultKey(ref.sourceId, ref.resultSetId))?.length ?? result.loadedRowCount,
             totalRowCount: message.totalRows,
+            ...(message.limitReached ? { limitReached: true } : {}),
         });
     }
 
     private applyRowWindow(message: Extract<ResultPanelHostToWebviewMessage, { command: 'rowWindow' }>): void {
+        const fetchPending = this.pendingRowFetches.get(message.requestId);
+        if (fetchPending) {
+            this.pendingRowFetches.delete(message.requestId);
+            clearTimeout(fetchPending.timer);
+            if (fetchPending.ref.sourceId !== message.sourceUri || fetchPending.offset !== message.offset) {
+                fetchPending.reject(new Error('Row window response did not match the request.'));
+                return;
+            }
+            fetchPending.resolve(decodeSharedRows(message.rows), message.totalRows);
+            return;
+        }
         const pending = this.pendingRowWindows.get(message.requestId);
         this.pendingRowWindows.delete(message.requestId);
         // A response is only valid for a request that is still live. The ref
@@ -1164,14 +2453,44 @@ export class SharedResultPanelController {
     }
 
     private applyDiskQueryResult(message: Extract<ResultPanelHostToWebviewMessage, { command: 'diskQueryResult' }>): void {
+        if (message.action === 'distinct') {
+            const pendingValues = this.pendingFilterValues.get(message.requestId);
+            if (!pendingValues) return;
+            this.pendingFilterValues.delete(message.requestId);
+            const values = (message.distinctValues ?? []).map(item => ({
+                key: sharedFilterValueKey(item.raw),
+                value: item.raw,
+                label: formatDataGridCellValue(item.raw, pendingValues.column.type, pendingValues.column),
+            }));
+            values.sort((left, right) => left.label.localeCompare(right.label));
+            pendingValues.resolve(values, message.distinctTruncated === true);
+            return;
+        }
         if (message.action !== 'window' || message.rows === undefined) return;
+        const fetchPending = this.pendingRowFetches.get(message.requestId);
+        if (fetchPending) {
+            this.pendingRowFetches.delete(message.requestId);
+            clearTimeout(fetchPending.timer);
+            const fetchOffset = asNonNegativeInteger(message.offset) ?? 0;
+            if (fetchPending.ref.sourceId !== message.sourceUri || fetchPending.offset !== fetchOffset) {
+                fetchPending.reject(new Error('Row window response did not match the request.'));
+                return;
+            }
+            fetchPending.resolve(decodeSharedRows(message.rows), message.filteredCount ?? message.totalRows);
+            return;
+        }
         const pending = this.pendingRowWindows.get(message.requestId);
         this.pendingRowWindows.delete(message.requestId);
         const offset = asNonNegativeInteger(message.offset) ?? 0;
         if (!pending || pending.ref.sourceId !== message.sourceUri || pending.offset !== offset) return;
         const ref = this.refs.get(sourceIndexKey(message.sourceUri, message.resultSetIndex));
         if (!ref || pending.ref !== ref) return;
-        this.applyLoadedRows(ref, offset, decodeSharedRows(message.rows), message.totalRows);
+        this.applyLoadedRows(
+            ref,
+            offset,
+            decodeSharedRows(message.rows),
+            message.filteredCount ?? message.totalRows,
+        );
     }
 
     private resultForRef(ref: ResultRef): UiResultSurfaceState | undefined {
@@ -1194,7 +2513,7 @@ export class SharedResultPanelController {
             executionId: ref.executionId,
             resultSetId: ref.resultSetId,
             loadedRowCount: nextRows.length,
-            totalRowCount: Math.max(result.totalRowCount, totalRows ?? 0, nextRows.length),
+            totalRowCount: Math.max(nextRows.length, totalRows ?? result.totalRowCount),
         });
     }
 
@@ -1216,6 +2535,7 @@ export class SharedResultPanelController {
                 ...eventBase(ref, nextSequence),
                 type: message.totalRows === 0 ? 'empty' : 'complete',
                 ...(message.totalRows === 0 ? {} : { totalRowCount: Math.max(message.totalRows, (this.rows.get(key) ?? []).length) }),
+                ...(message.limitReached ? { limitReached: true } : {}),
             } as UiResultEvent,
         });
         this.nextSequence.set(key, nextSequence + 1);
@@ -1264,13 +2584,461 @@ function useSharedControllerState(controller: SharedResultPanelController): UiSt
     return controller.getState();
 }
 
+type ResultExportDestination = 'file' | 'open' | 'temp' | 'clipboard';
+
+const RESULT_EXPORT_FORMATS = [
+    { id: 'excel', label: 'Excel (XLSB)', description: 'Binary workbook, smallest and fastest', icon: 'file-spreadsheet' },
+    { id: 'xlsx', label: 'Excel (XLSX)', description: 'Workbook with wider compatibility', icon: 'file-spreadsheet' },
+    { id: 'csv', label: 'CSV', description: 'Comma separated values', icon: 'table' },
+    { id: 'csv.gz', label: 'CSV.GZ', description: 'Gzip-compressed CSV', icon: 'table' },
+    { id: 'csv.zst', label: 'CSV.ZST', description: 'Zstandard-compressed CSV', icon: 'table' },
+    { id: 'json', label: 'JSON', description: 'Array of row objects', icon: 'file-json' },
+    { id: 'xml', label: 'XML', description: 'Extensible markup language', icon: 'code' },
+    { id: 'sql', label: 'SQL INSERT', description: 'INSERT statements, data only', icon: 'database' },
+    { id: 'markdown', label: 'Markdown', description: 'Markdown table with the header row', icon: 'file-text' },
+    { id: 'parquet', label: 'Parquet', description: 'Apache Parquet columnar format', icon: 'rows' },
+    { id: 'xpt', label: 'SAS XPORT', description: 'SAS Transport Format v5', icon: 'file-spreadsheet' },
+] as const;
+
+const RESULT_EXPORT_DESTINATIONS = [
+    { id: 'file', label: 'Save as…', description: 'Choose a folder and file name', icon: 'download' },
+    { id: 'open', label: 'Export & Open', description: 'Save to a temp folder and open it', icon: 'link' },
+    { id: 'temp', label: 'Export & Copy file', description: 'Save the file and put it on the clipboard', icon: 'clipboard-copy' },
+    { id: 'clipboard', label: 'Copy content', description: 'Copy the exported text without a file', icon: 'copy' },
+] as const;
+
+const RESULT_EXPORT_TEXT_FORMATS: ReadonlySet<string> = new Set(['csv', 'json', 'xml', 'sql', 'markdown']);
+
+function ResultExportDialog({
+    format,
+    destination,
+    scope,
+    onFormatChange,
+    onDestinationChange,
+    onScopeChange,
+    onCancel,
+    onExport,
+}: {
+    readonly format: string;
+    readonly destination: ResultExportDestination;
+    readonly scope: 'loaded' | 'all';
+    readonly onFormatChange: (format: string) => void;
+    readonly onDestinationChange: (destination: ResultExportDestination) => void;
+    readonly onScopeChange: (scope: 'loaded' | 'all') => void;
+    readonly onCancel: () => void;
+    readonly onExport: () => void;
+}): ReactNode {
+    const textFormat = RESULT_EXPORT_TEXT_FORMATS.has(format);
+    const activeDestination = !textFormat && destination === 'clipboard' ? 'file' : destination;
+    const dialogRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+        dialogRef.current?.focus();
+        const onKeyDown = (event: KeyboardEvent): void => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onCancel();
+                return;
+            }
+            if (event.key !== 'Tab' || !dialogRef.current) return;
+            const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            )];
+            if (focusable.length === 0) return;
+            const first = focusable[0]!;
+            const last = focusable[focusable.length - 1]!;
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('keydown', onKeyDown);
+            previous?.focus();
+        };
+    }, [onCancel]);
+    return <div className="ui-export-backdrop">
+        <div ref={dialogRef} className="ui-export-dialog" role="dialog" aria-modal="true" aria-labelledby="ui-export-title" tabIndex={-1}>
+            <header className="ui-export-header">
+                <div>
+                    <h2 id="ui-export-title">Export active result</h2>
+                    <p>Choose the format and how the file should be delivered.</p>
+                </div>
+                <button type="button" className="ui-export-close" aria-label="Close export" title="Close" onClick={onCancel}><MenuIcon name="x" /></button>
+            </header>
+            <section className="ui-export-section">
+                <h3>Format</h3>
+                <div className="ui-export-grid" role="radiogroup" aria-label="Export format">
+                    {RESULT_EXPORT_FORMATS.map(option => <button
+                        type="button"
+                        role="radio"
+                        aria-checked={format === option.id}
+                        className={`ui-export-option${format === option.id ? ' active' : ''}`}
+                        key={option.id}
+                        onClick={() => onFormatChange(option.id)}
+                    >
+                        <MenuIcon name={option.icon} />
+                        <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                    </button>)}
+                </div>
+            </section>
+            <section className="ui-export-section">
+                <h3>Save mode</h3>
+                <div className="ui-export-grid" role="radiogroup" aria-label="Export destination">
+                    {RESULT_EXPORT_DESTINATIONS.map(option => <button
+                        type="button"
+                        role="radio"
+                        aria-checked={activeDestination === option.id}
+                        className={`ui-export-option${activeDestination === option.id ? ' active' : ''}`}
+                        key={option.id}
+                        disabled={option.id === 'clipboard' && !textFormat}
+                        onClick={() => onDestinationChange(option.id)}
+                    >
+                        <MenuIcon name={option.icon} />
+                        <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                    </button>)}
+                </div>
+            </section>
+            <section className="ui-export-section ui-export-scope">
+                <h3>Rows</h3>
+                <label><input type="radio" name="ui-export-scope" checked={scope === 'loaded'} onChange={() => onScopeChange('loaded')} /> Loaded rows</label>
+                <label><input type="radio" name="ui-export-scope" checked={scope === 'all'} onChange={() => onScopeChange('all')} /> All rows from the server</label>
+            </section>
+            <footer className="ui-export-footer">
+                <button type="button" onClick={onCancel}>Cancel</button>
+                <button type="button" className="primary" onClick={onExport}><MenuIcon name="download" /> Export</button>
+            </footer>
+        </div>
+    </div>;
+}
+
+const SHARED_COPY_AS_FORMATS: readonly { readonly id: SharedClipboardFormat; readonly label: string }[] = [
+    { id: 'html', label: 'HTML table' },
+    { id: 'markdown', label: 'Markdown' },
+    { id: 'csv', label: 'CSV' },
+    { id: 'json', label: 'JSON' },
+    { id: 'sql', label: 'SQL INSERT' },
+];
+
+function SharedMoreMenu({
+    onClearFilters,
+    onRefreshSql,
+    onExportAllResults,
+    onUndoFilter,
+    onRedoFilter,
+    onCopyAs,
+    onCopyAsImage,
+    onQueryLocally,
+    onGroupAnalysis,
+    onAggregateAnalysis,
+    onFindColumn,
+}: {
+    readonly onClearFilters?: () => void;
+    readonly onRefreshSql?: () => void;
+    readonly onExportAllResults?: () => void;
+    readonly onUndoFilter?: () => void;
+    readonly onRedoFilter?: () => void;
+    readonly onCopyAs?: (format: SharedClipboardFormat) => void;
+    readonly onCopyAsImage?: () => void;
+    readonly onQueryLocally?: () => void;
+    readonly onGroupAnalysis?: () => void;
+    readonly onAggregateAnalysis?: () => void;
+    readonly onFindColumn?: () => void;
+}): ReactNode {
+    const [open, setOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!open) return undefined;
+        const close = (event: MouseEvent): void => {
+            if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+        };
+        const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', close);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', close);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [open]);
+    return <div className="ui-result-more" ref={rootRef}>
+        <button type="button" className="ui-result-toolbar-icon" aria-label="More result actions" aria-haspopup="menu" aria-expanded={open} title="More result actions" onClick={() => setOpen(value => !value)}><MenuIcon name="list" /></button>
+        {open && <div className="ui-result-more-menu" role="menu" aria-label="More result actions">
+            {onGroupAnalysis && <button type="button" role="menuitem" onClick={() => { setOpen(false); onGroupAnalysis(); }}>Group in database…</button>}
+            {onAggregateAnalysis && <button type="button" role="menuitem" onClick={() => { setOpen(false); onAggregateAnalysis(); }}>Aggregate in database…</button>}
+            {(onGroupAnalysis || onAggregateAnalysis) && <hr />}
+            {onRefreshSql && <button type="button" role="menuitem" onClick={() => { setOpen(false); onRefreshSql(); }}>Refresh SQL</button>}
+            {onFindColumn && <button type="button" role="menuitem" onClick={() => { setOpen(false); onFindColumn(); }}>Find column…</button>}
+            {onUndoFilter && <button type="button" role="menuitem" onClick={() => { setOpen(false); onUndoFilter(); }}>Undo filter (Alt+Z)</button>}
+            {onRedoFilter && <button type="button" role="menuitem" onClick={() => { setOpen(false); onRedoFilter(); }}>Redo filter (Alt+Y)</button>}
+            {onClearFilters && <button type="button" role="menuitem" onClick={() => { setOpen(false); onClearFilters(); }}>Clear all filters</button>}
+            {onExportAllResults && <button type="button" role="menuitem" onClick={() => { setOpen(false); onExportAllResults(); }}>All result sets → Excel workbook…</button>}
+            {(onCopyAs || onCopyAsImage || onQueryLocally) && <hr />}
+            {onCopyAs && <>
+                <span className="ui-result-more-heading" role="presentation">Copy as</span>
+                {SHARED_COPY_AS_FORMATS.map(option => <button type="button" role="menuitem" key={option.id} onClick={() => { setOpen(false); onCopyAs(option.id); }}>{option.label}</button>)}
+            </>}
+            {onCopyAsImage && <button type="button" role="menuitem" onClick={() => { setOpen(false); onCopyAsImage(); }}>Copy grid as image (up to 500 rows)</button>}
+            {onQueryLocally && <button type="button" role="menuitem" onClick={() => { setOpen(false); onQueryLocally(); }}>Query Locally (DuckDB)…</button>}
+        </div>}
+    </div>;
+}
+
+const LOG_STATUS_ICONS: Record<string, string> = {
+    running: '▶',
+    success: '✓',
+    error: '✗',
+    cancelled: '⊘',
+    retrying: '↻',
+};
+
+function appendLogSpan(parent: HTMLElement, className: string, text: string): HTMLSpanElement {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    parent.appendChild(span);
+    return span;
+}
+
+/** Legacy plain/status line builder shared by loose log rows and run-card bodies. */
+function createSharedLogLine(row: LogRow): HTMLElement {
+    const line = document.createElement('div');
+    line.className = 'console-line';
+    const time = String(row[0] ?? '');
+    const message = String(row[1] ?? '');
+    if (message === '') {
+        line.classList.add('console-line--empty');
+        line.innerHTML = '&nbsp;';
+        return line;
+    }
+    if (message.startsWith('---')) {
+        line.classList.add('separator');
+        appendLogSpan(line, 'console-time', time);
+        appendLogSpan(line, 'console-msg', message);
+        return line;
+    }
+    const parsed = parseRunLogMessage(message);
+    if (!parsed) {
+        appendLogSpan(line, 'console-time', time);
+        appendLogSpan(line, 'console-msg', message);
+        return line;
+    }
+    line.classList.add(`status-${parsed.status}`);
+    appendLogSpan(line, 'console-time', time);
+    const badge = document.createElement('span');
+    badge.className = `log-status log-status--${parsed.status}`;
+    const icon = document.createElement('span');
+    icon.className = 'log-status-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = LOG_STATUS_ICONS[parsed.status] ?? '';
+    const label = document.createElement('span');
+    label.textContent = parsed.status.toUpperCase();
+    badge.append(icon, label);
+    line.appendChild(badge);
+    const msg = document.createElement('span');
+    msg.className = 'console-msg';
+    if (parsed.sqlPreview) appendLogSpan(msg, 'log-line-sql', parsed.sqlPreview);
+    const meta = [parsed.connection, parsed.duration, parsed.rowCount].filter((part): part is string => !!part);
+    if (meta.length > 0) appendLogSpan(msg, 'log-meta-inline', meta.join(' · '));
+    if (parsed.errorText) appendLogSpan(msg, 'log-error-hint', parsed.errorText);
+    line.appendChild(msg);
+    return line;
+}
+
+/**
+ * Uses the legacy run-group renderer (statement cards, chips and SQL previews)
+ * so the shared Logs tab matches the legacy transcript instead of flattening
+ * every row into one text line.
+ */
+function SharedLogConsole({ rows, lanesJson }: { readonly rows: readonly (readonly unknown[])[]; readonly lanesJson?: string }): ReactNode {
+    const view = useRef<HTMLDivElement>(null);
+    const wrapper = useRef<HTMLDivElement>(null);
+    const [search, setSearch] = useState('');
+    const filteredRows = useMemo(() => {
+        const query = search.trim().toLocaleLowerCase();
+        if (!query) return rows;
+        return rows.filter(row => row.some(value =>
+            value !== null && value !== undefined && String(value).toLocaleLowerCase().includes(query),
+        ));
+    }, [rows, search]);
+    useEffect(() => {
+        const element = view.current;
+        if (!element) return;
+        const wasAtBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+        const previousTop = element.scrollTop;
+        element.replaceChildren();
+        if (filteredRows.length === 0) {
+            element.appendChild(createSharedLogLine(['', search.trim() ? 'No matching log messages.' : 'No log messages yet.']));
+        } else {
+            appendRunLogRows(element, filteredRows as LogRow[], createSharedLogLine);
+        }
+        // The legacy queue presentation owns pause/resume/recover/cancel and
+        // per-job details; reuse it instead of flattening the queue into rows.
+        if (wrapper.current) updateSqlQueueLogs(lanesJson);
+        element.scrollTop = wasAtBottom ? element.scrollHeight : previousTop;
+    }, [filteredRows, lanesJson, search]);
+    return <div className="ui-result-grid ui-legacy-log console-wrapper" ref={wrapper}>
+        <div className="ui-log-toolbar">
+            <input
+                aria-label="Search log"
+                placeholder="Search log…"
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+                onKeyDown={event => { if (event.key === 'Escape') setSearch(''); }}
+            />
+            <span role="status">{filteredRows.length.toLocaleString()} / {rows.length.toLocaleString()}</span>
+            {search.length > 0 && <button type="button" onClick={() => setSearch('')}>Clear</button>}
+        </div>
+        <div className="console-view" ref={view} role="log" aria-label="Query log" aria-live="polite" />
+    </div>;
+}
+
+/**
+ * ECharts is a large ESM-only dependency. Load the range-chart surface on
+ * demand so panels that never open Charts keep grid startup light and DOM-free
+ * test environments do not have to resolve the renderer.
+ */
+function LazySharedRangeChart(props: SharedRangeChartProps): ReactNode {
+    const [Chart, setChart] = useState<ComponentType<SharedRangeChartProps> | null>(null);
+    const [failed, setFailed] = useState(false);
+    useEffect(() => {
+        let cancelled = false;
+        void import('./sharedRangeChart.js')
+            .then(module => {
+                if (!cancelled) setChart(() => module.SharedRangeChart);
+            })
+            .catch(() => {
+                if (!cancelled) setFailed(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+    if (failed) {
+        return <div className="ui-range-chart-loading" role="status">Unable to load the chart renderer.</div>;
+    }
+    if (!Chart) {
+        return <div className="ui-range-chart-loading" role="status">Loading chart…</div>;
+    }
+    return <Chart {...props} />;
+}
+
+/**
+ * Explore is the largest legacy analysis surface (column cards, filters,
+ * server-side pivot, ECharts composer and ranking). It is DOM-based but fully
+ * functional, so the shared layout mounts it into a React-owned host while the
+ * rest of the panel stays React. The legacy `analysisContainer` is moved into
+ * the host for the duration of the view and restored on unmount.
+ */
+function SharedExploreHost({
+    result,
+    rows,
+    label,
+    diskBacked,
+    sql,
+    refreshSql,
+}: {
+    readonly result: UiResultSurfaceState;
+    readonly rows: readonly unknown[][];
+    readonly label: string;
+    readonly diskBacked: boolean;
+    readonly sql?: string;
+    readonly refreshSql?: string;
+}): ReactNode {
+    const hostRef = useRef<HTMLDivElement>(null);
+    const resultSetIndex = result.statementIndex;
+    useEffect(() => {
+        const host = hostRef.current;
+        if (!host) return undefined;
+        const existing = document.getElementById('analysisContainer');
+        const container = existing ?? document.createElement('div');
+        const created = !existing;
+        if (created) {
+            container.id = 'analysisContainer';
+            container.className = 'analysis-container';
+        }
+        const originalParent = container.parentElement;
+        const originalDisplay = container.style.display;
+        host.appendChild(container);
+        container.style.display = 'block';
+
+        const legacySets: ResultSet[] = [];
+        for (let index = 0; index < resultSetIndex; index += 1) {
+            legacySets.push({ columns: [], data: [], isLog: true, name: `Result ${index + 1}` });
+        }
+        legacySets[resultSetIndex] = {
+            resultSetId: result.resultSetId,
+            statementIndex: result.statementIndex,
+            name: label,
+            columns: result.columns.map((column, index) => ({ name: column.name, type: column.type, index, scale: column.scale })),
+            data: rows.map(row => [...row]),
+            totalRowCount: result.totalRowCount,
+            storageMode: diskBacked ? 'sqlite' : 'memory',
+            isStreamingComplete: result.status !== 'loading' && result.status !== 'streaming',
+            isCancelled: result.cancellation !== 'none',
+            limitReached: result.limitReached === true,
+            executionTimestamp: result.lastSequence,
+            sql,
+            refreshSql,
+        };
+        setResultSets(legacySets);
+        setActiveSourceUri(result.sourceId);
+        setActiveGridIndex(resultSetIndex);
+
+        // Explore owns the ECharts composer/ranking modules, which are large
+        // ESM-only dependencies. Load them only when the view is opened.
+        let disposed = false;
+        let dispose: (() => void) | undefined;
+        void import('./explore/explorePanel.js')
+            .then(module => {
+                if (disposed) return;
+                module.renderExploreView(resultSetIndex);
+                dispose = module.disposeExploreView;
+            })
+            .catch(() => {
+                if (!disposed) container.textContent = 'Unable to load Explore.';
+            });
+
+        return () => {
+            disposed = true;
+            dispose?.();
+            container.innerHTML = '';
+            if (created) {
+                container.remove();
+            } else {
+                container.style.display = originalDisplay || 'none';
+                if (originalParent) originalParent.appendChild(container);
+            }
+        };
+    }, [diskBacked, label, refreshSql, result, resultSetIndex, rows, sql]);
+    return <div className="ui-legacy-explore" ref={hostRef} />;
+}
+
 export function SharedResultPanelApp({ controller }: { readonly controller: SharedResultPanelController }): ReactNode {
     const state = useSharedControllerState(controller);
     const [selectedRow, setSelectedRow] = useState<number | undefined>();
+    const [selection, setSelection] = useState<DataGridSelection | undefined>();
+    const [rowViewOpen, setRowViewOpen] = useState(false);
     const [analysisKind, setAnalysisKind] = useState<UiResultAnalysisKind | undefined>();
     const [analysisTable, setAnalysisTable] = useState<UiResultAnalysisTable | undefined>();
     const [analysisLoading, setAnalysisLoading] = useState(false);
     const [analysisError, setAnalysisError] = useState<string | undefined>();
+    const [filterState, setFilterState] = useState<DataGridColumnFilterState | undefined>();
+    const [pivotOpen, setPivotOpen] = useState(false);
+    const [viewLayout, setViewLayout] = useState<'table' | 'charts' | 'mini-charts' | 'diff' | 'explore' | 'analytical'>('table');
+    const [diffBaselineId, setDiffBaselineId] = useState<string | undefined>();
+    const [exportOpen, setExportOpen] = useState(false);
+    const [exportFormat, setExportFormat] = useState('excel');
+    const [exportDestination, setExportDestination] = useState<ResultExportDestination>('file');
+    const [exportScope, setExportScope] = useState<'loaded' | 'all'>('loaded');
+    const [refreshLimitOpen, setRefreshLimitOpen] = useState(false);
+    const [refreshLimitInitial, setRefreshLimitInitial] = useState('');
+    const [dismissedLimitKey, setDismissedLimitKey] = useState<string | undefined>();
+    const [copyingAll, setCopyingAll] = useState(false);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
     const analysisGenerationRef = useRef(0);
     const activeResult = controller.activeResult();
     const closeAnalysis = useCallback(() => {
@@ -1282,27 +3050,158 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     }, []);
     useEffect(() => {
         setSelectedRow(undefined);
+        setSelection(undefined);
+        setFilterState(undefined);
+        setPivotOpen(false);
+        setViewLayout('table');
+        setDiffBaselineId(undefined);
+        setExportOpen(false);
+        setRefreshLimitOpen(false);
+        setDismissedLimitKey(undefined);
         closeAnalysis();
+        postHostMessage({ command: 'selectionStatsChanged', stats: null });
     }, [activeResult?.sourceId, activeResult?.resultSetId, closeAnalysis]);
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent): void => {
+            if (!event.altKey || event.ctrlKey || event.metaKey) return;
+            const target = event.target;
+            if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]') !== null) return;
+            if (event.key.toLocaleLowerCase() === 'z') {
+                event.preventDefault();
+                controller.undoFilter(controller.activeResult());
+            } else if (event.key.toLocaleLowerCase() === 'y') {
+                event.preventDefault();
+                controller.redoFilter(controller.activeResult());
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => document.removeEventListener('keydown', onKeyDown);
+    }, [controller]);
     const updateView = useCallback((patch: Partial<UiResultSurfaceState['view']>): void => {
         if ('globalFilter' in patch || 'columnFilters' in patch || 'sorting' in patch) {
             closeAnalysis();
         }
         if (activeResult) controller.updateView(activeResult.resultSetId, patch);
     }, [activeResult, closeAnalysis, controller]);
-    const runAnalysis = useCallback((kind: UiResultAnalysisKind): void => {
+    const applyColumnFilter = useCallback(() => {
+        const result = controller.activeResult();
+        const state = filterState;
+        if (!result || !state) return;
+        const definitions = { ...(result.view.columnFilterDefinitions ?? {}) };
+        const columnFilters = { ...result.view.columnFilters };
+        delete columnFilters[state.columnName];
+        const selectsEveryLoadedValue = state.operator === 'in'
+            && !state.truncated
+            && state.selectedKeys.length === state.options.length;
+        const activeConditions = (state.conditions ?? [{
+            operator: state.operator,
+            value: state.value,
+            ...(state.value2 === undefined ? {} : { value2: state.value2 }),
+        }]).filter(condition =>
+            condition.operator === 'isNull'
+            || condition.operator === 'isNotNull'
+            || condition.operator === 'isEmpty'
+            || condition.operator === 'isNotEmpty'
+            || condition.value.trim() !== ''
+            || (condition.operator === 'between' && (condition.value2 ?? '').trim() !== ''),
+        );
+        if (selectsEveryLoadedValue || activeConditions.length === 0) {
+            delete definitions[state.columnName];
+        } else {
+            const values = state.selectedKeys.flatMap(key => {
+                const option = state.options.find(candidate => candidate.key === key);
+                return option === undefined ? [] : [option.value];
+            });
+            if (state.operator === 'in') {
+                definitions[state.columnName] = { operator: 'in', value: '', values };
+            } else {
+                const first = activeConditions[0]!;
+                definitions[state.columnName] = {
+                    operator: first.operator,
+                    value: first.value,
+                    ...(first.value2 === undefined ? {} : { value2: first.value2 }),
+                    ...(activeConditions.length > 1
+                        ? {
+                            conditions: activeConditions.map(condition => ({
+                                operator: condition.operator,
+                                value: condition.value,
+                                ...(condition.value2 === undefined ? {} : { value2: condition.value2 }),
+                            })),
+                            logic: state.conditionLogic ?? 'and',
+                        }
+                        : {}),
+                };
+            }
+        }
+        controller.updateView(result.resultSetId, { columnFilters, columnFilterDefinitions: definitions });
+        setFilterState(undefined);
+    }, [controller, filterState]);
+    const clearColumnFilter = useCallback(() => {
+        const result = controller.activeResult();
+        const state = filterState;
+        if (!result || !state) return;
+        const definitions = { ...(result.view.columnFilterDefinitions ?? {}) };
+        const columnFilters = { ...result.view.columnFilters };
+        delete definitions[state.columnName];
+        delete columnFilters[state.columnName];
+        controller.updateView(result.resultSetId, { columnFilters, columnFilterDefinitions: definitions });
+        setFilterState(undefined);
+    }, [controller, filterState]);
+    const openColumnFilter = useCallback((request: DataGridColumnFilterRequest): void => {
         const result = controller.activeResult();
         if (!result) return;
-        if (analysisKind === kind && !analysisLoading) {
+        const base = buildSharedFilterState(request, controller.getRows(result), result.view);
+        if (!controller.isDiskBackedResult(result)) {
+            setFilterState(base);
+            return;
+        }
+        setFilterState({ ...base, options: [], selectedKeys: [], loading: true, truncated: false, error: undefined });
+        void controller.requestFilterValues(result, request.columnIndex).then(({ values, truncated }) => {
+            setFilterState(current => {
+                if (!current || current.columnName !== request.column.name) return current;
+                const definition = result.view.columnFilterDefinitions?.[request.column.name];
+                const selectedKeys = definition?.operator === 'in' && definition.values !== undefined
+                    ? values
+                        .filter(option => definition.values!.some(value => sharedFilterValueKey(value) === option.key))
+                        .map(option => option.key)
+                    : values.map(option => option.key);
+                return {
+                    ...current,
+                    options: values,
+                    selectedKeys,
+                    loading: false,
+                    truncated,
+                    error: undefined,
+                };
+            });
+        }).catch(error => {
+            setFilterState(current => current && current.columnName === request.column.name
+                ? { ...current, loading: false, error: error instanceof Error ? error.message : String(error) }
+                : current);
+        });
+    }, [controller]);
+    const handleSelectionChange = useCallback((nextSelection: DataGridSelection | undefined): void => {
+        setSelection(nextSelection);
+        const result = controller.activeResult();
+        postHostMessage({
+            command: 'selectionStatsChanged',
+            stats: controller.calculateSelectionStats(result, nextSelection),
+        });
+    }, [controller]);
+    const runAnalysis = useCallback((kind: UiResultAnalysisKind, pivot?: SharedPivotPlan, force = false): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        if (!force && analysisKind === kind && !analysisLoading) {
             closeAnalysis();
             return;
         }
         const generation = ++analysisGenerationRef.current;
+        setRowViewOpen(false);
         setAnalysisKind(kind);
         setAnalysisTable(undefined);
         setAnalysisError(undefined);
         setAnalysisLoading(true);
-        void controller.requestAnalysis(kind, result).then(table => {
+        void controller.requestAnalysis(kind, result, pivot).then(table => {
             if (analysisGenerationRef.current !== generation) return;
             setAnalysisTable(table);
             setAnalysisLoading(false);
@@ -1312,20 +3211,215 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             setAnalysisError(error instanceof Error ? error.message : String(error));
         });
     }, [analysisKind, analysisLoading, closeAnalysis, controller]);
+    const toggleAggregateFooter = useCallback((): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        if (Object.keys(result.view.columnAggregations ?? {}).length > 0) {
+            controller.updateView(result.resultSetId, { columnAggregations: {} });
+            return;
+        }
+        const next: Record<string, readonly UiResultColumnAggregation[]> = {};
+        result.columns.forEach(column => {
+            if (isDataGridNumericColumn(column)) next[column.name] = [{ fn: 'sum', position: 'bottom' }];
+        });
+        if (Object.keys(next).length === 0 && result.columns[0]) {
+            next[result.columns[0].name] = [{ fn: 'count', position: 'bottom' }];
+        }
+        controller.updateView(result.resultSetId, { columnAggregations: next });
+    }, [controller]);
+    const requestRefresh = useCallback((): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        const refreshSql = controller.getResultSql(result)?.refreshSql;
+        const limit = sharedRefreshLimit(refreshSql);
+        if (limit !== undefined) {
+            setRefreshLimitInitial(limit);
+            setRefreshLimitOpen(true);
+            return;
+        }
+        controller.refresh(result);
+    }, [controller]);
     const sourceResults = useMemo(
         () => Object.values(state.results.byResultSetId).filter(result => result.sourceId === state.results.activeSourceId),
         [state.results],
     );
     const rows = controller.getRows(activeResult);
+    const activeSql = controller.getResultSql(activeResult);
     const resultState = asyncStateFor(activeResult, rows.length);
-    const schemaCapability = capability(state.capabilities, 'result-panel.schema-navigation');
-    const sourceLabel = state.results.activeSourceId?.split(/[\\/]/u).pop() ?? 'Query Results';
-    const view = activeResult?.view ?? { globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined };
-    const selected = selectedRow === undefined ? undefined : rows[selectedRow];
-    const detailColumns = useMemo(
-        () => activeResult ? resolveDataGridColumns(activeResult.columns, rows) : [],
-        [activeResult?.columns, rows],
+    const activeResultKey = activeResult ? resultKey(activeResult.sourceId, activeResult.resultSetId) : undefined;
+    const executionStatus = activeResult?.status === 'loading' || activeResult?.status === 'streaming'
+        ? (activeResult.cancellation === 'requested' || activeResult.cancellation === 'acknowledged' ? 'finalizing' : 'loading')
+        : activeResult?.status === 'cancelled'
+            ? 'cancelled'
+            : activeResult?.status === 'error'
+                ? 'error'
+                : 'idle';
+    const cancelling = activeResult?.cancellation === 'requested' || activeResult?.cancellation === 'acknowledged';
+    const showLimitBanner = activeResult?.limitReached === true && activeResultKey !== dismissedLimitKey;
+    const refreshFailure = controller.getRefreshFailure(activeResult);
+    // Range charts follow the grid's filtered/sorted order and hide columns
+    // that the user hid, matching the legacy table-model extraction. A 2x2+
+    // grid selection narrows the chart to that range, as the legacy toolbar
+    // chart action did.
+    const chartSelection = useMemo(() => {
+        if (!selection || !activeResult || activeResult.view.grouping.length > 0) return undefined;
+        const rowStart = Math.min(selection.anchorRow, selection.focusRow);
+        const rowEnd = Math.max(selection.anchorRow, selection.focusRow);
+        const colStart = Math.min(selection.anchorColumn, selection.focusColumn);
+        const colEnd = Math.max(selection.anchorColumn, selection.focusColumn);
+        if (rowEnd - rowStart + 1 < 2 || colEnd - colStart + 1 < 2) return undefined;
+        return { rowStart, rowEnd, colStart, colEnd };
+    }, [activeResult, selection]);
+    const chartColumns = useMemo(() => {
+        if (!activeResult) return [];
+        return resolveDataGridColumns(activeResult.columns, rows)
+            .map((column, index) => ({ column, index }))
+            .filter(({ column, index }) => activeResult.view.columnVisibility?.[column.name] !== false
+                && (!chartSelection || (index >= chartSelection.colStart && index <= chartSelection.colEnd)));
+    }, [activeResult, chartSelection, rows]);
+    const chartRows = useMemo(() => {
+        if (!activeResult) return [];
+        const visibleIndexes = chartColumns.map(item => item.index);
+        const processed = processDataGridRows(activeResult.columns, rows, activeResult.view);
+        const ranged = chartSelection ? processed.slice(chartSelection.rowStart, chartSelection.rowEnd + 1) : processed;
+        return ranged.map(row => visibleIndexes.map(index => row[index]));
+    }, [activeResult, chartColumns, chartSelection, rows]);
+    const chartColumnProps = useMemo(() => chartColumns.map(item => item.column), [chartColumns]);
+    const diffBaselineResults = useMemo(() => {
+        if (!activeResult) return [];
+        return sourceResults
+            .filter(result => result.resultSetId !== activeResult.resultSetId
+                && result.status !== 'error'
+                && !controller.isLogResult(result))
+            .sort((left, right) => left.statementIndex - right.statementIndex);
+    }, [activeResult, controller, sourceResults]);
+    const diffBaselines = useMemo<DiffBaseline[]>(
+        () => diffBaselineResults.map(result => ({
+            id: result.resultSetId,
+            label: `Result ${result.statementIndex + 1} (${result.totalRowCount.toLocaleString()} rows)`,
+            columns: result.columns,
+            rows: controller.getRows(result),
+        })),
+        [controller, diffBaselineResults],
     );
+    // Legacy picks the nearest previous result as the default baseline, or the
+    // last result when the active result is first.
+    const defaultDiffBaselineId = useMemo(() => {
+        if (!activeResult || diffBaselineResults.length === 0) return undefined;
+        const previous = [...diffBaselineResults]
+            .reverse()
+            .find(result => result.statementIndex < activeResult.statementIndex);
+        return (previous ?? diffBaselineResults[diffBaselineResults.length - 1])!.resultSetId;
+    }, [activeResult, diffBaselineResults]);
+    const pivotDefaults = useMemo(
+        () => activeResult ? chooseSharedPivotPlan(activeResult.columns, rows) : undefined,
+        [activeResult, rows],
+    );
+    const openPivot = useCallback((force = false): void => {
+        if (!force && analysisKind === 'pivot' && !analysisLoading) {
+            closeAnalysis();
+            return;
+        }
+        setRowViewOpen(false);
+        setPivotOpen(true);
+    }, [analysisKind, analysisLoading, closeAnalysis]);
+    const createPivot = useCallback((configuration: PivotConfiguration): void => {
+        setPivotOpen(false);
+        runAnalysis('pivot', configuration, true);
+    }, [runAnalysis]);
+    const activeLayout: ResultLayoutKind = analysisKind === 'pivot' ? 'pivot' : viewLayout;
+    // Pivot is a layout, not a compact analysis panel: it replaces the table
+    // instead of stacking a second grid above it.
+    const pivotActive = analysisKind === 'pivot';
+    const tableLayoutActive = viewLayout === 'table' && !pivotActive;
+    const selectLayout = useCallback((layout: ResultLayoutKind): void => {
+        setPivotOpen(false);
+        if (layout === 'pivot') {
+            setViewLayout('table');
+            openPivot(true);
+            return;
+        }
+        closeAnalysis();
+        setRowViewOpen(false);
+        setViewLayout(layout === 'table' ? 'table' : layout);
+    }, [closeAnalysis, openPivot]);
+    const schemaCapability = capability(state.capabilities, 'result-panel.schema-navigation');
+    const editInfo = controller.getEditInfo(activeResult);
+    const editing = controller.isEditMode();
+    const pendingEditCount = controller.getPendingEditCount(activeResult);
+    const isLogResult = controller.isLogResult(activeResult);
+    const isErrorResult = activeResult?.status === 'error';
+    const view: UiResultSurfaceState['view'] = activeResult?.view ?? { globalFilter: '', columnFilters: {}, sorting: [], grouping: [], aggregation: undefined, columnAggregations: undefined, pivotColumn: undefined, scrollTop: 0, scrollLeft: 0 };
+    const hasAggregations = Object.keys(view.columnAggregations ?? {}).length > 0;
+    const rowViewDisplayRows = useMemo(() => {
+        if (!selection) return [] as number[];
+        const ranges = [{
+            minRow: Math.min(selection.anchorRow, selection.focusRow),
+            maxRow: Math.max(selection.anchorRow, selection.focusRow),
+        }, ...(selection.additionalRanges ?? [])];
+        const rows = new Set<number>();
+        for (const range of ranges) {
+            for (let row = range.minRow; row <= range.maxRow; row += 1) rows.add(row);
+        }
+        return [...rows].sort((left, right) => left - right);
+    }, [selection]);
+    const rowViewSelectedCount = rowViewDisplayRows.length;
+    const rowViewColumns = useMemo(
+        () => activeResult && rowViewOpen && !isLogResult ? resolveDataGridColumns(activeResult.columns, rows) : [],
+        [activeResult, isLogResult, rowViewOpen, rows],
+    );
+    const rowViewRows = useMemo(() => {
+        if (!activeResult || !rowViewOpen || isLogResult || rowViewSelectedCount > 10) return [];
+        const sourceIndices = processDataGridRowIndices(activeResult.columns, rows, activeResult.view);
+        const values: unknown[][] = [];
+        for (const row of rowViewDisplayRows) {
+            const sourceIndex = sourceIndices[row];
+            const rowValues = sourceIndex === undefined ? undefined : rows[sourceIndex];
+            if (rowValues) values.push([...rowValues]);
+        }
+        return values;
+    }, [activeResult, isLogResult, rowViewDisplayRows, rowViewOpen, rowViewSelectedCount, rows]);
+    const rowViewPlaceholder = !activeResult
+        ? 'Select 1 to 10 rows to view details or compare'
+        : activeResult.view.grouping.length > 0
+            ? 'Row View is unavailable while results are grouped'
+            : rowViewSelectedCount === 0
+                ? 'Select 1 to 10 rows to view details or compare'
+                : rowViewSelectedCount > 10
+                    ? 'Select 1 to 10 rows to compare'
+                    : activeResult.columns.length === 0
+                        ? 'This result has no data columns'
+                        : undefined;
+    const toggleRowView = useCallback((): void => {
+        setRowViewOpen(current => {
+            if (!current) closeAnalysis();
+            return !current;
+        });
+    }, [closeAnalysis]);
+    const exportRowViewXlsb = useCallback((): void => {
+        if (!activeResult || rowViewSelectedCount === 0 || activeResult.view.grouping.length > 0) return;
+        const sourceIndices = processDataGridRowIndices(activeResult.columns, rows, activeResult.view);
+        const selected: number[] = [];
+        for (const row of rowViewDisplayRows) {
+            const sourceIndex = sourceIndices[row];
+            if (sourceIndex !== undefined) selected.push(sourceIndex);
+        }
+        if (selected.length === 0) return;
+        postHostMessage({
+            command: 'openInExcel',
+            data: {
+                sourceUri: activeResult.sourceId,
+                results: [{
+                    resultSetIndex: activeResult.statementIndex,
+                    rowIndices: selected,
+                    columnIds: activeResult.columns.map((_column, index) => String(index)),
+                    name: `Row View - ${controller.getResultLabel(activeResult) ?? 'Result'}`,
+                    isActive: true,
+                }],
+            },
+            sql: '',
+        });
+    }, [activeResult, controller, rowViewDisplayRows, rowViewSelectedCount, rows]);
     const openCellValue = (context: DataGridCellContext): void => {
         const result = activeResult;
         const row = rows[context.rowIndex];
@@ -1342,6 +3436,8 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             isNull: value === null || value === undefined,
         });
     };
+    const getColumnFormatting = useCallback((column: { readonly name: string }, columnIndex: number): DataGridFormattingOptions | undefined =>
+        controller.getFormattingForColumn(column, columnIndex), [controller]);
     const openAnalysisCellValue = (context: DataGridCellContext): void => {
         const row = analysisTable?.rows[context.rowIndex];
         const column = analysisTable?.columns[context.columnIndex];
@@ -1356,58 +3452,356 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
             isNull: row[context.columnIndex] === null || row[context.columnIndex] === undefined,
         });
     };
-    const copySelection = (payload: { readonly columns: readonly { readonly name: string; readonly type?: string; readonly scale?: number }[]; readonly rows: readonly (readonly unknown[])[] }, format?: DataGridClipboardFormat): void => {
-        postHostMessage({
-            command: 'copyToClipboard',
-            text: formatDataGridClipboard(
-                payload,
-                format === undefined || format === 'tsv' ? 'text' : format,
-                { includeHeaders: payload.rows.length > 0 },
-            ),
-        });
+    const copySelection = (payload: { readonly columns: readonly { readonly name: string; readonly type?: string; readonly scale?: number }[]; readonly rows: readonly (readonly unknown[])[]; readonly includeHeaders?: boolean }, format?: DataGridClipboardFormat): void => {
+        writeSharedClipboard(payload, format ?? controller.getCopyFormat());
     };
+    const copyAllResults = useCallback((): void => {
+        setCopyingAll(true);
+        void controller.copyAllActive()
+            .then(count => {
+                if (count === 0) postHostMessage({ command: 'info', text: 'No rows to copy.' });
+            })
+            .catch(error => {
+                postHostMessage({ command: 'info', text: error instanceof Error ? error.message : String(error) });
+            })
+            .finally(() => setCopyingAll(false));
+    }, [controller]);
+    const toggleSidebarColumn = useCallback((column: { readonly name: string }, columnIndex: number): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        const key = column.name.trim().length > 0 ? column.name.trim() : `column-${columnIndex}`;
+        const visibility = { ...(result.view.columnVisibility ?? {}) };
+        const visible = visibility[key] !== false && visibility[String(columnIndex)] !== false;
+        visibility[key] = !visible;
+        controller.updateView(result.resultSetId, { columnVisibility: visibility });
+    }, [controller]);
+    const showAllSidebarColumns = useCallback((): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        controller.updateView(result.resultSetId, { columnVisibility: {} });
+    }, [controller]);
+    const hideAllSidebarColumns = useCallback((): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        const visibility: Record<string, boolean> = {};
+        result.columns.forEach((column, index) => {
+            visibility[column.name.trim() || `column-${index}`] = false;
+        });
+        controller.updateView(result.resultSetId, { columnVisibility: visibility });
+    }, [controller]);
+    const scrollToSidebarColumn = useCallback((_column: { readonly name: string }, columnIndex: number): void => {
+        const cell = document.querySelector<HTMLElement>(`[data-column-index="${columnIndex}"]`);
+        cell?.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }, []);
+    const groupSidebarColumn = useCallback((column: { readonly name: string }, columnIndex: number): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        const key = column.name.trim() || `column-${columnIndex}`;
+        if (result.view.grouping.includes(key)) return;
+        controller.updateView(result.resultSetId, { grouping: [...result.view.grouping, key] });
+    }, [controller]);
+    const ungroupSidebarColumn = useCallback((column: { readonly name: string }, columnIndex: number): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        const key = column.name.trim() || `column-${columnIndex}`;
+        controller.updateView(result.resultSetId, {
+            grouping: result.view.grouping.filter(item => item !== key),
+        });
+    }, [controller]);
+    const clearSidebarGrouping = useCallback((): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        controller.updateView(result.resultSetId, { grouping: [] });
+    }, [controller]);
+    const openColumnSearch = useCallback((): void => {
+        const details = document.querySelector<HTMLDetailsElement>('.ui-data-grid-column-menu');
+        if (!details) return;
+        details.open = true;
+        window.setTimeout(() => {
+            const input = details.querySelector<HTMLInputElement>('input[aria-label="Find column"]');
+            input?.focus();
+            input?.select();
+        }, 0);
+    }, []);
+    const columnSidebar = sidebarOpen && activeResult && !isLogResult && !isErrorResult && tableLayoutActive
+        ? <ResultColumnSidebar
+            columns={activeResult.columns}
+            visibility={activeResult.view.columnVisibility}
+            onToggleVisibility={toggleSidebarColumn}
+            onShowAll={showAllSidebarColumns}
+            onHideAll={hideAllSidebarColumns}
+            onSelectColumn={scrollToSidebarColumn}
+            onClose={() => setSidebarOpen(false)}
+            grouping={activeResult.view.grouping}
+            onGroupColumn={groupSidebarColumn}
+            onUngroupColumn={ungroupSidebarColumn}
+            onClearGrouping={clearSidebarGrouping}
+        />
+        : undefined;
 
-    return <UiShell
-        title={sourceLabel}
-        activeSurface={state.shell.activeSurface}
-        onSurfaceChange={surface => controller.setSurface(surface as UiState['shell']['activeSurface'])}
-        surfaces={[
-            { id: 'results', label: 'Results' },
-            { id: 'schema', label: 'Schema' },
-            { id: 'history', label: 'History' },
-        ]}
-        sidebar={<CapabilityGate capability={schemaCapability} fallback={<div role="status">Schema navigation is host-owned in shared mode.</div>}><div>Schema</div></CapabilityGate>}
-    >
+    return <UiShell activeSurface={state.shell.activeSurface} sidebar={state.shell.activeSurface === 'results' ? columnSidebar : undefined}>
         <FocusOnMount>
-            <WorkspaceTabs tabs={[{ id: state.results.activeSourceId ?? 'result-panel', label: sourceLabel }]} activeId={state.results.activeSourceId ?? 'result-panel'} onSelect={id => controller.selectSource(id)} />
             {state.shell.activeSurface === 'results' && <>
-                <ResultTabs results={sourceResults} activeResultSetId={state.results.activeResultSetId} activeSourceId={state.results.activeSourceId} onSelect={(id, sourceId) => controller.selectResult(id, sourceId)} />
-                <ResultViewToolbar columns={activeResult?.columns ?? []} view={view} onChange={updateView} onAggregate={() => runAnalysis('aggregate')} onGroup={() => runAnalysis('group')} onPivot={() => runAnalysis('pivot')} activeAnalysis={analysisKind} analysisBusy={analysisLoading} onRefresh={() => controller.refresh()} onCopy={() => controller.copyActive()} onExport={() => controller.exportActive()} />
-                {analysisKind && <ResultAnalysisPanel sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'result-panel'} table={analysisTable} loading={analysisLoading} error={analysisError} onClose={closeAnalysis} onCopySelection={copySelection} onViewCell={openAnalysisCellValue} />}
-                <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
-                    {activeResult && <DataGrid
+                <ResultTabs
+                    results={sourceResults}
+                    activeResultSetId={state.results.activeResultSetId}
+                    activeSourceId={state.results.activeSourceId}
+                    onSelect={(id, sourceId) => controller.selectResult(id, sourceId)}
+                    getLabel={result => controller.getResultLabel(result)}
+                    isPinned={result => controller.isResultPinned(result)}
+                    onTogglePin={result => controller.toggleResultPin(result)}
+                    onClose={result => controller.closeResult(result)}
+                />
+                <ResultViewToolbar
+                    columns={activeResult?.columns ?? []}
+                    view={view}
+                    onChange={updateView}
+                    onAggregate={toggleAggregateFooter}
+                    onPivot={() => openPivot()}
+                    onRowView={isLogResult || isErrorResult || !tableLayoutActive ? undefined : toggleRowView}
+                    rowViewActive={rowViewOpen}
+                    activeAnalysis={analysisKind ?? (hasAggregations ? 'aggregate' : undefined)}
+                    analysisBusy={analysisLoading}
+                    leading={isLogResult || isErrorResult ? undefined : <>
+                        <button
+                            type="button"
+                            className="ui-result-toolbar-icon"
+                            aria-label="Toggle column sidebar"
+                            aria-pressed={sidebarOpen}
+                            title="Show or hide the columns sidebar"
+                            onClick={() => setSidebarOpen(value => !value)}
+                        ><MenuIcon name="panel-right" /></button>
+                        <ResultLayoutSwitcher active={activeLayout} onSelect={selectLayout} busy={analysisLoading} />
+                    </>}
+                    showAnalysis={!isLogResult && !isErrorResult && tableLayoutActive}
+                    showTableControls={!isLogResult && !isErrorResult && tableLayoutActive}
+                    // Sorting and grouping remain available from the column
+                    // headers and the grouping panel; the toolbar shortcuts
+                    // only duplicated them and consumed header width.
+                    showSort={false}
+                    showGroup={false}
+                    onRefresh={isLogResult ? undefined : requestRefresh}
+                    onCopy={isLogResult || pivotActive ? undefined : () => controller.copyActive()}
+                    onCopyAll={isLogResult || pivotActive ? undefined : copyAllResults}
+                    copyingAll={copyingAll}
+                    onExport={isLogResult || pivotActive ? undefined : () => setExportOpen(true)}
+                    rowCount={isLogResult || pivotActive ? undefined : activeResult?.totalRowCount}
+                    actions={activeResult && (isLogResult
+                        ? <button type="button" className="ui-result-toolbar-text-button" onClick={() => controller.clearLogs(activeResult.sourceId)}>
+                            <MenuIcon name="trash" /> Clear Logs
+                        </button>
+                        : isErrorResult || !tableLayoutActive ? undefined
+                        : <>
+                            <button
+                                type="button"
+                                className="ui-result-toolbar-icon"
+                                aria-label={editing ? 'Stop editing' : 'Edit data'}
+                                title={editInfo?.isEditable === true ? (editing ? 'Stop editing' : 'Edit data') : editInfo?.reason ?? 'Inline editing is not available for this result.'}
+                                aria-pressed={editing}
+                                disabled={editInfo?.isEditable !== true}
+                                onClick={() => controller.toggleEditMode(activeResult)}
+                            ><MenuIcon name={editing ? 'x' : 'pencil'} /></button>
+                            {editing && <>
+                                <button type="button" disabled={pendingEditCount === 0} onClick={() => controller.saveEdits(activeResult)}>Save {pendingEditCount === 1 ? '1 change' : `${pendingEditCount} changes`}</button>
+                                <button type="button" disabled={pendingEditCount === 0} onClick={() => controller.discardEdits(activeResult)}>Discard</button>
+                            </>}
+                            <button type="button" className="ui-result-toolbar-icon" aria-label="Formatting" title="Formatting" onClick={() => callPanelMethod('openResultFormattingPanel', { scope: 'result' })}><MenuIcon name="wrench" /></button>
+                            <SharedMoreMenu
+                                onRefreshSql={requestRefresh}
+                                onClearFilters={() => controller.clearAllFilters(activeResult)}
+                                onExportAllResults={() => controller.exportAllResults()}
+                                onUndoFilter={controller.canUndoFilter(activeResult) ? () => controller.undoFilter(activeResult) : undefined}
+                                onRedoFilter={controller.canRedoFilter(activeResult) ? () => controller.redoFilter(activeResult) : undefined}
+                                onCopyAs={format => controller.copyActiveAs(format)}
+                                onCopyAsImage={() => void controller.copyGridAsImage(activeResult)}
+                                onQueryLocally={() => controller.queryLocallyDuckDB(activeResult)}
+                                onGroupAnalysis={() => runAnalysis('group')}
+                                onAggregateAnalysis={() => runAnalysis('aggregate')}
+                                onFindColumn={openColumnSearch}
+                            />
+                        </>)}
+                    columnMenu={activeResult && !isLogResult && !isErrorResult && tableLayoutActive ? <DataGridColumnMenu columns={activeResult.columns} view={view} onViewChange={updateView} /> : undefined}
+                />
+                {!isLogResult && <ResultExecutionBanner
+                    status={executionStatus}
+                    message={activeResult?.message}
+                    cancelling={cancelling}
+                    onCancel={activeResult ? () => controller.cancel(activeResult.sourceId) : undefined}
+                />}
+                {showLimitBanner && <ResultLimitBanner
+                    limitReached
+                    limit={controller.getQueryRowLimit()}
+                    rowCount={activeResult?.totalRowCount}
+                    onDismiss={() => setDismissedLimitKey(activeResultKey)}
+                />}
+                {refreshFailure && <ResultRefreshFailureBanner
+                    message={refreshFailure.message}
+                    onRetry={() => controller.refresh(activeResult)}
+                    onDismiss={() => controller.clearRefreshFailure(activeResult)}
+                />}
+                {pivotOpen && activeResult && <PivotDialog
+                    columns={activeResult.columns}
+                    defaults={pivotDefaults}
+                    onSubmit={createPivot}
+                    onClose={() => setPivotOpen(false)}
+                />}
+                {analysisKind && analysisKind !== 'pivot' && <ResultAnalysisPanel sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'result-panel'} table={analysisTable} loading={analysisLoading} error={analysisError} onClose={closeAnalysis} onCopySelection={copySelection} onViewCell={openAnalysisCellValue} />}
+                <div className="ui-result-main-split">
+                {pivotActive
+                    ? <ResultAnalysisPanel sourceId={activeResult?.sourceId} resultSetId={activeResult?.resultSetId ?? 'result-panel'} table={analysisTable} loading={analysisLoading} error={analysisError} onClose={closeAnalysis} onCopySelection={copySelection} onViewCell={openAnalysisCellValue} fill />
+                    : resultState === 'error' && activeResult
+                    ? <ResultErrorView message={activeResult.message} details={activeResult.errorDetails} />
+                    : <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
+                    {activeResult && (isLogResult
+                        ? <SharedLogConsole rows={rows} lanesJson={controller.getSqlQueueJson()} />
+                        : viewLayout === 'charts'
+                        ? <LazySharedRangeChart columns={chartColumnProps} rows={chartRows} />
+                        : viewLayout === 'mini-charts'
+                        ? <MiniChartsView columns={activeResult.columns} rows={rows} />
+                        : viewLayout === 'diff'
+                        ? <DiffView
+                            target={{
+                                label: `Result ${activeResult.statementIndex + 1}`,
+                                columns: activeResult.columns,
+                                rows,
+                            }}
+                            baselines={diffBaselines}
+                            baselineId={diffBaselineId ?? defaultDiffBaselineId}
+                            onBaselineChange={setDiffBaselineId}
+                        />
+                        : viewLayout === 'explore'
+                        ? <SharedExploreHost
+                            result={activeResult}
+                            rows={rows}
+                            label={`Result ${activeResult.statementIndex + 1}`}
+                            diskBacked={controller.isDiskBackedResult(activeResult)}
+                            sql={activeSql?.sql}
+                            refreshSql={activeSql?.refreshSql}
+                        />
+                        : viewLayout === 'analytical'
+                        ? <SharedAnalyticalView
+                            columns={activeResult.columns}
+                            rows={rows}
+                            grouping={activeResult.view.grouping}
+                            onClose={() => setViewLayout('table')}
+                        />
+                        : <DataGrid
                         sourceId={activeResult.sourceId}
                         resultSetId={activeResult.resultSetId}
                         columns={activeResult.columns}
                         rows={rows}
+                        getColumnFormatting={getColumnFormatting}
                         totalRowCount={activeResult.totalRowCount}
+                        busy={activeResult.status === 'loading' || activeResult.status === 'streaming' || analysisLoading}
                         view={activeResult.view}
                         onViewChange={updateView}
                         showContextMenu
+                        showColumnMenu={false}
+                        showGroupingPanel={activeResult.view.grouping.length > 0}
                         selectedRowIndex={selectedRow}
                         scroll={{ sourceId: activeResult.sourceId, resultSetId: activeResult.resultSetId, top: activeResult.view.scrollTop, left: activeResult.view.scrollLeft, anchorRow: activeResult.view.anchorRow }}
                         onScroll={position => controller.updateView(activeResult.resultSetId, { scrollTop: position.top, scrollLeft: position.left, anchorRow: position.anchorRow })}
                         onLoadMore={() => controller.loadMore(activeResult)}
                         onRowSelect={setSelectedRow}
-                        onCopySelection={(payload, format?: DataGridClipboardFormat) => postHostMessage({ command: 'copyToClipboard', text: formatDataGridClipboard(payload, format === undefined || format === 'tsv' ? 'text' : format, { includeHeaders: payload.includeHeaders ?? true }) })}
+                        onSelectionChange={handleSelectionChange}
+                        onCopySelection={(payload, format?: DataGridClipboardFormat) => writeSharedClipboard(payload, format ?? controller.getCopyFormat())}
                         onViewCell={openCellValue}
+                        onOpenColumnFilter={openColumnFilter}
+                        showInlineColumnFilters={false}
+                        editMode={editing}
+                        onDeleteRow={editing ? rowIndex => controller.toggleRowDelete(activeResult, rowIndex) : undefined}
+                        isRowDeleted={rowIndex => controller.isRowDeleted(activeResult, rowIndex)}
+                        onCellEdit={edit => controller.recordCellEdit(activeResult, edit)}
+                        onInsertCellContent={payload => postHostMessage({ command: 'insertCellContent', ...payload })}
                         onOpenResultFormatting={() => callPanelMethod('openResultFormattingPanel', { scope: 'result' })}
-                    />}
-                </AsyncStateView>
-                {selected && activeResult && <RowDetail columns={detailColumns} row={selected} onClose={() => setSelectedRow(undefined)} />}
+                        catalogBound={editInfo?.isEditable === true}
+                        onColumnAction={(context, action) => controller.postColumnAction(activeResult, context.columnIndex, action)}
+                        onProfileColumn={context => {
+                            setViewLayout('explore');
+                            window.setTimeout(() => focusExploreColumn(context.columnIndex), 80);
+                        }}
+                    />)}
+                </AsyncStateView>}
+                {rowViewOpen && !isLogResult && !pivotActive && activeResult && <RowViewPanel
+                    columns={rowViewColumns}
+                    rows={rowViewRows}
+                    placeholder={rowViewPlaceholder}
+                    onClose={() => setRowViewOpen(false)}
+                    onExportXlsb={exportRowViewXlsb}
+                    onNotify={text => postHostMessage({ command: 'info', text })}
+                />}
+                </div>
+                {filterState && <DataGridColumnFilterPanel
+                    state={filterState}
+                    onChange={patch => setFilterState(current => current ? { ...current, ...patch } : current)}
+                    onApply={applyColumnFilter}
+                    onClear={clearColumnFilter}
+                    onClose={() => setFilterState(undefined)}
+                    summary={view.columnAggregations?.[filterState.columnName] ?? []}
+                    onSummaryChange={aggregations => {
+                        if (!activeResult) return;
+                        const definitions = { ...(activeResult.view.columnAggregations ?? {}) };
+                        if (aggregations.length === 0) delete definitions[filterState.columnName];
+                        else definitions[filterState.columnName] = aggregations;
+                        controller.updateView(activeResult.resultSetId, { columnAggregations: definitions });
+                    }}
+                />}
+                {refreshLimitOpen && <RefreshLimitDialog
+                    sql={activeSql?.refreshSql}
+                    initialLimit={refreshLimitInitial}
+                    onSubmit={limit => {
+                        setRefreshLimitOpen(false);
+                        controller.refresh(activeResult, limit);
+                    }}
+                    onCancel={() => setRefreshLimitOpen(false)}
+                />}
+                {exportOpen && activeResult && <ResultExportDialog
+                    format={exportFormat}
+                    destination={exportDestination}
+                    scope={exportScope}
+                    onFormatChange={setExportFormat}
+                    onDestinationChange={setExportDestination}
+                    onScopeChange={setExportScope}
+                    onCancel={() => setExportOpen(false)}
+                    onExport={() => {
+                        setExportOpen(false);
+                        controller.exportActiveWithOptions(exportFormat, exportDestination, exportScope);
+                    }}
+                />}
             </>}
-            {state.shell.activeSurface === 'schema' && <CapabilityGate capability={schemaCapability} fallback={<AsyncStateView state="empty" emptyLabel="Schema navigation is not available in this Result Panel yet." />}><div>Schema navigation</div></CapabilityGate>}
-            {state.shell.activeSurface === 'history' && <AsyncStateView state="empty" emptyLabel="History remains available through the host until the shared HistoryPort adapter is enabled." />}
+            {state.shell.activeSurface === 'schema' && <section className="shared-schema-surface" aria-label="Schema">
+                <header>
+                    <h2>Result schema</h2>
+                    <p>Columns of the active result. Catalog actions remain available from the column context menu.</p>
+                    {schemaCapability && schemaCapability.status !== 'available' && <p className="shared-schema-note">{schemaCapability.reason ?? 'Catalog metadata is not exposed by this host yet.'}</p>}
+                </header>
+                {activeResult
+                    ? <ResultColumnSidebar
+                        columns={activeResult.columns}
+                        visibility={activeResult.view.columnVisibility}
+                        onToggleVisibility={toggleSidebarColumn}
+                        onShowAll={showAllSidebarColumns}
+                        onHideAll={hideAllSidebarColumns}
+                        onSelectColumn={scrollToSidebarColumn}
+                        grouping={activeResult.view.grouping}
+                        onGroupColumn={groupSidebarColumn}
+                        onUngroupColumn={ungroupSidebarColumn}
+                        onClearGrouping={clearSidebarGrouping}
+                    />
+                    : <AsyncStateView state="empty" emptyLabel="No active result set." />}
+            </section>}
+            {state.shell.activeSurface === 'history' && <section className="shared-history-surface" aria-label="Query history">
+                <HistoryView
+                    entries={state.history.entryIds.map(id => ({
+                        id,
+                        label: id,
+                        status: 'recorded',
+                        sqlFingerprint: id,
+                    }))}
+                    state={state.history.status === 'loading' ? 'loading' : state.history.entryIds.length === 0 ? 'empty' : 'ready'}
+                    message={state.history.message}
+                />
+            </section>}
         </FocusOnMount>
     </UiShell>;
 }
@@ -1421,20 +3815,36 @@ function ensureSharedStyles(): void {
         body.shared-ui-mode #loadingOverlay, body.shared-ui-mode #executionStatusBanner,
         body.shared-ui-mode #resultLimitBanner, body.shared-ui-mode #resultSetHeader { display: none !important; }
         body.shared-ui-mode .layout-wrapper { display: none !important; }
-        #${SHARED_ROOT_ID} { display: block; height: 100vh; overflow: auto; font: 13px var(--vscode-font-family, sans-serif); }
-        #${SHARED_ROOT_ID} .ui-shell { min-height: 100%; }
+        #${SHARED_ROOT_ID} { display: flex; flex-direction: column; min-height: 0; height: 100vh; overflow: hidden; font: 13px var(--vscode-font-family, sans-serif); }
+        #${SHARED_ROOT_ID} .ui-shell { display: flex; flex: 1 1 auto; min-height: 0; height: 100%; flex-direction: column; }
+        #${SHARED_ROOT_ID} .ui-shell-body { display: flex; flex: 1 1 auto; min-height: 0; height: auto; }
+        #${SHARED_ROOT_ID} .ui-shell-main { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; padding: 0; }
+        #${SHARED_ROOT_ID} .ui-shell-main > div { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+        #${SHARED_ROOT_ID} .ui-result-grid { flex: 1 1 auto; min-height: 0; }
         #${SHARED_ROOT_ID} .ui-shell-header, #${SHARED_ROOT_ID} .ui-result-toolbar,
-        #${SHARED_ROOT_ID} .ui-workspace-tabs, #${SHARED_ROOT_ID} .ui-result-tabs { display: flex; gap: 6px; align-items: center; padding: 6px; flex-wrap: wrap; }
-        #${SHARED_ROOT_ID} .ui-shell-header { justify-content: space-between; border-bottom: 1px solid var(--vscode-panel-border, #444); }
-        #${SHARED_ROOT_ID} .ui-shell-header h1 { margin: 0; font-size: 14px; }
-        #${SHARED_ROOT_ID} .ui-shell-body { display: grid; grid-template-columns: minmax(150px, 22%) 1fr; min-height: calc(100vh - 48px); }
-        #${SHARED_ROOT_ID} .ui-shell-sidebar { border-right: 1px solid var(--vscode-panel-border, #444); padding: 8px; }
-        #${SHARED_ROOT_ID} .ui-shell-main { min-width: 0; padding: 6px; }
-        #${SHARED_ROOT_ID} button, #${SHARED_ROOT_ID} input { font: inherit; }
-        #${SHARED_ROOT_ID} .ui-data-grid-scroll { max-height: calc(100vh - 180px); }
-        #${SHARED_ROOT_ID} .ui-row-detail { margin-top: 8px; padding: 8px; border: 1px solid var(--vscode-panel-border, #444); }
-        #${SHARED_ROOT_ID} .ui-row-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
-        #${SHARED_ROOT_ID} .ui-row-detail dt { font-weight: 600; }
+        #${SHARED_ROOT_ID} .ui-workspace-tabs, #${SHARED_ROOT_ID} .ui-result-tabs { display: flex; gap: 4px; align-items: center; padding: 4px 6px; }
+        #${SHARED_ROOT_ID} .ui-shell-header { flex: 0 0 auto; min-height: 30px; justify-content: space-between; border-bottom: 1px solid var(--vscode-panel-border, #444); }
+        #${SHARED_ROOT_ID} .ui-shell-header h1 { margin: 0; font-size: 13px; }
+        #${SHARED_ROOT_ID} .ui-result-tabs { flex: 0 0 auto; flex-wrap: nowrap; overflow-x: auto; gap: 0; padding: 0 4px; border-bottom: 1px solid var(--vscode-panel-border, #444); background: transparent; }
+        #${SHARED_ROOT_ID} .ui-result-tabs { gap: 0; padding: 0; background: transparent; }
+        #${SHARED_ROOT_ID} .ui-result-tab { border-bottom: 2px solid transparent; }
+        #${SHARED_ROOT_ID} .ui-result-tab-active { border-bottom-color: var(--vscode-focusBorder, #6689a7); }
+        #${SHARED_ROOT_ID} .ui-result-tab-label { min-height: 24px; padding: 2px 4px 2px 8px; border: 0; border-right: 1px solid var(--vscode-panel-border, #444); border-radius: 0; background: transparent; }
+        #${SHARED_ROOT_ID} .ui-result-tab:last-child .ui-result-tab-label { border-right: 0; }
+        #${SHARED_ROOT_ID} .ui-result-tab-label:hover { background: var(--vscode-list-hoverBackground, rgba(128,128,128,.15)); }
+        #${SHARED_ROOT_ID} .ui-result-tab-label[aria-selected="true"] { border-color: transparent; background: transparent; }
+        #${SHARED_ROOT_ID} .ui-result-tab-pin, #${SHARED_ROOT_ID} .ui-result-tab-close { width: 16px; min-width: 16px; min-height: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; font-size: 12px; }
+        #${SHARED_ROOT_ID} .ui-result-tab-pin { margin-left: 2px; }
+        #${SHARED_ROOT_ID} .ui-result-tab-pin[aria-pressed="true"] { color: var(--vscode-focusBorder, #6689a7); background: color-mix(in srgb, var(--vscode-focusBorder, #6689a7) 18%, transparent); }
+        #${SHARED_ROOT_ID} .ui-result-toolbar { flex: 0 0 auto; flex-wrap: wrap; padding: 3px 6px; gap: 3px; }
+        #${SHARED_ROOT_ID} .ui-result-toolbar label { display: flex; align-items: center; gap: 4px; margin: 0; min-width: 0; white-space: nowrap; }
+        #${SHARED_ROOT_ID} .ui-result-toolbar .ui-result-toolbar-search { box-sizing: border-box; flex: 1 1 200px; min-width: 110px; max-width: 300px; }
+        #${SHARED_ROOT_ID} .ui-result-toolbar .ui-result-toolbar-search input { box-sizing: border-box; width: 100%; height: 22px; padding: 1px 6px 1px 26px; }
+        #${SHARED_ROOT_ID} .ui-result-toolbar button { min-height: 22px; padding: 1px 7px; font-size: 11px; white-space: nowrap; }
+        #${SHARED_ROOT_ID} .ui-result-toolbar button.ui-result-toolbar-icon { display: inline-flex; width: 22px; min-width: 22px; padding: 0; align-items: center; justify-content: center; }
+        #${SHARED_ROOT_ID} .ui-result-toolbar-row-count { font-size: 11px; }
+        #${SHARED_ROOT_ID} .ui-data-grid-scroll { max-height: none; min-height: 0; flex: 1 1 auto; }
+        #${SHARED_ROOT_ID} .ui-data-grid-edit-hint { opacity: 0.8; font-size: 12px; }
         #${SHARED_ROOT_ID} .ui-capability-state, #${SHARED_ROOT_ID} .ui-async-state { padding: 12px; }
     `;
     document.head.appendChild(style);

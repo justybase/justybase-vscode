@@ -51,4 +51,14 @@ describe('portable result analysis tables', () => {
     expect(capped.columns).toHaveLength(501);
     expect(capped.summary).toContain('first 500 of 600 pivot values');
   });
+
+  it('marks a server-truncated pivot as partial even when the returned total is capped', () => {
+    const response: QueryGroupResponse = {
+      columns: [{ name: 'CATEGORY' }, { name: 'PIVOT' }, { name: 'SUM(AMOUNT)', type: 'DECIMAL' }],
+      rows: [['A', 'X', '1.00']],
+      totalGroups: 1,
+    };
+    expect(createPivotAnalysisTable(columns, { ...response, truncated: true }, 0, 1, 1).summary)
+      .toContain('partial: first 1 groups');
+  });
 });

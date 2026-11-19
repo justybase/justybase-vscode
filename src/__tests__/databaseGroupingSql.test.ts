@@ -215,6 +215,20 @@ describe('databaseGroupingSql', () => {
         expect(built.sql).toContain('ORDER BY 1 ASC');
     });
 
+    it('orders pivot groups by both dimensions instead of the aggregate', () => {
+        const built = buildDatabaseGroupingSql(BASE_SQL, COLUMNS, {
+            groupByColumns: [
+                { columnIndex: 1, columnName: 'DEPARTMENT' },
+                { columnIndex: 3, columnName: 'HIRE_DATE' },
+            ],
+            functions: [{ fn: 'sum', columnIndex: 2 }],
+            orderBy: [{ columnIndex: 0, desc: false }, { columnIndex: 1, desc: false }],
+        });
+
+        expect(built.sql).toContain('ORDER BY 1 ASC, 2 ASC');
+        expect(built.sql).not.toContain('ORDER BY 3 DESC');
+    });
+
     it('maps ORDER BY to position 3 for percentage column', () => {
         const built = buildDatabaseGroupingSql(BASE_SQL, COLUMNS, {
             groupByColumns: [{ columnIndex: 1, columnName: 'DEPARTMENT' }],

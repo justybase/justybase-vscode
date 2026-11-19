@@ -8,6 +8,7 @@ import {
   getSelectedGridRowIndices,
   gridSelectionColumnRange,
   gridSelectionContains,
+  gridSelectionRangeColumnRange,
   normalizeGridSelection,
   parseGridCellId,
 } from '../src';
@@ -33,6 +34,14 @@ describe('renderer-neutral result-grid selection', () => {
       { anchorRow: 0, anchorColumn: 42, focusRow: 0, focusColumn: 1 },
       [1, 2],
     )).toEqual({ minColumn: 0, maxColumn: 42 });
+    expect(gridSelectionRangeColumnRange(
+      { minRow: 0, maxRow: 0, minColumn: 1, maxColumn: 7 },
+      [0, 2, 4, 8],
+    )).toEqual({ minColumn: 1, maxColumn: 2 });
+    expect(gridSelectionRangeColumnRange(
+      { minRow: 0, maxRow: 0, minColumn: 5, maxColumn: 6 },
+      [0, 1],
+    )).toBeUndefined();
   });
 
   it('parses legacy cell ids and derives copy bounds', () => {

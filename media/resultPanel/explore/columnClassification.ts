@@ -160,7 +160,7 @@ export function classifyColumnRole(
 
 export function classifyColumns(
     columns: ReadonlyArray<{ name: string; type?: string }>,
-    rows: readonly unknown[][],
+    rows: ReadonlyArray<ReadonlyArray<unknown>>,
 ): ExploreColumnRole[] {
     return columns.map((column, index) => {
         const sample: unknown[] = [];

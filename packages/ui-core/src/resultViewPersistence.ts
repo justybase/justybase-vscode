@@ -1,5 +1,5 @@
 import type { PersistenceScope, UiIdentity } from '@justybase/contracts';
-import type { UiResultColumnFilterDefinition, UiResultViewState } from './types';
+import type { UiResultAggregationFunction, UiResultColumnAggregation, UiResultColumnFilterDefinition, UiResultViewState } from './types';
 import { PersistenceCodec, PersistenceDecodeError } from './persistence';
 
 export const RESULT_VIEW_PERSISTENCE_SCHEMA_VERSION = 1 as const;
@@ -69,6 +69,36 @@ function booleanRecord(value: unknown): Readonly<Record<string, boolean>> | unde
   return Object.fromEntries(entries) as Readonly<Record<string, boolean>>;
 }
 
+const AGGREGATION_FUNCTIONS = new Set<UiResultAggregationFunction>([
+  'sum',
+  'count',
+  'countDistinct',
+  'avg',
+  'min',
+  'max',
+  'stdev',
+  'median',
+]);
+
+function columnAggregations(value: unknown): Readonly<Record<string, readonly UiResultColumnAggregation[]>> | undefined {
+  if (!isRecord(value)) return undefined;
+  const next: Record<string, readonly UiResultColumnAggregation[]> = {};
+  for (const [key, entries] of Object.entries(value)) {
+    if (!Array.isArray(entries)) return undefined;
+    const normalized: UiResultColumnAggregation[] = [];
+    for (const entry of entries) {
+      if (!isRecord(entry) || typeof entry.fn !== 'string' || !AGGREGATION_FUNCTIONS.has(entry.fn as UiResultAggregationFunction)) return undefined;
+      if (entry.position !== undefined && entry.position !== 'top' && entry.position !== 'bottom') return undefined;
+      normalized.push({
+        fn: entry.fn as UiResultAggregationFunction,
+        ...(entry.position === undefined ? {} : { position: entry.position }),
+      });
+    }
+    next[key] = normalized;
+  }
+  return next;
+}
+
 function widthRecord(value: unknown): Readonly<Record<string, number>> | undefined {
   if (!isRecord(value)) return undefined;
   const entries = Object.entries(value);
@@ -103,6 +133,7 @@ export function normalizeResultView(value: unknown): UiResultViewState | undefin
   if (value.sorting !== undefined && sorting(value.sorting) === undefined) return undefined;
   if (value.grouping !== undefined && stringArray(value.grouping) === undefined) return undefined;
   if (value.aggregation !== undefined && typeof value.aggregation !== 'string') return undefined;
+  if (value.columnAggregations !== undefined && columnAggregations(value.columnAggregations) === undefined) return undefined;
   if (value.pivotColumn !== undefined && typeof value.pivotColumn !== 'string') return undefined;
   if (value.columnVisibility !== undefined && booleanRecord(value.columnVisibility) === undefined) return undefined;
   if (value.columnOrder !== undefined && stringArray(value.columnOrder) === undefined) return undefined;
@@ -122,6 +153,7 @@ export function normalizeResultView(value: unknown): UiResultViewState | undefin
     scrollTop: value.scrollTop === undefined ? 0 : nonNegativeNumber(value.scrollTop)!,
     scrollLeft: value.scrollLeft === undefined ? 0 : nonNegativeNumber(value.scrollLeft)!,
     ...(typeof value.aggregation === 'string' ? { aggregation: value.aggregation } : {}),
+    ...(value.columnAggregations !== undefined ? { columnAggregations: columnAggregations(value.columnAggregations)! } : {}),
     ...(typeof value.pivotColumn === 'string' ? { pivotColumn: value.pivotColumn } : {}),
     ...(value.columnVisibility !== undefined ? { columnVisibility: booleanRecord(value.columnVisibility)! } : {}),
     ...(value.columnOrder !== undefined ? { columnOrder: stringArray(value.columnOrder)! } : {}),

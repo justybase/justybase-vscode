@@ -1,11 +1,16 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vscode = require('vscode');
+const { requestScreenshot } = require('./extensionHostScreenshot');
 
 async function configureRegressionSettings() {
     const global = vscode.ConfigurationTarget.Global;
     const root = vscode.workspace.getConfiguration('justybase');
     const results = vscode.workspace.getConfiguration('justybase.results');
+    const uiMode = (process.env.JUSTYBASE_UI_MODE || '').trim();
+    if (uiMode === 'shared' || uiMode === 'legacy') {
+        await vscode.workspace.getConfiguration('justybase.ui').update('mode', uiMode, global);
+    }
     await root.update('enableStreaming', true, global);
     await root.update('streamingChunkSize', 2, global);
     await root.update('safeExecute.enabled', false, global);
@@ -26,6 +31,23 @@ async function run() {
     const engine = process.env.JUSTYBASE_EXTENSION_HOST_ENGINE === 'netezza' ? 'netezza' : 'sqlite';
     const reportPath = process.env.JUSTYBASE_EXTENSION_HOST_REPORT_PATH;
     const tracePath = process.env.JUSTYBASE_EXTENSION_HOST_TRACE_PATH;
+    const uiMode = (process.env.JUSTYBASE_UI_MODE || 'shared').trim() === 'legacy' ? 'legacy' : 'shared';
+    const screenshotMode = process.env.JUSTYBASE_EXTENSION_HOST_SCREENSHOTS === '1';
+    if (screenshotMode) {
+        // Visual capture mode deliberately does not depend on the legacy
+        // webview trace handshake. The result panel opens while the richer
+        // host scenario is still preparing its deterministic streams.
+        const scenarioPromise = vscode.commands.executeCommand('justybase.test.extensionHostScenario', { engine });
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        await requestScreenshot(`result-panel-${uiMode}`);
+        await scenarioPromise.catch(error => {
+            console.warn(
+                'Extension Host scenario did not finish after the visual capture:',
+                error instanceof Error ? error.message : String(error),
+            );
+        });
+        return;
+    }
     const report = await vscode.commands.executeCommand('justybase.test.extensionHostScenario', { engine });
 
     assert.ok(report && typeof report === 'object', 'Extension Host scenario returned no report.');

@@ -383,7 +383,7 @@ function initData(
     readOnly = nextReadOnly;
     document.body.classList.toggle('is-readonly', readOnly);
     appliedFilter = readFilter();
-    editorState = createState(data || [], columns || [], metadata?.columns, { readOnly });
+    editorState = createState(data || [], columns || [], (nextMetadata ?? metadata)?.columns, { readOnly });
     hideError();
     dataLoaded = true;
 

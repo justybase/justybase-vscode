@@ -494,7 +494,8 @@ function applyWindowResult(
     updateRowCountInfo(resultSetIndex, resultSet.totalRowCount ?? 0, resultSet.limitReached === true);
 }
 
-export function handleRowWindow(message: Record<string, unknown>): void {
+/** Returns true when the message belonged to a legacy disk-grid request. */
+export function handleRowWindow(message: Record<string, unknown>): boolean {
     const requestId = message.requestId as number | undefined;
     const offset = message.offset as number;
     const resultSetIndex = message.resultSetIndex as number;
@@ -502,19 +503,22 @@ export function handleRowWindow(message: Record<string, unknown>): void {
     const totalRows = message.totalRows as number | undefined;
     const filteredCount = message.filteredCount as number | undefined;
 
+    let legacyRequest = false;
     if (requestId !== undefined) {
         const pending = pendingRequests.get(requestId);
         if (pending?.type === 'fetch') {
             pending.resolve(rows);
             pendingRequests.delete(requestId);
-            return;
+            return true;
         }
         if (pending?.type === 'window') {
             pendingRequests.delete(requestId);
+            legacyRequest = true;
         }
     }
 
     tryApplyWindowResult(resultSetIndex, offset, rows, filteredCount ?? totalRows, totalRows);
+    return legacyRequest;
 }
 
 export function handleDiskQueryResult(message: Record<string, unknown>): void {

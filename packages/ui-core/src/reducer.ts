@@ -231,6 +231,7 @@ function hydrateResult(state: UiState, action: Extract<UiAction, { type: 'result
     loadedRowCount: action.loadedRowCount,
     totalRowCount,
     ...(action.columns === undefined ? {} : { columns: action.columns.map(column => ({ ...column })) }),
+    ...(action.limitReached === undefined ? {} : { limitReached: action.limitReached }),
   });
 }
 

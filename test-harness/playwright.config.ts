@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
     testDir: './tests',
+    testIgnore: /(data-grid-visual|data-grid-performance|result-panel-parity)\.spec\.ts/,
     timeout: 30000,
     retries: 1,
     use: {

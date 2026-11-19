@@ -30,16 +30,23 @@ operators, and match blank or non-blank values. Click **Apply** to keep the
 filter; **Clear filter** removes it. The older inline text fields are retained
 only for hosts that do not provide the rich filter menu.
 
-Use **Group** to open the grouping surface and start with the first result
-column, or use **Group by column** in a header/context menu. Drag additional
-columns into the grouping surface to create nested groups; the chip order is
+Use **Group by column** in a header or the context menu to open the grouping
+surface and start grouping. Click a column header label to sort; the header's
+group action also starts grouping. The toolbar sort and group shortcuts were
+removed because they duplicated those controls. Drag additional columns into
+the grouping surface to create nested groups; the chip order is
 the grouping priority. Each group is rendered as a tree row with an expand/
 collapse chevron, indentation, row count, and preserved row selection/copy
 coordinates. Removing the last grouping returns the flat result grid.
 
-Click **Pivot** to choose a row column, a pivot column, and a numeric value
-column. The operation opens in a dedicated panel and produces a separate,
-closable grid that respects the active filters.
+Open **Analyze → Pivot…** (or the Pivot toolbar button) to choose a row column,
+a pivot column, a numeric value column, and the aggregation. The dialog states
+which input becomes the first column, which becomes the header row, and where
+the aggregated value is placed. The pivot becomes the active result layout: it
+replaces the table until you close it, respects the active filters, and sorts
+the matrix by the row and pivot dimensions rather than by the aggregate value.
+If the server grouping cap is reached, the summary marks the result as partial
+instead of silently dropping cells.
 
 Drag a cell or row selection beyond the top or bottom edge of the result
 viewport to keep extending it while the grid scrolls. Header widths include
@@ -52,6 +59,51 @@ move columns that do not fit into expandable row details. Use the chevron in a
 row number cell to inspect those values. The option is off by default and is
 remembered for that result set. Grouping temporarily suspends the layout; the
 setting resumes when the grid returns to flat rows.
+
+## Inline editing
+
+Inline editing is available when the result comes from a single editable table.
+The shared Result Panel shows **Edit data** above the grid. Select it, then
+double-click a typed cell to open its editor:
+
+- Enter commits; Escape cancels. A multi-line JSON/text editor commits with
+  Ctrl+Enter (Cmd+Enter on macOS).
+- **Set NULL** stores a database `NULL`; the same button restores the previous
+  value before committing.
+- Values are validated against the column type. An invalid value keeps the
+  editor open and shows the reason instead of sending a malformed statement.
+
+Pending changes are previewed in the grid. **Save** sends the reviewed
+`UPDATE` statements to the host, which shows the confirmation dialog before
+executing them. **Discard** drops the pending session. Editing is disabled for
+disk-backed results and for queries that do not select a single table; the
+reason appears next to the disabled button.
+
+## Logs and selection statistics
+
+The **Logs** result tab keeps the execution log for the source. Use **Clear
+Logs** on that tab to clear it; the tab does not expose table editing or
+analysis actions.
+
+Selecting one or more cells reports the selection size, count, distinct count,
+and numeric sum/min/max to the VS Code status bar. Ctrl+click (Cmd+click on
+macOS) toggles individual cells without clearing the current selection, so you
+can summarize or copy non-adjacent cells. Copy and export use the bounding
+rectangle of the selection, matching Excel and the legacy grid. Grouped views do
+not report cell statistics because group headers are not data cells.
+
+Double-click a data cell outside edit mode to insert its value into the active
+SQL editor. The value is formatted as a SQL literal: numbers stay unquoted,
+text and dates are quoted, and NULL is inserted as `NULL`. In edit mode the
+double-click opens the cell editor instead.
+
+**Row View** opens a side panel that compares up to ten selected rows
+vertically: every column becomes a section, all selected values appear together,
+and columns whose values differ are highlighted. Grouped results show a
+placeholder until grouping is cleared. Drag the divider to resize the
+column-name column (or focus it and use the arrow keys; double-click to fit the
+longest name). The export menu copies the comparison as an image or Markdown,
+or downloads it as XLSB.
 
 <figure>
   <img src="screenshots/row-view.png" alt="Row View showing a result row side by side with values">
@@ -119,9 +171,19 @@ Disk-backed filtering sees every row fetched into the SQLite spill, without a se
 
 Visible-scope aggregation uses the currently filtered grid/spill. Database-scope aggregation uses the unlimited subquery used by **All rows + LIMIT**. Available operations include `SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `COUNT DISTINCT`, `STDDEV`, and `MEDIAN` where the selected database supports the operation and the column type is suitable. Pin aggregations to compare columns while changing filters.
 
+## Charts and Diff
+
+The **Analyze** menu in the layout switcher also exposes **Charts**, **Mini Charts**, and **Diff**.
+
+**Charts** renders the active 2x2-or-larger cell selection, or the whole filtered result when there is no usable selection. Pick a chart type (grouped, stacked, or 100% stacked columns; grouped or stacked bars; line; stacked area; pie; scatter), choose the category and numeric series, and set the title and legend in the sidebar. **Copy as Image** writes a PNG to the clipboard; **Download PNG** saves one. Chart data follows the grid's filters and sort order and skips hidden columns.
+
+**Mini Charts** shows one sparkline card per numeric column, sampled from the first 120 values, with min, average, maximum, and the latest sampled value.
+
+**Diff** compares the active result with another result set from the same source. The baseline picker excludes logs and failed results. The summary counts added, removed, and changed rows; changed cells show the baseline value struck through above the new value. The table shows at most 500 differences, and the summary still counts every difference.
+
 ## Analytical
 
-The **Analytical** view groups the rows by up to three columns and flags groups whose values, nulls, dates or category mix differ from the rest of the result. See [Analytical View](guide/user/analytical-view/) for the detection modes, the rules and their limits.
+The **Analytical** view groups the rows by up to three columns and flags groups whose values, nulls, dates or category mix differ from the rest of the result. Open it from **Analyze → Analytical** in the layout switcher; choose one to three **Group by** columns in the view header. See [Analytical View](guide/user/analytical-view/) for the detection modes, the rules and their limits.
 
 ## Explore
 
@@ -175,6 +237,8 @@ limitation rather than silently substituting sample statistics.
 Batch statements appear as separate tabs. Pinning protects a result from normal pruning; the current defaults are 50 data result sets per SQL file and 10 manually pinned sets. Empty, cancelled, partial, and error result sets keep their state and message so the user can distinguish “zero rows” from “query did not complete.”
 
 ## Copy and export
+
+**Ctrl+C** and the toolbar **Copy** write several representations in one clipboard operation: an HTML table plus a plain-text form controlled by `justybase.results.copyFormat` (Markdown by default, or tabbed, CSV, or semicolon-delimited CSV). Rich targets such as Excel, Word, and browsers paste the HTML table, while plain-text editors receive the configured text. JSON and SQL INSERT copies stay plain-text so a rich editor cannot substitute the table.
 
 **Copy** in the grid context menu copies the selection as tab-separated values without headers. **Copy as ▸** holds the other formats: tabbed with headers, Markdown table, CSV, JSON (an array of row objects), SQL INSERT statements, SQL IN list, and HTML table. **SQL IN list** turns the selected cells into a predicate list to paste after a column in a `WHERE` clause, for example `IN (1001, 1002, 'O''Brien')`. Numbers are written without quotes and text is quoted with `'` doubled. NULLs and duplicate values are left out. Lists longer than ten values are wrapped ten values per line. **Export Selection ▸** and **Export All Visible ▸** write Excel, CSV, or JSON files.
 

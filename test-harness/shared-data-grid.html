@@ -29,6 +29,16 @@
 </head>
 <body>
   <div id="root"></div>
+  <script>
+    window.__postedMessages = [];
+    window.acquireVsCodeApi = function () {
+      return {
+        postMessage: function (message) { window.__postedMessages.push(message); },
+        getState: function () { return undefined; },
+        setState: function () {},
+      };
+    };
+  </script>
   <script src="/dist/test-harness/shared-data-grid.js"></script>
 </body>
 </html>

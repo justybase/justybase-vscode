@@ -1,3 +1,4 @@
+import { calculateGridSelectionStats } from '@justybase/ui-core';
 import { postHostMessage } from '../protocol.js';
 import { getNumericTypeInfo, isTemporalType } from '../utils.js';
 import type { SelectionStats, TanStackColumn, TanStackTable } from '../types.js';
@@ -11,75 +12,8 @@ export interface DiskAggregationValue {
     value: unknown;
 }
 
-/** Pure cell-value classification shared by memory selection stats. No DOM access. */
-export function calculateSelectionStats(values: unknown[]): SelectionStats {
-    const numericValues: number[] = [];
-    const dateValues: string[] = [];
-    const textValues: string[] = [];
-
-    values.forEach(value => {
-        if (value === null || value === undefined) {
-            return;
-        }
-
-        const text = String(value).trim();
-        if (text === '' || text === 'NULL' || text === 'null') {
-            return;
-        }
-
-        const cleanText = text.replace(/[\s\u00A0]/g, '');
-        const standardText = cleanText.replace(',', '.');
-        const num = typeof value === 'number' ? value : parseFloat(standardText);
-        if (Number.isFinite(num) && /^-?\d*\.?\d+$/.test(standardText)) {
-            numericValues.push(num);
-        }
-
-        if (text.match(/^\d{4}-\d{2}-\d{2}/) || text.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-            dateValues.push(text);
-        } else if (!/^-?\d*\.?\d+$/.test(standardText)) {
-            textValues.push(text);
-        }
-    });
-
-    const allValues = [...numericValues, ...dateValues, ...textValues];
-    const distinctValues = new Set(allValues);
-    if (numericValues.length > 0 && dateValues.length === 0 && textValues.length === 0) {
-        return {
-            cellCount: allValues.length,
-            type: 'numeric',
-            count: numericValues.length,
-            distinctCount: distinctValues.size,
-            sum: numericValues.reduce((a, b) => a + b, 0),
-            min: Math.min(...numericValues),
-            max: Math.max(...numericValues)
-        };
-    }
-    if (dateValues.length > 0 && numericValues.length === 0 && textValues.length === 0) {
-        const sortedDates = [...dateValues].sort();
-        return {
-            cellCount: allValues.length,
-            type: 'date',
-            count: dateValues.length,
-            distinctCount: distinctValues.size,
-            min: sortedDates[0],
-            max: sortedDates[sortedDates.length - 1]
-        };
-    }
-    if (textValues.length > 0 && numericValues.length === 0 && dateValues.length === 0) {
-        return {
-            cellCount: allValues.length,
-            type: 'text',
-            count: textValues.length,
-            distinctCount: distinctValues.size
-        };
-    }
-    return {
-        cellCount: allValues.length,
-        type: 'mixed',
-        count: allValues.length,
-        distinctCount: distinctValues.size
-    };
-}
+/** Pure cell-value classification shared with every result renderer. */
+export const calculateSelectionStats = calculateGridSelectionStats;
 
 /** Map host aggregation results for a disk-backed column to SelectionStats. Pure. */
 export function getDiskColumnStats(column: TanStackColumn, values: DiskAggregationValue[]): SelectionStats {

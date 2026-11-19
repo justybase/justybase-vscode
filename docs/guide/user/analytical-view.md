@@ -12,7 +12,7 @@ product_version: 3.20.10
 
 The **Analytical** view groups the rows of a result by one to three columns and compares every group with a baseline. It lists the groups with an anomaly score, and the detail pane shows per-column statistics for the selected group. Use it to find a group whose values, nulls, dates or category mix differ from the others.
 
-Open it from the **Analytical** entry of the view switcher in the result toolbar.
+Open it from **Analyze → Analytical** in the result toolbar's layout switcher.
 
 ## Data boundaries
 

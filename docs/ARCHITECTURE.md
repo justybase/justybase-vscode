@@ -100,10 +100,15 @@ the source/index projection and reads the legacy timestamp fallback.
 The VS Code Result Panel defaults to the shared React surface
 (`justybase.ui.mode = "shared"`). The DOM renderer in
 `media/resultPanel/grid/tableBuilder.ts` is a deprecated, explicit `legacy`
-rollback and is scheduled for deletion after edit and analysis parity land.
-Selection geometry and typed copy formats live in `@justybase/ui-core`
-(`resultGridSelection`, `resultCopyFormats`) so both renderers share the same
-range and clipboard semantics.
+rollback. The shared panel covers the table, Charts, Mini Charts, Diff, Explore,
+Analytical, Pivot, Row View and Logs layouts. Explore still reuses its DOM
+feature module behind a React-owned host because it owns the server-side pivot,
+ECharts composer/ranking and full-statistics workflows. Selection geometry and
+typed copy formats live in `@justybase/ui-core` (`resultGridSelection`,
+`resultCopyFormats`) so both renderers share the same range and clipboard
+semantics. Typed inline editing uses the same package (`resultCellEditing`);
+the shared panel stages pending edits and posts the host-reviewed `saveEdits`
+request, while schema navigation remains host-owned.
 
 ## Desktop execution lifecycle
 

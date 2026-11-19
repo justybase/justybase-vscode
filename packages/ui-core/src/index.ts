@@ -76,6 +76,20 @@ export type { SchemaContextMenuLabel } from './schemaContextMenu';
 export { createAggregateAnalysisTable, createGroupAnalysisTable, createPivotAnalysisTable } from './resultAnalysis';
 export type { UiResultAnalysisKind, UiResultAnalysisTable } from './resultAnalysis';
 export {
+  editValuesEqual,
+  isBooleanEditType,
+  isDateOnlyEditType,
+  isNumericEditType,
+  parseTypedEditValue,
+  resolveGridCellEditKind,
+  toEditableCellText,
+} from './resultCellEditing';
+export type { GridCellEditKind, TypedEditResult } from './resultCellEditing';
+export {
+  calculateGridSelectionStats,
+} from './resultSelectionStats';
+export type { GridSelectionStats, GridSelectionStatsType } from './resultSelectionStats';
+export {
   formatCellsAsInList,
   formatCellsAsInsert,
   formatCellsAsJson,
@@ -89,6 +103,7 @@ export {
   getSelectedGridRowIndices,
   gridSelectionColumnRange,
   gridSelectionContains,
+  gridSelectionRangeColumnRange,
   normalizeGridSelection,
   parseGridCellId,
 } from './resultGridSelection';
@@ -118,7 +133,9 @@ export type {
   UiMetadataState,
   UiResultEvent,
   UiResultEventBase,
+  UiResultAggregationFunction,
   UiResultColumn,
+  UiResultColumnAggregation,
   UiResultColumnFilterDefinition,
   UiResultStatus,
   UiResultSurfaceState,

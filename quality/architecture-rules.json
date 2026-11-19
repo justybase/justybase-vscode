@@ -132,6 +132,41 @@
       "reason": "The shared context-menu icon renderer is the React counterpart of the webview menu icons.",
       "owner": "UI platform maintainers",
       "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/logConsole.tsx",
+      "target": "react",
+      "reason": "The shared log console is a React presentation component consumed by the VS Code webview adapter.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/rowView.tsx",
+      "target": "react",
+      "reason": "Row View is the shared React presentation for vertical multi-row comparison.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/pivotDialog.tsx",
+      "target": "react",
+      "reason": "The pivot builder is a shared React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/miniCharts.tsx",
+      "target": "react",
+      "reason": "The mini-charts layout is a shared React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
+    },
+    {
+      "source": "packages/ui-react/src/diffView.tsx",
+      "target": "react",
+      "reason": "The diff layout is a shared React presentation component consumed by product adapters.",
+      "owner": "UI platform maintainers",
+      "removeWhen": "Replace the React presentation implementation with a dependency-free renderer."
     }
   ],
   "layers": {

@@ -1,8 +1,8 @@
 import { memo, useMemo } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { formatDataGridCellValue, isDataGridNumericColumn, isDataGridTemporalColumn } from './resultGridFormatting';
-import type { DataGridCellMetadata } from './resultGridFormatting';
-import type { DataGridColumn } from './dataGridTypes';
+import type { DataGridCellMetadata, DataGridFormattingOptions } from './resultGridFormatting';
+import type { DataGridColumn, DataGridSelectionRange } from './dataGridTypes';
 
 /** Mounted column geometry shared by every rendered row. */
 export interface DataGridColumnLayout {
@@ -44,11 +44,12 @@ export interface DataGridRowProps {
   readonly columns: readonly DataGridColumnLayout[];
   readonly resolvedColumns: readonly DataGridColumn[];
   readonly getCellMetadata?: DataGridCellMetadataResolver;
+  /** Host formatting preferences resolved per column. */
+  readonly getColumnFormatting?: (column: DataGridColumn, columnIndex: number) => DataGridFormattingOptions | undefined;
+  readonly deleted?: boolean;
   readonly hostSelected: boolean;
-  /** True only for rows inside the current selection range. */
-  readonly rowInSelection: boolean;
-  readonly selectionMinColumn: number;
-  readonly selectionMaxColumn: number;
+  /** Selected rectangles projected onto display-order column positions. */
+  readonly selectionRanges: readonly DataGridSelectionRange[];
   /** Width of skipped columns before/after the mounted window. */
   readonly leftSpacer: number;
   readonly rightSpacer: number;
@@ -77,6 +78,7 @@ function prepareRowLabel(
   values: readonly unknown[],
   resolvedColumns: readonly DataGridColumn[],
   getCellMetadata: DataGridCellMetadataResolver | undefined,
+  getColumnFormatting: ((column: DataGridColumn, columnIndex: number) => DataGridFormattingOptions | undefined) | undefined,
   sourceIndex: number,
 ): string {
   let label = '';
@@ -84,7 +86,8 @@ function prepareRowLabel(
     const column = resolvedColumns[columnIndex];
     const value = values[columnIndex];
     const metadata = column === undefined ? undefined : getCellMetadata?.(value, sourceIndex, columnIndex, column) ?? column;
-    const text = formatDataGridCellValue(value, metadata?.type, metadata);
+    const formatting = column === undefined ? undefined : getColumnFormatting?.(column, columnIndex);
+    const text = formatDataGridCellValue(value, metadata?.type, metadata, formatting);
     label = columnIndex === 0 ? text : `${label} ${text}`;
   }
   return label;
@@ -95,13 +98,15 @@ function prepareCells(
   columns: readonly DataGridColumnLayout[],
   resolvedColumns: readonly DataGridColumn[],
   getCellMetadata: DataGridCellMetadataResolver | undefined,
+  getColumnFormatting: ((column: DataGridColumn, columnIndex: number) => DataGridFormattingOptions | undefined) | undefined,
   sourceIndex: number,
 ): readonly PreparedCell[] {
   return columns.map(layout => {
     const column = resolvedColumns[layout.columnIndex]!;
     const value = values[layout.columnIndex];
     const metadata = getCellMetadata?.(value, sourceIndex, layout.columnIndex, column) ?? column;
-    const displayValue = formatDataGridCellValue(value, metadata.type, metadata);
+    const formatting = getColumnFormatting?.(column, layout.columnIndex);
+    const displayValue = formatDataGridCellValue(value, metadata.type, metadata, formatting);
     return {
       key: `${layout.position}:${layout.key}`,
       columnIndex: layout.columnIndex,
@@ -134,10 +139,10 @@ export const DataGridRow = memo(function DataGridRow({
   columns,
   resolvedColumns,
   getCellMetadata,
+  getColumnFormatting,
+  deleted = false,
   hostSelected,
-  rowInSelection,
-  selectionMinColumn,
-  selectionMaxColumn,
+  selectionRanges,
   leftSpacer,
   rightSpacer,
   onRowClick,
@@ -149,22 +154,20 @@ export const DataGridRow = memo(function DataGridRow({
   onCellContextMenu,
 }: DataGridRowProps): ReactNode {
   const rowLabel = useMemo(
-    () => prepareRowLabel(values, resolvedColumns, getCellMetadata, sourceIndex),
-    [getCellMetadata, resolvedColumns, sourceIndex, values],
+    () => prepareRowLabel(values, resolvedColumns, getCellMetadata, getColumnFormatting, sourceIndex),
+    [getCellMetadata, getColumnFormatting, resolvedColumns, sourceIndex, values],
   );
   const cells = useMemo(
-    () => prepareCells(values, columns, resolvedColumns, getCellMetadata, sourceIndex),
-    [columns, getCellMetadata, resolvedColumns, sourceIndex, values],
+    () => prepareCells(values, columns, resolvedColumns, getCellMetadata, getColumnFormatting, sourceIndex),
+    [columns, getCellMetadata, getColumnFormatting, resolvedColumns, sourceIndex, values],
   );
-  const rowInRange = rowInSelection;
-
   return <tr
     data-row-index={displayIndex}
     data-source-index={sourceIndex}
     data-result-set={resultSetId}
     aria-label={rowLabel}
     aria-rowindex={displayIndex + 2}
-    className={`${displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${hostSelected ? 'ui-data-grid-row-selected' : ''}`}
+    className={`${displayIndex % 2 === 0 ? 'ui-data-grid-row-even' : 'ui-data-grid-row-odd'} ${hostSelected ? 'ui-data-grid-row-selected' : ''} ${deleted ? 'ui-data-grid-row-deleted' : ''}`}
     onClick={() => onRowClick(sourceIndex)}
   >
     <th scope="row" className="ui-data-grid-row-number" onMouseDown={event => onRowNumberMouseDown(displayIndex, event)} onMouseEnter={() => onRowNumberEnter(displayIndex)}>
@@ -172,7 +175,11 @@ export const DataGridRow = memo(function DataGridRow({
     </th>
     {leftSpacer > 0 && <td aria-hidden="true" className="ui-data-grid-column-spacer" style={{ width: leftSpacer, minWidth: leftSpacer }} />}
     {cells.map(cell => {
-      const selected = rowInRange && cell.position >= selectionMinColumn && cell.position <= selectionMaxColumn;
+      const selected = selectionRanges.some(range =>
+        displayIndex >= range.minRow
+        && displayIndex <= range.maxRow
+        && cell.position >= range.minColumn
+        && cell.position <= range.maxColumn);
       const className = selected ? `${cell.className} ui-data-grid-cell-selected` : cell.className;
       return <td
         key={cell.key}

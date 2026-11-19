@@ -122,8 +122,10 @@ function sqlLiteral(value: unknown): string {
   return `'${String(value).replace(/'/gu, "''")}'`;
 }
 
+/** Mirrors the on-screen grid: numeric cells are right-aligned; everything
+ *  else (text, dates, booleans) stays left-aligned. */
 function columnAlignment(column: DataGridColumn): 'left' | 'right' {
-  return isDataGridNumericColumn(column) || isDataGridTemporalColumn(column) ? 'left' : 'right';
+  return isDataGridNumericColumn(column) ? 'right' : 'left';
 }
 
 function markdownEscape(value: string): string {
@@ -162,18 +164,51 @@ function createMarkdownTable(headers: readonly string[], matrix: readonly (reado
 }
 
 function createHtmlTable(headers: readonly string[], matrix: readonly (readonly ClipboardCell[])[], columns: readonly DataGridColumn[]): string {
-  const tableStyle = 'border-collapse:collapse;border-spacing:0;font-family:Calibri, Arial, sans-serif;font-size:11pt;line-height:1.4;color:#1f1f1f';
-  const headerStyle = 'background-color:#f3f2f1;border:1px solid #d1d1d1;padding:6px 8px;font-weight:600;text-align:left;vertical-align:top;white-space:nowrap';
+  // Word/Outlook add their own paragraph spacing inside table cells, which is
+  // what makes pasted result grids balloon into very tall rows. Explicit zero
+  // margins on both the cell and an inner paragraph keep the table compact.
+  const tableStyle = [
+    'border-collapse:collapse',
+    'border-spacing:0',
+    'font-family:Calibri,Arial,sans-serif',
+    'font-size:10pt',
+    'line-height:1.15',
+    'mso-line-height-rule:exactly',
+    'color:#1f1f1f',
+    'margin:0',
+  ].join(';');
+  const cellTextStyle = 'margin:0;line-height:1.15;mso-line-height-rule:exactly;mso-margin-top-alt:0;mso-margin-bottom-alt:0';
+  const headerStyle = [
+    'background-color:#f3f2f1',
+    'border:1px solid #d1d1d1',
+    'padding:3px 8px',
+    'font-weight:600',
+    'text-align:left',
+    'vertical-align:middle',
+    'white-space:nowrap',
+    'height:auto',
+  ].join(';');
   const head = headers.length > 0
-    ? `<thead><tr>${headers.map(header => `<th align="left" style="${headerStyle}">${escapeHtml(header)}</th>`).join('')}</tr></thead>`
+    ? `<thead><tr>${headers.map(header => `<th align="left" style="${headerStyle}"><p style="${cellTextStyle}">${escapeHtml(header)}</p></th>`).join('')}</tr></thead>`
     : '';
   const body = matrix.map((row, rowIndex) => {
     const background = rowIndex % 2 === 0 ? '#ffffff' : '#faf9f8';
     const cells = row.map((cell, columnIndex) => {
       const alignment = columnAlignment(columns[columnIndex] ?? {} as DataGridColumn);
-      const style = `border:1px solid #d1d1d1;padding:6px 8px;text-align:${alignment};vertical-align:top;background-color:${background};white-space:nowrap${cell.kind === 'text' ? ";mso-number-format:'\\@'" : ''}`;
+      const style = [
+        'border:1px solid #d1d1d1',
+        `padding:2px 8px`,
+        `text-align:${alignment}`,
+        'vertical-align:middle',
+        `background-color:${background}`,
+        'white-space:nowrap',
+        'line-height:1.15',
+        'mso-line-height-rule:exactly',
+        'height:auto',
+      ].join(';');
       const numeric = cell.kind === 'number' && cell.numericValue !== undefined ? ` x:num="${escapeHtml(cell.numericValue)}"` : '';
-      return `<td align="${alignment}" style="${style}"${numeric}>${escapeHtml(cell.htmlValue)}</td>`;
+      const textStyle = `${cellTextStyle}${cell.kind === 'text' ? ";mso-number-format:'\\@'" : ''}`;
+      return `<td align="${alignment}" style="${style}"${numeric}><p style="${textStyle}">${escapeHtml(cell.htmlValue)}</p></td>`;
     }).join('');
     return `<tr>${cells}</tr>`;
   }).join('');
