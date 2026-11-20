@@ -33,6 +33,46 @@ function formatPostgresqlQualifiedName(schema: string, objectName: string): stri
   return formatQualifiedObjectName(undefined, schema, objectName, 'postgresql');
 }
 
+/** Pure SQL builders shared with the generated-SQL parser gate. */
+export function buildPostgresqlVacuumSql(sqlPrefix: string, qualifiedTable: string): string {
+  return `${sqlPrefix} ${qualifiedTable};`;
+}
+
+export function buildPostgresqlAnalyzeSql(sqlPrefix: string, qualifiedTable: string): string {
+  return `${sqlPrefix} ${qualifiedTable};`;
+}
+
+export function buildPostgresqlReindexTableSql(qualifiedTable: string): string {
+  return `REINDEX TABLE ${qualifiedTable};`;
+}
+
+export interface PostgresqlCreatePartitionSqlOptions {
+  partitionBound: string;
+  isDefault?: boolean;
+  tablespace?: string;
+}
+
+export function buildPostgresqlCreatePartitionSql(
+  qualifiedPartition: string,
+  qualifiedParent: string,
+  options: PostgresqlCreatePartitionSqlOptions,
+): string {
+  let sql = `CREATE TABLE ${qualifiedPartition} PARTITION OF ${qualifiedParent}`;
+  sql += options.isDefault ? ' DEFAULT' : ` ${options.partitionBound}`;
+  if (options.tablespace) {
+    sql += ` TABLESPACE ${formatPostgresqlIdentifier(options.tablespace)}`;
+  }
+  return `${sql};`;
+}
+
+export function buildPostgresqlAttachPartitionSql(
+  qualifiedParent: string,
+  qualifiedTable: string,
+  partitionBound: string,
+): string {
+  return `ALTER TABLE ${qualifiedParent} ATTACH PARTITION ${qualifiedTable} ${partitionBound};`;
+}
+
 /**
  * Helper to format bytes into human-readable format.
  */
@@ -127,7 +167,7 @@ export const postgresqlMaintenanceProvider: DatabaseMaintenanceProvider = {
       return;
     }
 
-    const sql = `${mode.sqlPrefix} ${qualifiedTable};`;
+    const sql = buildPostgresqlVacuumSql(mode.sqlPrefix, qualifiedTable);
     const confirmation = await vscode.window.showWarningMessage(
       `Run ${mode.label} on table "${target.qualifiedName}"?\n\n${sql}\n\nWarning: PostgreSQL VACUUM options can hold stronger locks depending on the mode.`,
       { modal: true },
@@ -168,7 +208,7 @@ export const postgresqlMaintenanceProvider: DatabaseMaintenanceProvider = {
       return;
     }
 
-    const sql = `${mode.sqlPrefix} ${qualifiedTable};`;
+    const sql = buildPostgresqlAnalyzeSql(mode.sqlPrefix, qualifiedTable);
     const confirmation = await vscode.window.showInformationMessage(
       `Analyze table "${target.qualifiedName}"?\n\n${sql}`,
       { modal: true },
@@ -191,7 +231,7 @@ export const postgresqlMaintenanceProvider: DatabaseMaintenanceProvider = {
 
   async reindexTable(target, services): Promise<void> {
     const qualifiedTable = formatPostgresqlQualifiedName(target.schemaName, target.tableName);
-    const sql = `REINDEX TABLE ${qualifiedTable};`;
+    const sql = buildPostgresqlReindexTableSql(qualifiedTable);
     const confirmation = await vscode.window.showWarningMessage(
       `Reindex table "${target.qualifiedName}"?\n\n${sql}\n\nWarning: REINDEX can be disruptive on busy tables.`,
       { modal: true },
@@ -255,19 +295,7 @@ export const postgresqlMaintenanceProvider: DatabaseMaintenanceProvider = {
     const qualifiedPartition = formatPostgresqlQualifiedName(schema, options.partitionName);
     const qualifiedParent = formatPostgresqlQualifiedName(target.schemaName, target.tableName);
 
-    let sql = `CREATE TABLE ${qualifiedPartition} PARTITION OF ${qualifiedParent}`;
-
-    if (options.isDefault) {
-      sql += ` DEFAULT`;
-    } else {
-      sql += ` ${options.partitionBound}`;
-    }
-
-    if (options.tablespace) {
-      sql += ` TABLESPACE ${formatPostgresqlIdentifier(options.tablespace)}`;
-    }
-
-    sql += `;`;
+    const sql = buildPostgresqlCreatePartitionSql(qualifiedPartition, qualifiedParent, options);
 
     const confirmation = await vscode.window.showWarningMessage(
       `Create partition "${options.partitionName}"?\n\n${sql}`,
@@ -364,7 +392,11 @@ export const postgresqlMaintenanceProvider: DatabaseMaintenanceProvider = {
     const qualifiedParent = formatPostgresqlQualifiedName(target.schemaName, target.tableName);
     const qualifiedTable = formatPostgresqlQualifiedName(schema, options.tableName);
 
-    const sql = `ALTER TABLE ${qualifiedParent} ATTACH PARTITION ${qualifiedTable} ${options.partitionBound};`;
+    const sql = buildPostgresqlAttachPartitionSql(
+      qualifiedParent,
+      qualifiedTable,
+      options.partitionBound,
+    );
 
     const confirmation = await vscode.window.showWarningMessage(
       `Attach table "${options.tableName}" as partition of "${target.tableName}"?\n\n${sql}`,

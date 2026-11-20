@@ -69,6 +69,14 @@ export const JsonTable = keyword('JsonTable', 'JSON_TABLE');
 export const Columns = keyword('Columns');
 export const Path = keyword('Path');
 export const Concurrently = keyword('Concurrently');
+export const Mapping = keyword('Mapping');
+export const Unlogged = keyword('Unlogged');
+export const Substring = keyword('Substring');
+export const Trim = keyword('Trim');
+export const Position = keyword('Position');
+export const Overlay = keyword('Overlay');
+export const Tablespace = keyword('Tablespace');
+export const Access = keyword('Access');
 
 // These are ordinary names in PostgreSQL. Reject foreign instructions in the
 // grammar instead of rejecting identifiers such as SELECT 1 AS groom.
@@ -76,7 +84,8 @@ const netezzaOnly = new Set(['Distribute', 'Organize', 'Groom', 'Versions', 'Rec
 export const allTokens = [
   DollarQuotedString, EscapeString, UnterminatedEscapeString, QuotedIdentifier, UnicodeIdentifier, JsonTextPath, JsonPath, JsonTextArrow, JsonArrow,
   JsonExistsAny, JsonExistsAll, JsonExists, JsonContains, JsonContained, Colon,
-  Matched, Source, Target, Old, New, JsonTable, Columns, Path, Concurrently,
+  Matched, Source, Target, Old, New, JsonTable, Columns, Path, Concurrently, Mapping, Unlogged,
+  Substring, Trim, Position, Overlay, Tablespace, Access,
   Lateral, Returning, Conflict, Do, Nothing, ArrayKeyword, Window, Ordinality,
   Overriding, System, Value, FunctionKeyword, Index, Domain, Enum, Generated,
   Always, Identity, Stored, Virtual, By, Atomic, Include, Collate,

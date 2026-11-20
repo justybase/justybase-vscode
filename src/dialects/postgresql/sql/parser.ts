@@ -4,6 +4,190 @@ import * as t from './lexer';
 
 type Rule = () => CstNode;
 
+/**
+ * Command tails (`GRANT …`, `COPY …`, `SET …`, `VACUUM …`) are not a
+ * structured grammar: they mix keywords that are reserved elsewhere. The
+ * shared tail only accepts the narrow relaxed-identifier set, which made
+ * PostgreSQL report syntax errors on valid administrative statements
+ * (`GRANT SELECT …`, `SET search_path TO …`, `COPY … FROM …`).
+ *
+ * `Identifier` and `StringLiteral` are categories in the PostgreSQL lexer, so
+ * consuming them also accepts their members (unicode identifiers, dollar
+ * quoted and escape strings). Members are excluded to avoid duplicate
+ * alternatives for the same token.
+ */
+const POSTGRESQL_COMMAND_TAIL_EXCLUDED_TOKENS = new Set([
+  'UnicodeIdentifier',
+  'DollarQuotedString',
+  'EscapeString',
+  'UnterminatedEscapeString',
+  'Semicolon',
+  'WhiteSpace',
+  'LineComment',
+  'BlockComment',
+]);
+
+/** Statement heads that lex as identifiers because PostgreSQL reserves no keyword for them. */
+const POSTGRESQL_IDENTIFIER_COMMAND_HEADS = new Set([
+  'ABORT',
+  'ANALYZE',
+  'CHECKPOINT',
+  'CLUSTER',
+  'DEALLOCATE',
+  'DISCARD',
+  'IMPORT',
+  'LISTEN',
+  'LOAD',
+  'NOTIFY',
+  'PREPARE',
+  'REASSIGN',
+  'REFRESH',
+  'RELEASE',
+  'SAVEPOINT',
+  'SECURITY',
+  'START',
+  'UNLISTEN',
+  'VACUUM',
+  'MOVE',
+  'CLOSE',
+]);
+
+/** `CREATE <object>` forms that have no dedicated rule yet. */
+const POSTGRESQL_MODELED_CREATE_HEADS = new Set<string>([
+  'FunctionKeyword',
+  'Procedure',
+  'Type',
+  'Domain',
+  'Index',
+  'Unique',
+  'Do',
+  'Merge',
+  'Global',
+  'Temp',
+  'Temporary',
+  'Table',
+  'Sequence',
+  'Schema',
+  'Materialized',
+  'View',
+]);
+
+/** `DROP <object>` forms already modeled by the shared drop rule. */
+const POSTGRESQL_MODELED_DROP_HEADS = new Set<string>([
+  'Table',
+  'View',
+  'Procedure',
+  'Database',
+  'Group',
+  'Schema',
+  'Sequence',
+  'Session',
+  'Synonym',
+]);
+
+/** `CREATE <object>` tails accepted as untyped PostgreSQL commands. */
+const POSTGRESQL_CREATE_FALLBACK_OBJECTS = new Set([
+  'ACCESS',
+  'AGGREGATE',
+  'CAST',
+  'COLLATION',
+  'CONSTRAINT',
+  'CONVERSION',
+  'DATABASE',
+  'EVENT',
+  'EXTENSION',
+  'FOREIGN',
+  'LANGUAGE',
+  'OPERATOR',
+  'POLICY',
+  'PUBLICATION',
+  'ROLE',
+  'RULE',
+  'SERVER',
+  'STATISTICS',
+  'SUBSCRIPTION',
+  'TABLESPACE',
+  'TEXT',
+  'TRANSFORM',
+  'TRIGGER',
+  'USER',
+]);
+
+/** `DROP <object>` tails accepted as untyped PostgreSQL commands. */
+const POSTGRESQL_DROP_FALLBACK_OBJECTS = new Set([
+  'ACCESS',
+  'AGGREGATE',
+  'CAST',
+  'COLLATION',
+  'CONSTRAINT',
+  'CONVERSION',
+  'EVENT',
+  'EXTENSION',
+  'FOREIGN',
+  'LANGUAGE',
+  'OPERATOR',
+  'OWNED',
+  'POLICY',
+  'PUBLICATION',
+  'ROLE',
+  'ROUTINE',
+  'RULE',
+  'SERVER',
+  'STATISTICS',
+  'SUBSCRIPTION',
+  'TABLESPACE',
+  'TEXT',
+  'TRANSFORM',
+  'TRIGGER',
+]);
+
+/** `ALTER <object>` tails accepted as untyped PostgreSQL commands. */
+const POSTGRESQL_ALTER_FALLBACK_OBJECTS = new Set([
+  'ACCESS',
+  'AGGREGATE',
+  'CAST',
+  'COLLATION',
+  'CONVERSION',
+  'DATABASE',
+  'DEFAULT',
+  'DOMAIN',
+  'EVENT',
+  'EXTENSION',
+  'FOREIGN',
+  'FUNCTION',
+  'GROUP',
+  'INDEX',
+  'LANGUAGE',
+  'LARGE',
+  'MATERIALIZED',
+  'OPERATOR',
+  'POLICY',
+  'PROCEDURE',
+  'PUBLICATION',
+  'ROLE',
+  'RULE',
+  'SCHEMA',
+  'SEQUENCE',
+  'SERVER',
+  'STATISTICS',
+  'SUBSCRIPTION',
+  'SYSTEM',
+  'TABLESPACE',
+  'TEXT',
+  'TRANSFORM',
+  'TRIGGER',
+  'TYPE',
+  'USER',
+  'VIEW',
+]);
+
+function isTokenType(value: unknown): value is TokenType {
+  return typeof value === 'object'
+    && value !== null
+    && typeof (value as { name?: unknown }).name === 'string'
+    && typeof (value as { tokenTypeIdx?: unknown }).tokenTypeIdx === 'number';
+}
+
 /** PostgreSQL rules keep shared CST names without inheriting Netezza grammar. */
 export class PostgreSqlParser extends BaseSqlParser {
   declare postgresqlReturning: Rule;
@@ -26,11 +210,45 @@ export class PostgreSqlParser extends BaseSqlParser {
   declare postgresqlAtomicBody: Rule;
   declare postgresqlAlterAction: Rule;
   declare postgresqlTableOption: Rule;
+  declare postgresqlEnableDisableAction: Rule;
+  declare postgresqlForceRowSecurityAction: Rule;
+  declare postgresqlNoForceRowSecurityAction: Rule;
+  declare postgresqlInheritAction: Rule;
+  declare postgresqlReloptionName: Rule;
+  declare postgresqlSetTableAction: Rule;
+  declare postgresqlReplicaIdentityAction: Rule;
+  declare postgresqlValidateConstraintAction: Rule;
+  declare postgresqlPartitionValueList: Rule;
+  declare postgresqlPartitionBound: Rule;
+  declare postgresqlPartitionAction: Rule;
+  declare postgresqlReloptionList: Rule;
+  declare postgresqlLikeClause: Rule;
+  declare postgresqlIndexColumn: Rule;
+  declare postgresqlLockingClause: Rule;
+  declare postgresqlTableSampleClause: Rule;
+  declare postgresqlRowExpression: Rule;
+  declare postgresqlSubstringExpression: Rule;
+  declare postgresqlTrimExpression: Rule;
+  declare postgresqlPositionExpression: Rule;
+  declare postgresqlOverlayExpression: Rule;
+  declare postgresqlDropRoutineStatement: Rule;
+  declare postgresqlCommandTailTokenPart1: Rule;
+  declare postgresqlCommandTailTokenPart2: Rule;
+  declare postgresqlCommandTailTokenPart3: Rule;
+  declare postgresqlIdentifierCommandStatement: Rule;
+  declare postgresqlCreateFallbackStatement: Rule;
+  declare postgresqlAlterFallbackStatement: Rule;
+  declare postgresqlDropFallbackStatement: Rule;
+  declare postgresqlDeclareStatement: Rule;
+  declare postgresqlFetchStatement: Rule;
+  declare postgresqlDropUserMappingStatement: Rule;
 
   constructor() {
     super(t);
     this.registerPostgresqlRules();
     this.registerAdvancedPostgresqlRules();
+    this.registerPostgresqlStatementOverrides();
+    this.registerPostgresqlFallbackRules();
     this.finalizeParser();
   }
 
@@ -65,8 +283,8 @@ export class PostgreSqlParser extends BaseSqlParser {
         ]);
         this.SUBRULE(this.columnList);
       } },
-      { GATE: () => this.LA(1).image.toUpperCase() === 'TABLESPACE', ALT: () => {
-        this.CONSUME1(t.Identifier); this.SUBRULE(this.identifier);
+      { ALT: () => {
+        this.CONSUME(t.Tablespace); this.SUBRULE(this.identifier);
       } },
       { ALT: () => {
         this.CONSUME(t.On); this.CONSUME(t.Commit);
@@ -76,11 +294,37 @@ export class PostgreSqlParser extends BaseSqlParser {
           { GATE: () => this.LA(1).image.toUpperCase() === 'PRESERVE', ALT: () => { this.CONSUME2(t.Identifier); this.CONSUME1(t.Rows); } },
         ]);
       } },
+      { GATE: () => this.isPostgresqlImageOneOf('INHERITS'), ALT: () => {
+        this.CONSUME3(t.Identifier); // INHERITS
+        this.CONSUME(t.LParen);
+        this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.qualifiedName) });
+        this.CONSUME(t.RParen);
+      } },
+      { ALT: () => {
+        this.CONSUME(t.With);
+        this.SUBRULE(this.postgresqlReloptionList);
+      } },
+      { GATE: () => this.isPostgresqlImageOneOf('WITHOUT'), ALT: () => {
+        this.CONSUME4(t.Identifier); // WITHOUT
+        this.CONSUME5(t.Identifier); // OIDS
+      } },
+      { ALT: () => {
+        this.CONSUME(t.Using);
+        this.SUBRULE1(this.identifier);
+      } },
     ]));
 
     this.RULE('postgresqlAlterAction', () => {
       let addIfNotExists = false;
       this.OR([
+      { GATE: () => this.isPostgresqlImageOneOf('ENABLE', 'DISABLE'), ALT: () => this.SUBRULE(this.postgresqlEnableDisableAction) },
+      { GATE: () => this.isPostgresqlImageOneOf('FORCE'), ALT: () => this.SUBRULE(this.postgresqlForceRowSecurityAction) },
+      { GATE: () => this.isPostgresqlImageOneOf('NO'), ALT: () => this.SUBRULE(this.postgresqlNoForceRowSecurityAction) },
+      { GATE: () => this.isPostgresqlImageOneOf('INHERIT'), ALT: () => this.SUBRULE(this.postgresqlInheritAction) },
+      { GATE: () => this.LA(1).tokenType === t.Set || this.LA(1).tokenType === t.Reset, ALT: () => this.SUBRULE(this.postgresqlSetTableAction) },
+      { GATE: () => this.isPostgresqlImageOneOf('REPLICA'), ALT: () => this.SUBRULE(this.postgresqlReplicaIdentityAction) },
+      { GATE: () => this.isPostgresqlImageOneOf('VALIDATE'), ALT: () => this.SUBRULE(this.postgresqlValidateConstraintAction) },
+      { GATE: () => this.isPostgresqlImageOneOf('ATTACH', 'DETACH'), ALT: () => this.SUBRULE(this.postgresqlPartitionAction) },
       { ALT: () => {
         this.CONSUME(t.Add); this.OPTION(() => this.CONSUME(t.Column));
         this.OPTION6(() => {
@@ -121,6 +365,189 @@ export class PostgreSqlParser extends BaseSqlParser {
       { ALT: () => { this.CONSUME(t.Owner); this.CONSUME1(t.To); this.SUBRULE4(this.identifier); } },
       ]);
     });
+
+    this.RULE('postgresqlEnableDisableAction', () => {
+      this.CONSUME(t.Identifier); // ENABLE | DISABLE
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === t.Row, ALT: () => {
+          this.CONSUME(t.Row);
+          this.CONSUME1(t.Identifier); // LEVEL
+          this.CONSUME2(t.Identifier); // SECURITY
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('ALWAYS', 'REPLICA'), ALT: () => {
+          this.CONSUME3(t.Identifier); // ALWAYS | REPLICA
+          this.CONSUME1(t.Row);
+          this.CONSUME4(t.Identifier); // LEVEL
+          this.CONSUME5(t.Identifier); // SECURITY
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('TRIGGER'), ALT: () => {
+          this.CONSUME6(t.Identifier); // TRIGGER
+          this.OPTION(() => this.OR1([
+            { ALT: () => this.CONSUME(t.All) },
+            { ALT: () => this.SUBRULE(this.identifier) },
+          ]));
+        } },
+        { GATE: () => this.LA(1).tokenType === t.Rule, ALT: () => {
+          this.CONSUME(t.Rule);
+          this.SUBRULE1(this.identifier);
+        } },
+      ]);
+    });
+
+    this.RULE('postgresqlForceRowSecurityAction', () => {
+      this.CONSUME(t.Identifier); // FORCE
+      this.CONSUME(t.Row);
+      this.CONSUME1(t.Identifier); // LEVEL
+      this.CONSUME2(t.Identifier); // SECURITY
+    });
+
+    this.RULE('postgresqlNoForceRowSecurityAction', () => {
+      this.CONSUME(t.Identifier); // NO
+      this.OR([
+        { GATE: () => this.isPostgresqlImageOneOf('FORCE'), ALT: () => {
+          this.CONSUME1(t.Identifier); // FORCE
+          this.CONSUME(t.Row);
+          this.CONSUME2(t.Identifier); // LEVEL
+          this.CONSUME3(t.Identifier); // SECURITY
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('INHERIT'), ALT: () => {
+          this.CONSUME4(t.Identifier); // INHERIT
+          this.SUBRULE(this.qualifiedName);
+        } },
+      ]);
+    });
+
+    this.RULE('postgresqlInheritAction', () => {
+      this.CONSUME(t.Identifier); // INHERIT
+      this.SUBRULE(this.qualifiedName);
+    });
+
+    this.RULE('postgresqlReloptionName', () => {
+      this.SUBRULE(this.identifier);
+      this.MANY(() => {
+        this.CONSUME(t.Dot);
+        this.SUBRULE1(this.identifier);
+      });
+    });
+
+    this.RULE('postgresqlSetTableAction', () => {
+      this.OR([
+        { ALT: () => this.CONSUME(t.Set) },
+        { ALT: () => this.CONSUME(t.Reset) },
+      ]);
+      this.OR1([
+        { GATE: () => this.LA(1).tokenType === t.LParen, ALT: () => {
+          this.CONSUME(t.LParen);
+          this.AT_LEAST_ONE_SEP({
+            SEP: t.Comma,
+            DEF: () => {
+              this.SUBRULE(this.postgresqlReloptionName);
+              this.OPTION(() => {
+                this.CONSUME(t.Equals);
+                this.SUBRULE(this.expression);
+              });
+            },
+          });
+          this.CONSUME(t.RParen);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('TABLESPACE', 'SCHEMA', 'ACCESS'), ALT: () => {
+          this.OR2([
+            { ALT: () => this.CONSUME(t.Schema) },
+            { ALT: () => this.CONSUME(t.Tablespace) },
+            { ALT: () => { this.CONSUME(t.Access); this.CONSUME1(t.Identifier); } }, // ACCESS METHOD
+          ]);
+          this.OR3([
+            { ALT: () => this.SUBRULE(this.identifier) },
+            { ALT: () => this.CONSUME(t.StringLiteral) },
+          ]);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('LOGGED', 'UNLOGGED'), ALT: () => {
+          this.CONSUME3(t.Identifier);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('WITHOUT'), ALT: () => {
+          this.CONSUME4(t.Identifier); // WITHOUT
+          this.CONSUME5(t.Identifier); // OIDS | CLUSTER
+        } },
+      ]);
+    });
+
+    this.RULE('postgresqlReplicaIdentityAction', () => {
+      this.CONSUME(t.Identifier); // REPLICA
+      this.CONSUME(t.Identity);
+      this.OR([
+        { GATE: () => this.isPostgresqlImageOneOf('DEFAULT', 'FULL', 'NOTHING'), ALT: () => this.OR1([
+          { ALT: () => this.CONSUME(t.Default) },
+          { ALT: () => this.CONSUME(t.Full) },
+          { ALT: () => this.CONSUME(t.Nothing) },
+        ]) },
+        { GATE: () => this.LA(1).tokenType === t.Using, ALT: () => {
+          this.CONSUME(t.Using);
+          this.CONSUME(t.Index);
+          this.SUBRULE(this.identifier);
+        } },
+      ]);
+    });
+
+    this.RULE('postgresqlValidateConstraintAction', () => {
+      this.CONSUME(t.Identifier); // VALIDATE
+      this.CONSUME(t.Constraint);
+      this.SUBRULE(this.identifier);
+    });
+
+    this.RULE('postgresqlPartitionValueList', () => {
+      this.CONSUME(t.LParen);
+      this.AT_LEAST_ONE_SEP({
+        SEP: t.Comma,
+        DEF: () => this.SUBRULE(this.expression),
+      });
+      this.CONSUME(t.RParen);
+    });
+
+    this.RULE('postgresqlPartitionBound', () => {
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === t.Default, ALT: () => this.CONSUME(t.Default) },
+        { GATE: () => this.LA(1).tokenType === t.For, ALT: () => {
+          this.CONSUME(t.For);
+          this.CONSUME(t.Values);
+          this.OR1([
+            { GATE: () => this.LA(1).tokenType === t.From, ALT: () => {
+              this.CONSUME(t.From);
+              this.SUBRULE(this.postgresqlPartitionValueList);
+              this.CONSUME(t.To);
+              this.SUBRULE1(this.postgresqlPartitionValueList);
+            } },
+            { GATE: () => this.LA(1).tokenType === t.In, ALT: () => {
+              this.CONSUME(t.In);
+              this.SUBRULE2(this.postgresqlPartitionValueList);
+            } },
+            { GATE: () => this.LA(1).tokenType === t.With, ALT: () => {
+              this.CONSUME(t.With);
+              this.CONSUME(t.LParen);
+              this.AT_LEAST_ONE_SEP({
+                SEP: t.Comma,
+                DEF: () => {
+                  this.SUBRULE(this.identifier);
+                  this.SUBRULE(this.expression);
+                },
+              });
+              this.CONSUME(t.RParen);
+            } },
+          ]);
+        } },
+      ]);
+    });
+
+    this.RULE('postgresqlPartitionAction', () => {
+      this.CONSUME(t.Identifier); // ATTACH | DETACH
+      this.CONSUME1(t.Identifier); // PARTITION
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION(() => this.SUBRULE(this.postgresqlPartitionBound));
+      this.OPTION1(() => this.OR([
+        { ALT: () => this.CONSUME(t.Concurrently) },
+        { ALT: () => this.CONSUME2(t.Identifier) }, // FINALIZE
+      ]));
+    });
+
     this.OVERRIDE_RULE('alterTableStatement', () => {
       this.CONSUME(t.Alter); this.CONSUME(t.Table); this.SUBRULE(this.qualifiedName);
       this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlAlterAction) });
@@ -226,38 +653,74 @@ export class PostgreSqlParser extends BaseSqlParser {
         } },
       ]);
     });
+    this.RULE('postgresqlIndexColumn', () => {
+      this.SUBRULE(this.expression);
+      this.OPTION(() => { this.CONSUME(t.Collate); this.SUBRULE(this.identifier); });
+      this.OPTION1({ GATE: () => this.LA(1).tokenType === t.Identifier || this.LA(1).tokenType === t.QuotedIdentifier, DEF: () => {
+        this.SUBRULE1(this.identifier); // operator class
+        this.OPTION2(() => {
+          this.CONSUME(t.LParen);
+          this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => {
+            this.SUBRULE(this.postgresqlReloptionName);
+            this.CONSUME(t.Equals);
+            this.SUBRULE1(this.expression);
+          } });
+          this.CONSUME(t.RParen);
+        });
+      } });
+      this.OPTION3(() => this.OR([
+        { ALT: () => this.CONSUME(t.Asc) },
+        { ALT: () => this.CONSUME(t.Desc) },
+      ]));
+      this.OPTION4(() => {
+        this.CONSUME(t.Nulls);
+        this.OR1([
+          { ALT: () => this.CONSUME(t.First) },
+          { ALT: () => this.CONSUME(t.Identifier) }, // LAST
+        ]);
+      });
+    });
     this.RULE('postgresqlCreateIndex', () => {
       this.CONSUME(t.Create); this.OPTION(() => this.CONSUME(t.Unique));
       this.CONSUME(t.Index); this.OPTION1(() => this.CONSUME(t.Concurrently));
       this.OPTION2(() => { this.CONSUME(t.If); this.CONSUME(t.Not); this.CONSUME(t.Exists); });
-      this.SUBRULE(this.identifier); this.CONSUME(t.On); this.SUBRULE(this.tableName);
-      this.OPTION3(() => { this.CONSUME(t.Using); this.SUBRULE1(this.identifier); });
+      this.OPTION3(() => this.SUBRULE(this.identifier)); // index name is optional
+      this.CONSUME(t.On); this.SUBRULE(this.tableName);
+      this.OPTION4(() => { this.CONSUME(t.Using); this.SUBRULE1(this.identifier); });
       this.CONSUME(t.LParen);
-      this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.orderByItem) });
+      this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlIndexColumn) });
       this.CONSUME(t.RParen);
-      this.OPTION4(() => { this.CONSUME(t.Include); this.SUBRULE(this.columnList); });
-      this.OPTION5(() => this.SUBRULE(this.whereClause));
+      this.OPTION5(() => { this.CONSUME(t.Include); this.SUBRULE(this.columnList); });
+      this.OPTION6(() => { this.CONSUME(t.Nulls); this.CONSUME1(t.Not); this.CONSUME(t.Distinct); });
+      this.OPTION7(() => { this.CONSUME(t.With); this.SUBRULE(this.postgresqlReloptionList); });
+      this.OPTION8(() => { this.CONSUME(t.Tablespace); this.SUBRULE2(this.identifier); });
+      this.OPTION9(() => this.SUBRULE(this.whereClause));
     });
     this.OVERRIDE_RULE('columnDefinition', () => {
+      this.OR([
+        { ALT: () => this.SUBRULE(this.postgresqlLikeClause) },
+        { ALT: () => {
       this.SUBRULE(this.columnName); this.SUBRULE(this.typeName);
-      this.MANY(() => this.OR([
+      this.MANY(() => this.OR1([
         { ALT: () => { this.CONSUME(t.Not); this.CONSUME(t.Null); } },
         { ALT: () => this.CONSUME1(t.Null) },
         { ALT: () => { this.CONSUME(t.Default); this.SUBRULE(this.additiveExpression); } },
         { ALT: () => this.SUBRULE(this.constraintDefinition) },
         { ALT: () => {
           this.CONSUME(t.Generated);
-          this.OR1([{ ALT: () => this.CONSUME(t.Always) }, { ALT: () => { this.CONSUME(t.By); this.CONSUME1(t.Default); } }]);
+          this.OR2([{ ALT: () => this.CONSUME(t.Always) }, { ALT: () => { this.CONSUME(t.By); this.CONSUME1(t.Default); } }]);
           this.CONSUME(t.As);
-          this.OR2([
+          this.OR3([
             { ALT: () => this.CONSUME(t.Identity) },
             { ALT: () => {
               this.CONSUME(t.LParen); this.SUBRULE(this.expression); this.CONSUME(t.RParen);
-              this.OR3([{ ALT: () => this.CONSUME(t.Stored) }, { ALT: () => this.CONSUME(t.Virtual) }]);
+              this.OR4([{ ALT: () => this.CONSUME(t.Stored) }, { ALT: () => this.CONSUME(t.Virtual) }]);
             } },
           ]);
         } },
       ]));
+        } },
+      ]);
     });
     this.OVERRIDE_RULE('dropStatement', () => {
       this.CONSUME(t.Drop);
@@ -276,11 +739,35 @@ export class PostgreSqlParser extends BaseSqlParser {
   }
 
   private registerPostgresqlRules(): void {
+    const commandTailTokens = Array.from(new Set(
+      Object.values(t)
+        .filter(isTokenType)
+        .filter(tokenType => !POSTGRESQL_COMMAND_TAIL_EXCLUDED_TOKENS.has(tokenType.name)),
+    ));
+    // Chevrotain limits a single alternation to 256 alternatives. Split the
+    // token vocabulary so the tail stays a flat, deterministic decision.
+    const groupSize = Math.ceil(commandTailTokens.length / 3);
+    const commandTailGroups = [
+      commandTailTokens.slice(0, groupSize),
+      commandTailTokens.slice(groupSize, groupSize * 2),
+      commandTailTokens.slice(groupSize * 2),
+    ];
+    this.RULE('postgresqlCommandTailTokenPart1', () => this.OR(this.getTokenAlternatives(commandTailGroups[0])));
+    this.RULE('postgresqlCommandTailTokenPart2', () => this.OR(this.getTokenAlternatives(commandTailGroups[1])));
+    this.RULE('postgresqlCommandTailTokenPart3', () => this.OR(this.getTokenAlternatives(commandTailGroups[2])));
+    this.OVERRIDE_RULE('commandTailToken', () => this.OR([
+      { ALT: () => this.SUBRULE(this.postgresqlCommandTailTokenPart1) },
+      { ALT: () => this.SUBRULE(this.postgresqlCommandTailTokenPart2) },
+      { ALT: () => this.SUBRULE(this.postgresqlCommandTailTokenPart3) },
+    ]));
+
     const nameTokens: TokenType[] = [
       t.Identifier, t.QuotedIdentifier, t.Replace, t.Left, t.Right,
       t.User, t.Type, t.Key, t.Public, t.Schema, t.Database, t.Materialized, t.Conflict, t.Nothing,
       t.FunctionKeyword, t.Index, t.Domain, t.Enum, t.Value, t.System,
       t.Identity, t.Stored, t.Virtual, t.Generated, t.Always, t.Include, t.Old, t.New, t.Path,
+      t.Mapping, t.Unlogged, t.Copy, t.Hash, t.Add,
+      t.Substring, t.Trim, t.Position, t.Overlay, t.Tablespace, t.Access,
     ];
     this.OVERRIDE_RULE('identifier', () => this.OR(this.getTokenAlternatives(nameTokens)));
     this.OVERRIDE_RULE('alias', () => this.SUBRULE(this.identifier));
@@ -299,9 +786,64 @@ export class PostgreSqlParser extends BaseSqlParser {
       this.OPTION(() => this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.expression) }));
       this.CONSUME(t.RBracket);
     });
+    this.RULE('postgresqlRowExpression', () => {
+      this.CONSUME(t.Row);
+      this.CONSUME(t.LParen);
+      this.OPTION(() => this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.expression) }));
+      this.CONSUME(t.RParen);
+    });
+    this.RULE('postgresqlSubstringExpression', () => {
+      this.CONSUME(t.Substring);
+      this.CONSUME(t.LParen);
+      this.SUBRULE(this.additiveExpression);
+      this.OR([
+        { ALT: () => {
+          this.CONSUME(t.From);
+          this.SUBRULE1(this.additiveExpression);
+          this.OPTION(() => { this.CONSUME(t.For); this.SUBRULE2(this.additiveExpression); });
+        } },
+        { ALT: () => this.MANY(() => { this.CONSUME(t.Comma); this.SUBRULE3(this.additiveExpression); }) },
+      ]);
+      this.CONSUME(t.RParen);
+    });
+    this.RULE('postgresqlTrimExpression', () => {
+      this.CONSUME(t.Trim);
+      this.CONSUME(t.LParen);
+      this.OPTION({ GATE: () => this.isPostgresqlImageOneOf('BOTH', 'LEADING', 'TRAILING'), DEF: () => this.CONSUME(t.Identifier) });
+      this.OPTION1({ GATE: () => this.LA(1).tokenType !== t.From, DEF: () => this.SUBRULE(this.additiveExpression) });
+      this.OPTION2(() => { this.CONSUME(t.From); this.SUBRULE1(this.additiveExpression); });
+      this.CONSUME(t.RParen);
+    });
+    this.RULE('postgresqlPositionExpression', () => {
+      this.CONSUME(t.Position);
+      this.CONSUME(t.LParen);
+      this.SUBRULE(this.additiveExpression);
+      this.CONSUME(t.In);
+      this.SUBRULE1(this.additiveExpression);
+      this.CONSUME(t.RParen);
+    });
+    this.RULE('postgresqlOverlayExpression', () => {
+      this.CONSUME(t.Overlay);
+      this.CONSUME(t.LParen);
+      this.SUBRULE(this.additiveExpression);
+      this.CONSUME(t.Identifier); // PLACING
+      this.SUBRULE1(this.additiveExpression);
+      this.CONSUME(t.From);
+      this.SUBRULE2(this.additiveExpression);
+      this.OPTION(() => { this.CONSUME(t.For); this.SUBRULE3(this.additiveExpression); });
+      this.CONSUME(t.RParen);
+    });
     this.RULE('postgresqlPostfixExpression', () => {
       this.SUBRULE(this.primaryExpression);
-      this.MANY(() => this.OR([
+      this.MANY({
+        GATE: () => {
+          const tokenType = this.LA(1).tokenType;
+          return tokenType === t.DoubleColon
+            || tokenType === t.LBracket
+            || (this.isPostgresqlImageOneOf('AT') && this.LA(2).image?.toUpperCase() === 'TIME')
+            || (this.isPostgresqlImageOneOf('SIMILAR') && this.LA(2).tokenType === t.To);
+        },
+        DEF: () => this.OR([
         { ALT: () => {
           this.CONSUME(t.DoubleColon);
           this.SUBRULE(this.typeName);
@@ -315,7 +857,20 @@ export class PostgreSqlParser extends BaseSqlParser {
           ]);
           this.CONSUME1(t.RBracket);
         } },
-      ]));
+        { GATE: () => this.isPostgresqlImageOneOf('AT') && this.LA(2).image?.toUpperCase() === 'TIME', ALT: () => {
+          this.CONSUME(t.Identifier); // AT
+          this.CONSUME1(t.Identifier); // TIME
+          this.CONSUME2(t.Identifier); // ZONE
+          this.SUBRULE3(this.expression);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('SIMILAR') && this.LA(2).tokenType === t.To, ALT: () => {
+          this.CONSUME3(t.Identifier); // SIMILAR
+          this.CONSUME(t.To);
+          this.SUBRULE4(this.expression);
+          this.OPTION3(() => { this.CONSUME(t.Escape); this.SUBRULE5(this.expression); });
+        } },
+      ]),
+      });
     });
     this.RULE('postgresqlJsonExpression', () => {
       this.SUBRULE(this.postgresqlPostfixExpression);
@@ -331,6 +886,11 @@ export class PostgreSqlParser extends BaseSqlParser {
     this.OVERRIDE_RULE('primaryExpression', () => {
       this.OR([
         { GATE: () => this.LA(1).tokenType === t.ArrayKeyword, ALT: () => this.SUBRULE(this.arrayExpression) },
+        { GATE: () => this.LA(1).tokenType === t.Row && this.LA(2).tokenType === t.LParen, ALT: () => this.SUBRULE(this.postgresqlRowExpression) },
+        { GATE: () => this.LA(1).tokenType === t.Substring && this.LA(2).tokenType === t.LParen, ALT: () => this.SUBRULE(this.postgresqlSubstringExpression) },
+        { GATE: () => this.LA(1).tokenType === t.Trim && this.LA(2).tokenType === t.LParen, ALT: () => this.SUBRULE(this.postgresqlTrimExpression) },
+        { GATE: () => this.LA(1).tokenType === t.Position && this.LA(2).tokenType === t.LParen, ALT: () => this.SUBRULE(this.postgresqlPositionExpression) },
+        { GATE: () => this.LA(1).tokenType === t.Overlay && this.LA(2).tokenType === t.LParen, ALT: () => this.SUBRULE(this.postgresqlOverlayExpression) },
         { GATE: () => tokenMatcher(this.LA(1), t.StringLiteral) || [t.NumberLiteral, t.Null, t.DollarNumber].includes(this.LA(1).tokenType) || tokenMatcher(this.LA(2), t.StringLiteral), ALT: () => this.SUBRULE(this.literal) },
         { GATE: () => this.functionAhead(), ALT: () => this.SUBRULE(this.functionCall) },
         { ALT: () => this.SUBRULE(this.castFunctionExpression) },
@@ -362,6 +922,48 @@ export class PostgreSqlParser extends BaseSqlParser {
       this.OPTION(() => this.SUBRULE(this.orderByClause));
     });
 
+    this.OVERRIDE_RULE('typeName', () => {
+      this.SUBRULE(this.typeNameWord);
+      this.MANY({
+        GATE: () => !this.isPostgresqlImageOneOf('SIMILAR', 'AT'),
+        DEF: () => this.SUBRULE1(this.typeNameWord),
+      });
+      this.OPTION(() => {
+        this.CONSUME(t.LParen);
+        this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.typeArgument) });
+        this.CONSUME(t.RParen);
+      });
+    });
+
+    this.OVERRIDE_RULE('limitClause', () => {
+      this.CONSUME(t.Limit);
+      this.OR([
+        { ALT: () => this.CONSUME(t.All) },
+        { ALT: () => this.SUBRULE(this.expression) },
+      ]);
+    });
+
+    this.OVERRIDE_RULE('updateSetItem', () => this.OR([
+      { GATE: () => this.LA(1).tokenType === t.LParen, ALT: () => {
+        this.CONSUME(t.LParen);
+        this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.columnReference) });
+        this.CONSUME(t.RParen);
+        this.CONSUME(t.Equals);
+        this.CONSUME1(t.LParen);
+        this.OR1([
+          { ALT: () => this.SUBRULE(this.selectStatement) },
+          { ALT: () => this.SUBRULE(this.withStatement) },
+          { ALT: () => this.AT_LEAST_ONE_SEP1({ SEP: t.Comma, DEF: () => this.SUBRULE(this.expression) }) },
+        ]);
+        this.CONSUME1(t.RParen);
+      } },
+      { ALT: () => {
+        this.SUBRULE1(this.columnReference);
+        this.CONSUME1(t.Equals);
+        this.SUBRULE1(this.expression);
+      } },
+    ]));
+
     this.RULE('postgresqlValuesQuery', () => this.SUBRULE(this.valuesClause));
     this.OVERRIDE_RULE('subquery', () => {
       this.CONSUME(t.LParen);
@@ -380,8 +982,9 @@ export class PostgreSqlParser extends BaseSqlParser {
         { GATE: () => this.functionAhead(), ALT: () => this.SUBRULE(this.functionCall) },
         { ALT: () => this.SUBRULE(this.tableName) },
       ]);
-      this.OPTION1(() => { this.CONSUME(t.With); this.CONSUME(t.Ordinality); });
-      this.OPTION2(() => this.SUBRULE(this.aliasOptional));
+      this.OPTION1({ GATE: () => this.LA(1).tokenType === t.With && this.LA(2).tokenType === t.Ordinality, DEF: () => { this.CONSUME(t.With); this.CONSUME(t.Ordinality); } });
+      this.OPTION2({ GATE: () => !this.isPostgresqlImageOneOf('TABLESAMPLE'), DEF: () => this.SUBRULE(this.aliasOptional) });
+      this.OPTION4({ GATE: () => this.isPostgresqlImageOneOf('TABLESAMPLE'), DEF: () => this.SUBRULE(this.postgresqlTableSampleClause) });
       this.OPTION3(() => this.SUBRULE(this.cteColumnList));
     });
     this.OVERRIDE_RULE('cteDefinition', () => {
@@ -422,16 +1025,19 @@ export class PostgreSqlParser extends BaseSqlParser {
     });
     this.OVERRIDE_RULE('selectStatement', () => {
       this.SUBRULE(this.selectClause);
-      this.OPTION(() => this.SUBRULE(this.fromClause));
-      this.OPTION1(() => this.SUBRULE(this.whereClause));
-      this.OPTION2(() => this.SUBRULE(this.groupByClause));
-      this.OPTION3(() => this.SUBRULE(this.havingClause));
-      this.OPTION4(() => this.SUBRULE(this.postgresqlWindowClause));
-      this.OPTION5(() => this.SUBRULE(this.orderByClause));
-      this.OPTION6(() => this.SUBRULE(this.limitClause));
-      this.OPTION7(() => this.SUBRULE(this.offsetClause));
-      this.OPTION8(() => this.SUBRULE(this.fetchFirstClause));
-      this.MANY(() => { this.SUBRULE(this.setOperation); this.SUBRULE1(this.selectStatement); });
+      this.OPTION1(() => this.SUBRULE(this.fromClause));
+      this.OPTION2(() => this.SUBRULE(this.whereClause));
+      this.OPTION3(() => this.SUBRULE(this.groupByClause));
+      this.OPTION4(() => this.SUBRULE(this.havingClause));
+      this.OPTION5(() => this.SUBRULE(this.postgresqlWindowClause));
+      this.OPTION6(() => this.SUBRULE(this.orderByClause));
+      this.MANY(() => this.OR([
+        { GATE: () => this.LA(1).tokenType === t.Limit, ALT: () => this.SUBRULE(this.limitClause) },
+        { GATE: () => this.LA(1).tokenType === t.Offset, ALT: () => this.SUBRULE(this.offsetClause) },
+        { GATE: () => this.LA(1).tokenType === t.Fetch, ALT: () => this.SUBRULE(this.fetchFirstClause) },
+        { GATE: () => this.LA(1).tokenType === t.For, ALT: () => this.SUBRULE(this.postgresqlLockingClause) },
+      ]));
+      this.MANY1(() => { this.SUBRULE(this.setOperation); this.SUBRULE1(this.selectStatement); });
     });
     this.OVERRIDE_RULE('setOperation', () => {
       this.OR([{ ALT: () => this.CONSUME(t.Union) }, { ALT: () => this.CONSUME(t.Intersect) }, { ALT: () => this.CONSUME(t.Except) }]);
@@ -441,6 +1047,91 @@ export class PostgreSqlParser extends BaseSqlParser {
       { ALT: () => { this.CONSUME(t.Distinct); this.OPTION(() => { this.CONSUME(t.On); this.SUBRULE(this.expressionList); }); } },
       { ALT: () => this.CONSUME(t.All) },
     ]));
+
+    this.OVERRIDE_RULE('intoClause', () => {
+      this.CONSUME(t.Into);
+      this.OPTION(() => this.OR([
+        { ALT: () => this.CONSUME(t.Temp) },
+        { ALT: () => this.CONSUME(t.Temporary) },
+      ]));
+      this.OPTION1(() => this.CONSUME(t.Table));
+      this.SUBRULE(this.qualifiedName);
+    });
+
+    this.RULE('postgresqlLockingClause', () => {
+      this.CONSUME(t.For);
+      this.OR([
+        { ALT: () => this.CONSUME(t.Update) },
+        { GATE: () => this.isPostgresqlImageOneOf('NO'), ALT: () => {
+          this.CONSUME(t.Identifier); // NO
+          this.CONSUME(t.Key);
+          this.CONSUME1(t.Update);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('SHARE'), ALT: () => this.CONSUME1(t.Identifier) },
+        { GATE: () => this.isPostgresqlImageOneOf('KEY'), ALT: () => {
+          this.CONSUME1(t.Key);
+          this.CONSUME2(t.Identifier); // SHARE
+        } },
+      ]);
+      this.OPTION(() => {
+        this.CONSUME(t.Of);
+        this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.qualifiedName) });
+      });
+      this.OPTION1(() => this.OR1([
+        { GATE: () => this.isPostgresqlImageOneOf('NOWAIT'), ALT: () => this.CONSUME3(t.Identifier) },
+        { GATE: () => this.isPostgresqlImageOneOf('SKIP'), ALT: () => {
+          this.CONSUME4(t.Identifier); // SKIP
+          this.CONSUME5(t.Identifier); // LOCKED
+        } },
+      ]));
+    });
+
+    this.RULE('postgresqlTableSampleClause', () => {
+      this.CONSUME(t.Identifier); // TABLESAMPLE
+      this.SUBRULE(this.identifier); // method
+      this.CONSUME(t.LParen);
+      this.SUBRULE(this.expression);
+      this.CONSUME(t.RParen);
+      this.OPTION(() => {
+        this.CONSUME1(t.Identifier); // REPEATABLE
+        this.CONSUME1(t.LParen);
+        this.SUBRULE1(this.expression);
+        this.CONSUME1(t.RParen);
+      });
+    });
+
+    this.OVERRIDE_RULE('comparisonRhs', () => this.OR([
+      { GATE: () => [t.Any, t.Some, t.All].includes(this.LA(1).tokenType) && this.LA(2).tokenType === t.LParen, ALT: () => {
+        this.OR1([
+          { ALT: () => this.CONSUME(t.Any) },
+          { ALT: () => this.CONSUME(t.Some) },
+          { ALT: () => this.CONSUME(t.All) },
+        ]);
+        this.CONSUME(t.LParen);
+        this.OR2([
+          { GATE: () => this.LA(1).tokenType === t.ArrayKeyword, ALT: () => this.SUBRULE(this.arrayExpression) },
+          { ALT: () => this.SUBRULE(this.selectStatement) },
+          { ALT: () => this.SUBRULE(this.withStatement) },
+          { ALT: () => this.SUBRULE(this.expression) },
+        ]);
+        this.CONSUME(t.RParen);
+      } },
+      { ALT: () => this.SUBRULE(this.additiveExpression) },
+    ]));
+
+    this.OVERRIDE_RULE('isExpression', () => {
+      this.CONSUME(t.Is);
+      this.OPTION(() => this.CONSUME(t.Not));
+      this.OR([
+        { ALT: () => this.CONSUME(t.Null) },
+        { ALT: () => {
+          this.CONSUME(t.Distinct);
+          this.CONSUME(t.From);
+          this.SUBRULE(this.additiveExpression);
+        } },
+        { ALT: () => this.CONSUME(t.Identifier) }, // TRUE | FALSE | UNKNOWN
+      ]);
+    });
 
     this.RULE('postgresqlReturning', () => {
       this.CONSUME(t.Returning);
@@ -573,11 +1264,14 @@ export class PostgreSqlParser extends BaseSqlParser {
       { GATE: () => this.LA(2).tokenType === t.Index || (this.LA(2).tokenType === t.Unique && this.LA(3).tokenType === t.Index), ALT: () => this.SUBRULE(this.postgresqlCreateIndex) },
       { ALT: () => this.SUBRULE(this.postgresqlDoStatement) },
       { ALT: () => this.SUBRULE(this.mergeStatement) },
+      { ALT: () => this.SUBRULE(this.callStatement) },
       { ALT: () => this.SUBRULE(this.createTableStatement) },
       { ALT: () => this.SUBRULE(this.createSequenceStatement) },
       { ALT: () => this.SUBRULE(this.createSchemaStatement) },
       { ALT: () => this.SUBRULE(this.createViewStatement) },
       { ALT: () => this.SUBRULE(this.commentStatement) },
+      { GATE: () => this.LA(1).tokenType === t.Drop && (this.LA(2).tokenType === t.FunctionKeyword || this.LA(2).tokenType === t.Procedure), ALT: () => this.SUBRULE(this.postgresqlDropRoutineStatement) },
+      { GATE: () => this.LA(1).tokenType === t.Drop && this.LA(2).tokenType === t.User && this.LA(3).tokenType === t.Mapping, ALT: () => this.SUBRULE(this.postgresqlDropUserMappingStatement) },
       { ALT: () => this.SUBRULE(this.alterTableStatement) },
       { ALT: () => this.SUBRULE(this.dropStatement) },
       { ALT: () => this.SUBRULE(this.truncateStatement) },
@@ -597,7 +1291,368 @@ export class PostgreSqlParser extends BaseSqlParser {
       { ALT: () => this.SUBRULE(this.postgresqlValuesQuery) },
       { ALT: () => this.SUBRULE(this.postgresqlTransaction) },
       { ALT: () => this.SUBRULE(this.setStatement) },
+      { GATE: () => this.LA(1).tokenType === t.Reindex, ALT: () => this.SUBRULE(this.reindexStatement) },
+      { GATE: () => this.LA(1).tokenType === t.Declare, ALT: () => this.SUBRULE(this.postgresqlDeclareStatement) },
+      { GATE: () => this.LA(1).tokenType === t.Fetch, ALT: () => this.SUBRULE(this.postgresqlFetchStatement) },
+      { GATE: () => this.isPostgresqlCreateFallback(), ALT: () => this.SUBRULE(this.postgresqlCreateFallbackStatement) },
+      { GATE: () => this.isPostgresqlAlterFallback(), ALT: () => this.SUBRULE(this.postgresqlAlterFallbackStatement) },
+      { GATE: () => this.isPostgresqlDropFallback(), ALT: () => this.SUBRULE(this.postgresqlDropFallbackStatement) },
+      { GATE: () => this.isPostgresqlIdentifierCommand(), ALT: () => this.SUBRULE(this.postgresqlIdentifierCommandStatement) },
     ]));
+  }
+
+  /**
+   * PostgreSQL table/view DDL differs from the shared ANSI subset:
+   * `CREATE TABLE … PARTITION OF`, `INHERITS`, `LIKE`, `WITH (storage)`,
+   * `UNLOGGED`, view storage parameters, and `WITH [NO] DATA`.
+   */
+  private registerPostgresqlStatementOverrides(): void {
+    this.OVERRIDE_RULE('tableTypeClause', () => {
+      this.OPTION(() => this.CONSUME(t.Global));
+      this.OR([
+        { ALT: () => this.CONSUME(t.Temp) },
+        { ALT: () => this.CONSUME(t.Temporary) },
+        { ALT: () => this.CONSUME(t.Unlogged) },
+      ]);
+    });
+
+    this.RULE('postgresqlLikeClause', () => {
+      this.CONSUME(t.Like);
+      this.SUBRULE(this.qualifiedName);
+      this.MANY(() => {
+        this.OR([
+          { GATE: () => this.isPostgresqlImageOneOf('INCLUDING'), ALT: () => this.CONSUME(t.Identifier) },
+          { GATE: () => this.isPostgresqlImageOneOf('EXCLUDING'), ALT: () => this.CONSUME1(t.Identifier) },
+        ]);
+        this.OR1([
+          { ALT: () => this.CONSUME(t.All) },
+          { ALT: () => this.CONSUME2(t.Identifier) }, // DEFAULTS, CONSTRAINTS, INDEXES, STORAGE, COMMENTS, STATISTICS
+          { ALT: () => this.CONSUME(t.Generated) },
+          { ALT: () => this.CONSUME(t.Identity) },
+        ]);
+      });
+    });
+
+    this.RULE('postgresqlReloptionList', () => {
+      this.CONSUME(t.LParen);
+      this.AT_LEAST_ONE_SEP({
+        SEP: t.Comma,
+        DEF: () => {
+          this.SUBRULE(this.postgresqlReloptionName);
+          this.OPTION(() => {
+            this.CONSUME(t.Equals);
+            this.SUBRULE(this.expression);
+          });
+        },
+      });
+      this.CONSUME(t.RParen);
+    });
+
+    this.OVERRIDE_RULE('createTableStatement', () => {
+      this.CONSUME(t.Create);
+      this.OPTION({ GATE: () => this.supportsTableTypeClause(), DEF: () => this.SUBRULE(this.tableTypeClause) });
+      this.CONSUME(t.Table);
+      this.OPTION1(() => {
+        this.CONSUME(t.If);
+        this.CONSUME(t.Not);
+        this.CONSUME(t.Exists);
+      });
+      this.SUBRULE(this.qualifiedName);
+      this.OR([
+        { GATE: () => this.isPostgresqlImageOneOf('PARTITION'), ALT: () => {
+          this.CONSUME(t.Identifier); // PARTITION
+          this.CONSUME(t.Of);
+          this.SUBRULE1(this.qualifiedName); // parent table
+          this.OPTION2(() => this.SUBRULE(this.postgresqlPartitionBound));
+        } },
+        { ALT: () => {
+          this.OR1([
+            { ALT: () => {
+              this.CONSUME(t.As);
+              this.OR2([
+                { ALT: () => {
+                  this.CONSUME(t.LParen);
+                  this.OR3([
+                    { ALT: () => this.SUBRULE(this.withStatement) },
+                    { ALT: () => this.SUBRULE(this.selectStatement) },
+                  ]);
+                  this.CONSUME(t.RParen);
+                } },
+                { ALT: () => {
+                  this.OR4([
+                    { ALT: () => this.SUBRULE1(this.withStatement) },
+                    { ALT: () => this.SUBRULE1(this.selectStatement) },
+                  ]);
+                } },
+              ]);
+            } },
+            { GATE: () => {
+              const second = this.LA(2).tokenType;
+              const third = this.LA(3).tokenType;
+              return (second === t.Identifier || second === t.QuotedIdentifier)
+                && (third === t.Comma || third === t.RParen);
+            }, ALT: () => {
+              this.SUBRULE(this.columnList);
+              this.CONSUME1(t.As);
+              this.OR5([
+                { ALT: () => this.SUBRULE2(this.withStatement) },
+                { ALT: () => this.SUBRULE2(this.selectStatement) },
+              ]);
+            } },
+            { ALT: () => {
+              this.CONSUME1(t.LParen);
+              this.SUBRULE(this.columnDefinitionList);
+              this.CONSUME1(t.RParen);
+            } },
+          ]);
+        } },
+      ]);
+      this.registerCreateTableDialectClauses();
+    });
+
+    this.OVERRIDE_RULE('createViewStatement', () => {
+      this.CONSUME(t.Create);
+      this.OPTION(() => {
+        this.CONSUME(t.Or);
+        this.CONSUME(t.Replace);
+      });
+      this.OPTION1(() => this.CONSUME(t.Materialized));
+      this.CONSUME(t.View);
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION2(() => this.SUBRULE(this.viewColumnAliasList));
+      this.OPTION3(() => {
+        this.CONSUME(t.With);
+        this.SUBRULE(this.postgresqlReloptionList);
+      });
+      this.CONSUME(t.As);
+      this.OR([
+        { ALT: () => {
+          this.CONSUME(t.LParen);
+          this.OR1([
+            { ALT: () => this.SUBRULE(this.withStatement) },
+            { ALT: () => this.SUBRULE(this.selectStatement) },
+          ]);
+          this.CONSUME(t.RParen);
+        } },
+        { ALT: () => {
+          this.OR2([
+            { ALT: () => this.SUBRULE1(this.withStatement) },
+            { ALT: () => this.SUBRULE1(this.selectStatement) },
+          ]);
+        } },
+      ]);
+      this.OPTION4(() => {
+        this.CONSUME1(t.With);
+        this.OPTION5(() => this.CONSUME(t.Identifier)); // CASCADED | LOCAL
+        this.CONSUME(t.Check);
+        this.CONSUME1(t.Identifier); // OPTION
+      });
+      this.OPTION6(() => {
+        this.CONSUME2(t.With);
+        this.OPTION7(() => this.CONSUME2(t.Identifier)); // NO
+        this.CONSUME3(t.Identifier); // DATA
+      });
+    });
+
+    this.OVERRIDE_RULE('commentStatement', () => {
+      this.CONSUME(t.Comment);
+      this.CONSUME(t.On);
+      this.OR([
+        { ALT: () => this.CONSUME(t.Table) },
+        { ALT: () => this.CONSUME(t.View) },
+        { ALT: () => { this.CONSUME(t.Materialized); this.CONSUME1(t.View); } },
+        { ALT: () => { this.CONSUME(t.Foreign); this.CONSUME1(t.Table); } },
+        { ALT: () => this.CONSUME(t.Index) },
+        { ALT: () => this.CONSUME(t.Sequence) },
+        { ALT: () => this.CONSUME(t.Schema) },
+        { ALT: () => this.CONSUME(t.Database) },
+        { ALT: () => this.CONSUME(t.Type) },
+        { ALT: () => this.CONSUME(t.Domain) },
+        { ALT: () => this.CONSUME(t.FunctionKeyword) },
+        { ALT: () => this.CONSUME(t.Procedure) },
+        { ALT: () => this.CONSUME(t.Column) },
+        { ALT: () => this.CONSUME(t.Tablespace) },
+        { ALT: () => this.CONSUME(t.Access) },
+        { ALT: () => this.CONSUME(t.Identifier) }, // TRIGGER, POLICY, EXTENSION, ROLE, ...
+      ]);
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION(() => {
+        this.CONSUME(t.LParen);
+        this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.typeName) });
+        this.CONSUME(t.RParen);
+      });
+      this.CONSUME(t.Is);
+      this.OR1([
+        { ALT: () => this.CONSUME(t.StringLiteral) },
+        { ALT: () => this.CONSUME(t.Null) },
+      ]);
+    });
+
+    this.OVERRIDE_RULE('createSequenceStatement', () => {
+      this.CONSUME(t.Create);
+      this.CONSUME(t.Sequence);
+      this.OPTION(() => {
+        this.CONSUME(t.If);
+        this.CONSUME(t.Not);
+        this.CONSUME(t.Exists);
+      });
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION1(() => this.SUBRULE(this.commandTail));
+    });
+
+    this.RULE('postgresqlDropRoutineStatement', () => {
+      this.CONSUME(t.Drop);
+      this.OR([
+        { ALT: () => this.CONSUME(t.FunctionKeyword) },
+        { ALT: () => this.CONSUME(t.Procedure) },
+      ]);
+      this.OPTION(() => {
+        this.CONSUME(t.If);
+        this.CONSUME(t.Exists);
+      });
+      this.SUBRULE(this.qualifiedName);
+      this.OPTION1(() => {
+        this.CONSUME(t.LParen);
+        this.OPTION2(() => this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.typeName) }));
+        this.CONSUME(t.RParen);
+      });
+      this.OPTION3(() => this.OR1([
+        { ALT: () => this.CONSUME(t.Cascade) },
+        { ALT: () => this.CONSUME(t.Restrict) },
+      ]));
+    });
+  }
+
+  /**
+   * PostgreSQL administrative statements that have no structured grammar.
+   *
+   * They are accepted as a command head plus an untyped tail instead of being
+   * reported as syntax errors. This keeps strict validation for the statements
+   * the parser models (SELECT/DML/table and routine DDL) while avoiding false
+   * positives for `VACUUM`, `REFRESH MATERIALIZED VIEW`, `CREATE EXTENSION`,
+   * `ALTER ROLE`, `DROP POLICY`, and similar commands.
+   */
+  private registerPostgresqlFallbackRules(): void {
+    this.RULE('postgresqlIdentifierCommandStatement', () => {
+      this.CONSUME(t.Identifier);
+      this.OPTION(() => this.SUBRULE(this.commandTail));
+    });
+
+    this.RULE('postgresqlCreateFallbackStatement', () => {
+      this.CONSUME(t.Create);
+      this.OPTION(() => {
+        this.CONSUME(t.Or);
+        this.CONSUME(t.Replace);
+      });
+      this.OR([
+        { ALT: () => this.CONSUME(t.Identifier) },
+        { ALT: () => this.CONSUME(t.User) },
+        { ALT: () => this.CONSUME(t.Database) },
+        { ALT: () => this.CONSUME(t.Cast) },
+        { ALT: () => this.CONSUME(t.Rule) },
+        { ALT: () => this.CONSUME(t.Foreign) },
+        { ALT: () => this.CONSUME(t.Constraint) },
+        { ALT: () => this.CONSUME(t.Tablespace) },
+        { ALT: () => this.CONSUME(t.Access) },
+        { ALT: () => this.CONSUME(t.Group) },
+      ]);
+      this.SUBRULE(this.commandTail);
+    });
+
+    this.RULE('postgresqlAlterFallbackStatement', () => {
+      this.CONSUME(t.Alter);
+      this.OR([
+        { ALT: () => this.CONSUME(t.Identifier) },
+        { ALT: () => this.CONSUME(t.System) },
+        { ALT: () => this.CONSUME(t.User) },
+        { ALT: () => this.CONSUME(t.Database) },
+        { ALT: () => this.CONSUME(t.Sequence) },
+        { ALT: () => this.CONSUME(t.Index) },
+        { ALT: () => this.CONSUME(t.View) },
+        { ALT: () => this.CONSUME(t.Materialized) },
+        { ALT: () => this.CONSUME(t.Schema) },
+        { ALT: () => this.CONSUME(t.Type) },
+        { ALT: () => this.CONSUME(t.Domain) },
+        { ALT: () => this.CONSUME(t.FunctionKeyword) },
+        { ALT: () => this.CONSUME(t.Procedure) },
+        { ALT: () => this.CONSUME(t.Foreign) },
+        { ALT: () => this.CONSUME(t.Default) },
+        { ALT: () => this.CONSUME(t.Cast) },
+        { ALT: () => this.CONSUME(t.Rule) },
+        { ALT: () => this.CONSUME(t.Language) },
+        { ALT: () => this.CONSUME(t.Tablespace) },
+        { ALT: () => this.CONSUME(t.Access) },
+      ]);
+      this.SUBRULE(this.commandTail);
+    });
+
+    this.RULE('postgresqlDropFallbackStatement', () => {
+      this.CONSUME(t.Drop);
+      this.OR([
+        { ALT: () => this.CONSUME(t.Identifier) },
+        { ALT: () => this.CONSUME(t.Index) },
+        { ALT: () => this.CONSUME(t.Type) },
+        { ALT: () => this.CONSUME(t.Domain) },
+        { ALT: () => this.CONSUME(t.FunctionKeyword) },
+        { ALT: () => this.CONSUME(t.Materialized) },
+        { ALT: () => this.CONSUME(t.Foreign) },
+        { ALT: () => this.CONSUME(t.Constraint) },
+        { ALT: () => this.CONSUME(t.Tablespace) },
+        { ALT: () => this.CONSUME(t.Access) },
+      ]);
+      this.SUBRULE(this.commandTail);
+    });
+
+    this.RULE('postgresqlDeclareStatement', () => {
+      this.CONSUME(t.Declare);
+      this.SUBRULE(this.commandTail);
+    });
+
+    this.RULE('postgresqlFetchStatement', () => {
+      this.CONSUME(t.Fetch);
+      this.SUBRULE(this.commandTail);
+    });
+
+    this.RULE('postgresqlDropUserMappingStatement', () => {
+      this.CONSUME(t.Drop);
+      this.CONSUME(t.User);
+      this.CONSUME(t.Mapping);
+      this.OPTION(() => this.SUBRULE(this.commandTail));
+    });
+  }
+
+  private isPostgresqlImageOneOf(...images: string[]): boolean {
+    const image = this.LA(1).image?.toUpperCase();
+    return image !== undefined && images.includes(image);
+  }
+
+  private isPostgresqlCreateFallback(): boolean {
+    if (this.LA(1).tokenType !== t.Create) return false;
+    const headIndex = this.LA(2).tokenType === t.Or && this.LA(3).tokenType === t.Replace ? 4 : 2;
+    const head = this.LA(headIndex).tokenType;
+    if (POSTGRESQL_MODELED_CREATE_HEADS.has(head.name)) return false;
+    return head !== t.Identifier
+      || POSTGRESQL_CREATE_FALLBACK_OBJECTS.has(this.LA(headIndex).image.toUpperCase());
+  }
+
+  private isPostgresqlAlterFallback(): boolean {
+    if (this.LA(1).tokenType !== t.Alter || this.LA(2).tokenType === t.Table) return false;
+    const head = this.LA(2).tokenType;
+    return head !== t.Identifier
+      || POSTGRESQL_ALTER_FALLBACK_OBJECTS.has(this.LA(2).image.toUpperCase());
+  }
+
+  private isPostgresqlDropFallback(): boolean {
+    if (this.LA(1).tokenType !== t.Drop) return false;
+    const head = this.LA(2).tokenType;
+    if (POSTGRESQL_MODELED_DROP_HEADS.has(head.name)) return false;
+    return head !== t.Identifier
+      || POSTGRESQL_DROP_FALLBACK_OBJECTS.has(this.LA(2).image.toUpperCase());
+  }
+
+  private isPostgresqlIdentifierCommand(): boolean {
+    return this.LA(1).tokenType === t.Identifier
+      && POSTGRESQL_IDENTIFIER_COMMAND_HEADS.has(this.LA(1).image.toUpperCase());
   }
 }
 export class SqlParser extends PostgreSqlParser {}
