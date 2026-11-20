@@ -267,6 +267,8 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
         fs.mkdirSync(tempDir, { recursive: true });
         const firstPath = path.join(tempDir, 'vqb-first.csv');
         const secondPath = path.join(tempDir, 'vqb-second.csv');
+        // DuckDB reports file views with POSIX separators on every platform.
+        const metadataPaths = [firstPath, secondPath].map(filePath => filePath.replace(/\\/g, '/'));
         fs.writeFileSync(firstPath, 'id,name\n1,Alice\n');
         fs.writeFileSync(secondPath, 'id,total\n1,100\n');
 
@@ -292,9 +294,9 @@ describeIfInstalled('file dialect integration (xlsx/csv/parquet/avro via DuckDB)
             );
 
             expect(schemas).toEqual([['main']]);
-            expect(views.map(row => String(row[0]))).toEqual(expect.arrayContaining([firstPath, secondPath]));
+            expect(views.map(row => String(row[0]))).toEqual(expect.arrayContaining(metadataPaths));
             expect(columns.map(row => String(row[2]))).toEqual(
-                expect.arrayContaining([firstPath, secondPath]),
+                expect.arrayContaining(metadataPaths),
             );
         } finally {
             await connection.close();
