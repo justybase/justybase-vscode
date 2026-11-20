@@ -1777,6 +1777,62 @@ describe("StreamingManager", () => {
       expect(result.results[0].limitReached).toBe(false);
     });
 
+    it("publishes columns when streaming metadata only arrives on the first read", async () => {
+      const cmd = new MockNzCommand();
+      const onChunk = jest.fn();
+      jest.spyOn(mockConnection, "createCommand").mockReturnValue(cmd);
+
+      const names = ["ID", "NAME"];
+      const types = ["INT", "VARCHAR"];
+      const rows = [[1, "a"], [2, "b"]];
+      let rowIndex = -1;
+      let fieldCount = 0;
+      const reader = {
+        get fieldCount() {
+          return fieldCount;
+        },
+        read: jest.fn().mockImplementation(async () => {
+          // PostgreSQL publishes the row description asynchronously, so the
+          // field count is only valid after the first read resolves.
+          fieldCount = names.length;
+          rowIndex++;
+          return rowIndex < rows.length;
+        }),
+        nextResult: jest.fn().mockResolvedValue(false),
+        getValue: jest.fn().mockImplementation(
+          (index: number) => rows[rowIndex]?.[index],
+        ),
+        getName: jest.fn().mockImplementation(
+          (index: number) => names[index],
+        ),
+        getTypeName: jest.fn().mockImplementation(
+          (index: number) => types[index],
+        ),
+        close: jest.fn().mockResolvedValue(undefined),
+      } as unknown as NzDataReader;
+
+      jest.spyOn(cmd, "executeReader").mockResolvedValue(reader);
+
+      const result = await manager.executeWithStreaming(
+        mockConnection,
+        "SELECT id, name FROM test",
+        100,
+        10,
+        undefined,
+        undefined,
+        onChunk,
+      );
+
+      expect(result.totalRows).toBe(2);
+      const firstChunk = onChunk.mock.calls.find(
+        ([chunk]) => chunk.isFirstChunk,
+      )?.[0];
+      expect(firstChunk?.columns).toEqual([
+        { name: "ID", type: "INT" },
+        { name: "NAME", type: "VARCHAR" },
+      ]);
+    });
+
     it("should send final chunk with columns for zero-row executeWithStreaming", async () => {
       const cmd = new MockNzCommand();
       const onChunk = jest.fn();

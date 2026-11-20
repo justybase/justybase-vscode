@@ -776,7 +776,11 @@ export class StreamingManager {
                     return hasRow;
                 };
 
-                // Read column metadata BEFORE the fetch loop (even if there are 0 rows)
+                // Streaming readers such as PostgreSQL do not publish the row
+                // description until the first read completes. Wait for the
+                // first row (or EOF) before capturing column metadata so the
+                // first chunk is not emitted with an empty column list.
+                let hasRow = await readRow();
                 for (let i = 0; i < reader.fieldCount; i++) {
                     const column: ReaderColumn = {
                         name: reader.getName(i),
@@ -790,7 +794,7 @@ export class StreamingManager {
                 }
 
                 let userCancelled = false;
-                while (await readRow()) {
+                while (hasRow) {
                     executionTiming.rowsRead = (executionTiming.rowsRead ?? 0) + 1;
                     // Check for cancellation
                     if (signal?.aborted) {
@@ -857,6 +861,8 @@ export class StreamingManager {
                         commandCleanupDone = true;
                         break;
                     }
+
+                    hasRow = await readRow();
                 }
 
                 // If user cancelled, return early with an error
