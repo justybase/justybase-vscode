@@ -21,9 +21,9 @@ function whensFor(command: string): string[] {
 }
 
 describe('PostgreSQL tree expansion', () => {
-    it('lists materialized views, foreign tables, triggers and indexes as type groups', () => {
+    it('lists materialized views, foreign tables, types, domains, policies, triggers and indexes as type groups', () => {
         const sql = buildTypeGroupsQuery();
-        for (const group of ['MATERIALIZED VIEW', 'FOREIGN TABLE', 'TRIGGER', 'INDEX']) {
+        for (const group of ['MATERIALIZED VIEW', 'FOREIGN TABLE', 'TRIGGER', 'INDEX', 'TYPE', 'DOMAIN', 'POLICY']) {
             expect(sql).toContain(`'${group}'`);
         }
     });
@@ -37,13 +37,16 @@ describe('PostgreSQL tree expansion', () => {
         expect(buildObjectTypeQuery('VIEW')).not.toContain(`'m'`);
     });
 
-    it('queries triggers and indexes from their catalogs', () => {
+    it('queries triggers, indexes, types, domains and policies from their catalogs', () => {
         const triggerSql = buildObjectTypeQuery('TRIGGER');
         expect(triggerSql).toContain('pg_trigger');
         expect(triggerSql).toContain('NOT t.tgisinternal');
         const indexSql = buildObjectTypeQuery('INDEX');
         expect(indexSql).toContain('pg_index');
         expect(indexSql).toContain('NOT i.indisprimary');
+        expect(buildObjectTypeQuery('TYPE')).toContain(`t.typtype IN ('c', 'e', 'r', 'm')`);
+        expect(buildObjectTypeQuery('DOMAIN')).toContain(`t.typtype = 'd'`);
+        expect(buildObjectTypeQuery('POLICY')).toContain('pg_policy');
     });
 
     it('builds single-object definition queries', () => {
@@ -55,7 +58,7 @@ describe('PostgreSQL tree expansion', () => {
 
     it('exposes the new object types through the metadata provider', () => {
         expect(postgresqlMetadataProvider.defaultObjectTypes).toEqual(
-            expect.arrayContaining(['MATERIALIZED VIEW', 'FOREIGN TABLE', 'TRIGGER', 'INDEX']),
+            expect.arrayContaining(['MATERIALIZED VIEW', 'FOREIGN TABLE', 'TRIGGER', 'INDEX', 'TYPE', 'DOMAIN', 'POLICY']),
         );
         expect(postgresqlMetadataProvider.defaultColumnObjectTypes).toEqual(
             expect.arrayContaining(['MATERIALIZED VIEW', 'FOREIGN TABLE']),

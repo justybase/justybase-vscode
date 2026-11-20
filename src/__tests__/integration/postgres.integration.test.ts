@@ -553,6 +553,52 @@ describeIfConfigured('postgres integration', () => {
         }
     }, 120000);
 
+    it('lists PostgreSQL user types, domains and policies', async () => {
+        const stamp = Date.now();
+        const enumName = `jbl_enum_${stamp}`;
+        const domainName = `jbl_domain_${stamp}`;
+        const tableName = `jbl_policy_${stamp}`;
+        const policyName = `p_jbl_${stamp}`;
+
+        try {
+            await connection.createCommand(`CREATE TYPE "public"."${enumName}" AS ENUM ('a', 'b')`).execute();
+            await connection.createCommand(
+                `CREATE DOMAIN "public"."${domainName}" AS integer CHECK (VALUE > 0)`
+            ).execute();
+            await connection.createCommand(
+                `CREATE TABLE "public"."${tableName}" (id integer PRIMARY KEY, secret text)`
+            ).execute();
+            await connection.createCommand(
+                `CREATE POLICY "${policyName}" ON "public"."${tableName}" USING (id > 0)`
+            ).execute();
+
+            const types = await readRows(connection, postgresqlMetadataProvider.buildObjectTypeQuery(config!.database, 'TYPE'));
+            expect(types).toEqual(expect.arrayContaining([
+                expect.objectContaining({ OBJNAME: enumName, SCHEMA: 'public', DESCRIPTION: 'enum' }),
+            ]));
+
+            const domains = await readRows(connection, postgresqlMetadataProvider.buildObjectTypeQuery(config!.database, 'DOMAIN'));
+            expect(domains).toEqual(expect.arrayContaining([
+                expect.objectContaining({ OBJNAME: domainName, SCHEMA: 'public' }),
+            ]));
+
+            const policies = await readRows(connection, postgresqlMetadataProvider.buildObjectTypeQuery(config!.database, 'POLICY'));
+            expect(policies).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    OBJNAME: policyName,
+                    SCHEMA: 'public',
+                    DESCRIPTION: expect.stringContaining(tableName),
+                }),
+            ]));
+        } finally {
+            await connection.createCommand(
+                `DROP TABLE IF EXISTS "public"."${tableName}" CASCADE`
+            ).execute();
+            await connection.createCommand(`DROP DOMAIN IF EXISTS "public"."${domainName}"`).execute();
+            await connection.createCommand(`DROP TYPE IF EXISTS "public"."${enumName}"`).execute();
+        }
+    }, 120000);
+
     it('streams live PostgreSQL rows with the row description resolved on first read', async () => {
         const manager = new StreamingManager();
         const chunks: StreamingChunk[] = [];

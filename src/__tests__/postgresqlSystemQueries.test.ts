@@ -50,12 +50,18 @@ describe('postgresqlSystemQueries', () => {
 
         expect(typeGroupsQuery).toContain(`SELECT 'TABLE' AS "OBJTYPE"`);
         expect(typeGroupsQuery).toContain(`UNION ALL SELECT 'PROCEDURE' AS "OBJTYPE"`);
+        expect(typeGroupsQuery).toContain(`UNION ALL SELECT 'TYPE' AS "OBJTYPE"`);
+        expect(typeGroupsQuery).toContain(`UNION ALL SELECT 'DOMAIN' AS "OBJTYPE"`);
+        expect(typeGroupsQuery).toContain(`UNION ALL SELECT 'POLICY' AS "OBJTYPE"`);
     });
 
     it('uses PostgreSQL relkind and prokind filters for relation and routine listings', () => {
         const tablesQuery = compactSql(buildListTablesQuery('public'));
         const viewsQuery = compactSql(buildListViewsQuery('analytics'));
         const sequenceQuery = compactSql(buildObjectTypeQuery('SEQUENCE'));
+        const typeQuery = compactSql(buildObjectTypeQuery('TYPE'));
+        const domainQuery = compactSql(buildObjectTypeQuery('DOMAIN'));
+        const policyQuery = compactSql(buildObjectTypeQuery('POLICY'));
         const functionQuery = compactSql(buildObjectTypeQuery('FUNCTION'));
         const proceduresQuery = compactSql(buildListProceduresQuery('public'));
 
@@ -69,6 +75,13 @@ describe('postgresqlSystemQueries', () => {
 
         expect(sequenceQuery).toContain(`c.relkind IN ('S')`);
         expect(sequenceQuery).toContain(`'SEQUENCE' AS "OBJTYPE"`);
+
+        expect(typeQuery).toContain(`t.typtype IN ('c', 'e', 'r', 'm')`);
+        expect(typeQuery).toContain(`c.relkind = 'c'`);
+        expect(domainQuery).toContain(`t.typtype = 'd'`);
+        expect(domainQuery).toContain('format_type(t.typbasetype, t.typtypmod)');
+        expect(policyQuery).toContain('pg_catalog.pg_policy');
+        expect(policyQuery).toContain(`WHEN 'r' THEN 'SELECT'`);
 
         expect(functionQuery).toContain(`p.prokind = 'f'`);
         expect(functionQuery).toContain('pg_get_function_identity_arguments');
@@ -213,6 +226,8 @@ describe('postgresqlSystemQueries', () => {
         expect(objectSearchQuery).toContain(`c.relname AS "NAME"`);
         expect(objectSearchQuery).toContain(`n.nspname AS "SCHEMA"`);
         expect(objectSearchQuery).toContain(`CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS "TYPE"`);
+        expect(objectSearchQuery).toContain(`CASE WHEN t.typtype = 'd' THEN 'DOMAIN' ELSE 'TYPE' END AS "TYPE"`);
+        expect(objectSearchQuery).toContain(`'POLICY' AS "TYPE"`);
         expect(objectSearchQuery).toContain(`'COLUMN' AS "TYPE"`);
         expect(objectSearchQuery).toContain(`'OBJ_DESC' AS "MATCH_TYPE"`);
         expect(objectSearchQuery).toContain(`'COL_DESC' AS "MATCH_TYPE"`);

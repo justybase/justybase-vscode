@@ -1,7 +1,7 @@
 import type { DatabaseSourceSearchQueryOptions } from '@justybase/contracts';
 
 type PostgreSqlTableLikeType = 'TABLE' | 'VIEW' | 'MATERIALIZED VIEW' | 'FOREIGN TABLE';
-type PostgreSqlCatalogObjectType = PostgreSqlTableLikeType | 'SEQUENCE' | 'FUNCTION' | 'PROCEDURE' | 'TRIGGER' | 'INDEX';
+type PostgreSqlCatalogObjectType = PostgreSqlTableLikeType | 'SEQUENCE' | 'FUNCTION' | 'PROCEDURE' | 'TRIGGER' | 'INDEX' | 'TYPE' | 'DOMAIN' | 'POLICY';
 
 const TABLE_RELKINDS = ['r', 'p'] as const;
 const MATERIALIZED_VIEW_RELKINDS = ['m'] as const;
@@ -10,7 +10,20 @@ const VIEW_RELKINDS = ['v'] as const;
 /** Every relation kind with browsable columns. */
 const COLUMN_BEARING_RELKINDS = [...TABLE_RELKINDS, ...VIEW_RELKINDS, ...MATERIALIZED_VIEW_RELKINDS, ...FOREIGN_TABLE_RELKINDS] as const;
 const SEQUENCE_RELKINDS = ['S'] as const;
-const DEFAULT_TYPE_GROUPS = ['TABLE', 'VIEW', 'MATERIALIZED VIEW', 'FOREIGN TABLE', 'SEQUENCE', 'FUNCTION', 'PROCEDURE', 'TRIGGER', 'INDEX'] as const;
+const DEFAULT_TYPE_GROUPS = [
+    'TABLE',
+    'VIEW',
+    'MATERIALIZED VIEW',
+    'FOREIGN TABLE',
+    'SEQUENCE',
+    'TYPE',
+    'DOMAIN',
+    'FUNCTION',
+    'PROCEDURE',
+    'TRIGGER',
+    'INDEX',
+    'POLICY',
+] as const;
 
 function quoteLiteral(value: string | undefined): string {
     return `'${(value ?? '').replace(/'/g, "''")}'`;
@@ -169,6 +182,76 @@ export function buildObjectTypeQuery(objectType: string): string {
         return buildRelationObjectQuery(SEQUENCE_RELKINDS, 'SEQUENCE');
     }
 
+    if (normalizedType === 'TYPE') {
+        return `
+            SELECT
+                t.typname AS "OBJNAME",
+                t.oid::INT AS "OBJID",
+                n.nspname AS "SCHEMA",
+                CASE t.typtype
+                    WHEN 'c' THEN 'composite type'
+                    WHEN 'e' THEN 'enum'
+                    WHEN 'r' THEN 'range'
+                    WHEN 'm' THEN 'multirange'
+                    ELSE t.typtype::text
+                END AS "DESCRIPTION",
+                pg_get_userbyid(t.typowner) AS "OWNER",
+                current_database() AS "DATABASE"
+            FROM pg_catalog.pg_type t
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = t.typnamespace
+            LEFT JOIN pg_catalog.pg_class c
+                ON c.oid = t.typrelid
+            WHERE t.typtype IN ('c', 'e', 'r', 'm')
+              AND (t.typtype <> 'c' OR c.relkind = 'c')
+              AND ${buildUserSchemaPredicate('n.nspname')}
+            ORDER BY n.nspname, t.typname
+        `;
+    }
+
+    if (normalizedType === 'DOMAIN') {
+        return `
+            SELECT
+                t.typname AS "OBJNAME",
+                t.oid::INT AS "OBJID",
+                n.nspname AS "SCHEMA",
+                'over ' || pg_catalog.format_type(t.typbasetype, t.typtypmod) AS "DESCRIPTION",
+                pg_get_userbyid(t.typowner) AS "OWNER",
+                current_database() AS "DATABASE"
+            FROM pg_catalog.pg_type t
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = t.typnamespace
+            WHERE t.typtype = 'd'
+              AND ${buildUserSchemaPredicate('n.nspname')}
+            ORDER BY n.nspname, t.typname
+        `;
+    }
+
+    if (normalizedType === 'POLICY') {
+        return `
+            SELECT
+                p.polname AS "OBJNAME",
+                p.oid::INT AS "OBJID",
+                n.nspname AS "SCHEMA",
+                'ON ' || c.relname || ' (' || CASE p.polcmd
+                    WHEN 'r' THEN 'SELECT'
+                    WHEN 'a' THEN 'INSERT'
+                    WHEN 'w' THEN 'UPDATE'
+                    WHEN 'd' THEN 'DELETE'
+                    ELSE 'ALL'
+                END || ')' AS "DESCRIPTION",
+                pg_get_userbyid(c.relowner) AS "OWNER",
+                current_database() AS "DATABASE"
+            FROM pg_catalog.pg_policy p
+            INNER JOIN pg_catalog.pg_class c
+                ON c.oid = p.polrelid
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = c.relnamespace
+            WHERE ${buildUserSchemaPredicate('n.nspname')}
+            ORDER BY n.nspname, c.relname, p.polname
+        `;
+    }
+
     if (normalizedType === 'MATERIALIZED VIEW') {
         return buildRelationObjectQuery(MATERIALIZED_VIEW_RELKINDS, 'MATERIALIZED VIEW');
     }
@@ -314,6 +397,44 @@ export function buildObjectSearchQuery(database: string, likePattern: string): s
               AND ${buildUserSchemaPredicate('n.nspname')}
               AND UPPER(COALESCE(obj_description(p.oid, 'pg_proc'), '')) LIKE '${likePattern}' ESCAPE '\\'
               AND UPPER(${buildRoutineSignatureExpression('p')}) NOT LIKE '${likePattern}' ESCAPE '\\'
+            UNION ALL
+            SELECT
+                2 AS "PRIORITY",
+                t.typname AS "NAME",
+                n.nspname AS "SCHEMA",
+                ${databaseLiteral} AS "DATABASE",
+                CASE WHEN t.typtype = 'd' THEN 'DOMAIN' ELSE 'TYPE' END AS "TYPE",
+                '' AS "PARENT",
+                COALESCE(obj_description(t.oid, 'pg_type'), '') AS "DESCRIPTION",
+                'NAME' AS "MATCH_TYPE"
+            FROM pg_catalog.pg_type t
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = t.typnamespace
+            LEFT JOIN pg_catalog.pg_class c
+                ON c.oid = t.typrelid
+            WHERE (
+                    t.typtype = 'd'
+                    OR (t.typtype IN ('c', 'e', 'r', 'm') AND (t.typtype <> 'c' OR c.relkind = 'c'))
+                  )
+              AND ${buildUserSchemaPredicate('n.nspname')}
+              AND UPPER(t.typname) LIKE '${likePattern}' ESCAPE '\\'
+            UNION ALL
+            SELECT
+                2 AS "PRIORITY",
+                p.polname AS "NAME",
+                n.nspname AS "SCHEMA",
+                ${databaseLiteral} AS "DATABASE",
+                'POLICY' AS "TYPE",
+                c.relname AS "PARENT",
+                'ON ' || c.relname AS "DESCRIPTION",
+                'NAME' AS "MATCH_TYPE"
+            FROM pg_catalog.pg_policy p
+            INNER JOIN pg_catalog.pg_class c
+                ON c.oid = p.polrelid
+            INNER JOIN pg_catalog.pg_namespace n
+                ON n.oid = c.relnamespace
+            WHERE ${buildUserSchemaPredicate('n.nspname')}
+              AND UPPER(p.polname) LIKE '${likePattern}' ESCAPE '\\'
             UNION ALL
             SELECT
                 2 AS "PRIORITY",
