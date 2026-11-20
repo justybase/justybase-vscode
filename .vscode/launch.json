@@ -19,6 +19,235 @@
       ]
     },
     {
+      "name": "Run Extension + Access (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/access",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/access/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + Access Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + Db2 (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/db2",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/db2/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + Db2 Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + DuckDB + Files (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/duckdb",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/duckdb/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + DuckDB + Files Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + ClickHouse (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/clickhouse",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/clickhouse/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + ClickHouse Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + SQL Server (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/mssql",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/mssql/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + SQL Server Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + MySQL (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/mysql",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/mysql/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + MySQL Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + Oracle (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/oracle",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/oracle/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + Oracle Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + PostgreSQL (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/postgresql",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/postgresql/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + PostgreSQL Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + Snowflake (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/snowflake",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/snowflake/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + Snowflake Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + Vertica (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/vertica",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/vertica/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + Vertica Companion",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
+      "name": "Run Extension + All Companions (Development Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/access",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/db2",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/duckdb",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/clickhouse",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/mssql",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/mysql",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/oracle",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/postgresql",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/snowflake",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/vertica",
+        "--disable-extensions"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js",
+        "${workspaceFolder}/extensions/*/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build Extension + All Companions",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    },
+    {
       "name": "Debug Jest: current test file",
       "type": "node",
       "request": "launch",
@@ -28,6 +257,31 @@
         "--config",
         "jest.config.js",
         "${relativeFile}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "NODE_ENV": "test",
+        "JEST_SILENT": "0",
+        "NODE_OPTIONS": "--max-old-space-size=4096"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/node_modules/**"
+      ],
+      "sourceMaps": true
+    },
+    {
+      "name": "Debug Jest: PostgreSQL live integration",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/jest/bin/jest.js",
+      "args": [
+        "--runInBand",
+        "--config",
+        "jest.live.config.js",
+        "src/__tests__/integration/postgres.integration.test.ts"
       ],
       "cwd": "${workspaceFolder}",
       "env": {

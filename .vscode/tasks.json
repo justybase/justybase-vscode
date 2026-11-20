@@ -6,6 +6,94 @@
       "type": "npm",
       "script": "build",
       "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + Access Companion",
+      "type": "npm",
+      "script": "build:access",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + Db2 Companion",
+      "type": "npm",
+      "script": "build:db2",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + DuckDB + Files Companion",
+      "type": "npm",
+      "script": "build:duckdb",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + ClickHouse Companion",
+      "type": "npm",
+      "script": "build:clickhouse",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + SQL Server Companion",
+      "type": "npm",
+      "script": "build:mssql",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + MySQL Companion",
+      "type": "npm",
+      "script": "build:mysql",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + Oracle Companion",
+      "type": "npm",
+      "script": "build:oracle",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + PostgreSQL Companion",
+      "type": "npm",
+      "script": "build:postgresql",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + Snowflake Companion",
+      "type": "npm",
+      "script": "build:snowflake",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + Vertica Companion",
+      "type": "npm",
+      "script": "build:vertica",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Extension + All Companions",
+      "type": "npm",
+      "script": "build:companions",
+      "dependsOn": "Build Extension",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
     }
   ]
 }
