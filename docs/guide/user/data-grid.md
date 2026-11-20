@@ -4,7 +4,7 @@ description: Explore streamed, multi-result, memory-backed, and disk-backed resu
 audience: user
 category: Product guides
 status: Supported
-last_verified: 2026-10-21
+last_verified: 2026-11-20
 product_version: 3.20.11
 ---
 
@@ -53,6 +53,11 @@ viewport to keep extending it while the grid scrolls. Header widths include
 the type badge and the drag, pin, filter, and grouping controls. A manually
 saved width is still respected, but it cannot be reduced below the readable
 header minimum; use horizontal scrolling for a wide result.
+
+Use the **Find column** field in the result toolbar to jump to a column by
+name. Typing filters the list; press Enter or select an entry to scroll the
+grid horizontally to that column and briefly highlight its header. Selecting a
+column hidden by the column menu also makes it visible again.
 
 In the desktop Result Panel, open **More → Responsive collapsed columns** to
 move columns that do not fit into expandable row details. Use the chevron in a

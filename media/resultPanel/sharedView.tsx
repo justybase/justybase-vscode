@@ -55,6 +55,7 @@ import {
     ResultRefreshFailureBanner,
     ResultTabs,
     ResultAnalysisPanel,
+    ResultColumnSearch,
     ResultColumnSidebar,
     ResultViewToolbar,
     RowViewPanel,
@@ -67,6 +68,7 @@ import type {
     DataGridFormattingOptions,
     DataGridColumnFilterState,
     DataGridFilterValueOption,
+    DataGridHandle,
     DataGridSelection,
     DiffBaseline,
     PivotAggregation,
@@ -4020,6 +4022,15 @@ function SharedExploreHost({
     return <div className="ui-legacy-explore" ref={hostRef} />;
 }
 
+function isSharedColumnHidden(result: UiResultSurfaceState | undefined, columnIndex: number): boolean {
+    const column = result?.columns[columnIndex];
+    if (!result || !column) return false;
+    const visibility = result.view.columnVisibility;
+    if (!visibility) return false;
+    const key = column.name.trim() || `column-${columnIndex}`;
+    return visibility[key] === false || visibility[column.name] === false || visibility[String(columnIndex)] === false;
+}
+
 export function SharedResultPanelApp({ controller }: { readonly controller: SharedResultPanelController }): ReactNode {
     const state = useSharedControllerState(controller);
     const [selectedRow, setSelectedRow] = useState<number | undefined>();
@@ -4043,6 +4054,9 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const [copyingAll, setCopyingAll] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const analysisGenerationRef = useRef(0);
+    const dataGridRef = useRef<DataGridHandle>(null);
+    const columnSearchRef = useRef<HTMLInputElement>(null);
+    const pendingColumnScrollRef = useRef<{ readonly resultSetId: string; readonly columnIndex: number } | undefined>(undefined);
     const activeResult = controller.activeResult();
     const closeAnalysis = useCallback(() => {
         analysisGenerationRef.current += 1;
@@ -4516,15 +4530,37 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         if (!result) return;
         controller.updateView(result.resultSetId, { grouping: [] });
     }, [controller]);
+    const isColumnVisible = useCallback((columnIndex: number): boolean =>
+        !isSharedColumnHidden(controller.activeResult(), columnIndex), [controller]);
+    const scrollToGridColumn = useCallback((columnIndex: number): void => {
+        const result = controller.activeResult();
+        const column = result?.columns[columnIndex];
+        if (!result || !column) return;
+        if (isSharedColumnHidden(result, columnIndex)) {
+            const visibility = result.view.columnVisibility;
+            const key = column.name.trim() || `column-${columnIndex}`;
+            const next = { ...visibility };
+            delete next[key];
+            delete next[column.name];
+            delete next[String(columnIndex)];
+            // The grid can only scroll to a mounted column, so wait for the
+            // visibility update to commit before issuing the scroll request.
+            pendingColumnScrollRef.current = { resultSetId: result.resultSetId, columnIndex };
+            controller.updateView(result.resultSetId, { columnVisibility: next });
+            return;
+        }
+        dataGridRef.current?.scrollToColumn(columnIndex);
+    }, [controller]);
+    useEffect(() => {
+        const pending = pendingColumnScrollRef.current;
+        if (pending === undefined) return;
+        pendingColumnScrollRef.current = undefined;
+        if (activeResult?.resultSetId !== pending.resultSetId) return;
+        dataGridRef.current?.scrollToColumn(pending.columnIndex);
+    }, [activeResult]);
     const openColumnSearch = useCallback((): void => {
-        const details = document.querySelector<HTMLDetailsElement>('.ui-data-grid-column-menu');
-        if (!details) return;
-        details.open = true;
-        window.setTimeout(() => {
-            const input = details.querySelector<HTMLInputElement>('input[aria-label="Find column"]');
-            input?.focus();
-            input?.select();
-        }, 0);
+        columnSearchRef.current?.focus();
+        columnSearchRef.current?.select();
     }, []);
     const columnSidebar = sidebarOpen && activeResult && !isLogResult && !isErrorResult && tableLayoutActive
         ? <ResultColumnSidebar
@@ -4623,6 +4659,15 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                                 onFindColumn={openColumnSearch}
                             />
                         </>)}
+                    columnFinder={activeResult && !isLogResult && !isErrorResult && tableLayoutActive
+                        ? <ResultColumnSearch
+                            key={activeResult.resultSetId}
+                            ref={columnSearchRef}
+                            columns={activeResult.columns}
+                            onSelect={scrollToGridColumn}
+                            isColumnVisible={isColumnVisible}
+                        />
+                        : undefined}
                     columnMenu={activeResult && !isLogResult && !isErrorResult && tableLayoutActive ? <DataGridColumnMenu columns={activeResult.columns} view={view} onViewChange={updateView} /> : undefined}
                 />
                 {!isLogResult && <ResultExecutionBanner
@@ -4705,6 +4750,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                             onClose={() => setViewLayout('table')}
                         />
                         : <DataGrid
+                        ref={dataGridRef}
                         sourceId={activeResult.sourceId}
                         resultSetId={activeResult.resultSetId}
                         columns={activeResult.columns}

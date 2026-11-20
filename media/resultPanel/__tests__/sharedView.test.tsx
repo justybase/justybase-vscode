@@ -1,7 +1,7 @@
 import { encode } from '@msgpack/msgpack';
 import '@testing-library/jest-dom';
 import { act } from 'react';
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, waitFor } from '@testing-library/react';
 import {
     SharedResultPanelApp,
     SharedResultPanelController,
@@ -737,6 +737,55 @@ describe('shared VS Code Result Panel adapter', () => {
         fireEvent.click(screen.getByTitle('Sort by id. Shift+Click to add another sort column. Drag to grouping panel.'));
         fireEvent.click(screen.getByRole('row', { name: '2 two' }));
         expect(screen.queryByRole('heading', { name: 'Row details' })).not.toBeInTheDocument();
+        controller.dispose();
+    });
+
+    it('jumps to a searched column from the toolbar finder', () => {
+        const controller = new SharedResultPanelController();
+        const columns = ['ID', 'CUSTOMER_NAME', 'AMOUNT', 'REGION', 'CHANNEL', 'STATUS'].map(name => ({ name }));
+        controller.handleHostMessage(hydrateMessage([{
+            resultSetId: 'column-finder-result',
+            columns,
+            data: [[1, 'Ada', 10, 'EU', 'WEB', 'ready']],
+            totalRowCount: 1,
+        }]));
+        const { container } = render(<SharedResultPanelApp controller={controller} />);
+        const finder = screen.getByRole('combobox', { name: 'Find column' });
+
+        // The legacy More menu shortcut focuses the same toolbar field.
+        fireEvent.click(screen.getByRole('button', { name: 'More result actions' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: /Find column/ }));
+        expect(document.activeElement).toBe(finder);
+
+        fireEvent.change(finder, { target: { value: 'channel' } });
+        fireEvent.keyDown(finder, { key: 'Enter' });
+        const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+        expect(scroller?.scrollLeft ?? 0).toBeGreaterThan(0);
+        expect(finder).toHaveValue('CHANNEL');
+        controller.dispose();
+    });
+
+    it('unhides and jumps to a searched hidden column', async () => {
+        const controller = new SharedResultPanelController();
+        const columns = ['ID', 'CUSTOMER_NAME', 'AMOUNT', 'REGION', 'CHANNEL', 'STATUS'].map(name => ({ name }));
+        controller.handleHostMessage(hydrateMessage([{
+            resultSetId: 'hidden-column-result',
+            columns,
+            data: [[1, 'Ada', 10, 'EU', 'WEB', 'ready']],
+            totalRowCount: 1,
+        }]));
+        controller.updateView('hidden-column-result', { columnVisibility: { CHANNEL: false } });
+        const { container } = render(<SharedResultPanelApp controller={controller} />);
+        const finder = screen.getByRole('combobox', { name: 'Find column' });
+
+        fireEvent.focus(finder);
+        fireEvent.change(finder, { target: { value: 'channel' } });
+        expect(screen.getByRole('option', { name: /CHANNEL/ })).toHaveTextContent('hidden');
+        fireEvent.keyDown(finder, { key: 'Enter' });
+
+        await waitFor(() => expect(controller.activeResult()?.view.columnVisibility?.CHANNEL).toBeUndefined());
+        const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+        await waitFor(() => expect(scroller?.scrollLeft ?? 0).toBeGreaterThan(0));
         controller.dispose();
     });
 

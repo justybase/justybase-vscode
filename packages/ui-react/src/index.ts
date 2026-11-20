@@ -1,7 +1,8 @@
+/* istanbul ignore file -- this barrel only re-exports already-covered modules. */
 export { uiTokens } from './tokens';
 export type { UiTokens } from './tokens';
 export { calculateDataGridColumnWindow, calculateDataGridVirtualWindow, DataGridColumnMenu, formatDataGridCellValue, processDataGridRowIndices, processDataGridRows, reorderDataGridGrouping, resolveDataGridColumnIndexes, resolveDataGridColumns, resolveDataGridNavigationTarget, resolveDataGridScrollTop } from './dataGrid';
-export type { DataGridCellContext, DataGridCellEdit, DataGridColumnAction, DataGridColumnFilterRequest, DataGridCopyPayload, DataGridProps, DataGridSelection, DataGridSelectionRange } from './dataGrid';
+export type { DataGridCellContext, DataGridCellEdit, DataGridColumnAction, DataGridColumnFilterRequest, DataGridCopyPayload, DataGridHandle, DataGridProps, DataGridSelection, DataGridSelectionRange } from './dataGrid';
 export type { DataGridColumnMenuProps } from './dataGrid';
 export type { DataGridColumnWindow, DataGridNavigationRequest, DataGridNavigationTarget } from './dataGrid';
 export { DataGridColumnFilterPanel } from './dataGridFilter';
@@ -15,6 +16,8 @@ export { ResultAnalysisPanel } from './resultAnalysis';
 export type { ResultAnalysisKind, ResultAnalysisPanelProps, ResultAnalysisTable } from './resultAnalysis';
 export { ResultColumnSidebar } from './resultColumnSidebar';
 export type { ResultColumnSidebarProps } from './resultColumnSidebar';
+export { ResultColumnSearch } from './resultColumnSearch';
+export type { ResultColumnSearchColumn, ResultColumnSearchProps } from './resultColumnSearch';
 export { areRowViewValuesEqual, RowViewPanel } from './rowView';
 export type { RowViewPanelProps } from './rowView';
 export { PivotDialog } from './pivotDialog';

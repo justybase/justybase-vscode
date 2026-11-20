@@ -1,3 +1,4 @@
+import { createRef } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
@@ -37,6 +38,7 @@ import {
   resolveDataGridNavigationTarget,
   resolveDataGridScrollTop,
 } from '../src';
+import type { DataGridHandle } from '../src';
 
 const result: UiResultSurfaceState = {
   sourceId: 'source-1',
@@ -571,6 +573,58 @@ describe('shared React presentation', () => {
     render(<DataGrid resultSetId={result.resultSetId} columns={result.columns} rows={[[1]]} scroll={{ resultSetId: 'different-result', top: -1, left: -1 }} />);
     render(<DataGrid resultSetId="empty-result" columns={[]} rows={[]} />);
     expect(screen.getByRole('status')).toHaveTextContent('No rows');
+  });
+
+  it('scrolls to and highlights a column through the imperative grid handle', () => {
+    const ref = createRef<DataGridHandle>();
+    const columns = ['COL_A', 'COL_B', 'COL_C', 'COL_D', 'COL_E', 'COL_F'].map(name => ({ name, type: 'VARCHAR' }));
+    const onScroll = jest.fn();
+    const { container } = render(<DataGrid
+      ref={ref}
+      resultSetId="scroll-to-column"
+      columns={columns}
+      rows={[columns.map((_column, index) => `value-${index}`)]}
+      onScroll={onScroll}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    expect(scroller).not.toBeNull();
+    if (!scroller || !ref.current) return;
+    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 220 });
+
+    act(() => ref.current?.scrollToColumn(5));
+    expect(scroller.scrollLeft).toBeGreaterThan(0);
+    expect(screen.getByRole('columnheader', { name: /COL_F/ }).querySelector('.ui-data-grid-column-highlight')).not.toBeNull();
+
+    // Searching an earlier column scrolls back to the left.
+    const rightScroll = scroller.scrollLeft;
+    act(() => ref.current?.scrollToColumn(1));
+    expect(scroller.scrollLeft).toBeLessThan(rightScroll);
+
+    // Unknown/hidden column indexes are a no-op instead of scrolling to 0.
+    const previous = scroller.scrollLeft;
+    act(() => ref.current?.scrollToColumn(99));
+    expect(scroller.scrollLeft).toBe(previous);
+  });
+
+  it('ignores column scroll requests without a mounted layout', () => {
+    const ref = createRef<DataGridHandle>();
+    const { unmount } = render(<DataGrid ref={ref} resultSetId="empty-column-handle" columns={[]} rows={[]} />);
+    const handle = ref.current;
+    expect(handle).not.toBeNull();
+    act(() => handle?.scrollToColumn(0));
+    unmount();
+    act(() => handle?.scrollToColumn(0));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('renders an optional column finder next to the result view controls', () => {
+    render(<ResultViewToolbar
+      columns={[{ name: 'ID' }]}
+      view={{ globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined }}
+      onChange={jest.fn()}
+      columnFinder={<span data-testid="column-finder" />}
+    />);
+    expect(screen.getByTestId('column-finder')).toBeInTheDocument();
   });
 
   it('calculates a bounded virtual window with stable pixel padding', () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, UIEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Range, Virtualizer } from '@tanstack/react-virtual';
@@ -233,6 +233,11 @@ interface PendingScrollRestoration {
   readonly scope: string;
   readonly top: number;
   readonly left: number;
+}
+
+export interface DataGridHandle {
+  /** Scrolls the grid horizontally to the requested raw column index. */
+  scrollToColumn(columnIndex: number): void;
 }
 
 export interface DataGridProps {
@@ -696,7 +701,7 @@ export function DataGridColumnMenu({ columns, view, onViewChange }: DataGridColu
     <div className="ui-data-grid-column-menu-panel" role="menu" aria-label="Column settings">
       <div className="ui-data-grid-column-menu-heading"><strong>Visible columns</strong><span>{visibleColumnIndexes.length} of {columns.length}</span></div>
       <div className="ui-data-grid-column-menu-tools">
-        <input aria-label="Find column" placeholder="Find column…" value={search} onChange={event => setSearch(event.target.value)} />
+        <input aria-label="Filter columns" placeholder="Filter columns…" value={search} onChange={event => setSearch(event.target.value)} />
         <button type="button" onClick={() => setAllVisibility(true)}>Show all</button>
         <button type="button" onClick={() => setAllVisibility(false)}>Hide all</button>
       </div>
@@ -1055,7 +1060,7 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
   return rendered;
 }
 
-export function DataGrid({
+export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataGrid({
   sourceId,
   resultSetId,
   columns,
@@ -1094,8 +1099,10 @@ export function DataGrid({
   catalogBound = false,
   onProfileColumn,
   busy = false,
-}: DataGridProps): ReactNode {
+}: DataGridProps, ref): ReactNode {
   const scroller = useRef<HTMLDivElement>(null);
+  const [highlightedColumn, setHighlightedColumn] = useState<number | undefined>(undefined);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
   const [activeCellEditor, setActiveCellEditor] = useState<ActiveCellEditor | undefined>(undefined);
   const [aggregationMenu, setAggregationMenu] = useState<{ readonly columnIndex: number; readonly left: number; readonly top: number } | undefined>(undefined);
@@ -1114,6 +1121,12 @@ export function DataGrid({
   useEffect(() => {
     if (!editMode) setActiveCellEditor(undefined);
   }, [editMode]);
+  useEffect(() => () => {
+    if (highlightTimerRef.current !== undefined) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = undefined;
+    }
+  }, []);
   const resolvedColumnsCacheRef = useRef<{
     readonly resultSetId: string;
     readonly signature: string;
@@ -2050,6 +2063,21 @@ export function DataGrid({
     });
   };
 
+  /** Scrolls horizontally to a column. Returns true when the offset changed. */
+  function scrollColumnIntoView(element: HTMLDivElement, layout: readonly DataGridColumnLayout[], columnIndex: number): boolean {
+    const entry = layout.find(item => item.columnIndex === columnIndex);
+    if (entry === undefined || entry.pinned) return false;
+    const pinnedWidth = layout.reduce((sum, item) => item.pinned ? sum + item.width : sum, 0);
+    const visibleLeft = element.scrollLeft + ROW_NUMBER_WIDTH + pinnedWidth;
+    const visibleRight = element.scrollLeft + element.clientWidth;
+    let nextLeft = element.scrollLeft;
+    if (entry.offset < visibleLeft) nextLeft = Math.max(0, entry.offset - ROW_NUMBER_WIDTH - pinnedWidth);
+    else if (entry.offset + entry.width > visibleRight) nextLeft = entry.offset + entry.width - element.clientWidth;
+    if (nextLeft === element.scrollLeft) return false;
+    element.scrollLeft = nextLeft;
+    return true;
+  }
+
   /** Keeps a keyboard target below the sticky header and outside pinned columns. */
   function scrollCellIntoView(rowIndex: number, columnIndex: number): void {
     const element = scroller.current;
@@ -2062,22 +2090,45 @@ export function DataGrid({
     if (rowTop < nextTop + header) nextTop = rowTop - header;
     else if (rowTop + ROW_HEIGHT > nextTop + element.clientHeight) nextTop = rowTop + ROW_HEIGHT - element.clientHeight;
     nextTop = Math.max(0, Math.min(maxTop, nextTop));
-    const entry = layout.find(item => item.columnIndex === columnIndex);
-    let nextLeft = element.scrollLeft;
-    if (entry !== undefined && !entry.pinned) {
-      const pinnedWidth = layout.reduce((sum, item) => item.pinned ? sum + item.width : sum, 0);
-      const visibleLeft = nextLeft + ROW_NUMBER_WIDTH + pinnedWidth;
-      const visibleRight = nextLeft + element.clientWidth;
-      if (entry.offset < visibleLeft) nextLeft = Math.max(0, entry.offset - ROW_NUMBER_WIDTH - pinnedWidth);
-      else if (entry.offset + entry.width > visibleRight) nextLeft = entry.offset + entry.width - element.clientWidth;
-    }
     const topChanged = nextTop !== element.scrollTop;
-    const leftChanged = nextLeft !== element.scrollLeft;
+    const leftChanged = scrollColumnIntoView(element, layout, columnIndex);
     if (topChanged) element.scrollTop = nextTop;
-    if (leftChanged) element.scrollLeft = nextLeft;
     if (leftChanged) columnViewportSyncRef.current?.();
     if (topChanged) bumpRowWindow();
   }
+
+  function highlightColumn(columnIndex: number): void {
+    setHighlightedColumn(columnIndex);
+    if (highlightTimerRef.current !== undefined) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedColumn(undefined);
+      highlightTimerRef.current = undefined;
+    }, 1800);
+  }
+
+  /** Public handle used by the toolbar's find-column control. */
+  function scrollToColumn(columnIndex: number): void {
+    const element = scroller.current;
+    const layout = columnLayoutRef.current;
+    if (!element || layout.length === 0) return;
+    if (!layout.some(item => item.columnIndex === columnIndex)) return;
+    if (scrollColumnIntoView(element, layout, columnIndex)) {
+      // Adopt the native position before the host confirms it, so a pending
+      // restoration frame cannot write the previous controlled offset back.
+      const position = {
+        scope: `${sourceId ?? ''}\u0000${resultSetId}`,
+        top: element.scrollTop,
+        left: element.scrollLeft,
+      };
+      scrollRestorationRef.current = position;
+      if (onScroll) nativeScrollRef.current = position;
+      pendingScrollRestorationRef.current = undefined;
+      columnViewportSyncRef.current?.();
+    }
+    highlightColumn(columnIndex);
+  }
+
+  useImperativeHandle(ref, () => ({ scrollToColumn }));
 
   function sortColumn(columnIndex: number, extend = false): void {
     const column = resolvedColumns[columnIndex]!;
@@ -2535,7 +2586,7 @@ export function DataGrid({
             const sort = activeView.sorting.find(item => columnMatchesKey(column, columnIndex, item.column));
             const filterActive = filterValue(activeView, column, columnIndex) !== '' || filterDefinition(activeView, column, columnIndex) !== undefined;
             return <th scope="col" key={`${entry.position}:${id}`} ref={element => { const refKey = `${id}:${columnIndex}`; if (element) columnHeaderRefs.current.set(refKey, element); else columnHeaderRefs.current.delete(refKey); }} className={[entry.pinned ? 'ui-data-grid-pinned' : '', columnDropTarget?.columnIndex === columnIndex ? (columnDropTarget.after ? 'ui-data-grid-column-drop-after' : 'ui-data-grid-column-drop-before') : ''].filter(Boolean).join(' ') || undefined} style={{ width: entry.width, minWidth: entry.width, ...(entry.left === undefined ? {} : { left: entry.left }) }} onDragOver={event => { if (draggedHeaderColumn === undefined) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; const rect = event.currentTarget.getBoundingClientRect(); setColumnDropTarget({ columnIndex, after: event.clientX > rect.left + rect.width / 2 }); }} onDrop={event => { event.preventDefault(); event.stopPropagation(); const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex, columnDropTarget?.columnIndex === columnIndex ? columnDropTarget.after : false); endHeaderColumnDrag(); }}>
-              <div className="ui-data-grid-header-content">
+              <div className={highlightedColumn === columnIndex ? 'ui-data-grid-header-content ui-data-grid-column-highlight' : 'ui-data-grid-header-content'}>
                 <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} title="Drag to reorder or to grouping panel" onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag}><svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" fill="currentColor"><circle cx="5" cy="4" r="1.1" /><circle cx="11" cy="4" r="1.1" /><circle cx="5" cy="8" r="1.1" /><circle cx="11" cy="8" r="1.1" /><circle cx="5" cy="12" r="1.1" /><circle cx="11" cy="12" r="1.1" /></svg></button>
                 <button type="button" className="ui-data-grid-header-label" draggable onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag} onClick={event => sortColumn(columnIndex, event.shiftKey)} title={`Sort by ${column.name}. Shift+Click to add another sort column. Drag to grouping panel.`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : `${sort.descending ? 'Sorted descending' : 'Sorted ascending'}${activeView.sorting.length > 1 ? `, priority ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}`}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}{sort !== undefined && activeView.sorting.length > 1 ? ` ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}</span></button>
                 <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column)}`}>{typeBadge(column)}</span>
@@ -2667,7 +2718,7 @@ export function DataGrid({
       {onEditRow && <button type="button" role="menuitem" onClick={() => { onEditRow(contextMenu); setContextMenu(undefined); }}><MenuIcon name="pencil" />Edit row…</button>}
     </div>}
   </div>;
-}
+});
 
 /**
  * Canonical result-grid name for new consumers. DataGrid remains exported as a

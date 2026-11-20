@@ -23,6 +23,25 @@ test('column filter dialog stays inside a short result panel', async ({ page }) 
   expect(box!.y + box!.height).toBeLessThanOrEqual(420);
 });
 
+test('toolbar finder scrolls the grid to a searched result column', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
+  const panel = page.locator('#shared-ui-root');
+  await expect(panel.locator('.ui-result-grid')).toBeVisible();
+  const scroller = panel.locator('.ui-data-grid-scroll');
+  const finder = panel.getByRole('combobox', { name: 'Find column' });
+
+  await finder.fill('payload');
+  await expect(panel.getByRole('option', { name: /PAYLOAD/ })).toBeVisible();
+  await finder.press('Enter');
+
+  await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+  const payloadHeader = panel.getByRole('columnheader', { name: /PAYLOAD/ });
+  await expect(payloadHeader).toBeVisible();
+  await expect(payloadHeader.locator('.ui-data-grid-column-highlight')).toHaveCount(1);
+  await expect(finder).toHaveValue('PAYLOAD');
+});
+
 test('shared result panel keeps Excel-style filtering, grouping and inline editing', async ({ page }) => {
   await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
   const panel = page.locator('#shared-ui-root');

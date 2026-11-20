@@ -417,6 +417,8 @@ export interface ResultViewToolbarProps {
   readonly activeAnalysis?: ResultAnalysisKind;
   readonly analysisBusy?: boolean;
   readonly columnMenu?: ReactNode;
+  /** Optional find/jump column control rendered next to the column menu. */
+  readonly columnFinder?: ReactNode;
   /** Layout switcher or other view selector rendered before the table controls. */
   readonly leading?: ReactNode;
   /** Adapter-owned actions (editing, formatting) rendered with the shared controls. */
@@ -434,7 +436,7 @@ export interface ResultViewToolbarProps {
 }
 
 /** Product-neutral controls for the common result view state. */
-export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onCopyAll, copyingAll = false, copyAllLabel, onExport, onAggregate, onGroup, onPivot, onRowView, rowViewActive = false, activeAnalysis, analysisBusy = false, columnMenu, leading, actions, rowCount, showAnalysis = true, showTableControls = true, showSort = true, showGroup = true }: ResultViewToolbarProps): ReactNode {
+export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, onCopyAll, copyingAll = false, copyAllLabel, onExport, onAggregate, onGroup, onPivot, onRowView, rowViewActive = false, activeAnalysis, analysisBusy = false, columnMenu, columnFinder, leading, actions, rowCount, showAnalysis = true, showTableControls = true, showSort = true, showGroup = true }: ResultViewToolbarProps): ReactNode {
   const firstColumn = columns[0]?.name;
   const canSelectColumn = firstColumn !== undefined;
   const aggregateActive = activeAnalysis === 'aggregate' || (activeAnalysis === undefined && view.aggregation !== undefined);
@@ -457,6 +459,7 @@ export function ResultViewToolbar({ columns, view, onChange, onRefresh, onCopy, 
     {onCopyAll && <button type="button" className="ui-result-toolbar-icon" aria-label={copyAllLabel ?? 'Copy full result (all rows)'} title={copyingAll ? 'Copying all rows…' : 'Copy every filtered row from the server spool, not just the loaded page'} disabled={copyingAll} onClick={onCopyAll}><MenuIcon name="file-spreadsheet" /></button>}
     {onExport && <button type="button" className="ui-result-toolbar-icon" aria-label="Export" title="Export" onClick={onExport}><MenuIcon name="download" /></button>}
     {actions}
+    {columnFinder}
     {columnMenu}
     {rowCount !== undefined && <span className="ui-result-toolbar-row-count" role="status">{rowCount.toLocaleString()} rows</span>}
   </div>;
