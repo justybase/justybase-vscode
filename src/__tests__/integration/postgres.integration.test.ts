@@ -12,7 +12,7 @@ import { postgresqlDialect } from '../../../extensions/postgresql/src/postgresql
 import { postgresqlMaintenanceProvider } from '../../../extensions/postgresql/src/postgresqlMaintenanceProvider';
 import { ensureBuiltInDialectsRegistered } from '../../dialects';
 import { importDataToPostgreSql } from '../../import/postgresqlImporter';
-import { buildEditDataQueryPlan } from '../../views/editDataQuery';
+import { buildEditDataQueryPlan, buildPrimaryKeyLocatorPredicate } from '../../views/editDataQuery';
 import { StreamingManager, type StreamingChunk } from '../../core/streaming/StreamingManager';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
@@ -426,6 +426,56 @@ describeIfConfigured('postgres integration', () => {
             const rows = await readRows(connection, plan.sql);
             expect(rows).toHaveLength(2);
             expect(rows.map(row => row.name)).toEqual(['Alice', 'Bob']);
+        } finally {
+            await connection.createCommand(`DROP TABLE IF EXISTS "public"."${tableName}"`).execute();
+        }
+    }, 120000);
+
+    it('edits PostgreSQL rows through the primary-key locator', async () => {
+        const tableName = `jbl_postgres_pk_edit_${Date.now()}`;
+
+        try {
+            await connection.createCommand(
+                `CREATE TABLE "public"."${tableName}" (tenant TEXT NOT NULL, id INTEGER NOT NULL, name TEXT, PRIMARY KEY (tenant, id))`
+            ).execute();
+            await connection.createCommand(
+                `INSERT INTO "public"."${tableName}" (tenant, id, name) VALUES ('acme', 1, 'Alice'), ('o''reilly', 2, 'Bob')`
+            ).execute();
+
+            const plan = buildEditDataQueryPlan({
+                database: config!.database,
+                schema: 'public',
+                table: tableName,
+                databaseKind: 'postgresql',
+                editable: true,
+                primaryKeyColumns: ['tenant', 'id'],
+                rowLimit: 10,
+            });
+            expect(plan.sql).toBe(
+                `SELECT pg_catalog.jsonb_build_array(tenant::text, id::text)::text AS "ROWID", * `
+                + `FROM public.${tableName} ORDER BY tenant, id LIMIT 10`,
+            );
+
+            const rows = await readRows(connection, plan.sql);
+            expect(rows.map(row => [row.ROWID, row.name])).toEqual([
+                ['["acme", "1"]', 'Alice'],
+                [`["o'reilly", "2"]`, 'Bob'],
+            ]);
+
+            const predicate = buildPrimaryKeyLocatorPredicate(rows[1].ROWID, ['tenant', 'id'], 'postgresql');
+            expect(predicate).toBe(`tenant = 'o''reilly' AND id = '2'`);
+
+            await connection.createCommand(
+                `UPDATE "public"."${tableName}" SET name = 'Robert' WHERE ${predicate}`
+            ).execute();
+            expect(await readRows(connection, `SELECT name FROM "public"."${tableName}" WHERE ${predicate}`))
+                .toEqual([{ name: 'Robert' }]);
+
+            await connection.createCommand(
+                `DELETE FROM "public"."${tableName}" WHERE ${predicate}`
+            ).execute();
+            expect(await readRows(connection, `SELECT id FROM "public"."${tableName}"`))
+                .toEqual([{ id: 1 }]);
         } finally {
             await connection.createCommand(`DROP TABLE IF EXISTS "public"."${tableName}"`).execute();
         }

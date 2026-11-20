@@ -211,12 +211,17 @@ describe('schema menu capability matrix', () => {
         }
     });
 
-    it('enables row editing only where a stable ROWID locator exists', () => {
+    it('enables row editing only where a stable locator exists', () => {
         for (const kind of ['netezza', 'sqlite', 'duckdb']) {
             expectCapabilities(kind, { supportsRowEditing: true });
         }
         for (const kind of ['postgresql', 'db2', 'oracle', 'mysql', 'mssql', 'clickhouse', 'snowflake', 'vertica', 'access', 'file']) {
             expectCapabilities(kind, { supportsRowEditing: false });
+        }
+        // PostgreSQL has no ROWID; the Edit Data panel locates rows by primary key.
+        expect(dialects.postgresql.capabilities.supportsPrimaryKeyRowEditing).toBe(true);
+        for (const kind of ['netezza', 'sqlite', 'duckdb', 'db2', 'oracle', 'mysql', 'mssql', 'clickhouse', 'snowflake', 'vertica', 'access', 'file']) {
+            expect(Boolean(dialects[kind].capabilities.supportsPrimaryKeyRowEditing)).toBe(false);
         }
     });
 

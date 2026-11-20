@@ -42,6 +42,7 @@ export const postgresqlDialect: DatabaseDialect = {
     supportsPartitionManagement: true,
     supportsIndexes: true,
     supportsTableStorageOptions: true,
+    supportsPrimaryKeyRowEditing: true,
     supportsSchemaValueSearch: true,
     supportsCallRoutine: true,
     supportsErDiagram: true,

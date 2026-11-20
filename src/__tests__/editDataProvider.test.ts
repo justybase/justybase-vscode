@@ -29,11 +29,12 @@ jest.mock('../core/queryRunner', () => ({
 
 jest.mock('../providers/tableMetadataProvider', () => ({
     getTableMetadata: jest.fn(),
+    fetchTableColumnsWithFallback: jest.fn(),
     toWebviewFormat: jest.fn(columns => columns)
 }));
 
 import { runQuery, runQueryRaw, runQueriesSequentially } from '../core/queryRunner';
-import { getTableMetadata } from '../providers/tableMetadataProvider';
+import { getTableMetadata, fetchTableColumnsWithFallback } from '../providers/tableMetadataProvider';
 
 describe('EditDataProvider', () => {
     let mockContext: vscode.ExtensionContext;
@@ -114,6 +115,8 @@ describe('EditDataProvider', () => {
             getConnectionDatabaseKind: jest.fn(() => 'netezza'),
             getConnectionCapabilities: jest.fn(() => createDatabaseCapabilities({ supportsRowEditing: true })),
         } as unknown as jest.Mocked<ConnectionManager>;
+
+        (fetchTableColumnsWithFallback as jest.Mock).mockResolvedValue([]);
     });
 
     describe('createOrShow', () => {
@@ -503,6 +506,93 @@ describe('EditDataProvider', () => {
                 columns: ['ID', 'NAME'],
                 readOnly: true,
             }));
+        });
+
+        it('edits PostgreSQL tables through their primary key', async () => {
+            (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('postgresql');
+            (mockConnectionManager.getConnectionCapabilities as jest.Mock)
+                .mockReturnValue(createDatabaseCapabilities({ supportsPrimaryKeyRowEditing: true }));
+            (fetchTableColumnsWithFallback as jest.Mock).mockResolvedValue([
+                { attname: 'id', formatType: 'integer', isNotNull: true, colDefault: null, description: '', isPk: true, isFk: false },
+                { attname: 'name', formatType: 'text', isNotNull: false, colDefault: null, description: '', isPk: false, isFk: false },
+            ]);
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ROWID' }, { name: 'id' }, { name: 'name' }],
+                data: [['["1"]', 1, 'John']],
+            });
+            (getTableMetadata as jest.Mock).mockResolvedValue({
+                columns: [{ ATTNAME: 'id' }, { ATTNAME: 'name' }],
+                tableComment: '',
+            });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            await signalReady();
+
+            const selectCall = (runQueryRaw as jest.Mock).mock.calls
+                .find(call => String(call[1] ?? call[0]).startsWith('SELECT'));
+            expect(selectCall?.[1]).toBe(
+                'SELECT pg_catalog.jsonb_build_array(id::text)::text AS "ROWID", * FROM public.users ORDER BY id LIMIT 50000',
+            );
+
+            const setData = (mockWebview.postMessage as jest.Mock).mock.calls
+                .map(call => call[0])
+                .find(message => message.command === 'setData');
+            expect(setData).toEqual(expect.objectContaining({ readOnly: false }));
+
+            await messageHandler!({
+                command: 'save',
+                changes: {
+                    updates: [{ rowId: '["1"]', changes: { name: 'Jane' } }],
+                    deletes: ['["2"]'],
+                },
+            });
+
+            const batch = (runQueriesSequentially as jest.Mock).mock.calls[0][1];
+            expect(batch).toEqual([
+                'BEGIN',
+                `DELETE FROM public.users WHERE id = '2'`,
+                `UPDATE public.users SET name = 'Jane' WHERE id = '1'`,
+                'COMMIT',
+            ]);
+        });
+
+        it('keeps PostgreSQL tables without a primary key read-only', async () => {
+            (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('postgresql');
+            (mockConnectionManager.getConnectionCapabilities as jest.Mock)
+                .mockReturnValue(createDatabaseCapabilities({ supportsPrimaryKeyRowEditing: true }));
+            (fetchTableColumnsWithFallback as jest.Mock).mockResolvedValue([
+                { attname: 'id', formatType: 'integer', isNotNull: true, colDefault: null, description: '', isPk: false, isFk: false },
+            ]);
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'id' }],
+                data: [[1]],
+            });
+            (getTableMetadata as jest.Mock).mockResolvedValue({
+                columns: [{ ATTNAME: 'id' }],
+                tableComment: '',
+            });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            await signalReady();
+
+            const selectCall = (runQueryRaw as jest.Mock).mock.calls
+                .find(call => String(call[1] ?? call[0]).startsWith('SELECT'));
+            expect(selectCall?.[1]).toBe('SELECT * FROM public.users LIMIT 50000');
+
+            const setData = (mockWebview.postMessage as jest.Mock).mock.calls
+                .map(call => call[0])
+                .find(message => message.command === 'setData');
+            expect(setData).toEqual(expect.objectContaining({ readOnly: true }));
         });
 
         it('rejects PostgreSQL saves instead of issuing ROWID DML', async () => {

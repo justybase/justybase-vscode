@@ -10,7 +10,7 @@ import type {
 } from '../contracts/webviews';
 import { runQuery, runQueryRaw, runQueriesSequentially, queryResultToRows } from '../core/queryRunner';
 import { ConnectionManager } from '../core/connectionManager';
-import { getTableMetadata, toWebviewFormat, type TableMetadata } from '../providers/tableMetadataProvider';
+import { getTableMetadata, fetchTableColumnsWithFallback, toWebviewFormat, type TableMetadata } from '../providers/tableMetadataProvider';
 import type { MetadataQueryKind } from '../metadata/metadataQueryDiagnostics';
 import { runWithMetadataQueryConcurrencyLimit } from '../metadata/metadataQueryLimiter';
 import type { ConnectionManagerMetadataCache } from '../core/connectionManagerPorts';
@@ -19,7 +19,7 @@ import { getCachedColumnsFromMetadataCache, getCachedColumnsFromMetadataCacheAsy
 import type { DatabaseKind } from '../contracts/database';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 import { splitCommaSeparatedTopLevel } from '../core/parenAwareText';
-import { buildEditDataQualifiedTableName, buildEditDataQueryPlan } from './editDataQuery';
+import { buildEditDataQualifiedTableName, buildEditDataQueryPlan, buildPrimaryKeyLocatorPredicate, type EditDataRowLocator } from './editDataQuery';
 
 /** Maximum number of rows fetched into the editor. */
 export const EDIT_DATA_ROW_LIMIT = 50000;
@@ -108,6 +108,8 @@ interface EditDataPanelState {
     knownColumns: Set<string>;
     /** Dialect of the panel connection; drives qualification and row editing. */
     databaseKind?: DatabaseKind;
+    /** Row identity used by the Data SELECT and the save DML; null means read-only. */
+    rowLocator: EditDataRowLocator | null;
     /** Last live catalog read, reused for the projection fallback. */
     lastTableMetadata?: TableMetadata;
     /** Last Structure payload; bundled into setData so the grid keeps column types. */
@@ -277,17 +279,37 @@ export class EditDataProvider {
         const schema = item.schema ?? '';
         const database = item.dbName;
         const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
-        // Dialects without a stable row locator still show the Data tab, but
-        // read-only: issuing Netezza's ROWID would fail on PostgreSQL and peers.
-        const supportsRowEditing = connectionManager.getConnectionCapabilities?.(item.connectionName)?.supportsRowEditing === true;
-        const fullTableName = buildEditDataQualifiedTableName(database, schema, tableName, databaseKind);
         const objectType = normalizeObjectType(item);
         const objectKind = objectKindFor(objectType);
+        const capabilities = connectionManager.getConnectionCapabilities?.(item.connectionName);
+        const supportsRowIdEditing = capabilities?.supportsRowEditing === true;
+        // PostgreSQL has no ROWID; a declared primary key is the stable locator.
+        const canUsePrimaryKeyLocator = !supportsRowIdEditing && capabilities?.supportsPrimaryKeyRowEditing === true && databaseKind === 'postgresql';
+        let rowLocator: EditDataRowLocator | null = supportsRowIdEditing ? { kind: 'rowid' } : null;
+        if (
+            rowLocator === null
+            && canUsePrimaryKeyLocator
+            && objectKind === 'table'
+            && objectType !== 'EXTERNAL TABLE'
+            && options.readOnly !== true
+        ) {
+            const primaryKeyColumns = await this._resolvePrimaryKeyColumns(
+                context,
+                connectionManager,
+                item.connectionName,
+                database,
+                schema,
+                tableName,
+                databaseKind,
+                objectType,
+            );
+            if (primaryKeyColumns.length > 0) {
+                rowLocator = { kind: 'primary-key', columns: primaryKeyColumns };
+            }
+        }
+        const fullTableName = buildEditDataQualifiedTableName(database, schema, tableName, databaseKind);
         // External tables are inspected, never mutated from this panel.
-        const readOnly = options.readOnly === true
-            || objectKind !== 'table'
-            || objectType === 'EXTERNAL TABLE'
-            || !supportsRowEditing;
+        const readOnly = options.readOnly === true || objectKind !== 'table' || objectType === 'EXTERNAL TABLE' || rowLocator === null;
         const ddlObjectName = String(item.rawLabel || item.label);
         const detailView = options.initialTab === 'structure' || readOnly;
 
@@ -329,6 +351,7 @@ export class EditDataProvider {
             objectType,
             objectKind,
             readOnly,
+            rowLocator,
             ddlObjectName,
             properties: objectKind === 'procedure'
                 ? buildProcedureProperties(item, objectType, ddlObjectName)
@@ -402,7 +425,7 @@ export class EditDataProvider {
                         break;
                     case 'previewSql': {
                         try {
-                            const statements = this._buildSaveQueries(message.changes, fullTableName, state.knownColumns, state.databaseKind);
+                            const statements = this._buildSaveQueries(message.changes, fullTableName, state.knownColumns, state.databaseKind, state.rowLocator);
                             this._postMessage(panel, { command: 'sqlPreview', statements });
                         } catch (e: unknown) {
                             this._postMessage(panel, {
@@ -571,6 +594,51 @@ export class EditDataProvider {
     }
 
     /**
+     * Primary-key columns used as the row locator when the dialect has no
+     * native `ROWID`. A warm metadata cache avoids any query; a cold connection
+     * pays one catalog read before the panel opens.
+     */
+    private static async _resolvePrimaryKeyColumns(
+        context: vscode.ExtensionContext,
+        connectionManager: ConnectionManager,
+        connectionName: string,
+        db: string,
+        schema: string,
+        table: string,
+        databaseKind: DatabaseKind | undefined,
+        objectType: string,
+    ): Promise<string[]> {
+        try {
+            const cache = connectionManager.getMetadataCache?.();
+            if (cache) {
+                const cached = await readCachedTableMetadata(cache, connectionName, db, schema, table, databaseKind);
+                if (cached) {
+                    return cached.columns
+                        .filter(column => column.isPk === true)
+                        .map(column => column.ATTNAME);
+                }
+            }
+        } catch {
+            // Cache hydration failures fall through to the live catalog read.
+        }
+        try {
+            const columns = await fetchTableColumnsWithFallback(
+                this._createMetadataQueryRunner(context, connectionManager, connectionName, db, schema, table),
+                db,
+                schema,
+                table,
+                databaseKind,
+                objectType && objectType !== 'TABLE' ? { objectType } : undefined,
+            );
+            return columns
+                .filter(column => column.isPk === true)
+                .map(column => column.attname);
+        } catch {
+            return [];
+        }
+    }
+
+    /**
      * Structure payload: cached columns/comments first, then the live catalog.
      * The live read never blocks the Data tab; it only refreshes the Structure
      * tab once the server answers.
@@ -677,6 +745,8 @@ export class EditDataProvider {
         const objectKind = state?.objectKind ?? 'table';
         let readOnly = state?.readOnly ?? false;
         const databaseKind = state?.databaseKind ?? connectionManager.getConnectionDatabaseKind?.(connectionName);
+        const rowLocator = state?.rowLocator ?? null;
+        const primaryKeyColumns = rowLocator?.kind === 'primary-key' ? rowLocator.columns : undefined;
         const fullTableName = buildEditDataQualifiedTableName(db, schema, table, databaseKind);
         const generation = state ? ++state.loadGeneration : 0;
         const isStale = (): boolean => Boolean(state && (state.disposed || state.loadGeneration !== generation));
@@ -712,13 +782,14 @@ export class EditDataProvider {
                 return;
             }
 
-            let editable = objectKind === 'table' && !readOnly;
+            let editable = objectKind === 'table' && !readOnly && rowLocator !== null;
             let plan = buildEditDataQueryPlan({
                 database: db,
                 schema,
                 table,
                 databaseKind,
                 editable,
+                primaryKeyColumns,
                 filters: options,
                 rowLimit: EDIT_DATA_ROW_LIMIT,
             });
@@ -736,7 +807,7 @@ export class EditDataProvider {
                 // SQLite WITHOUT ROWID tables (and similar objects) reject the
                 // locator. Fall back to the same read-only projection instead of
                 // failing View Data.
-                if (!editable || !isMissingRowIdError(error)) {
+                if (!editable || rowLocator?.kind !== 'rowid' || !isMissingRowIdError(error)) {
                     throw error;
                 }
                 readOnly = true;
@@ -876,18 +947,31 @@ export class EditDataProvider {
         tableName: string,
         knownColumns: ReadonlySet<string>,
         databaseKind?: DatabaseKind,
+        rowLocator?: EditDataRowLocator | null,
     ): string[] {
         const queries: string[] = [];
+        const primaryKeyColumns = rowLocator?.kind === 'primary-key' ? rowLocator.columns : [];
         const columnSql = (column: string): string => {
             if (knownColumns.size > 0 && !knownColumns.has(column)) {
                 throw new Error(`Unknown column: "${column}".`);
             }
             return formatIdentifierForSql(column, databaseKind);
         };
+        const rowPredicate = (rowId: string | number): string => primaryKeyColumns.length > 0
+            ? buildPrimaryKeyLocatorPredicate(rowId, primaryKeyColumns, databaseKind)
+            : `ROWID = ${assertRowId(rowId)}`;
 
         if (changes.deletes && changes.deletes.length > 0) {
-            const ids = changes.deletes.map(assertRowId).join(', ');
-            queries.push(`DELETE FROM ${tableName} WHERE ROWID IN (${ids})`);
+            if (primaryKeyColumns.length > 0) {
+                // Composite keys cannot share one IN list without type casts;
+                // the batch runs in a transaction, so per-row DELETEs stay safe.
+                for (const rowId of changes.deletes) {
+                    queries.push(`DELETE FROM ${tableName} WHERE ${rowPredicate(rowId)}`);
+                }
+            } else {
+                const ids = changes.deletes.map(assertRowId).join(', ');
+                queries.push(`DELETE FROM ${tableName} WHERE ROWID IN (${ids})`);
+            }
         }
 
         if (changes.updates && changes.updates.length > 0) {
@@ -898,7 +982,7 @@ export class EditDataProvider {
                     setClauses.push(`${columnSql(col)} = ${this._formatValue(val)}`);
                 }
                 if (setClauses.length > 0) {
-                    queries.push(`UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE ROWID = ${assertRowId(update.rowId)}`);
+                    queries.push(`UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE ${rowPredicate(update.rowId)}`);
                 }
             }
         }
@@ -933,6 +1017,7 @@ export class EditDataProvider {
                 tableName,
                 state?.knownColumns ?? new Set(),
                 databaseKind,
+                state?.rowLocator,
             );
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);

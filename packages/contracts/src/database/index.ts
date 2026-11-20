@@ -187,6 +187,12 @@ export interface DatabaseCapabilities {
    * one open the same grid read-only instead of issuing `ROWID` SQL.
    */
   supportsRowEditing: boolean;
+  /**
+   * Whether Edit Data can address rows through the table primary key when the
+   * dialect has no `ROWID` pseudo-column. Only tables with a declared primary
+   * key become editable; tables without one stay read-only.
+   */
+  supportsPrimaryKeyRowEditing?: boolean;
   /** SQLite database-level maintenance (VACUUM, integrity_check, ...). */
   supportsSqliteDatabaseMaintenance: boolean;
   /** Schema-wide text/numeric value search script generation. */

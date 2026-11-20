@@ -1,6 +1,8 @@
 import {
     buildEditDataQualifiedTableName,
     buildEditDataQueryPlan,
+    buildPrimaryKeyLocatorExpression,
+    buildPrimaryKeyLocatorPredicate,
 } from '../views/editDataQuery';
 
 describe('edit data query planning', () => {
@@ -151,6 +153,72 @@ describe('edit data query planning', () => {
             expect(plan.sql).toBe(
                 'SELECT ROWID AS ROWID, id, name FROM main.users ORDER BY ROWID LIMIT 50000',
             );
+        });
+
+        it('encodes a PostgreSQL primary key instead of ROWID', () => {
+            const plan = buildEditDataQueryPlan({
+                database: 'testdb',
+                schema: 'public',
+                table: 'users',
+                databaseKind: 'postgresql',
+                editable: true,
+                primaryKeyColumns: ['id'],
+                rowLimit: 50000,
+            });
+
+            expect(plan.sql).toBe(
+                'SELECT pg_catalog.jsonb_build_array(id::text)::text AS "ROWID", * FROM public.users ORDER BY id LIMIT 50000',
+            );
+        });
+
+        it('keeps explicit columns and orders composite keys', () => {
+            const plan = buildEditDataQueryPlan({
+                database: 'testdb',
+                schema: 'public',
+                table: 'users',
+                databaseKind: 'postgresql',
+                editable: true,
+                primaryKeyColumns: ['tenant_id', 'id'],
+                filters: {
+                    whereClause: 'WHERE active',
+                    columns: 'id, name',
+                },
+                rowLimit: 50000,
+            });
+
+            expect(plan.sql).toBe(
+                'SELECT pg_catalog.jsonb_build_array(tenant_id::text, id::text)::text AS "ROWID", id, name '
+                + 'FROM public.users WHERE active ORDER BY tenant_id, id LIMIT 50000',
+            );
+        });
+
+        it('builds primary-key predicates from the JSON locator', () => {
+            expect(buildPrimaryKeyLocatorPredicate('["acme", 42]', ['tenant_id', 'id'], 'postgresql'))
+                .toBe(`tenant_id = 'acme' AND id = 42`);
+            expect(buildPrimaryKeyLocatorPredicate(`["O'Reilly"]`, ['name'], 'postgresql'))
+                .toBe(`name = 'O''Reilly'`);
+            expect(buildPrimaryKeyLocatorPredicate('["C:\\\\temp"]', ['path'], 'postgresql'))
+                .toBe(`path = E'C:\\\\temp'`);
+            expect(buildPrimaryKeyLocatorPredicate('[""]', ['code'], 'postgresql'))
+                .toBe(`code = ''`);
+            expect(buildPrimaryKeyLocatorPredicate('[null]', ['id'], 'postgresql'))
+                .toBe('id IS NULL');
+        });
+
+        it('rejects malformed or unsupported primary-key locators', () => {
+            expect(() => buildPrimaryKeyLocatorPredicate('not-json', ['id'], 'postgresql'))
+                .toThrow('Invalid primary-key row locator');
+            expect(() => buildPrimaryKeyLocatorPredicate('[1, 2]', ['id'], 'postgresql'))
+                .toThrow('Invalid primary-key row locator');
+            expect(() => buildPrimaryKeyLocatorPredicate('[[1]]', ['id'], 'postgresql'))
+                .toThrow('Unsupported primary-key value');
+        });
+
+        it('limits primary-key locators to PostgreSQL', () => {
+            expect(() => buildPrimaryKeyLocatorExpression(['id'], 'mysql'))
+                .toThrow('only implemented for PostgreSQL');
+            expect(() => buildPrimaryKeyLocatorExpression([], 'postgresql'))
+                .toThrow('at least one column');
         });
     });
 });

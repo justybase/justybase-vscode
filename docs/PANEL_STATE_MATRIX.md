@@ -21,7 +21,7 @@ Every stateful panel documents and tests:
 
 | Aspect | Contract |
 | --- | --- |
-| State owner | One `EditDataProvider` panel per table; host state is created per panel in `src/views/editDataProvider.ts`. The webview editing model (`media/editDataPanel/state.ts`) owns rows keyed by `r:<ROWID>` (loaded) or `n:<id>` (inserted). |
+| State owner | One `EditDataProvider` panel per table; host state is created per panel in `src/views/editDataProvider.ts`. The webview editing model (`media/editDataPanel/state.ts`) owns rows keyed by `r:<ROWID>` (loaded) or `n:<id>` (inserted). For PostgreSQL the `ROWID` identity is an opaque JSON array of primary-key values. |
 | Persisted | Nothing durable. Pending edits, inserts and deletions live only in the webview; `retainContextWhenHidden` keeps them across hide/reveal, and a reload or panel close discards them after an in-webview confirmation. |
 | Loading | `setLoading` shows a progress bar and toolbar status and disables the data actions. |
 | Empty | The grid keeps its column headers and shows a table-empty or no-match message under them. |
@@ -29,12 +29,12 @@ Every stateful panel documents and tests:
 | Cancellation | None; changing the filter starts a new load and the previous generation is discarded. |
 | Race/identity | Per-panel `loadGeneration` guard discards stale load results (newer request wins). Client-side sorting reorders view keys only; change tracking is keyed by row identity. |
 | Disposal | `onDidDispose` marks the panel disposed and invalidates in-flight loads; `postMessage` failures are swallowed. |
-| Save | The batch runs as `BEGIN … COMMIT` on the panel connection. Reentrant save is rejected while one save is in flight; a failed batch attempts `ROLLBACK`, posts `saveFailed` and keeps the pending edits in the webview (no reload). DML may reference only columns from the last load and integer ROWIDs on row-editing dialects. |
-| Read-only fallback | Dialects without `supportsRowEditing` (PostgreSQL, Db2, Oracle, SQL Server, MySQL, ClickHouse, Snowflake, Vertica, Access, File) open the same Data tab read-only. The SELECT uses dialect-qualified names and never emits `ROWID`, so View Data still loads rows. SQLite `WITHOUT ROWID` tables retry the same read-only projection when the locator is rejected. |
+| Save | The batch runs as `BEGIN … COMMIT` on the panel connection. Reentrant save is rejected while one save is in flight; a failed batch attempts `ROLLBACK`, posts `saveFailed` and keeps the pending edits in the webview (no reload). DML may reference only columns from the last load; native ROWID dialects validate integer locators, and PostgreSQL validates the JSON primary-key array before building its `WHERE` predicate. |
+| Read-only fallback | Dialects without `supportsRowEditing` or `supportsPrimaryKeyRowEditing` (Db2, Oracle, SQL Server, MySQL, ClickHouse, Snowflake, Vertica, Access, File) open the same Data tab read-only. PostgreSQL tables with a primary key use `supportsPrimaryKeyRowEditing`; tables without one stay read-only. The SELECT uses dialect-qualified names and never emits a native `ROWID` where the dialect has none. SQLite `WITHOUT ROWID` tables retry the same read-only projection when the locator is rejected. |
 | DDL | Requested lazily on first open of the DDL tab (`requestDdl` → `setDdl`); Refresh regenerates it. |
 | DDL safety | Column names and type expressions are validated before interpolation; invalid input is rejected. |
 | Unsaved changes | The in-panel Close action confirms before discarding edits; a failed reload keeps the working grid and shows a banner. The VS Code tab close cannot be vetoed. |
-| Evidence | `src/__tests__/editDataProvider.test.ts` (stale load, dispose, overlapping save, rollback, DDL validation, read-only dialects, close), `src/__tests__/editDataQuery.test.ts` (dialect qualification and ROWID planning), `src/__tests__/integration/postgres.integration.test.ts` (live PostgreSQL View Data). |
+| Evidence | `src/__tests__/editDataProvider.test.ts` (stale load, dispose, overlapping save, rollback, DDL validation, read-only dialects, PostgreSQL primary-key locator, close), `src/__tests__/editDataQuery.test.ts` (dialect qualification, ROWID and primary-key planning), `src/__tests__/integration/postgres.integration.test.ts` (live PostgreSQL View Data and primary-key editing). |
 
 ## Import Wizard
 
