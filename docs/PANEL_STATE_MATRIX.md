@@ -29,11 +29,12 @@ Every stateful panel documents and tests:
 | Cancellation | None; changing the filter starts a new load and the previous generation is discarded. |
 | Race/identity | Per-panel `loadGeneration` guard discards stale load results (newer request wins). Client-side sorting reorders view keys only; change tracking is keyed by row identity. |
 | Disposal | `onDidDispose` marks the panel disposed and invalidates in-flight loads; `postMessage` failures are swallowed. |
-| Save | The batch runs as `BEGIN … COMMIT` on the panel connection. Reentrant save is rejected while one save is in flight; a failed batch attempts `ROLLBACK`, posts `saveFailed` and keeps the pending edits in the webview (no reload). DML may reference only columns from the last load and integer ROWIDs. |
+| Save | The batch runs as `BEGIN … COMMIT` on the panel connection. Reentrant save is rejected while one save is in flight; a failed batch attempts `ROLLBACK`, posts `saveFailed` and keeps the pending edits in the webview (no reload). DML may reference only columns from the last load and integer ROWIDs on row-editing dialects. |
+| Read-only fallback | Dialects without `supportsRowEditing` (PostgreSQL, Db2, Oracle, SQL Server, MySQL, ClickHouse, Snowflake, Vertica, Access, File) open the same Data tab read-only. The SELECT uses dialect-qualified names and never emits `ROWID`, so View Data still loads rows. SQLite `WITHOUT ROWID` tables retry the same read-only projection when the locator is rejected. |
 | DDL | Requested lazily on first open of the DDL tab (`requestDdl` → `setDdl`); Refresh regenerates it. |
 | DDL safety | Column names and type expressions are validated before interpolation; invalid input is rejected. |
 | Unsaved changes | The in-panel Close action confirms before discarding edits; a failed reload keeps the working grid and shows a banner. The VS Code tab close cannot be vetoed. |
-| Evidence | `src/__tests__/editDataProvider.test.ts` (stale load, dispose, overlapping save, rollback, DDL validation, close). |
+| Evidence | `src/__tests__/editDataProvider.test.ts` (stale load, dispose, overlapping save, rollback, DDL validation, read-only dialects, close), `src/__tests__/editDataQuery.test.ts` (dialect qualification and ROWID planning), `src/__tests__/integration/postgres.integration.test.ts` (live PostgreSQL View Data). |
 
 ## Import Wizard
 

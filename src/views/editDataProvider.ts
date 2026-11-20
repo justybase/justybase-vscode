@@ -19,6 +19,7 @@ import { getCachedColumnsFromMetadataCache, getCachedColumnsFromMetadataCacheAsy
 import type { DatabaseKind } from '../contracts/database';
 import { formatIdentifierForSql } from '../utils/identifierUtils';
 import { splitCommaSeparatedTopLevel } from '../core/parenAwareText';
+import { buildEditDataQualifiedTableName, buildEditDataQueryPlan } from './editDataQuery';
 
 /** Maximum number of rows fetched into the editor. */
 export const EDIT_DATA_ROW_LIMIT = 50000;
@@ -53,14 +54,21 @@ function assertRowId(value: unknown): string {
     return text;
 }
 
-function stripLeadingKeyword(clause: string | undefined, keyword: RegExp): string {
-    return (clause || '').trim().replace(keyword, '').trim();
+/**
+ * SQLite WITHOUT ROWID tables and some DuckDB objects reject the `ROWID`
+ * projection. View Data retries without it instead of failing outright.
+ */
+function isMissingRowIdError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /rowid/i.test(message)
+        && /(no such column|does not exist|not found|unknown column|binder error)/i.test(message);
 }
 
 export interface EditDataItem {
     label: string;
     dbName: string;
-    schema: string;
+    /** Empty for schema-less dialects (SQLite catalogs, file sessions). */
+    schema?: string;
     connectionName: string;
     objType?: string;
     rawLabel?: string;
@@ -98,6 +106,8 @@ interface EditDataPanelState {
     dataInFlight: boolean;
     /** Column names returned by the last load; DML may only reference these. */
     knownColumns: Set<string>;
+    /** Dialect of the panel connection; drives qualification and row editing. */
+    databaseKind?: DatabaseKind;
     /** Last live catalog read, reused for the projection fallback. */
     lastTableMetadata?: TableMetadata;
     /** Last Structure payload; bundled into setData so the grid keeps column types. */
@@ -153,7 +163,7 @@ function buildProcedureProperties(item: EditDataItem, objectType: string, signat
     const properties: EditDataProperty[] = [
         { label: 'Kind', value: objectType },
         { label: 'Database', value: item.dbName },
-        { label: 'Schema', value: item.schema },
+        { label: 'Schema', value: item.schema ?? '' },
         { label: 'Signature', value: signature },
     ];
     if (item.owner) {
@@ -258,19 +268,26 @@ export class EditDataProvider {
         connectionManager: ConnectionManager,
         options: EditDataPanelOptions = {}
     ) {
-        if (!item || !item.label || !item.dbName || !item.schema) {
+        if (!item || !item.label || !item.dbName) {
             vscode.window.showErrorMessage('Invalid table selection');
             return;
         }
 
         const tableName = item.label;
-        const schema = item.schema;
+        const schema = item.schema ?? '';
         const database = item.dbName;
-        const fullTableName = `${database}.${schema}.${tableName}`;
+        const databaseKind = connectionManager.getConnectionDatabaseKind?.(item.connectionName);
+        // Dialects without a stable row locator still show the Data tab, but
+        // read-only: issuing Netezza's ROWID would fail on PostgreSQL and peers.
+        const supportsRowEditing = connectionManager.getConnectionCapabilities?.(item.connectionName)?.supportsRowEditing === true;
+        const fullTableName = buildEditDataQualifiedTableName(database, schema, tableName, databaseKind);
         const objectType = normalizeObjectType(item);
         const objectKind = objectKindFor(objectType);
         // External tables are inspected, never mutated from this panel.
-        const readOnly = options.readOnly ?? (objectKind !== 'table' || objectType === 'EXTERNAL TABLE');
+        const readOnly = options.readOnly === true
+            || objectKind !== 'table'
+            || objectType === 'EXTERNAL TABLE'
+            || !supportsRowEditing;
         const ddlObjectName = String(item.rawLabel || item.label);
         const detailView = options.initialTab === 'structure' || readOnly;
 
@@ -308,6 +325,7 @@ export class EditDataProvider {
             dataLoaded: false,
             dataInFlight: false,
             knownColumns: new Set(),
+            databaseKind,
             objectType,
             objectKind,
             readOnly,
@@ -384,7 +402,7 @@ export class EditDataProvider {
                         break;
                     case 'previewSql': {
                         try {
-                            const statements = this._buildSaveQueries(message.changes, fullTableName, state.knownColumns);
+                            const statements = this._buildSaveQueries(message.changes, fullTableName, state.knownColumns, state.databaseKind);
                             this._postMessage(panel, { command: 'sqlPreview', statements });
                         } catch (e: unknown) {
                             this._postMessage(panel, {
@@ -655,10 +673,11 @@ export class EditDataProvider {
         connectionManager: ConnectionManager,
         options: EditDataQueryOptions = {}
     ) {
-        const fullTableName = `${db}.${schema}.${table}`;
         const state = panelStates.get(panel);
         const objectKind = state?.objectKind ?? 'table';
-        const readOnly = state?.readOnly ?? false;
+        let readOnly = state?.readOnly ?? false;
+        const databaseKind = state?.databaseKind ?? connectionManager.getConnectionDatabaseKind?.(connectionName);
+        const fullTableName = buildEditDataQualifiedTableName(db, schema, table, databaseKind);
         const generation = state ? ++state.loadGeneration : 0;
         const isStale = (): boolean => Boolean(state && (state.disposed || state.loadGeneration !== generation));
         if (state?.disposed) return;
@@ -693,37 +712,53 @@ export class EditDataProvider {
                 return;
             }
 
-            const editable = objectKind === 'table' && !readOnly;
+            let editable = objectKind === 'table' && !readOnly;
+            let plan = buildEditDataQueryPlan({
+                database: db,
+                schema,
+                table,
+                databaseKind,
+                editable,
+                filters: options,
+                rowLimit: EDIT_DATA_ROW_LIMIT,
+            });
 
-            // Prepare Query. ROWID only exists on regular tables; views are read through a plain projection.
-            let selectList = editable ? 'ROWID, *' : '*';
-            if (options.columns && options.columns.trim()) {
-                const cols = options.columns.trim();
-                selectList = editable && !/\bROWID\b/i.test(cols) ? 'ROWID, ' + cols : cols;
-            }
-
-            const where = stripLeadingKeyword(options.whereClause, /^WHERE\s+/i);
-            const orderBy = stripLeadingKeyword(options.orderBy, /^ORDER\s+BY\s+/i);
-            let query = `SELECT ${selectList} FROM ${fullTableName}`;
-            if (where) {
-                query += ` WHERE ${where}`;
-            }
-            if (editable) {
-                query += ` ORDER BY ${orderBy || 'ROWID'} LIMIT ${EDIT_DATA_ROW_LIMIT}`;
-            } else {
-                if (orderBy) {
-                    query += ` ORDER BY ${orderBy}`;
+            let dataResult;
+            try {
+                dataResult = await runQueryRaw(
+                    context,
+                    plan.sql,
+                    true,
+                    connectionManager,
+                    connectionName
+                );
+            } catch (error: unknown) {
+                // SQLite WITHOUT ROWID tables (and similar objects) reject the
+                // locator. Fall back to the same read-only projection instead of
+                // failing View Data.
+                if (!editable || !isMissingRowIdError(error)) {
+                    throw error;
                 }
-                query += ` LIMIT ${EDIT_DATA_ROW_LIMIT}`;
+                readOnly = true;
+                editable = false;
+                if (state) state.readOnly = true;
+                plan = buildEditDataQueryPlan({
+                    database: db,
+                    schema,
+                    table,
+                    databaseKind,
+                    editable: false,
+                    filters: options,
+                    rowLimit: EDIT_DATA_ROW_LIMIT,
+                });
+                dataResult = await runQueryRaw(
+                    context,
+                    plan.sql,
+                    true,
+                    connectionManager,
+                    connectionName
+                );
             }
-
-            const dataResult = await runQueryRaw(
-                context,
-                query,
-                true,
-                connectionManager,
-                connectionName
-            );
 
             let data: Record<string, unknown>[] = [];
             if (dataResult && dataResult.data) {
@@ -840,13 +875,14 @@ export class EditDataProvider {
         changes: EditDataChanges,
         tableName: string,
         knownColumns: ReadonlySet<string>,
+        databaseKind?: DatabaseKind,
     ): string[] {
         const queries: string[] = [];
         const columnSql = (column: string): string => {
             if (knownColumns.size > 0 && !knownColumns.has(column)) {
                 throw new Error(`Unknown column: "${column}".`);
             }
-            return formatIdentifierForSql(column, 'netezza');
+            return formatIdentifierForSql(column, databaseKind);
         };
 
         if (changes.deletes && changes.deletes.length > 0) {
@@ -890,7 +926,14 @@ export class EditDataProvider {
     ): Promise<boolean> {
         let queries: string[];
         try {
-            queries = this._buildSaveQueries(changes, tableName, panelStates.get(panel)?.knownColumns ?? new Set());
+            const state = panelStates.get(panel);
+            const databaseKind = state?.databaseKind ?? connectionManager.getConnectionDatabaseKind?.(connectionName);
+            queries = this._buildSaveQueries(
+                changes,
+                tableName,
+                state?.knownColumns ?? new Set(),
+                databaseKind,
+            );
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             vscode.window.showErrorMessage(`Failed to save changes: ${message}`);
@@ -998,7 +1041,9 @@ export class EditDataProvider {
 
         const nonce = getNonce();
         const esc = escapeHtml;
-        const fullName = `${target.database}.${target.schema}.${target.table}`;
+        const fullName = target.schema
+            ? `${target.database}.${target.schema}.${target.table}`
+            : `${target.database}.${target.table}`;
 
         return `<!DOCTYPE html>
         <html lang="en">
@@ -1056,6 +1101,12 @@ export function renderEditDataShell(target: {
         ?? (objectType === 'PROCEDURE' ? 'procedure' : objectType.includes('VIEW') ? 'view' : 'table');
     const isProcedure = objectKind === 'procedure';
     const readOnly = target.readOnly ?? false;
+    const displayPath = target.schema
+        ? `${target.database}.${target.schema}.${target.table}`
+        : `${target.database}.${target.table}`;
+    const displayContainer = target.schema
+        ? `${target.database}.${target.schema}.`
+        : `${target.database}.`;
     const initialTab = target.initialTab ?? 'data';
     const activeTab = initialTab === 'structure' || isProcedure && initialTab === 'data'
         ? 'tab-metadata'
@@ -1127,9 +1178,9 @@ export function renderEditDataShell(target: {
 
     return `<div class="main-layout">
                 <header class="panel-header">
-                    <div class="object-path" title="${esc(`${target.connectionName} · ${target.database}.${target.schema}.${target.table}`)}">
+                    <div class="object-path" title="${esc(`${target.connectionName} · ${displayPath}`)}">
                         <span class="object-icon" aria-hidden="true">${objectIcon}</span>
-                        <span class="object-path__muted">${esc(target.database)}.${esc(target.schema)}.</span><span class="object-path__name">${esc(target.table)}</span>
+                        <span class="object-path__muted">${esc(displayContainer)}</span><span class="object-path__name">${esc(target.table)}</span>
                         <span class="object-path__conn">${esc(target.connectionName)}</span>
                     </div>
                     <nav class="tabs-header" role="tablist">

@@ -211,6 +211,15 @@ describe('schema menu capability matrix', () => {
         }
     });
 
+    it('enables row editing only where a stable ROWID locator exists', () => {
+        for (const kind of ['netezza', 'sqlite', 'duckdb']) {
+            expectCapabilities(kind, { supportsRowEditing: true });
+        }
+        for (const kind of ['postgresql', 'db2', 'oracle', 'mysql', 'mssql', 'clickhouse', 'snowflake', 'vertica', 'access', 'file']) {
+            expectCapabilities(kind, { supportsRowEditing: false });
+        }
+    });
+
     it('names the space-reclaim operation the way each dialect does', () => {
         const styles = Object.fromEntries(Object.entries(dialects)
             .filter(([, dialect]) => dialect.capabilities.supportsVacuumTable)

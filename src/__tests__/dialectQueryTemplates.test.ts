@@ -1,5 +1,6 @@
 import {
     buildExplainQuery,
+    buildLimitedSelectQuery,
     buildTopRowsQuery,
     formatQueryObjectName,
     formatQuerySchemaName,
@@ -38,6 +39,47 @@ describe('dialect query templates', () => {
         ['mssql', 'SELECT TOP 1000 *'],
     ] as const)('builds the %s top-row query', (kind, expected) => {
         expect(buildTopRowsQuery(target, kind)).toContain(expected);
+    });
+
+    it.each([
+        ['netezza', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['postgresql', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['mysql', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['clickhouse', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['snowflake', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['vertica', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['duckdb', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['sqlite', 'SELECT * FROM DB1.PUBLIC.Orders LIMIT 100'],
+        ['db2', 'SELECT * FROM DB1.PUBLIC.Orders FETCH FIRST 100 ROWS ONLY'],
+        ['oracle', 'SELECT * FROM DB1.PUBLIC.Orders FETCH FIRST 100 ROWS ONLY'],
+        ['mssql', 'SELECT TOP (100) * FROM DB1.PUBLIC.Orders'],
+        ['access', 'SELECT TOP 100 * FROM DB1.PUBLIC.Orders'],
+    ] as const)('builds the %s bounded SELECT with native row-limit syntax', (kind, expected) => {
+        expect(buildLimitedSelectQuery({ from: 'DB1.PUBLIC.Orders', limit: 100, kind })).toBe(expected);
+    });
+
+    it('places projections, filters, and ordering inside the dialect row limit', () => {
+        expect(buildLimitedSelectQuery({
+            selectList: 'id, name',
+            from: 'public.users',
+            where: 'id > 10',
+            orderBy: 'name DESC',
+            limit: 50,
+            kind: 'mssql',
+        })).toBe('SELECT TOP (50) id, name FROM public.users WHERE id > 10 ORDER BY name DESC');
+
+        expect(buildLimitedSelectQuery({
+            from: 'HR.EMPLOYEES',
+            where: 'salary > 1000',
+            orderBy: 'salary DESC',
+            limit: 25,
+            kind: 'oracle',
+        })).toBe('SELECT * FROM HR.EMPLOYEES WHERE salary > 1000 ORDER BY salary DESC FETCH FIRST 25 ROWS ONLY');
+    });
+
+    it('validates bounded SELECT input', () => {
+        expect(() => buildLimitedSelectQuery({ from: 'T', limit: 0 })).toThrow('positive');
+        expect(() => buildLimitedSelectQuery({ from: '  ', limit: 10 })).toThrow('cannot be empty');
     });
 
     it.each([

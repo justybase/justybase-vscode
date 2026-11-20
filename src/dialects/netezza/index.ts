@@ -58,6 +58,7 @@ export const netezzaDialect: DatabaseDialect = {
     supportsTableOwnerChange: true,
     supportsPrimaryKeyChanges: true,
     supportsUniqueConstraintChanges: true,
+    supportsRowEditing: true,
     supportsSchemaValueSearch: true,
     supportsCallRoutine: true,
     supportsErDiagram: true,

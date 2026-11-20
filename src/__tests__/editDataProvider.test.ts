@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { EditDataProvider, EditDataItem, cachedColumnsToWebviewFormat } from '../views/editDataProvider';
 import { ConnectionManager } from '../core/connectionManager';
+import { createDatabaseCapabilities } from '../contracts/database';
 
 // Mock dependencies
 jest.mock('../core/queryRunner', () => ({
@@ -109,7 +110,9 @@ describe('EditDataProvider', () => {
         // Create mock connection manager
         mockConnectionManager = {
             getConnection: jest.fn(),
-            setDocumentConnection: jest.fn()
+            setDocumentConnection: jest.fn(),
+            getConnectionDatabaseKind: jest.fn(() => 'netezza'),
+            getConnectionCapabilities: jest.fn(() => createDatabaseCapabilities({ supportsRowEditing: true })),
         } as unknown as jest.Mocked<ConnectionManager>;
     });
 
@@ -468,6 +471,97 @@ describe('EditDataProvider', () => {
             expect(query).toContain('LIMIT 50000');
         });
 
+        it('loads PostgreSQL tables without ROWID and opens the panel read-only', async () => {
+            (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('postgresql');
+            (mockConnectionManager.getConnectionCapabilities as jest.Mock)
+                .mockReturnValue(createDatabaseCapabilities());
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ID' }, { name: 'NAME' }],
+                data: [[1, 'John']],
+            });
+            (getTableMetadata as jest.Mock).mockResolvedValue({
+                columns: [{ ATTNAME: 'ID' }, { ATTNAME: 'NAME' }],
+                tableComment: '',
+            });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            await signalReady();
+
+            const selectCall = (runQueryRaw as jest.Mock).mock.calls
+                .find(call => String(call[1] ?? call[0]).startsWith('SELECT'));
+            expect(selectCall?.[1]).toBe('SELECT * FROM public.users LIMIT 50000');
+
+            const setData = (mockWebview.postMessage as jest.Mock).mock.calls
+                .map(call => call[0])
+                .find(message => message.command === 'setData');
+            expect(setData).toEqual(expect.objectContaining({
+                columns: ['ID', 'NAME'],
+                readOnly: true,
+            }));
+        });
+
+        it('rejects PostgreSQL saves instead of issuing ROWID DML', async () => {
+            (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('postgresql');
+            (mockConnectionManager.getConnectionCapabilities as jest.Mock)
+                .mockReturnValue(createDatabaseCapabilities());
+            (runQueryRaw as jest.Mock).mockResolvedValue({ columns: [{ name: 'ID' }], data: [[1]] });
+            (getTableMetadata as jest.Mock).mockResolvedValue({ columns: [], tableComment: '' });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                sampleItem,
+                mockContext,
+                mockConnectionManager
+            );
+            await signalReady();
+
+            await messageHandler!({ command: 'save', changes: { deletes: [1] } });
+
+            expect(runQueriesSequentially).not.toHaveBeenCalled();
+            expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+                expect.stringContaining('is read-only in this panel'),
+            );
+        });
+
+        it('falls back to a read-only projection when a SQLite table has no ROWID', async () => {
+            (mockConnectionManager.getConnectionDatabaseKind as jest.Mock).mockReturnValue('sqlite');
+            (mockConnectionManager.getConnectionCapabilities as jest.Mock)
+                .mockReturnValue(createDatabaseCapabilities({ supportsRowEditing: true }));
+            (runQueryRaw as jest.Mock)
+                .mockRejectedValueOnce(new Error('no such column: ROWID'))
+                .mockResolvedValue({ columns: [{ name: 'ID' }], data: [[1]] });
+            (getTableMetadata as jest.Mock).mockResolvedValue({
+                columns: [{ ATTNAME: 'ID' }],
+                tableComment: '',
+            });
+
+            await EditDataProvider.createOrShow(
+                mockContext.extensionUri,
+                { ...sampleItem, dbName: 'main', schema: '' },
+                mockContext,
+                mockConnectionManager
+            );
+            await signalReady();
+
+            const selects = (runQueryRaw as jest.Mock).mock.calls
+                .map(call => String(call[1] ?? call[0]))
+                .filter(sql => sql.startsWith('SELECT'));
+            expect(selects).toEqual([
+                'SELECT ROWID AS ROWID, * FROM main.users ORDER BY ROWID LIMIT 50000',
+                'SELECT * FROM main.users LIMIT 50000',
+            ]);
+
+            const setData = (mockWebview.postMessage as jest.Mock).mock.calls
+                .map(call => call[0])
+                .find(message => message.command === 'setData');
+            expect(setData).toEqual(expect.objectContaining({ readOnly: true }));
+        });
+
         it('should handle WHERE clause with prefix', async () => {
             if (messageHandler) {
                 await messageHandler({
@@ -802,8 +896,7 @@ describe('EditDataProvider', () => {
 
         const installCachedTable = (): void => {
             const cache = {
-                getColumns: jest.fn((_connectionName: string, key: string) =>
-                    key === 'TESTDB.PUBLIC.USERS' ? cachedColumns : undefined),
+                getColumns: jest.fn(() => cachedColumns),
                 getTablesAllSchemas: jest.fn(() => [
                     { TABLENAME: 'USERS', SCHEMA: 'PUBLIC', DESCRIPTION: 'Cached table comment' },
                 ]),

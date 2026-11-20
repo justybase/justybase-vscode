@@ -32,6 +32,7 @@ export const duckdbDialect: DatabaseDialect = {
         supportsTruncateTable: true,
         supportsTableRename: true,
         supportsIndexes: true,
+        supportsRowEditing: true,
         supportsSchemaValueSearch: true,
     }),
     designerCapabilities: getDatabaseDesignerCapabilities('duckdb'),

@@ -16,7 +16,7 @@ Use **Visual Table Designer** to draft a new table and **Alter Table Wizard** to
 
 ## View/Edit Data
 
-**View/Edit Data (Limit 50k)** opens a bounded editing surface for supported table connections. It is not available for every dialect and is separate from a disk-backed result grid. It loads at most 50,000 rows; the status bar says when that limit is reached, so narrow the `WHERE` filter to reach the rest.
+**View/Edit Data (Limit 50k)** opens a bounded data surface for table connections. It is not available for every dialect and is separate from a disk-backed result grid. Row editing is enabled only for dialects with a stable row locator (Netezza, SQLite, and DuckDB today); other dialects, including PostgreSQL, open the same Data tab read-only, so **View Data** still works without issuing Netezza `ROWID` SQL. It loads at most 50,000 rows; the status bar says when that limit is reached, so narrow the `WHERE` filter to reach the rest.
 
 The panel has three tabs:
 

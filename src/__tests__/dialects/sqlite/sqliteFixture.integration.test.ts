@@ -8,6 +8,7 @@ import { normalizeSqliteExplainPlan } from '../../../dialects/sqlite/explainPars
 import { importDataToSqlite } from '../../../import/sqliteImporter';
 import { exportQueryToStreamFile } from '../../../export/queryStreamExporter';
 import { parseSqlStatements, SQLITE_SQL_PARSING_RUNTIME } from '../../../sqlParser/parsingRuntime';
+import { buildEditDataQueryPlan } from '../../../views/editDataQuery';
 import { createSqliteFixture, type SqliteFixture } from '../../fixtures/sqliteFixture';
 
 describe('SQLite real-database fixture', () => {
@@ -19,6 +20,27 @@ describe('SQLite real-database fixture', () => {
 
     afterEach(async () => {
         await fixture.dispose();
+    });
+
+    it('runs the edit-data ROWID plan against the real SQLite fixture', async () => {
+        const plan = buildEditDataQueryPlan({
+            database: 'main',
+            schema: '',
+            table: 'customers',
+            databaseKind: 'sqlite',
+            editable: true,
+            rowLimit: 50,
+        });
+
+        expect(plan.qualifiedTableName).toBe('main.customers');
+        expect(plan.sql).toBe('SELECT ROWID AS ROWID, * FROM main.customers ORDER BY ROWID LIMIT 50');
+
+        await fixture.execute(`INSERT INTO customers (email, display_name, created_at)
+            VALUES ('edit-data@example.test', 'Edit Data', '2026-11-20 00:00:00')`);
+
+        const rows = await fixture.query<{ ROWID: number; email: string }>(plan.sql);
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows[0].ROWID).toBeGreaterThan(0);
     });
 
     it('executes native DML, literals, constraints, returning and transaction control', async () => {

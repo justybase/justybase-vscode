@@ -181,6 +181,12 @@ export interface DatabaseCapabilities {
   supportsIndexes: boolean;
   /** PostgreSQL storage parameters (fillfactor, tablespaces). */
   supportsTableStorageOptions: boolean;
+  /**
+   * Whether the Edit Data grid can address a row for UPDATE/DELETE through a
+   * stable pseudo-column locator (Netezza/DuckDB `ROWID`). Dialects without
+   * one open the same grid read-only instead of issuing `ROWID` SQL.
+   */
+  supportsRowEditing: boolean;
   /** SQLite database-level maintenance (VACUUM, integrity_check, ...). */
   supportsSqliteDatabaseMaintenance: boolean;
   /** Schema-wide text/numeric value search script generation. */
@@ -341,6 +347,7 @@ export function createDatabaseCapabilities(
     supportsPartitionManagement: false,
     supportsIndexes: false,
     supportsTableStorageOptions: false,
+    supportsRowEditing: false,
     supportsSqliteDatabaseMaintenance: false,
     supportsSchemaValueSearch: false,
     supportsCallRoutine: false,

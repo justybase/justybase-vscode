@@ -98,6 +98,7 @@ describe("@justybase/contracts", () => {
       expect(caps.supportsTuningAdvisor).toBe(false);
       expect(caps.supportsSessionMonitor).toBe(false);
       expect(caps.supportsTableMaintenance).toBe(false);
+      expect(caps.supportsRowEditing).toBe(false);
     });
 
     it("merges provided capabilities", () => {

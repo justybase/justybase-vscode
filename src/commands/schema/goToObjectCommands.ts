@@ -203,7 +203,7 @@ export function registerGoToObjectCommands(deps: SchemaCommandsDependencies): vs
                     return;
                 }
 
-                await vscode.commands.executeCommand('netezza.viewData', {
+                await vscode.commands.executeCommand('netezza.viewEditData', {
                     label: objectName,
                     rawLabel: objectName,
                     dbName: result.DATABASE,

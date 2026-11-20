@@ -97,6 +97,47 @@ export function buildTopRowsQuery(parts: QueryObjectNameParts, kind: DatabaseKin
     return `SELECT *\nFROM ${objectName}\nLIMIT ${safeLimit}`;
 }
 
+export interface LimitedSelectQueryOptions {
+    /** Projection after SELECT; defaults to `*`. */
+    selectList?: string;
+    /** Already-qualified object reference. */
+    from: string;
+    /** Predicate without the leading WHERE keyword. */
+    where?: string;
+    /** Sort expression without the leading ORDER BY keyword. */
+    orderBy?: string;
+    limit: number;
+    kind?: DatabaseKind;
+}
+
+/**
+ * Builds a bounded SELECT using the target dialect's native row-limit syntax.
+ * MSSQL and Access use TOP, Oracle and Db2 use FETCH FIRST, and the remaining
+ * dialects use LIMIT. Read-only View Data relies on this for every dialect.
+ */
+export function buildLimitedSelectQuery(options: LimitedSelectQueryOptions): string {
+    const normalizedKind = normalizeDatabaseKind(options.kind ?? 'netezza');
+    const safeLimit = validatedLimit(options.limit);
+    const selectList = options.selectList?.trim() || '*';
+    const from = options.from.trim();
+    if (!from) throw new Error('SQL object reference cannot be empty.');
+
+    const where = optionalPart(options.where);
+    const orderBy = optionalPart(options.orderBy);
+    const suffix = `${where ? ` WHERE ${where}` : ''}${orderBy ? ` ORDER BY ${orderBy}` : ''}`;
+
+    if (normalizedKind === 'mssql') {
+        return `SELECT TOP (${safeLimit}) ${selectList} FROM ${from}${suffix}`;
+    }
+    if (normalizedKind === 'access') {
+        return `SELECT TOP ${safeLimit} ${selectList} FROM ${from}${suffix}`;
+    }
+    if (normalizedKind === 'oracle' || normalizedKind === 'db2') {
+        return `SELECT ${selectList} FROM ${from}${suffix} FETCH FIRST ${safeLimit} ROWS ONLY`;
+    }
+    return `SELECT ${selectList} FROM ${from}${suffix} LIMIT ${safeLimit}`;
+}
+
 /**
  * Builds an explain statement/script without pretending that every database
  * accepts PostgreSQL/Netezza's EXPLAIN prefix.

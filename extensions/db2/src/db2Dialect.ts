@@ -48,6 +48,7 @@ const db2Capabilities: DatabaseCapabilities = {
   supportsTableSkewCheck: false,
   supportsTableOwnerChange: false,
   supportsTableStorageOptions: false,
+  supportsRowEditing: false,
   supportsSqliteDatabaseMaintenance: false,
   supportsErDiagram: true,
   supportsDependencyAnalysis: true,

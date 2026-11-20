@@ -41,6 +41,7 @@ export const sqliteDialect: DatabaseDialect = {
         supportsTruncateTable: true,
         supportsTableRename: true,
         supportsIndexes: true,
+        supportsRowEditing: true,
         supportsSqliteDatabaseMaintenance: true,
         supportsSchemaValueSearch: true,
     }),

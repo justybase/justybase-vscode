@@ -475,6 +475,86 @@ describe('commands/queryCommands', () => {
             );
         });
 
+        it('should drop the database part for PostgreSQL view data queries', async () => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: {
+                    ...mockConnectionManager,
+                    getConnectionDatabaseKind: jest.fn().mockReturnValue('postgresql'),
+                    getEffectiveDatabase: jest.fn().mockResolvedValue('TESTDB')
+                },
+                resultPanelProvider: mockResultPanelProvider
+            };
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ID', type: 'INTEGER' }],
+                data: [[1]]
+            });
+
+            registerQueryCommands(deps);
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.action.viewTableData'
+            )?.[1] as ((args: { documentUri: string; databaseName?: string; schemaName?: string; tableName: string }) => Promise<void>);
+
+            await handler({
+                documentUri: 'file:///view-data.sql',
+                databaseName: 'TESTDB',
+                schemaName: 'public',
+                tableName: 'customers'
+            });
+
+            expect(runQueryRaw).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    query: 'SELECT * FROM public.customers LIMIT 100'
+                })
+            );
+        });
+
+        it.each([
+            ['mssql', 'TESTDB', 'dbo', 'customers', 'SELECT TOP (100) * FROM TESTDB.dbo.customers'],
+            ['oracle', 'TESTDB', 'HR', 'CUSTOMERS', 'SELECT * FROM HR.CUSTOMERS FETCH FIRST 100 ROWS ONLY'],
+            ['db2', 'TESTDB', 'PUBLIC', 'CUSTOMERS', 'SELECT * FROM TESTDB.PUBLIC.CUSTOMERS FETCH FIRST 100 ROWS ONLY'],
+        ] as const)('uses %s row-limit syntax for View Data', async (
+            kind,
+            databaseName,
+            schemaName,
+            tableName,
+            expectedQuery,
+        ) => {
+            const deps: QueryCommandsDependencies = {
+                context: mockContext,
+                connectionManager: {
+                    ...mockConnectionManager,
+                    getConnectionDatabaseKind: jest.fn().mockReturnValue(kind),
+                    getEffectiveDatabase: jest.fn().mockResolvedValue(databaseName),
+                },
+                resultPanelProvider: mockResultPanelProvider,
+            };
+            (runQueryRaw as jest.Mock).mockResolvedValue({
+                columns: [{ name: 'ID', type: 'INTEGER' }],
+                data: [[1]],
+            });
+
+            registerQueryCommands(deps);
+
+            const handler = (vscode.commands.registerCommand as jest.Mock).mock.calls.find(
+                call => call[0] === 'netezza.action.viewTableData'
+            )?.[1] as ((args: { documentUri: string; databaseName?: string; schemaName?: string; tableName: string }) => Promise<void>);
+
+            await handler({
+                documentUri: 'file:///view-data.sql',
+                databaseName,
+                schemaName,
+                tableName,
+            });
+
+            expect(runQueryRaw).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    query: expectedQuery,
+                })
+            );
+        });
+
         it('should surface a missing connection before running the query', async () => {
             const deps: QueryCommandsDependencies = {
                 context: mockContext,

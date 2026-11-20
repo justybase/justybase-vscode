@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
+import { buildLimitedSelectQuery } from '@justybase/dialect-utils';
 import type { DatabaseKind } from '../../contracts/database';
 import {
     runQueryRaw,
@@ -37,7 +38,7 @@ function buildQualifiedObjectPath(
     tableName: string,
     kind?: string | DatabaseKind
 ): string {
-    if (kind !== 'sqlite' && kind !== 'access') {
+    if (kind === undefined || kind === 'netezza') {
         if (databaseName && schemaName) {
             return `${quoteIdentifier(databaseName)}.${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
         }
@@ -218,7 +219,11 @@ export function registerQueryCommands(
             const databaseKind = connectionManager.getConnectionDatabaseKind(connectionName);
             const resolvedObjectPath = buildQualifiedObjectPath(databaseName, schemaName, tableName, databaseKind);
             const displayObjectPath = buildDisplayObjectPath(databaseName, schemaName, tableName, databaseKind);
-            const query = `SELECT * FROM ${resolvedObjectPath} LIMIT ${VIEW_DATA_ROW_LIMIT}`;
+            const query = buildLimitedSelectQuery({
+                from: resolvedObjectPath,
+                limit: VIEW_DATA_ROW_LIMIT,
+                kind: databaseKind,
+            });
             const sourceDocument = vscode.workspace.textDocuments?.find(
                 document => document.uri.toString() === sourceUri,
             );

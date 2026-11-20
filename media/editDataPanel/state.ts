@@ -78,6 +78,23 @@ function isTruthyFlag(value: unknown): boolean {
     return value === true || value === 1 || value === '1' || value === 't' || value === 'true';
 }
 
+/**
+ * Reads the row locator case-insensitively. SQLite and DuckDB report the bare
+ * `rowid` column in lower case even though the grid tracks it as `ROWID`.
+ */
+function readRowId(row: EditDataRow): string | number | null {
+    const direct = row.ROWID;
+    if (direct !== null && direct !== undefined) {
+        return typeof direct === 'number' || typeof direct === 'string' ? direct : null;
+    }
+    for (const [key, value] of Object.entries(row)) {
+        if (key.toUpperCase() === ROWID) {
+            return typeof value === 'number' || typeof value === 'string' ? value : null;
+        }
+    }
+    return null;
+}
+
 export function buildColumns(columnNames: string[], metadata: EditDataColumnMetadata[] | undefined, readOnly = false): GridColumn[] {
     const byName = new Map<string, EditDataColumnMetadata>();
     (metadata || []).forEach(meta => byName.set(String(meta.ATTNAME).toUpperCase(), meta));
@@ -99,8 +116,8 @@ export function buildColumns(columnNames: string[], metadata: EditDataColumnMeta
 }
 
 function rowKeyFor(row: EditDataRow, fallbackIndex: number): string {
-    const rowId = row.ROWID;
-    return rowId === null || rowId === undefined ? `x:${fallbackIndex}` : `r:${String(rowId)}`;
+    const rowId = readRowId(row);
+    return rowId === null ? `x:${fallbackIndex}` : `r:${String(rowId)}`;
 }
 
 export function createState(
@@ -117,7 +134,7 @@ export function createState(
         const original = { ...row };
         rows.set(key, {
             key,
-            rowId: row.ROWID ?? null,
+            rowId: readRowId(row),
             original,
             values: { ...row },
             status: 'clean',
