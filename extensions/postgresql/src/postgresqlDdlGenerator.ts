@@ -6,6 +6,7 @@ import type {
     DatabaseDdlColumnInfo,
     DatabaseDdlKeyInfo,
     DatabaseDdlResult,
+    DatabaseTableDefinitionMetadata,
 } from '@justybase/contracts';
 import type { ConnectionDetails } from '@justybase/contracts';
 import { activateCoreExtension } from '@justybase/vscode-companion-adapter';
@@ -29,10 +30,11 @@ import {
     buildRoutineDefinitionQuery,
     buildSequenceDefinitionQuery,
     buildTableCommentQuery,
+    buildTableDefinitionQuery,
     buildTableIndexesQuery,
     buildTableOwnerQuery,
-    buildTablePartitionKeyQuery,
     buildTablePartitionsQuery,
+    buildTableSerialSequencesQuery,
     buildTableTriggersQuery,
     buildTriggerDefinitionQuery,
     buildViewDefinitionQuery,
@@ -44,6 +46,12 @@ interface ColumnRow {
     DESCRIPTION?: string | null;
     IS_NOT_NULL?: number | string | boolean;
     COLDEFAULT?: string | null;
+    ATTIDENTITY?: string | null;
+    ATTGENERATED?: string | null;
+    IDENTITY_OPTIONS?: string | null;
+    COLLATION?: string | null;
+    STORAGE?: string | null;
+    COMPRESSION?: string | null;
 }
 
 interface KeyRow {
@@ -73,6 +81,13 @@ interface TextRow {
     TRIGGER_DDL?: string | null;
     PARTITION_KEY?: string | null;
     PARTITION_DDL?: string | null;
+    PERSISTENCE?: string | null;
+    ACCESS_METHOD?: string | null;
+    TABLESPACE?: string | null;
+    RELOPTIONS?: unknown;
+    ATTNAME?: string | null;
+    SEQUENCE_SCHEMA?: string | null;
+    SEQUENCE_NAME?: string | null;
 }
 
 interface ObjectRow {
@@ -189,13 +204,48 @@ async function createConnectionFromDetails(
 }
 
 function rowsToDdlColumns(rows: ColumnRow[]): DatabaseDdlColumnInfo[] {
-    return rows.map((row) => ({
-        name: row.ATTNAME || '',
-        description: row.DESCRIPTION ?? null,
-        fullTypeName: row.FULL_TYPE || '',
-        notNull: normalizeBooleanFlag(row.IS_NOT_NULL),
-        defaultValue: row.COLDEFAULT ?? null,
-    }));
+    return rows.map((row) => {
+        const generated = row.ATTGENERATED === 's' || row.ATTGENERATED === 'v';
+        return {
+            name: row.ATTNAME || '',
+            description: row.DESCRIPTION ?? null,
+            fullTypeName: row.FULL_TYPE || '',
+            notNull: normalizeBooleanFlag(row.IS_NOT_NULL),
+            defaultValue: row.COLDEFAULT ?? null,
+            identity: row.ATTIDENTITY === 'a'
+                ? 'ALWAYS'
+                : row.ATTIDENTITY === 'd'
+                    ? 'BY DEFAULT'
+                    : undefined,
+            identityOptions: row.IDENTITY_OPTIONS ?? null,
+            generatedExpression: generated ? row.COLDEFAULT ?? null : null,
+            generatedKind: row.ATTGENERATED === 'v' ? 'VIRTUAL' : generated ? 'STORED' : undefined,
+            collation: row.COLLATION ?? null,
+            storage: normalizeColumnStorage(row.STORAGE),
+            compression: row.COMPRESSION ?? null,
+        };
+    });
+}
+
+function normalizeColumnStorage(value: string | null | undefined): DatabaseDdlColumnInfo['storage'] {
+    switch ((value || '').toUpperCase()) {
+        case 'PLAIN':
+        case 'EXTERNAL':
+        case 'EXTENDED':
+        case 'MAIN':
+            return (value || '').toUpperCase() as NonNullable<DatabaseDdlColumnInfo['storage']>;
+        default:
+            return null;
+    }
+}
+
+function normalizeReloptions(value: unknown): string[] | undefined {
+    const options = Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+        : typeof value === 'string' && value.length > 0
+            ? value.replace(/^\{|\}$/g, '').split(',').map(item => item.trim()).filter(Boolean)
+            : [];
+    return options.length > 0 ? options : undefined;
 }
 
 function rowsToKeyInfoMap(rows: KeyRow[]): Map<string, DatabaseDdlKeyInfo> {
@@ -474,6 +524,30 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
             const rows = await executeDatabaseQuery<TextRow>(connection, buildTableOwnerQuery(schema, tableName));
             return rows[0]?.OWNER ?? null;
         },
+        async getTableDefinitionMetadata(
+            connection: DatabaseConnection,
+            _database: string,
+            schema: string,
+            tableName: string,
+        ): Promise<DatabaseTableDefinitionMetadata | null> {
+            const rows = await executeDatabaseQuery<TextRow>(connection, buildTableDefinitionQuery(schema, tableName));
+            const row = rows[0];
+            if (!row) {
+                return null;
+            }
+            return {
+                engine: row.ACCESS_METHOD || 'heap',
+                persistence: row.PERSISTENCE === 'u'
+                    ? 'unlogged'
+                    : row.PERSISTENCE === 't'
+                        ? 'temporary'
+                        : 'permanent',
+                accessMethod: row.ACCESS_METHOD || null,
+                tablespace: row.TABLESPACE || null,
+                reloptions: normalizeReloptions(row.RELOPTIONS),
+                partitionBy: row.PARTITION_KEY?.trim() || undefined,
+            };
+        },
         async generateTableDDL(
             connection: DatabaseConnection,
             database: string,
@@ -488,13 +562,14 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
             const keysInfo = await this.getKeysInfo(connection, database, schema, tableName);
             const tableComment = await this.getTableComment(connection, database, schema, tableName);
             const owner = await this.getTableOwner(connection, database, schema, tableName);
-            const partitionKeyRows = await executeDatabaseQuery<TextRow>(
+            const tableDefinition = await this.getTableDefinitionMetadata!(
                 connection,
-                buildTablePartitionKeyQuery(schema, tableName),
+                database,
+                schema,
+                tableName,
             );
-            const partitionKey = partitionKeyRows[0]?.PARTITION_KEY?.trim() || '';
 
-            let ddl = this.buildTableDDLFromCache(
+            const ddl = this.buildTableDDLFromCache(
                 database,
                 schema,
                 tableName,
@@ -504,11 +579,8 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
                 keysInfo,
                 tableComment,
                 owner,
+                tableDefinition ?? undefined,
             );
-
-            if (partitionKey) {
-                ddl = ddl.replace(/\n;$/, `\nPARTITION BY ${partitionKey}\n;`);
-            }
 
             const indexRows = await executeDatabaseQuery<TextRow>(
                 connection,
@@ -522,6 +594,21 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
                 connection,
                 buildTablePartitionsQuery(schema, tableName),
             );
+            const serialRows = await executeDatabaseQuery<TextRow>(
+                connection,
+                buildTableSerialSequencesQuery(schema, tableName),
+            );
+
+            const qualifiedTableName = formatQualifiedName(schema, tableName);
+            const sequenceCreates = serialRows
+                .map((row) => ensureStatementTerminated(row.SEQUENCE_DDL?.trim() || ''))
+                .filter(Boolean);
+            const sequenceOwners = serialRows
+                .filter((row) => row.ATTNAME && row.SEQUENCE_SCHEMA && row.SEQUENCE_NAME)
+                .map((row) => (
+                    `ALTER SEQUENCE ${formatQualifiedName(row.SEQUENCE_SCHEMA!, row.SEQUENCE_NAME!)} `
+                    + `OWNED BY ${qualifiedTableName}.${formatIdentifierForSql(row.ATTNAME!, 'postgresql')};`
+                ));
 
             const extraStatements = [
                 ...indexRows.map((row) => ensureStatementTerminated(row.INDEX_DDL?.trim() || '')).filter(Boolean),
@@ -531,7 +618,7 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
                     .filter(Boolean),
             ];
 
-            return [ddl, ...extraStatements].filter(Boolean).join('\n\n');
+            return [...sequenceCreates, ddl, ...extraStatements, ...sequenceOwners].filter(Boolean).join('\n\n');
         },
         buildTableDDLFromCache(
             _database: string,
@@ -543,20 +630,56 @@ export const postgresqlAdvancedFeatures: DatabaseAdvancedFeatures = {
             keysInfo: Map<string, DatabaseDdlKeyInfo>,
             tableComment?: string | null,
             owner?: string | null,
+            tableDefinition?: DatabaseTableDefinitionMetadata,
         ): string {
             const qualifiedTableName = formatQualifiedName(schema, tableName);
             const columnClauses = columns.map((column) => {
                 const parts = [formatIdentifierForSql(column.name, 'postgresql'), column.fullTypeName];
+                if (column.storage) {
+                    parts.push(`STORAGE ${column.storage}`);
+                }
+                if (column.compression) {
+                    parts.push(`COMPRESSION ${column.compression}`);
+                }
+                if (column.collation) {
+                    parts.push(`COLLATE ${column.collation}`);
+                }
+                if (column.identity) {
+                    parts.push(`GENERATED ${column.identity} AS IDENTITY${column.identityOptions ?? ''}`);
+                } else if (column.generatedExpression) {
+                    const kind = column.generatedKind === 'VIRTUAL' ? 'VIRTUAL' : 'STORED';
+                    parts.push(`GENERATED ALWAYS AS (${column.generatedExpression}) ${kind}`);
+                } else if (column.defaultValue !== null && column.defaultValue !== undefined && column.defaultValue !== '') {
+                    parts.push(`DEFAULT ${column.defaultValue}`);
+                }
                 if (column.notNull) {
                     parts.push('NOT NULL');
-                }
-                if (column.defaultValue !== null && column.defaultValue !== undefined && column.defaultValue !== '') {
-                    parts.push(`DEFAULT ${column.defaultValue}`);
                 }
                 return parts.join(' ');
             });
             const definitionLines = [...columnClauses, ...buildConstraintClauses(keysInfo)];
-            const statements = [`CREATE TABLE ${qualifiedTableName} (\n    ${definitionLines.join(',\n    ')}\n)\n;`];
+            const createTable = tableDefinition?.persistence === 'unlogged'
+                ? 'CREATE UNLOGGED TABLE'
+                : tableDefinition?.persistence === 'temporary'
+                    ? 'CREATE TEMPORARY TABLE'
+                    : 'CREATE TABLE';
+            const tableOptions: string[] = [];
+            if (tableDefinition?.partitionBy?.trim()) {
+                tableOptions.push(`PARTITION BY ${tableDefinition.partitionBy.trim()}`);
+            }
+            if (tableDefinition?.accessMethod && tableDefinition.accessMethod.toLowerCase() !== 'heap') {
+                tableOptions.push(`USING ${formatIdentifierForSql(tableDefinition.accessMethod, 'postgresql')}`);
+            }
+            if (tableDefinition?.reloptions?.length) {
+                tableOptions.push(`WITH (${tableDefinition.reloptions.join(', ')})`);
+            }
+            if (tableDefinition?.tablespace?.trim()) {
+                tableOptions.push(`TABLESPACE ${formatIdentifierForSql(tableDefinition.tablespace, 'postgresql')}`);
+            }
+            const tableOptionsSuffix = tableOptions.length > 0 ? `\n${tableOptions.join('\n')}` : '';
+            const statements = [
+                `${createTable} ${qualifiedTableName} (\n    ${definitionLines.join(',\n    ')}\n)${tableOptionsSuffix}\n;`,
+            ];
 
             if (tableComment && tableComment.trim().length > 0) {
                 statements.push(`COMMENT ON TABLE ${qualifiedTableName} IS ${quoteLiteral(tableComment)};`);

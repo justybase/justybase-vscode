@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { buildIdLookupKey, extractLabel, inferCachedTableLikeType } from '../helpers';
 import { carryForwardRowCounts, normalizeEstimatedRowCount } from '../estimatedRowCount';
 import type { TableMetadata } from '../types';
+import type { DatabaseTableExpressionField } from '@justybase/contracts';
 import type { MetadataCachePort } from './metadataCachePort';
 import { buildSchemaCacheKey } from './schemaTreeDataSource';
 import { normalizeCompletionDescription } from '../../utils/completionDescriptionUtils';
@@ -50,7 +51,7 @@ function nativeTableDefinitionFromRow(
     }
 
     const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
-    const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+    const fields: Array<[DatabaseTableExpressionField, string]> = [
         ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
         ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
         ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],

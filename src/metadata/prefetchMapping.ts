@@ -1,4 +1,4 @@
-import type { DatabaseTableDefinitionMetadata } from '@justybase/contracts';
+import type { DatabaseTableDefinitionMetadata, DatabaseTableExpressionField } from '@justybase/contracts';
 import type { MetadataPrefetchTarget } from './cache/MetadataPrefetchTarget';
 import { buildColumnCacheKey, normalizeCatalogPart, type RawColumnRowWithKeys } from './columnRowMapping';
 import { buildNetezzaCacheDatabasePart } from './helpers';
@@ -50,7 +50,7 @@ function mapNativeTableDefinition(row: RawObjectRow): DatabaseTableDefinitionMet
     }
 
     const definition: DatabaseTableDefinitionMetadata = { engine };
-    const fields: Array<[keyof DatabaseTableDefinitionMetadata, string]> = [
+    const fields: Array<[DatabaseTableExpressionField, string]> = [
         ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
         ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
         ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],

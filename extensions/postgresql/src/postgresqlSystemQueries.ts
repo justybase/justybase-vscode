@@ -691,7 +691,38 @@ export function buildDdlColumnsQuery(schema: string, tableName: string): string 
             pg_catalog.format_type(a.atttypid, a.atttypmod) AS "FULL_TYPE",
             COALESCE(pg_catalog.col_description(c.oid, a.attnum), '') AS "DESCRIPTION",
             CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS "IS_NOT_NULL",
-            pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS "COLDEFAULT"
+            pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS "COLDEFAULT",
+            a.attidentity AS "ATTIDENTITY",
+            a.attgenerated AS "ATTGENERATED",
+            CASE
+                WHEN a.attidentity <> '' AND seq.seqrelid IS NOT NULL THEN
+                    pg_catalog.format(
+                        ' (INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s%s)',
+                        seq.seqincrement,
+                        seq.seqmin,
+                        seq.seqmax,
+                        seq.seqstart,
+                        seq.seqcache,
+                        CASE WHEN seq.seqcycle THEN ' CYCLE' ELSE ' NO CYCLE' END
+                    )
+            END AS "IDENTITY_OPTIONS",
+            CASE
+                WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation
+                THEN pg_catalog.format('%I.%I', cn.nspname, co.collname)
+            END AS "COLLATION",
+            CASE
+                WHEN a.attstorage <> t.typstorage THEN
+                    CASE a.attstorage
+                        WHEN 'p' THEN 'PLAIN'
+                        WHEN 'e' THEN 'EXTERNAL'
+                        WHEN 'x' THEN 'EXTENDED'
+                        WHEN 'm' THEN 'MAIN'
+                    END
+            END AS "STORAGE",
+            CASE a.attcompression
+                WHEN 'p' THEN 'pglz'
+                WHEN 'l' THEN 'lz4'
+            END AS "COMPRESSION"
         FROM pg_catalog.pg_class c
         INNER JOIN pg_catalog.pg_namespace n
             ON n.oid = c.relnamespace
@@ -699,6 +730,18 @@ export function buildDdlColumnsQuery(schema: string, tableName: string): string 
             ON a.attrelid = c.oid
            AND a.attnum > 0
            AND NOT a.attisdropped
+        INNER JOIN pg_catalog.pg_type t
+            ON t.oid = a.atttypid
+        LEFT JOIN pg_catalog.pg_collation co
+            ON co.oid = a.attcollation
+        LEFT JOIN pg_catalog.pg_namespace cn
+            ON cn.oid = co.collnamespace
+        LEFT JOIN pg_catalog.pg_depend dep
+            ON dep.refobjid = c.oid
+           AND dep.refobjsubid = a.attnum
+           AND dep.deptype = 'i'
+        LEFT JOIN pg_catalog.pg_sequence seq
+            ON seq.seqrelid = dep.objid
         LEFT JOIN pg_catalog.pg_attrdef ad
             ON ad.adrelid = c.oid
            AND ad.adnum = a.attnum
@@ -876,6 +919,69 @@ export function buildTablePartitionKeyQuery(schema: string, tableName: string): 
           AND n.nspname = ${quoteLiteral(schema)}
           AND c.relname = ${quoteLiteral(tableName)}
         LIMIT 1
+    `;
+}
+
+export function buildTableDefinitionQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            c.relpersistence AS "PERSISTENCE",
+            am.amname AS "ACCESS_METHOD",
+            ts.spcname AS "TABLESPACE",
+            c.reloptions AS "RELOPTIONS",
+            pg_catalog.pg_get_partkeydef(c.oid) AS "PARTITION_KEY"
+        FROM pg_catalog.pg_class c
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        LEFT JOIN pg_catalog.pg_am am
+            ON am.oid = c.relam
+        LEFT JOIN pg_catalog.pg_tablespace ts
+            ON ts.oid = c.reltablespace
+        WHERE c.relkind IN ('r', 'p')
+          AND n.nspname = ${quoteLiteral(schema)}
+          AND c.relname = ${quoteLiteral(tableName)}
+        LIMIT 1
+    `;
+}
+
+export function buildTableSerialSequencesQuery(schema: string, tableName: string): string {
+    return `
+        SELECT
+            a.attname AS "ATTNAME",
+            sn.nspname AS "SEQUENCE_SCHEMA",
+            s.relname AS "SEQUENCE_NAME",
+            pg_catalog.format(
+                'CREATE SEQUENCE %I.%I INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s%s;',
+                sn.nspname,
+                s.relname,
+                q.seqincrement,
+                q.seqmin,
+                q.seqmax,
+                q.seqstart,
+                q.seqcache,
+                CASE WHEN q.seqcycle THEN ' CYCLE' ELSE ' NO CYCLE' END
+            ) AS "SEQUENCE_DDL"
+        FROM pg_catalog.pg_class c
+        INNER JOIN pg_catalog.pg_namespace n
+            ON n.oid = c.relnamespace
+        INNER JOIN pg_catalog.pg_attribute a
+            ON a.attrelid = c.oid
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+        INNER JOIN pg_catalog.pg_depend d
+            ON d.refobjid = c.oid
+           AND d.refobjsubid = a.attnum
+           AND d.deptype = 'a'
+        INNER JOIN pg_catalog.pg_class s
+            ON s.oid = d.objid
+           AND s.relkind = 'S'
+        INNER JOIN pg_catalog.pg_namespace sn
+            ON sn.oid = s.relnamespace
+        INNER JOIN pg_catalog.pg_sequence q
+            ON q.seqrelid = s.oid
+        WHERE n.nspname = ${quoteLiteral(schema)}
+          AND c.relname = ${quoteLiteral(tableName)}
+        ORDER BY a.attnum
     `;
 }
 

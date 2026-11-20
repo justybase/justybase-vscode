@@ -18,10 +18,12 @@ import {
     buildSequenceDefinitionQuery,
     buildTableCommentQuery,
     buildTableColumnsQuery,
+    buildTableDefinitionQuery,
     buildTableIndexesQuery,
     buildTableOwnerQuery,
     buildTablePartitionKeyQuery,
     buildTablePartitionsQuery,
+    buildTableSerialSequencesQuery,
     buildTableTriggersQuery,
     buildTypeGroupsQuery,
     buildViewSourceSearchQuery,
@@ -125,6 +127,13 @@ describe('postgresqlSystemQueries', () => {
         expect(findSchemaQuery).toContain(`c.relkind IN ('r', 'p', 'v', 'm', 'f')`);
 
         expect(ddlColumnsQuery).toContain('AS "FULL_TYPE"');
+        expect(ddlColumnsQuery).toContain('AS "ATTIDENTITY"');
+        expect(ddlColumnsQuery).toContain('AS "ATTGENERATED"');
+        expect(ddlColumnsQuery).toContain('AS "IDENTITY_OPTIONS"');
+        expect(ddlColumnsQuery).toContain('AS "COLLATION"');
+        expect(ddlColumnsQuery).toContain('AS "STORAGE"');
+        expect(ddlColumnsQuery).toContain('AS "COMPRESSION"');
+        expect(ddlColumnsQuery).toContain(`dep.deptype = 'i'`);
         expect(ddlColumnsQuery).toContain(`n.nspname = 'public'`);
         expect(ddlColumnsQuery).toContain(`c.relname = 'orders'`);
 
@@ -140,6 +149,8 @@ describe('postgresqlSystemQueries', () => {
         const indexesQuery = compactSql(buildTableIndexesQuery('public', 'orders'));
         const triggersQuery = compactSql(buildTableTriggersQuery('public', 'orders'));
         const partitionKeyQuery = compactSql(buildTablePartitionKeyQuery('public', 'orders'));
+        const tableDefinitionQuery = compactSql(buildTableDefinitionQuery('public', 'orders'));
+        const serialSequencesQuery = compactSql(buildTableSerialSequencesQuery('public', 'orders'));
         const partitionsQuery = compactSql(buildTablePartitionsQuery('public', 'orders'));
         const viewDefinitionQuery = compactSql(buildViewDefinitionQuery('public', 'orders_view'));
         const routineDefinitionQuery = compactSql(buildRoutineDefinitionQuery('public', 'do_work(integer)', 'PROCEDURE'));
@@ -153,6 +164,15 @@ describe('postgresqlSystemQueries', () => {
 
         expect(partitionKeyQuery).toContain('pg_catalog.pg_get_partkeydef');
         expect(partitionKeyQuery).toContain(`c.relkind = 'p'`);
+
+        expect(tableDefinitionQuery).toContain('c.relpersistence AS "PERSISTENCE"');
+        expect(tableDefinitionQuery).toContain('c.reloptions AS "RELOPTIONS"');
+        expect(tableDefinitionQuery).toContain('pg_catalog.pg_get_partkeydef');
+        expect(tableDefinitionQuery).toContain(`c.relkind IN ('r', 'p')`);
+
+        expect(serialSequencesQuery).toContain(`d.deptype = 'a'`);
+        expect(serialSequencesQuery).toContain('CREATE SEQUENCE %I.%I INCREMENT BY %s');
+        expect(serialSequencesQuery).toContain(`c.relname = 'orders'`);
 
         expect(partitionsQuery).toContain('CREATE TABLE %I.%I PARTITION OF %I.%I %s;');
         expect(partitionsQuery).toContain('pg_catalog.pg_get_expr(child.relpartbound, child.oid, true)');

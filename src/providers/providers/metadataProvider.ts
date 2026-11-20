@@ -3,6 +3,7 @@
  */
 
 import * as vscode from 'vscode';
+import type { DatabaseTableExpressionField } from '@justybase/contracts';
 import { getDatabaseMetadataProvider } from '../../core/connectionFactory';
 import { runQueryRaw, queryResultToRows } from '../../core/queryRunner';
 import { MetadataCache } from '../../metadataCache';
@@ -63,7 +64,7 @@ function clickHouseTableDefinitionFromRow(
     }
 
     const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
-    const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+    const fields: Array<[DatabaseTableExpressionField, string]> = [
         ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
         ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
         ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],

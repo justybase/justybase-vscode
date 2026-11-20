@@ -10,6 +10,7 @@ import { PostgreSqlConnection } from '../../../extensions/postgresql/src/postgre
 import { postgresqlMetadataProvider } from '../../../extensions/postgresql/src/postgresqlSchemaProvider';
 import { postgresqlDialect } from '../../../extensions/postgresql/src/postgresqlDialect';
 import { postgresqlMaintenanceProvider } from '../../../extensions/postgresql/src/postgresqlMaintenanceProvider';
+import { postgresqlAdvancedFeatures } from '../../../extensions/postgresql/src/postgresqlDdlGenerator';
 import { ensureBuiltInDialectsRegistered } from '../../dialects';
 import { importDataToPostgreSql } from '../../import/postgresqlImporter';
 import { buildEditDataQueryPlan, buildPrimaryKeyLocatorPredicate } from '../../views/editDataQuery';
@@ -18,6 +19,7 @@ import type { ConnectionManager } from '../../core/connectionManager';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
 import type {
+    DatabaseConnection,
     DatabaseConnectionConfig,
     DatabaseMaintenanceServices,
     DatabaseMaintenanceTarget,
@@ -476,6 +478,76 @@ describeIfConfigured('postgres integration', () => {
             ).execute();
             expect(await readRows(connection, `SELECT id FROM "public"."${tableName}"`))
                 .toEqual([{ id: 1 }]);
+        } finally {
+            await connection.createCommand(`DROP TABLE IF EXISTS "public"."${tableName}"`).execute();
+        }
+    }, 120000);
+
+    it('reconstructs PostgreSQL column and table storage fidelity in DDL', async () => {
+        const stamp = Date.now();
+        const tableName = `jbl_postgres_ddl_${stamp}`;
+        const restoreSchema = `jbl_postgres_restore_${stamp}`;
+
+        try {
+            await connection.createCommand(`
+                CREATE TABLE "public"."${tableName}" (
+                    id bigint GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 2) PRIMARY KEY,
+                    label text NOT NULL COLLATE "C",
+                    payload text STORAGE EXTERNAL COMPRESSION lz4,
+                    doubled bigint GENERATED ALWAYS AS (id * 2) STORED,
+                    legacy_id serial,
+                    note text DEFAULT 'draft'
+                ) WITH (fillfactor=70)
+            `).execute();
+
+            const ddl = await postgresqlAdvancedFeatures.ddl!.generateTableDDL(
+                connection as unknown as DatabaseConnection,
+                config!.database,
+                'public',
+                tableName,
+            );
+
+            expect(ddl).toContain('CREATE TABLE public.');
+            expect(ddl).toContain(
+                'id bigint GENERATED ALWAYS AS IDENTITY '
+                + '(INCREMENT BY 2 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 100 CACHE 1 NO CYCLE) NOT NULL',
+            );
+            expect(ddl).toContain('label text COLLATE pg_catalog."C" NOT NULL');
+            expect(ddl).toContain('payload text STORAGE EXTERNAL COMPRESSION lz4');
+            expect(ddl).toContain('doubled bigint GENERATED ALWAYS AS ((id * 2)) STORED');
+            expect(ddl).toContain(`note text DEFAULT 'draft'::text`);
+            expect(ddl).toContain('WITH (fillfactor=70)');
+            expect(ddl).toContain('CREATE SEQUENCE public.');
+            expect(ddl).toContain('_legacy_id_seq INCREMENT BY 1');
+            expect(ddl).toContain('OWNED BY public.');
+            expect(ddl).toContain('.legacy_id;');
+
+            // Prove the reconstructed script is runnable in a fresh schema.
+            await connection.createCommand(`CREATE SCHEMA "${restoreSchema}"`).execute();
+            try {
+                const restoreDdl = ddl.split('public.').join(`"${restoreSchema}".`);
+                await connection.createCommand(`SET search_path TO "${restoreSchema}", public`).execute();
+                await connection.createCommand(restoreDdl).execute();
+
+                const restored = await readRows(
+                    connection,
+                    `SELECT column_name, is_identity, is_generated
+                     FROM information_schema.columns
+                     WHERE table_schema = '${restoreSchema}' AND table_name = '${tableName}'
+                     ORDER BY ordinal_position`,
+                );
+                expect(restored.map(row => [row.column_name, row.is_identity, row.is_generated])).toEqual([
+                    ['id', 'YES', 'NEVER'],
+                    ['label', 'NO', 'NEVER'],
+                    ['payload', 'NO', 'NEVER'],
+                    ['doubled', 'NO', 'ALWAYS'],
+                    ['legacy_id', 'NO', 'NEVER'],
+                    ['note', 'NO', 'NEVER'],
+                ]);
+            } finally {
+                await connection.createCommand('SET search_path TO DEFAULT').execute();
+                await connection.createCommand(`DROP SCHEMA IF EXISTS "${restoreSchema}" CASCADE`).execute();
+            }
         } finally {
             await connection.createCommand(`DROP TABLE IF EXISTS "public"."${tableName}"`).execute();
         }

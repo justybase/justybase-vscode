@@ -22,7 +22,7 @@ The panel has three tabs:
 
 - **Data**: an editable grid styled like the Results grid. The filter bar takes a server-side `WHERE`, `ORDER BY` and column list (Enter applies them). Clicking a column header sorts the loaded rows only. Pending changes are marked until you submit them: edited cells are amber, inserted rows green, deleted rows struck through. **Preview** shows the exact SQL, and **Submit** runs it in one transaction on the panel's connection. If the transaction fails, nothing is committed and your edits stay in the grid so you can fix them.
 - **Structure**: the table comment, the column list (type, NOT NULL, default, comment), inline column comments, and Add/Drop column. Dropping a column asks for confirmation first.
-- **DDL**: the generated `CREATE TABLE` statement, which you can copy or open in a SQL editor.
+- **DDL**: the generated `CREATE TABLE` statement, which you can copy or open in a SQL editor. PostgreSQL output preserves identity sequence options, generated columns, collation, column storage/compression, table reloptions, tablespace, access method, partition key and serial sequences.
 
 | Key | Action |
 | --- | --- |

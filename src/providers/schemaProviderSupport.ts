@@ -6,6 +6,7 @@ import { applyGeneratedIdentifierCase } from '../core/dialectTraits';
 import { runQueryRaw } from '../core/queryRunner';
 import type { ConnectionManager } from '../core/connectionManager';
 import type { TableMetadata } from '../metadata/types';
+import type { DatabaseTableExpressionField } from '@justybase/contracts';
 import { buildIdLookupKey, extractLabel } from '../metadata/helpers';
 import { normalizeCompletionDescription } from '../utils/completionDescriptionUtils';
 import { formatQualifiedObjectName } from '../utils/identifierUtils';
@@ -23,7 +24,7 @@ export function clickHouseTableDefinitionFromRow(
     }
 
     const definition: NonNullable<TableMetadata['tableDefinition']> = { engine };
-    const fields: Array<[keyof NonNullable<TableMetadata['tableDefinition']>, string]> = [
+    const fields: Array<[DatabaseTableExpressionField, string]> = [
         ['engineClause', 'CLICKHOUSE_ENGINE_FULL'],
         ['partitionBy', 'CLICKHOUSE_PARTITION_BY'],
         ['primaryKey', 'CLICKHOUSE_PRIMARY_KEY'],

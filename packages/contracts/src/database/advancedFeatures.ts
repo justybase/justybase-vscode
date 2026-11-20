@@ -14,6 +14,20 @@ export interface DatabaseDdlColumnInfo {
   fullTypeName: string;
   notNull: boolean;
   defaultValue: string | null;
+  /** PostgreSQL identity kind; emits `GENERATED <kind> AS IDENTITY`. */
+  identity?: 'ALWAYS' | 'BY DEFAULT';
+  /** Formatted identity sequence options, including the surrounding parentheses. */
+  identityOptions?: string | null;
+  /** PostgreSQL generation expression for a `GENERATED ... AS` column. */
+  generatedExpression?: string | null;
+  /** PostgreSQL generated-column storage; defaults to `STORED`. */
+  generatedKind?: 'STORED' | 'VIRTUAL';
+  /** Explicit non-default collation, already formatted as a SQL name. */
+  collation?: string | null;
+  /** Explicit non-default column storage (`PLAIN`, `EXTERNAL`, `EXTENDED`, `MAIN`). */
+  storage?: 'PLAIN' | 'EXTERNAL' | 'EXTENDED' | 'MAIN' | null;
+  /** Explicit column compression method (`pglz`, `lz4`, ...). */
+  compression?: string | null;
 }
 
 export interface DatabaseDdlKeyInfo {
@@ -53,6 +67,21 @@ export interface DatabaseTableDdlMetadata {
  * them into columns would lose function calls, nested arguments, or quoted
  * literals that are significant to the storage definition.
  */
+/**
+ * Storage-expression fields carried as SQL text. Kept separate from the
+ * dialect-specific table options so ClickHouse mappings never assign a string
+ * to a persistence enum or an array of reloptions.
+ */
+export type DatabaseTableExpressionField =
+  | 'engineClause'
+  | 'partitionBy'
+  | 'primaryKey'
+  | 'orderBy'
+  | 'sampleBy'
+  | 'ttl'
+  | 'settings'
+  | 'sourceDdl';
+
 export interface DatabaseTableDefinitionMetadata {
   engine: string;
   engineClause?: string;
@@ -63,6 +92,14 @@ export interface DatabaseTableDefinitionMetadata {
   ttl?: string;
   settings?: string;
   sourceDdl?: string;
+  /** PostgreSQL table persistence; defaults to a permanent table. */
+  persistence?: 'permanent' | 'unlogged' | 'temporary';
+  /** PostgreSQL non-default tablespace. */
+  tablespace?: string | null;
+  /** PostgreSQL access method; `heap` is the default and may be omitted. */
+  accessMethod?: string | null;
+  /** PostgreSQL `WITH (...)` storage parameters. */
+  reloptions?: string[];
 }
 
 export interface DatabaseDdlResult {
