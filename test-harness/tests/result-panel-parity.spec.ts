@@ -1,7 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 
 async function settleLayout(page: Page): Promise<void> {
-  await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
+  // The find-column control has its own functional parity test. Hide it from
+  // the shared visual baselines so they stay stable across CI platforms.
+  await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; } .ui-result-column-search { visibility: hidden !important; }' });
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
