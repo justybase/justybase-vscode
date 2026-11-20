@@ -34,6 +34,7 @@ import {
 	expectLiveForeignKeyCompletion,
 	requireForeignKeyRelationshipQuery,
 } from './liveForeignKeyCompletionHelper';
+import { expectReadOnlyViewDataQuery } from './viewDataIntegrationAssertions';
 
 registerLiveIntegrationSuite(mssqlHarness);
 
@@ -254,6 +255,15 @@ describeIfConfigured('mssql integration', () => {
 	});
 
 	describe('connection and metadata discovery', () => {
+		it('loads read-only View Data through the production SQL Server query plan', async () => {
+			await expectReadOnlyViewDataQuery(connection, {
+				database: config!.database,
+				schema: schemaName,
+				table: tableName,
+				kind: 'mssql',
+			});
+		}, 120000);
+
 		it('returns current database, schema, and session context', async () => {
 			const reader = await connection
 				.createCommand('SELECT DB_NAME() AS CURRENT_CATALOG, SCHEMA_NAME() AS CURRENT_SCHEMA, @@SPID AS CURRENT_SID')

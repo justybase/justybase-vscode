@@ -31,6 +31,8 @@ import {
     expectConnectionCloseIsIdempotent,
     expectReaderCloseAndReuse,
 } from './connectionLifecycleHelpers';
+import { expectStreamingQueryMetadata } from './streamingResultAssertions';
+import { expectReadOnlyViewDataQuery } from './viewDataIntegrationAssertions';
 
 function readEnv(name: string): string | undefined {
     const value = process.env[name]?.trim();
@@ -223,6 +225,19 @@ describeIfConfigured('clickhouse integration', () => {
             config!,
         );
     });
+
+    it('streams query metadata before the first result chunk', async () => {
+        await expectStreamingQueryMetadata(connection, 'SELECT 1 AS ID');
+    }, 120000);
+
+    it('loads read-only View Data through the production ClickHouse query plan', async () => {
+        await expectReadOnlyViewDataQuery(connection, {
+            database,
+            schema: database,
+            table: tableName,
+            kind: 'clickhouse',
+        });
+    }, 120000);
 
     it('cancels an in-flight HTTP query and allows a fresh connection', async () => {
         const cancellationConnection = new ClickHouseConnection(config!);

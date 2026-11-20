@@ -21,6 +21,8 @@ import {
   expectLiveForeignKeyCompletion,
   requireForeignKeyRelationshipQuery,
 } from "./liveForeignKeyCompletionHelper";
+import { expectStreamingQueryMetadata } from "./streamingResultAssertions";
+import { expectReadOnlyViewDataQuery } from "./viewDataIntegrationAssertions";
 
 function readEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -169,6 +171,19 @@ describeIfConfigured("mysql integration", () => {
       await connection.createCommand(`DROP TABLE IF EXISTS ${qualifiedChild}`).execute();
       await connection.createCommand(`DROP TABLE IF EXISTS ${qualifiedParent}`).execute();
     }
+  }, 120000);
+
+  it("streams query metadata before the first result chunk", async () => {
+    await expectStreamingQueryMetadata(connection, "SELECT 1 AS ID");
+  }, 120000);
+
+  it("loads read-only View Data through the production MySQL query plan", async () => {
+    await expectReadOnlyViewDataQuery(connection, {
+      database: config!.database,
+      schema: config!.database,
+      table: "departments",
+      kind: "mysql",
+    });
   }, 120000);
 
   it("closes readers and connections idempotently", async () => {

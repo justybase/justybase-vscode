@@ -12,6 +12,8 @@ import { postgresqlDialect } from '../../../extensions/postgresql/src/postgresql
 import { postgresqlMaintenanceProvider } from '../../../extensions/postgresql/src/postgresqlMaintenanceProvider';
 import { ensureBuiltInDialectsRegistered } from '../../dialects';
 import { importDataToPostgreSql } from '../../import/postgresqlImporter';
+import { buildEditDataQueryPlan } from '../../views/editDataQuery';
+import { StreamingManager, type StreamingChunk } from '../../core/streaming/StreamingManager';
 import type { ConnectionManager } from '../../core/connectionManager';
 import { registerDatabaseDialect } from '../../core/factories/databaseDialectRegistry';
 import { createSessionMonitorServices } from '../../core/sessionMonitorProviderUtils';
@@ -22,7 +24,7 @@ import type {
 } from '../../contracts/database';
 import { LspCompletionEngine, type CompletionMetadataProvider } from '../../server/completionEngine';
 import type { MetadataColumnItem, MetadataObjectItem } from '../../lsp/protocol';
-import type { ConnectionDetails } from '../../types';
+import type { ConnectionDetails, NzConnection } from '../../types';
 import {
     cancelReaderExecution,
     expectConnectionCloseIsIdempotent,
@@ -392,6 +394,70 @@ describeIfConfigured('postgres integration', () => {
             await schemasReader.close();
         }
     });
+
+    it('loads table data through the edit-data query plan without PostgreSQL ROWID', async () => {
+        const tableName = `jbl_postgres_edit_data_${Date.now()}`;
+
+        try {
+            await connection.createCommand(
+                `CREATE TABLE "public"."${tableName}" (id INTEGER NOT NULL PRIMARY KEY, name TEXT NOT NULL)`
+            ).execute();
+            await connection.createCommand(
+                `INSERT INTO "public"."${tableName}" (id, name) VALUES (1, 'Alice'), (2, 'Bob')`
+            ).execute();
+
+            // Issue #22: Netezza's ROWID pseudo-column does not exist in PostgreSQL.
+            await expect(
+                readRows(connection, `SELECT ROWID, * FROM "public"."${tableName}" LIMIT 10`)
+            ).rejects.toThrow(/column "rowid" does not exist/i);
+
+            const plan = buildEditDataQueryPlan({
+                database: config!.database,
+                schema: 'public',
+                table: tableName,
+                databaseKind: 'postgresql',
+                editable: false,
+                rowLimit: 50000,
+            });
+
+            expect(plan.qualifiedTableName).toBe(`public.${tableName}`);
+            expect(plan.sql).toBe(`SELECT * FROM public.${tableName} LIMIT 50000`);
+
+            const rows = await readRows(connection, plan.sql);
+            expect(rows).toHaveLength(2);
+            expect(rows.map(row => row.name)).toEqual(['Alice', 'Bob']);
+        } finally {
+            await connection.createCommand(`DROP TABLE IF EXISTS "public"."${tableName}"`).execute();
+        }
+    }, 120000);
+
+    it('streams live PostgreSQL rows with the row description resolved on first read', async () => {
+        const manager = new StreamingManager();
+        const chunks: StreamingChunk[] = [];
+
+        try {
+            const result = await manager.executeWithStreaming(
+                connection as unknown as NzConnection,
+                "SELECT 1::integer AS id, 'Alice'::text AS name",
+                100,
+                10,
+                undefined,
+                undefined,
+                chunk => {
+                    chunks.push(chunk);
+                },
+            );
+
+            expect(result.error).toBeUndefined();
+            expect(result.status).toBe('success');
+            expect(result.totalRows).toBe(1);
+            const firstChunk = chunks.find(chunk => chunk.isFirstChunk);
+            expect(firstChunk?.columns.map(column => column.name)).toEqual(['id', 'name']);
+            expect(firstChunk?.rows).toEqual([[1, 'Alice']]);
+        } finally {
+            await manager.dispose();
+        }
+    }, 120000);
 
     it('imports a small CSV file with COPY when integration env vars are present', async () => {
         const sourceFile = createSmokeCsv();

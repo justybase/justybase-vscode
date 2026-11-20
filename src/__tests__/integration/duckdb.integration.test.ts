@@ -29,6 +29,8 @@ import {
     expectReaderCloseAndReuse,
     withTimeout,
 } from './connectionLifecycleHelpers';
+import { expectStreamingQueryMetadata } from './streamingResultAssertions';
+import { expectReadOnlyViewDataQuery } from './viewDataIntegrationAssertions';
 
 const extensionRequire = createRequire(path.join(process.cwd(), 'extensions', 'duckdb', 'package.json'));
 
@@ -208,6 +210,24 @@ describeIfInstalled('duckdb integration', () => {
         }
     });
 
+    it('streams query metadata before the first result chunk', async () => {
+        const connection = new DuckDbConnection({
+            host: '',
+            database: databasePath,
+            user: '',
+            password: '',
+            options: {
+                mode: 'file'
+            }
+        });
+        await connection.connect();
+        try {
+            await expectStreamingQueryMetadata(connection, 'SELECT 1 AS ID');
+        } finally {
+            await connection.close();
+        }
+    }, 120000);
+
     it('connects, creates schema objects, and executes round-trip SQL against a local DuckDB file', async () => {
         const connection = new DuckDbConnection({
             host: '',
@@ -228,6 +248,13 @@ describeIfInstalled('duckdb integration', () => {
 
             const currentCatalog = await readScalar(connection, 'SELECT current_catalog()');
             expect(String(currentCatalog ?? '').length).toBeGreaterThan(0);
+
+            await expectReadOnlyViewDataQuery(connection, {
+                database: String(currentCatalog ?? ''),
+                schema: schemaName,
+                table: 'orders',
+                kind: 'duckdb',
+            }, 2);
 
             const rows = await readRows(
                 await connection.createCommand(`SELECT id, customer_name FROM ${schemaName}.orders ORDER BY id`).executeReader()

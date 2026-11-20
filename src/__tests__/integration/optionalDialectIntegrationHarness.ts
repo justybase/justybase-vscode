@@ -34,6 +34,7 @@ import {
     expectConnectionCloseIsIdempotent,
     expectReaderCloseAndReuse,
 } from './connectionLifecycleHelpers';
+import { expectStreamingQueryMetadata } from './streamingResultAssertions';
 
 registerDatabaseDialect(db2Dialect);
 registerDatabaseDialect(mssqlDialect);
@@ -565,6 +566,10 @@ export function registerLiveIntegrationSuite(harness: LiveDialectHarness): void 
         itIfConfigured('connects and executes a smoke query', async () => {
             await expectQueryHasShape(connection, harness.smokeSql, true);
         });
+
+        itIfConfigured('streams the smoke query with column metadata in the first chunk', async () => {
+            await expectStreamingQueryMetadata(connection, harness.smokeSql);
+        }, 120000);
 
         itIfConfigured('closes a reader twice and reuses the live connection', async () => {
             await expectReaderCloseAndReuse(connection, harness.smokeSql, harness.smokeSql);
