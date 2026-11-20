@@ -10,6 +10,7 @@ import {
 import { McpHttpServerManager } from '../mcp/mcpHttpServerManager';
 import { getConfiguredMcpConnectionName } from '../mcp/mcpConnection';
 import { SettingsView } from '../views/settingsView';
+import { normalizeAiToolAccess, type AiToolAccessConfig } from '../core/assistant/toolPolicy';
 
 interface McpRegistrationParams {
     context: vscode.ExtensionContext;
@@ -34,10 +35,18 @@ export function registerMcpFeatures(params: McpRegistrationParams): void {
         logger.warn('Netezza MCP server: registerMcpServerDefinitionProvider API not available in this VS Code version.');
     }
 
-    const definitionProvider: NetezzaMcpServerDefinitionProvider | undefined =
-        registerMcpServerDefinitionProvider(context, connectionManager);
+    const readAccessConfig = (): AiToolAccessConfig =>
+        normalizeAiToolAccess(getExtensionConfiguration().get('ai.tools'));
 
-    const httpManager = new McpHttpServerManager(context, connectionManager);
+    const definitionProvider: NetezzaMcpServerDefinitionProvider | undefined =
+        registerMcpServerDefinitionProvider(context, connectionManager, readAccessConfig);
+
+    const httpManager = new McpHttpServerManager(
+        context,
+        connectionManager,
+        getConfiguredMcpConnectionName,
+        readAccessConfig,
+    );
     context.subscriptions.push(httpManager);
     SettingsView.configureMcp({ connectionManager, definitionProvider, httpManager });
 
@@ -97,6 +106,11 @@ export function registerMcpFeatures(params: McpRegistrationParams): void {
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration('justybase.mcp')) {
                 syncAndRefreshSettings();
+            }
+            if (event.affectsConfiguration('justybase.ai.tools')) {
+                // Access changes can add or remove tools, so the HTTP child must
+                // restart with the new policy and the stdio env must refresh.
+                syncAndRefreshSettings(true);
             }
         }),
         connectionManager.onDidChangeConnections(() => syncAndRefreshSettings(true))

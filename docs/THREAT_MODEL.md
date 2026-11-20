@@ -119,16 +119,18 @@ user confirmation, or a read-only connection is made to run writes.
   `ExecutionRequest.readOnly` into the backend query options
   (`packages/database-runtime/src/execution.ts:720`).
 - AI/MCP planner access is gated by `buildSafeExplainSql`
-  (`src/services/copilotTools/aiSqlSafety.ts`): exactly one statement, must
+  (`src/core/assistant/sqlAccess.ts`): exactly one statement, must
   start with `SELECT`/`WITH`, and rejects DML/DDL keywords, `SELECT ... INTO`,
   and `FOR UPDATE`/`FOR SHARE` locking clauses after stripping strings and
   comments.
-- The MCP gate (`src/mcp/mcpReadOnlyGate.ts`) is applied by both user-SQL tools
-  (`explain_sql`, `analyze_query_plan`) and therefore on both the stdio and
-  HTTP transports, which share `createNetezzaMcpServer`
-  (`src/mcp/mcpServerCore.ts:13`).
-- Adversarial coverage: `src/__tests__/aiSqlSafety.test.ts`,
-  `src/__tests__/mcp/mcpReadOnlyGate.test.ts`, and
+- `classifySqlStatement` fails closed: unknown statements require the write
+  tier, and `DROP`/`TRUNCATE`/`GRANT`/`REVOKE`/`ALTER ... DROP` require the
+  destructive tier.
+- Both user-SQL MCP entry points (`explain_query`, `validate_sql` with
+  `mode=database`) apply the shared gate on both stdio and HTTP transports,
+  which share `createNetezzaMcpServer` (`src/mcp/mcpServerCore.ts`).
+- Adversarial coverage: `src/__tests__/assistant/sqlAccess.test.ts`,
+  `src/__tests__/aiSqlSafety.test.ts`, and
   `src/__tests__/mcp/mcpToolRegistry.test.ts`.
 
 **Residual risk:** Netezza-side read-only enforcement of arbitrary editor SQL
@@ -178,20 +180,27 @@ values, credentials, or host details.
 **Residual risk:** reports contain command names and counters; screenshots can
 contain SQL and result values and must never be published without review.
 
-## T7 — MCP read-only gate (stdio and HTTP)
+## T7 — MCP access gate (stdio and HTTP)
 
-**Threat:** an external MCP client submits arbitrary SQL through the server.
+**Threat:** an external MCP client submits arbitrary or destructive SQL through
+the server without the operator intending to grant that access.
 
 **Controls:**
 
-- The server exposes only catalog introspection, parser validation, and
-  EXPLAIN-plan tools; all tools carry `readOnlyHint: true`
-  (`src/mcp/mcpServerCore.ts:30`).
-- Catalog queries are constructed internally by `CatalogIntrospection`; the
-  only user-SQL entry points pass through the gate before execution.
-- The HTTP transport binds `127.0.0.1` and creates a per-session server
-  instance that uses the same gated tool definitions
+- Read-only is the default profile for both transports. Tools outside the
+  resolved policy are not registered at all, so they cannot be called
+  (`src/core/assistant/toolPolicy.ts`, `src/mcp/mcpServerEntry.ts`).
+- Write tools require the `read-write` profile **and** the selected connection in
+  `writableConnections`; destructive tools require `full` plus a `confirm` value
+  equal to the target object name (`src/mcp/mcpToolRegistry.ts`).
+- HTTP write mode refuses to start without `JUSTYBASE_MCP_TOKEN` and rejects
+  requests whose `Authorization` header does not match the per-run bearer token
   (`src/mcp/mcpServerEntry.ts`).
+- The server exposes catalog introspection and parser validation; arbitrary SQL
+  entry points are limited to `execute_sql`, `validate_sql`, `explain_query` and
+  `compile_procedure`, all classified by `src/core/assistant/sqlAccess.ts`.
+- The HTTP transport binds `127.0.0.1` and creates a per-session server
+  instance with the same filtered tool definitions.
 - The server refuses to start for non-Netezza connections.
 
 ## T-relay — Service login relay

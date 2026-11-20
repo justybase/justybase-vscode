@@ -1196,7 +1196,7 @@
         "toolReferenceName": "getSqlContext",
         "icon": "$(database)",
         "userDescription": "Collect the current SQL, connection, referenced table DDL, and parser/linter diagnostics",
-        "modelDescription": "Collects a single context bundle for the active SQL editor or supplied SQL: active dialect, connection name, SQL text/selection, DDL for referenced tables, and current parser/linter diagnostics. Use this first when the user asks about \"this query\", \"the current SQL\", or a diagnostic. It replaces the former get_sql_schema and get_sql_diagnostics tools and requires no connection for parser diagnostics.",
+        "modelDescription": "Collects a single context bundle for the active SQL editor or supplied SQL: active dialect, connection name, SQL text/selection, DDL for referenced tables, and current parser/linter diagnostics. Use this first when the user asks about \"this query\", \"the current SQL\", or a diagnostic.",
         "canBeReferencedInPrompt": true,
         "tags": [
           "context",
@@ -1213,7 +1213,7 @@
             },
             "includeSchema": {
               "type": "boolean",
-              "description": "Include DDL for tables referenced by the SQL (default true)."
+              "description": "Include DDL for referenced tables (default true)."
             },
             "includeDiagnostics": {
               "type": "boolean",
@@ -1228,8 +1228,8 @@
         "displayName": "Search Catalog",
         "toolReferenceName": "searchCatalog",
         "icon": "$(search)",
-        "userDescription": "Search databases, schemas, tables, views, procedures, external tables, columns, or table locations",
-        "modelDescription": "Unified catalog discovery for the connected Netezza database. Choose objectType to list databases, schemas, tables, views, procedures, external tables, search columns or all objects by name pattern, or locate a table across databases. This replaces the former get_databases/get_schemas/get_tables/get_views/get_procedures/get_external_tables/search_schema/find_table_locations tools. Requires an active connection.",
+        "userDescription": "Search databases, schemas, tables, views, procedures, external tables or columns",
+        "modelDescription": "Unified catalog discovery for the connected Netezza database. Choose kind to list databases, schemas, tables, views, procedures or external tables, search columns, or search all objects by name pattern.",
         "canBeReferencedInPrompt": true,
         "tags": [
           "catalog",
@@ -1241,7 +1241,7 @@
         "inputSchema": {
           "type": "object",
           "properties": {
-            "objectType": {
+            "kind": {
               "type": "string",
               "enum": [
                 "databases",
@@ -1249,53 +1249,51 @@
                 "tables",
                 "views",
                 "procedures",
-                "external tables",
+                "external_tables",
                 "columns",
-                "all",
-                "locations"
+                "all"
               ],
-              "description": "What to search. Defaults to tables."
+              "description": "What to list or search."
             },
-            "pattern": {
+            "query": {
               "type": "string",
-              "description": "Name pattern or table name. Required for columns, all, and locations."
+              "description": "Name pattern for columns/all searches (case-insensitive contains match)."
             },
             "database": {
               "type": "string",
-              "description": "Optional database scope. Defaults to the active connection database."
+              "description": "Database name. Defaults to the connected database."
             },
             "schema": {
               "type": "string",
-              "description": "Optional schema filter for tables, views, procedures, and external tables."
+              "description": "Schema filter for tables, views, procedures and external tables."
             }
           },
-          "required": []
+          "required": [
+            "kind"
+          ]
         }
       },
       {
-        "name": "netezza_get_object_details",
+        "name": "netezza_get_object",
         "displayName": "Get Object Details",
-        "toolReferenceName": "getObjectDetails",
+        "toolReferenceName": "getObject",
         "icon": "$(symbol-class)",
-        "userDescription": "Get DDL, columns, comments, statistics, dependencies, or workspace favorites for an object",
-        "modelDescription": "Returns structured metadata for one Netezza object. Select sections to control payload: ddl (CREATE statement), columns (names/types/nullability/keys), comments (table and column descriptions), stats (row count/skew/distribution), dependencies (foreign keys and view/procedure references), and favorites (workspace-curated table profiles and snippets). This replaces the former get_columns/get_ddl/get_comments/get_table_stats/get_dependencies/get_favorites tools.",
+        "userDescription": "Read DDL, columns, comments, statistics, constraints and dependencies for one object",
+        "modelDescription": "Returns one or more sections for a single catalog object in one call: DDL, columns, comments, table statistics, constraints and dependencies. Prefer this over several narrow metadata calls.",
         "canBeReferencedInPrompt": true,
         "tags": [
-          "columns",
-          "comments",
-          "database",
+          "catalog",
           "ddl",
-          "dependencies",
           "metadata",
           "netezza",
-          "statistics"
+          "object"
         ],
         "inputSchema": {
           "type": "object",
           "properties": {
-            "objectName": {
+            "object": {
               "type": "string",
-              "description": "Object name. Supports TABLE, SCHEMA.TABLE, DATABASE..TABLE, and DATABASE.SCHEMA.TABLE."
+              "description": "Object name (TABLE, SCHEMA.TABLE, DATABASE..TABLE or DATABASE.SCHEMA.TABLE)."
             },
             "objectType": {
               "type": "string",
@@ -1308,15 +1306,15 @@
                 "nickname",
                 "alias"
               ],
-              "description": "Object type used for DDL and dependency lookup. Defaults to table."
+              "description": "Object type (default table)."
             },
             "database": {
               "type": "string",
-              "description": "Optional database scope."
+              "description": "Database name. Defaults to the connected database."
             },
             "schema": {
               "type": "string",
-              "description": "Optional schema scope."
+              "description": "Schema name when the object is unqualified."
             },
             "sections": {
               "type": "array",
@@ -1327,26 +1325,27 @@
                   "columns",
                   "comments",
                   "stats",
-                  "dependencies",
-                  "favorites"
+                  "constraints",
+                  "dependencies"
                 ]
               },
-              "description": "Requested metadata sections. Defaults to ddl and columns."
+              "description": "Sections to return. Default: ddl, columns."
             }
           },
-          "required": []
+          "required": [
+            "object"
+          ]
         }
       },
       {
-        "name": "netezza_explain_sql",
-        "displayName": "Explain SQL",
-        "toolReferenceName": "explainSql",
+        "name": "netezza_explain_query",
+        "displayName": "Explain Query",
+        "toolReferenceName": "explainQuery",
         "icon": "$(graph)",
-        "userDescription": "Run a read-only EXPLAIN and return plan structure, hotspots, risk, and raw plan",
-        "modelDescription": "Runs a read-only EXPLAIN for exactly one SELECT or WITH ... SELECT statement and returns structured plan nodes, edges, hotspots, overall risk, and the raw plan. Use it to diagnose performance. Tuning recommendations are intentionally left to the assistant and the JustyBase performance skill, which combine this output with object statistics and dependencies.",
+        "userDescription": "Run a read-only EXPLAIN and return the plan, hotspots and recommendations",
+        "modelDescription": "Runs a read-only EXPLAIN for a single SELECT or WITH ... SELECT statement and returns the plan, structural hotspots and recommendations. Never executes the statement itself.",
         "canBeReferencedInPrompt": true,
         "tags": [
-          "database",
           "explain",
           "netezza",
           "performance",
@@ -1357,11 +1356,19 @@
           "properties": {
             "sql": {
               "type": "string",
-              "description": "SQL query to explain. Must be a single SELECT or WITH ... SELECT statement."
+              "description": "A single SELECT or WITH ... SELECT statement. Do not include an EXPLAIN prefix."
+            },
+            "verbose": {
+              "type": "boolean",
+              "description": "Request EXPLAIN VERBOSE (default false)."
+            },
+            "analyze": {
+              "type": "boolean",
+              "description": "Return structured analysis with hotspots and recommendations (default true)."
             },
             "database": {
               "type": "string",
-              "description": "Optional database name to use. If not specified, uses the current database."
+              "description": "Database name. Defaults to the connected database."
             }
           },
           "required": [
@@ -1371,43 +1378,15 @@
       },
       {
         "name": "netezza_validate_sql",
-        "displayName": "Validate SQL (Parser)",
-        "toolReferenceName": "validateSqlParser",
+        "displayName": "Validate SQL",
+        "toolReferenceName": "validateSql",
         "icon": "$(check)",
-        "userDescription": "Validates SQL with parser/linter rules (no database execution)",
-        "modelDescription": "This tool validates SQL using the built-in parser and linter pipeline. It returns syntax and semantic diagnostics with issue codes (e.g., SQLxxx, NZxxx, NZPxxx). Use this when you need offline validation without executing SQL. No database connection required.",
+        "userDescription": "Validate SQL with the offline parser/linter or a read-only database EXPLAIN",
+        "modelDescription": "Validates a SQL script. mode=parser runs the offline Netezza parser/linter; mode=database additionally asks the server to validate the statement through a read-only EXPLAIN.",
         "canBeReferencedInPrompt": true,
         "tags": [
+          "diagnostics",
           "netezza",
-          "parser",
-          "sql",
-          "syntax",
-          "validation"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "sql": {
-              "type": "string",
-              "description": "SQL code to validate. If not provided, uses the content of the currently active editor."
-            }
-          },
-          "required": []
-        }
-      },
-      {
-        "name": "netezza_validate_sql_on_database",
-        "displayName": "Validate SQL on Database",
-        "toolReferenceName": "validateSqlOnDatabase",
-        "icon": "$(database)",
-        "userDescription": "Validates SQL against connected database using EXPLAIN",
-        "modelDescription": "This tool validates SQL on the connected IBM Netezza database by running EXPLAIN (without executing DML/SELECT results). Use this when parser validation passes but runtime/database context still needs verification. Requires an active database connection.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "database",
-          "explain",
-          "netezza",
-          "runtime",
           "sql",
           "validation"
         ],
@@ -1416,165 +1395,38 @@
           "properties": {
             "sql": {
               "type": "string",
-              "description": "SQL code to validate on database. If not provided, uses the content of the currently active editor."
+              "description": "SQL text to validate."
             },
-            "database": {
-              "type": "string",
-              "description": "Optional database context for validation."
-            }
-          },
-          "required": []
-        }
-      },
-      {
-        "name": "netezza_repair_procedure",
-        "displayName": "Repair Netezza Procedure",
-        "toolReferenceName": "repairProcedure",
-        "icon": "$(tools)",
-        "userDescription": "Compiles a Netezza stored procedure and optionally runs a user-confirmed typed test CALL",
-        "modelDescription": "Use this tool to compile and repair one complete CREATE PROCEDURE or CREATE OR REPLACE PROCEDURE block from the active SQL editor. The tool returns database compilation diagnostics and permits at most three attempts. Set mode='compile_only' to repair from compilation errors. Set mode='compile_and_call' and provide typed callArguments to run a test CALL after compilation; a separate explicit user confirmation is always required because CALL may modify database data. Pass the corrected complete procedure SQL in sql on subsequent attempts.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "compile",
-          "database",
-          "nzplsql",
-          "procedure",
-          "repair",
-          "sql",
-          "write"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
             "mode": {
               "type": "string",
               "enum": [
-                "compile_only",
-                "compile_and_call"
+                "parser",
+                "database"
               ],
-              "description": "Repair mode. compile_only uses compilation diagnostics; compile_and_call also tests the procedure with typed callArguments."
+              "description": "Validation mode (default parser)."
             },
-            "sql": {
+            "database": {
               "type": "string",
-              "description": "Optional complete corrected CREATE PROCEDURE or CREATE OR REPLACE PROCEDURE block. If omitted, uses the selected or current procedure block in the active editor."
-            },
-            "callArguments": {
-              "type": "array",
-              "description": "Typed values for CALL in declaration order. Required for compile_and_call; use [] for a no-argument procedure.",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "string",
-                      "number",
-                      "boolean",
-                      "null",
-                      "date",
-                      "timestamp"
-                    ]
-                  },
-                  "value": {
-                    "description": "Value matching the declared type. Dates use YYYY-MM-DD."
-                  }
-                },
-                "required": [
-                  "type",
-                  "value"
-                ],
-                "additionalProperties": false
-              }
+              "description": "Database name for mode=database."
             }
           },
           "required": [
-            "mode"
-          ],
-          "additionalProperties": false
-        }
-      },
-      {
-        "name": "netezza_inspect_import_file",
-        "displayName": "Inspect Import File",
-        "toolReferenceName": "inspectImportFile",
-        "icon": "$(file)",
-        "userDescription": "Inspects a source file and returns detected delimiter, inferred column types, and sample rows",
-        "modelDescription": "Use this tool before import to inspect CSV/TXT/XLSX/XLSB files. It infers delimiter and decimal separator, returns source-to-target column mapping preview, and shows sample rows. This tool does not write to database.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "file",
-          "import",
-          "netezza",
-          "preview",
-          "schema"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "filePath": {
-              "type": "string",
-              "description": "Path to source file to inspect."
-            },
-            "sampleRows": {
-              "type": "integer",
-              "description": "Number of sample rows to return (default 5, max 20).",
-              "default": 5,
-              "minimum": 1,
-              "maximum": 20
-            }
-          },
-          "required": [
-            "filePath"
+            "sql"
           ]
         }
       },
       {
-        "name": "netezza_propose_import_mapping",
-        "displayName": "Propose Import Mapping",
-        "toolReferenceName": "proposeImportMapping",
-        "icon": "$(wand)",
-        "userDescription": "Proposes inferred source-to-target column mapping and CREATE TABLE SQL for import",
-        "modelDescription": "Use this tool after file inspection to produce a proposed mapping for import. It infers target column names/types and returns proposed CREATE TABLE AS EXTERNAL SQL for the selected target table.",
-        "canBeReferencedInPrompt": true,
-        "tags": [
-          "ddl",
-          "import",
-          "mapping",
-          "netezza",
-          "schema"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "filePath": {
-              "type": "string",
-              "description": "Path to source file."
-            },
-            "targetTable": {
-              "type": "string",
-              "description": "Target table name in Netezza (for example MYDB.ADMIN.MYTABLE)."
-            }
-          },
-          "required": [
-            "filePath",
-            "targetTable"
-          ]
-        }
-      },
-      {
-        "name": "netezza_get_dialect_reference",
+        "name": "netezza_get_reference",
         "displayName": "Get Dialect Reference",
         "toolReferenceName": "getDialectReference",
         "icon": "$(book)",
-        "userDescription": "Get Netezza SQL, optimization, or NZPLSQL reference guidance",
-        "modelDescription": "Returns the JustyBase reference rules for the active dialect: SQL naming conventions and optimization guidance, NZPLSQL procedure constraints, or both. Use it before rewriting or reviewing Netezza SQL when dialect-specific rules matter.",
+        "userDescription": "Get Netezza SQL, NZPLSQL or performance reference documentation",
+        "modelDescription": "Returns the Netezza reference for SQL authoring, NZPLSQL procedures, or performance tuning. Use it before writing dialect-specific syntax or procedures.",
         "canBeReferencedInPrompt": true,
         "tags": [
+          "documentation",
           "netezza",
-          "nzplsql",
-          "optimization",
-          "reference",
-          "sql"
+          "reference"
         ],
         "inputSchema": {
           "type": "object",
@@ -1586,10 +1438,211 @@
                 "nzplsql",
                 "all"
               ],
-              "description": "Reference topic. Defaults to all."
+              "description": "Reference topic (default all)."
             }
           },
           "required": []
+        }
+      },
+      {
+        "name": "netezza_inspect_import_file",
+        "displayName": "Inspect Import File",
+        "toolReferenceName": "inspectImportFile",
+        "icon": "$(file)",
+        "userDescription": "Inspect a local delimited or spreadsheet file without importing it",
+        "modelDescription": "Inspects a local delimited or spreadsheet file without importing it: columns, inferred types, sample rows and delimiter/encoding hints.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "file",
+          "import",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Absolute path to the file to inspect."
+            },
+            "sampleRows": {
+              "type": "number",
+              "description": "Number of sample rows (default 5)."
+            }
+          },
+          "required": [
+            "filePath"
+          ]
+        }
+      },
+      {
+        "name": "netezza_propose_import_mapping",
+        "displayName": "Propose Import Mapping",
+        "toolReferenceName": "proposeImportMapping",
+        "icon": "$(table)",
+        "userDescription": "Propose a column mapping and DDL for importing a file into a table",
+        "modelDescription": "Proposes a column mapping and staging/target DDL for importing a local file into a Netezza table. It never executes the import.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "ddl",
+          "import",
+          "mapping",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Absolute path to the file to import."
+            },
+            "targetTable": {
+              "type": "string",
+              "description": "Target table name."
+            }
+          },
+          "required": [
+            "filePath",
+            "targetTable"
+          ]
+        }
+      },
+      {
+        "name": "netezza_execute_sql",
+        "displayName": "Execute SQL",
+        "toolReferenceName": "executeSql",
+        "icon": "$(play)",
+        "userDescription": "Execute one SQL statement; writes and destructive statements are policy-gated",
+        "modelDescription": "Executes exactly one SQL statement on the selected Netezza connection. SELECT returns capped rows; DML/DDL returns the affected row count. Destructive statements require the destructive tier and an explicit confirm value.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "database",
+          "netezza",
+          "sql",
+          "write"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "Exactly one SQL statement."
+            },
+            "maxRows": {
+              "type": "number",
+              "description": "Maximum rows returned for SELECT (default 500, max 5000)."
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Command timeout in milliseconds (default 60000)."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database to execute in. Defaults to the selected connection database."
+            },
+            "confirm": {
+              "type": "string",
+              "description": "Required for destructive statements: the object name being dropped or truncated."
+            }
+          },
+          "required": [
+            "sql"
+          ]
+        }
+      },
+      {
+        "name": "netezza_drop_object",
+        "displayName": "Drop Object",
+        "toolReferenceName": "dropObject",
+        "icon": "$(trash)",
+        "userDescription": "Drop one database object after an explicit confirmation value",
+        "modelDescription": "Drops a single Netezza object with an explicit confirmation value. This is destructive: it requires the destructive tier and confirm equal to the object name.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "database",
+          "destructive",
+          "netezza"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "object": {
+              "type": "string",
+              "description": "Object name to drop."
+            },
+            "objectType": {
+              "type": "string",
+              "enum": [
+                "table",
+                "view",
+                "procedure",
+                "external table",
+                "synonym",
+                "nickname",
+                "alias"
+              ],
+              "description": "Object type."
+            },
+            "cascade": {
+              "type": "boolean",
+              "description": "Add CASCADE (default false)."
+            },
+            "database": {
+              "type": "string",
+              "description": "Database name. Defaults to the connected database."
+            },
+            "confirm": {
+              "type": "string",
+              "description": "Must repeat the object name exactly (case-insensitive)."
+            }
+          },
+          "required": [
+            "object",
+            "objectType",
+            "confirm"
+          ]
+        }
+      },
+      {
+        "name": "netezza_compile_procedure",
+        "displayName": "Compile Procedure",
+        "toolReferenceName": "compileProcedure",
+        "icon": "$(code)",
+        "userDescription": "Create or replace an NZPLSQL procedure and optionally run a test CALL",
+        "modelDescription": "Creates or replaces a Netezza NZPLSQL procedure from the supplied CREATE PROCEDURE block. Use mode=compile_and_call to run a test CALL; that CALL may modify data and is confirmed separately.",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "ddl",
+          "netezza",
+          "nzplsql",
+          "procedure"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "CREATE PROCEDURE block. When omitted, the active editor selection is used."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "compile_only",
+                "compile_and_call"
+              ],
+              "description": "Compile only, or compile and run a test CALL."
+            },
+            "callArguments": {
+              "type": "array",
+              "description": "Typed arguments for the test CALL when mode=compile_and_call.",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "mode"
+          ]
         }
       }
     ],
@@ -4413,15 +4466,20 @@
           "maximum": 20,
           "description": "Maximum number of workspace Copilot table profiles included in one Copilot request context."
         },
+        "justybase.ai.tools": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Per-surface access profiles and per-tool overrides for JustyBase assistant tools. Each surface accepts `read-only`, `read-write` or `full`; `writableConnections` lists the MCP connections that may write. Configure it in **JustyBase Settings → AI Tools**."
+        },
         "justybase.copilot.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Register JustyBase AI tools and enable AI-assisted SQL workflows. When disabled, the extension does not register its language-model tools; the read-only MCP server is controlled separately."
+          "description": "Register JustyBase AI tools and enable AI-assisted SQL workflows. When disabled, the extension does not register its language-model tools; the MCP server is controlled separately."
         },
         "justybase.mcp.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Register the read-only Netezza MCP server (stdio) for Copilot Chat in VS Code. Passwords are passed to the server process via environment variables and are never written to disk."
+          "description": "Register the Netezza MCP server (stdio) for Copilot Chat in VS Code. Tool access is controlled by justybase.ai.tools. Passwords are passed to the server process via environment variables and are never written to disk."
         },
         "justybase.mcp.connectionName": {
           "type": "string",
@@ -4431,7 +4489,7 @@
         "justybase.mcp.externalEnabled": {
           "type": "boolean",
           "default": false,
-          "description": "Start the Netezza MCP server in HTTP mode on 127.0.0.1 so other MCP clients on this machine (Cursor, Claude Desktop, ...) can use the read-only schema tools. Runs only while VS Code is open."
+          "description": "Start the Netezza MCP server in HTTP mode on 127.0.0.1 so other MCP clients on this machine (Cursor, Claude Desktop, ...) can use the schema tools. Write access requires a bearer token shown in JustyBase Settings. Runs only while VS Code is open."
         },
         "justybase.mcp.port": {
           "type": "number",

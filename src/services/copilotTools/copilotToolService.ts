@@ -6,7 +6,16 @@
  */
 
 import type * as vscode from 'vscode';
+import type { ExecuteStatementResult } from '../../core/assistant/executionService';
 import type { ProcedureRepairInput } from '../copilot/tools/procedureRepairUtils';
+
+export interface CopilotExecuteOptions {
+    readonly maxRows?: number;
+    readonly timeoutMs?: number;
+    readonly database?: string;
+    readonly signal?: AbortSignal;
+}
+
 export interface CopilotToolService {
     getColumnsForTables(tables: string[], database?: string): Promise<string>;
     getComments(tableName: string, database?: string, schema?: string, includeColumns?: boolean): Promise<string>;
@@ -17,6 +26,7 @@ export interface CopilotToolService {
         schema?: string;
     }): Promise<string>;
     getDatabases(): Promise<string>;
+    getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string>;
     getExplainPlanAnalysis(sql: string, verbose: boolean, database?: string): Promise<string>;
     getExternalTables(database?: string, schema?: string, pattern?: string): Promise<string>;
     getNetezzaReference(topic: 'optimization' | 'nzplsql' | 'all'): string;
@@ -27,6 +37,7 @@ export interface CopilotToolService {
     ): Promise<string>;
     getProcedures(database?: string, schema?: string): Promise<string>;
     getSchemaForSql(sql: string): Promise<string>;
+    getTableConstraints(table: string, database?: string, schema?: string): Promise<string>;
     getToolContext(sql?: string, includeSchema?: boolean, includeDiagnostics?: boolean): Promise<string>;
     getSchemas(database?: string): Promise<string>;
     getSqlDiagnostics(includeWarnings?: boolean): Promise<string>;
@@ -44,5 +55,6 @@ export interface CopilotToolService {
     validateSql(sql: string): Promise<string>;
     validateSqlOnDatabase(sql: string, database?: string): Promise<string>;
     repairProcedure(input: ProcedureRepairInput, token?: vscode.CancellationToken): Promise<string>;
+    executeSql(sql: string, options: CopilotExecuteOptions): Promise<ExecuteStatementResult>;
     findTableLocations(tableName: string): Promise<string>;
 }

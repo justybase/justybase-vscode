@@ -6,11 +6,11 @@ description: Analyze Netezza query performance with JustyBase tools. Use when as
 # JustyBase performance workflow
 
 1. Call `#netezza_get_context` to capture the SQL and diagnostics.
-2. Call `#netezza_explain_sql` with the query. Inspect nodes, hotspots, risk, and the raw plan.
-3. Collect metadata for referenced tables with `#netezza_get_object_details` using `sections: ["stats", "dependencies", "columns"]`.
+2. Call `#netezza_explain_query` with the query. Inspect nodes, hotspots, risk, and the raw plan.
+3. Collect metadata for referenced tables with `#netezza_get_object` using `sections: ["stats", "dependencies", "columns"]`.
 4. Check table distribution, row counts, skew, and join keys. Call `#netezza_search_catalog` when a referenced table cannot be resolved.
 5. Propose changes one at a time: predicate pushdown, join order, distribution, statistics refresh, or set-based rewrites.
-6. Re-run `#netezza_validate_sql` and `#netezza_explain_sql` on the rewrite.
+6. Re-run `#netezza_validate_sql` and `#netezza_explain_query` on the rewrite.
 7. Report the plan delta, not only the rewritten SQL. If cost markers are unavailable, say so.
 
 ## Guidelines

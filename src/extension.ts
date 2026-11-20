@@ -29,7 +29,6 @@ import { registerMigrationCommands } from './commands/migrationCommands';
 import { registerFileConnectionCommands } from './commands/fileConnectionCommands';
 import { registerQueryCommands } from './commands/queryCommands';
 import { registerCopilotFeatures } from './activation/copilotRegistration';
-import { showSensitiveCopilotToolNotice } from './activation/sensitiveCopilotToolNotice';
 import { registerSqlLanguageFeatures } from './activation/sqlLanguageRegistration';
 import { getExtensionDocumentParseSession } from './core/extensionDocumentParseSession';
 import { startSqlLanguageClient, stopSqlLanguageClient } from './activation/lspRegistration';
@@ -417,13 +416,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger.warn(`Netezza extension: MCP server registration failed but activation will continue: ${errorMessage}`);
-    }
-
-    if (!skipDeferredFeatureInit) {
-        void showSensitiveCopilotToolNotice(context).catch((error: unknown) => {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.warn(`Netezza extension: Could not show Copilot security notice: ${errorMessage}`);
-        });
     }
 
     const sqlParserConfig = getExtensionConfiguration('sqlParser');

@@ -9,7 +9,10 @@
 
 import * as vscode from 'vscode';
 import type { DatabaseReferenceTopic } from '../contracts/database';
+import type { ConnectionDetails } from '../types';
 import { ConnectionManager } from '../core/connectionManager';
+import { CatalogIntrospection } from '../core/catalogIntrospection';
+import { executeStatement, type ExecuteStatementResult } from '../core/assistant/executionService';
 import {
     getDatabaseDialect,
     getRequiredDatabaseCopilotReferenceProvider
@@ -287,8 +290,51 @@ Please:
         return this.toolsHandler.getColumnsForTables(tables, database);
     }
 
+    public async getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string> {
+        return this.toolsHandler.getExplainPlan(sql, verbose, database);
+    }
+
     public async getExplainPlanAnalysis(sql: string, verbose: boolean, database?: string): Promise<string> {
         return this.toolsHandler.getExplainPlanAnalysis(sql, verbose, database);
+    }
+
+    /**
+     * Constraints are only implemented by the shared catalog service, so the
+     * Copilot surface reuses it against the active editor connection.
+     */
+    public async getTableConstraints(table: string, database?: string, schema?: string): Promise<string> {
+        return this.catalogForActiveConnection().getTableConstraints(table, database, schema);
+    }
+
+    public async executeSql(
+        sql: string,
+        options: {
+            maxRows?: number;
+            timeoutMs?: number;
+            database?: string;
+            signal?: AbortSignal;
+        },
+    ): Promise<ExecuteStatementResult> {
+        const details = await this.requireActiveConnectionDetails();
+        return executeStatement(details, sql, options);
+    }
+
+    private catalogForActiveConnection(): CatalogIntrospection {
+        return new CatalogIntrospection({
+            getConnectionDetails: () => this.requireActiveConnectionDetails(),
+        });
+    }
+
+    private async requireActiveConnectionDetails(): Promise<ConnectionDetails> {
+        const connectionName = this.connectionManager.getActiveConnectionName();
+        if (!connectionName) {
+            throw new Error('No active connection. Select a Netezza connection first.');
+        }
+        const details = await this.connectionManager.getConnection(connectionName);
+        if (!details) {
+            throw new Error(`Connection "${connectionName}" is not available.`);
+        }
+        return details;
     }
 
     public async getSchemaForSql(sql: string): Promise<string> {

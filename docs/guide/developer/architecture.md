@@ -62,4 +62,4 @@ The desktop result panel has loaded-row, disk-backed, and database-scope filteri
 
 ## AI and MCP
 
-Copilot registrations are aligned with `src/contracts/copilotTools/contracts.ts`, activation registration, and the manifest. MCP uses `src/mcp/mcpToolCatalog.ts` and a read-only gate for both stdio and HTTP. New tools must update code, contract, catalog, privacy documentation, and generated docs in the same change.
+Copilot registrations are aligned with `src/contracts/copilotTools/contracts.ts`, the shared `src/core/assistant/toolCatalog.ts` catalog, the activation registration, and the manifest. MCP uses the same catalog plus `toolPolicy.ts` for per-surface filtering; stdio and HTTP share `createNetezzaMcpServer`. Read-only is the default, and HTTP writes require a bearer token. New tools must update code, contract, catalog, policy, privacy documentation, and generated docs in the same change.

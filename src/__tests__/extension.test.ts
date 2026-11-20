@@ -345,14 +345,15 @@ jest.mock('../services/copilotService', () => ({
     })),
     GetContextTool: jest.fn(),
     SearchCatalogTool: jest.fn(),
-    GetObjectDetailsTool: jest.fn(),
-    ExplainSqlTool: jest.fn(),
+    GetObjectTool: jest.fn(),
+    ExplainQueryTool: jest.fn(),
     ValidateSqlTool: jest.fn(),
-    ValidateSqlOnDatabaseTool: jest.fn(),
-    ProcedureRepairTool: jest.fn(),
+    GetReferenceTool: jest.fn(),
     InspectImportFileTool: jest.fn(),
     ProposeImportMappingTool: jest.fn(),
-    NetezzaReferenceTool: jest.fn()
+    ExecuteSqlTool: jest.fn(),
+    DropObjectTool: jest.fn(),
+    CompileProcedureTool: jest.fn()
 }));
 
 jest.mock('../commands/schemaCommands', () => ({

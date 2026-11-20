@@ -12,14 +12,15 @@ import {
     hasToolContract,
     GetContextToolContract,
     SearchCatalogToolContract,
-    GetObjectDetailsToolContract,
-    ExplainSqlToolContract,
+    GetObjectToolContract,
+    ExplainQueryToolContract,
     ValidateSqlToolContract,
-    ValidateSqlOnDatabaseToolContract,
-    ProcedureRepairToolContract,
+    ExecuteSqlToolContract,
+    DropObjectToolContract,
+    CompileProcedureToolContract,
     InspectImportFileToolContract,
     ProposeImportMappingToolContract,
-    NetezzaReferenceToolContract
+    GetReferenceToolContract
 } from '../../contracts/copilotTools/contracts';
 import { ALLOWED_AI_TOOL_NAMES } from '../../services/copilotTools/aiToolPolicy';
 
@@ -33,7 +34,7 @@ describe('JustyBase AI tool contracts', () => {
         tags?: string[];
     }>;
 
-    describe('Manifest ↔ contract coverage', () => {
+    describe('Manifest → contract coverage', () => {
         it('has a contract for every manifest tool', () => {
             const missing = manifestTools
                 .map(tool => tool.name)
@@ -52,9 +53,9 @@ describe('JustyBase AI tool contracts', () => {
             expect([...ALLOWED_AI_TOOL_NAMES].sort()).toEqual([...ToolContractRegistry.keys()].sort());
         });
 
-        it('registers exactly ten tools', () => {
-            expect(ToolContractRegistry.size).toBe(10);
-            expect(manifestTools).toHaveLength(10);
+        it('registers exactly eleven tools', () => {
+            expect(ToolContractRegistry.size).toBe(11);
+            expect(manifestTools).toHaveLength(11);
         });
 
         it('matches names, display names, reference names, and tags', () => {
@@ -76,41 +77,61 @@ describe('JustyBase AI tool contracts', () => {
             expect(GetContextToolContract.validateInput({ includeSchema: 'yes' }).success).toBe(false);
         });
 
-        it('defaults search_catalog to tables and validates objectType', () => {
+        it('defaults search_catalog to tables and validates kind', () => {
             const defaultResult = SearchCatalogToolContract.validateInput({});
             expect(defaultResult.success).toBe(true);
             if (defaultResult.success) {
-                expect(defaultResult.data.objectType).toBe('tables');
+                expect(defaultResult.data.kind).toBe('tables');
             }
 
-            expect(SearchCatalogToolContract.validateInput({ objectType: 'columns', pattern: 'NAME' }).success).toBe(true);
-            expect(SearchCatalogToolContract.validateInput({ objectType: 'invalid' }).success).toBe(false);
+            expect(SearchCatalogToolContract.validateInput({ kind: 'columns', query: 'NAME' }).success).toBe(true);
+            expect(SearchCatalogToolContract.validateInput({ kind: 'invalid' }).success).toBe(false);
+            expect(SearchCatalogToolContract.validateInput({ kind: 'columns' }).success).toBe(false);
         });
 
-        it('requires objectName unless only favorites are requested', () => {
-            expect(GetObjectDetailsToolContract.validateInput({ objectName: 'ADMIN.T', sections: ['ddl'] }).success).toBe(true);
-            expect(GetObjectDetailsToolContract.validateInput({ sections: ['favorites'] }).success).toBe(true);
-            expect(GetObjectDetailsToolContract.validateInput({ sections: ['ddl'] }).success).toBe(false);
-            expect(GetObjectDetailsToolContract.validateInput({ objectName: 'T', sections: ['unknown'] }).success).toBe(false);
+        it('requires the object name and validates sections', () => {
+            expect(GetObjectToolContract.validateInput({ object: 'ADMIN.T', sections: ['ddl'] }).success).toBe(true);
+            expect(GetObjectToolContract.validateInput({ object: 'ADMIN.T' }).success).toBe(true);
+            expect(GetObjectToolContract.validateInput({ sections: ['ddl'] }).success).toBe(false);
+            expect(GetObjectToolContract.validateInput({ object: 'T', sections: ['unknown'] }).success).toBe(false);
+            expect(GetObjectToolContract.validateInput({ object: 'T', sections: ['favorites'] }).success).toBe(false);
         });
 
-        it('validates explain_sql and validate_sql input', () => {
-            expect(ExplainSqlToolContract.validateInput({ sql: 'SELECT 1' }).success).toBe(true);
-            expect(ExplainSqlToolContract.validateInput({}).success).toBe(false);
-            expect(ValidateSqlToolContract.validateInput({}).success).toBe(true);
+        it('validates explain_query and validate_sql input', () => {
+            expect(ExplainQueryToolContract.validateInput({ sql: 'SELECT 1' }).success).toBe(true);
+            expect(ExplainQueryToolContract.validateInput({}).success).toBe(false);
             expect(ValidateSqlToolContract.validateInput({ sql: 'SELECT 1' }).success).toBe(true);
+            expect(ValidateSqlToolContract.validateInput({}).success).toBe(false);
+            expect(ValidateSqlToolContract.validateInput({ sql: 'SELECT 1', mode: 'database' }).success).toBe(true);
+            expect(ValidateSqlToolContract.validateInput({ sql: 'SELECT 1', mode: 'invalid' }).success).toBe(false);
         });
 
-        it('validates validate_sql_on_database input', () => {
-            expect(ValidateSqlOnDatabaseToolContract.validateInput({ database: 'TESTDB' }).success).toBe(true);
-            expect(ValidateSqlOnDatabaseToolContract.validateInput({ sql: 'SELECT 1', database: 'TESTDB' }).success).toBe(true);
+        it('validates execute_sql input', () => {
+            expect(ExecuteSqlToolContract.validateInput({ sql: 'SELECT 1' }).success).toBe(true);
+            expect(ExecuteSqlToolContract.validateInput({ sql: 'DROP TABLE T', confirm: 'T' }).success).toBe(true);
+            expect(ExecuteSqlToolContract.validateInput({}).success).toBe(false);
         });
 
-        it('validates procedure repair mode and call arguments', () => {
-            expect(ProcedureRepairToolContract.validateInput({ mode: 'compile_only' }).success).toBe(true);
-            expect(ProcedureRepairToolContract.validateInput({ mode: 'compile_and_call', callArguments: [] }).success).toBe(true);
-            expect(ProcedureRepairToolContract.validateInput({ mode: 'compile_and_call' }).success).toBe(false);
-            expect(ProcedureRepairToolContract.validateInput({ mode: 'invalid' }).success).toBe(false);
+        it('validates drop_object input', () => {
+            expect(DropObjectToolContract.validateInput({
+                object: 'ADMIN.T',
+                objectType: 'table',
+                confirm: 'T'
+            }).success).toBe(true);
+            expect(DropObjectToolContract.validateInput({ object: 'ADMIN.T', confirm: 'T' }).success).toBe(false);
+            expect(DropObjectToolContract.validateInput({ object: 'ADMIN.T', objectType: 'table' }).success).toBe(false);
+            expect(DropObjectToolContract.validateInput({
+                object: 'ADMIN.T',
+                objectType: 'invalid',
+                confirm: 'T'
+            }).success).toBe(false);
+        });
+
+        it('validates procedure compile mode and call arguments', () => {
+            expect(CompileProcedureToolContract.validateInput({ mode: 'compile_only' }).success).toBe(true);
+            expect(CompileProcedureToolContract.validateInput({ mode: 'compile_and_call', callArguments: [] }).success).toBe(true);
+            expect(CompileProcedureToolContract.validateInput({ mode: 'compile_and_call' }).success).toBe(false);
+            expect(CompileProcedureToolContract.validateInput({ mode: 'invalid' }).success).toBe(false);
         });
 
         it('validates import tools', () => {
@@ -121,13 +142,13 @@ describe('JustyBase AI tool contracts', () => {
         });
 
         it('validates dialect reference topic', () => {
-            const defaultResult = NetezzaReferenceToolContract.validateInput({});
+            const defaultResult = GetReferenceToolContract.validateInput({});
             expect(defaultResult.success).toBe(true);
             if (defaultResult.success) {
                 expect(defaultResult.data.topic).toBe('all');
             }
-            expect(NetezzaReferenceToolContract.validateInput({ topic: 'nzplsql' }).success).toBe(true);
-            expect(NetezzaReferenceToolContract.validateInput({ topic: 'invalid' }).success).toBe(false);
+            expect(GetReferenceToolContract.validateInput({ topic: 'nzplsql' }).success).toBe(true);
+            expect(GetReferenceToolContract.validateInput({ topic: 'invalid' }).success).toBe(false);
         });
     });
 

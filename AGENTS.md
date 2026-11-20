@@ -239,7 +239,8 @@ Optional extensions expose corresponding `package:<dialect>` and `package:<diale
 - `@justybase/sqlite-runtime` owns SQLite sessions and Node I/O. Pass only product-authorized absolute paths or `:memory:`; sandbox and user authorization remain in the product adapter.
 - `@justybase/duckdb-runtime` owns DuckDB sessions, module resolution, catalog serialization, bounded reads, cancellation, and instance ownership. File SQL conversion/view setup stays in the companion adapter.
 - `@justybase/netezza-runtime` is the sole production owner of the Netezza driver import. Product adapters pass resolved credentials/targets; do not import the driver directly from desktop dialects, MCP, companion extensions, or compatibility helpers.
-- `src/mcp/` contains the bundled read-only Netezza MCP server. Preserve the read-only gate for both stdio and HTTP transports.
+- `src/mcp/` contains the bundled Netezza MCP server. The server tool set and access tiers come from `src/core/assistant/toolCatalog.ts` and `toolPolicy.ts`; `justybase.ai.tools` (Settings → AI Tools) controls each surface. Read-only remains the default for stdio and HTTP. HTTP write mode additionally requires a per-run bearer token and the selected connection in `writableConnections`; never remove those two gates.
+- Assistant tools share `src/core/assistant/executionService.ts` and `sqlAccess.ts`. Keep both free of `vscode` imports: the MCP bundle runs in a standalone Node process.
 
 ### Critical Patterns
 

@@ -1,7 +1,8 @@
 # Netezza MCP Server
 
-The extension bundles a read-only **Model Context Protocol (MCP)** server that exposes Netezza schema
-introspection and SQL tooling to AI agents:
+The extension bundles a **Model Context Protocol (MCP)** server that exposes Netezza schema
+introspection and SQL tooling to AI agents. It is **read-only by default**; write and destructive
+tools are opt-in per surface and per connection:
 
 - **Copilot Chat in VS Code** (stdio mode) — registered via
   `vscode.lm.registerMcpServerDefinitionProvider` (`contributes.mcpServerDefinitionProviders`).
@@ -10,12 +11,14 @@ introspection and SQL tooling to AI agents:
 
 All MCP configuration lives in the custom **JustyBase Settings → MCP Server** section: connection selection,
 on/off switches for both modes, the HTTP port, live status, tools and the OpenCode configuration snippet.
+Tool access is configured in **JustyBase Settings → AI Tools** (`justybase.ai.tools`).
 
 ## What this enables
 
-MCP turns JustyBase into a safe schema companion for AI-assisted SQL work. An agent can discover the right
+MCP turns JustyBase into a schema companion for AI-assisted SQL work. An agent can discover the right
 database object, inspect its columns and DDL, search the catalog, validate SQL locally, or request a read-only
-`EXPLAIN` plan — without being allowed to run `INSERT`, `UPDATE`, `DELETE`, DDL, or arbitrary SQL.
+`EXPLAIN` plan. A user who explicitly grants write access can also let the agent execute DML/DDL, drop
+objects, or compile NZPLSQL procedures. Defaults never allow that.
 
 Choose the integration that matches your workflow:
 
@@ -40,35 +43,48 @@ from the VS Code Secrets API — are injected into the process environment only:
 
 No credentials file is ever written. The server exits when VS Code closes (HTTP mode is not a daemon).
 
-## Read-only policy
+## Access policy
 
-Every tool is registered with the `readOnlyHint` MCP annotation. The server:
+`justybase.ai.tools` resolves an access profile per surface (`read-only`, `read-write`, `full`) plus
+optional per-tool overrides. Overrides can only narrow access. Read-only tools are always available;
+write tools appear only when the profile allows them; destructive tools require `full`.
 
-- never accepts arbitrary SQL from the model — catalog queries are constructed internally,
-- runs `EXPLAIN` only for a single `SELECT` / `WITH ... SELECT` statement (gate:
-  `src/mcp/mcpReadOnlyGate.ts`, shared with the Copilot tools `aiSqlSafety.ts`),
-- never reads user table data.
+MCP writes have two additional gates:
+
+- the selected connection must be listed in `writableConnections`;
+- HTTP mode generates a per-run **bearer token** whenever write tools are exposed. Every HTTP request
+  must send `Authorization: Bearer <token>`. The token is shown in **Settings → MCP Server** and is
+  regenerated when the child process restarts.
+
+Tools that the policy does not allow are **not registered**, so they never appear in `tools/list`.
+Read tools carry `readOnlyHint: true`; write and destructive tools carry `readOnlyHint: false`, and
+destructive tools additionally carry `destructiveHint: true`.
+
+The execution layer also classifies each statement before it runs:
+
+- `SELECT` / `WITH ... SELECT` run through `executeReader` and return capped rows;
+- DML and DDL require the write tier;
+- `DROP`, `TRUNCATE`, `GRANT`, `REVOKE` and `ALTER ... DROP` require the destructive tier and an explicit
+  `confirm` value equal to the object name.
+
+Exactly one statement is accepted per call, and every call opens its own connection (autocommit, no
+cross-call transaction). Database permissions remain the final boundary.
 
 ## Offered tools
 
-| Tool | Description |
-|------|-------------|
-| `get_databases` | No arguments. Lists databases from `_V_DATABASE`. |
-| `get_schemas` | Optional `database`; uses the active database, or `_V_USER` when none is available. |
-| `get_tables` | Optional `database` and `schema`; returns up to 200 tables from `_V_TABLE`. |
-| `get_columns` | Required `tables` array. Accepts `TABLE`, `SCHEMA.TABLE`, `DATABASE.SCHEMA.TABLE` and `DATABASE..TABLE`; returns type and nullability metadata from `_V_RELATION_COLUMN`. |
-| `get_table_stats` | Required `tableName`; returns catalog-only row/storage, skew, distribution and organization metadata. It never scans the table. |
-| `get_comments` | Required `tableName`; optional `database`, `schema` and `includeColumns`; returns `DESCRIPTION` values from catalog views. |
-| `get_dependencies` | Required `object`; optional `database` and `objectType` (`TABLE`, `VIEW`, `PROCEDURE`); reports FK and view/procedure source references. |
-| `get_external_tables` | Optional `database`, `schema` and `pattern`; lists external-table metadata including `DATAOBJECT`, without reading external data. |
-| `get_table_constraints` | Required `tableName`; optional `database` and `schema`; returns `PRIMARY KEY`, `FOREIGN KEY` and `UNIQUE` metadata. |
-| `get_procedures` | Optional `database` and `schema`; lists visible procedures from `_V_PROCEDURE`. |
-| `get_views` | Optional `database` and `schema`; lists up to 200 non-system views from `_V_VIEW`. |
-| `search_schema` | Required `pattern`; optional `database` and `objectType`. `ALL` searches tables, views and procedures; use `COLUMNS` to search column names. Results are limited to 100. |
-| `get_ddl` | Required `objectName`; optional `objectType`, `database` and `schema`. Generates DDL through the database DDL provider and supports qualified Netezza names including `DATABASE..OBJECT`. |
-| `explain_sql` | Required single `SELECT` or `WITH ... SELECT` in `sql`; optional `verbose` and `database`. Returns the plan captured from driver NOTICE messages. |
-| `analyze_query_plan` | Same safe SQL input as `explain_sql`; returns parsed plan nodes, edges, hotspots, risk summary and recommendations. |
-| `validate_sql` | Required `sql`. Runs parser and linter validation without a database connection. |
+| Tool | Tier | Description |
+|------|------|-------------|
+| `search_catalog` | read | Required `kind`: `databases`, `schemas`, `tables`, `views`, `procedures`, `external_tables`, `columns` or `all`. Optional `query`, `database` and `schema`. |
+| `get_object` | read | Required `object`; optional `objectType`, `database`, `schema` and `sections` (`ddl`, `columns`, `comments`, `stats`, `constraints`, `dependencies`). |
+| `explain_query` | read | Required single `SELECT` or `WITH ... SELECT` in `sql`; optional `verbose`, `analyze` and `database`. Never executes the statement. |
+| `validate_sql` | read | Required `sql`; optional `mode` (`parser` or `database`) and `database`. |
+| `get_reference` | read | Optional `topic` (`optimization`, `nzplsql`, `all`). Returns bundled dialect guidance. |
+| `execute_sql` | write | Required `sql`; optional `maxRows`, `timeoutMs` and `database`. Destructive statements additionally require `confirm`. |
+| `drop_object` | destructive | Required `object`, `objectType` and `confirm`; optional `cascade` and `database`. |
+| `compile_procedure` | write | Required `mode` (`compile_only` or `compile_and_call`); optional `sql` and typed `callArguments`. |
+
+The read tools reuse the shared catalog service (`src/core/catalogIntrospection.ts`). The write tools reuse
+`src/core/assistant/executionService.ts`; both modules are free of `vscode` imports.
 
 ## Using it in VS Code (Copilot Chat)
 
@@ -142,15 +158,35 @@ or lost access stop the server and require choosing another connection.
    In each client, start a new session after adding the server and check its MCP server list/status if
    the tools do not appear immediately.
 
+   When write tools are enabled, add the bearer token from **Settings → MCP Server** as an
+   `Authorization` header. The OpenCode snippet in Settings already includes it. Other clients accept the
+   same header via their HTTP MCP configuration:
+
+   ```json
+   {
+     "mcp": {
+       "netezza-schema": {
+         "type": "remote",
+         "url": "http://127.0.0.1:37210",
+         "headers": { "Authorization": "Bearer <token from Settings>" }
+       }
+     }
+   }
+   ```
+
 Requirements and limits:
 
 - the server runs **only while VS Code is open** (child process; no daemon, no credentials file),
 - bound to `127.0.0.1` only,
-- the listener is reachable by other processes of the same user — tools are read-only,
-- changing the selected MCP connection restarts the HTTP child process on the new target.
+- the listener is reachable by other processes of the same user,
+- read-only is the default; write tools require the profile, the connection allowlist and (for HTTP) the token,
+- changing the selected MCP connection restarts the HTTP child process on the new target,
 - changing the active editor connection has no effect on MCP.
 
 ## Configuration
+
+`justybase.ai.tools` — per-surface profiles (`copilot`, `mcp`, `mcpExternal`), per-tool overrides and
+`writableConnections` (configured in **Settings → AI Tools**; read-only everywhere by default)
 
 `justybase.mcp.enabled` — register the stdio server for Copilot Chat (default `false`)
 `justybase.mcp.connectionName` — name of the explicitly selected saved Netezza connection (default empty; no automatic fallback)
@@ -163,24 +199,29 @@ Requirements and limits:
 flowchart TD
     Secrets[VS Code Secrets API] --> CM[ConnectionManager]
     Settings[JustyBase Settings] --> Server[MCP Server]
+    Access[justybase.ai.tools] --> Server
     CM --> Server
     Server --> Provider[registerMcpServerDefinitionProvider · stdio · resolve injects env]
     Provider --> Stdin[dist/mcp/mcpServer.js · stdio]
     Provider --> Http[dist/mcp/mcpServer.js · --transport http]
     Stdin --> Copilot[Copilot Chat]
     Http --> Clients[External MCP clients]
-    Server --> Introspection[src/core/catalogIntrospection.ts · read-only]
+    Server --> Introspection[src/core/catalogIntrospection.ts · read tools]
+    Server --> Execution[src/core/assistant/executionService.ts · write tools]
+    Server --> Policy[src/core/assistant/toolPolicy.ts · registration filter]
 ```
 
-Shared read-only logic lives in `src/core/catalogIntrospection.ts` (no `vscode` imports), so it is
-usable both from the extension host and from the standalone server process. The server entry point is
-`src/mcp/mcpServerEntry.ts` (built to `dist/mcp/mcpServer.js` by `esbuild.js`).
+Shared logic lives in `src/core/assistant/` (`toolCatalog`, `toolPolicy`, `sqlAccess`, `executionService`)
+and `src/core/catalogIntrospection.ts`; none of these import `vscode`, so they work both in the extension
+host and in the standalone server process. The server entry point is `src/mcp/mcpServerEntry.ts` (built to
+`dist/mcp/mcpServer.js` by `esbuild.js`).
 
 ## Live verification
 
 Run `npm run test:mcp:live` with `NZ_DEV_PASSWORD` and optional `NZ_DEV_HOST`, `NZ_DEV_PORT`,
-`NZ_DEV_DATABASE` and `NZ_DEV_USER`. The suite performs a preflight, calls every tool through stdio and
-Streamable HTTP, compares catalog responses with independent `_V_*` oracle queries, checks invalid
-arguments and process shutdown, and writes a redacted summary to `/tmp/justybase-mcp-live-report.json`.
+`NZ_DEV_DATABASE` and `NZ_DEV_USER`. The suite performs a preflight, verifies `tools/list` exposes only the
+read-only tools for the default policy, calls each read tool through stdio and Streamable HTTP, compares
+catalog responses with independent `_V_*` oracle queries, checks invalid arguments and process shutdown,
+and writes a redacted summary to `/tmp/justybase-mcp-live-report.json`.
 Fixture DDL is disabled by default; enable it explicitly with `MCP_LIVE_ALLOW_FIXTURE_DDL=1` and, if
 needed, set `MCP_LIVE_FIXTURE_SCHEMA` to a schema where the test user may create temporary objects.

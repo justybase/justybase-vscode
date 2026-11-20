@@ -31,6 +31,6 @@ product_version: 3.20.11
 | Maintenance | Database-specific admin/maintenance privilege; Netezza session sweep may require system admin. |
 | Session monitor/terminate | Monitor visibility and a terminate privilege; provider-specific. |
 | Security Panel | Grant/revoke/admin catalog rights. |
-| MCP read-only tools | Saved Netezza connection with catalog/EXPLAIN visibility; the selected connection is explicit. |
+| MCP tools | Saved Netezza connection with catalog/EXPLAIN visibility; the selected connection is explicit. Write tools additionally require the `read-write` profile and the connection in `writableConnections`; destructive tools require `full`. |
 
 The UI can hide an action based on capability metadata, but database authorization remains the final authority. Never infer permission from a visible button alone.

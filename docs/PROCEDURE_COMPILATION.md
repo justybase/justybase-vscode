@@ -1,6 +1,6 @@
 # Procedure workflow with Copilot
 
-Copilot exposes `netezza_repair_procedure` for one complete `CREATE PROCEDURE` or
+Copilot exposes `netezza_compile_procedure` for one complete `CREATE PROCEDURE` or
 `CREATE OR REPLACE PROCEDURE` block from the active SQL editor.
 
 The tool supports two modes:
@@ -18,5 +18,8 @@ Arguments for `CALL` are typed values (`string`, `number`, `boolean`, `null`,
 the active editor after a successful compilation but never saves the file
 automatically.
 
-The MCP server remains read-only. Procedure compilation and test execution are
-available only through the explicitly confirmed VS Code Copilot tool.
+The MCP server exposes the same `compile_procedure` tool only when the MCP
+surface is granted the write tier and the selected connection is in
+`writableConnections`. HTTP mode additionally requires its bearer token. The
+compile call executes procedure DDL; `compile_and_call` also executes the test
+`CALL` and may repeat its side effects on each retry.

@@ -457,6 +457,116 @@ body {
 
 .mcp-tools li { margin: 3px 0; }
 
+.mcp-access-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.mcp-write-token {
+    word-break: break-all;
+    user-select: all;
+}
+
+.tool-access-control {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+}
+
+.tool-access-profiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+}
+
+.tool-access-profile {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.tool-access-writable {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.tool-access-writable input {
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--border-subtle));
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+.tool-access-writable small {
+    color: var(--fg-muted);
+}
+
+.tool-access-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.tool-access-table th,
+.tool-access-table td {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 6px 4px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.tool-access-table th {
+    color: var(--fg-dim);
+    font-weight: 600;
+}
+
+.tool-access-name code {
+    display: block;
+    color: var(--fg-muted);
+    font-size: 10px;
+    margin-top: 2px;
+}
+
+.tool-access-tier {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.tool-access-tier.tier-write {
+    background: var(--vscode-editorWarning-foreground, #cca700);
+    color: #1e1e1e;
+}
+
+.tool-access-tier.tier-destructive {
+    background: var(--vscode-errorForeground, #f48771);
+    color: #1e1e1e;
+}
+
+.tool-access-na {
+    color: var(--fg-muted);
+    text-align: center;
+}
+
 .setting-row {
     display: flex;
     align-items: center;

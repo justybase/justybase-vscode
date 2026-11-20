@@ -6,9 +6,9 @@ description: Author, review, or repair Netezza NZPLSQL procedures with JustyBase
 # JustyBase NZPLSQL workflow
 
 1. Call `#netezza_get_context` for the procedure body and its diagnostics.
-2. Call `#netezza_get_dialect_reference` with `topic: "nzplsql"` before rewriting syntax.
+2. Call `#netezza_get_reference` with `topic: "nzplsql"` before rewriting syntax.
 3. Use `#netezza_validate_sql` for parser validation. It does not prove database compilation.
-4. Use `#netezza_repair_procedure` when the procedure must be compiled. This tool is write-capable and requires user confirmation. Prefer `compile_only`; use `compile_and_call` only when the user understands that a test CALL may repeat side effects.
+4. Use `#netezza_compile_procedure` when the procedure must be compiled. This tool is write-capable and requires user confirmation. Prefer `compile_only`; use `compile_and_call` only when the user understands that a test CALL may repeat side effects.
 5. Review the compile diagnostics before proposing another attempt. The tool stops after three attempts.
 
 ## NZPLSQL constraints

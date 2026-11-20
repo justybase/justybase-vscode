@@ -2,8 +2,10 @@ jest.unmock('chevrotain');
 
 import { CatalogIntrospection } from '../../core/catalogIntrospection';
 import { MCP_TOOL_CATALOG } from '../../mcp/mcpToolCatalog';
-import { createMcpToolDefinitions, McpToolDefinition } from '../../mcp/mcpToolRegistry';
+import { createMcpToolDefinitions, type McpToolDefinition, type McpToolRuntime } from '../../mcp/mcpToolRegistry';
 import { jsonSchemaToZod } from '../../mcp/mcpServerCore';
+import type { ExecuteStatementResult } from '../../core/assistant/executionService';
+import type { ToolAuditEvent } from '../../core/assistant/audit';
 
 function createFakeIntrospection(): CatalogIntrospection {
     return {
@@ -21,21 +23,53 @@ function createFakeIntrospection(): CatalogIntrospection {
         searchSchema: jest.fn().mockResolvedValue('[]'),
         getDDL: jest.fn().mockResolvedValue('## DDL'),
         explain: jest.fn().mockResolvedValue('Plan'),
-        analyzeQueryPlan: jest.fn().mockResolvedValue('{"summary":{"overallRisk":"low"}}')
+        analyzeQueryPlan: jest.fn().mockResolvedValue('{"summary":{"overallRisk":"low"}}'),
+        getConnectionDetails: jest.fn().mockResolvedValue({ host: 'h', database: 'DWH' })
     } as unknown as CatalogIntrospection;
+}
+
+function result(overrides: Partial<ExecuteStatementResult> = {}): ExecuteStatementResult {
+    return {
+        kind: 'read',
+        columns: ['X'],
+        rows: [[1]],
+        rowCount: 1,
+        affectedRows: 0,
+        truncated: false,
+        notices: [],
+        ...overrides
+    };
+}
+
+function toolByName(tools: readonly McpToolDefinition[], name: string): McpToolDefinition {
+    const tool = tools.find(candidate => candidate.name === name);
+    if (!tool) throw new Error(`Missing tool ${name}`);
+    return tool;
 }
 
 describe('MCP tool registry', () => {
     const introspection = createFakeIntrospection();
+    const execute = jest.fn();
     let tools: McpToolDefinition[];
 
+    const writableRuntime: McpToolRuntime = {
+        allowWrites: true,
+        allowDestructive: true,
+        execute: (sql, options) => execute(sql, options)
+    };
+
     beforeAll(() => {
-        tools = createMcpToolDefinitions(introspection);
+        tools = createMcpToolDefinitions(introspection, writableRuntime);
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        execute.mockResolvedValue(result());
     });
 
     it('exposes exactly the catalog tools', () => {
-        expect(tools.map(t => t.name).sort()).toEqual(
-            MCP_TOOL_CATALOG.map(t => t.name).sort()
+        expect(tools.map(tool => tool.name).sort()).toEqual(
+            MCP_TOOL_CATALOG.map(tool => tool.name).sort()
         );
         expect(tools).toHaveLength(MCP_TOOL_CATALOG.length);
         for (const tool of tools) {
@@ -44,118 +78,260 @@ describe('MCP tool registry', () => {
         }
     });
 
-    it('rejects get_columns without tables', async () => {
-        const tool = tools.find(t => t.name === 'get_columns')!;
-        const result = await tool.handler({ tables: [] });
-        expect(result.isError).toBe(true);
-        expect(result.text).toContain('No tables');
+    it('filters the registered tools to the effective policy', () => {
+        const filtered = createMcpToolDefinitions(introspection, writableRuntime, ['search_catalog', 'get_object']);
+        expect(filtered.map(tool => tool.name)).toEqual(['search_catalog', 'get_object']);
     });
 
-    it('forwards tables to the columns introspection', async () => {
-        const tool = tools.find(t => t.name === 'get_columns')!;
-        const result = await tool.handler({ tables: ['SALES'] });
-        expect(result.isError).toBeUndefined();
-        expect(introspection.getColumns).toHaveBeenCalledWith(['SALES']);
-    });
+    it('routes every catalog search kind', async () => {
+        const tool = toolByName(tools, 'search_catalog');
+        await tool.handler({ kind: 'databases' });
+        await tool.handler({ kind: 'schemas', database: 'DWH' });
+        await tool.handler({ kind: 'tables', database: 'DWH', schema: 'ADMIN' });
+        await tool.handler({ kind: 'views', database: 'DWH' });
+        await tool.handler({ kind: 'procedures', database: 'DWH' });
+        await tool.handler({ kind: 'external_tables', database: 'DWH' });
+        await tool.handler({ kind: 'columns', query: 'NAME' });
+        await tool.handler({ kind: 'all', query: 'NAME' });
 
-    it('forwards database/schema to the tables introspection', async () => {
-        const tool = tools.find(t => t.name === 'get_tables')!;
-        await tool.handler({ database: 'DWH', schema: 'ADMIN' });
         expect(introspection.getTables).toHaveBeenCalledWith('DWH', 'ADMIN');
+        expect(introspection.searchSchema).toHaveBeenCalledWith('NAME', 'COLUMNS', undefined);
+        expect(introspection.searchSchema).toHaveBeenCalledWith('NAME', 'ALL', undefined);
     });
 
-    it('forwards the new catalog tools without accepting table data SQL', async () => {
-        await tools.find(t => t.name === 'get_table_stats')!.handler({ tableName: 'ADMIN.ORDERS' });
-        expect(introspection.getTableStats).toHaveBeenCalledWith('ADMIN.ORDERS', undefined);
-
-        await tools.find(t => t.name === 'get_comments')!.handler({ tableName: 'ORDERS', includeColumns: false });
-        expect(introspection.getComments).toHaveBeenCalledWith('ORDERS', undefined, undefined, false);
-
-        await tools.find(t => t.name === 'get_dependencies')!.handler({ object: 'ORDERS', objectType: 'TABLE' });
-        expect(introspection.getDependencies).toHaveBeenCalledWith('ORDERS', undefined, 'TABLE');
-
-        await tools.find(t => t.name === 'get_external_tables')!.handler({ database: 'DWH' });
-        expect(introspection.getExternalTables).toHaveBeenCalledWith('DWH', undefined, undefined);
-
-        await tools.find(t => t.name === 'get_table_constraints')!.handler({ tableName: 'ORDERS' });
-        expect(introspection.getTableConstraints).toHaveBeenCalledWith('ORDERS', undefined, undefined);
-
-        await tools.find(t => t.name === 'analyze_query_plan')!.handler({ sql: 'SELECT 1' });
-        expect(introspection.analyzeQueryPlan).toHaveBeenCalledWith('EXPLAIN SELECT 1', undefined);
-    });
-
-    it.each([
-        ['get_table_stats', {}],
-        ['get_comments', {}],
-        ['get_dependencies', {}],
-        ['get_table_constraints', {}],
-        ['analyze_query_plan', {}]
-    ])('rejects missing required arguments for %s', async (name, args) => {
-        const result = await tools.find(t => t.name === name)!.handler(args);
+    it('requires a query for column and object searches', async () => {
+        const result = await toolByName(tools, 'search_catalog').handler({ kind: 'columns' });
         expect(result.isError).toBe(true);
+        expect(result.text).toContain('query is required');
     });
 
-    it('rejects DML through explain_sql', async () => {
-        const tool = tools.find(t => t.name === 'explain_sql')!;
-        const result = await tool.handler({ sql: 'DELETE FROM t' });
+    it('reads default and requested object sections', async () => {
+        const tool = toolByName(tools, 'get_object');
+        const defaults = await tool.handler({ object: 'ADMIN.ORDERS' });
+        expect(defaults.isError).toBeUndefined();
+        expect(introspection.getDDL).toHaveBeenCalledWith({
+            objectName: 'ADMIN.ORDERS',
+            objectType: 'table',
+            database: undefined,
+            schema: undefined
+        });
+        expect(introspection.getColumns).toHaveBeenCalledWith(['ADMIN.ORDERS'], undefined);
+
+        await tool.handler({
+            object: 'ADMIN.ORDERS',
+            sections: ['stats', 'constraints', 'dependencies']
+        });
+        expect(introspection.getTableStats).toHaveBeenCalledWith('ADMIN.ORDERS', undefined);
+        expect(introspection.getTableConstraints).toHaveBeenCalledWith('ADMIN.ORDERS', undefined, undefined);
+        expect(introspection.getDependencies).toHaveBeenCalledWith('ADMIN.ORDERS', undefined, 'TABLE');
+    });
+
+    it('rejects DML through explain_query', async () => {
+        const result = await toolByName(tools, 'explain_query').handler({ sql: 'DELETE FROM t' });
         expect(result.isError).toBe(true);
         expect(result.text).toMatch(/SELECT or WITH|planner-safe/i);
         expect(introspection.explain).not.toHaveBeenCalled();
+        expect(introspection.analyzeQueryPlan).not.toHaveBeenCalled();
     });
 
     it('passes gated EXPLAIN SQL to the introspection', async () => {
-        const tool = tools.find(t => t.name === 'explain_sql')!;
-        const result = await tool.handler({ sql: 'SELECT * FROM admin.orders', verbose: true });
-        expect(result.isError).toBeUndefined();
-        expect(introspection.explain).toHaveBeenCalledWith('EXPLAIN VERBOSE SELECT * FROM admin.orders', undefined);
+        const analyzed = await toolByName(tools, 'explain_query').handler({ sql: 'SELECT * FROM admin.orders' });
+        expect(analyzed.isError).toBeUndefined();
+        expect(introspection.analyzeQueryPlan).toHaveBeenCalledWith('EXPLAIN SELECT * FROM admin.orders', undefined);
+
+        const raw = await toolByName(tools, 'explain_query').handler({
+            sql: 'SELECT 1',
+            verbose: true,
+            analyze: false
+        });
+        expect(raw.isError).toBeUndefined();
+        expect(introspection.explain).toHaveBeenCalledWith('EXPLAIN VERBOSE SELECT 1', undefined);
     });
 
-    it.each(['explain_sql', 'analyze_query_plan'])(
-        'blocks table-materializing and row-locking SQL through %s on both transports',
-        async name => {
-            (introspection.explain as jest.Mock).mockClear();
-            (introspection.analyzeQueryPlan as jest.Mock).mockClear();
-            const tool = tools.find(t => t.name === name)!;
-
-            const pinned = await tool.handler({ sql: 'SELECT * INTO backup FROM admin.orders' });
-            expect(pinned.isError).toBe(true);
-
-            const locked = await tool.handler({ sql: 'SELECT * FROM admin.orders FOR UPDATE' });
-            expect(locked.isError).toBe(true);
-
-            expect(introspection.explain).not.toHaveBeenCalled();
-            expect(introspection.analyzeQueryPlan).not.toHaveBeenCalled();
-        },
-    );
-
-    it('routes safe SQL from both user-SQL tools through the shared gate', async () => {
-        (introspection.explain as jest.Mock).mockClear();
-        (introspection.analyzeQueryPlan as jest.Mock).mockClear();
-
-        await tools.find(t => t.name === 'explain_sql')!.handler({ sql: 'SELECT 1' });
-        await tools.find(t => t.name === 'analyze_query_plan')!.handler({ sql: 'WITH x AS (SELECT 1) SELECT * FROM x' });
-
-        expect(introspection.explain).toHaveBeenCalledWith('EXPLAIN SELECT 1', undefined);
-        expect(introspection.analyzeQueryPlan).toHaveBeenCalledWith('EXPLAIN WITH x AS (SELECT 1) SELECT * FROM x', undefined);
+    it.each([
+        'SELECT * INTO backup FROM admin.orders',
+        'SELECT * FROM admin.orders FOR UPDATE'
+    ])('blocks table-materializing and row-locking SQL: %s', async sql => {
+        const result = await toolByName(tools, 'explain_query').handler({ sql });
+        expect(result.isError).toBe(true);
+        expect(introspection.explain).not.toHaveBeenCalled();
+        expect(introspection.analyzeQueryPlan).not.toHaveBeenCalled();
     });
 
     it('validate_sql reports parser issues without a connection', async () => {
-        const tool = tools.find(t => t.name === 'validate_sql')!;
-        const result = await tool.handler({ sql: 'SELECT * FRO' });
+        const result = await toolByName(tools, 'validate_sql').handler({ sql: 'SELECT * FRO' });
         expect(result.isError).toBeUndefined();
         expect(result.text).toContain('SQL parser validation found');
     });
 
-    it('validate_sql passes clean SQL', async () => {
-        const tool = tools.find(t => t.name === 'validate_sql')!;
-        const result = await tool.handler({ sql: 'SELECT * FROM _V_TABLE' });
-        expect(result.text).toContain('passed');
+    it('validate_sql passes clean SQL and supports database validation', async () => {
+        const clean = await toolByName(tools, 'validate_sql').handler({ sql: 'SELECT * FROM _V_TABLE' });
+        expect(clean.text).toContain('passed');
+
+        const database = await toolByName(tools, 'validate_sql').handler({
+            sql: 'SELECT 1',
+            mode: 'database'
+        });
+        expect(database.isError).toBeUndefined();
+        expect(introspection.explain).toHaveBeenCalledWith('EXPLAIN SELECT 1', undefined);
     });
 
     it('validate_sql rejects missing sql input', async () => {
-        const tool = tools.find(t => t.name === 'validate_sql')!;
-        const result = await tool.handler({});
+        const result = await toolByName(tools, 'validate_sql').handler({});
         expect(result.isError).toBe(true);
+    });
+
+    describe('write access', () => {
+        it('requires the write tier', async () => {
+            const readOnly = createMcpToolDefinitions(introspection, {
+                allowWrites: false,
+                allowDestructive: false,
+                execute: (sql, options) => execute(sql, options)
+            });
+            const denied = await toolByName(readOnly, 'execute_sql').handler({ sql: 'DELETE FROM t' });
+            expect(denied.isError).toBe(true);
+            expect(denied.text).toContain('disabled');
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        it('runs a write statement when the tier allows it', async () => {
+            execute.mockResolvedValue(result({ kind: 'write', columns: [], rows: [], rowCount: 0, affectedRows: 2 }));
+            const written = await toolByName(tools, 'execute_sql').handler({ sql: 'DELETE FROM ADMIN.ORDERS' });
+            expect(written.isError).toBeUndefined();
+            expect(written.text).toContain('affected rows: 2');
+            expect(execute).toHaveBeenCalledWith('DELETE FROM ADMIN.ORDERS', {});
+        });
+
+        it('returns capped read rows', async () => {
+            const read = await toolByName(tools, 'execute_sql').handler({ sql: 'SELECT 1 AS X', maxRows: 10 });
+            expect(read.isError).toBeUndefined();
+            expect(read.text).toContain('Read 1 row(s)');
+            expect(execute).toHaveBeenCalledWith('SELECT 1 AS X', { maxRows: 10 });
+        });
+
+        it('requires a matching confirmation for destructive statements', async () => {
+            const missing = await toolByName(tools, 'execute_sql').handler({ sql: 'DROP TABLE ADMIN.ORDERS' });
+            expect(missing.isError).toBe(true);
+            expect(missing.text).toContain('confirm');
+
+            const mismatch = await toolByName(tools, 'execute_sql').handler({
+                sql: 'DROP TABLE ADMIN.ORDERS',
+                confirm: 'CUSTOMERS'
+            });
+            expect(mismatch.isError).toBe(true);
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        it('accepts a matching destructive confirmation', async () => {
+            execute.mockResolvedValue(result({ kind: 'destructive', columns: [], rows: [], rowCount: 0, affectedRows: 1 }));
+            const dropped = await toolByName(tools, 'execute_sql').handler({
+                sql: 'DROP TABLE ADMIN.ORDERS',
+                confirm: 'orders'
+            });
+            expect(dropped.isError).toBeUndefined();
+            expect(execute).toHaveBeenCalledWith('DROP TABLE ADMIN.ORDERS', {});
+        });
+
+        it('rejects destructive access when the tier is disabled', async () => {
+            const noDestructive = createMcpToolDefinitions(introspection, {
+                allowWrites: true,
+                allowDestructive: false,
+                execute: (sql, options) => execute(sql, options)
+            });
+            const denied = await toolByName(noDestructive, 'execute_sql').handler({
+                sql: 'TRUNCATE TABLE ADMIN.ORDERS',
+                confirm: 'ORDERS'
+            });
+            expect(denied.isError).toBe(true);
+            expect(denied.text).toContain('Destructive');
+            expect(execute).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('drop_object', () => {
+        it('drops an object with a matching confirmation', async () => {
+            execute.mockResolvedValue(result({ kind: 'destructive', columns: [], rows: [], rowCount: 0, affectedRows: 1 }));
+            const dropped = await toolByName(tools, 'drop_object').handler({
+                object: 'ADMIN.ORDERS',
+                objectType: 'table',
+                confirm: 'ORDERS'
+            });
+            expect(dropped.isError).toBeUndefined();
+            expect(execute).toHaveBeenCalledWith('DROP TABLE "ADMIN"."ORDERS"', {});
+        });
+
+        it('rejects a mismatched confirmation', async () => {
+            const mismatch = await toolByName(tools, 'drop_object').handler({
+                object: 'ADMIN.ORDERS',
+                objectType: 'table',
+                confirm: 'CUSTOMERS'
+            });
+            expect(mismatch.isError).toBe(true);
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        it('rejects destructive access when the tier is disabled', async () => {
+            const noDestructive = createMcpToolDefinitions(introspection, {
+                allowWrites: true,
+                allowDestructive: false,
+                execute: (sql, options) => execute(sql, options)
+            });
+            const denied = await toolByName(noDestructive, 'drop_object').handler({
+                object: 'ADMIN.ORDERS',
+                objectType: 'table',
+                confirm: 'ORDERS'
+            });
+            expect(denied.isError).toBe(true);
+            expect(denied.text).toContain('Destructive');
+            expect(execute).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('compile_procedure', () => {
+        it('compiles only by default', async () => {
+            execute.mockResolvedValue(result({ kind: 'write', columns: [], rows: [], rowCount: 0, affectedRows: 0 }));
+            const compiled = await toolByName(tools, 'compile_procedure').handler({
+                sql: 'CREATE PROCEDURE ADMIN.P() RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN 1; END_PROC;',
+                mode: 'compile_only'
+            });
+            expect(compiled.isError).toBeUndefined();
+            expect(execute).toHaveBeenCalledTimes(1);
+        });
+
+        it('runs the test CALL with typed arguments', async () => {
+            execute.mockResolvedValue(result({ kind: 'write', columns: [], rows: [], rowCount: 0, affectedRows: 0 }));
+            const compiled = await toolByName(tools, 'compile_procedure').handler({
+                sql: 'CREATE PROCEDURE ADMIN.P(v INT) RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN v; END_PROC;',
+                mode: 'compile_and_call',
+                callArguments: [{ type: 'number', value: 7 }]
+            });
+            expect(compiled.isError).toBeUndefined();
+            expect(execute).toHaveBeenNthCalledWith(2, 'CALL "ADMIN"."P"(7)', { maxRows: 500 });
+        });
+
+        it('rejects non-CREATE PROCEDURE input', async () => {
+            const rejected = await toolByName(tools, 'compile_procedure').handler({
+                sql: 'DROP TABLE ADMIN.ORDERS',
+                mode: 'compile_only'
+            });
+            expect(rejected.isError).toBe(true);
+            expect(execute).not.toHaveBeenCalled();
+        });
+    });
+
+    it('emits audit events without SQL text', async () => {
+        const events: ToolAuditEvent[] = [];
+        const audited = createMcpToolDefinitions(introspection, {
+            ...writableRuntime,
+            audit: event => events.push(event)
+        });
+        await toolByName(audited, 'execute_sql').handler({ sql: 'SELECT 1' });
+        await toolByName(audited, 'execute_sql').handler({ sql: 'DROP TABLE t' });
+
+        expect(events).toHaveLength(2);
+        expect(events[0]).toMatchObject({ tool: 'execute_sql', tier: 'write', surface: 'mcp', ok: true });
+        expect(events[1]).toMatchObject({ tool: 'execute_sql', ok: false });
+        expect(JSON.stringify(events)).not.toContain('DELETE FROM t');
     });
 
     it('keeps JSON Schema optional properties optional in the MCP validator', () => {
@@ -164,10 +340,10 @@ describe('MCP tool registry', () => {
             properties: {
                 database: { type: 'string' },
                 verbose: { type: 'boolean' },
-                sql: { type: 'string' },
+                sql: { type: 'string' }
             },
             required: ['sql'],
-            additionalProperties: false,
+            additionalProperties: false
         });
 
         expect(schema.safeParse({ sql: 'SELECT 1' }).success).toBe(true);

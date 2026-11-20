@@ -232,7 +232,7 @@ Assertions and layers:
 | ID | Pri | Effort | Owner | Status | Work and acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | SQ01 | P0 | L | Desktop security owner | done | Maintain a threat model for SecretStorage, untrusted webview messages, local-file authorization, read-only bypass, DDL confirmation, and artifact redaction. Evidence: `docs/THREAT_MODEL.md`, `SECURITY.md`. Verified 2026-10-02. |
-| SQ02 | P0 | XL | Security/test owners | planned | Add adversarial tests for every trust boundary, including malformed webview messages and SQL intended to bypass read-only classification. Preserve the MCP read-only gate on both transports. |
+| SQ02 | P0 | XL | Security/test owners | planned | Add adversarial tests for every trust boundary, including malformed webview messages and SQL intended to bypass read-only classification. Preserve the MCP access tiers, writable-connection allowlist, and HTTP bearer-token gate on both transports. |
 | SQ03 | P1 | M | Dependency owner | planned | Add weekly dependency updates, CodeQL for JavaScript/TypeScript, release SBOM generation, license checks, and continued production/development dependency audits. |
 | SQ04 | P0 | L | Release owner | planned | Install and smoke-test packaged VSIX artifacts on Linux and Windows before publication; development-extension tests alone are insufficient release proof. |
 | SQ05 | P0 | S | CI/security owner | planned | Keep traces allow-listed and sanitized. Screenshots remain opt-in and require fixture/data review before external sharing. |

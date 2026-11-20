@@ -22,7 +22,7 @@ describe('contractEnforcedTool', () => {
                 new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart('should-not-run')])
             )
         };
-        const tool = withContractEnforcement('netezza_explain_sql', innerTool);
+        const tool = withContractEnforcement('netezza_explain_query', innerTool);
         expect(tool.invoke).toBeDefined();
 
         const result = await tool.invoke!(
@@ -31,7 +31,7 @@ describe('contractEnforcedTool', () => {
         );
         const text = getResultText(result);
 
-        expect(text).toContain("Missing required parameter 'sql' in tool 'netezza_explain_sql'.");
+        expect(text).toContain("Missing required parameter 'sql' in tool 'netezza_explain_query'.");
         expect(innerTool.invoke).not.toHaveBeenCalled();
     });
 
@@ -42,7 +42,7 @@ describe('contractEnforcedTool', () => {
                 .fn()
                 .mockResolvedValue(new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart('query result')]))
         };
-        const tool = withContractEnforcement('netezza_explain_sql', innerTool);
+        const tool = withContractEnforcement('netezza_explain_query', innerTool);
         expect(tool.invoke).toBeDefined();
 
         const result = await tool.invoke!(
@@ -60,7 +60,7 @@ describe('contractEnforcedTool', () => {
             prepareInvocation: jest.fn().mockResolvedValue({ invocationMessage: 'ok' }),
             invoke: jest.fn().mockRejectedValue(new Error('boom'))
         };
-        const tool = withContractEnforcement('netezza_explain_sql', innerTool);
+        const tool = withContractEnforcement('netezza_explain_query', innerTool);
         expect(tool.invoke).toBeDefined();
 
         const result = await tool.invoke!(
@@ -69,7 +69,7 @@ describe('contractEnforcedTool', () => {
         );
         const text = getResultText(result);
 
-        expect(text).toContain("Tool execution failed for 'netezza_explain_sql'. boom");
+        expect(text).toContain("Tool execution failed for 'netezza_explain_query'. boom");
     });
 
     it('returns standardized output-contract error for empty tool result content', async () => {
@@ -77,7 +77,7 @@ describe('contractEnforcedTool', () => {
             prepareInvocation: jest.fn().mockResolvedValue({ invocationMessage: 'ok' }),
             invoke: jest.fn().mockResolvedValue(new vscode.LanguageModelToolResult([]))
         };
-        const tool = withContractEnforcement('netezza_explain_sql', innerTool);
+        const tool = withContractEnforcement('netezza_explain_query', innerTool);
         expect(tool.invoke).toBeDefined();
 
         const result = await tool.invoke!(
@@ -86,7 +86,7 @@ describe('contractEnforcedTool', () => {
         );
         const text = getResultText(result);
 
-        expect(text).toContain("Invalid output contract in tool 'netezza_explain_sql'.");
+        expect(text).toContain("Invalid output contract in tool 'netezza_explain_query'.");
     });
 
     it('returns validation details in prepareInvocation for invalid input', async () => {
@@ -94,7 +94,7 @@ describe('contractEnforcedTool', () => {
             prepareInvocation: jest.fn().mockResolvedValue({ invocationMessage: 'ok' }),
             invoke: jest.fn().mockResolvedValue(new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart('ok')]))
         };
-        const tool = withContractEnforcement('netezza_explain_sql', innerTool);
+        const tool = withContractEnforcement('netezza_explain_query', innerTool);
         expect(tool.prepareInvocation).toBeDefined();
 
         const prepared = await tool.prepareInvocation!(

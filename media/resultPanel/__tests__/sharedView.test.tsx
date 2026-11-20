@@ -333,8 +333,12 @@ describe('shared VS Code Result Panel adapter', () => {
             {
                 resultSetId: 'logs-result',
                 columns: [{ name: 'Time' }, { name: 'Message' }],
-                data: [['12:00', 'ready']],
-                totalRowCount: 1,
+                data: [
+                    ['12:00', 'ready'],
+                    ['12:01', '✓ SUCCESS: SELECT 1'],
+                    ['12:02', `✗ ERROR: SELECT 1 | CONN | 10 ms | 1 row | ERROR:  'SELECT ${Array.from({ length: 80 }, (_value, index) => `COL_${index}`).join(', ')} FROM T'\nerror ^ found "," (at char 10) expecting an identifier`],
+                ],
+                totalRowCount: 3,
                 isLog: true,
             },
             {
@@ -353,6 +357,9 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(screen.queryByRole('button', { name: 'Group' })).not.toBeInTheDocument();
         expect(screen.queryByRole('textbox', { name: 'Filter results' })).not.toBeInTheDocument();
         expect(screen.getByRole('log', { name: 'Query log' })).toHaveTextContent('ready');
+        const errorHint = document.querySelector('.log-error-hint')?.textContent ?? '';
+        expect(errorHint).toContain('found "," (at char 10)');
+        expect(errorHint).not.toContain('COL_40');
         controller.dispose();
     });
 

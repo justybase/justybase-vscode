@@ -2,19 +2,24 @@ import * as vscode from 'vscode';
 import type { CopilotToolService } from './copilotToolService';
 import { extractProcedureIdentity, type ProcedureCallArgument, type ProcedureRepairMode } from '../copilot/tools/procedureRepairUtils';
 
-export interface IProcedureRepairToolParameters {
+export interface ICompileProcedureToolParameters {
     mode: ProcedureRepairMode;
     sql?: string;
     callArguments?: ProcedureCallArgument[];
 }
 
-export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureRepairToolParameters> {
+/**
+ * Compiles (CREATE / CREATE OR REPLACE) a Netezza NZPLSQL procedure and
+ * optionally runs a test CALL. The CALL executes procedure logic and is
+ * confirmed separately by the repair workflow.
+ */
+export class CompileProcedureTool implements vscode.LanguageModelTool<ICompileProcedureToolParameters> {
     private readonly confirmedDdlTargets = new Map<string, number>();
 
     constructor(private readonly copilotService: CopilotToolService) { }
 
     async prepareInvocation(
-        options: vscode.LanguageModelToolInvocationPrepareOptions<IProcedureRepairToolParameters>,
+        options: vscode.LanguageModelToolInvocationPrepareOptions<ICompileProcedureToolParameters>,
         _token: vscode.CancellationToken,
     ): Promise<vscode.PreparedToolInvocation> {
         const mode = options.input.mode;
@@ -51,7 +56,7 @@ export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureR
     }
 
     async invoke(
-        options: vscode.LanguageModelToolInvocationOptions<IProcedureRepairToolParameters>,
+        options: vscode.LanguageModelToolInvocationOptions<ICompileProcedureToolParameters>,
         token: vscode.CancellationToken,
     ): Promise<vscode.LanguageModelToolResult> {
         try {
@@ -60,7 +65,7 @@ export class ProcedureRepairTool implements vscode.LanguageModelTool<IProcedureR
             return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result)]);
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
-            throw new Error(`Netezza procedure repair failed: ${message}`, { cause: error });
+            throw new Error(`Netezza procedure compilation failed: ${message}`, { cause: error });
         }
     }
 }
@@ -70,7 +75,7 @@ function truncateSql(sql: string): string {
     return sql.length <= maxLength ? sql : `${sql.slice(0, maxLength)}\n...`;
 }
 
-function buildConfirmationKey(input: IProcedureRepairToolParameters): string {
+function buildConfirmationKey(input: ICompileProcedureToolParameters): string {
     const editor = vscode.window.activeTextEditor;
     const candidateSql = input.sql?.trim()
         || (editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection).trim() : '')

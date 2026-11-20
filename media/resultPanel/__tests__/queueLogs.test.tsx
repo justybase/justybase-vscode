@@ -65,4 +65,18 @@ describe('SQL queue and grouped Logs', () => {
             target.querySelector('details')!.dispatchEvent(new Event('toggle'));
         }
     });
+    test('compacts long echoed SQL in grouped error summaries and lines', () => {
+        const container=document.querySelector<HTMLElement>('.console-view')!;
+        const line=(row: unknown[])=>{const element=document.createElement('div');element.textContent=String(row[1]);return element;};
+        const longSql = `SELECT ${Array.from({ length: 80 }, (_value, index) => `COL_${index}`).join(', ')} FROM T`;
+        const message = `✗ ERROR: SELECT 1 | CONN | 10 ms | 1 row | ERROR:  '${longSql}'\nerror ^ found "," (at char 10) expecting an identifier`;
+        appendRunLogRows(container,[
+            ['now','RUNNING',{executionId:'err',event:'start',status:'running'}],
+            ['later', message, {executionId:'err',event:'end',status:'error'}]
+        ],line);
+        const hint=container.querySelector('.log-error-hint')?.textContent ?? '';
+        expect(hint).toContain('found "," (at char 10)');
+        expect(hint).not.toContain('COL_40');
+        expect(container.querySelector('.log-run-summary')?.textContent).not.toContain('COL_40');
+    });
 });

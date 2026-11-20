@@ -1,19 +1,22 @@
 import * as vscode from 'vscode';
 import {
     CopilotService,
+    CompileProcedureTool,
+    DropObjectTool,
+    ExecuteSqlTool,
+    ExplainQueryTool,
     GetContextTool,
-    SearchCatalogTool,
-    GetObjectDetailsTool,
-    ExplainSqlTool,
-    ValidateSqlTool,
-    ValidateSqlOnDatabaseTool,
-    ProcedureRepairTool,
+    GetObjectTool,
+    GetReferenceTool,
     InspectImportFileTool,
     ProposeImportMappingTool,
-    NetezzaReferenceTool
+    SearchCatalogTool,
+    ValidateSqlTool
 } from '../services/copilotService';
 import { withContractEnforcement } from '../services/copilotTools/contractEnforcedTool';
-import { isAiToolAllowed } from '../services/copilotTools/aiToolPolicy';
+import { allowedToolsForSurface, surfaceAllowsDestructive } from '../core/assistant/toolPolicy';
+import { copilotToolName } from '../core/assistant/toolCatalog';
+import { getAiToolAccessConfig } from '../services/aiToolAccess';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
 import { ResultPanelView } from '../views/resultPanelView';
@@ -85,36 +88,79 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
         return copilotService;
     }
 
-    const registerToolWithContract = <TInput extends object>(
-        toolName: string,
-        tool: vscode.LanguageModelTool<TInput>
-    ): vscode.Disposable => languageModelApi.registerTool(toolName, withContractEnforcement(toolName, tool));
+    let registrations: vscode.Disposable[] = [];
 
-    const toolRegistrations: Array<{ name: string; register: () => vscode.Disposable }> = [
-        { name: 'netezza_get_context', register: () => registerToolWithContract('netezza_get_context', new GetContextTool(copilotService)) },
-        { name: 'netezza_search_catalog', register: () => registerToolWithContract('netezza_search_catalog', new SearchCatalogTool(copilotService)) },
-        { name: 'netezza_get_object_details', register: () => registerToolWithContract('netezza_get_object_details', new GetObjectDetailsTool(copilotService)) },
-        { name: 'netezza_explain_sql', register: () => registerToolWithContract('netezza_explain_sql', new ExplainSqlTool(copilotService)) },
-        { name: 'netezza_validate_sql', register: () => registerToolWithContract('netezza_validate_sql', new ValidateSqlTool(copilotService)) },
-        { name: 'netezza_validate_sql_on_database', register: () => registerToolWithContract('netezza_validate_sql_on_database', new ValidateSqlOnDatabaseTool(copilotService)) },
-        { name: 'netezza_repair_procedure', register: () => registerToolWithContract('netezza_repair_procedure', new ProcedureRepairTool(copilotService)) },
-        { name: 'netezza_inspect_import_file', register: () => registerToolWithContract('netezza_inspect_import_file', new InspectImportFileTool(copilotService)) },
-        { name: 'netezza_propose_import_mapping', register: () => registerToolWithContract('netezza_propose_import_mapping', new ProposeImportMappingTool(copilotService)) },
-        { name: 'netezza_get_dialect_reference', register: () => registerToolWithContract('netezza_get_dialect_reference', new NetezzaReferenceTool(copilotService)) }
-    ];
-    let hasToolRegistrationFailure = false;
-
-    for (const toolRegistration of toolRegistrations.filter(tool => isAiToolAllowed(tool.name))) {
-        try {
-            context.subscriptions.push(toolRegistration.register());
-        } catch {
-            hasToolRegistrationFailure = true;
+    const createTool = (id: string): vscode.LanguageModelTool<object> | undefined => {
+        const allowDestructive = surfaceAllowsDestructive(getAiToolAccessConfig(), 'copilot');
+        switch (id) {
+            case 'get_context':
+                return new GetContextTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'search_catalog':
+                return new SearchCatalogTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'get_object':
+                return new GetObjectTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'explain_query':
+                return new ExplainQueryTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'validate_sql':
+                return new ValidateSqlTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'get_reference':
+                return new GetReferenceTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'inspect_import_file':
+                return new InspectImportFileTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'propose_import_mapping':
+                return new ProposeImportMappingTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            case 'execute_sql':
+                return new ExecuteSqlTool(copilotService, allowDestructive) as unknown as vscode.LanguageModelTool<object>;
+            case 'drop_object':
+                return new DropObjectTool(copilotService, allowDestructive) as unknown as vscode.LanguageModelTool<object>;
+            case 'compile_procedure':
+                return new CompileProcedureTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+            default:
+                return undefined;
         }
-    }
+    };
 
-    if (hasToolRegistrationFailure) {
-        showCopilotRegistrationWarning();
-    }
+    const registerTools = (): void => {
+        for (const registration of registrations) {
+            registration.dispose();
+        }
+        registrations = [];
+        let hasToolRegistrationFailure = false;
+        const access = getAiToolAccessConfig();
+
+        for (const tool of allowedToolsForSurface('copilot', access)) {
+            try {
+                const name = copilotToolName(tool.id);
+                const instance = createTool(tool.id);
+                if (!instance) continue;
+                registrations.push(languageModelApi.registerTool(name, withContractEnforcement(name, instance)));
+            } catch {
+                hasToolRegistrationFailure = true;
+            }
+        }
+
+        if (hasToolRegistrationFailure) {
+            showCopilotRegistrationWarning();
+        }
+    };
+
+    registerTools();
+
+    context.subscriptions.push(
+        {
+            dispose: () => {
+                for (const registration of registrations) {
+                    registration.dispose();
+                }
+                registrations = [];
+            }
+        },
+        vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('justybase.ai.tools')) {
+                registerTools();
+            }
+        })
+    );
 
     return copilotService;
 }

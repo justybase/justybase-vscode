@@ -10,11 +10,11 @@ Use this skill when the user asks about the SQL in the active editor, a diagnost
 ## Safe workflow
 
 1. Call `#netezza_get_context` first. It returns the active SQL, connection, referenced table DDL, and parser/linter diagnostics.
-2. If the SQL references tables that are not in the context, call `#netezza_search_catalog` and then `#netezza_get_object_details` for columns, DDL, comments, or dependencies.
+2. If the SQL references tables that are not in the context, call `#netezza_search_catalog` and then `#netezza_get_object` for columns, DDL, comments, or dependencies.
 3. Validate a proposed rewrite with `#netezza_validate_sql` before presenting it as ready.
-4. Use `#netezza_explain_sql` when performance is part of the request.
+4. Use `#netezza_explain_query` when performance is part of the request.
 5. Show the proposed change as a diff or a SQL block. Do not claim it was applied unless the user applied it.
-6. Never execute DML, DDL, or arbitrary SQL. JustyBase tools are read-only except `#netezza_repair_procedure`, which requires an explicit user confirmation.
+6. Do not execute DML, DDL, or arbitrary SQL unless the user explicitly asks and the access policy allows it. `#netezza_execute_sql` and `#netezza_drop_object` are tier-gated; `#netezza_compile_procedure` is write-capable and requires confirmation.
 
 ## Netezza naming rules
 

@@ -12,6 +12,7 @@ import {
   ExplainView,
   FocusOnMount,
   HistoryView,
+  LogConsole,
   PivotDialog,
   ResultColumnSidebar,
   ResultErrorView,
@@ -438,6 +439,17 @@ describe('shared React presentation', () => {
     expect(summary).toBe(`ERROR: found "," (at char ${char}) expecting an identifier`);
     expect(excerpt?.[caretLine!.indexOf('^')]).toBe(',');
     expect(container.querySelector('.ui-result-error-raw summary')?.textContent).toBe('Show full error details');
+  });
+
+  it('compacts long echoed SQL in log error hints', () => {
+    const longSql = `SELECT ${Array.from({ length: 80 }, (_value, index) => `COL_${index}`).join(', ')} FROM T`;
+    const message = `✗ ERROR: SELECT 1 | CONN | 10 ms | 1 row | ERROR:  '${longSql}'\nerror ^ found "," (at char 10) expecting an identifier`;
+    const { container } = render(<LogConsole rows={[['12:00', message]]} />);
+    const hint = container.querySelector('.log-error-hint')?.textContent ?? '';
+
+    expect(hint).toContain('found "," (at char 10)');
+    expect(hint.length).toBeLessThan(longSql.length);
+    expect(hint).not.toContain('COL_40');
   });
 
   it('hides the Copilot fix action when no SQL is available', () => {

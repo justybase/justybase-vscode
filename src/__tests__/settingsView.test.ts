@@ -38,6 +38,54 @@ describe('SettingsView webview shell', () => {
         expect(settingsScript).toContain('function renderMcpStatus()');
     });
 
+    it('validates AI tool access updates from the webview', async () => {
+        const WebviewPanelMock = (vscode as unknown as {
+            WebviewPanel: new () => vscode.WebviewPanel;
+        }).WebviewPanel;
+        const panel = new WebviewPanelMock();
+        (vscode.window.createWebviewPanel as jest.Mock).mockReturnValue(panel);
+        const context = {
+            extensionUri: vscode.Uri.file('/extension'),
+            extensionPath: '/extension'
+        } as vscode.ExtensionContext;
+        (vscode.workspace.getConfiguration as jest.Mock).mockReturnValue({
+            get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+            inspect: jest.fn(),
+            update: jest.fn().mockResolvedValue(undefined)
+        });
+
+        SettingsView.createOrShow(context.extensionUri, context);
+
+        const handler = (panel.webview.onDidReceiveMessage as jest.Mock).mock.calls[0]?.[0] as
+            (message: unknown) => Promise<void>;
+        expect(typeof handler).toBe('function');
+
+        await handler({
+            command: 'updateSetting',
+            key: 'ai.tools',
+            value: {
+                copilot: { access: 'read-write', overrides: { execute_sql: 'read' } },
+                writableConnections: ['Dev']
+            }
+        });
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'settingUpdated',
+            key: 'ai.tools',
+            success: true
+        }));
+
+        await handler({
+            command: 'updateSetting',
+            key: 'ai.tools',
+            value: { copilot: { overrides: { unknown_tool: 'off' } } }
+        });
+        expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: 'settingUpdated',
+            key: 'ai.tools',
+            success: false
+        }));
+    });
+
     it('styles text settings with theme-aware input colors', () => {
         const css = fs.readFileSync(path.join(__dirname, '../../media/settingsView.css'), 'utf8');
 

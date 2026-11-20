@@ -1,45 +1,32 @@
 import * as vscode from 'vscode';
+import type { CatalogSearchKind } from '../../core/assistant/toolCatalog';
 import type { CopilotToolService } from './copilotToolService';
 
-export type CatalogObjectType =
-    | 'databases'
-    | 'schemas'
-    | 'tables'
-    | 'views'
-    | 'procedures'
-    | 'external tables'
-    | 'columns'
-    | 'all'
-    | 'locations';
-
 export interface ISearchCatalogToolParameters {
-    objectType?: CatalogObjectType;
-    pattern?: string;
+    kind: CatalogSearchKind;
+    query?: string;
     database?: string;
     schema?: string;
 }
 
-/**
- * Unified catalog discovery tool. Replaces separate databases/schemas/tables/
- * views/procedures/external-tables/search-schema/find-locations tools.
- */
+/** Unified catalog discovery tool for the Copilot surface. */
 export class SearchCatalogTool implements vscode.LanguageModelTool<ISearchCatalogToolParameters> {
-    constructor(private copilotService: CopilotToolService) { }
+    constructor(private readonly copilotService: CopilotToolService) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ISearchCatalogToolParameters>,
         _token: vscode.CancellationToken
     ): Promise<vscode.PreparedToolInvocation> {
-        const objectType = options.input.objectType || 'tables';
-        const pattern = options.input.pattern ? ` matching "${options.input.pattern}"` : '';
+        const kind = options.input.kind ?? 'tables';
+        const query = options.input.query ? ` matching "${options.input.query}"` : '';
         const database = options.input.database ? ` in ${options.input.database}` : '';
 
         return {
-            invocationMessage: `Searching ${objectType}${pattern}${database}...`,
+            invocationMessage: `Searching ${kind}${query}${database}...`,
             confirmationMessages: {
                 title: 'Search Database Catalog',
                 message: new vscode.MarkdownString(
-                    `Search the connected Netezza catalog for ${objectType}${pattern}${database}?`
+                    `Search the connected Netezza catalog for ${kind}${query}${database}?`
                 )
             }
         };
@@ -52,17 +39,17 @@ export class SearchCatalogTool implements vscode.LanguageModelTool<ISearchCatalo
         try {
             const result = await this.search(options.input);
             return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result)]);
-        } catch (e: unknown) {
-            const errorMsg = e instanceof Error ? e.message : String(e);
-            throw new Error(`Catalog search failed: ${errorMsg}`, { cause: e });
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Catalog search failed: ${message}`, { cause: error });
         }
     }
 
     private async search(input: ISearchCatalogToolParameters): Promise<string> {
-        const objectType = input.objectType || 'tables';
-        const pattern = input.pattern?.trim();
+        const kind = input.kind ?? 'tables';
+        const query = input.query?.trim();
 
-        switch (objectType) {
+        switch (kind) {
             case 'databases':
                 return this.copilotService.getDatabases();
             case 'schemas':
@@ -73,25 +60,22 @@ export class SearchCatalogTool implements vscode.LanguageModelTool<ISearchCatalo
                 return this.copilotService.getViews(input.database, input.schema);
             case 'procedures':
                 return this.copilotService.getProcedures(input.database, input.schema);
-            case 'external tables':
-                return this.copilotService.getExternalTables(input.database, input.schema, pattern);
+            case 'external_tables':
+                return this.copilotService.getExternalTables(input.database, input.schema, query);
             case 'columns':
-                this.requirePattern(pattern, objectType);
-                return this.copilotService.searchSchema(pattern, 'COLUMNS', input.database);
+                this.requireQuery(query, kind);
+                return this.copilotService.searchSchema(query, 'COLUMNS', input.database);
             case 'all':
-                this.requirePattern(pattern, objectType);
-                return this.copilotService.searchSchema(pattern, 'ALL', input.database);
-            case 'locations':
-                this.requirePattern(pattern, objectType);
-                return this.copilotService.findTableLocations(pattern);
+                this.requireQuery(query, kind);
+                return this.copilotService.searchSchema(query, 'ALL', input.database);
             default:
-                throw new Error(`Unsupported objectType "${objectType}".`);
+                throw new Error(`Unsupported kind "${kind}".`);
         }
     }
 
-    private requirePattern(pattern: string | undefined, objectType: string): asserts pattern is string {
-        if (!pattern) {
-            throw new Error(`A "pattern" is required when objectType is "${objectType}".`);
+    private requireQuery(query: string | undefined, kind: string): asserts query is string {
+        if (!query) {
+            throw new Error(`A "query" is required when kind is "${kind}".`);
         }
     }
 }

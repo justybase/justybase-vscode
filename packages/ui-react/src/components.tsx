@@ -149,12 +149,9 @@ export function ResultErrorView({ message, details, onFixWithAi, children }: Res
   const nextSteps = resultErrorNextSteps(message);
   const displayMessage = message === undefined ? 'Something went wrong.' : compactSqlErrorMessage(message);
   const hasFullMessage = message !== undefined && displayMessage !== message;
-  return <section className="ui-result-error" role="alert" aria-label="Result error">
+  const fullDetails = hasFullMessage ? <details className="ui-result-error-raw"><summary>Show full error details</summary><pre>{message}</pre></details> : undefined;
+  return <section className="ui-result-error" role="alert" aria-label="Result error">{fullDetails}
     <div className="ui-result-error-message">{displayMessage}</div>
-    {hasFullMessage && <details className="ui-result-error-raw">
-      <summary>Show full error details</summary>
-      <pre>{message}</pre>
-    </details>}
     {nextSteps && <p className="ui-result-error-next">{nextSteps}</p>}
     {onFixWithAi && <div className="ui-result-error-actions">
       <button

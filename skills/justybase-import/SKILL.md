@@ -6,7 +6,7 @@ description: Plan a data import into Netezza with JustyBase tools. Use when insp
 # JustyBase import workflow
 
 1. Call `#netezza_inspect_import_file` to infer the delimiter, column types, and sample rows.
-2. Call `#netezza_get_object_details` for the target table with `sections: ["columns", "ddl"]`.
+2. Call `#netezza_get_object` for the target table with `sections: ["columns", "ddl"]`.
 3. Compare source columns with target columns. Report missing required columns, type mismatches, and truncation risks.
 4. Call `#netezza_propose_import_mapping` to obtain a proposed mapping and CREATE/INSERT guidance.
 5. Present the mapping and ask the user to review it. Do not execute the import.

@@ -20,7 +20,7 @@ The table below is generated from the root and companion extension manifests dur
 - `justybase.results.*` controls result retention, SQLite spill, formatting, and export display values.
 - `justybase.metadata.*` and `justybase.cacheTTL` control catalog refresh and persistence. `justybase.metadata.fullRefreshColumnConnections` (1 by default, up to 8) controls the optional physical-session pool used only for the full-refresh column stage. `justybase.metadata.popularDatabases` (0–5, default 2) sets how many recently used databases are warmed with the active database, and `justybase.metadata.liveFallback` (`never` / `onDemand` / `always`) controls whether authoring may query the live catalog on a cache miss.
 - `justybase.linter.*` controls quality diagnostics and severity.
-- `justybase.copilot.*` and `justybase.mcp.*` control AI availability, context, privacy confirmation, and read-only tools.
+- `justybase.copilot.*`, `justybase.mcp.*`, and `justybase.ai.tools` control AI availability, context, privacy confirmation, and per-surface tool access. Read-only is the default for every surface.
 - `justybase.importWizard.*` controls preview and background validation.
 
 Use the exact keys in the generated table. The current query controls are `justybase.query.rowLimit` and `justybase.query.executionTimeout`.

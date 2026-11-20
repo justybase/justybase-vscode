@@ -122,6 +122,11 @@ export class CatalogIntrospection {
         return this.options.getConnectionDetails();
     }
 
+    /** Public accessor for tools that execute statements on the same target. */
+    async getConnectionDetails(): Promise<ConnectionDetails> {
+        return this.getDetails();
+    }
+
     private async currentDatabase(): Promise<string | undefined> {
         const details = await this.getDetails();
         return details.database || undefined;
@@ -292,7 +297,7 @@ export class CatalogIntrospection {
     }
 
     /**
-     * Executes an already-gated EXPLAIN statement (see `mcpReadOnlyGate`) and
+     * Executes an already-gated EXPLAIN statement (see `core/assistant/sqlAccess`) and
      * returns the plan text captured from the driver NOTICE events.
      */
     async explain(explainSql: string, database?: string): Promise<string> {

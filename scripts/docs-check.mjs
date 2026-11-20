@@ -117,11 +117,13 @@ async function catalogs() {
   const commands = unique(manifests.flatMap(manifest => (manifest.contributes?.commands ?? []).map(command => command.command)).filter(Boolean));
   const settings = unique(manifests.flatMap(manifest => Object.keys(manifest.contributes?.configuration?.properties ?? {})));
   const contracts = await readFile(path.join(root, 'src/contracts/copilotTools/contracts.ts'), 'utf8');
-  const registrations = await readFile(path.join(root, 'src/activation/copilotRegistration.ts'), 'utf8');
-  const mcp = await readFile(path.join(root, 'src/mcp/mcpToolCatalog.ts'), 'utf8');
+  const toolCatalog = await readFile(path.join(root, 'src/core/assistant/toolCatalog.ts'), 'utf8');
+  const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const contractTools = unique(regexValues(contracts, /name:\s*'([^']+)'/g).filter(name => name.startsWith('netezza_')));
-  const activeTools = unique(regexValues(registrations, /name:\s*'([^']+)'/g));
-  const mcpTools = unique(regexValues(mcp, /name:\s*'([^']+)'/g));
+  const activeTools = unique((rootManifest.contributes?.languageModelTools ?? []).map(tool => tool.name).filter(Boolean));
+  const mcpTools = unique([...toolCatalog.matchAll(/\{\s*id:\s*'([^']+)',[\s\S]*?surfaces:\s*\[([^\]]*)\]/g)]
+    .filter(match => match[2].includes("'mcp'"))
+    .map(match => match[1]));
   const database = await readFile(path.join(root, 'packages/contracts/src/database/index.ts'), 'utf8');
   const databaseKinds = unique(regexValues(database, /\|\s*'([^']+)'/g)).filter(kind => kind !== 'string');
   const copilotNames = activeTools;

@@ -1,8 +1,16 @@
 import * as vscode from 'vscode';
 import { ChildProcess, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import * as path from 'path';
 import { ConnectionManager } from '../core/connectionManager';
-import { connectionDetailsToEnv, MCP_ENV } from './mcpEnv';
+import {
+    DEFAULT_AI_TOOL_ACCESS,
+    normalizeAiToolAccess,
+    surfaceAllowsConnectionWrites,
+    type AccessProfile,
+    type AiToolAccessConfig,
+} from '../core/assistant/toolPolicy';
+import { aiToolAccessToEnv, connectionDetailsToEnv, MCP_ENV } from './mcpEnv';
 import {
     getConfiguredMcpConnectionName,
     resolveSelectedMcpConnection
@@ -14,6 +22,10 @@ export interface McpHttpServerStatus {
     port?: number;
     pid?: number;
     connectionName?: string;
+    access: AccessProfile;
+    writesEnabled: boolean;
+    /** Bearer token required for HTTP requests when writes are enabled. */
+    writeToken?: string;
     lastError?: string;
 }
 
@@ -25,6 +37,10 @@ export interface McpHttpServerStatus {
  * including the password from the VS Code Secrets API — travel through the
  * process environment and never touch the file system. The server only runs
  * while VS Code is open; stopping the server kills the child process.
+ *
+ * When the resolved access profile allows writes, a per-run bearer token is
+ * generated and passed to the child. The token is shown only in the Settings
+ * view and is required by every HTTP request.
  */
 export class McpHttpServerManager {
     private readonly didChangeStatus = new vscode.EventEmitter<McpHttpServerStatus>();
@@ -33,20 +49,32 @@ export class McpHttpServerManager {
     private child?: ChildProcess;
     private port?: number;
     private connectionName?: string;
+    private accessKey?: string;
+    private token?: string;
     private lastError?: string;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly connectionManager: ConnectionManager,
-        private readonly getSelectedConnectionName: () => string | undefined = getConfiguredMcpConnectionName
+        private readonly getSelectedConnectionName: () => string | undefined = getConfiguredMcpConnectionName,
+        private readonly getAccessConfigSetting: () => AiToolAccessConfig = () => DEFAULT_AI_TOOL_ACCESS,
     ) { }
 
+    getAccessConfig(): AiToolAccessConfig {
+        return normalizeAiToolAccess(this.getAccessConfigSetting());
+    }
+
     getStatus(): McpHttpServerStatus {
+        const access = this.getAccessConfig();
+        const writesEnabled = surfaceAllowsConnectionWrites(access, 'mcpExternal', this.connectionName);
         return {
             running: this.child !== undefined,
             port: this.port,
             pid: this.child?.pid,
             connectionName: this.connectionName,
+            access: access.mcpExternal.access,
+            writesEnabled,
+            ...(writesEnabled && this.token ? { writeToken: this.token } : {}),
             lastError: this.lastError
         };
     }
@@ -65,7 +93,18 @@ export class McpHttpServerManager {
             return this.getStatus();
         }
 
-        if (this.child && this.port === port && this.connectionName === resolution.connectionName) {
+        const access = this.getAccessConfig();
+        const accessKey = JSON.stringify(access);
+        const writesEnabled = surfaceAllowsConnectionWrites(
+            access,
+            'mcpExternal',
+            resolution.connectionName,
+        );
+
+        if (this.child
+            && this.port === port
+            && this.connectionName === resolution.connectionName
+            && this.accessKey === accessKey) {
             return this.getStatus();
         }
         if (this.child) {
@@ -74,6 +113,7 @@ export class McpHttpServerManager {
 
         const connectionName = resolution.connectionName;
         const connectionDetails = resolution.details;
+        const token = writesEnabled ? randomUUID() : undefined;
 
         const env: NodeJS.ProcessEnv = { ...process.env };
         Object.assign(
@@ -84,6 +124,12 @@ export class McpHttpServerManager {
             })
         );
         env[MCP_ENV.VERSION] = MCP_SERVER_VERSION;
+        env[MCP_ENV.ACCESS] = aiToolAccessToEnv(access);
+        if (token) {
+            env[MCP_ENV.TOKEN] = token;
+        } else {
+            delete env[MCP_ENV.TOKEN];
+        }
 
         const serverEntry = path.join(this.context.extensionPath, 'dist', 'mcp', 'mcpServer.js');
         this.lastError = undefined;
@@ -109,6 +155,8 @@ export class McpHttpServerManager {
                     this.child = undefined;
                     this.port = undefined;
                     this.connectionName = undefined;
+                    this.accessKey = undefined;
+                    this.token = undefined;
                     if (!this.lastError) {
                         this.lastError = `Server stopped (${signal ?? `exit ${code}`}).`;
                     }
@@ -123,6 +171,8 @@ export class McpHttpServerManager {
             this.child = child;
             this.port = port;
             this.connectionName = connectionName;
+            this.accessKey = accessKey;
+            this.token = token;
 
             await new Promise<void>((resolve, reject) => {
                 const timer = setTimeout(() => resolve(), 500);
@@ -152,6 +202,8 @@ export class McpHttpServerManager {
         this.child = undefined;
         this.port = undefined;
         this.connectionName = undefined;
+        this.accessKey = undefined;
+        this.token = undefined;
         try {
             child.kill('SIGTERM');
         } catch {

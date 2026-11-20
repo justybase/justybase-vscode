@@ -3,8 +3,8 @@
  *
  * The contract layer is the single source of truth for tool input validation.
  * Runtime tool classes mirror the input interfaces in
- * `src/services/copilotTools/*Tool.ts`, and package.json mirrors the contract
- * names/tags through `languageModelTools`.
+ * `src/services/copilotTools/*Tool.ts`, and package.json mirrors the catalog
+ * through `contributes.languageModelTools`.
  */
 
 import {
@@ -28,9 +28,10 @@ import type {
     ProcedureRepairInput
 } from './types';
 
-const OBJECT_DETAIL_SECTIONS = ['ddl', 'columns', 'comments', 'stats', 'dependencies', 'favorites'] as const;
-const OBJECT_DETAIL_TYPES = ['table', 'view', 'procedure', 'external table', 'synonym', 'nickname', 'alias'] as const;
-const CATALOG_OBJECT_TYPES = ['databases', 'schemas', 'tables', 'views', 'procedures', 'external tables', 'columns', 'all', 'locations'] as const;
+const OBJECT_SECTIONS = ['ddl', 'columns', 'comments', 'stats', 'constraints', 'dependencies'] as const;
+const OBJECT_TYPES = ['table', 'view', 'procedure', 'external table', 'synonym', 'nickname', 'alias'] as const;
+const CATALOG_KINDS = ['databases', 'schemas', 'tables', 'views', 'procedures', 'external_tables', 'columns', 'all'] as const;
+const VALIDATION_MODES = ['parser', 'database'] as const;
 
 /** GetContextTool input */
 export interface IGetContextToolInput {
@@ -41,41 +42,56 @@ export interface IGetContextToolInput {
 
 /** SearchCatalogTool input */
 export interface ISearchCatalogToolInput {
-    objectType?: typeof CATALOG_OBJECT_TYPES[number];
-    pattern?: string;
+    kind: typeof CATALOG_KINDS[number];
+    query?: string;
     database?: string;
     schema?: string;
 }
 
-/** GetObjectDetailsTool input */
-export interface IGetObjectDetailsToolInput {
-    objectName?: string;
-    objectType?: typeof OBJECT_DETAIL_TYPES[number];
+/** GetObjectTool input */
+export interface IGetObjectToolInput {
+    object: string;
+    objectType?: typeof OBJECT_TYPES[number];
     database?: string;
     schema?: string;
-    sections?: typeof OBJECT_DETAIL_SECTIONS[number][];
+    sections?: typeof OBJECT_SECTIONS[number][];
 }
 
-/** ExplainSqlTool input */
-export interface IExplainSqlToolInput {
+/** ExplainQueryTool input */
+export interface IExplainQueryToolInput {
     sql: string;
     database?: string;
     verbose?: boolean;
+    analyze?: boolean;
 }
 
 /** ValidateSqlTool input */
 export interface IValidateSqlToolInput {
-    sql?: string;
-}
-
-/** ValidateSqlOnDatabaseTool input */
-export interface IValidateSqlOnDatabaseToolInput {
-    sql?: string;
+    sql: string;
+    mode?: typeof VALIDATION_MODES[number];
     database?: string;
 }
 
-/** ProcedureRepairTool input */
-export type IProcedureRepairToolInput = ProcedureRepairInput;
+/** ExecuteSqlTool input */
+export interface IExecuteSqlToolInput {
+    sql: string;
+    maxRows?: number;
+    timeoutMs?: number;
+    database?: string;
+    confirm?: string;
+}
+
+/** DropObjectTool input */
+export interface IDropObjectToolInput {
+    object: string;
+    objectType: typeof OBJECT_TYPES[number];
+    cascade?: boolean;
+    database?: string;
+    confirm: string;
+}
+
+/** CompileProcedureTool input */
+export type ICompileProcedureToolInput = ProcedureRepairInput;
 
 /** InspectImportFileTool input */
 export interface IInspectImportFileToolInput {
@@ -89,13 +105,17 @@ export interface IProposeImportMappingToolInput {
     targetTable: string;
 }
 
-/** NetezzaReferenceTool input */
-export interface INetezzaReferenceToolInput {
+/** GetReferenceTool input */
+export interface IGetReferenceToolInput {
     topic?: 'optimization' | 'nzplsql' | 'all';
 }
 
 function invalidInput(): ValidationResult<never> {
     return { success: false, errors: [{ field: 'input', message: 'Input must be an object', code: 'INVALID_TYPE' }] };
+}
+
+function collectErrors(...results: ValidationResult<unknown>[]): ValidationError[] {
+    return results.flatMap(result => result.success ? [] : result.errors);
 }
 
 function validateGetContextToolInput(input: unknown): ValidationResult<IGetContextToolInput> {
@@ -108,14 +128,7 @@ function validateGetContextToolInput(input: unknown): ValidationResult<IGetConte
     const includeDiagnosticsResult = optionalBoolean(obj.includeDiagnostics, 'includeDiagnostics');
 
     if (!sqlResult.success || !includeSchemaResult.success || !includeDiagnosticsResult.success) {
-        return {
-            success: false,
-            errors: [
-                ...(sqlResult.success ? [] : sqlResult.errors),
-                ...(includeSchemaResult.success ? [] : includeSchemaResult.errors),
-                ...(includeDiagnosticsResult.success ? [] : includeDiagnosticsResult.errors)
-            ]
-        };
+        return { success: false, errors: collectErrors(sqlResult, includeSchemaResult, includeDiagnosticsResult) };
     }
 
     return {
@@ -133,85 +146,25 @@ function validateSearchCatalogToolInput(input: unknown): ValidationResult<ISearc
         return invalidInput();
     }
     const obj = input as Record<string, unknown>;
-    const objectTypeResult = obj.objectType === undefined
+    const kindResult = obj.kind === undefined
         ? { success: true as const, data: 'tables' as const }
-        : enumValidator(CATALOG_OBJECT_TYPES, obj.objectType, 'objectType');
-    const patternResult = optionalString(obj.pattern, 'pattern');
+        : enumValidator(CATALOG_KINDS, obj.kind, 'kind');
+    const queryResult = optionalString(obj.query, 'query');
     const databaseResult = optionalString(obj.database, 'database');
     const schemaResult = optionalString(obj.schema, 'schema');
 
-    if (!objectTypeResult.success || !patternResult.success || !databaseResult.success || !schemaResult.success) {
+    if (!kindResult.success || !queryResult.success || !databaseResult.success || !schemaResult.success) {
         return {
             success: false,
-            errors: [
-                ...(objectTypeResult.success ? [] : objectTypeResult.errors),
-                ...(patternResult.success ? [] : patternResult.errors),
-                ...(databaseResult.success ? [] : databaseResult.errors),
-                ...(schemaResult.success ? [] : schemaResult.errors)
-            ]
+            errors: collectErrors(kindResult, queryResult, databaseResult, schemaResult)
         };
     }
 
-    return {
-        success: true,
-        data: {
-            objectType: objectTypeResult.data,
-            pattern: patternResult.data,
-            database: databaseResult.data,
-            schema: schemaResult.data
-        }
-    };
-}
-
-function validateGetObjectDetailsToolInput(input: unknown): ValidationResult<IGetObjectDetailsToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return invalidInput();
+    const errors: ValidationError[] = [];
+    if ((kindResult.data === 'columns' || kindResult.data === 'all')
+        && (!queryResult.data || queryResult.data.trim().length === 0)) {
+        errors.push({ field: 'query', message: `query is required when kind is "${kindResult.data}"`, code: 'REQUIRED' });
     }
-    const obj = input as Record<string, unknown>;
-    const objectNameResult = optionalString(obj.objectName, 'objectName');
-    const objectTypeResult = obj.objectType === undefined
-        ? { success: true as const, data: 'table' as const }
-        : enumValidator(OBJECT_DETAIL_TYPES, obj.objectType, 'objectType');
-    const databaseResult = optionalString(obj.database, 'database');
-    const schemaResult = optionalString(obj.schema, 'schema');
-    const sectionsResult = optionalStringArray(obj.sections, 'sections');
-
-    const errors: ValidationError[] = [
-        ...(objectNameResult.success ? [] : objectNameResult.errors),
-        ...(objectTypeResult.success ? [] : objectTypeResult.errors),
-        ...(databaseResult.success ? [] : databaseResult.errors),
-        ...(schemaResult.success ? [] : schemaResult.errors),
-        ...(sectionsResult.success ? [] : sectionsResult.errors)
-    ];
-
-    let sections: typeof OBJECT_DETAIL_SECTIONS[number][] = ['ddl', 'columns'];
-    if (sectionsResult.success && sectionsResult.data !== undefined) {
-        sections = [];
-        for (const section of sectionsResult.data) {
-            if (!(OBJECT_DETAIL_SECTIONS as readonly string[]).includes(section)) {
-                errors.push({
-                    field: 'sections',
-                    message: `Unsupported section "${section}". Allowed: ${OBJECT_DETAIL_SECTIONS.join(', ')}`,
-                    code: 'INVALID_VALUE'
-                });
-            } else {
-                sections.push(section as typeof OBJECT_DETAIL_SECTIONS[number]);
-            }
-        }
-    }
-
-    if (errors.length > 0 || !objectNameResult.success || !objectTypeResult.success) {
-        return { success: false, errors };
-    }
-
-    if (!objectNameResult.data && !sections.every(section => section === 'favorites')) {
-        errors.push({
-            field: 'objectName',
-            message: 'objectName is required unless the only requested section is "favorites"',
-            code: 'REQUIRED'
-        });
-    }
-
     if (errors.length > 0) {
         return { success: false, errors };
     }
@@ -219,7 +172,59 @@ function validateGetObjectDetailsToolInput(input: unknown): ValidationResult<IGe
     return {
         success: true,
         data: {
-            objectName: objectNameResult.data,
+            kind: kindResult.data,
+            query: queryResult.data,
+            database: databaseResult.data,
+            schema: schemaResult.data
+        }
+    };
+}
+
+function validateGetObjectToolInput(input: unknown): ValidationResult<IGetObjectToolInput> {
+    if (typeof input !== 'object' || input === null) {
+        return invalidInput();
+    }
+    const obj = input as Record<string, unknown>;
+    const objectResult = requiredString(obj.object, 'object');
+    const objectTypeResult = obj.objectType === undefined
+        ? { success: true as const, data: 'table' as const }
+        : enumValidator(OBJECT_TYPES, obj.objectType, 'objectType');
+    const databaseResult = optionalString(obj.database, 'database');
+    const schemaResult = optionalString(obj.schema, 'schema');
+    const sectionsResult = optionalStringArray(obj.sections, 'sections');
+
+    const errors: ValidationError[] = collectErrors(
+        objectResult,
+        objectTypeResult,
+        databaseResult,
+        schemaResult,
+        sectionsResult
+    );
+
+    let sections: typeof OBJECT_SECTIONS[number][] = ['ddl', 'columns'];
+    if (sectionsResult.success && sectionsResult.data !== undefined) {
+        sections = [];
+        for (const section of sectionsResult.data) {
+            if (!(OBJECT_SECTIONS as readonly string[]).includes(section)) {
+                errors.push({
+                    field: 'sections',
+                    message: `Unsupported section "${section}". Allowed: ${OBJECT_SECTIONS.join(', ')}`,
+                    code: 'INVALID_VALUE'
+                });
+            } else {
+                sections.push(section as typeof OBJECT_SECTIONS[number]);
+            }
+        }
+    }
+
+    if (errors.length > 0 || !objectResult.success || !objectTypeResult.success) {
+        return { success: false, errors };
+    }
+
+    return {
+        success: true,
+        data: {
+            object: objectResult.data,
             objectType: objectTypeResult.data,
             database: databaseResult.success ? databaseResult.data : undefined,
             schema: schemaResult.success ? schemaResult.data : undefined,
@@ -228,7 +233,7 @@ function validateGetObjectDetailsToolInput(input: unknown): ValidationResult<IGe
     };
 }
 
-function validateExplainSqlToolInput(input: unknown): ValidationResult<IExplainSqlToolInput> {
+function validateExplainQueryToolInput(input: unknown): ValidationResult<IExplainQueryToolInput> {
     if (typeof input !== 'object' || input === null) {
         return invalidInput();
     }
@@ -236,16 +241,10 @@ function validateExplainSqlToolInput(input: unknown): ValidationResult<IExplainS
     const sqlResult = sqlString(obj.sql, 'sql');
     const databaseResult = optionalString(obj.database, 'database');
     const verboseResult = optionalBoolean(obj.verbose, 'verbose');
+    const analyzeResult = optionalBoolean(obj.analyze, 'analyze');
 
-    if (!sqlResult.success || !databaseResult.success || !verboseResult.success) {
-        return {
-            success: false,
-            errors: [
-                ...(sqlResult.success ? [] : sqlResult.errors),
-                ...(databaseResult.success ? [] : databaseResult.errors),
-                ...(verboseResult.success ? [] : verboseResult.errors)
-            ]
-        };
+    if (!sqlResult.success || !databaseResult.success || !verboseResult.success || !analyzeResult.success) {
+        return { success: false, errors: collectErrors(sqlResult, databaseResult, verboseResult, analyzeResult) };
     }
 
     return {
@@ -253,7 +252,8 @@ function validateExplainSqlToolInput(input: unknown): ValidationResult<IExplainS
         data: {
             sql: sqlResult.data,
             database: databaseResult.data,
-            verbose: verboseResult.data
+            verbose: verboseResult.data,
+            analyze: analyzeResult.data
         }
     };
 }
@@ -263,42 +263,84 @@ function validateValidateSqlToolInput(input: unknown): ValidationResult<IValidat
         return invalidInput();
     }
     const obj = input as Record<string, unknown>;
-    const sqlResult = optionalString(obj.sql, 'sql');
-    if (!sqlResult.success) {
-        return { success: false, errors: sqlResult.errors };
-    }
-
-    const sql = sqlResult.data;
-    if (sql && sql.trim().length > 0) {
-        const sqlValidationResult = sqlString(sql, 'sql');
-        if (!sqlValidationResult.success) {
-            return { success: false, errors: sqlValidationResult.errors };
-        }
-    }
-
-    return { success: true, data: { sql } };
-}
-
-function validateValidateSqlOnDatabaseToolInput(input: unknown): ValidationResult<IValidateSqlOnDatabaseToolInput> {
-    if (typeof input !== 'object' || input === null) {
-        return invalidInput();
-    }
-    const obj = input as Record<string, unknown>;
-    const sqlValidationResult = validateValidateSqlToolInput(input);
+    const sqlResult = sqlString(obj.sql, 'sql');
+    const modeResult = obj.mode === undefined
+        ? { success: true as const, data: 'parser' as const }
+        : enumValidator(VALIDATION_MODES, obj.mode, 'mode');
     const databaseResult = optionalString(obj.database, 'database');
 
-    if (!sqlValidationResult.success) {
-        return { success: false, errors: sqlValidationResult.errors };
-    }
-    if (!databaseResult.success) {
-        return { success: false, errors: databaseResult.errors };
+    if (!sqlResult.success || !modeResult.success || !databaseResult.success) {
+        return { success: false, errors: collectErrors(sqlResult, modeResult, databaseResult) };
     }
 
     return {
         success: true,
         data: {
-            sql: sqlValidationResult.data.sql,
+            sql: sqlResult.data,
+            mode: modeResult.data,
             database: databaseResult.data
+        }
+    };
+}
+
+function validateExecuteSqlToolInput(input: unknown): ValidationResult<IExecuteSqlToolInput> {
+    if (typeof input !== 'object' || input === null) {
+        return invalidInput();
+    }
+    const obj = input as Record<string, unknown>;
+    const sqlResult = sqlString(obj.sql, 'sql');
+    const maxRowsResult = optionalNumber(obj.maxRows, 'maxRows');
+    const timeoutResult = optionalNumber(obj.timeoutMs, 'timeoutMs');
+    const databaseResult = optionalString(obj.database, 'database');
+    const confirmResult = optionalString(obj.confirm, 'confirm');
+
+    if (!sqlResult.success || !maxRowsResult.success || !timeoutResult.success
+        || !databaseResult.success || !confirmResult.success) {
+        return {
+            success: false,
+            errors: collectErrors(sqlResult, maxRowsResult, timeoutResult, databaseResult, confirmResult)
+        };
+    }
+
+    return {
+        success: true,
+        data: {
+            sql: sqlResult.data,
+            maxRows: maxRowsResult.data,
+            timeoutMs: timeoutResult.data,
+            database: databaseResult.data,
+            confirm: confirmResult.data
+        }
+    };
+}
+
+function validateDropObjectToolInput(input: unknown): ValidationResult<IDropObjectToolInput> {
+    if (typeof input !== 'object' || input === null) {
+        return invalidInput();
+    }
+    const obj = input as Record<string, unknown>;
+    const objectResult = requiredString(obj.object, 'object');
+    const objectTypeResult = enumValidator(OBJECT_TYPES, obj.objectType, 'objectType');
+    const cascadeResult = optionalBoolean(obj.cascade, 'cascade');
+    const databaseResult = optionalString(obj.database, 'database');
+    const confirmResult = requiredString(obj.confirm, 'confirm');
+
+    if (!objectResult.success || !objectTypeResult.success || !cascadeResult.success
+        || !databaseResult.success || !confirmResult.success) {
+        return {
+            success: false,
+            errors: collectErrors(objectResult, objectTypeResult, cascadeResult, databaseResult, confirmResult)
+        };
+    }
+
+    return {
+        success: true,
+        data: {
+            object: objectResult.data,
+            objectType: objectTypeResult.data,
+            cascade: cascadeResult.data,
+            database: databaseResult.data,
+            confirm: confirmResult.data
         }
     };
 }
@@ -312,13 +354,7 @@ function validateInspectImportFileToolInput(input: unknown): ValidationResult<II
     const sampleRowsResult = optionalNumber(obj.sampleRows, 'sampleRows');
 
     if (!filePathResult.success || !sampleRowsResult.success) {
-        return {
-            success: false,
-            errors: [
-                ...(filePathResult.success ? [] : filePathResult.errors),
-                ...(sampleRowsResult.success ? [] : sampleRowsResult.errors)
-            ]
-        };
+        return { success: false, errors: collectErrors(filePathResult, sampleRowsResult) };
     }
 
     return {
@@ -339,13 +375,7 @@ function validateProposeImportMappingToolInput(input: unknown): ValidationResult
     const targetTableResult = requiredString(obj.targetTable, 'targetTable');
 
     if (!filePathResult.success || !targetTableResult.success) {
-        return {
-            success: false,
-            errors: [
-                ...(filePathResult.success ? [] : filePathResult.errors),
-                ...(targetTableResult.success ? [] : targetTableResult.errors)
-            ]
-        };
+        return { success: false, errors: collectErrors(filePathResult, targetTableResult) };
     }
 
     return {
@@ -357,7 +387,7 @@ function validateProposeImportMappingToolInput(input: unknown): ValidationResult
     };
 }
 
-function validateNetezzaReferenceToolInput(input: unknown): ValidationResult<INetezzaReferenceToolInput> {
+function validateGetReferenceToolInput(input: unknown): ValidationResult<IGetReferenceToolInput> {
     if (typeof input !== 'object' || input === null) {
         return invalidInput();
     }
@@ -373,7 +403,7 @@ function validateNetezzaReferenceToolInput(input: unknown): ValidationResult<INe
     return { success: true, data: { topic: topicResult.data } };
 }
 
-function validateProcedureRepairToolInput(input: unknown): ValidationResult<IProcedureRepairToolInput> {
+function validateCompileProcedureToolInput(input: unknown): ValidationResult<ICompileProcedureToolInput> {
     if (typeof input !== 'object' || input === null) {
         return invalidInput();
     }
@@ -381,10 +411,7 @@ function validateProcedureRepairToolInput(input: unknown): ValidationResult<IPro
     const obj = input as Record<string, unknown>;
     const modeResult = enumValidator(['compile_only', 'compile_and_call'] as const, obj.mode, 'mode');
     const sqlResult = optionalString(obj.sql, 'sql');
-    const errors: ValidationError[] = [
-        ...(modeResult.success ? [] : modeResult.errors),
-        ...(sqlResult.success ? [] : sqlResult.errors)
-    ];
+    const errors: ValidationError[] = collectErrors(modeResult, sqlResult);
 
     const rawArguments = obj.callArguments;
     let callArguments: ProcedureCallArgument[] | undefined;
@@ -540,7 +567,7 @@ export const GetContextToolContract: ToolContract<IGetContextToolInput, string> 
 export const SearchCatalogToolContract: ToolContract<ISearchCatalogToolInput, string> = {
     name: 'netezza_search_catalog',
     displayName: 'Search Catalog',
-    description: 'Searches databases, schemas, tables, views, procedures, external tables, columns, or table locations',
+    description: 'Searches databases, schemas, tables, views, procedures, external tables, columns, or all objects',
     toolReferenceName: 'searchCatalog',
     validateInput: validateSearchCatalogToolInput,
     validateOutput: validateToolOutput,
@@ -549,64 +576,76 @@ export const SearchCatalogToolContract: ToolContract<ISearchCatalogToolInput, st
     tags: ['catalog', 'database', 'metadata', 'netezza', 'search']
 };
 
-export const GetObjectDetailsToolContract: ToolContract<IGetObjectDetailsToolInput, string> = {
-    name: 'netezza_get_object_details',
+export const GetObjectToolContract: ToolContract<IGetObjectToolInput, string> = {
+    name: 'netezza_get_object',
     displayName: 'Get Object Details',
-    description: 'Returns DDL, columns, comments, statistics, dependencies, or workspace favorites for a database object',
-    toolReferenceName: 'getObjectDetails',
-    validateInput: validateGetObjectDetailsToolInput,
+    description: 'Returns DDL, columns, comments, statistics, constraints, or dependencies for a database object',
+    toolReferenceName: 'getObject',
+    validateInput: validateGetObjectToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: true,
-    tags: ['columns', 'comments', 'database', 'ddl', 'dependencies', 'metadata', 'netezza', 'statistics']
+    tags: ['catalog', 'ddl', 'metadata', 'netezza', 'object']
 };
 
-export const ExplainSqlToolContract: ToolContract<IExplainSqlToolInput, string> = {
-    name: 'netezza_explain_sql',
-    displayName: 'Explain SQL',
+export const ExplainQueryToolContract: ToolContract<IExplainQueryToolInput, string> = {
+    name: 'netezza_explain_query',
+    displayName: 'Explain Query',
     description: 'Runs a read-only EXPLAIN and returns plan structure, hotspots, risk, and raw plan',
-    toolReferenceName: 'explainSql',
-    validateInput: validateExplainSqlToolInput,
+    toolReferenceName: 'explainQuery',
+    validateInput: validateExplainQueryToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: true,
-    tags: ['database', 'explain', 'netezza', 'performance', 'sql']
+    tags: ['explain', 'netezza', 'performance', 'sql']
 };
 
 export const ValidateSqlToolContract: ToolContract<IValidateSqlToolInput, string> = {
     name: 'netezza_validate_sql',
-    displayName: 'Validate SQL (Parser)',
-    description: 'Validates SQL syntax using the parser without executing it',
-    toolReferenceName: 'validateSqlParser',
+    displayName: 'Validate SQL',
+    description: 'Validates SQL with the offline parser or a read-only database EXPLAIN',
+    toolReferenceName: 'validateSql',
     validateInput: validateValidateSqlToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: false,
-    tags: ['netezza', 'parser', 'sql', 'syntax', 'validation']
+    tags: ['diagnostics', 'netezza', 'sql', 'validation']
 };
 
-export const ValidateSqlOnDatabaseToolContract: ToolContract<IValidateSqlOnDatabaseToolInput, string> = {
-    name: 'netezza_validate_sql_on_database',
-    displayName: 'Validate SQL on Database',
-    description: 'Validates SQL on the database using a read-only EXPLAIN',
-    toolReferenceName: 'validateSqlOnDatabase',
-    validateInput: validateValidateSqlOnDatabaseToolInput,
+export const ExecuteSqlToolContract: ToolContract<IExecuteSqlToolInput, string> = {
+    name: 'netezza_execute_sql',
+    displayName: 'Execute SQL',
+    description: 'Executes one SQL statement; write and destructive access is policy-gated',
+    toolReferenceName: 'executeSql',
+    validateInput: validateExecuteSqlToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: true,
-    tags: ['database', 'explain', 'netezza', 'runtime', 'sql', 'validation']
+    tags: ['database', 'netezza', 'sql', 'write']
 };
 
-export const ProcedureRepairToolContract: ToolContract<IProcedureRepairToolInput, string> = {
-    name: 'netezza_repair_procedure',
-    displayName: 'Repair Netezza Procedure',
+export const DropObjectToolContract: ToolContract<IDropObjectToolInput, string> = {
+    name: 'netezza_drop_object',
+    displayName: 'Drop Object',
+    description: 'Drops one database object after an explicit confirmation value',
+    toolReferenceName: 'dropObject',
+    validateInput: validateDropObjectToolInput,
+    validateOutput: validateToolOutput,
+    errorCodes: commonErrorCodes,
+    requiresConnection: true,
+    tags: ['database', 'destructive', 'netezza']
+};
+
+export const CompileProcedureToolContract: ToolContract<ICompileProcedureToolInput, string> = {
+    name: 'netezza_compile_procedure',
+    displayName: 'Compile Procedure',
     description: 'Compiles a procedure and optionally runs a user-confirmed typed test CALL with a bounded repair loop',
-    toolReferenceName: 'repairProcedure',
-    validateInput: validateProcedureRepairToolInput,
+    toolReferenceName: 'compileProcedure',
+    validateInput: validateCompileProcedureToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: true,
-    tags: ['compile', 'database', 'nzplsql', 'procedure', 'repair', 'sql', 'write']
+    tags: ['ddl', 'netezza', 'nzplsql', 'procedure']
 };
 
 export const InspectImportFileToolContract: ToolContract<IInspectImportFileToolInput, string> = {
@@ -618,7 +657,7 @@ export const InspectImportFileToolContract: ToolContract<IInspectImportFileToolI
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: false,
-    tags: ['file', 'import', 'netezza', 'preview', 'schema']
+    tags: ['file', 'import', 'netezza']
 };
 
 export const ProposeImportMappingToolContract: ToolContract<IProposeImportMappingToolInput, string> = {
@@ -630,43 +669,43 @@ export const ProposeImportMappingToolContract: ToolContract<IProposeImportMappin
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: true,
-    tags: ['ddl', 'import', 'mapping', 'netezza', 'schema']
+    tags: ['ddl', 'import', 'mapping', 'netezza']
 };
 
-export const NetezzaReferenceToolContract: ToolContract<INetezzaReferenceToolInput, string> = {
-    name: 'netezza_get_dialect_reference',
+export const GetReferenceToolContract: ToolContract<IGetReferenceToolInput, string> = {
+    name: 'netezza_get_reference',
     displayName: 'Get Dialect Reference',
     description: 'Returns JustyBase Netezza SQL, optimization, or NZPLSQL reference guidance',
     toolReferenceName: 'getDialectReference',
-    validateInput: validateNetezzaReferenceToolInput,
+    validateInput: validateGetReferenceToolInput,
     validateOutput: validateToolOutput,
     errorCodes: commonErrorCodes,
     requiresConnection: false,
-    tags: ['netezza', 'nzplsql', 'optimization', 'reference', 'sql']
+    tags: ['documentation', 'netezza', 'reference']
 };
 
 /** Registry of all tool contracts. */
-export const ToolContractRegistry: Map<string, ToolContract<unknown, unknown>> = new Map([
-    [GetContextToolContract.name, GetContextToolContract as ToolContract<unknown, unknown>],
-    [SearchCatalogToolContract.name, SearchCatalogToolContract as ToolContract<unknown, unknown>],
-    [GetObjectDetailsToolContract.name, GetObjectDetailsToolContract as ToolContract<unknown, unknown>],
-    [ExplainSqlToolContract.name, ExplainSqlToolContract as ToolContract<unknown, unknown>],
-    [ValidateSqlToolContract.name, ValidateSqlToolContract as ToolContract<unknown, unknown>],
-    [ValidateSqlOnDatabaseToolContract.name, ValidateSqlOnDatabaseToolContract as ToolContract<unknown, unknown>],
-    [ProcedureRepairToolContract.name, ProcedureRepairToolContract as ToolContract<unknown, unknown>],
-    [InspectImportFileToolContract.name, InspectImportFileToolContract as ToolContract<unknown, unknown>],
-    [ProposeImportMappingToolContract.name, ProposeImportMappingToolContract as ToolContract<unknown, unknown>],
-    [NetezzaReferenceToolContract.name, NetezzaReferenceToolContract as ToolContract<unknown, unknown>]
-]);
+export const ToolContractRegistry: Map<string, ToolContract<unknown, unknown>> = new Map();
+ToolContractRegistry.set(GetContextToolContract.name, GetContextToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(SearchCatalogToolContract.name, SearchCatalogToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(GetObjectToolContract.name, GetObjectToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(ExplainQueryToolContract.name, ExplainQueryToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(ValidateSqlToolContract.name, ValidateSqlToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(ExecuteSqlToolContract.name, ExecuteSqlToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(DropObjectToolContract.name, DropObjectToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(CompileProcedureToolContract.name, CompileProcedureToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(InspectImportFileToolContract.name, InspectImportFileToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(ProposeImportMappingToolContract.name, ProposeImportMappingToolContract as ToolContract<unknown, unknown>);
+ToolContractRegistry.set(GetReferenceToolContract.name, GetReferenceToolContract as ToolContract<unknown, unknown>);
 
 export function getToolContract(name: string): ToolContract<unknown, unknown> | undefined {
     return ToolContractRegistry.get(name);
 }
 
-export function getAllToolContracts(): ToolContract<unknown, unknown>[] {
-    return Array.from(ToolContractRegistry.values());
-}
-
 export function hasToolContract(name: string): boolean {
     return ToolContractRegistry.has(name);
+}
+
+export function getAllToolContracts(): ToolContract<unknown, unknown>[] {
+    return Array.from(ToolContractRegistry.values());
 }

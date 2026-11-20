@@ -1,5 +1,9 @@
 import { ConnectionDetails } from '../types';
 import { tryNormalizeDatabaseKind } from '../contracts/database';
+import {
+    normalizeAiToolAccess,
+    type AiToolAccessConfig,
+} from '../core/assistant/toolPolicy';
 
 /**
  * Connection details are transferred from the VS Code extension host to the
@@ -18,7 +22,9 @@ export const MCP_ENV = {
     DBTYPE: 'JUSTYBASE_MCP_DBTYPE',
     OPTIONS: 'JUSTYBASE_MCP_OPTIONS',
     CONNECTION_NAME: 'JUSTYBASE_MCP_CONNECTION_NAME',
-    VERSION: 'JUSTYBASE_MCP_VERSION'
+    VERSION: 'JUSTYBASE_MCP_VERSION',
+    ACCESS: 'JUSTYBASE_MCP_ACCESS',
+    TOKEN: 'JUSTYBASE_MCP_TOKEN'
 } as const;
 
 export function connectionDetailsToEnv(details: ConnectionDetails): Record<string, string> {
@@ -32,6 +38,23 @@ export function connectionDetailsToEnv(details: ConnectionDetails): Record<strin
     env[MCP_ENV.OPTIONS] = details.options ? JSON.stringify(details.options) : '';
     env[MCP_ENV.CONNECTION_NAME] = details.name || '';
     return env;
+}
+
+/** Access policy is JSON so per-tool overrides travel to the child unchanged. */
+export function aiToolAccessToEnv(config: AiToolAccessConfig): string {
+    return JSON.stringify(config);
+}
+
+export function parseMcpAiToolAccess(env: NodeJS.ProcessEnv): AiToolAccessConfig {
+    const raw = env[MCP_ENV.ACCESS];
+    if (!raw) {
+        return normalizeAiToolAccess(undefined);
+    }
+    try {
+        return normalizeAiToolAccess(JSON.parse(raw) as unknown);
+    } catch {
+        return normalizeAiToolAccess(undefined);
+    }
 }
 
 export function envToConnectionDetails(env: NodeJS.ProcessEnv): ConnectionDetails | undefined {

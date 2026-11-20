@@ -428,8 +428,11 @@ async function liveCatalogs() {
   const settings = uniqueByName(manifests.flatMap(manifest => Object.entries(manifest.contributes?.configuration?.properties ?? {}).map(([key, value]) => ({ key, ...(value ?? {}) }))), 'key').sort((a, b) => a.key.localeCompare(b.key));
   const registrationSource = await readFile(path.join(root, 'src/activation/copilotRegistration.ts'), 'utf8');
   const mcpSource = await readFile(path.join(root, 'src/mcp/mcpToolCatalog.ts'), 'utf8');
-  const copilotNames = [...new Set(readRegexValues(registrationSource, /name:\s*'([^']+)'/g))].sort();
-  const mcpNames = [...new Set(readRegexValues(mcpSource, /name:\s*'([^']+)'/g))].sort();
+  const toolCatalogSource = await readFile(path.join(root, 'src/core/assistant/toolCatalog.ts'), 'utf8');
+  const copilotNames = [...new Set(packageJson.contributes?.languageModelTools?.map(tool => tool.name).filter(Boolean))].sort();
+  const mcpNames = [...new Set([...toolCatalogSource.matchAll(/\{\s*id:\s*'([^']+)',[\s\S]*?surfaces:\s*\[([^\]]*)\]/g)]
+    .filter(match => match[2].includes("'mcp'"))
+    .map(match => match[1]))].sort();
   const databaseSource = await readFile(path.join(root, 'packages/contracts/src/database/index.ts'), 'utf8');
   const databaseKinds = [...new Set(readRegexValues(databaseSource, /\|\s*'([^']+)'/g))].filter(value => value !== 'string').sort();
   return { commands, settings, copilotNames, mcpNames, databaseKinds, manifests };
@@ -439,7 +442,7 @@ function catalogMarkdown(catalog) {
   const commandRows = catalog.commands.map(command => `| \`${command.command}\` | ${String(command.title ?? '').replaceAll('|', '\\|')} |`).join('\n');
   const settingRows = catalog.settings.map(setting => `| \`${setting.key}\` | ${displayCatalogValue(setting.default).replaceAll('|', '\\|').replaceAll('\n', ' ')} | ${displayCatalogValue(setting.description ?? '').replaceAll('|', '\\|').replaceAll('\n', ' ')} |`).join('\n');
   const toolRows = catalog.copilotNames.map(name => `| \`${name}\` | Language Model Tool |`).join('\n');
-  const mcpRows = catalog.mcpNames.map(name => `| \`${name}\` | Read-only MCP catalog |`).join('\n');
+  const mcpRows = catalog.mcpNames.map(name => `| \`${name}\` | MCP catalog (tier from justybase.ai.tools) |`).join('\n');
   const dbRows = catalog.databaseKinds.filter(kind => advertisedDatabaseKinds.has(kind)).map(kind => `| \`${kind}\` | ${kind === 'sqlite' || kind === 'duckdb' ? 'Local / file runtime' : 'Database or companion runtime'} |`).join('\n');
   return {
     COMMANDS: `<!-- GENERATED_TABLE:COMMANDS -->\n| Command | Title |\n| --- | --- |\n${commandRows}`,

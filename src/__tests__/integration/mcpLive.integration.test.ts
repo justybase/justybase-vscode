@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { NzConnection } from '@justybase/netezza-driver';
 import { connectionDetailsToEnv } from '../../mcp/mcpEnv';
 import { MCP_TOOL_CATALOG } from '../../mcp/mcpToolCatalog';
+import { ASSISTANT_TOOL_CATALOG } from '../../core/assistant/toolCatalog';
 import { escapeSqlIdentifier, escapeSqlLiteral } from '../../utils/sqlUtils';
 
 const enabled = Boolean(process.env.NZ_DEV_PASSWORD);
@@ -111,6 +112,17 @@ function parseJsonText(text: string): Record<string, unknown>[] {
     } catch {
         return [];
     }
+}
+
+/** Section tools prefix JSON with a `## SECTION` heading. */
+function parseSectionJsonText(text: string): Record<string, unknown>[] {
+    const objectStart = text.indexOf('{');
+    const arrayStart = text.indexOf('[');
+    const candidates = [objectStart, arrayStart].filter(index => index >= 0);
+    if (candidates.length === 0) {
+        return [];
+    }
+    return parseJsonText(text.slice(Math.min(...candidates)));
 }
 
 function toolOutcome(response: JsonRpcResponse): ToolOutcome {
@@ -557,33 +569,43 @@ async function verifyTransport(
             .filter((name): name is string => typeof name === 'string')
             .sort()
         : [];
-    expect(listedTools).toEqual(MCP_TOOL_CATALOG.map(tool => tool.name).sort());
-    record('tools/list', transport, 'PASS', `Returned exactly ${listedTools.length} catalog tools.`);
+    const readOnlyToolNames = ASSISTANT_TOOL_CATALOG
+        .filter(tool => tool.tier === 'read'
+            && (tool.surfaces.includes('mcp') || tool.surfaces.includes('mcpExternal')))
+        .map(tool => tool.id)
+        .sort();
+    expect(listedTools).toEqual(readOnlyToolNames);
+    expect(listedTools.length).toBeLessThan(MCP_TOOL_CATALOG.length);
+    record('tools/list', transport, 'PASS', `Returned the ${listedTools.length} read-only catalog tools.`);
 
     const calls: Array<{ name: string; args: Record<string, unknown>; validate: (outcome: ToolOutcome) => string }> = [
         {
-            name: 'get_databases', args: {}, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'databases' }, validate: outcome => {
                 const rows = parseJsonText(outcome.text);
                 expect(rowKeys(rows, ['DATABASE'])).toEqual(rowKeys(oracleDatabases, ['DATABASE']));
                 return 'Database names match independent _V_DATABASE oracle.';
             }
         },
         {
-            name: 'get_schemas', args: { database: DB_CONFIG.database }, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'schemas', database: DB_CONFIG.database }, validate: outcome => {
                 const rows = parseJsonText(outcome.text);
                 expect(rowKeys(rows, ['SCHEMA_NAME'])).toEqual(rowKeys(oracleSchemas, ['SCHEMA_NAME']));
                 return 'Schema names match independent database catalog oracle.';
             }
         },
         {
-            name: 'get_tables', args: { database: DB_CONFIG.database, schema: target.schema }, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'tables', database: DB_CONFIG.database, schema: target.schema }, validate: outcome => {
                 const rows = parseJsonText(outcome.text);
                 expect(rowKeys(rows, ['OWNER', 'TABLENAME'])).toEqual(rowKeys(oracleTables, ['OWNER', 'TABLENAME']));
                 return 'Table listing matches independent _V_TABLE oracle for the selected schema.';
             }
         },
         {
-            name: 'get_columns', args: { tables: [`${target.schema}.${target.table}`] }, validate: outcome => {
+            name: 'get_object', args: {
+                object: `${target.schema}.${target.table}`,
+                sections: ['columns'],
+                database: DB_CONFIG.database
+            }, validate: outcome => {
                 expect(outcome.text).toContain('COLUMN_NAME|DATA_TYPE');
                 expect(outcome.text).toContain(`${target.table.toUpperCase()}|`);
                 if (oracleColumns.length > 0) {
@@ -596,7 +618,7 @@ async function verifyTransport(
             }
         },
         {
-            name: 'get_procedures', args: { database: DB_CONFIG.database }, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'procedures', database: DB_CONFIG.database }, validate: outcome => {
                 const rows = parseJsonText(outcome.text);
                 if (rows.length === 0) {
                     return 'PARTIAL: no user procedure exists to provide a positive semantic fixture.';
@@ -606,7 +628,7 @@ async function verifyTransport(
             }
         },
         {
-            name: 'get_views', args: { database: DB_CONFIG.database }, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'views', database: DB_CONFIG.database }, validate: outcome => {
                 const rows = parseJsonText(outcome.text);
                 if (rows.length === 0) {
                     return 'PARTIAL: no user view exists to provide a positive semantic fixture.';
@@ -616,20 +638,24 @@ async function verifyTransport(
             }
         },
         {
-            name: 'search_schema', args: { pattern: target.table, objectType: 'TABLES', database: DB_CONFIG.database }, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'all', query: target.table, database: DB_CONFIG.database }, validate: outcome => {
                 expect(outcome.text.toUpperCase()).toContain(target.table.toUpperCase());
                 return 'Search result contains the independently discovered table.';
             }
         },
         {
-            name: 'get_ddl', args: { objectName: `${target.schema}.${target.table}`, objectType: 'table', database: DB_CONFIG.database }, validate: outcome => {
+            name: 'get_object', args: {
+                object: `${target.schema}.${target.table}`,
+                sections: ['ddl'],
+                database: DB_CONFIG.database
+            }, validate: outcome => {
                 expect(outcome.text.toUpperCase()).toContain('CREATE TABLE');
                 expect(outcome.text.toUpperCase()).toContain(target.table.toUpperCase());
                 return 'Generated DDL contains CREATE TABLE for the independently discovered object.';
             }
         },
         {
-            name: 'explain_sql', args: { sql: 'SELECT 1' }, validate: outcome => {
+            name: 'explain_query', args: { sql: 'SELECT 1' }, validate: outcome => {
                 const oraclePlan = awaitOraclePlan;
                 if (!oraclePlan) {
                     return 'PARTIAL: independent EXPLAIN returned no NOTICE text.';
@@ -645,15 +671,23 @@ async function verifyTransport(
             }
         },
         {
-            name: 'get_table_stats', args: { tableName: `${target.schema}.${target.table}`, database: DB_CONFIG.database }, validate: outcome => {
-                const object = jsonObject(parseJsonText(outcome.text)[0]);
+            name: 'get_object', args: {
+                object: `${target.schema}.${target.table}`,
+                sections: ['stats'],
+                database: DB_CONFIG.database
+            }, validate: outcome => {
+                const object = jsonObject(parseSectionJsonText(outcome.text)[0]);
                 expect(object?.tableName).toBe(target.table.toUpperCase());
                 return 'Catalog statistics target matches independent _V_TABLE discovery.';
             }
         },
         {
-            name: 'get_comments', args: { tableName: `${target.schema}.${target.table}`, database: DB_CONFIG.database }, validate: outcome => {
-                const object = jsonObject(parseJsonText(outcome.text)[0]);
+            name: 'get_object', args: {
+                object: `${target.schema}.${target.table}`,
+                sections: ['comments'],
+                database: DB_CONFIG.database
+            }, validate: outcome => {
+                const object = jsonObject(parseSectionJsonText(outcome.text)[0]);
                 expect(object?.tableName).toBe(target.table.toUpperCase());
                 if (oracleComments.length > 0) {
                     expect(jsonObject(object?.object)?.DESCRIPTION ?? null)
@@ -663,8 +697,12 @@ async function verifyTransport(
             }
         },
         {
-            name: 'get_dependencies', args: { object: `${target.schema}.${target.table}`, database: DB_CONFIG.database, objectType: 'TABLE' }, validate: outcome => {
-                const object = jsonObject(parseJsonText(outcome.text)[0]);
+            name: 'get_object', args: {
+                object: `${target.schema}.${target.table}`,
+                sections: ['dependencies'],
+                database: DB_CONFIG.database
+            }, validate: outcome => {
+                const object = jsonObject(parseSectionJsonText(outcome.text)[0]);
                 expect(jsonObject(object?.target)?.objectName).toBe(target.table.toUpperCase());
                 if (object?.partial === true) {
                     return 'PARTIAL: one optional dependency catalog source was unavailable.';
@@ -673,7 +711,7 @@ async function verifyTransport(
             }
         },
         {
-            name: 'get_external_tables', args: { database: DB_CONFIG.database, schema: target.schema }, validate: outcome => {
+            name: 'search_catalog', args: { kind: 'external_tables', database: DB_CONFIG.database, schema: target.schema }, validate: outcome => {
                 const rows = parseJsonText(outcome.text);
                 if (rows.length === 0) {
                     return 'PARTIAL: no external table exists for positive DATAOBJECT comparison.';
@@ -684,8 +722,12 @@ async function verifyTransport(
             }
         },
         {
-            name: 'get_table_constraints', args: { tableName: `${target.schema}.${target.table}`, database: DB_CONFIG.database }, validate: outcome => {
-                const object = jsonObject(parseJsonText(outcome.text)[0]);
+            name: 'get_object', args: {
+                object: `${target.schema}.${target.table}`,
+                sections: ['constraints'],
+                database: DB_CONFIG.database
+            }, validate: outcome => {
+                const object = jsonObject(parseSectionJsonText(outcome.text)[0]);
                 const constraints = Array.isArray(object?.constraints) ? object.constraints : [];
                 if (oracleConstraints.length > 0) {
                     const expectedNames = Array.from(new Set(oracleConstraints.map(row => String(row.CONSTRAINTNAME ?? '')))).sort();
@@ -700,8 +742,8 @@ async function verifyTransport(
             }
         },
         {
-            name: 'analyze_query_plan', args: { sql: 'SELECT 1' }, validate: outcome => {
-                const object = jsonObject(parseJsonText(outcome.text)[0]);
+            name: 'explain_query', args: { sql: 'SELECT 1', analyze: true }, validate: outcome => {
+                const object = jsonObject(parseSectionJsonText(outcome.text)[0]);
                 expect(object?.summary).toBeDefined();
                 expect(Array.isArray(object?.hotspots)).toBe(true);
                 return 'Response includes structural summary and hotspots, not only raw plan text.';
@@ -724,22 +766,13 @@ async function verifyTransport(
     }
 
     const invalidArguments: Array<[string, Record<string, unknown>]> = [
-        ['get_databases', { unexpected: true }],
-        ['get_schemas', { unexpected: true }],
-        ['get_tables', { unexpected: true }],
-        ['get_columns', { tables: [] }],
-        ['get_procedures', { unexpected: true }],
-        ['get_views', { unexpected: true }],
-        ['search_schema', {}],
-        ['get_ddl', {}],
-        ['explain_sql', { sql: 'DELETE FROM SOME_TABLE' }],
+        ['search_catalog', { unexpected: true }],
+        ['search_catalog', { kind: 'bogus' }],
+        ['get_object', {}],
+        ['explain_query', { sql: 'DELETE FROM SOME_TABLE' }],
         ['validate_sql', {}],
-        ['get_table_stats', {}],
-        ['get_comments', {}],
-        ['get_dependencies', {}],
-        ['get_external_tables', { database: 42 }],
-        ['get_table_constraints', {}],
-        ['analyze_query_plan', { sql: 'CREATE TABLE SHOULD_NOT_RUN (ID INTEGER)' }]
+        ['explain_query', { sql: 'CREATE TABLE SHOULD_NOT_RUN (ID INTEGER)' }],
+        ['search_catalog', { kind: 'tables', unexpected: true }]
     ];
     for (const [name, args] of invalidArguments) {
         const outcome = await callTool(client, name, args);

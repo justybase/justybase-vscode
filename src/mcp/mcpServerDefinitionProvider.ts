@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { ConnectionManager } from '../core/connectionManager';
-import { connectionDetailsToEnv } from './mcpEnv';
+import {
+    DEFAULT_AI_TOOL_ACCESS,
+    normalizeAiToolAccess,
+    type AiToolAccessConfig
+} from '../core/assistant/toolPolicy';
+import { aiToolAccessToEnv, connectionDetailsToEnv, MCP_ENV } from './mcpEnv';
 import {
     getConfiguredMcpConnectionName,
     getMcpConnectionSelectionError,
@@ -20,7 +25,7 @@ import { MCP_SERVER_ID, MCP_SERVER_NAME, MCP_SERVER_VERSION } from './mcpToolCat
  *   server process is started. It loads the explicitly selected connection
  *   (including the password) from the VS Code Secrets API via
  *   ConnectionManager and injects it into the `env` of the spawned child
- *   process.
+ *   process. The resolved tool-access policy travels in the same env.
  */
 export class NetezzaMcpServerDefinitionProvider implements vscode.McpServerDefinitionProvider<vscode.McpStdioServerDefinition> {
     private readonly didChange = new vscode.EventEmitter<void>();
@@ -31,7 +36,8 @@ export class NetezzaMcpServerDefinitionProvider implements vscode.McpServerDefin
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly connectionManager: ConnectionManager,
-        private readonly _getSelectedConnectionName: () => string | undefined = getConfiguredMcpConnectionName
+        private readonly _getSelectedConnectionName: () => string | undefined = getConfiguredMcpConnectionName,
+        private readonly _getAccessConfig: () => AiToolAccessConfig = () => DEFAULT_AI_TOOL_ACCESS,
     ) {
         this.context.subscriptions.push(
             this.connectionManager.onDidChangeConnections(() => this.didChange.fire())
@@ -44,6 +50,10 @@ export class NetezzaMcpServerDefinitionProvider implements vscode.McpServerDefin
 
     getSelectedConnectionName(): string | undefined {
         return this._getSelectedConnectionName();
+    }
+
+    getAccessConfig(): AiToolAccessConfig {
+        return normalizeAiToolAccess(this._getAccessConfig());
     }
 
     getSelectionError(): string | undefined {
@@ -98,10 +108,13 @@ export class NetezzaMcpServerDefinitionProvider implements vscode.McpServerDefin
             return undefined;
         }
 
-        server.env = connectionDetailsToEnv({
-            ...resolution.details,
-            name: resolution.details.name ?? resolution.connectionName
-        });
+        server.env = {
+            ...connectionDetailsToEnv({
+                ...resolution.details,
+                name: resolution.details.name ?? resolution.connectionName
+            }),
+            [MCP_ENV.ACCESS]: aiToolAccessToEnv(this.getAccessConfig()),
+        };
         server.version = MCP_SERVER_VERSION;
         return server;
     }
@@ -114,13 +127,19 @@ export function canRegisterMcpServerDefinitionProvider(): boolean {
 
 export function registerMcpServerDefinitionProvider(
     context: vscode.ExtensionContext,
-    connectionManager: ConnectionManager
+    connectionManager: ConnectionManager,
+    getAccessConfig: () => AiToolAccessConfig = () => DEFAULT_AI_TOOL_ACCESS,
 ): NetezzaMcpServerDefinitionProvider | undefined {
     if (!canRegisterMcpServerDefinitionProvider()) {
         return undefined;
     }
 
-    const provider = new NetezzaMcpServerDefinitionProvider(context, connectionManager);
+    const provider = new NetezzaMcpServerDefinitionProvider(
+        context,
+        connectionManager,
+        getConfiguredMcpConnectionName,
+        getAccessConfig,
+    );
     const lm = vscode.lm as typeof vscode.lm & {
         registerMcpServerDefinitionProvider(id: string, provider: vscode.McpServerDefinitionProvider): vscode.Disposable;
     };

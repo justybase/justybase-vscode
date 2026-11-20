@@ -1,10 +1,18 @@
 import { ConnectionDetails } from '../../types';
 import {
+    aiToolAccessToEnv,
     connectionDetailsToEnv,
     envToConnectionDetails,
     hasMcpConnectionEnv,
-    MCP_ENV
+    MCP_ENV,
+    parseMcpAiToolAccess
 } from '../../mcp/mcpEnv';
+import {
+    DEFAULT_AI_TOOL_ACCESS,
+    effectiveToolTier,
+    normalizeAiToolAccess
+} from '../../core/assistant/toolPolicy';
+import { getAssistantTool } from '../../core/assistant/toolCatalog';
 
 describe('MCP connection env serialization', () => {
     const details: ConnectionDetails = {
@@ -49,5 +57,33 @@ describe('MCP connection env serialization', () => {
     it('hasMcpConnectionEnv detects connection presence', () => {
         expect(hasMcpConnectionEnv({})).toBe(false);
         expect(hasMcpConnectionEnv({ [MCP_ENV.HOST]: 'h' })).toBe(true);
+    });
+
+    it('round-trips the access policy through the child environment', () => {
+        const access = normalizeAiToolAccess({
+            mcp: { access: 'read-write', overrides: { execute_sql: 'read' } },
+            mcpExternal: 'full',
+            writableConnections: ['Dev Netezza']
+        });
+        const env = { [MCP_ENV.ACCESS]: aiToolAccessToEnv(access) };
+
+        expect(parseMcpAiToolAccess(env)).toEqual(access);
+    });
+
+    it('falls back to read-only for missing or malformed access env', () => {
+        expect(parseMcpAiToolAccess({})).toEqual(DEFAULT_AI_TOOL_ACCESS);
+        expect(parseMcpAiToolAccess({ [MCP_ENV.ACCESS]: '{not-json' })).toEqual(DEFAULT_AI_TOOL_ACCESS);
+    });
+
+    it('requires the MCP connection to be listed before write tools are exposed', () => {
+        const executeSql = getAssistantTool('execute_sql')!;
+        const writeAccess = normalizeAiToolAccess({
+            mcp: 'read-write',
+            writableConnections: ['Dev Netezza']
+        });
+
+        expect(effectiveToolTier(executeSql, 'mcp', writeAccess, 'Dev Netezza')).toBe('write');
+        expect(effectiveToolTier(executeSql, 'mcp', writeAccess, 'Production')).toBeUndefined();
+        expect(effectiveToolTier(executeSql, 'mcp', DEFAULT_AI_TOOL_ACCESS, 'Dev Netezza')).toBeUndefined();
     });
 });

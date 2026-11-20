@@ -4,17 +4,23 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import * as http from 'http';
 import { randomUUID } from 'crypto';
 import { CatalogIntrospection } from '../core/catalogIntrospection';
-import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
-import { netezzaDialect } from '../dialects/netezza';
-import { envToConnectionDetails, MCP_ENV } from './mcpEnv';
+import { allowedToolIds, surfaceAllowsDestructive, surfaceAllowsWrites } from '../core/assistant/toolPolicy';
+import { getAssistantTool, type ToolSurface } from '../core/assistant/toolCatalog';
+import {
+    envToConnectionDetails,
+    MCP_ENV,
+    parseMcpAiToolAccess
+} from './mcpEnv';
 import { createNetezzaMcpServer } from './mcpServerCore';
+import { isAuthorizedHttpRequest } from './mcpHttpAuth';
+import type { McpToolRuntime } from './mcpToolRegistry';
 
 /**
  * Standalone entry point for the Netezza MCP server.
  *
  * Spawned by the VS Code extension (stdio mode for Copilot Chat, http mode
- * for external MCP clients on the local machine). Connection details —
- * including the password — are passed exclusively through environment
+ * for external MCP clients on the local machine). Connection details — and the
+ * resolved tool-access policy — are passed exclusively through environment
  * variables; nothing is read from or written to disk.
  *
  * Usage:
@@ -53,7 +59,31 @@ function parseArgs(argv: string[]): McpServerArgs {
     return { transport, port };
 }
 
-function startStdio(server: McpServer): void {
+function createRuntime(surface: ToolSurface, connectionName: string | undefined): McpToolRuntime {
+    const access = parseMcpAiToolAccess(process.env);
+    return {
+        connectionName,
+        allowWrites: surfaceAllowsWrites(access, surface),
+        allowDestructive: surfaceAllowsDestructive(access, surface),
+        audit: event => {
+            console.error(
+                `[netezza-mcp][audit] ${event.tool} tier=${event.tier} ok=${event.ok} ` +
+                `surface=${event.surface} durationMs=${event.durationMs}` +
+                `${event.connectionName ? ` connection=${event.connectionName}` : ''}`,
+            );
+        },
+    };
+}
+
+function startStdio(introspection: CatalogIntrospection, serverVersion: string, connectionName: string | undefined): void {
+    const surface: ToolSurface = 'mcp';
+    const runtime = createRuntime(surface, connectionName);
+    const access = parseMcpAiToolAccess(process.env);
+    const server = createNetezzaMcpServer(introspection, {
+        serverVersion,
+        runtime,
+        allowedToolIds: allowedToolIds(surface, access, connectionName),
+    });
     const transport = new StdioServerTransport();
     void server.connect(transport).catch((error: unknown) => {
         console.error('[netezza-mcp] stdio connect failed:', error);
@@ -61,12 +91,40 @@ function startStdio(server: McpServer): void {
     });
 }
 
-function startHttp(introspection: CatalogIntrospection, serverVersion: string, port: number): void {
+function startHttp(
+    introspection: CatalogIntrospection,
+    serverVersion: string,
+    port: number,
+    connectionName: string | undefined,
+): void {
+    const surface: ToolSurface = 'mcpExternal';
+    const access = parseMcpAiToolAccess(process.env);
+    const runtime = createRuntime(surface, connectionName);
+    const allowed = allowedToolIds(surface, access, connectionName);
+    const writesEnabled = allowed.some(id => getAssistantTool(id)?.tier !== 'read');
+    const token = process.env[MCP_ENV.TOKEN]?.trim();
+
+    if (writesEnabled && !token) {
+        console.error(
+            '[netezza-mcp] Refusing to start HTTP write mode without ' + MCP_ENV.TOKEN + '.'
+        );
+        process.exit(1);
+    }
+
     // The SDK binds a McpServer instance to exactly one transport, so every
     // HTTP session gets its own server instance.
     const transports = new Map<string, { transport: StreamableHTTPServerTransport; server: McpServer }>();
 
+    const authorized = (req: http.IncomingMessage): boolean =>
+        isAuthorizedHttpRequest(req.headers, token);
+
     const httpServer = http.createServer(async (req, res) => {
+        if (!authorized(req)) {
+            res.writeHead(401, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+        }
+
         const sessionHeader = req.headers['mcp-session-id'];
         let entry: { transport: StreamableHTTPServerTransport; server: McpServer } | undefined =
             typeof sessionHeader === 'string' ? transports.get(sessionHeader) : undefined;
@@ -76,7 +134,11 @@ function startHttp(introspection: CatalogIntrospection, serverVersion: string, p
             const transport = new StreamableHTTPServerTransport({
                 sessionIdGenerator: () => sessionId
             });
-            const server = createNetezzaMcpServer(introspection, serverVersion);
+            const server = createNetezzaMcpServer(introspection, {
+                serverVersion,
+                runtime,
+                allowedToolIds: allowed,
+            });
             entry = { transport, server };
             transports.set(sessionId, entry);
             transport.onclose = () => {
@@ -147,24 +209,20 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
-    // The standalone MCP bundle does not execute the VS Code composition
-    // root, so register the one dialect required by the DDL generator here.
-    registerDatabaseDialect(netezzaDialect);
-
     const introspection = new CatalogIntrospection({
         getConnectionDetails: async () => details
     });
     const serverVersion = process.env[MCP_ENV.VERSION] || '1.0.0';
-    const server = createNetezzaMcpServer(introspection, serverVersion);
+    const connectionName = details.name ?? process.env[MCP_ENV.CONNECTION_NAME] ?? undefined;
     const args = parseArgs(process.argv.slice(2));
 
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
     if (args.transport === 'http') {
-        startHttp(introspection, serverVersion, args.port);
+        startHttp(introspection, serverVersion, args.port, connectionName);
     } else {
-        startStdio(server);
+        startStdio(introspection, serverVersion, connectionName);
     }
 }
 

@@ -16,6 +16,8 @@ import {
 import type { McpHttpServerManager } from '../mcp/mcpHttpServerManager';
 import type { NetezzaMcpServerDefinitionProvider } from '../mcp/mcpServerDefinitionProvider';
 import { MCP_TOOL_CATALOG } from '../mcp/mcpToolCatalog';
+import { ASSISTANT_TOOL_CATALOG } from '../core/assistant/toolCatalog';
+import { normalizeAiToolAccess } from '../core/assistant/toolPolicy';
 import {
     isSettingsWebviewMessage,
     type SettingsHostMessage
@@ -23,7 +25,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 
-type SettingType = 'toggle' | 'select' | 'number' | 'text' | 'button' | 'textarea' | 'json';
+type SettingType = 'toggle' | 'select' | 'number' | 'text' | 'button' | 'textarea' | 'json' | 'tool-access';
 
 type SettingValue = boolean | string | number | string[] | Record<string, string> | Record<string, unknown>[];
 
@@ -41,6 +43,13 @@ interface SettingItem {
     jsonKind?: 'array' | 'objectArray' | 'severityMap';
     /** Template merged into the editor by the "Insert example" button. Omit to hide the button. */
     jsonExample?: SettingValue;
+    /** Tool rows rendered by the `tool-access` control. */
+    toolCatalog?: readonly {
+        readonly id: string;
+        readonly title: string;
+        readonly tier: string;
+        readonly surfaces: readonly string[];
+    }[];
 }
 
 interface SettingsSection {
@@ -1130,6 +1139,27 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
         ]
     },
     {
+        id: 'ai-tools',
+        title: 'AI Tools',
+        description: 'Choose which assistant tools are available on each surface and whether they may write to the database. Defaults are read-only everywhere.',
+        settings: [
+            {
+                id: 'ai-tools-access',
+                label: 'Tool Access',
+                description: 'Per-surface profiles and per-tool overrides. MCP writes additionally require the connection in "Writable connections".',
+                type: 'tool-access',
+                configKey: 'ai.tools',
+                defaultValue: {},
+                toolCatalog: ASSISTANT_TOOL_CATALOG.map(tool => ({
+                    id: tool.id,
+                    title: tool.title,
+                    tier: tool.tier,
+                    surfaces: tool.surfaces,
+                })),
+            }
+        ]
+    },
+    {
         id: 'snippets',
         title: 'SQL Snippets',
         description: 'Browse predefined Netezza snippets and manage your custom SQL snippets',
@@ -1407,6 +1437,27 @@ export class SettingsView {
                 if (!setting.jsonKind) throw new Error(`${setting.label} has no JSON validation schema.`);
                 validateJsonSettingValue(value, setting.jsonKind);
                 return;
+            case 'tool-access': {
+                if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+                    throw new Error(`${setting.label} must be an object.`);
+                }
+                const normalized = normalizeAiToolAccess(value);
+                const known = new Set(ASSISTANT_TOOL_CATALOG.map(tool => tool.id));
+                for (const surface of ['copilot', 'mcp', 'mcpExternal'] as const) {
+                    for (const toolId of Object.keys(normalized[surface].overrides)) {
+                        const canonical = toolId.startsWith('netezza_') ? toolId.slice('netezza_'.length) : toolId;
+                        if (!known.has(canonical)) {
+                            throw new Error(`Unknown tool override "${toolId}" in ${setting.label}.`);
+                        }
+                    }
+                }
+                for (const connection of normalized.writableConnections) {
+                    if (typeof connection !== 'string' || connection.trim().length === 0) {
+                        throw new Error(`${setting.label} contains an invalid writable connection name.`);
+                    }
+                }
+                return;
+            }
             default:
                 throw new Error(`${setting.label} cannot be changed here.`);
         }

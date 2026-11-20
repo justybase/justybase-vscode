@@ -14,7 +14,7 @@ const JSON_EXAMPLES = {};
 const NAV_GROUPS = [
     { id: 'core', title: 'Core', sections: ['general', 'editor', 'sql', 'codelens', 'join-knowledge'] },
     { id: 'data', title: 'Data', sections: ['query', 'ddl', 'schema', 'results', 'filepreview', 'importwizard'] },
-    { id: 'integrations', title: 'Integrations', sections: ['copilot', 'mcp', 'snippets'] }
+    { id: 'integrations', title: 'Integrations', sections: ['ai-tools', 'copilot', 'mcp', 'snippets'] }
 ];
 
 // ── Render Sidebar Navigation ──
@@ -33,6 +33,7 @@ function renderNav() {
         'results': '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>',
         'filepreview': '<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
         'importwizard': '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+        'ai-tools': '<svg viewBox="0 0 24 24"><path d="M12 2l1.9 5.1L19 9l-5.1 1.9L12 16l-1.9-5.1L5 9l5.1-1.9L12 2z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>',
         'copilot': '<svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM8 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm8 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>',
         'mcp': '<svg viewBox="0 0 24 24"><path d="M8 8.5 12 4l4 4.5"/><path d="M12 4v11"/><path d="M7 12H4v7h16v-7h-3"/><path d="M8 19v2h8v-2"/></svg>',
         'snippets': '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="8 10 12 14 16 10"/></svg>'
@@ -142,7 +143,7 @@ function renderContent() {
 }
 
 function renderSettingRow(setting, visible = true) {
-    const isTextarea = setting.type === 'textarea' || setting.type === 'json';
+    const isTextarea = setting.type === 'textarea' || setting.type === 'json' || setting.type === 'tool-access';
     const label = String(setting.label || setting.id || 'Setting');
     const description = String(setting.description || '');
     try {
@@ -181,9 +182,15 @@ function renderMcpStatus() {
         '</div>';
 
     if (status.externalEnabled && http.running) {
+        const accessLabel = http.writesEnabled ? 'writes enabled' : 'read-only';
         html += '<div class="mcp-status-line success">✓ Local HTTP: running on <code>http://127.0.0.1:' +
             escapeHtml(String(http.port || settingsValues['mcp-port'] || 37210)) +
-            '</code>' + (http.connectionName ? ' · ' + escapeHtml(http.connectionName) : '') + '</div>';
+            '</code>' + (http.connectionName ? ' · ' + escapeHtml(http.connectionName) : '') +
+            ' <span class="mcp-access-badge">' + escapeHtml(accessLabel) + '</span></div>';
+        if (http.writesEnabled && http.writeToken) {
+            html += '<div class="mcp-status-line warning">Bearer token for HTTP clients: <code class="mcp-write-token">' +
+                escapeHtml(String(http.writeToken)) + '</code><br><small>Regenerated whenever the HTTP server restarts.</small></div>';
+        }
     } else if (status.externalEnabled) {
         html += '<div class="mcp-status-line error">⚠ Local HTTP: ' +
             escapeHtml(http.lastError || 'server is not running') + '</div>';
@@ -193,18 +200,25 @@ function renderMcpStatus() {
 
     if (status.externalEnabled) {
         const port = http.port || settingsValues['mcp-port'] || 37210;
-        const snippet = JSON.stringify({
-            mcp: { 'netezza-schema': { type: 'remote', url: 'http://127.0.0.1:' + port } }
-        }, null, 2);
+        const server = {
+            type: 'remote',
+            url: 'http://127.0.0.1:' + port
+        };
+        if (http.writesEnabled && http.writeToken) {
+            server.headers = { Authorization: 'Bearer ' + http.writeToken };
+        }
+        const snippet = JSON.stringify({ mcp: { 'netezza-schema': server } }, null, 2);
         html += '<div class="mcp-snippet-label">OpenCode Streamable HTTP configuration</div>';
         html += '<pre class="mcp-snippet"><code>' + escapeHtml(snippet) + '</code></pre>';
     }
 
-    html += '<details class="mcp-tools"><summary>Available read-only tools (' + tools.length + ')</summary><ul>';
+    html += '<details class="mcp-tools"><summary>MCP tools (' + tools.length + ')</summary><ul>';
     for (const tool of tools) {
-        html += '<li><strong>' + escapeHtml(tool.name || '') + '</strong> — ' + escapeHtml(tool.description || '') + '</li>';
+        html += '<li><span class="tool-access-tier tier-' + escapeHtml(String(tool.tier || 'read')) + '">' +
+            escapeHtml(String(tool.tier || 'read')) + '</span> <strong>' + escapeHtml(tool.name || '') + '</strong> - ' +
+            escapeHtml(tool.description || '') + '</li>';
     }
-    html += '</ul></details></div>';
+    html += '</ul><small>Enable or disable tools per surface in <strong>AI Tools</strong>.</small></details></div>';
     return html;
 }
 
@@ -396,6 +410,9 @@ function renderControl(setting) {
         case 'json':
             controlHtml = renderJsonControl(setting);
             return controlHtml;
+        case 'tool-access':
+            controlHtml = renderToolAccessControl(setting);
+            return controlHtml;
         default:
             controlHtml = '';
             break;
@@ -433,6 +450,116 @@ function renderJsonControl(setting) {
         exampleButton +
         '<button class="reset-btn" data-reset-key="' + escapeHtml(String(setting.configKey || '')) + '" data-reset-id="' + escapeHtml(String(setting.id || '')) + '" title="' + escapeHtml(defaultHint) + '" aria-label="Reset ' + escapeHtml(String(setting.label || setting.id || 'setting')) + ' to default">↺</button></div>' +
         '</div>';
+}
+
+const TOOL_ACCESS_SURFACES = [
+    { key: 'copilot', label: 'Copilot' },
+    { key: 'mcp', label: 'MCP (VS Code)' },
+    { key: 'mcpExternal', label: 'MCP (HTTP)' }
+];
+const TOOL_ACCESS_PROFILES = ['read-only', 'read-write', 'full'];
+const TOOL_OVERRIDE_LEVELS = ['inherit', 'off', 'read', 'write', 'destructive'];
+
+function normalizeToolAccessValue(raw) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const value = {};
+    for (const surface of TOOL_ACCESS_SURFACES) {
+        value[surface.key] = { access: 'read-only', overrides: {} };
+        const entry = source[surface.key];
+        if (typeof entry === 'string' && TOOL_ACCESS_PROFILES.includes(entry)) {
+            value[surface.key].access = entry;
+        } else if (entry && typeof entry === 'object') {
+            if (typeof entry.access === 'string' && TOOL_ACCESS_PROFILES.includes(entry.access)) {
+                value[surface.key].access = entry.access;
+            }
+            if (entry.overrides && typeof entry.overrides === 'object' && !Array.isArray(entry.overrides)) {
+                for (const [toolId, level] of Object.entries(entry.overrides)) {
+                    if (TOOL_OVERRIDE_LEVELS.includes(level)) {
+                        value[surface.key].overrides[toolId] = level;
+                    }
+                }
+            }
+        }
+    }
+    value.writableConnections = Array.isArray(source.writableConnections)
+        ? source.writableConnections.filter(connection => typeof connection === 'string' && connection.trim().length > 0)
+        : [];
+    return value;
+}
+
+function renderToolAccessControl(setting) {
+    const value = normalizeToolAccessValue(settingsValues[setting.id] ?? setting.defaultValue);
+    const catalog = Array.isArray(setting.toolCatalog) ? setting.toolCatalog : [];
+    let html = '<div class="tool-access-control" data-key="' + escapeHtml(String(setting.configKey || '')) +
+        '" data-id="' + escapeHtml(String(setting.id || '')) + '">';
+
+    html += '<div class="tool-access-profiles">';
+    for (const surface of TOOL_ACCESS_SURFACES) {
+        html += '<label class="tool-access-profile"><span>' + escapeHtml(surface.label) + '</span>' +
+            '<select data-role="profile" data-surface="' + surface.key + '">';
+        for (const profile of TOOL_ACCESS_PROFILES) {
+            html += '<option value="' + profile + '"' +
+                (value[surface.key].access === profile ? ' selected' : '') + '>' + profile + '</option>';
+        }
+        html += '</select></label>';
+    }
+    html += '</div>';
+
+    html += '<label class="tool-access-writable"><span>Writable connections</span>' +
+        '<input type="text" data-role="writable" value="' +
+        escapeHtml(value.writableConnections.join(', ')) + '" placeholder="DEV, UAT">' +
+        '<small>Comma-separated connection names. MCP write tools stay hidden for other connections.</small></label>';
+
+    html += '<table class="tool-access-table"><thead><tr><th>Tool</th><th>Tier</th>';
+    for (const surface of TOOL_ACCESS_SURFACES) {
+        html += '<th>' + escapeHtml(surface.label) + '</th>';
+    }
+    html += '</tr></thead><tbody>';
+
+    for (const tool of catalog) {
+        html += '<tr><td class="tool-access-name"><strong>' + escapeHtml(tool.title) + '</strong>' +
+            '<code>' + escapeHtml(tool.id) + '</code></td>' +
+            '<td><span class="tool-access-tier tier-' + escapeHtml(tool.tier) + '">' +
+            escapeHtml(tool.tier) + '</span></td>';
+        for (const surface of TOOL_ACCESS_SURFACES) {
+            if (!Array.isArray(tool.surfaces) || !tool.surfaces.includes(surface.key)) {
+                html += '<td class="tool-access-na">—</td>';
+                continue;
+            }
+            const selected = value[surface.key].overrides[tool.id] || 'inherit';
+            html += '<td><select data-role="override" data-surface="' + surface.key +
+                '" data-tool="' + escapeHtml(tool.id) + '">';
+            for (const level of TOOL_OVERRIDE_LEVELS) {
+                html += '<option value="' + level + '"' +
+                    (selected === level ? ' selected' : '') + '>' + level + '</option>';
+            }
+            html += '</select></td>';
+        }
+        html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+    return html;
+}
+
+function collectToolAccessValue(container) {
+    const value = normalizeToolAccessValue({});
+    container.querySelectorAll('select[data-role="profile"]').forEach(select => {
+        const surface = select.dataset.surface;
+        if (value[surface]) value[surface].access = select.value;
+    });
+    container.querySelectorAll('select[data-role="override"]').forEach(select => {
+        const surface = select.dataset.surface;
+        const toolId = select.dataset.tool;
+        if (value[surface] && toolId && select.value !== 'inherit') {
+            value[surface].overrides[toolId] = select.value;
+        }
+    });
+    const writable = container.querySelector('input[data-role="writable"]');
+    if (writable) {
+        value.writableConnections = writable.value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+    return value;
 }
 
 function setJsonStatus(id, state, text) {
@@ -625,6 +752,20 @@ function attachControlListeners() {
                     vscode.postMessage({ command: 'updateSetting', key: key, value: el.value });
                 }
             }, 800);
+        });
+    });
+
+    // AI tool access matrix — one structured setting, saved on change.
+    document.querySelectorAll('.tool-access-control').forEach(el => {
+        el.addEventListener('change', () => {
+            const key = el.dataset.key;
+            const id = el.dataset.id;
+            const value = collectToolAccessValue(el);
+            if (id) settingsValues[id] = value;
+            if (key) {
+                vscode.postMessage({ command: 'updateSetting', key: key, value: value });
+                showToast('AI tool access updated');
+            }
         });
     });
 
