@@ -1,4 +1,5 @@
 import type { ExecutionLogDetails } from '../contracts/webviews/executionLogContracts';
+import { compactSqlErrorMessage } from '@justybase/ui-core';
 import * as vscode from 'vscode';
 import { ResultSet } from '../types';
 import { getLogger } from '../utils/logger';
@@ -987,7 +988,13 @@ export class ResultStateManager {
                 entry.endTime = Date.now();
                 entry.rowCount = rowCount;
                 entry.status = status;
-                entry.errorMessage = errorMessage;
+                // Netezza repeats the whole statement before the parser
+                // diagnostic; keep the diagnostic and a short SQL excerpt so a
+                // long failing statement does not bury the error in Logs.
+                const displayError = errorMessage === undefined
+                    ? undefined
+                    : compactSqlErrorMessage(errorMessage);
+                entry.errorMessage = displayError;
 
                 // Calculate execution time
                 const executionTime = entry.endTime - entry.startTime;
@@ -1025,10 +1032,10 @@ export class ResultStateManager {
                         let logMessage: string;
 
                         if (status === 'retrying') {
-                            logMessage = `${statusIcon} ${statusText}: ${entry.truncatedSql} | ${entry.connectionName}${errorMessage ? ` | ${errorMessage}` : ''}`;
-                        } else if (status === 'error' && errorMessage) {
+                            logMessage = `${statusIcon} ${statusText}: ${entry.truncatedSql} | ${entry.connectionName}${displayError ? ` | ${displayError}` : ''}`;
+                        } else if (status === 'error' && displayError) {
                             // For errors, show the error message
-                            logMessage = `${statusIcon} ${statusText}: ${entry.truncatedSql} | ${entry.connectionName} | ${timeStr} | ${rowCount} rows | ${errorMessage}`;
+                            logMessage = `${statusIcon} ${statusText}: ${entry.truncatedSql} | ${entry.connectionName} | ${timeStr} | ${rowCount} rows | ${displayError}`;
                         } else {
                             logMessage = `${statusIcon} ${statusText}: ${entry.truncatedSql} | ${entry.connectionName} | ${timeStr} | ${rowCount} rows`;
                         }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { compactSqlErrorMessage } from '@justybase/ui-core';
 import type { DataGridColumn } from './dataGridTypes';
 
 export interface LogConsoleProps {
@@ -143,7 +144,7 @@ export function LogConsole({ rows, columns, emptyLabel = 'No log messages yet.' 
           <span className="console-msg">
             {parsed.sqlPreview && <span className="log-line-sql">{parsed.sqlPreview}</span>}
             {meta.length > 0 && <span className="log-meta-inline">{meta.join('  ·  ')}</span>}
-            {parsed.errorText && <span className="log-error-hint">{parsed.errorText}</span>}
+            {parsed.errorText && <span className="log-error-hint">{compactSqlErrorMessage(parsed.errorText)}</span>}
           </span>
         </div>;
       })}

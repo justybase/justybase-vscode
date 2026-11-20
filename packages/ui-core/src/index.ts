@@ -114,6 +114,8 @@ export type {
 } from './resultGridSelection';
 export { hasUiResultQuery, resolveUiResultColumnIndex, toUiResultQueryOptions } from './resultQuery';
 export type { UiResultQueryOptions } from './resultQuery';
+export { compactSqlErrorMessage, summarizeSqlErrorMessage } from './sqlErrorMessage';
+export type { SqlErrorExcerptOptions } from './sqlErrorMessage';
 export { createInitialUiState, emptyResultView, reduceUiState, resultKey } from './reducer';
 export type { InitialUiStateOptions } from './reducer';
 export type { SqlProblem, SqlProblemSeverity } from './editor';

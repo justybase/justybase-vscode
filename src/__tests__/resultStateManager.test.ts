@@ -583,6 +583,25 @@ describe('ResultStateManager', () => {
             expect(manager.getExecutionLogs(sourceUri)[0].status).toBe('success');
         });
 
+        it('keeps the parser diagnostic visible for a long echoed statement', () => {
+            const sourceUri = 'file:///test.sql';
+            manager.startExecution(sourceUri);
+
+            const columns = Array.from({ length: 40 }, (_value, index) => `d.LONG_COLUMN_NAME_${index}`).join(', ');
+            const sql = `SELECT ${columns} FROM JUST_DATA..DIMDATE WHERE `;
+            const char = sql.length + 2;
+            const error = `ERROR:  '${sql}'\nerror ^ found "" (at char ${char}) expecting an expression`;
+
+            const { id } = manager.logExecutionStart(sourceUri, sql, 'conn1');
+            manager.logExecutionEnd(id, 0, 'error', error);
+
+            const logData = manager.resultsMap.get(sourceUri)![0].data;
+            const message = logData[logData.length - 1]![1] as string;
+            expect(message).toContain(`found "" (at char ${char}) expecting an expression`);
+            expect(message).not.toContain("ERROR:  '");
+            expect(message).not.toContain(columns);
+        });
+
         it('ignores retrying and duplicate terminal updates after execution ended', () => {
             const sourceUri = 'file:///test.sql';
             manager.startExecution(sourceUri);

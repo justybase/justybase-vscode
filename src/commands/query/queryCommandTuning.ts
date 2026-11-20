@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { compactSqlErrorMessage } from '@justybase/ui-core';
 import { ConnectionManager } from '../../core/connectionManager';
 import {
     getDatabaseDialect,
@@ -710,7 +711,7 @@ export async function executeExplainQuery(
         if (executionGate && !executionGate.isCurrent()) {
             return;
         }
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = compactSqlErrorMessage(err instanceof Error ? err.message : String(err));
         const errorEvent = explainTimer.finish({
             result: 'error',
             errorCode: toPerfErrorCode(msg),
@@ -872,7 +873,7 @@ export async function executeTuningAdvisor(
         if (!executionStillCurrent) {
             return;
         }
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = compactSqlErrorMessage(err instanceof Error ? err.message : String(err));
         const errorEvent = tuningTimer.finish({
             result: 'error',
             errorCode: toPerfErrorCode(msg),

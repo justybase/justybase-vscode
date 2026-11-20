@@ -5,6 +5,7 @@
  */
 
 import * as vscode from "vscode";
+import { compactSqlErrorMessage } from '@justybase/ui-core';
 import { ConnectionManager } from "./connectionManager";
 import { isConnectionExceptionSqlState, isDatabaseSqlError } from '@justybase/database-runtime';
 export { normalizeUriKey } from "./uriUtils";
@@ -127,6 +128,13 @@ export function isConnectionBrokenError(error: unknown): boolean {
 
 /** User-facing query error text; avoids `Error: Error (after reconnect attempt): …`. */
 export function formatQueryRunnerErrorMessage(message: string): string {
+  // A Netezza parser error repeats the whole statement before the diagnostic.
+  // Keep the diagnostic first and shorten the echo so logs and notifications
+  // stay readable; short statements are returned unchanged.
+  const compacted = compactSqlErrorMessage(message);
+  if (compacted !== message) {
+    return compacted;
+  }
   const trimmed = message.trim();
   // Multi-line driver messages (for example Netezza parser output with a
   // caret under the offending character) are position-sensitive. Prefixing

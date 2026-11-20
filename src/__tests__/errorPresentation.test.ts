@@ -28,6 +28,14 @@ describe('errorPresentation', () => {
         );
     });
 
+    it('shortens a driver message that echoes a long statement', () => {
+        const sql = `SELECT ${Array.from({ length: 40 }, (_value, index) => `COLUMN_${index}`).join(', ')}`;
+        const error = new Error(`ERROR:  '${sql}'\nerror ^ found "" (at char 5) expecting an expression`);
+        const described = describeQueryError(error);
+        expect(described).toContain('found "" (at char 5) expecting an expression');
+        expect(described).not.toContain(sql);
+    });
+
     it('explains a thrown non-Error value', () => {
         expect(describeQueryError('plain string failure')).toBe('plain string failure');
         expect(describeQueryError(undefined)).toBe('Query execution failed.');

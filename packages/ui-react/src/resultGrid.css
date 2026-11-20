@@ -189,6 +189,13 @@ body,
   scroll-padding-top: var(--jb-grid-column-header-height, 62px);
 }
 
+/* The theme border is nearly white in light themes, which makes the horizontal
+   scrollbar invisible; keep a clearly visible thumb there. */
+body.vscode-light .ui-data-grid-scroll,
+body.vscode-high-contrast-light .ui-data-grid-scroll {
+  scrollbar-color: color-mix(in srgb, var(--justybase-grid-text) 40%, transparent) transparent;
+}
+
 .ui-data-grid-scroll:focus-visible {
   box-shadow: inset 0 0 0 1px var(--justybase-grid-accent);
 }
@@ -862,6 +869,9 @@ body,
 
 .ui-data-grid thead .ui-data-grid-row-number {
   z-index: 12;
+  /* Keep the gutter header on the same surface as the column headers; the body
+     gutter deliberately keeps the tab-bar surface. */
+  background: var(--justybase-grid-header);
   cursor: default;
 }
 
@@ -975,6 +985,30 @@ body,
 
 .ui-data-grid-value-boolean-false {
   color: var(--vscode-disabledForeground, #64748b) !important;
+}
+
+/* Light themes cannot reuse the dark-first accents above: the chart colors and
+   disabled foreground are tuned for a dark surface, and the extra opacity on
+   NULL pushes the text below a readable contrast on white. Muted values stay
+   clearly dimmer than data, but derive their contrast from the theme text. */
+body.vscode-light .ui-data-grid-value-null,
+body.vscode-high-contrast-light .ui-data-grid-value-null,
+body.vscode-light .ui-data-grid-value-boolean-false,
+body.vscode-high-contrast-light .ui-data-grid-value-boolean-false {
+  color: color-mix(in srgb, var(--justybase-grid-text) 72%, transparent) !important;
+  opacity: 1;
+}
+
+body.vscode-light .ui-data-grid-value-numeric,
+body.vscode-high-contrast-light .ui-data-grid-value-numeric,
+body.vscode-light .ui-data-grid-value-boolean-true,
+body.vscode-high-contrast-light .ui-data-grid-value-boolean-true {
+  color: #15803d !important;
+}
+
+body.vscode-light .ui-data-grid-value-temporal,
+body.vscode-high-contrast-light .ui-data-grid-value-temporal {
+  color: #6d28d9 !important;
 }
 
 .ui-data-grid-cell-numeric {
@@ -1098,6 +1132,32 @@ body,
 .ui-data-grid-type-numeric { color: #86efac; background: rgba(34, 197, 94, .15); }
 .ui-data-grid-type-temporal { color: #d8b4fe; background: rgba(168, 85, 247, .15); }
 .ui-data-grid-type-boolean { color: #fcd34d; background: rgba(245, 158, 11, .15); }
+
+/* The pastel badge palette above only reads on a dark header. Light themes use
+   the same hues at full strength so the 8px uppercase label stays legible. */
+body.vscode-light .ui-data-grid-type-text,
+body.vscode-high-contrast-light .ui-data-grid-type-text {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, .12);
+}
+
+body.vscode-light .ui-data-grid-type-numeric,
+body.vscode-high-contrast-light .ui-data-grid-type-numeric {
+  color: #166534;
+  background: rgba(34, 197, 94, .14);
+}
+
+body.vscode-light .ui-data-grid-type-temporal,
+body.vscode-high-contrast-light .ui-data-grid-type-temporal {
+  color: #6d28d9;
+  background: rgba(168, 85, 247, .14);
+}
+
+body.vscode-light .ui-data-grid-type-boolean,
+body.vscode-high-contrast-light .ui-data-grid-type-boolean {
+  color: #92400e;
+  background: rgba(245, 158, 11, .16);
+}
 
 .ui-data-grid-column-filter {
   grid-column: 1 / -1;
@@ -1327,7 +1387,7 @@ body,
   gap: 8px;
   padding: 7px 10px;
   border-bottom: 1px solid var(--justybase-grid-border);
-  background: color-mix(in srgb, var(--justybase-grid-surface) 76%, #000 24%);
+  background: var(--justybase-grid-header);
 }
 
 .ui-data-grid-filter-title {
@@ -1730,7 +1790,7 @@ body,
   gap: 5px;
   padding: 7px 10px;
   border-top: 1px solid var(--justybase-grid-border);
-  background: color-mix(in srgb, var(--justybase-grid-surface) 82%, #000 18%);
+  background: var(--justybase-grid-header);
 }
 
 .ui-data-grid-filter-footer button {
@@ -2214,6 +2274,18 @@ body,
 .ui-column-sidebar-type.type-binary { color: #fdd663; background: color-mix(in srgb, #fdd663 16%, transparent); }
 .ui-column-sidebar-type.type-text { color: var(--justybase-grid-muted); background: color-mix(in srgb, var(--justybase-grid-muted) 14%, transparent); }
 
+body.vscode-light .ui-column-sidebar-type.type-number,
+body.vscode-high-contrast-light .ui-column-sidebar-type.type-number { color: #1d4ed8; }
+
+body.vscode-light .ui-column-sidebar-type.type-temporal,
+body.vscode-high-contrast-light .ui-column-sidebar-type.type-temporal { color: #6d28d9; }
+
+body.vscode-light .ui-column-sidebar-type.type-bool,
+body.vscode-high-contrast-light .ui-column-sidebar-type.type-bool { color: #166534; }
+
+body.vscode-light .ui-column-sidebar-type.type-binary,
+body.vscode-high-contrast-light .ui-column-sidebar-type.type-binary { color: #854d0e; }
+
 .ui-column-sidebar-name {
   min-width: 0;
   overflow: hidden;
@@ -2611,6 +2683,21 @@ body,
 .ui-result-grid .log-status--error { color: #f14c4c; border-color: #f14c4c; background: transparent; }
 .ui-result-grid .log-status--cancelled { color: var(--justybase-grid-muted); border-color: var(--justybase-grid-border); background: transparent; }
 .ui-result-grid .log-status--retrying { color: #cca700; border-color: #cca700; background: transparent; }
+
+/* The status chips above reuse dark-theme signal colors; on a light surface the
+   success and retry hues fall below readable contrast. */
+body.vscode-light .ui-result-grid .log-status--running,
+body.vscode-high-contrast-light .ui-result-grid .log-status--running { color: #0369a1; border-color: #0369a1; }
+
+body.vscode-light .ui-result-grid .log-status--success,
+body.vscode-high-contrast-light .ui-result-grid .log-status--success { color: #15803d; border-color: #15803d; }
+
+body.vscode-light .ui-result-grid .log-status--error,
+body.vscode-high-contrast-light .ui-result-grid .log-status--error { color: #b91c1c; border-color: #b91c1c; }
+
+body.vscode-light .ui-result-grid .log-status--retrying,
+body.vscode-high-contrast-light .ui-result-grid .log-status--retrying { color: #92400e; border-color: #92400e; }
+
 .ui-result-grid .console-line.status-running,
 .ui-result-grid .console-line.status-success,
 .ui-result-grid .console-line.status-error,
@@ -2619,6 +2706,10 @@ body,
 .ui-result-grid .log-meta-inline { color: var(--justybase-grid-muted); font-size: 11px; white-space: nowrap; }
 .ui-result-grid .log-meta-inline::before { content: '· '; }
 .ui-result-grid .log-error-hint { display: block; margin-top: 2px; color: #f14c4c; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+
+body.vscode-light .ui-result-grid .log-error-hint,
+body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--vscode-errorForeground, #b91c1c); }
+
 .ui-result-grid .console-line--empty .console-msg { opacity: .6; }
 
 /* Statement cards inside the shared Logs transcript. The legacy renderer emitted
@@ -4144,6 +4235,23 @@ body,
 .ui-log-badge-error { color: #fca5a5; background: rgb(239 68 68 / 16%); }
 .ui-log-badge-cancelled { color: #cbd5e1; background: rgb(100 116 139 / 20%); }
 .ui-log-badge-retrying { color: #fcd34d; background: rgb(245 158 11 / 16%); }
+
+/* Light themes need the saturated end of each hue for the same 9px labels. */
+body.vscode-light .ui-log-badge-running,
+body.vscode-high-contrast-light .ui-log-badge-running { color: #0369a1; background: rgb(14 165 233 / 12%); }
+
+body.vscode-light .ui-log-badge-success,
+body.vscode-high-contrast-light .ui-log-badge-success { color: #166534; background: rgb(34 197 94 / 12%); }
+
+body.vscode-light .ui-log-badge-error,
+body.vscode-high-contrast-light .ui-log-badge-error { color: #b91c1c; background: rgb(239 68 68 / 12%); }
+
+body.vscode-light .ui-log-badge-cancelled,
+body.vscode-high-contrast-light .ui-log-badge-cancelled { color: #475569; background: rgb(100 116 139 / 14%); }
+
+body.vscode-light .ui-log-badge-retrying,
+body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; background: rgb(245 158 11 / 14%); }
+
 .ui-log-sql { font-weight: 600; }
 .ui-log-meta { margin-left: 6px; color: var(--justybase-grid-muted); font-size: 11px; }
 .ui-log-error { display: block; color: var(--vscode-errorForeground, #f48771); font-size: 11px; }
@@ -4213,6 +4321,12 @@ body,
 /* Driver messages embed a caret line under the failing SQL token. The
    editor font keeps that caret aligned with the reported character. */
 .ui-result-error-message { max-width: 100%; overflow-x: auto; color: var(--vscode-errorForeground, #f48771); font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 12px); font-variant-ligatures: none; font-weight: 400; tab-size: 4; white-space: pre; }
+/* The shortened message keeps the driver's SQL echo out of the way; the raw
+   text stays available on demand, matching the legacy error view. */
+.ui-result-error-raw { color: var(--justybase-grid-muted); font-size: 11px; }
+.ui-result-error-raw summary { cursor: pointer; }
+.ui-result-error-raw summary:hover { color: var(--justybase-grid-text); }
+.ui-result-error-raw pre { max-height: 260px; margin: 6px 0 0; padding: 8px; overflow: auto; border: 1px solid var(--justybase-grid-border); border-radius: 3px; background: var(--justybase-grid-bg); color: var(--justybase-grid-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; white-space: pre; }
 .ui-result-error-next { margin: 0; color: var(--vscode-descriptionForeground); }
 .ui-result-error-actions { display: flex; gap: 6px; }
 .ui-result-error-fix { min-height: 24px; padding: 2px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); font: inherit; cursor: pointer; }

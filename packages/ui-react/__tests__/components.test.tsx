@@ -421,12 +421,23 @@ describe('shared React presentation', () => {
     expect(onFixWithAi).toHaveBeenCalledTimes(1);
   });
 
-  it('flattens newlines inside the quoted SQL so the caret line stays aligned', () => {
+  it('keeps a short echoed statement in the driver layout', () => {
     const message = "ERROR:    'SELECT 1,2\nFROM DIMDATE WHERE 1,,5'\nerror                    ^ found \",\" (at char 34) expecting a keyword";
     const { container } = render(<ResultErrorView message={message} />);
-    expect(container.querySelector('.ui-result-error-message')?.textContent).toBe(
-      "ERROR:    'SELECT 1,2 FROM DIMDATE WHERE 1,,5'\nerror                    ^ found \",\" (at char 34) expecting a keyword",
-    );
+    expect(container.querySelector('.ui-result-error-message')?.textContent).toBe(message);
+  });
+
+  it('leads with the diagnostic and shortens a long echoed statement', () => {
+    const columns = Array.from({ length: 40 }, (_value, index) => `d.COLUMN_WITH_A_LONG_NAME_${index}`).join(', ');
+    const sql = `WITH abc as (\n\nSELECT ${columns} FROM just_data..DIMDATE d\n)\n\nSELECT ,,${columns} FROM abc`;
+    const char = sql.indexOf('SELECT ,,') + 'SELECT '.length + 2;
+    const message = `ERROR:  '${sql}'\nerror ^ found "," (at char ${char}) expecting an identifier`;
+    const { container } = render(<ResultErrorView message={message} />);
+    const text = container.querySelector('.ui-result-error-message')?.textContent ?? '';
+    const [summary, excerpt, caretLine] = text.split('\n');
+    expect(summary).toBe(`ERROR: found "," (at char ${char}) expecting an identifier`);
+    expect(excerpt?.[caretLine!.indexOf('^')]).toBe(',');
+    expect(container.querySelector('.ui-result-error-raw summary')?.textContent).toBe('Show full error details');
   });
 
   it('hides the Copilot fix action when no SQL is available', () => {

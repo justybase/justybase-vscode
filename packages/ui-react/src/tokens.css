@@ -66,6 +66,18 @@
   --justybase-results-grid-font-size: var(--jb-font-size);
 }
 
+/*
+ * Light themes invert the surface relationship. The dark-first tokens above mix
+ * the header toward black, which turns a light tab background into a muddy mid
+ * gray, and `color-scheme: dark` keeps native scrollbars and form controls dark.
+ * Light themes instead tint the header slightly toward the text color.
+ */
+body.vscode-light,
+body.vscode-high-contrast-light {
+  color-scheme: light;
+  --justybase-grid-header: color-mix(in srgb, var(--jb-color-surface) 92%, var(--jb-color-text) 8%);
+}
+
 html,
 body,
 #root {

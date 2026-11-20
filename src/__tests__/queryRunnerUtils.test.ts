@@ -177,6 +177,17 @@ describe("queryRunnerUtils", () => {
       expect(formatQueryRunnerErrorMessage(message)).toBe(message);
     });
 
+    it("should shorten a long echoed Netezza statement but keep the diagnostic", () => {
+      const sql = `SELECT ${Array.from({ length: 40 }, (_value, index) => `COLUMN_${index}`).join(", ")}`;
+      const message = [
+        `ERROR:  '${sql}'`,
+        'error ^ found "" (at char 5) expecting an expression',
+      ].join("\n");
+      const result = formatQueryRunnerErrorMessage(message);
+      expect(result.split("\n")[0]).toBe('ERROR: found "" (at char 5) expecting an expression');
+      expect(result).not.toContain(sql);
+    });
+
     it("should not prefix messages that already start with ERROR:", () => {
       expect(formatQueryRunnerErrorMessage("ERROR: relation does not exist")).toBe(
         "ERROR: relation does not exist",

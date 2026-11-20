@@ -1,3 +1,5 @@
+import { compactSqlErrorMessage } from '@justybase/ui-core';
+
 /**
  * Extracts a non-empty, human-readable message from any thrown value.
  *
@@ -97,7 +99,10 @@ export function describeQueryError(error: unknown, fallback = DEFAULT_FALLBACK):
     const collected = collectError(error);
     const messages = dedupeMessages(collected.messages);
     if (messages.length > 0) {
-        return messages.join(' — ');
+        // Netezza repeats the whole statement before the parser diagnostic.
+        // Keep the diagnostic and a short SQL excerpt so notifications and the
+        // result panel never truncate the only actionable part.
+        return compactSqlErrorMessage(messages.join(' — '));
     }
     const code = collected.codes[0];
     return code ? `${fallback} (${code})` : fallback;

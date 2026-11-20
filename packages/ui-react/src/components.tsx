@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseErrorDetails, type DatabaseKind } from '@justybase/contracts';
-import { SCHEMA_CONTEXT_MENU_LABELS, type MetadataNode } from '@justybase/ui-core';
+import { compactSqlErrorMessage, SCHEMA_CONTEXT_MENU_LABELS, type MetadataNode } from '@justybase/ui-core';
 import type { UiExecutionState, UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { formatDataGridCellValue } from './dataGrid';
@@ -139,40 +139,22 @@ export interface ResultErrorViewProps {
 function resultErrorNextSteps(message: string | undefined): string | undefined {
   const text = (message ?? '').toLowerCase();
   if (/(connect|connection|socket|network|timeout|host|port)/u.test(text)) return 'Check that the server is running and reachable (host/port, VPN or SSH tunnel), then retry. Review Logs for details.';
-  if (/(syntax|parse|unexpected token|near )/u.test(text)) return 'Review the SQL near the reported position, fix it, and run the query again.';
+  if (/(syntax|parse|unexpected token|near |found .*\(at char \d+\))/u.test(text)) return 'Review the SQL near the reported position, fix it, and run the query again.';
   if (/(permission|denied|privilege|not authorized)/u.test(text)) return 'Check the object and schema permissions for the active connection, then retry.';
   if (/(not found|does not exist|unknown column|unknown table)/u.test(text)) return 'Verify the object name, schema and search path, then retry.';
   return undefined;
 }
 
-/**
- * Driver errors quote the executed SQL. Multi-line SQL keeps its newlines in
- * that quote, while the driver's caret line is measured against a single line,
- * so the caret appears under the wrong character. Flatten only the quoted SQL
- * (everything before the closing quote) and leave the caret line untouched.
- */
-function flattenQuotedSqlInErrorMessage(message: string): string {
-  const lines = message.split(/\r?\n/u);
-  const caretIndex = lines.findIndex(line => line.includes('^'));
-  if (caretIndex <= 0) return message;
-  let sqlEndLine = -1;
-  for (let index = 0; index < caretIndex; index += 1) {
-    if ((lines[index] ?? '').trimEnd().endsWith("'")) sqlEndLine = index;
-  }
-  if (sqlEndLine <= 0) return message;
-  const head = [(lines[0] ?? '').trimEnd()];
-  for (let index = 1; index <= sqlEndLine; index += 1) {
-    const continuation = (lines[index] ?? '').trim();
-    if (continuation) head.push(continuation);
-  }
-  return [head.join(' '), ...lines.slice(sqlEndLine + 1)].join('\n');
-}
-
 export function ResultErrorView({ message, details, onFixWithAi, children }: ResultErrorViewProps): ReactNode {
   const nextSteps = resultErrorNextSteps(message);
-  const displayMessage = message === undefined ? 'Something went wrong.' : flattenQuotedSqlInErrorMessage(message);
+  const displayMessage = message === undefined ? 'Something went wrong.' : compactSqlErrorMessage(message);
+  const hasFullMessage = message !== undefined && displayMessage !== message;
   return <section className="ui-result-error" role="alert" aria-label="Result error">
     <div className="ui-result-error-message">{displayMessage}</div>
+    {hasFullMessage && <details className="ui-result-error-raw">
+      <summary>Show full error details</summary>
+      <pre>{message}</pre>
+    </details>}
     {nextSteps && <p className="ui-result-error-next">{nextSteps}</p>}
     {onFixWithAi && <div className="ui-result-error-actions">
       <button

@@ -16,6 +16,7 @@ import {
     createGroupAnalysisTable,
     createPivotAnalysisTable,
     calculateGridSelectionStats,
+    compactSqlErrorMessage,
     normalizeGridSelection,
     resultKey,
     resultAsyncState as getResultAsyncState,
@@ -3832,7 +3833,7 @@ function createSharedLogLine(row: LogRow): HTMLElement {
     if (parsed.sqlPreview) appendLogSpan(msg, 'log-line-sql', parsed.sqlPreview);
     const meta = [parsed.connection, parsed.duration, parsed.rowCount].filter((part): part is string => !!part);
     if (meta.length > 0) appendLogSpan(msg, 'log-meta-inline', meta.join(' · '));
-    if (parsed.errorText) appendLogSpan(msg, 'log-error-hint', parsed.errorText);
+    if (parsed.errorText) appendLogSpan(msg, 'log-error-hint', compactSqlErrorMessage(parsed.errorText));
     line.appendChild(msg);
     return line;
 }

@@ -1,3 +1,4 @@
+import { compactSqlErrorMessage, summarizeSqlErrorMessage } from '@justybase/ui-core';
 import type { ExecutionLogDetails } from '../../src/contracts/webviews/executionLogContracts';
 import type { LogRow } from './types.js';
 
@@ -160,7 +161,9 @@ function renderRunSummary(
     if (status === 'error' && parsed.errorText) {
         const hint = document.createElement('span');
         hint.className = 'log-error-hint';
-        hint.textContent = parsed.errorText.length > 200 ? `${parsed.errorText.slice(0, 200)}…` : parsed.errorText;
+        // Keep the parser diagnostic instead of the first 200 characters of the
+        // echoed statement, which is what made long-SQL errors unreadable.
+        hint.textContent = summarizeSqlErrorMessage(parsed.errorText, 200);
         main.appendChild(hint);
     }
 }
@@ -271,7 +274,7 @@ export function appendRunLogRows(container: HTMLElement, rows: LogRow[], createL
         if (metadata.event === 'message' || !metadata.event) {
             body.append(createLine(row));
         } else if (metadata.event === 'end' && (metadata.status === 'error' || metadata.status === 'retrying') && parsed.errorText) {
-            body.append(createErrorLine(parsed.errorText));
+            body.append(createErrorLine(compactSqlErrorMessage(parsed.errorText)));
         }
     }
 }
