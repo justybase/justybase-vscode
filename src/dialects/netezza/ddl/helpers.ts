@@ -3,6 +3,8 @@
  */
 import type { NzConnection, ConnectionDetails } from '../../../types';
 import { createConnectedDatabaseConnectionFromDetails } from '../../../core/connectedDatabaseFactory';
+import { getDatabaseDialectByKind } from '../../../core/factories/databaseDialectRegistry';
+import { createConnectedNetezzaConnectionFromDetails } from '../../../core/mcpConnectionFactory';
 
 /**
  * Execute query and return array of objects (shim for NzConnection)
@@ -105,9 +107,19 @@ export async function createConnectionFromDetails(
     details: ConnectionDetails, 
     databaseOverride?: string
 ): Promise<NzConnection> {
-    return await createConnectedDatabaseConnectionFromDetails(
+    // The extension host registers the Netezza dialect during activation, so
+    // tunnels and dialect-specific connection setup stay available there. The
+    // standalone MCP process deliberately has no dialect registry; use the
+    // VS Code-free Netezza connection factory in that case.
+    if (getDatabaseDialectByKind(details.dbType ?? 'netezza')) {
+        return await createConnectedDatabaseConnectionFromDetails(
+            details,
+            databaseOverride,
+        ) as NzConnection;
+    }
+    return await createConnectedNetezzaConnectionFromDetails(
         details,
         databaseOverride,
-    ) as NzConnection;
+    ) as unknown as NzConnection;
 }
 

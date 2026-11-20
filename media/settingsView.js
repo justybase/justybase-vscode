@@ -182,7 +182,9 @@ function renderMcpStatus() {
         '</div>';
 
     if (status.externalEnabled && http.running) {
-        const accessLabel = http.writesEnabled ? 'writes enabled' : 'read-only';
+        const accessLabel = http.writesEnabled
+            ? 'writes enabled'
+            : (http.access === 'off' ? 'disabled' : 'read-only');
         html += '<div class="mcp-status-line success">✓ Local HTTP: running on <code>http://127.0.0.1:' +
             escapeHtml(String(http.port || settingsValues['mcp-port'] || 37210)) +
             '</code>' + (http.connectionName ? ' · ' + escapeHtml(http.connectionName) : '') +
@@ -457,14 +459,14 @@ const TOOL_ACCESS_SURFACES = [
     { key: 'mcp', label: 'MCP (VS Code)' },
     { key: 'mcpExternal', label: 'MCP (HTTP)' }
 ];
-const TOOL_ACCESS_PROFILES = ['read-only', 'read-write', 'full'];
+const TOOL_ACCESS_PROFILES = ['off', 'read-only', 'read-write', 'full'];
 const TOOL_OVERRIDE_LEVELS = ['inherit', 'off', 'read', 'write', 'destructive'];
 
 function normalizeToolAccessValue(raw) {
     const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const value = {};
     for (const surface of TOOL_ACCESS_SURFACES) {
-        value[surface.key] = { access: 'read-only', overrides: {} };
+        value[surface.key] = { access: 'off', overrides: {} };
         const entry = source[surface.key];
         if (typeof entry === 'string' && TOOL_ACCESS_PROFILES.includes(entry)) {
             value[surface.key].access = entry;

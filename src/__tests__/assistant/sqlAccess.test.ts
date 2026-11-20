@@ -11,6 +11,11 @@ describe('assistant SQL access policy', () => {
             expect(splitSingleStatement('  SELECT 1;  ')).toBe('SELECT 1');
         });
 
+        it('ignores comment-only trailing segments', () => {
+            expect(splitSingleStatement('SELECT 1; -- note')).toBe('SELECT 1');
+            expect(splitSingleStatement('SELECT 1; /* note */')).toBe('SELECT 1');
+        });
+
         it.each([
             '',
             '   ',
@@ -72,7 +77,6 @@ describe('assistant SQL access policy', () => {
             'CREATE TABLE t (id INT)',
             'ALTER TABLE t ADD COLUMN x INT',
             'COMMENT ON TABLE t IS \'x\'',
-            'CALL my_proc(1)',
             "COPY t FROM 'file.csv'",
             'SET search_path TO admin',
             'SELECT * INTO backup FROM admin.orders',
@@ -86,7 +90,9 @@ describe('assistant SQL access policy', () => {
             'TRUNCATE TABLE t',
             'GRANT SELECT ON t TO PUBLIC',
             'REVOKE SELECT ON t FROM PUBLIC',
-            'ALTER TABLE t DROP COLUMN x'
+            'ALTER TABLE t DROP COLUMN x',
+            'CALL my_proc(1)',
+            'EXEC my_proc(1)'
         ])('classifies %s as destructive', sql => {
             expect(classifySqlStatement(sql).kind).toBe('destructive');
         });
@@ -100,14 +106,25 @@ describe('assistant SQL access policy', () => {
         it.each([
             ['DROP TABLE ADMIN.ORDERS', 'ORDERS'],
             ['DROP TABLE IF EXISTS "ADMIN"."ORDERS"', 'ORDERS'],
+            ['DROP TABLE DB..ORDERS', 'ORDERS'],
+            ['DROP SCHEMA ADMIN', 'ADMIN'],
+            ['DROP DATABASE DWH', 'DWH'],
+            ['DROP SEQUENCE ADMIN.SEQ_ORDERS', 'SEQ_ORDERS'],
             ['TRUNCATE TABLE ADMIN.ORDERS', 'ORDERS'],
-            ['TRUNCATE ADMIN.ORDERS', 'ORDERS']
+            ['TRUNCATE ADMIN.ORDERS', 'ORDERS'],
+            ['CALL ADMIN.P(1)', 'P'],
+            ['EXECUTE ADMIN.P(1)', 'P'],
+            ['ALTER TABLE ADMIN.ORDERS DROP COLUMN X', 'ORDERS'],
+            ['GRANT SELECT ON TABLE ADMIN.ORDERS TO PUBLIC', 'ORDERS'],
+            ['REVOKE SELECT ON ADMIN.ORDERS FROM PUBLIC', 'ORDERS'],
+            ['-- note\nDROP TABLE ADMIN.ORDERS', 'ORDERS']
         ])('extracts the short name from %s', (sql, expected) => {
             expect(destructiveTarget(sql)).toBe(expected);
         });
 
         it('returns undefined for non-drop statements', () => {
             expect(destructiveTarget('DELETE FROM ADMIN.ORDERS')).toBeUndefined();
+            expect(destructiveTarget('EXECUTE IMMEDIATE \'DROP TABLE ADMIN.ORDERS\'')).toBeUndefined();
         });
     });
 });

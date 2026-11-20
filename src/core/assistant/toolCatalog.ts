@@ -27,6 +27,16 @@ export interface AssistantToolDefinition {
   /** Model-facing description shared by both surfaces. */
   readonly description: string;
   readonly tier: ToolTier;
+  /**
+   * True when the tool can operate with fewer capabilities than its catalog
+   * tier (currently only `execute_sql`, which can be narrowed to reads).
+   */
+  readonly supportsReducedTier?: boolean;
+  /**
+   * True when the tool can execute statement kinds classified as destructive
+   * (currently `execute_sql` and `compile_procedure` in compile-and-call mode).
+   */
+  readonly supportsDestructiveStatements?: boolean;
   readonly surfaces: readonly ToolSurface[];
   readonly requiresConnection: boolean;
   readonly inputSchema: JsonObjectSchema;
@@ -222,6 +232,8 @@ export const ASSISTANT_TOOL_CATALOG: readonly AssistantToolDefinition[] = [
     description:
       'Executes exactly one SQL statement on the selected Netezza connection. SELECT returns capped rows; DML/DDL returns the affected row count. Destructive statements require the destructive tier and an explicit confirm value.',
     tier: 'write',
+    supportsReducedTier: true,
+    supportsDestructiveStatements: true,
     surfaces: ['copilot', 'mcp', 'mcpExternal'],
     requiresConnection: true,
     inputSchema: object(
@@ -263,8 +275,9 @@ export const ASSISTANT_TOOL_CATALOG: readonly AssistantToolDefinition[] = [
     id: 'compile_procedure',
     title: 'Compile Procedure',
     description:
-      'Creates or replaces a Netezza NZPLSQL procedure from the supplied CREATE PROCEDURE block. Use mode=compile_and_call to run a test CALL; that CALL may modify data and is confirmed separately.',
+      'Creates or replaces a Netezza NZPLSQL procedure from the supplied CREATE PROCEDURE block. Use mode=compile_and_call to run a test CALL; that CALL can modify or drop data and requires the full access profile plus confirm.',
     tier: 'write',
+    supportsDestructiveStatements: true,
     surfaces: ['copilot', 'mcp', 'mcpExternal'],
     requiresConnection: true,
     inputSchema: object(
@@ -276,6 +289,9 @@ export const ASSISTANT_TOOL_CATALOG: readonly AssistantToolDefinition[] = [
           description: 'Typed arguments for the test CALL when mode=compile_and_call.',
           items: { type: 'object', additionalProperties: true },
         },
+        confirm: optionalString(
+          'Required for compile_and_call: the procedure name being called (case-insensitive).',
+        ),
       },
       ['mode'],
     ),

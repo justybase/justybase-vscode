@@ -128,7 +128,7 @@ The optional AI workflows integrate with GitHub Copilot Chat and can:
 - explain, fix, optimize, rewrite, and generate SQL;
 - inspect schema, columns, tables, DDL, plans, diagnostics, and table statistics;
 - analyze procedures locally before you compile or run them manually;
-- expose a Netezza MCP server (read-only by default, with opt-in write/destructive tiers) for Copilot Chat, Cursor, Claude Desktop, OpenCode, and other MCP clients.
+- expose a Netezza MCP server (disabled by default, with opt-in read-only, write and destructive tiers) for Copilot Chat, Cursor, Claude Desktop, OpenCode, and other MCP clients.
 
 AI features transmit SQL, schema information, selected metadata, and limited query history to external Microsoft/GitHub services. Privacy confirmations are shown before transmission and AI features can be disabled with `justybase.copilot.enabled`.
 

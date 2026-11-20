@@ -19,7 +19,7 @@ It documents the current workflow and boundaries:
 - the current Language Model Tool catalog and their database requirements;
 - `validate_sql` with `mode=database` as a guarded database validation/EXPLAIN operation;
 - `compile_procedure` as a bounded, explicitly confirmed procedure compile/test workflow;
-- MCP over stdio or localhost HTTP, read-only by default with opt-in write/destructive tiers;
+- MCP over stdio or localhost HTTP, disabled by default with opt-in read-only, write and destructive tiers;
 - the difference between an AI suggestion and a user-approved execution.
 
 The generated [Copilot and MCP reference](guide/reference/ai-mcp/) is built from `contributes.languageModelTools` and `src/core/assistant/toolCatalog.ts`. This file remains as a compatibility entry point for links to the former Markdown documentation.

@@ -41,7 +41,10 @@ export function createNetezzaMcpServer(
         inputSchema: jsonSchemaToZod(tool.inputSchema),
         annotations: tool.tier === 'read'
           ? { readOnlyHint: true }
-          : { readOnlyHint: false, destructiveHint: tool.tier === 'destructive' }
+          : {
+              readOnlyHint: false,
+              destructiveHint: tool.tier === 'destructive' || tool.supportsDestructiveStatements === true
+            }
       },
       async (args) => {
         const result = await tool.handler(args as Record<string, unknown>);

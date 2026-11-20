@@ -4,8 +4,14 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import * as http from 'http';
 import { randomUUID } from 'crypto';
 import { CatalogIntrospection } from '../core/catalogIntrospection';
-import { allowedToolIds, surfaceAllowsDestructive, surfaceAllowsWrites } from '../core/assistant/toolPolicy';
-import { getAssistantTool, type ToolSurface } from '../core/assistant/toolCatalog';
+import {
+    allowedToolIds,
+    effectiveToolTiers,
+    surfaceAllowsConnectionWrites,
+    surfaceAllowsDestructive,
+    surfaceAllowsWrites
+} from '../core/assistant/toolPolicy';
+import type { ToolSurface } from '../core/assistant/toolCatalog';
 import {
     envToConnectionDetails,
     MCP_ENV,
@@ -65,6 +71,7 @@ function createRuntime(surface: ToolSurface, connectionName: string | undefined)
         connectionName,
         allowWrites: surfaceAllowsWrites(access, surface),
         allowDestructive: surfaceAllowsDestructive(access, surface),
+        accessLevels: effectiveToolTiers(surface, access, connectionName),
         audit: event => {
             console.error(
                 `[netezza-mcp][audit] ${event.tool} tier=${event.tier} ok=${event.ok} ` +
@@ -101,7 +108,7 @@ function startHttp(
     const access = parseMcpAiToolAccess(process.env);
     const runtime = createRuntime(surface, connectionName);
     const allowed = allowedToolIds(surface, access, connectionName);
-    const writesEnabled = allowed.some(id => getAssistantTool(id)?.tier !== 'read');
+    const writesEnabled = surfaceAllowsConnectionWrites(access, surface, connectionName);
     const token = process.env[MCP_ENV.TOKEN]?.trim();
 
     if (writesEnabled && !token) {

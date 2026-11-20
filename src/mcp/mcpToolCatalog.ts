@@ -12,6 +12,7 @@ export interface McpToolCatalogEntry {
     title: string;
     description: string;
     tier: ToolTier;
+    supportsDestructiveStatements?: boolean;
 }
 
 export const MCP_TOOL_CATALOG: readonly McpToolCatalogEntry[] = ASSISTANT_TOOL_CATALOG
@@ -20,7 +21,8 @@ export const MCP_TOOL_CATALOG: readonly McpToolCatalogEntry[] = ASSISTANT_TOOL_C
         name: tool.id,
         title: tool.title,
         description: tool.description,
-        tier: tool.tier
+        tier: tool.tier,
+        supportsDestructiveStatements: tool.supportsDestructiveStatements
     }));
 
 export const MCP_SERVER_NAME = 'Netezza MCP Server';

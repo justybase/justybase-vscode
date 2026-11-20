@@ -242,6 +242,10 @@ function isNonExecutableAstLine(file, lineNumber) {
           || (ts.isFunctionDeclaration(node) && node.body === undefined)
           || ts.isJsxAttribute(node)
           || ts.isJsxSpreadAttribute(node)
+          // A JSX child expression such as `{fullDetails}` is compiled into
+          // the enclosing element's createElement call, so Istanbul records
+          // the line of the assignment/return rather than the child line.
+          || ts.isJsxExpression(node)
           || (ts.isCallExpression(node)
             && lineNumber > startLine
             && lineNumber <= endLine)

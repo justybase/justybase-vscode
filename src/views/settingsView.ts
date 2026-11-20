@@ -1141,7 +1141,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     {
         id: 'ai-tools',
         title: 'AI Tools',
-        description: 'Choose which assistant tools are available on each surface and whether they may write to the database. Defaults are read-only everywhere.',
+        description: 'Choose which assistant tools are available on each surface and whether they may write to the database. All assistant tools are disabled by default; select a profile explicitly to enable them.',
         settings: [
             {
                 id: 'ai-tools-access',

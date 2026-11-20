@@ -1,3 +1,4 @@
+import { shortObjectName } from './objectNames';
 import { SqlParser } from '../../sql/sqlParser';
 
 /**
@@ -12,7 +13,7 @@ import { SqlParser } from '../../sql/sqlParser';
 const FORBIDDEN_STATEMENT_KEYWORDS =
   /\b(?:INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|CALL|EXEC(?:UTE)?|COPY|GRANT|REVOKE|INTO)\b/iu;
 const LOCKING_CLAUSE = /\bFOR\s+(?:(?:NO\s+)?KEY\s+)?(?:UPDATE|SHARE)\b/iu;
-const DESTRUCTIVE_STATEMENT = /^(?:DROP|TRUNCATE|GRANT|REVOKE)\b/iu;
+const DESTRUCTIVE_STATEMENT = /^(?:DROP|TRUNCATE|GRANT|REVOKE|CALL|EXEC(?:UTE)?)\b/iu;
 const WRITE_STATEMENT =
   /^(?:INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|COMMENT|COPY|CALL|EXEC(?:UTE)?|VACUUM|GROOM|GENSTATS|SET|RESET|BEGIN|COMMIT|ROLLBACK)\b/iu;
 
@@ -32,14 +33,25 @@ function withoutSqlStringsAndComments(sql: string): string {
     .replace(/\/\*[\s\S]*?\*\//gu, '');
 }
 
+/** Comments alone are not executable statements. */
+function withoutSqlComments(sql: string): string {
+  return sql
+    .replace(/--[^\r\n]*/gu, '')
+    .replace(/\/\*[\s\S]*?\*\//gu, '');
+}
+
+function hasExecutableSql(statement: string): boolean {
+  return withoutSqlComments(statement).trim().length > 0;
+}
+
 /** Splits and rejects scripts: every execution tool accepts exactly one statement. */
 export function splitSingleStatement(sql: string): string {
   const statements = SqlParser.splitStatements(sql)
     .map(statement => statement.trim())
-    .filter(statement => statement.length > 0);
+    .filter(statement => statement.length > 0 && hasExecutableSql(statement));
 
   if (statements.length !== 1) {
-    throw new Error('AI EXPLAIN accepts exactly one SQL statement.');
+    throw new Error('Exactly one SQL statement is required.');
   }
   return statements[0]!.replace(/;\s*$/u, '').trim();
 }
@@ -84,7 +96,7 @@ export function classifySqlStatement(sql: string): SqlAccessClassification {
     return {
       kind: 'destructive',
       statement,
-      reason: 'The statement drops or revokes a database object or privilege.',
+      reason: 'The statement drops, truncates, or invokes a database object or privilege.',
     };
   }
 
@@ -130,18 +142,38 @@ export function isDestructiveStatement(sql: string): boolean {
 }
 
 const IDENTIFIER = String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)`;
-const QUALIFIED_IDENTIFIER = String.raw`${IDENTIFIER}(?:\.${IDENTIFIER})*`;
-const DESTRUCTIVE_TARGET = new RegExp(
-  String.raw`^(?:DROP\s+(?:TABLE|VIEW|PROCEDURE|EXTERNAL\s+TABLE|SYNONYM|NICKNAME|ALIAS)\s+(?:IF\s+EXISTS\s+)?|TRUNCATE\s+(?:TABLE\s+)?)(${QUALIFIED_IDENTIFIER})`,
-  'iu',
-);
+const QUALIFIED_IDENTIFIER = String.raw`${IDENTIFIER}(?:\.${IDENTIFIER}|\.\.${IDENTIFIER})*`;
+const OBJECT_TYPE =
+  String.raw`(?:EXTERNAL\s+TABLE|MATERIALIZED\s+VIEW|TABLE|VIEW|PROCEDURE|SEQUENCE|FUNCTION|AGGREGATE|SCHEMA|DATABASE|SYNONYM|NICKNAME|ALIAS)`;
+
+const DESTRUCTIVE_TARGETS: readonly RegExp[] = [
+  new RegExp(
+    String.raw`^DROP\s+${OBJECT_TYPE}\s+(?:IF\s+EXISTS\s+)?(${QUALIFIED_IDENTIFIER})`,
+    'iu',
+  ),
+  new RegExp(String.raw`^TRUNCATE\s+(?:TABLE\s+)?(${QUALIFIED_IDENTIFIER})`, 'iu'),
+  new RegExp(String.raw`^(?:CALL|EXEC(?:UTE)?)\s+(?!IMMEDIATE\b)(${QUALIFIED_IDENTIFIER})`, 'iu'),
+  new RegExp(
+    String.raw`^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(${QUALIFIED_IDENTIFIER})`,
+    'iu',
+  ),
+  new RegExp(
+    String.raw`^(?:GRANT|REVOKE)\b[\s\S]*?\bON\s+(?:(?:TABLE|VIEW|PROCEDURE|DATABASE|SCHEMA|SEQUENCE|FUNCTION)\s+)?(${QUALIFIED_IDENTIFIER})`,
+    'iu',
+  ),
+];
 
 /**
- * Returns the short object name a DROP/TRUNCATE confirmation must repeat.
+ * Returns the short object name a destructive confirmation must repeat.
  * The confirmation is a speed bump, not a security boundary.
  */
 export function destructiveTarget(statement: string): string | undefined {
-  const match = DESTRUCTIVE_TARGET.exec(statement);
-  const raw = match?.[1]?.split('.').filter(part => part.length > 0).pop();
-  return raw?.replace(/^"|"$/gu, '').replace(/""/gu, '"');
+  const normalized = withoutSqlStringsAndComments(statement).trim();
+  for (const pattern of DESTRUCTIVE_TARGETS) {
+    const match = pattern.exec(normalized);
+    if (match?.[1]) {
+      return shortObjectName(match[1]);
+    }
+  }
+  return undefined;
 }

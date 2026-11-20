@@ -61,13 +61,13 @@ The agent adds JustyBase skills automatically:
 
 Tools return only what the agent requests. `#netezza_get_context` can include the active SQL, referenced table DDL, and diagnostics; `#netezza_get_object` can include comments, statistics, constraints, and dependencies. Tool invocations are approved by the chat host, and write-capable tools add their own confirmation.
 
-`justybase.copilot.enabled` controls whether JustyBase registers its language-model tools. `justybase.ai.tools` controls which tools and tiers are available; the default is read-only. The MCP server is controlled separately by `justybase.mcp.enabled`. `justybase.ddl.maxTablesForContext` and `justybase.copilot.maxWorkspaceProfilesInContext` bound context size.
+`justybase.copilot.enabled` controls whether JustyBase registers its language-model tools. `justybase.ai.tools` controls which tools and tiers are available; every surface is **off** by default, so no assistant tool is registered until you select a profile. The MCP server is controlled separately by `justybase.mcp.enabled`. `justybase.ddl.maxTablesForContext` and `justybase.copilot.maxWorkspaceProfilesInContext` bound context size.
 
 Do not attach secrets, passwords, tokens, regulated row data, or an unreviewed production dump as AI context. Prefer a read-only connection and a sanitized query. Copilot’s own retention, account, model, and organization policies still apply; JustyBase cannot override them.
 
-## MCP: read-only by default
+## MCP: disabled by default
 
-The bundled Netezza MCP server exposes catalog introspection, DDL, safe `EXPLAIN`, parser validation, and — only when you grant access — single-statement execution, object drops, and procedure compilation. Read-only remains the default for stdio and HTTP. Write tools additionally require the selected connection in `writableConnections`; HTTP write mode requires a per-run bearer token shown in Settings. Stdio mode serves Copilot Chat; optional HTTP mode binds to `127.0.0.1` only while VS Code is open. The selected MCP connection is explicit and independent of the active editor tab.
+The bundled Netezza MCP server exposes catalog introspection, DDL, safe `EXPLAIN`, parser validation, and - only when you grant access - single-statement execution, object drops, and procedure compilation. All assistant tools are disabled by default; select an access profile under **Settings → AI Tools** to enable a surface. Write tools additionally require the selected connection in `writableConnections`; HTTP write mode requires a per-run bearer token shown in Settings. Stdio mode serves Copilot Chat; optional HTTP mode binds to `127.0.0.1` only while VS Code is open. The selected MCP connection is explicit and independent of the active editor tab.
 
 Enable MCP under **JustyBase Settings → MCP Server**, choose the saved Netezza connection, and enable only the transport needed. Configure tool access under **Settings → AI Tools**. Read the [MCP technical appendix](guide/legacy/mcp_server/) for client examples and the complete generated tool catalog.
 

@@ -9,19 +9,32 @@ describe('compile_procedure contract', () => {
         }
     });
 
-    it('accepts typed call arguments', () => {
+    it('accepts typed call arguments with a confirmation', () => {
         const result = CompileProcedureToolContract.validateInput({
             mode: 'compile_and_call',
             sql: 'CREATE PROCEDURE ADMIN.P(v INT) RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN v; END_PROC;',
-            callArguments: [{ type: 'number', value: 7 }]
+            callArguments: [{ type: 'number', value: 7 }],
+            confirm: 'P'
         });
         expect(result.success).toBe(true);
+    });
+
+    it('requires confirm for compile_and_call', () => {
+        const result = CompileProcedureToolContract.validateInput({
+            mode: 'compile_and_call',
+            callArguments: []
+        });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.errors.some(error => error.field === 'confirm')).toBe(true);
+        }
     });
 
     it('rejects malformed call arguments', () => {
         const invalid = CompileProcedureToolContract.validateInput({
             mode: 'compile_and_call',
-            callArguments: [{ type: 'number', value: 'seven' }]
+            callArguments: [{ type: 'number', value: 'seven' }],
+            confirm: 'P'
         });
         expect(invalid.success).toBe(false);
     });
@@ -29,7 +42,7 @@ describe('compile_procedure contract', () => {
     it('defaults compilation to compile_only when the mode is supplied', () => {
         expect(CompileProcedureToolContract.validateInput({ mode: 'compile_only' })).toEqual({
             success: true,
-            data: { mode: 'compile_only', sql: undefined }
+            data: { mode: 'compile_only', sql: undefined, confirm: undefined }
         });
     });
 });

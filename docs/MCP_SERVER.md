@@ -1,8 +1,9 @@
 # Netezza MCP Server
 
 The extension bundles a **Model Context Protocol (MCP)** server that exposes Netezza schema
-introspection and SQL tooling to AI agents. It is **read-only by default**; write and destructive
-tools are opt-in per surface and per connection:
+introspection and SQL tooling to AI agents. **All assistant tools are disabled by default**; the
+operator must explicitly enable a surface. Write and destructive tools additionally require the
+matching profile and, for MCP, an allowlisted connection:
 
 - **Copilot Chat in VS Code** (stdio mode) — registered via
   `vscode.lm.registerMcpServerDefinitionProvider` (`contributes.mcpServerDefinitionProviders`).
@@ -45,9 +46,12 @@ No credentials file is ever written. The server exits when VS Code closes (HTTP 
 
 ## Access policy
 
-`justybase.ai.tools` resolves an access profile per surface (`read-only`, `read-write`, `full`) plus
-optional per-tool overrides. Overrides can only narrow access. Read-only tools are always available;
-write tools appear only when the profile allows them; destructive tools require `full`.
+`justybase.ai.tools` resolves an access profile per surface (`off`, `read-only`, `read-write`,
+`full`) plus optional per-tool overrides. The default is `off`: no assistant tool is registered until
+the operator selects a profile. Overrides can only narrow access. Read-only tools are available
+after selecting `read-only`; write tools appear only when the profile allows them; destructive tools
+require `full`. Selecting an override below a tool's required tier disables that tool (except
+`execute_sql`, which supports a read-only reduced mode).
 
 MCP writes have two additional gates:
 
@@ -64,8 +68,9 @@ The execution layer also classifies each statement before it runs:
 
 - `SELECT` / `WITH ... SELECT` run through `executeReader` and return capped rows;
 - DML and DDL require the write tier;
-- `DROP`, `TRUNCATE`, `GRANT`, `REVOKE` and `ALTER ... DROP` require the destructive tier and an explicit
-  `confirm` value equal to the object name.
+- `DROP`, `TRUNCATE`, `GRANT`, `REVOKE`, `CALL` and `ALTER ... DROP` require the destructive tier and an explicit
+  `confirm` value equal to the object name (for `CALL`, the procedure name).
+- `compile_and_call` requires `full` and `confirm` equal to the procedure name; `compile_only` is a normal write.
 
 Exactly one statement is accepted per call, and every call opens its own connection (autocommit, no
 cross-call transaction). Database permissions remain the final boundary.
@@ -79,9 +84,9 @@ cross-call transaction). Database permissions remain the final boundary.
 | `explain_query` | read | Required single `SELECT` or `WITH ... SELECT` in `sql`; optional `verbose`, `analyze` and `database`. Never executes the statement. |
 | `validate_sql` | read | Required `sql`; optional `mode` (`parser` or `database`) and `database`. |
 | `get_reference` | read | Optional `topic` (`optimization`, `nzplsql`, `all`). Returns bundled dialect guidance. |
-| `execute_sql` | write | Required `sql`; optional `maxRows`, `timeoutMs` and `database`. Destructive statements additionally require `confirm`. |
-| `drop_object` | destructive | Required `object`, `objectType` and `confirm`; optional `cascade` and `database`. |
-| `compile_procedure` | write | Required `mode` (`compile_only` or `compile_and_call`); optional `sql` and typed `callArguments`. |
+| `execute_sql` | write | Required `sql`; optional `maxRows`, `timeoutMs` and `database`. Destructive statements additionally require `full` and `confirm`. |
+| `drop_object` | destructive | Required `object`, `objectType` and `confirm`; optional `cascade` and `database`. `DATABASE..TABLE` notation is preserved. |
+| `compile_procedure` | write | Required `mode` (`compile_only` or `compile_and_call`); optional `sql` and typed `callArguments`. `compile_and_call` additionally requires `full` and `confirm` equal to the procedure name. |
 
 The read tools reuse the shared catalog service (`src/core/catalogIntrospection.ts`). The write tools reuse
 `src/core/assistant/executionService.ts`; both modules are free of `vscode` imports.
@@ -179,14 +184,15 @@ Requirements and limits:
 - the server runs **only while VS Code is open** (child process; no daemon, no credentials file),
 - bound to `127.0.0.1` only,
 - the listener is reachable by other processes of the same user,
-- read-only is the default; write tools require the profile, the connection allowlist and (for HTTP) the token,
+- all assistant tools are disabled by default; enabling a profile is an explicit operator action,
+- write tools additionally require the profile, the connection allowlist and (for HTTP) the token,
 - changing the selected MCP connection restarts the HTTP child process on the new target,
 - changing the active editor connection has no effect on MCP.
 
 ## Configuration
 
 `justybase.ai.tools` — per-surface profiles (`copilot`, `mcp`, `mcpExternal`), per-tool overrides and
-`writableConnections` (configured in **Settings → AI Tools**; read-only everywhere by default)
+`writableConnections` (configured in **Settings → AI Tools**; every surface is `off` by default)
 
 `justybase.mcp.enabled` — register the stdio server for Copilot Chat (default `false`)
 `justybase.mcp.connectionName` — name of the explicitly selected saved Netezza connection (default empty; no automatic fallback)
@@ -219,8 +225,8 @@ host and in the standalone server process. The server entry point is `src/mcp/mc
 ## Live verification
 
 Run `npm run test:mcp:live` with `NZ_DEV_PASSWORD` and optional `NZ_DEV_HOST`, `NZ_DEV_PORT`,
-`NZ_DEV_DATABASE` and `NZ_DEV_USER`. The suite performs a preflight, verifies `tools/list` exposes only the
-read-only tools for the default policy, calls each read tool through stdio and Streamable HTTP, compares
+`NZ_DEV_DATABASE` and `NZ_DEV_USER`. The suite performs a preflight, opts into the read-only profile and verifies
+that `tools/list` exposes only the read-only tools, calls each read tool through stdio and Streamable HTTP, compares
 catalog responses with independent `_V_*` oracle queries, checks invalid arguments and process shutdown,
 and writes a redacted summary to `/tmp/justybase-mcp-live-report.json`.
 Fixture DDL is disabled by default; enable it explicitly with `MCP_LIVE_ALLOW_FIXTURE_DDL=1` and, if

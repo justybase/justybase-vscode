@@ -126,6 +126,20 @@ describe('MCP tool registry', () => {
         expect(introspection.getDependencies).toHaveBeenCalledWith('ADMIN.ORDERS', undefined, 'TABLE');
     });
 
+    it('qualifies sections with an explicit schema and database', async () => {
+        const tool = toolByName(tools, 'get_object');
+        await tool.handler({
+            object: 'ORDERS',
+            database: 'DWH',
+            schema: 'ADMIN',
+            sections: ['columns', 'stats', 'dependencies']
+        });
+
+        expect(introspection.getColumns).toHaveBeenCalledWith(['DWH.ADMIN.ORDERS'], 'DWH');
+        expect(introspection.getTableStats).toHaveBeenCalledWith('DWH.ADMIN.ORDERS', 'DWH');
+        expect(introspection.getDependencies).toHaveBeenCalledWith('DWH.ADMIN.ORDERS', 'DWH', 'TABLE');
+    });
+
     it('rejects DML through explain_query', async () => {
         const result = await toolByName(tools, 'explain_query').handler({ sql: 'DELETE FROM t' });
         expect(result.isError).toBe(true);
@@ -243,8 +257,30 @@ describe('MCP tool registry', () => {
                 confirm: 'ORDERS'
             });
             expect(denied.isError).toBe(true);
-            expect(denied.text).toContain('Destructive');
+            expect(denied.text).toContain('full access profile');
             expect(execute).not.toHaveBeenCalled();
+        });
+
+        it('treats CALL as destructive and requires the procedure name', async () => {
+            const writeOnly = createMcpToolDefinitions(introspection, {
+                allowWrites: true,
+                allowDestructive: false,
+                execute: (sql, options) => execute(sql, options)
+            });
+            const denied = await toolByName(writeOnly, 'execute_sql').handler({
+                sql: 'CALL ADMIN.P(1)',
+                confirm: 'P'
+            });
+            expect(denied.isError).toBe(true);
+            expect(denied.text).toContain('full access profile');
+
+            execute.mockResolvedValue(result({ kind: 'destructive', columns: [], rows: [], rowCount: 0, affectedRows: 1 }));
+            const called = await toolByName(tools, 'execute_sql').handler({
+                sql: 'CALL ADMIN.P(1)',
+                confirm: 'p'
+            });
+            expect(called.isError).toBeUndefined();
+            expect(execute).toHaveBeenCalledWith('CALL ADMIN.P(1)', {});
         });
     });
 
@@ -258,6 +294,17 @@ describe('MCP tool registry', () => {
             });
             expect(dropped.isError).toBeUndefined();
             expect(execute).toHaveBeenCalledWith('DROP TABLE "ADMIN"."ORDERS"', {});
+        });
+
+        it('preserves DATABASE..TABLE notation', async () => {
+            execute.mockResolvedValue(result({ kind: 'destructive', columns: [], rows: [], rowCount: 0, affectedRows: 1 }));
+            const dropped = await toolByName(tools, 'drop_object').handler({
+                object: 'DWH..ORDERS',
+                objectType: 'table',
+                confirm: 'ORDERS'
+            });
+            expect(dropped.isError).toBeUndefined();
+            expect(execute).toHaveBeenCalledWith('DROP TABLE "DWH".."ORDERS"', {});
         });
 
         it('rejects a mismatched confirmation', async () => {
@@ -303,10 +350,34 @@ describe('MCP tool registry', () => {
             const compiled = await toolByName(tools, 'compile_procedure').handler({
                 sql: 'CREATE PROCEDURE ADMIN.P(v INT) RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN v; END_PROC;',
                 mode: 'compile_and_call',
-                callArguments: [{ type: 'number', value: 7 }]
+                callArguments: [{ type: 'number', value: 7 }],
+                confirm: 'P'
             });
             expect(compiled.isError).toBeUndefined();
             expect(execute).toHaveBeenNthCalledWith(2, 'CALL "ADMIN"."P"(7)', { maxRows: 500 });
+        });
+
+        it('requires confirm for compile_and_call', async () => {
+            const rejected = await toolByName(tools, 'compile_procedure').handler({
+                sql: 'CREATE PROCEDURE ADMIN.P() RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN 1; END_PROC;',
+                mode: 'compile_and_call',
+                callArguments: []
+            });
+            expect(rejected.isError).toBe(true);
+            expect(rejected.text).toContain('confirm');
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        it('preserves DATABASE..PROCEDURE notation in the test CALL', async () => {
+            execute.mockResolvedValue(result({ kind: 'write', columns: [], rows: [], rowCount: 0, affectedRows: 0 }));
+            const compiled = await toolByName(tools, 'compile_procedure').handler({
+                sql: 'CREATE PROCEDURE DWH..P() RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN 1; END_PROC;',
+                mode: 'compile_and_call',
+                callArguments: [],
+                confirm: 'P'
+            });
+            expect(compiled.isError).toBeUndefined();
+            expect(execute).toHaveBeenNthCalledWith(2, 'CALL "DWH".."P"()', { maxRows: 500 });
         });
 
         it('rejects non-CREATE PROCEDURE input', async () => {

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { normalizeObjectName } from '../../core/assistant/objectNames';
 import type { ObjectSection } from '../../core/assistant/toolCatalog';
 import type { CopilotToolService } from './copilotToolService';
 
@@ -93,14 +94,20 @@ export class GetObjectTool implements vscode.LanguageModelTool<IGetObjectToolPar
                     schema: input.schema
                 });
             case 'columns':
-                return this.copilotService.getColumnsForTables([object], input.database);
+                return this.copilotService.getColumnsForTables(
+                    [normalizeObjectName({ object, database: input.database, schema: input.schema })],
+                    input.database
+                );
             case 'comments':
                 return this.copilotService.getComments(object, input.database, input.schema, true);
             case 'stats':
                 if (objectType !== 'table' && objectType !== 'external table') {
                     return `Skipped: statistics are available for tables and external tables, not "${objectType}".`;
                 }
-                return this.copilotService.getTableStats(object, input.database);
+                return this.copilotService.getTableStats(
+                    normalizeObjectName({ object, database: input.database, schema: input.schema }),
+                    input.database
+                );
             case 'constraints':
                 if (objectType !== 'table') {
                     return `Skipped: constraints are available for tables, not "${objectType}".`;
@@ -115,7 +122,11 @@ export class GetObjectTool implements vscode.LanguageModelTool<IGetObjectToolPar
                     : objectType === 'view'
                         ? 'VIEW'
                         : 'PROCEDURE';
-                return this.copilotService.getObjectDependencies(object, input.database, dependencyType);
+                return this.copilotService.getObjectDependencies(
+                    normalizeObjectName({ object, database: input.database, schema: input.schema }),
+                    input.database,
+                    dependencyType
+                );
             }
             default:
                 return `Unsupported section "${section}".`;

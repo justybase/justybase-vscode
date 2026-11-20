@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ConnectionManager } from '../core/connectionManager';
 import {
     DEFAULT_AI_TOOL_ACCESS,
+    allowedToolIds,
     normalizeAiToolAccess,
     type AiToolAccessConfig
 } from '../core/assistant/toolPolicy';
@@ -83,6 +84,9 @@ export class NetezzaMcpServerDefinitionProvider implements vscode.McpServerDefin
 
     provideMcpServerDefinitions(): vscode.McpStdioServerDefinition[] {
         if (!this.enabled || !this.hasSelectedNetezzaConnection()) {
+            return [];
+        }
+        if (allowedToolIds('mcp', this.getAccessConfig(), this.getSelectedConnectionName()).length === 0) {
             return [];
         }
 

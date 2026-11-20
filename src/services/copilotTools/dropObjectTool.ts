@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { formatExecuteStatementResult } from '../../core/assistant/audit';
-import { escapeSqlIdentifier } from '../../utils/sqlUtils';
+import { shortObjectName, sqlObjectName } from '../../core/assistant/objectNames';
 import type { CopilotToolService } from './copilotToolService';
 
 export type DropObjectType =
@@ -29,25 +29,6 @@ const OBJECT_SQL: Record<DropObjectType, string> = {
     nickname: 'NICKNAME',
     alias: 'ALIAS'
 };
-
-const VALID_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
-
-function qualifiedName(object: string, database?: string): string {
-    const parts = object.split('.').map(part => part.trim()).filter(part => part.length > 0);
-    if (parts.length === 0 || parts.length > 3 || parts.some(part => !VALID_IDENTIFIER.test(part))) {
-        throw new Error('The object name must use simple Netezza identifiers.');
-    }
-    const escaped = parts.map(part => escapeSqlIdentifier(part));
-    if (database) {
-        if (!VALID_IDENTIFIER.test(database.trim())) {
-            throw new Error('The database name must be a simple Netezza identifier.');
-        }
-        if (parts.length === 1) {
-            return `${escapeSqlIdentifier(database.trim())}..${escaped[0]}`;
-        }
-    }
-    return escaped.join('.');
-}
 
 /** Drops a single object after an explicit confirmation value. */
 export class DropObjectTool implements vscode.LanguageModelTool<IDropObjectToolParameters> {
@@ -84,11 +65,15 @@ export class DropObjectTool implements vscode.LanguageModelTool<IDropObjectToolP
         if (!keyword) {
             throw new Error(`Unsupported objectType "${options.input.objectType}".`);
         }
-        const shortName = options.input.object.split('.').filter(part => part.length > 0).pop() ?? '';
+        const shortName = shortObjectName(options.input.object) ?? '';
         if (options.input.confirm.trim().toLowerCase() !== shortName.toLowerCase()) {
             throw new Error(`confirm must equal the object name "${shortName}".`);
         }
-        const sql = `DROP ${keyword} ${qualifiedName(options.input.object, options.input.database)}` +
+        const target = sqlObjectName({
+            object: options.input.object,
+            database: options.input.database,
+        });
+        const sql = `DROP ${keyword} ${target}` +
             `${options.input.cascade ? ' CASCADE' : ''}`;
         const result = await this.copilotService.executeSql(sql, {});
         return new vscode.LanguageModelToolResult([

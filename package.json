@@ -1608,7 +1608,7 @@
         "toolReferenceName": "compileProcedure",
         "icon": "$(code)",
         "userDescription": "Create or replace an NZPLSQL procedure and optionally run a test CALL",
-        "modelDescription": "Creates or replaces a Netezza NZPLSQL procedure from the supplied CREATE PROCEDURE block. Use mode=compile_and_call to run a test CALL; that CALL may modify data and is confirmed separately.",
+        "modelDescription": "Creates or replaces a Netezza NZPLSQL procedure from the supplied CREATE PROCEDURE block. Use mode=compile_and_call to run a test CALL; that CALL can modify or drop data and requires the full access profile plus confirm.",
         "canBeReferencedInPrompt": true,
         "tags": [
           "ddl",
@@ -1638,6 +1638,10 @@
                 "type": "object",
                 "additionalProperties": true
               }
+            },
+            "confirm": {
+              "type": "string",
+              "description": "Required for compile_and_call: the procedure name being called (case-insensitive)."
             }
           },
           "required": [
@@ -4469,7 +4473,7 @@
         "justybase.ai.tools": {
           "type": "object",
           "default": {},
-          "markdownDescription": "Per-surface access profiles and per-tool overrides for JustyBase assistant tools. Each surface accepts `read-only`, `read-write` or `full`; `writableConnections` lists the MCP connections that may write. Configure it in **JustyBase Settings → AI Tools**."
+          "markdownDescription": "Per-surface access profiles and per-tool overrides for JustyBase assistant tools. Each surface accepts `off`, `read-only`, `read-write` or `full` and is `off` by default; `writableConnections` lists the MCP connections that may write. Configure it in **JustyBase Settings → AI Tools**."
         },
         "justybase.copilot.enabled": {
           "type": "boolean",

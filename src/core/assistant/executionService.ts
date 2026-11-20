@@ -68,7 +68,8 @@ export async function executeStatement(
 
   try {
     const command = connection.createCommand(classification.statement);
-    command.commandTimeout = timeoutMs;
+    // The Netezza driver expects `commandTimeout` in seconds.
+    command.commandTimeout = Math.max(1, Math.ceil(timeoutMs / 1000));
     const cancel = (): void => {
       void command.cancel().catch(() => undefined);
     };

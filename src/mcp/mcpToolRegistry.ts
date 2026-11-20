@@ -13,7 +13,13 @@ import {
 } from '../core/assistant/audit';
 import { getNetezzaAssistantReference } from '../core/assistant/reference';
 import { getAssistantTool, type JsonObjectSchema, type ToolTier } from '../core/assistant/toolCatalog';
-import { escapeSqlIdentifier, escapeSqlLiteral } from '../utils/sqlUtils';
+import {
+    normalizeObjectName,
+    shortObjectName,
+    sqlObjectName
+} from '../core/assistant/objectNames';
+import type { ToolAccessLevel } from '../core/assistant/toolPolicy';
+import { escapeSqlLiteral } from '../utils/sqlUtils';
 import { MCP_TOOL_CATALOG, type McpToolCatalogEntry } from './mcpToolCatalog';
 
 /**
@@ -32,8 +38,11 @@ export interface McpToolDefinition extends McpToolCatalogEntry {
 
 export interface McpToolRuntime {
     readonly connectionName?: string;
-    readonly allowWrites: boolean;
-    readonly allowDestructive: boolean;
+    /** Profile-level fallback for tests; production passes `accessLevels`. */
+    readonly allowWrites?: boolean;
+    readonly allowDestructive?: boolean;
+    /** Effective capability per canonical tool id, resolved by the access policy. */
+    readonly accessLevels?: Readonly<Record<string, ToolAccessLevel>>;
     readonly audit?: ToolAuditSink;
     /** Injected in tests; defaults to a real connection using the introspection details. */
     readonly execute?: (sql: string, options: ExecuteStatementOptions) => Promise<ExecuteStatementResult>;
@@ -118,7 +127,6 @@ const OBJECT_TYPE_TO_SQL: Record<string, string> = {
     alias: 'ALIAS'
 };
 
-const VALID_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
 const OBJECT_SECTION_NAMES = new Set<string>([
     'ddl',
     'columns',
@@ -128,48 +136,23 @@ const OBJECT_SECTION_NAMES = new Set<string>([
     'dependencies'
 ]);
 
-function qualifiedObjectName(input: {
-    readonly object: string;
-    readonly database?: string;
-    readonly schema?: string;
-}): string {
-    const parts = input.object.split('.').map(part => part.trim()).filter(part => part.length > 0);
-    if (parts.length === 0 || parts.length > 3 || parts.some(part => !VALID_IDENTIFIER.test(part))) {
-        throw new Error(
-            'The object name must use TABLE, SCHEMA.TABLE, DATABASE..TABLE or DATABASE.SCHEMA.TABLE with simple identifiers.'
-        );
-    }
-    const escaped = parts.map(part => escapeSqlIdentifier(part));
-    const database = input.database?.trim();
-    const schema = input.schema?.trim();
-    if (database && !VALID_IDENTIFIER.test(database)) {
-        throw new Error('The database name must be a simple Netezza identifier.');
-    }
-    if (schema) {
-        if (!VALID_IDENTIFIER.test(schema)) {
-            throw new Error('The schema name must be a simple Netezza identifier.');
-        }
-        const table = escaped[escaped.length - 1];
-        return database
-            ? `${escapeSqlIdentifier(database)}..${escapeSqlIdentifier(schema)}.${table}`
-            : `${escapeSqlIdentifier(schema)}.${table}`;
-    }
-    if (database && parts.length === 1) {
-        return `${escapeSqlIdentifier(database)}..${escaped[0]}`;
-    }
-    return escaped.join('.');
+const NAME_PART = String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)`;
+const PROCEDURE_NAME = String.raw`${NAME_PART}(?:\.{1,2}${NAME_PART})*`;
+const CREATE_PROCEDURE_RE = new RegExp(
+    String.raw`CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+(${PROCEDURE_NAME})`,
+    'iu',
+);
+
+function procedureNameFromCreate(sql: string): string | undefined {
+    return CREATE_PROCEDURE_RE.exec(sql)?.[1];
 }
 
 function buildCallSql(sql: string, callArguments: readonly Record<string, unknown>[]): string {
-    const match = /CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+([A-Za-z_][A-Za-z0-9_$.]*)/iu.exec(sql);
-    if (!match?.[1]) {
+    const procedure = procedureNameFromCreate(sql);
+    if (!procedure) {
         throw new Error('Could not determine the procedure name from the CREATE PROCEDURE block.');
     }
-    const procedure = match[1]
-        .split('.')
-        .filter(part => part.length > 0)
-        .map(part => escapeSqlIdentifier(part))
-        .join('.');
+    const target = sqlObjectName({ object: procedure });
     const args = callArguments.map(argument => {
         const type = String(argument.type ?? '').toLowerCase();
         const value = argument.value;
@@ -187,7 +170,7 @@ function buildCallSql(sql: string, callArguments: readonly Record<string, unknow
         }
         throw new Error(`Unsupported CALL argument type "${type}".`);
     });
-    return `CALL ${procedure}(${args.join(', ')})`;
+    return `CALL ${target}(${args.join(', ')})`;
 }
 
 export function createMcpToolDefinitions(
@@ -199,15 +182,27 @@ export function createMcpToolDefinitions(
         introspection.getConnectionDetails().then(details => executeStatement(details, sql, options))
     ));
 
+    const levelFor = (toolId: string): ToolAccessLevel => {
+        const explicit = runtime.accessLevels?.[toolId];
+        if (explicit !== undefined) return explicit;
+        if (runtime.allowDestructive === true) return 'destructive';
+        if (runtime.allowWrites === true) return 'write';
+        return 'read';
+    };
+
     const runStatement = async (
         sql: string,
-        options: ExecuteStatementOptions
+        options: ExecuteStatementOptions,
+        accessLevel: ToolAccessLevel,
     ): Promise<ExecuteStatementResult> => {
         const classification = classifySqlStatement(sql);
-        if (classification.kind === 'destructive' && !runtime.allowDestructive) {
-            throw new Error('Destructive statements are disabled for this MCP surface.');
+        if (accessLevel === 'off') {
+            throw new Error('This tool is disabled for this MCP surface.');
         }
-        if (classification.kind === 'write' && !runtime.allowWrites) {
+        if (classification.kind === 'destructive' && accessLevel !== 'destructive') {
+            throw new Error('Destructive statements require the full access profile for this MCP surface.');
+        }
+        if (classification.kind === 'write' && accessLevel === 'read') {
             throw new Error('Write statements are disabled for this MCP surface.');
         }
         return execute(classification.statement, options);
@@ -252,6 +247,7 @@ export function createMcpToolDefinitions(
             }
             const database = stringArg(args, 'database');
             const schema = stringArg(args, 'schema');
+            const qualifiedObject = normalizeObjectName({ object, database, schema });
             const requested = stringArrayArg(args, 'sections');
             const sections = requested.length > 0 ? requested : ['ddl', 'columns'];
             const unsupported = sections.filter(section => !OBJECT_SECTION_NAMES.has(section));
@@ -261,30 +257,32 @@ export function createMcpToolDefinitions(
                 );
             }
             const results: string[] = [];
+            let failed = false;
 
             for (const section of sections) {
                 const label = section.toUpperCase();
                 try {
                     results.push(`## ${label}\n${await readObjectSection(section)}`);
                 } catch (error: unknown) {
+                    failed = true;
                     results.push(`## ${label}\nError: ${errorText(error)}`);
                 }
             }
-            return { text: results.join('\n\n') };
+            return { text: results.join('\n\n'), ...(failed ? { isError: true } : {}) };
 
             async function readObjectSection(section: string): Promise<string> {
                 switch (section) {
                     case 'ddl':
                         return introspection.getDDL({ objectName: object, objectType, database, schema });
                     case 'columns':
-                        return introspection.getColumns([object], database);
+                        return introspection.getColumns([qualifiedObject], database);
                     case 'comments':
                         return introspection.getComments(object, database, schema, true);
                     case 'stats':
                         if (objectType !== 'table' && objectType !== 'external table') {
                             return `Skipped: statistics are available for tables and external tables, not "${objectType}".`;
                         }
-                        return introspection.getTableStats(object, database);
+                        return introspection.getTableStats(qualifiedObject, database);
                     case 'constraints':
                         if (objectType !== 'table') {
                             return `Skipped: constraints are available for tables, not "${objectType}".`;
@@ -294,7 +292,7 @@ export function createMcpToolDefinitions(
                         if (objectType !== 'table' && objectType !== 'view' && objectType !== 'procedure') {
                             return `Skipped: dependencies are available for tables, views and procedures, not "${objectType}".`;
                         }
-                        return introspection.getDependencies(object, database, sqlType);
+                        return introspection.getDependencies(qualifiedObject, database, sqlType);
                     default:
                         return `Unsupported section "${section}".`;
                 }
@@ -334,16 +332,23 @@ export function createMcpToolDefinitions(
 
         async execute_sql(args) {
             const sql = requireArg(args, 'sql', 'sql');
+            const accessLevel = levelFor('execute_sql');
             const classification = classifySqlStatement(sql);
             if (classification.kind === 'destructive') {
-                const confirm = stringArg(args, 'confirm');
-                if (!confirm) {
-                    throw new Error(
-                        'Destructive statements require confirm with the object name being dropped or truncated.'
-                    );
+                if (accessLevel !== 'destructive') {
+                    throw new Error('Destructive statements require the full access profile for this MCP surface.');
                 }
                 const target = destructiveTarget(classification.statement);
-                if (target && confirm.toLowerCase() !== target.toLowerCase()) {
+                if (!target) {
+                    throw new Error(
+                        'The destructive statement target could not be determined. Use a supported DROP/TRUNCATE/CALL statement or the drop_object tool.'
+                    );
+                }
+                const confirm = stringArg(args, 'confirm');
+                if (!confirm) {
+                    throw new Error(`Destructive statements require confirm equal to "${target}".`);
+                }
+                if (confirm.toLowerCase() !== target.toLowerCase()) {
                     throw new Error(`confirm must equal the object name "${target}".`);
                 }
             }
@@ -351,13 +356,14 @@ export function createMcpToolDefinitions(
                 maxRows: numberArg(args, 'maxRows'),
                 timeoutMs: numberArg(args, 'timeoutMs'),
                 database: stringArg(args, 'database')
-            });
+            }, accessLevel);
             return { text: formatExecuteStatementResult(result) };
         },
 
         async drop_object(args) {
-            if (!runtime.allowDestructive) {
-                throw new Error('Destructive statements are disabled for this MCP surface.');
+            const accessLevel = levelFor('drop_object');
+            if (accessLevel !== 'destructive') {
+                throw new Error('Destructive statements require the full access profile for this MCP surface.');
             }
             const object = requireArg(args, 'object', 'object');
             const objectType = requireArg(args, 'objectType', 'objectType').toLowerCase();
@@ -366,17 +372,17 @@ export function createMcpToolDefinitions(
                 throw new Error(`Unsupported objectType "${objectType}".`);
             }
             const confirm = requireArg(args, 'confirm', 'confirm');
-            const shortName = object.split('.').filter(part => part.length > 0).pop() ?? object;
+            const shortName = shortObjectName(object) ?? '';
             if (confirm.trim().toLowerCase() !== shortName.toLowerCase()) {
                 throw new Error('confirm must repeat the object name exactly.');
             }
-            const target = qualifiedObjectName({
+            const target = sqlObjectName({
                 object,
                 database: stringArg(args, 'database'),
                 schema: stringArg(args, 'schema')
             });
             const sql = `DROP ${sqlType} ${target}${booleanArg(args, 'cascade') === true ? ' CASCADE' : ''}`;
-            const result = await runStatement(sql, {});
+            const result = await runStatement(sql, {}, accessLevel);
             return { text: formatExecuteStatementResult(result) };
         },
 
@@ -392,16 +398,31 @@ export function createMcpToolDefinitions(
             if (mode !== 'compile_only' && mode !== 'compile_and_call') {
                 throw new Error(`Unsupported compile mode "${mode}".`);
             }
-            if (mode === 'compile_and_call' && !Array.isArray(args.callArguments)) {
-                throw new Error(
-                    'callArguments is required for compile_and_call (use [] for a no-argument procedure).'
-                );
+            const accessLevel = levelFor('compile_procedure');
+            if (mode === 'compile_and_call') {
+                if (!Array.isArray(args.callArguments)) {
+                    throw new Error(
+                        'callArguments is required for compile_and_call (use [] for a no-argument procedure).'
+                    );
+                }
+                if (accessLevel !== 'destructive') {
+                    throw new Error('compile_and_call requires the full access profile for this MCP surface.');
+                }
+                const procedure = procedureNameFromCreate(sql);
+                const target = procedure ? shortObjectName(procedure) : undefined;
+                if (!target) {
+                    throw new Error('Could not determine the procedure name from the CREATE PROCEDURE block.');
+                }
+                const confirm = stringArg(args, 'confirm');
+                if (!confirm || confirm.toLowerCase() !== target.toLowerCase()) {
+                    throw new Error(`compile_and_call requires confirm equal to the procedure name "${target}".`);
+                }
             }
-            const compiled = await runStatement(sql, {});
+            const compiled = await runStatement(sql, {}, accessLevel);
             const lines = [formatExecuteStatementResult(compiled)];
             if (mode === 'compile_and_call') {
                 const callSql = buildCallSql(sql, recordArrayArg(args, 'callArguments'));
-                const called = await runStatement(callSql, { maxRows: 500 });
+                const called = await runStatement(callSql, { maxRows: 500 }, accessLevel);
                 lines.push('Test CALL:', formatExecuteStatementResult(called));
             }
             return { text: lines.join('\n\n') };

@@ -15,7 +15,7 @@ import {
   type ToolTier,
 } from './toolCatalog';
 
-export type AccessProfile = 'read-only' | 'read-write' | 'full';
+export type AccessProfile = 'off' | 'read-only' | 'read-write' | 'full';
 
 export type ToolAccessLevel = 'off' | 'read' | 'write' | 'destructive';
 
@@ -32,7 +32,7 @@ export interface AiToolAccessConfig {
 }
 
 const TIER_RANK: Record<ToolTier, number> = { read: 1, write: 2, destructive: 3 };
-const PROFILE_RANK: Record<AccessProfile, number> = { 'read-only': 1, 'read-write': 2, full: 3 };
+const PROFILE_RANK: Record<AccessProfile, number> = { off: 0, 'read-only': 1, 'read-write': 2, full: 3 };
 const ACCESS_LEVEL_RANK: Record<ToolAccessLevel, number> = {
   off: 0,
   read: 1,
@@ -40,11 +40,11 @@ const ACCESS_LEVEL_RANK: Record<ToolAccessLevel, number> = {
   destructive: 3,
 };
 const RANK_TIER: readonly ToolTier[] = ['read', 'write', 'destructive'];
-const ACCESS_PROFILES: readonly AccessProfile[] = ['read-only', 'read-write', 'full'];
+const ACCESS_PROFILES: readonly AccessProfile[] = ['off', 'read-only', 'read-write', 'full'];
 const ACCESS_LEVELS: readonly ToolAccessLevel[] = ['off', 'read', 'write', 'destructive'];
 
 export const DEFAULT_SURFACE_ACCESS: ToolSurfaceAccess = {
-  access: 'read-only',
+  access: 'off',
   overrides: {},
 };
 
@@ -84,11 +84,11 @@ function normalizeOverrides(value: unknown): Record<string, ToolAccessLevel> {
 function normalizeSurface(value: unknown): ToolSurfaceAccess {
   // Accept the shorthand `"read-write"` as well as the object form.
   if (typeof value === 'string') {
-    return { access: normalizeProfile(value, 'read-only'), overrides: {} };
+    return { access: normalizeProfile(value, 'off'), overrides: {} };
   }
   if (!isRecord(value)) return DEFAULT_SURFACE_ACCESS;
   return {
-    access: normalizeProfile(value.access, 'read-only'),
+    access: normalizeProfile(value.access, 'off'),
     overrides: normalizeOverrides(value.overrides),
   };
 }
@@ -118,10 +118,22 @@ function overrideFor(tool: AssistantToolDefinition, surfaceAccessValue: ToolSurf
   );
 }
 
+function connectionAllowsWrites(config: AiToolAccessConfig, connectionName?: string): boolean {
+  const selected = (connectionName ?? '').trim().toLowerCase();
+  if (!selected) return false;
+  return config.writableConnections.some(name => name.trim().toLowerCase() === selected);
+}
+
 /**
- * Effective tier for a tool on a surface, or `undefined` when the tool is not
- * available. The result is the minimum of the tool tier, the surface profile
- * and the per-tool override.
+ * Effective capability for a tool on a surface, or `undefined` when the tool is
+ * not available.
+ *
+ * The surface profile is a hard upper bound: a write tool is never available on
+ * `read-only`, and a destructive tool is never available below `full`. An
+ * override can narrow the effective capability further (for example
+ * `execute_sql: read` on a `read-write` profile). Tools that have no reduced
+ * mode (DROP, procedure compilation) disappear when the override would reduce
+ * them below their required tier.
  */
 export function effectiveToolTier(
   tool: AssistantToolDefinition,
@@ -130,19 +142,27 @@ export function effectiveToolTier(
   connectionName?: string,
 ): ToolTier | undefined {
   if (!tool.surfaces.includes(surface)) return undefined;
-  const access = surfaceAccess(config, surface);
-  const override = overrideFor(tool, access);
-  const limit = Math.min(
-    TIER_RANK[tool.tier],
-    PROFILE_RANK[access.access],
-    override === undefined ? TIER_RANK[tool.tier] : ACCESS_LEVEL_RANK[override],
-  );
-  if (limit < TIER_RANK.read) return undefined;
 
-  if (surface !== 'copilot' && tool.tier !== 'read') {
-    const selected = (connectionName ?? '').trim().toLowerCase();
-    const writable = config.writableConnections.some(name => name.trim().toLowerCase() === selected);
-    if (!selected || !writable) return undefined;
+  const access = surfaceAccess(config, surface);
+  const requiredRank = TIER_RANK[tool.tier];
+  const profileRank = PROFILE_RANK[access.access];
+  if (profileRank < requiredRank) return undefined;
+
+  const override = overrideFor(tool, access);
+  const overrideRank = override === undefined ? profileRank : ACCESS_LEVEL_RANK[override];
+  let limit = Math.min(profileRank, overrideRank);
+
+  if (limit < requiredRank && tool.supportsReducedTier !== true) return undefined;
+  if (tool.supportsDestructiveStatements !== true) {
+    // Read/write tools never gain destructive capability just because the
+    // surface profile is full.
+    limit = Math.min(limit, requiredRank);
+  }
+  if (limit < ACCESS_LEVEL_RANK.read) return undefined;
+
+  // MCP surfaces only expose write-capable tools for allowlisted connections.
+  if (surface !== 'copilot' && limit > ACCESS_LEVEL_RANK.read && !connectionAllowsWrites(config, connectionName)) {
+    return undefined;
   }
 
   return RANK_TIER[limit - 1];
@@ -173,6 +193,20 @@ export function allowedToolIds(
   return allowedToolsForSurface(surface, config, connectionName).map(tool => tool.id);
 }
 
+/** Effective capability per canonical tool id for one surface. */
+export function effectiveToolTiers(
+  surface: ToolSurface,
+  config: AiToolAccessConfig,
+  connectionName?: string,
+): Readonly<Record<string, ToolTier>> {
+  const tiers: Record<string, ToolTier> = {};
+  for (const tool of ASSISTANT_TOOL_CATALOG) {
+    const tier = effectiveToolTier(tool, surface, config, connectionName);
+    if (tier !== undefined) tiers[tool.id] = tier;
+  }
+  return tiers;
+}
+
 /** True when the surface can run statements that write to the database. */
 export function surfaceAllowsWrites(config: AiToolAccessConfig, surface: ToolSurface): boolean {
   return PROFILE_RANK[surfaceAccess(config, surface).access] >= PROFILE_RANK['read-write'];
@@ -184,13 +218,16 @@ export function surfaceAllowsDestructive(config: AiToolAccessConfig, surface: To
 }
 
 /**
- * True when the surface exposes at least one write tool for this connection.
- * MCP surfaces additionally require the connection in `writableConnections`.
+ * True when the surface exposes at least one write-capable tool for this
+ * connection. MCP surfaces additionally require the connection in
+ * `writableConnections`.
  */
 export function surfaceAllowsConnectionWrites(
   config: AiToolAccessConfig,
   surface: ToolSurface,
   connectionName?: string,
 ): boolean {
-  return allowedToolsForSurface(surface, config, connectionName).some(tool => tool.tier !== 'read');
+  return allowedToolsForSurface(surface, config, connectionName).some(
+    tool => effectiveToolTier(tool, surface, config, connectionName) !== 'read',
+  );
 }

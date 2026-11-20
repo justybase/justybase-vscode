@@ -411,7 +411,8 @@ function validateCompileProcedureToolInput(input: unknown): ValidationResult<ICo
     const obj = input as Record<string, unknown>;
     const modeResult = enumValidator(['compile_only', 'compile_and_call'] as const, obj.mode, 'mode');
     const sqlResult = optionalString(obj.sql, 'sql');
-    const errors: ValidationError[] = collectErrors(modeResult, sqlResult);
+    const confirmResult = optionalString(obj.confirm, 'confirm');
+    const errors: ValidationError[] = collectErrors(modeResult, sqlResult, confirmResult);
 
     const rawArguments = obj.callArguments;
     let callArguments: ProcedureCallArgument[] | undefined;
@@ -439,8 +440,15 @@ function validateCompileProcedureToolInput(input: unknown): ValidationResult<ICo
             code: 'REQUIRED'
         });
     }
+    if (mode === 'compile_and_call' && confirmResult.success && !confirmResult.data) {
+        errors.push({
+            field: 'confirm',
+            message: 'Field \'confirm\' is required for compile_and_call and must equal the procedure name',
+            code: 'REQUIRED'
+        });
+    }
 
-    if (errors.length > 0 || !modeResult.success || !sqlResult.success) {
+    if (errors.length > 0 || !modeResult.success || !sqlResult.success || !confirmResult.success) {
         return { success: false, errors };
     }
 
@@ -449,6 +457,7 @@ function validateCompileProcedureToolInput(input: unknown): ValidationResult<ICo
         data: {
             mode: modeResult.data,
             sql: sqlResult.data,
+            confirm: confirmResult.data,
             ...(callArguments === undefined ? {} : { callArguments })
         }
     };

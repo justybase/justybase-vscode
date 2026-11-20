@@ -16,9 +16,10 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { randomInt } from 'node:crypto';
 import * as path from 'node:path';
 import { NzConnection } from '@justybase/netezza-driver';
-import { connectionDetailsToEnv } from '../../mcp/mcpEnv';
+import { connectionDetailsToEnv, aiToolAccessToEnv, MCP_ENV } from '../../mcp/mcpEnv';
 import { MCP_TOOL_CATALOG } from '../../mcp/mcpToolCatalog';
 import { ASSISTANT_TOOL_CATALOG } from '../../core/assistant/toolCatalog';
+import { normalizeAiToolAccess } from '../../core/assistant/toolPolicy';
 import { escapeSqlIdentifier, escapeSqlLiteral } from '../../utils/sqlUtils';
 
 const enabled = Boolean(process.env.NZ_DEV_PASSWORD);
@@ -166,8 +167,10 @@ function parseRpcPayload(payload: string): JsonRpcResponse {
 }
 
 function serverEnvironment(): NodeJS.ProcessEnv {
+    const readOnlyAccess = normalizeAiToolAccess({ mcp: 'read-only', mcpExternal: 'read-only' });
     return {
         ...process.env,
+        [MCP_ENV.ACCESS]: aiToolAccessToEnv(readOnlyAccess),
         ...connectionDetailsToEnv({
             host: DB_CONFIG.host,
             port: DB_CONFIG.port,

@@ -25,6 +25,7 @@ export class ExecuteSqlTool implements vscode.LanguageModelTool<IExecuteSqlToolP
     constructor(
         private readonly copilotService: CopilotToolService,
         private readonly allowDestructive: boolean,
+        private readonly allowWrites: boolean = true,
     ) { }
 
     async prepareInvocation(
@@ -36,6 +37,9 @@ export class ExecuteSqlTool implements vscode.LanguageModelTool<IExecuteSqlToolP
         const database = options.input.database ? ` on **${options.input.database}**` : '';
         if (classification.kind === 'read') {
             return { invocationMessage: `Running read-only query${database}...` };
+        }
+        if (!this.allowWrites) {
+            return { invocationMessage: 'Write access is disabled for JustyBase AI tools.' };
         }
         const destructiveNotice = classification.kind === 'destructive'
             ? '\n\n**This statement is destructive and may drop database objects.**'
@@ -62,16 +66,24 @@ export class ExecuteSqlTool implements vscode.LanguageModelTool<IExecuteSqlToolP
             throw new Error('SQL is required.');
         }
         const classification = classifySqlStatement(sql);
+        if (classification.kind === 'write' && !this.allowWrites) {
+            throw new Error('Write statements require the "read-write" or "full" access profile in JustyBase AI Tools settings.');
+        }
         if (classification.kind === 'destructive') {
             if (!this.allowDestructive) {
                 throw new Error('Destructive statements require the "full" access profile in JustyBase AI Tools settings.');
             }
             const target = destructiveTarget(classification.statement);
             const confirm = options.input.confirm?.trim();
-            if (!confirm) {
-                throw new Error(`Destructive statements require confirm${target ? ` equal to "${target}"` : ''}.`);
+            if (!target) {
+                throw new Error(
+                    'The destructive statement target could not be determined. Use a supported DROP/TRUNCATE/CALL statement or the drop_object tool.'
+                );
             }
-            if (target && confirm.toLowerCase() !== target.toLowerCase()) {
+            if (!confirm) {
+                throw new Error(`Destructive statements require confirm equal to "${target}".`);
+            }
+            if (confirm.toLowerCase() !== target.toLowerCase()) {
                 throw new Error(`confirm must equal the object name "${target}".`);
             }
         }

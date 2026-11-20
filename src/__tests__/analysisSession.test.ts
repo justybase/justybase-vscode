@@ -24,7 +24,7 @@ describe('isolated analysis runtime adapter',()=>{
         expect(runQueryRaw).toHaveBeenCalledWith(expect.objectContaining({isUserQuery:false,connectionOverride:{close},maxRows:20001,isExecutionCurrent:expect.any(Function)}));
         expect(await session.explain('SELECT * FROM CUSTOMER')).toBe('plan');
         expect(runExplainQuery).toHaveBeenCalledWith(expect.anything(),'EXPLAIN VERBOSE SELECT * FROM CUSTOMER','NZ',expect.anything(),expect.stringMatching(/^justybase-analysis:/),{close});
-        await expect(session.explain('SELECT 1; DELETE FROM CUSTOMER')).rejects.toThrow(/exactly one/);
+        await expect(session.explain('SELECT 1; DELETE FROM CUSTOMER')).rejects.toThrow(/Exactly one SQL statement/);
         expect(runExplainQuery).toHaveBeenCalledTimes(1);await session.close();expect(close).toHaveBeenCalledTimes(1);
     });
     test('cancellation stops future commands and retires isolated source',async()=>{

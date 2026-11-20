@@ -396,6 +396,30 @@ test('ignores pure identifier interpolation lines inside HTML template strings',
   }
 });
 
+test('ignores pure JSX expression child lines inside components', () => {
+  const fixturePath = path.resolve(process.cwd(), 'src/__quality_jsx_fixture__.tsx');
+  const fixture = [
+    'export function render(value: string, extra?: unknown) {',
+    '  return <div>',
+    '    {value}',
+    '    {extra}',
+    '  </div>;',
+    '}',
+  ].join('\n');
+  fs.writeFileSync(fixturePath, fixture);
+  try {
+    const result = checkChangedCoverage({
+      diff: '+++ b/src/__quality_jsx_fixture__.tsx\n@@ -2 +3,2 @@\n',
+      lcov: 'SF:src/__quality_jsx_fixture__.tsx\nDA:2,1\nDA:5,1\nend_of_record\n',
+      baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } },
+    });
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.files[0]?.executableLines, 0);
+  } finally {
+    fs.rmSync(fixturePath, { force: true });
+  }
+});
+
 test('does not require an LCOV record for changed declaration-only files', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/media/resultPanel/selectionStatsTypes.ts\n@@ -1 +2 @@\n',

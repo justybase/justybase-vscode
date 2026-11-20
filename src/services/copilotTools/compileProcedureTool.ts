@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { shortObjectName } from '../../core/assistant/objectNames';
 import type { CopilotToolService } from './copilotToolService';
 import { extractProcedureIdentity, type ProcedureCallArgument, type ProcedureRepairMode } from '../copilot/tools/procedureRepairUtils';
 
@@ -6,17 +7,22 @@ export interface ICompileProcedureToolParameters {
     mode: ProcedureRepairMode;
     sql?: string;
     callArguments?: ProcedureCallArgument[];
+    confirm?: string;
 }
 
 /**
  * Compiles (CREATE / CREATE OR REPLACE) a Netezza NZPLSQL procedure and
- * optionally runs a test CALL. The CALL executes procedure logic and is
- * confirmed separately by the repair workflow.
+ * optionally runs a test CALL. The CALL executes procedure logic and requires
+ * the full access profile plus a confirmation value naming the procedure.
  */
 export class CompileProcedureTool implements vscode.LanguageModelTool<ICompileProcedureToolParameters> {
     private readonly confirmedDdlTargets = new Map<string, number>();
 
-    constructor(private readonly copilotService: CopilotToolService) { }
+    constructor(
+        private readonly copilotService: CopilotToolService,
+        private readonly allowWrites: boolean = true,
+        private readonly allowDestructive: boolean = true,
+    ) { }
 
     async prepareInvocation(
         options: vscode.LanguageModelToolInvocationPrepareOptions<ICompileProcedureToolParameters>,
@@ -33,7 +39,7 @@ export class CompileProcedureTool implements vscode.LanguageModelTool<ICompilePr
         const confirmedAt = this.confirmedDdlTargets.get(confirmationKey);
         const ddlConfirmationValid = confirmedAt !== undefined && now - confirmedAt < 10 * 60 * 1000;
         const callNotice = mode === 'compile_and_call'
-            ? '\n\nAfter compilation, a separate modal confirmation will be required before the test CALL is executed. The CALL may modify database data.'
+            ? '\n\nAfter compilation, the test CALL requires the full access profile and `confirm` equal to the procedure name. The CALL may modify database data.'
             : '';
 
         const prepared: vscode.PreparedToolInvocation = {
@@ -59,6 +65,26 @@ export class CompileProcedureTool implements vscode.LanguageModelTool<ICompilePr
         options: vscode.LanguageModelToolInvocationOptions<ICompileProcedureToolParameters>,
         token: vscode.CancellationToken,
     ): Promise<vscode.LanguageModelToolResult> {
+        if (!this.allowWrites) {
+            throw new Error('Compiling procedures requires the "read-write" or "full" access profile in JustyBase AI Tools settings.');
+        }
+
+        if (options.input.mode === 'compile_and_call') {
+            if (!this.allowDestructive) {
+                throw new Error('compile_and_call requires the "full" access profile in JustyBase AI Tools settings.');
+            }
+            const sql = resolveProcedureSql(options.input.sql);
+            const identity = sql ? extractProcedureIdentity(sql) : undefined;
+            const target = identity ? shortObjectName(identity.name) : undefined;
+            if (!target) {
+                throw new Error('Could not determine the procedure name from the CREATE PROCEDURE block.');
+            }
+            const confirm = options.input.confirm?.trim();
+            if (!confirm || confirm.toLowerCase() !== target.toLowerCase()) {
+                throw new Error(`compile_and_call requires confirm equal to the procedure name "${target}".`);
+            }
+        }
+
         try {
             this.confirmedDdlTargets.set(buildConfirmationKey(options.input), Date.now());
             const result = await this.copilotService.repairProcedure(options.input, token);
@@ -68,6 +94,14 @@ export class CompileProcedureTool implements vscode.LanguageModelTool<ICompilePr
             throw new Error(`Netezza procedure compilation failed: ${message}`, { cause: error });
         }
     }
+}
+
+function resolveProcedureSql(sqlInput?: string): string {
+    const editor = vscode.window.activeTextEditor;
+    const selected = editor && !editor.selection.isEmpty
+        ? editor.document.getText(editor.selection).trim()
+        : '';
+    return sqlInput?.trim() || selected || editor?.document.getText().trim() || '';
 }
 
 function truncateSql(sql: string): string {

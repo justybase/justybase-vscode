@@ -418,9 +418,16 @@ describe('extension.ts', () => {
         } as unknown as vscode.ExtensionContext;
 
         // Reset extensions mock
-        const { extensions } = jest.requireMock('vscode');
+        const { extensions, workspace } = jest.requireMock('vscode');
         extensions.all = [];
         (extensions.getExtension as jest.Mock).mockReturnValue(undefined);
+
+        // Restore the default configuration stub: tests that enable AI tools
+        // override it explicitly.
+        (workspace.getConfiguration as jest.Mock).mockReturnValue({
+            get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+            update: jest.fn()
+        });
     });
 
     afterEach(() => {
@@ -485,10 +492,24 @@ describe('extension.ts', () => {
             expect(startSqlLanguageClient).toHaveBeenCalled();
         });
 
-        it('should register Copilot tools', async () => {
+        it('does not register Copilot tools by default', async () => {
             await activate(mockContext);
 
             const { lm } = jest.requireMock('vscode');
+            expect(lm.registerTool).not.toHaveBeenCalled();
+        });
+
+        it('should register Copilot tools when a profile is enabled', async () => {
+            const { lm, workspace } = jest.requireMock('vscode');
+            (workspace.getConfiguration as jest.Mock).mockReturnValue({
+                get: jest.fn((key: string, defaultValue?: unknown) => (
+                    key === 'ai.tools' ? { copilot: 'read-only' } : defaultValue
+                )),
+                update: jest.fn()
+            });
+
+            await activate(mockContext);
+
             expect(lm.registerTool).toHaveBeenCalled();
         });
 
@@ -595,7 +616,13 @@ describe('extension.ts', () => {
         });
 
         it('should register netezza.openLogin even when LM tool registration fails', async () => {
-            const { commands, lm, window } = jest.requireMock('vscode');
+            const { commands, lm, window, workspace } = jest.requireMock('vscode');
+            (workspace.getConfiguration as jest.Mock).mockReturnValue({
+                get: jest.fn((key: string, defaultValue?: unknown) => (
+                    key === 'ai.tools' ? { copilot: 'read-only' } : defaultValue
+                )),
+                update: jest.fn()
+            });
             (lm.registerTool as jest.Mock).mockImplementationOnce(() => {
                 throw new Error('LM unavailable');
             });

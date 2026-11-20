@@ -131,6 +131,8 @@ export interface ProcedureRepairInput {
     mode: ProcedureRepairMode;
     sql?: string;
     callArguments?: ProcedureCallArgument[];
+    /** Required for compile_and_call: the procedure name being called. */
+    confirm?: string;
 }
 
 /**

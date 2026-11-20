@@ -5,6 +5,7 @@ import * as path from 'path';
 import { ConnectionManager } from '../core/connectionManager';
 import {
     DEFAULT_AI_TOOL_ACCESS,
+    allowedToolIds,
     normalizeAiToolAccess,
     surfaceAllowsConnectionWrites,
     type AccessProfile,
@@ -95,6 +96,14 @@ export class McpHttpServerManager {
 
         const access = this.getAccessConfig();
         const accessKey = JSON.stringify(access);
+        if (allowedToolIds('mcpExternal', access, resolution.connectionName).length === 0) {
+            if (this.child) {
+                await this.stop();
+            }
+            this.lastError = 'No AI tools are enabled for the MCP HTTP surface in JustyBase AI Tools settings.';
+            this.didChangeStatus.fire(this.getStatus());
+            return this.getStatus();
+        }
         const writesEnabled = surfaceAllowsConnectionWrites(
             access,
             'mcpExternal',
@@ -145,8 +154,14 @@ export class McpHttpServerManager {
             });
             child.stderr.on('data', (data: Buffer) => {
                 const message = data.toString().trim();
-                if (message.length > 0) {
-                    console.error(`[netezza-mcp:http] ${message}`);
+                if (message.length === 0) {
+                    return;
+                }
+                console.error(`[netezza-mcp:http] ${message}`);
+                // Audit logs and the startup banner are informational; treating
+                // them as errors hides the real failure in Settings.
+                if (!message.startsWith('[netezza-mcp][audit]')
+                    && !message.includes('HTTP server listening on')) {
                     this.lastError = message;
                 }
             });

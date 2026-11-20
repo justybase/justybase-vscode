@@ -14,8 +14,8 @@ import {
     ValidateSqlTool
 } from '../services/copilotService';
 import { withContractEnforcement } from '../services/copilotTools/contractEnforcedTool';
-import { allowedToolsForSurface, surfaceAllowsDestructive } from '../core/assistant/toolPolicy';
-import { copilotToolName } from '../core/assistant/toolCatalog';
+import { allowedToolsForSurface, effectiveToolTier } from '../core/assistant/toolPolicy';
+import { copilotToolName, type ToolTier } from '../core/assistant/toolCatalog';
 import { getAiToolAccessConfig } from '../services/aiToolAccess';
 import { ConnectionManager } from '../core/connectionManager';
 import { MetadataCache } from '../metadataCache';
@@ -90,8 +90,9 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
 
     let registrations: vscode.Disposable[] = [];
 
-    const createTool = (id: string): vscode.LanguageModelTool<object> | undefined => {
-        const allowDestructive = surfaceAllowsDestructive(getAiToolAccessConfig(), 'copilot');
+    const createTool = (id: string, level: ToolTier): vscode.LanguageModelTool<object> | undefined => {
+        const allowWrites = level !== 'read';
+        const allowDestructive = level === 'destructive';
         switch (id) {
             case 'get_context':
                 return new GetContextTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
@@ -110,11 +111,11 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
             case 'propose_import_mapping':
                 return new ProposeImportMappingTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
             case 'execute_sql':
-                return new ExecuteSqlTool(copilotService, allowDestructive) as unknown as vscode.LanguageModelTool<object>;
+                return new ExecuteSqlTool(copilotService, allowDestructive, allowWrites) as unknown as vscode.LanguageModelTool<object>;
             case 'drop_object':
                 return new DropObjectTool(copilotService, allowDestructive) as unknown as vscode.LanguageModelTool<object>;
             case 'compile_procedure':
-                return new CompileProcedureTool(copilotService) as unknown as vscode.LanguageModelTool<object>;
+                return new CompileProcedureTool(copilotService, allowWrites, allowDestructive) as unknown as vscode.LanguageModelTool<object>;
             default:
                 return undefined;
         }
@@ -130,8 +131,10 @@ export function registerCopilotFeatures(params: CopilotRegistrationParams): Copi
 
         for (const tool of allowedToolsForSurface('copilot', access)) {
             try {
+                const level = effectiveToolTier(tool, 'copilot', access);
+                if (!level) continue;
                 const name = copilotToolName(tool.id);
-                const instance = createTool(tool.id);
+                const instance = createTool(tool.id, level);
                 if (!instance) continue;
                 registrations.push(languageModelApi.registerTool(name, withContractEnforcement(name, instance)));
             } catch {

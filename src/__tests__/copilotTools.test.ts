@@ -198,6 +198,30 @@ describe('JustyBase AI tools', () => {
             expect(result).toBeDefined();
         });
 
+        it('qualifies columns, statistics and dependencies with schema and database', async () => {
+            mockCopilotService.getColumnsForTables.mockResolvedValue('COLUMNS');
+            mockCopilotService.getTableStats.mockResolvedValue('STATS');
+            mockCopilotService.getObjectDependencies.mockResolvedValue('DEPS');
+            const options = {
+                input: {
+                    object: 'ORDERS',
+                    database: 'DWH',
+                    schema: 'ADMIN',
+                    sections: ['columns', 'stats', 'dependencies']
+                }
+            } as vscode.LanguageModelToolInvocationOptions<IGetObjectToolParameters>;
+
+            await tool.invoke(options, mockToken);
+
+            expect(mockCopilotService.getColumnsForTables).toHaveBeenCalledWith(['DWH.ADMIN.ORDERS'], 'DWH');
+            expect(mockCopilotService.getTableStats).toHaveBeenCalledWith('DWH.ADMIN.ORDERS', 'DWH');
+            expect(mockCopilotService.getObjectDependencies).toHaveBeenCalledWith(
+                'DWH.ADMIN.ORDERS',
+                'DWH',
+                'TABLE'
+            );
+        });
+
         it('supports all sections and continues after a section error', async () => {
             mockCopilotService.getDDL.mockResolvedValue('DDL');
             mockCopilotService.getColumnsForTables.mockResolvedValue('COLUMNS');
@@ -365,6 +389,27 @@ describe('JustyBase AI tools', () => {
                 expect.anything()
             );
         });
+
+        it('rejects writes when the effective tier is read', async () => {
+            const tool = new ExecuteSqlTool(mockCopilotService as any, false, false);
+            const options = {
+                input: { sql: 'DELETE FROM ADMIN.ORDERS WHERE ID = 1' }
+            } as vscode.LanguageModelToolInvocationOptions<IExecuteSqlToolParameters>;
+
+            await expect(tool.invoke(options, mockToken)).rejects.toThrow('read-write');
+            expect(mockCopilotService.executeSql).not.toHaveBeenCalled();
+        });
+
+        it('requires the procedure name to confirm a CALL', async () => {
+            const tool = new ExecuteSqlTool(mockCopilotService as any, true);
+            const options = {
+                input: { sql: 'CALL ADMIN.P(1)', confirm: 'P' }
+            } as vscode.LanguageModelToolInvocationOptions<IExecuteSqlToolParameters>;
+
+            mockCopilotService.executeSql.mockResolvedValue(writeResult());
+            await tool.invoke(options, mockToken);
+            expect(mockCopilotService.executeSql).toHaveBeenCalledWith('CALL ADMIN.P(1)', expect.anything());
+        });
     });
 
     describe('DropObjectTool', () => {
@@ -415,6 +460,25 @@ describe('JustyBase AI tools', () => {
             const result = await tool.invoke(options, mockToken);
             expect(mockCopilotService.repairProcedure).toHaveBeenCalledWith(input, mockToken);
             expect(result).toBeDefined();
+        });
+
+        it('requires full access and a matching confirm for compile_and_call', async () => {
+            const input: ICompileProcedureToolParameters = {
+                mode: 'compile_and_call',
+                sql: 'CREATE PROCEDURE ADMIN.P() RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC RETURN 1; END_PROC;',
+                callArguments: [],
+                confirm: 'P'
+            };
+            const options = { input } as vscode.LanguageModelToolInvocationOptions<ICompileProcedureToolParameters>;
+
+            await expect(new CompileProcedureTool(mockCopilotService as any, true, false).invoke(options, mockToken))
+                .rejects.toThrow('full');
+            await expect(new CompileProcedureTool(mockCopilotService as any, false, true).invoke(options, mockToken))
+                .rejects.toThrow('read-write');
+
+            mockCopilotService.repairProcedure.mockResolvedValue('compiled');
+            await new CompileProcedureTool(mockCopilotService as any, true, true).invoke(options, mockToken);
+            expect(mockCopilotService.repairProcedure).toHaveBeenCalledWith(input, mockToken);
         });
     });
 });

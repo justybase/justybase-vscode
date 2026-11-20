@@ -70,7 +70,7 @@ describe('MCP connection env serialization', () => {
         expect(parseMcpAiToolAccess(env)).toEqual(access);
     });
 
-    it('falls back to read-only for missing or malformed access env', () => {
+    it('falls back to disabled tools for missing or malformed access env', () => {
         expect(parseMcpAiToolAccess({})).toEqual(DEFAULT_AI_TOOL_ACCESS);
         expect(parseMcpAiToolAccess({ [MCP_ENV.ACCESS]: '{not-json' })).toEqual(DEFAULT_AI_TOOL_ACCESS);
     });

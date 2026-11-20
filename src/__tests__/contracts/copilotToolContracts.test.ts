@@ -127,9 +127,19 @@ describe('JustyBase AI tool contracts', () => {
             }).success).toBe(false);
         });
 
-        it('validates procedure compile mode and call arguments', () => {
+        it('validates procedure compile mode, call arguments and confirmation', () => {
             expect(CompileProcedureToolContract.validateInput({ mode: 'compile_only' }).success).toBe(true);
-            expect(CompileProcedureToolContract.validateInput({ mode: 'compile_and_call', callArguments: [] }).success).toBe(true);
+            expect(CompileProcedureToolContract.validateInput({
+                mode: 'compile_and_call',
+                callArguments: [],
+                confirm: 'P'
+            }).success).toBe(true);
+            expect(CompileProcedureToolContract.validateInput({ mode: 'compile_and_call', callArguments: [] }).success).toBe(false);
+            expect(CompileProcedureToolContract.validateInput({
+                mode: 'compile_and_call',
+                callArguments: [],
+                confirm: ''
+            }).success).toBe(false);
             expect(CompileProcedureToolContract.validateInput({ mode: 'compile_and_call' }).success).toBe(false);
             expect(CompileProcedureToolContract.validateInput({ mode: 'invalid' }).success).toBe(false);
         });
