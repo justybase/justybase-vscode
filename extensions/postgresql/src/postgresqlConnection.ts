@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { Readable } from 'stream';
 import type { Client, ClientConfig, ClientNotice, FieldDef, QueryResult as PgQueryResult } from 'pg';
@@ -114,8 +115,29 @@ function resolveCopyImportRequest(sql: string): CopyImportRequest | undefined {
     };
 }
 
-function buildClientConfig(config: DatabaseConnectionConfig): ClientConfig {
-    const sslMode = getStringOption(config, 'sslMode');
+type PostgreSqlSslConfig = {
+    rejectUnauthorized?: boolean;
+    ca?: Buffer;
+    cert?: Buffer;
+    key?: Buffer;
+    servername?: string;
+    checkServerIdentity?: () => undefined;
+};
+
+function readTlsFile(path: string | undefined, label: string): Buffer | undefined {
+    if (!path) {
+        return undefined;
+    }
+    try {
+        return readFileSync(path);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to read PostgreSQL ${label} "${path}": ${message}`);
+    }
+}
+
+export function buildClientConfig(config: DatabaseConnectionConfig): ClientConfig {
+    const sslMode = (getStringOption(config, 'sslMode') || '').toLowerCase();
     const sslServerName = getStringOption(config, 'sslServerName');
     const connectTimeout = getNumberOption(config, 'connectTimeout');
 
@@ -128,16 +150,31 @@ function buildClientConfig(config: DatabaseConnectionConfig): ClientConfig {
         application_name: 'JustyBase PostgreSQL'
     };
 
-    if (sslMode === 'require') {
-        clientConfig.ssl = {
-            rejectUnauthorized: false,
+    if (sslMode === 'disable') {
+        clientConfig.ssl = false;
+    } else if (sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full') {
+        const rootCert = readTlsFile(getStringOption(config, 'sslRootCert'), 'root CA certificate');
+        const clientCert = readTlsFile(getStringOption(config, 'sslCert'), 'client certificate');
+        const clientKey = readTlsFile(getStringOption(config, 'sslKey'), 'client private key');
+        if (clientCert && !clientKey) {
+            throw new Error('PostgreSQL client certificate requires a client private key.');
+        }
+        if (clientKey && !clientCert) {
+            throw new Error('PostgreSQL client private key requires a client certificate.');
+        }
+
+        const ssl: PostgreSqlSslConfig = {
+            rejectUnauthorized: sslMode !== 'require',
+            ...(rootCert ? { ca: rootCert } : {}),
+            ...(clientCert ? { cert: clientCert } : {}),
+            ...(clientKey ? { key: clientKey } : {}),
             ...(sslServerName ? { servername: sslServerName } : {})
         };
-    } else if (sslMode === 'verify-full') {
-        clientConfig.ssl = {
-            rejectUnauthorized: true,
-            ...(sslServerName ? { servername: sslServerName } : {})
-        };
+        if (sslMode === 'verify-ca') {
+            // verify-ca validates the chain but not the certificate host name.
+            ssl.checkServerIdentity = () => undefined;
+        }
+        clientConfig.ssl = ssl as unknown as ClientConfig['ssl'];
     }
 
     if (connectTimeout !== undefined && connectTimeout > 0) {

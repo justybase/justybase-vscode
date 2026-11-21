@@ -83,15 +83,23 @@ export const postgresqlDialect: DatabaseDialect = {
             label: "Default",
           },
           {
+            value: "disable",
+            label: "Disable",
+          },
+          {
             value: "require",
             label: "Require (skip certificate validation)",
           },
           {
+            value: "verify-ca",
+            label: "Verify CA (no host name check)",
+          },
+          {
             value: "verify-full",
-            label: "Verify certificate",
+            label: "Verify certificate and host name",
           },
         ],
-        description: "Simple SSL options for pg.",
+        description: "TLS behavior for pg.",
         layout: "half",
       },
       {
@@ -103,6 +111,34 @@ export const postgresqlDialect: DatabaseDialect = {
         description:
           "Optional TLS server name. Useful when PostgreSQL is reached through a local tunnel; use 127.0.0.1 as Host with verify-full.",
         layout: "full",
+      },
+      {
+        key: "sslRootCert",
+        label: "TLS Root CA",
+        type: "text",
+        storage: "options",
+        placeholder: "Path to a PEM root CA certificate",
+        description:
+          "Optional PEM root CA used by verify-ca and verify-full. Leave empty to use the Node.js trust store.",
+        layout: "full",
+      },
+      {
+        key: "sslCert",
+        label: "TLS Client Certificate",
+        type: "text",
+        storage: "options",
+        placeholder: "Path to a PEM client certificate",
+        description: "Optional PEM client certificate for mutual TLS.",
+        layout: "half",
+      },
+      {
+        key: "sslKey",
+        label: "TLS Client Key",
+        type: "text",
+        storage: "options",
+        placeholder: "Path to a PEM client private key",
+        description: "Optional unencrypted PEM private key paired with the client certificate.",
+        layout: "half",
       },
       {
         key: "connectTimeout",

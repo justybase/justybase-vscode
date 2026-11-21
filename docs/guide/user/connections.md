@@ -22,6 +22,10 @@ If your organization runs a service that holds the Netezza login, enable the tun
 
 Netezza profiles expose **SSL mode** and an optional **CA certificate (PEM)**. `Default (negotiate)` keeps the existing driver behavior, and the driver prefers an unencrypted session when the server allows it, so it is not a guarantee of encryption. `Require` forces an encrypted session without validating the server certificate; it does not need a certificate file. `Verify full` forces TLS and validates the certificate chain and host name, so select the appliance or CA certificate for a self-signed or private-CA server. No client certificate or private key is required. The CA path is stored with the profile options; the profile password remains in VS Code Secret Storage.
 
+### PostgreSQL TLS
+
+PostgreSQL profiles expose **SSL Mode** with `Default`, `Disable`, `Require`, `Verify CA`, and `Verify full`. `Require` encrypts without validating the server certificate. `Verify CA` validates the certificate chain but not the host name; pair it with **TLS Server Name** when the server certificate names a host that differs from the address, such as through a tunnel. `Verify full` validates both the chain and the host name. **TLS Root CA** selects a PEM root CA for private or self-signed CAs, and **TLS Client Certificate** plus **TLS Client Key** enable mutual TLS; the key must be an unencrypted PEM file. Paths are stored with the profile options, while the password remains in VS Code Secret Storage.
+
 ## Select context per tab
 
 Use **Select Connection for SQL Tab** and **Select Database for SQL Tab** when a document needs a different scope from the global connection. The tab context is shown in the SQL editor and is used by completion, diagnostics, DDL, execution, and metadata lookup. `DB.SCHEMA.TABLE`, `DB..TABLE`, `SCHEMA.TABLE`, and quoted identifiers remain distinct object forms; do not remove qualification merely to make a suggestion appear.
