@@ -67,6 +67,7 @@ import {
     registerDecorationSubscriptions,
 } from './editors/decorationManager';
 import { ConnectionAccentDecorationProvider } from './decorations/connectionAccentDecorationProvider';
+import { activateRuntimeErrorDiagnostics } from './providers/runtimeErrorDiagnostics';
 import { Logger, logWithFallback } from './utils/logger';
 import { registerMcpFeatures } from './activation/mcpRegistration';
 import { createPerformanceTimer, formatPerformanceEvent } from './services/perf/performanceEvents';
@@ -133,6 +134,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<JustyB
 
     const coreActivation = activateCoreServices(context, logger);
     databaseTunnelManager = coreActivation.databaseTunnelManager;
+    activateRuntimeErrorDiagnostics(context);
     queryExecutionCoordinator = createQueryExecutionCoordinator();
     setDefaultQueryExecutionCoordinator(queryExecutionCoordinator);
     const activationStreamingManager = createStreamingManager();

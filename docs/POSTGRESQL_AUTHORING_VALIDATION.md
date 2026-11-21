@@ -16,11 +16,16 @@ UPDATE FROM, DELETE USING, MERGE, basic JSON_TABLE, EXPLAIN options, identity
 and generated columns, common ALTER TABLE actions, enum/composite/domain
 types, indexes, and routine envelopes.
 
-PL/pgSQL string bodies are opaque. Their syntax and procedural semantics remain
-the server's responsibility. BEGIN ATOMIC SQL bodies are parsed structurally.
 This is a tested SQL subset, not a complete implementation of PostgreSQL's
 grammar. Advanced routine options, nested JSON_TABLE clauses, index operator
 classes/storage options and some DDL forms remain outside the covered subset.
+
+PL/pgSQL string bodies are opaque to the SQL grammar. A separate structural
+analyzer (`PGP001`–`PGP009`) warns about block/IF/LOOP/CASE mismatches,
+misplaced `EXCEPTION` handlers, `ELSIF`/`ELSE` outside `IF`, and a non-void
+function without `RETURN`. It masks comments, strings and quoted identifiers,
+does not parse expressions, and the server remains authoritative. `BEGIN
+ATOMIC` SQL bodies are parsed structurally.
 
 ## Identity and session context
 
@@ -50,6 +55,40 @@ original UTF-16 offsets. Macro-looking text inside protected PostgreSQL SQL
 regions is preserved during execution preprocessing, including queued and
 single-query execution. These checks must continue passing for Netezza macro
 completion and preprocessing.
+
+## Runtime error diagnostics
+
+PostgreSQL errors expose a SQLSTATE, optional one-based `position`, `DETAIL`,
+`HINT`, and a `CONTEXT` line such as
+`PL/pgSQL function f() line 4 at RETURN`. The shared error extractor keeps
+these fields, the Result Panel renders `SQLSTATE`, `DETAIL`, `HINT`, `CONTEXT`
+and a psql-style `LINE n:` excerpt, and the runtime diagnostic collection marks
+the failing character in the editor after a run. The collection is separate
+from the linter so an automatic lint pass cannot delete a server-reported
+position; editing the document clears it.
+
+PL/pgSQL runtime failures carry `CONTEXT` and `internalQuery`/`internalPosition`
+rather than a top-level `position`. The Result Panel keeps that context; the
+editor diagnostic is intentionally limited to top-level positions because the
+body offset must be resolved by the routine analysis layer.
+
+## PL/pgSQL structural codes
+
+| Code | Meaning |
+| --- | --- |
+| `PGP001` | `BEGIN` without `END`, or a body that does not start with `BEGIN`/`DECLARE` |
+| `PGP002` | `END` without a matching `BEGIN` |
+| `PGP003` | `IF` without `END IF`, or `END IF` without `IF` |
+| `PGP004` | `LOOP` without `END LOOP`, or `END LOOP` without `LOOP` |
+| `PGP005` | `CASE` without a matching close, or `END CASE` without `CASE` |
+| `PGP006` | `DECLARE` block without `BEGIN` |
+| `PGP007` | Non-void function body without a `RETURN` statement (warning; may still raise) |
+| `PGP008` | `EXCEPTION`/`WHEN` outside a block body or after another handler |
+| `PGP009` | `ELSIF`/`ELSE` outside an `IF`/`CASE` |
+
+The analyzer is warning-only. A construct it cannot classify is left to the
+server; the live matrix (`postgresqlPlpgsqlMatrix.live.integration.test.ts`)
+compiles every case inside a transaction and rolls it back.
 
 ## Test ownership
 
@@ -92,6 +131,17 @@ Missing configuration is an error on explicit invocation. Conformance and live
 suites are excluded from the default root Jest run. The CI PostgreSQL workflow
 runs live integration, authoring and built LSP checks; it does not verify the
 SQL corpus.
+
+The PL/pgSQL live matrix and the runtime error-field probe use the same
+environment variables and the live Jest config:
+
+```sh
+npx jest --config jest.live.config.js src/__tests__/integration/postgresqlPlpgsqlMatrix.live.integration.test.ts --runInBand
+npx jest --config jest.live.config.js src/__tests__/integration/postgresqlErrorFields.live.integration.test.ts --runInBand
+```
+
+Both create a random schema inside a transaction, use savepoints around every
+case, and roll everything back.
 
 The conformance suite creates a random schema inside a transaction, substitutes
 that schema for canonical public fixture references, plans SELECT/WITH queries,

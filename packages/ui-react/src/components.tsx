@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { DATABASE_KIND_DISPLAY_NAMES, SUPPORTED_DATABASE_KINDS, type CapabilityDescriptor, type DatabaseErrorDetails, type DatabaseKind } from '@justybase/contracts';
-import { compactSqlErrorMessage, SCHEMA_CONTEXT_MENU_LABELS, type MetadataNode } from '@justybase/ui-core';
+import { compactSqlErrorMessage, buildSqlErrorLineExcerpt, DATABASE_DIAGNOSTIC_LABELS, SCHEMA_CONTEXT_MENU_LABELS, type MetadataNode } from '@justybase/ui-core';
 import type { UiExecutionState, UiResultSurfaceState } from '@justybase/ui-core';
 import type { UiResultViewState } from '@justybase/ui-core';
 import { formatDataGridCellValue } from './dataGrid';
@@ -45,10 +45,14 @@ export function ErrorDiagnostics({ details }: ErrorDiagnosticsProps): ReactNode 
   const lines: Array<[string, string]> = [];
   if (details.code) lines.push(['SQLSTATE', details.code]);
   if (details.severity) lines.push(['Severity', details.severity]);
+  if (details.position !== undefined) lines.push(['Position', String(details.position)]);
   const collapsible: Array<[string, string]> = [];
   if (details.detail) collapsible.push(['Detail', details.detail]);
   if (details.hint) collapsible.push(['Hint', details.hint]);
-  for (const [key, value] of Object.entries(details.diagnostics ?? {})) collapsible.push([key, value]);
+  if (details.context) collapsible.push(['Context', details.context]);
+  for (const [key, value] of Object.entries(details.diagnostics ?? {})) {
+    collapsible.push([DATABASE_DIAGNOSTIC_LABELS[key] ?? key, value]);
+  }
   if (lines.length === 0 && collapsible.length === 0) return null;
   const copy = (): void => {
     const text = [...lines, ...collapsible].map(([label, value]) => `${label}: ${value}`).join('\n');
@@ -131,6 +135,8 @@ export function ResultRefreshFailureBanner({ message, onRetry, onDismiss }: Resu
 export interface ResultErrorViewProps {
   readonly message?: string;
   readonly details?: DatabaseErrorDetails;
+  /** Submitted SQL, used to render a psql-style line excerpt at `details.position`. */
+  readonly sql?: string;
   /** Prepares a Copilot Chat prompt for this error; omitted when no SQL is available. */
   readonly onFixWithAi?: () => void;
   readonly children?: ReactNode;
@@ -145,14 +151,18 @@ function resultErrorNextSteps(message: string | undefined): string | undefined {
   return undefined;
 }
 
-export function ResultErrorView({ message, details, onFixWithAi, children }: ResultErrorViewProps): ReactNode {
+export function ResultErrorView({ message, details, sql, onFixWithAi, children }: ResultErrorViewProps): ReactNode {
   const nextSteps = resultErrorNextSteps(message);
   const displayMessage = message === undefined ? 'Something went wrong.' : compactSqlErrorMessage(message);
   const hasFullMessage = message !== undefined && displayMessage !== message;
   const fullDetails = hasFullMessage ? <details className="ui-result-error-raw"><summary>Show full error details</summary><pre>{message}</pre></details> : undefined;
+  const excerpt = sql !== undefined && details?.position !== undefined
+    ? buildSqlErrorLineExcerpt(sql, details.position)
+    : undefined;
   return <section className="ui-result-error" role="alert" aria-label="Result error">
     <div className="ui-result-error-message">{displayMessage}</div>
     {fullDetails}
+    {excerpt && <pre className="ui-result-error-excerpt">{`LINE ${excerpt.line}: ${excerpt.text}\n${' '.repeat(Math.min(excerpt.caret, excerpt.text.length))}^`}</pre>}
     {nextSteps && <p className="ui-result-error-next">{nextSteps}</p>}
     {onFixWithAi && <div className="ui-result-error-actions">
       <button

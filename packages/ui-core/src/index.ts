@@ -114,6 +114,7 @@ export type {
 } from './resultGridSelection';
 export { hasUiResultQuery, resolveUiResultColumnIndex, toUiResultQueryOptions } from './resultQuery';
 export type { UiResultQueryOptions } from './resultQuery';
+export * from './databaseErrorText';
 import { compactSqlErrorMessage as compactSqlErrorMessageImpl, summarizeSqlErrorMessage as summarizeSqlErrorMessageImpl } from './sqlErrorMessage';
 export const compactSqlErrorMessage = compactSqlErrorMessageImpl;
 export const summarizeSqlErrorMessage = summarizeSqlErrorMessageImpl;

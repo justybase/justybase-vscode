@@ -282,6 +282,8 @@ function isLikelyNonExecutableLine(file, lineNumber) {
       || /^(?:\/\/|\/\*|\*|\*\/)/u.test(trimmed)
       || /^(?:export\s+)?(?:declare\s+)?(?:interface|type)\b/u.test(trimmed)
       || /^import\s+type\b/u.test(trimmed)
+      || /^export\s+\*\s+from\s+['"]/u.test(trimmed)
+      || /^export\s*\{[^}]*\}\s*from\s+['"]/u.test(trimmed)
       || /^(?:[}\])]|,|[?:])/.test(trimmed)
       || /^(?:[A-Za-z_$][\w$]*|\d+(?:\.\d+)?),\s*$/u.test(trimmed)
       || /^[{}()[\],;]+$/u.test(trimmed);

@@ -21,6 +21,8 @@ This pack is published with `"preview": true` in `extensions/postgresql/package.
 - DDL generation for tables, views, routines, and sequences
 - `EXPLAIN (FORMAT JSON)` parsing for the explain view and tuning-advisor scaffolding
 - Table maintenance (VACUUM/ANALYZE/REINDEX and friends) and session monitor (`pg_terminate_backend`)
+- Runtime error fidelity: SQLSTATE, `DETAIL`, `HINT`, `CONTEXT`, a psql-style `LINE n:` excerpt and an editor diagnostic at the server-reported position
+- Structural PL/pgSQL warnings for `BEGIN`/`END`, `IF`, `LOOP`, `CASE`, `EXCEPTION` and non-void `RETURN` paths
 
 ## Installation
 
@@ -100,7 +102,10 @@ npm run test:database:tunnel:live
 
 ## SQL authoring scope and verification
 
-The implemented grammar targets PostgreSQL 16–18. Known older connections receive
+The implemented grammar targets PostgreSQL 16-18. Known older connections receive
 PG001 warnings for recognized newer syntax; disconnected editing uses the union.
-PL/pgSQL bodies remain opaque. See [Authoring validation](POSTGRESQL_AUTHORING_VALIDATION.md)
-for supported forms, limitations, corpus ownership, live-test hygiene and commands.
+A separate warning-only analyzer (`PGP001`–`PGP009`) covers the structure of
+PL/pgSQL dollar-quoted bodies; it masks comments, strings and quoted identifiers
+and leaves expression semantics and validation to the server. See
+[Authoring validation](POSTGRESQL_AUTHORING_VALIDATION.md) for supported forms,
+limitations, corpus ownership, live-test hygiene and commands.

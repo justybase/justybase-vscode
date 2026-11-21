@@ -181,6 +181,8 @@ describe("@justybase/contracts", () => {
         severity: "ERROR",
         detail: "Missing relation.",
         hint: "Check the name.",
+        position: 12,
+        context: "PL/pgSQL function f() line 2 at SQL statement",
         diagnostics: { C: "42P01", M: "relation does not exist" },
       })).toBe(true);
     });
@@ -192,6 +194,10 @@ describe("@justybase/contracts", () => {
       expect(isDatabaseErrorDetails([])).toBe(false);
       expect(isDatabaseErrorDetails({ code: 42 })).toBe(false);
       expect(isDatabaseErrorDetails({ detail: {} })).toBe(false);
+      expect(isDatabaseErrorDetails({ position: "12" })).toBe(false);
+      expect(isDatabaseErrorDetails({ position: 0 })).toBe(false);
+      expect(isDatabaseErrorDetails({ position: 1.5 })).toBe(false);
+      expect(isDatabaseErrorDetails({ context: 42 })).toBe(false);
       expect(isDatabaseErrorDetails({ diagnostics: { C: 42 } })).toBe(false);
       expect(isDatabaseErrorDetails({ diagnostics: [] })).toBe(false);
     });
@@ -201,6 +207,8 @@ describe("@justybase/contracts", () => {
       expect(hasDatabaseErrorDetails({})).toBe(false);
       expect(hasDatabaseErrorDetails({ diagnostics: {} })).toBe(false);
       expect(hasDatabaseErrorDetails({ code: "42P01" })).toBe(true);
+      expect(hasDatabaseErrorDetails({ position: 12 })).toBe(true);
+      expect(hasDatabaseErrorDetails({ context: "line 4" })).toBe(true);
       expect(hasDatabaseErrorDetails({ diagnostics: { C: "42P01" } })).toBe(true);
     });
   });

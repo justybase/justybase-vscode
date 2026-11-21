@@ -19,6 +19,14 @@ describe('PostgreSQL semantic validation', () => {
   it('distinguishes quoted aliases from folded aliases', () => {
     expect(validate('SELECT i.id FROM items "I"').map(issue => issue.code)).toContain('SQL003');
   });
+  it('reports structural PL/pgSQL warnings through the shared validator', () => {
+    const sql = "CREATE FUNCTION public.f() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN IF true THEN RETURN 1; END $$";
+    expect(validate(sql).map(issue => issue.code)).toContain('PGP003');
+  });
+  it('keeps a valid PL/pgSQL body free of structural warnings', () => {
+    const sql = "CREATE FUNCTION public.f() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN CASE WHEN true THEN 1 ELSE 0 END; END $$";
+    expect(validate(sql).filter(issue => issue.code.startsWith('PGP'))).toEqual([]);
+  });
   it.each([
     'SELECT 1 WHERE true',
     'SELECT "I".id, i.payload FROM items "I" CROSS JOIN items i',

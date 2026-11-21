@@ -459,6 +459,29 @@ describe('shared React presentation', () => {
     expect(screen.queryByRole('button', { name: 'Fix with Copilot' })).not.toBeInTheDocument();
   });
 
+  it('renders a PostgreSQL position excerpt and structured diagnostics', () => {
+    const sql = 'SELECT *\nFROM items\nWHERE idd = 1';
+    const { container } = render(<ResultErrorView
+      message='column "idd" does not exist'
+      sql={sql}
+      details={{
+        code: '42703',
+        severity: 'ERROR',
+        position: 27,
+        detail: 'The column is missing.',
+        hint: 'Check the column name.',
+        context: 'PL/pgSQL function f() line 4 at RETURN',
+        diagnostics: { constraint: 'items_pkey', table: 'items' },
+      }}
+    />);
+    expect(container.querySelector('.ui-result-error-excerpt')?.textContent).toContain('LINE 3: WHERE idd = 1');
+    expect(container.querySelector('.ui-result-error-excerpt')?.textContent).toContain('^');
+    expect(screen.getByText('42703')).toBeInTheDocument();
+    expect(screen.getByText('Detail')).toBeInTheDocument();
+    expect(screen.getByText('Context')).toBeInTheDocument();
+    expect(screen.getByText('items_pkey')).toBeInTheDocument();
+  });
+
   it('keeps capability differences visible and guards writes', () => {
     render(<CapabilityGate capability={{ key: 'write', status: 'unsupported', owner: 'adapter', documentation: '/docs/write', removalCondition: 'Add provider support.' }}><span>hidden</span></CapabilityGate>);
     expect(screen.queryByText('hidden')).not.toBeInTheDocument();

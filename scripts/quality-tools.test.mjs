@@ -373,6 +373,22 @@ test('ignores type members inside executable TypeScript modules', () => {
   assert.equal(result.files[0]?.executableLines, 0);
 });
 
+test('ignores pure re-export lines in changed coverage', () => {
+  const fixturePath = path.resolve(process.cwd(), 'src/__quality_reexport_fixture__.ts');
+  fs.writeFileSync(fixturePath, "export * from './databaseErrorText';\nexport { a, b } from './x';\n");
+  try {
+    const result = checkChangedCoverage({
+      diff: '+++ b/src/__quality_reexport_fixture__.ts\n@@ -1,2 +1,2 @@\n',
+      lcov: 'SF:src/__quality_reexport_fixture__.ts\nDA:9,1\nend_of_record\n',
+      baseline: { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } },
+    });
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.files[0]?.executableLines, 0);
+  } finally {
+    fs.rmSync(fixturePath, { force: true });
+  }
+});
+
 test('ignores pure identifier interpolation lines inside HTML template strings', () => {
   const fixturePath = path.resolve(process.cwd(), 'src/__quality_template_fixture__.ts');
   const fixture = [

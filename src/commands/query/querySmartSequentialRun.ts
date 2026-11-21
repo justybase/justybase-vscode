@@ -34,6 +34,10 @@ import type { DatabaseErrorDetails } from '@justybase/contracts';
 import { extractDatabaseErrorDetails } from '@justybase/database-runtime';
 import { recordJoinKnowledgeSuccessfulStatement } from '../../knowledge/joinKnowledgeRuntime';
 import { describeQueryError, ensureQueryErrorMessage } from '../../core/errorPresentation';
+import {
+    clearRuntimeErrorDiagnostic,
+    publishRuntimeErrorDiagnostic,
+} from '../../providers/runtimeErrorDiagnostics';
 
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
@@ -213,6 +217,7 @@ async function executePreparedQuery(
         // A fresh run after idle clears unpinned tabs instead of pinning them.
         resultPanelProvider.startExecution(executionUri, preserveExistingResults ? { preserveExistingResults: true } : undefined);
         executionStarted = true;
+        clearRuntimeErrorDiagnostic(documentUri);
         resultPanelProvider.log(executionUri, 'Preparing SQL execution...');
 
         const config = getExtensionConfiguration();
@@ -287,6 +292,14 @@ async function executePreparedQuery(
                         sql: queries[queryIndex] ?? sql,
                         operation: 'SQL execution',
                     });
+                    publishRuntimeErrorDiagnostic(
+                        documentUri,
+                        queries[queryIndex] ?? sql,
+                        errorMessage,
+                        errorDetails,
+                        databaseKind ?? '',
+                        queryIndex,
+                    );
                     resultPanelProvider.updateResults(
                         [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage, databaseKind, errorDetails)],
                         executionUri,
@@ -408,6 +421,9 @@ async function executePreparedQuery(
         if (!executionStillCurrent) {
             return 'cancelled';
         }
+        if (!hadFailure) {
+            clearRuntimeErrorDiagnostic(documentUri);
+        }
         resultPanelProvider.finalizeExecution(executionUri);
         void handleExecutionCompletion(documentUri);
         if (runQueryTimer) {
@@ -430,6 +446,10 @@ async function executePreparedQuery(
         const msg = describeQueryError(err);
         executionGate.recordError(msg);
         if (isConnectionBrokenError(err)) executionGate.requireSessionIsolation();
+        const errorDetails = extractDatabaseErrorDetails(err);
+        if (!isCancellationError(err) && queriesForError.length === 1) {
+            publishRuntimeErrorDiagnostic(documentUri, queriesForError[0], msg, errorDetails, databaseKind ?? '', 0);
+        }
 
         if (isCancellationError(err)) {
             executionGate.requireSessionIsolation();
@@ -457,7 +477,7 @@ async function executePreparedQuery(
                     queriesForError.length === 1 ? queriesForError[0] : undefined,
                     msg,
                     databaseKind,
-                    extractDatabaseErrorDetails(err),
+                    errorDetails,
                 )],
                 executionUri,
                 true,

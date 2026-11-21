@@ -132,7 +132,7 @@ function readTlsFile(path: string | undefined, label: string): Buffer | undefine
         return readFileSync(path);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to read PostgreSQL ${label} "${path}": ${message}`);
+        throw new Error(`Failed to read PostgreSQL ${label} "${path}": ${message}`, { cause: error });
     }
 }
 

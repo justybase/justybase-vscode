@@ -4406,6 +4406,10 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
 .ui-result-error-raw summary { cursor: pointer; }
 .ui-result-error-raw summary:hover { color: var(--justybase-grid-text); }
 .ui-result-error-raw pre { max-height: 260px; margin: 6px 0 0; padding: 8px; overflow: auto; border: 1px solid var(--justybase-grid-border); border-radius: 3px; background: var(--justybase-grid-bg); color: var(--justybase-grid-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; white-space: pre; }
+/* PostgreSQL reports a one-based character position. The host renders the
+   matching LINE n: excerpt and caret, so the failing token stays visible even
+   when the message is shorter than the statement. */
+.ui-result-error-excerpt { max-width: 100%; margin: 0; padding: 8px; overflow: auto; border: 1px solid var(--justybase-grid-border); border-radius: 3px; background: var(--justybase-grid-bg); color: var(--justybase-grid-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; white-space: pre; tab-size: 4; }
 .ui-result-error-next { margin: 0; color: var(--vscode-descriptionForeground); }
 .ui-result-error-actions { display: flex; gap: 6px; }
 .ui-result-error-fix { min-height: 24px; padding: 2px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); font: inherit; cursor: pointer; }

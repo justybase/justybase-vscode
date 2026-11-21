@@ -29,6 +29,7 @@ import type {
 } from "./documentParseSession";
 import type { StatementBoundary } from "./statementIndex";
 import { getPostgresqlVersionDiagnostics } from "../dialects/postgresql/versionDiagnostics";
+import { getPostgresqlPlpgsqlDiagnostics } from "../dialects/postgresql/plpgsql/postgresqlPlpgsqlDiagnostics";
 import type { SqlValidationService } from "./validationService";
 import {
   SCRIPT_SCOPE_ALTER_TABLE_RENAME_PATTERN,
@@ -274,6 +275,9 @@ export class SqlValidator implements SqlValidationService {
     const errors: ValidationError[] = [];
     const preParseWarnings: ValidationError[] = this.validationProfile.databaseKind === 'postgresql'
       ? getPostgresqlVersionDiagnostics(sql, this.authoringContext.serverVersionNum) : [];
+    if (this.validationProfile.databaseKind === 'postgresql' && lexResult.errors.length === 0) {
+      preParseWarnings.push(...getPostgresqlPlpgsqlDiagnostics(sql, lexResult.tokens));
+    }
     const symbolWarnings: ValidationError[] = [];
     const useBestEffortSyntaxValidation = this.usesBestEffortSyntaxValidation();
 

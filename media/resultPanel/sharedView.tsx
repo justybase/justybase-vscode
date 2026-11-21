@@ -17,6 +17,7 @@ import {
     createPivotAnalysisTable,
     calculateGridSelectionStats,
     compactSqlErrorMessage,
+    formatDatabaseErrorForPrompt,
     normalizeGridSelection,
     resultKey,
     resultAsyncState as getResultAsyncState,
@@ -4701,11 +4702,15 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                     ? <ResultErrorView
                         message={activeResult.message}
                         details={activeResult.errorDetails}
+                        sql={activeSql?.sql}
                         {...(activeSql?.sql?.trim()
                             ? {
                                 onFixWithAi: () => postHostMessage({
                                     command: 'fixSqlError',
-                                    errorMessage: activeResult.message ?? '',
+                                    errorMessage: formatDatabaseErrorForPrompt(
+                                        activeResult.message,
+                                        activeResult.errorDetails,
+                                    ),
                                     sql: activeSql.sql ?? '',
                                 }),
                             }

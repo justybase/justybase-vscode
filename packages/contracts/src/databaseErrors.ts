@@ -22,12 +22,26 @@ export interface DatabaseErrorDetails {
   detail?: string;
   /** Suggested remediation reported by the backend. */
   hint?: string;
+  /**
+   * One-based character position in the submitted SQL text, when the backend
+   * reports it (PostgreSQL `position`). Never a byte offset.
+   */
+  position?: number;
+  /**
+   * Backend execution context, for example
+   * `PL/pgSQL function f() line 4 at RETURN` (PostgreSQL `CONTEXT`/`where`).
+   */
+  context?: string;
   /** Remaining protocol diagnostic fields, keyed by their backend field code. */
   diagnostics?: Record<string, string>;
 }
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
+}
+
+function isOptionalPositiveInteger(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value > 0);
 }
 
 /**
@@ -41,6 +55,8 @@ export function isDatabaseErrorDetails(value: unknown): value is DatabaseErrorDe
   if (!isOptionalString(candidate.severity)) return false;
   if (!isOptionalString(candidate.detail)) return false;
   if (!isOptionalString(candidate.hint)) return false;
+  if (!isOptionalString(candidate.context)) return false;
+  if (!isOptionalPositiveInteger(candidate.position)) return false;
   if (candidate.diagnostics === undefined) return true;
   if (typeof candidate.diagnostics !== 'object' || candidate.diagnostics === null || Array.isArray(candidate.diagnostics)) return false;
   return Object.values(candidate.diagnostics as Record<string, unknown>).every(entry => typeof entry === 'string');
@@ -55,5 +71,7 @@ export function hasDatabaseErrorDetails(
     || details.severity !== undefined
     || details.detail !== undefined
     || details.hint !== undefined
+    || details.position !== undefined
+    || details.context !== undefined
     || (details.diagnostics !== undefined && Object.keys(details.diagnostics).length > 0);
 }

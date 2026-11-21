@@ -28,6 +28,22 @@ const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
  */
 const SENSITIVE_DIAGNOSTIC_KEY_PATTERN = /pass|secret|token|credential|private|api[-_]?key|auth/i;
 
+/**
+ * Protocol fields that are useful in the diagnostics list but have no
+ * dedicated contract property. PostgreSQL's `where` maps to `context`, and
+ * `position` maps to the typed one-based offset.
+ */
+const BACKEND_DIAGNOSTIC_FIELDS = [
+  'internalPosition',
+  'internalQuery',
+  'schema',
+  'table',
+  'column',
+  'dataType',
+  'constraint',
+  'routine',
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -39,6 +55,26 @@ function readText(value: unknown): string | undefined {
   return trimmed.length > MAX_ERROR_DETAIL_LENGTH
     ? trimmed.slice(0, MAX_ERROR_DETAIL_LENGTH)
     : trimmed;
+}
+
+/** One-based character offset. PostgreSQL sends it as a digit string. */
+function readPosition(value: unknown): number | undefined {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^\d+$/u.test(value.trim())
+      ? Number(value.trim())
+      : undefined;
+  if (parsed === undefined || !Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.trunc(parsed);
+}
+
+function readBackendFields(record: Record<string, unknown>): Record<string, string> | undefined {
+  const fields: Record<string, string> = {};
+  for (const key of BACKEND_DIAGNOSTIC_FIELDS) {
+    const text = readText(record[key]);
+    if (text !== undefined) fields[key] = text;
+  }
+  return Object.keys(fields).length > 0 ? fields : undefined;
 }
 
 function readDiagnostics(value: unknown): Record<string, string> | undefined {
@@ -82,6 +118,7 @@ function looksLikeDatabaseError(record: Record<string, unknown>): boolean {
   if (typeof record.dbMessage === 'string') return true;
   if (isSqlStateCode(record.code)) return true;
   if (readText(record.severity) !== undefined) return true;
+  if (readPosition(record.position) !== undefined) return true;
   if (isRecord(record.diagnostics)) return true;
   return typeof record.name === 'string' && DATABASE_ERROR_NAME_PATTERN.test(record.name);
 }
@@ -95,6 +132,7 @@ function hasStructuredDiagnostics(record: Record<string, unknown>): boolean {
   if (typeof record.dbMessage === 'string') return true;
   if (isSqlStateCode(record.code)) return true;
   if (readText(record.severity) !== undefined) return true;
+  if (readPosition(record.position) !== undefined) return true;
   return isRecord(record.diagnostics);
 }
 
@@ -105,13 +143,21 @@ function candidateDetails(value: unknown): DatabaseErrorDetails | undefined {
   const severity = readText(value.severity);
   const detail = readText(value.detail);
   const hint = readText(value.hint);
+  const position = readPosition(value.position);
+  const context = readText(value.context) ?? readText(value.where);
   const diagnostics = readDiagnostics(value.diagnostics);
+  const backendFields = readBackendFields(value);
+  const mergedDiagnostics = diagnostics === undefined && backendFields === undefined
+    ? undefined
+    : { ...(backendFields ?? {}), ...(diagnostics ?? {}) };
   if (
     code === undefined
     && severity === undefined
     && detail === undefined
     && hint === undefined
-    && diagnostics === undefined
+    && position === undefined
+    && context === undefined
+    && mergedDiagnostics === undefined
   ) {
     return undefined;
   }
@@ -120,7 +166,9 @@ function candidateDetails(value: unknown): DatabaseErrorDetails | undefined {
     ...(severity === undefined ? {} : { severity }),
     ...(detail === undefined ? {} : { detail }),
     ...(hint === undefined ? {} : { hint }),
-    ...(diagnostics === undefined ? {} : { diagnostics }),
+    ...(position === undefined ? {} : { position }),
+    ...(context === undefined ? {} : { context }),
+    ...(mergedDiagnostics === undefined ? {} : { diagnostics: mergedDiagnostics }),
   };
 }
 

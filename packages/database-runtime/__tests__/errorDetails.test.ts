@@ -29,6 +29,17 @@ function backendError(overrides: Record<string, unknown> = {}): Error {
   return Object.assign(error, overrides);
 }
 
+/** Mirrors node-postgres DatabaseError fields without importing pg. */
+function postgresError(overrides: Record<string, unknown> = {}): Error {
+  const error = new Error('syntax error at or near "SELEC"') as Error & Record<string, unknown>;
+  error.name = 'error';
+  error.severity = 'ERROR';
+  error.code = '42601';
+  error.position = '1';
+  error.routine = 'scanner_yyerror';
+  return Object.assign(error, overrides);
+}
+
 describe('extractDatabaseErrorDetails', () => {
   it('extracts SQLSTATE, severity, detail, hint and extra diagnostics', () => {
     expect(extractDatabaseErrorDetails(backendError())).toEqual({
@@ -54,6 +65,66 @@ describe('extractDatabaseErrorDetails', () => {
   it('bounds long diagnostic values', () => {
     const error = backendError({ detail: 'x'.repeat(MAX_ERROR_DETAIL_LENGTH + 500) });
     expect(extractDatabaseErrorDetails(error)?.detail).toHaveLength(MAX_ERROR_DETAIL_LENGTH);
+  });
+
+  it('extracts the PostgreSQL one-based position and routine', () => {
+    expect(extractDatabaseErrorDetails(postgresError())).toEqual({
+      code: '42601',
+      severity: 'ERROR',
+      position: 1,
+      diagnostics: { routine: 'scanner_yyerror' },
+    });
+  });
+
+  it('extracts a PostgreSQL constraint violation as structured fields', () => {
+    const error = postgresError({
+      message: 'duplicate key value violates unique constraint "items_pkey"',
+      code: '23505',
+      position: undefined,
+      detail: 'Key (id)=(1) already exists.',
+      schema: 'public',
+      table: 'items',
+      constraint: 'items_pkey',
+      routine: '_bt_check_unique',
+    });
+    expect(extractDatabaseErrorDetails(error)).toEqual({
+      code: '23505',
+      severity: 'ERROR',
+      detail: 'Key (id)=(1) already exists.',
+      diagnostics: {
+        schema: 'public',
+        table: 'items',
+        constraint: 'items_pkey',
+        routine: '_bt_check_unique',
+      },
+    });
+  });
+
+  it('maps the PL/pgSQL context and internal query', () => {
+    const error = postgresError({
+      message: 'column "missing_col" does not exist',
+      code: '42703',
+      position: undefined,
+      where: 'PL/pgSQL function f() line 4 at RETURN',
+      internalPosition: '9',
+      internalQuery: '(SELECT missing_col FROM public.items)',
+      routine: 'errorMissingColumn',
+    });
+    expect(extractDatabaseErrorDetails(error)).toEqual({
+      code: '42703',
+      severity: 'ERROR',
+      context: 'PL/pgSQL function f() line 4 at RETURN',
+      diagnostics: {
+        internalPosition: '9',
+        internalQuery: '(SELECT missing_col FROM public.items)',
+        routine: 'errorMissingColumn',
+      },
+    });
+  });
+
+  it('ignores a zero or non-numeric PostgreSQL position', () => {
+    expect(extractDatabaseErrorDetails(postgresError({ position: '0' }))?.position).toBeUndefined();
+    expect(extractDatabaseErrorDetails(postgresError({ position: '1.5' }))?.position).toBeUndefined();
   });
 
   it('walks several cause levels', () => {
@@ -123,6 +194,10 @@ describe('extractDatabaseErrorDetails', () => {
     });
     expect(extractDatabaseErrorDetails(unrelated)).toBeUndefined();
     expect(isDatabaseSqlError(unrelated)).toBe(false);
+    const contextOnly = Object.assign(new Error('socket closed'), {
+      where: 'internal context',
+    });
+    expect(extractDatabaseErrorDetails(contextOnly)).toBeUndefined();
   });
 
   it('propagates an authentication failure found behind a container error', () => {
