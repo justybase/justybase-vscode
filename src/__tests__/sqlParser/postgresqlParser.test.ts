@@ -31,6 +31,14 @@ describe('PostgreSQL parser runtime', () => {
     'INSERT INTO public.items (id, payload) VALUES (1, \'{}\') ON CONFLICT (id) DO UPDATE SET payload = \'{}\' RETURNING id',
     'UPDATE public.items SET payload = \'{}\' WHERE id = 1 RETURNING id',
     'DELETE FROM public.items WHERE id = 1 RETURNING id',
+    'CREATE FUNCTION public.add_one(x integer) RETURNS integer LANGUAGE sql AS $$ SELECT x + 1 $$',
+    'CREATE OR REPLACE FUNCTION public.f() RETURNS TABLE(id integer, payload text) LANGUAGE sql AS $$ SELECT id, payload FROM public.items $$',
+    'CREATE FUNCTION public.f() RETURNS integer[] LANGUAGE sql AS $$ SELECT ARRAY[1] $$',
+    'CREATE FUNCTION public.f() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$ IMMUTABLE STRICT PARALLEL SAFE',
+    'CREATE FUNCTION public.f() RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp COST 10 ROWS 100 AS $$ SELECT 1 $$',
+    'CREATE PROCEDURE public.p(VARIADIC ys text[]) LANGUAGE plpgsql AS $$ BEGIN NULL; END $$',
+    'CREATE INDEX idx ON public.items USING gin (payload jsonb_path_ops (fastupdate = on))',
+    "SELECT * FROM JSON_TABLE('{\"a\":[{\"b\":1}]}', '$' COLUMNS (a json PATH '$.a', NESTED PATH '$.a[*]' COLUMNS (b integer PATH '$.b'))) jt",
   ])('accepts common PostgreSQL syntax: %s', sql => {
     const result = parse(sql);
     expect(result.lexResult.errors).toHaveLength(0);
@@ -42,6 +50,18 @@ describe('PostgreSQL parser runtime', () => {
     'CREATE TABLE public.items (id integer) DISTRIBUTE ON (id)',
     'GROOM TABLE public.items',
   ])('rejects Netezza-only or non-PostgreSQL syntax: %s', sql => {
+    expect(parse(sql).actionableParserErrors.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    'CREATE FUNCTION public.f() LANGUAGE sql AS $$ SELECT 1 $$',
+    'CREATE PROCEDURE public.p() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$',
+    'CREATE FUNCTION public.f() RETURNS TABLE() LANGUAGE sql AS $$ SELECT 1 $$',
+    'CREATE FUNCTION public.f() RETURNS TABLE(id) LANGUAGE sql AS $$ SELECT 1 $$',
+    'CREATE FUNCTION public.f() RETURNS integer SET search_path = LANGUAGE sql AS $$ SELECT 1 $$',
+    'CREATE FUNCTION public.f() RETURNS integer LANGUAGE sql',
+    "SELECT * FROM JSON_TABLE('{}', '$' COLUMNS (NESTED PATH '$.a' COLUMNS ())) jt",
+  ])('rejects malformed PostgreSQL routine and JSON_TABLE syntax: %s', sql => {
     expect(parse(sql).actionableParserErrors.length).toBeGreaterThan(0);
   });
 

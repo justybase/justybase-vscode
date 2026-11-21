@@ -52,6 +52,29 @@ const POSTGRESQL_IDENTIFIER_COMMAND_HEADS = new Set([
   'CLOSE',
 ]);
 
+/**
+ * Words that end a routine type. Most routine attributes lex as identifiers in
+ * PostgreSQL, so a type rule must stop before them instead of consuming them
+ * as an extra type word.
+ */
+const POSTGRESQL_ROUTINE_TYPE_STOP_WORDS = new Set([
+  'IMMUTABLE',
+  'STABLE',
+  'VOLATILE',
+  'LEAKPROOF',
+  'STRICT',
+  'CALLED',
+  'SECURITY',
+  'PARALLEL',
+  'COST',
+  'ROWS',
+  'SUPPORT',
+  'EXTERNAL',
+  'EXISTS',
+  'FORMAT',
+  'NESTED',
+]);
+
 /** `CREATE <object>` forms that have no dedicated rule yet. */
 const POSTGRESQL_MODELED_CREATE_HEADS = new Set<string>([
   'FunctionKeyword',
@@ -206,7 +229,23 @@ export class PostgreSqlParser extends BaseSqlParser {
   declare postgresqlCreateIndex: Rule;
   declare postgresqlMergeWhen: Rule;
   declare postgresqlJsonTable: Rule;
+  declare postgresqlJsonTableColumn: Rule;
+  declare postgresqlJsonTableRegularColumn: Rule;
+  declare postgresqlJsonTableNested: Rule;
+  declare postgresqlJsonTableWrapper: Rule;
+  declare postgresqlJsonTableQuotes: Rule;
+  declare postgresqlJsonTableOnClause: Rule;
   declare postgresqlRoutineArgument: Rule;
+  declare postgresqlRoutineType: Rule;
+  declare postgresqlRoutineTypeWord: Rule;
+  declare postgresqlRoutineTableColumn: Rule;
+  declare postgresqlRoutineOption: Rule;
+  declare postgresqlRoutineAttribute: Rule;
+  declare postgresqlRoutineSecurityOption: Rule;
+  declare postgresqlRoutineSet: Rule;
+  declare postgresqlRoutineSetValue: Rule;
+  declare postgresqlRoutineBody: Rule;
+  declare postgresqlReloptionValue: Rule;
   declare postgresqlAtomicBody: Rule;
   declare postgresqlAlterAction: Rule;
   declare postgresqlTableOption: Rule;
@@ -430,6 +469,19 @@ export class PostgreSqlParser extends BaseSqlParser {
       });
     });
 
+    this.RULE('postgresqlReloptionValue', () => this.OR([
+      { ALT: () => this.CONSUME(t.StringLiteral) },
+      { ALT: () => this.CONSUME(t.NumberLiteral) },
+      { ALT: () => this.CONSUME(t.Identifier) },
+      { ALT: () => this.CONSUME(t.QuotedIdentifier) },
+      { ALT: () => this.CONSUME(t.Default) },
+      { ALT: () => this.CONSUME(t.On) },
+      { ALT: () => this.CONSUME(t.None) },
+      { ALT: () => this.CONSUME(t.All) },
+      { ALT: () => this.CONSUME(t.Current) },
+      { ALT: () => this.CONSUME(t.Public) },
+    ]));
+
     this.RULE('postgresqlSetTableAction', () => {
       this.OR([
         { ALT: () => this.CONSUME(t.Set) },
@@ -556,12 +608,110 @@ export class PostgreSqlParser extends BaseSqlParser {
     this.RULE('postgresqlJsonTable', () => {
       this.CONSUME(t.JsonTable); this.CONSUME(t.LParen);
       this.SUBRULE(this.expression); this.CONSUME(t.Comma); this.CONSUME(t.StringLiteral);
-      this.CONSUME(t.Columns); this.CONSUME1(t.LParen);
-      this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => {
-        this.SUBRULE(this.identifier); this.SUBRULE(this.typeName);
-        this.CONSUME(t.Path); this.CONSUME1(t.StringLiteral);
+      this.OPTION(() => { this.CONSUME(t.As); this.SUBRULE(this.identifier); });
+      this.OPTION1({ GATE: () => this.isPostgresqlImageOneOf('PASSING'), DEF: () => {
+        this.CONSUME(t.Identifier); // PASSING
+        this.AT_LEAST_ONE_SEP1({ SEP: t.Comma, DEF: () => {
+          this.SUBRULE1(this.expression);
+          this.CONSUME1(t.As);
+          this.SUBRULE1(this.identifier);
+        } });
       } });
-      this.CONSUME(t.RParen); this.CONSUME1(t.RParen);
+      this.CONSUME(t.Columns); this.CONSUME1(t.LParen);
+      this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlJsonTableColumn) });
+      this.CONSUME(t.RParen);
+      this.OPTION2(() => {
+        this.OR([
+          { ALT: () => this.CONSUME(t.Error) },
+          { GATE: () => this.isPostgresqlImageOneOf('EMPTY'), ALT: () => {
+            this.CONSUME1(t.Identifier); // EMPTY
+            this.OPTION3(() => this.CONSUME(t.ArrayKeyword));
+          } },
+        ]);
+        this.CONSUME(t.On); this.CONSUME1(t.Error);
+      });
+      this.CONSUME1(t.RParen);
+    });
+    this.RULE('postgresqlJsonTableColumn', () => {
+      this.OR([
+        { GATE: () => this.isPostgresqlImageOneOf('NESTED'), ALT: () => this.SUBRULE(this.postgresqlJsonTableNested) },
+        { ALT: () => this.SUBRULE(this.postgresqlJsonTableRegularColumn) },
+      ]);
+    });
+    this.RULE('postgresqlJsonTableRegularColumn', () => {
+      this.SUBRULE(this.identifier);
+      this.OR([
+        { ALT: () => { this.CONSUME(t.For); this.CONSUME(t.Ordinality); } },
+        { ALT: () => {
+          this.SUBRULE(this.postgresqlRoutineType);
+          this.OPTION(() => {
+            this.CONSUME(t.Identifier); // FORMAT
+            this.CONSUME1(t.Identifier); // JSON
+            this.OPTION1(() => { this.CONSUME2(t.Identifier); this.CONSUME3(t.Identifier); }); // ENCODING UTF8
+          });
+          this.OPTION2({ GATE: () => this.LA(1).tokenType === t.Exists, DEF: () => this.CONSUME(t.Exists) });
+          this.OPTION3(() => { this.CONSUME(t.Path); this.CONSUME(t.StringLiteral); });
+          this.OPTION4(() => this.SUBRULE(this.postgresqlJsonTableWrapper));
+          this.OPTION5(() => this.SUBRULE(this.postgresqlJsonTableQuotes));
+          this.MANY(() => this.SUBRULE(this.postgresqlJsonTableOnClause));
+        } },
+      ]);
+    });
+    this.RULE('postgresqlJsonTableNested', () => {
+      this.CONSUME(t.Identifier); // NESTED
+      this.OPTION(() => this.CONSUME(t.Path));
+      this.CONSUME(t.StringLiteral);
+      this.OPTION1(() => { this.CONSUME(t.As); this.SUBRULE(this.identifier); });
+      this.CONSUME(t.Columns);
+      this.CONSUME(t.LParen);
+      this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlJsonTableColumn) });
+      this.CONSUME(t.RParen);
+    });
+    this.RULE('postgresqlJsonTableWrapper', () => {
+      this.OR([
+        { ALT: () => {
+          this.CONSUME(t.With);
+          this.OPTION({ GATE: () => this.isPostgresqlImageOneOf('CONDITIONAL', 'UNCONDITIONAL'), DEF: () => this.CONSUME(t.Identifier) });
+          this.OPTION1(() => this.CONSUME(t.ArrayKeyword));
+          this.CONSUME1(t.Identifier); // WRAPPER
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('WITHOUT'), ALT: () => {
+          this.CONSUME2(t.Identifier); // WITHOUT
+          this.OPTION2({ GATE: () => this.isPostgresqlImageOneOf('CONDITIONAL', 'UNCONDITIONAL'), DEF: () => this.CONSUME3(t.Identifier) });
+          this.OPTION3(() => this.CONSUME1(t.ArrayKeyword));
+          this.CONSUME4(t.Identifier); // WRAPPER
+        } },
+      ]);
+    });
+    this.RULE('postgresqlJsonTableQuotes', () => {
+      this.OR([
+        { GATE: () => this.isPostgresqlImageOneOf('KEEP'), ALT: () => this.CONSUME(t.Identifier) },
+        { GATE: () => this.isPostgresqlImageOneOf('OMIT'), ALT: () => this.CONSUME1(t.Identifier) },
+      ]);
+      this.CONSUME2(t.Identifier); // QUOTES
+      this.OPTION(() => {
+        this.CONSUME(t.On);
+        this.CONSUME3(t.Identifier); // SCALAR
+        this.CONSUME4(t.Identifier); // STRING
+      });
+    });
+    this.RULE('postgresqlJsonTableOnClause', () => {
+      this.OR([
+        { ALT: () => this.CONSUME(t.Error) },
+        { ALT: () => this.CONSUME(t.Null) },
+        { GATE: () => this.isPostgresqlImageOneOf('EMPTY'), ALT: () => {
+          this.CONSUME(t.Identifier); // EMPTY
+          this.OPTION(() => this.CONSUME(t.ArrayKeyword));
+          this.OPTION1(() => this.CONSUME1(t.Identifier)); // OBJECT
+        } },
+        { ALT: () => { this.CONSUME(t.Default); this.SUBRULE(this.expression); } },
+        { GATE: () => this.isPostgresqlImageOneOf('TRUE', 'FALSE', 'UNKNOWN'), ALT: () => this.CONSUME2(t.Identifier) },
+      ]);
+      this.CONSUME(t.On);
+      this.OR1([
+        { GATE: () => this.isPostgresqlImageOneOf('EMPTY'), ALT: () => this.CONSUME3(t.Identifier) },
+        { ALT: () => this.CONSUME1(t.Error) },
+      ]);
     });
     this.RULE('postgresqlMergeWhen', () => {
       let notMatched = false;
@@ -597,34 +747,173 @@ export class PostgreSqlParser extends BaseSqlParser {
       this.AT_LEAST_ONE(() => this.SUBRULE(this.postgresqlMergeWhen));
       this.OPTION1(() => this.SUBRULE(this.postgresqlReturning));
     });
+    this.RULE('postgresqlRoutineTypeWord', () => {
+      this.OR([
+        { ALT: () => this.CONSUME(t.Identifier) },
+        { ALT: () => this.CONSUME(t.QuotedIdentifier) },
+        { ALT: () => this.CONSUME(t.To) },
+        { ALT: () => this.CONSUME(t.With) },
+      ]);
+    });
+    this.RULE('postgresqlRoutineType', () => {
+      this.SUBRULE(this.postgresqlRoutineTypeWord);
+      this.MANY({ GATE: () => this.LA(1).tokenType === t.Dot || this.isPostgresqlRoutineTypeWordAhead(), DEF: () => {
+        this.OR([
+          { ALT: () => { this.CONSUME(t.Dot); this.SUBRULE1(this.postgresqlRoutineTypeWord); } },
+          { ALT: () => this.SUBRULE2(this.postgresqlRoutineTypeWord) },
+        ]);
+      } });
+      this.OPTION(() => {
+        this.CONSUME(t.LParen);
+        this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.typeArgument) });
+        this.CONSUME(t.RParen);
+      });
+      this.MANY1(() => {
+        this.CONSUME(t.LBracket);
+        this.OPTION1(() => this.CONSUME(t.NumberLiteral));
+        this.CONSUME(t.RBracket);
+      });
+      this.OPTION2(() => {
+        this.CONSUME(t.ArrayKeyword);
+        this.OPTION3(() => { this.CONSUME1(t.LBracket); this.CONSUME1(t.RBracket); });
+      });
+    });
+    this.RULE('postgresqlRoutineTableColumn', () => {
+      this.SUBRULE(this.identifier);
+      this.SUBRULE(this.postgresqlRoutineType);
+      this.OPTION(() => { this.CONSUME(t.Collate); this.SUBRULE1(this.identifier); });
+    });
+    this.RULE('postgresqlRoutineSetValue', () => {
+      this.OR([
+        { ALT: () => this.CONSUME(t.StringLiteral) },
+        { ALT: () => this.CONSUME(t.NumberLiteral) },
+        { ALT: () => this.CONSUME(t.Identifier) },
+        { ALT: () => this.CONSUME(t.QuotedIdentifier) },
+        { ALT: () => this.CONSUME(t.Default) },
+        { ALT: () => this.CONSUME(t.On) },
+        { ALT: () => this.CONSUME(t.None) },
+        { ALT: () => this.CONSUME(t.All) },
+        { ALT: () => this.CONSUME(t.Current) },
+        { ALT: () => this.CONSUME(t.Public) },
+      ]);
+    });
     this.RULE('postgresqlRoutineArgument', () => {
-      this.OPTION(() => this.OR([{ ALT: () => this.CONSUME(t.In) }, { ALT: () => this.CONSUME(t.Out) }, { ALT: () => this.CONSUME(t.Inout) }]));
-      this.SUBRULE(this.typeName);
-      this.OPTION1(() => { this.OR1([{ ALT: () => this.CONSUME(t.Default) }, { ALT: () => this.CONSUME(t.Equals) }]); this.SUBRULE(this.expression); });
+      this.OPTION({ GATE: () => this.LA(1).tokenType === t.In || this.LA(1).tokenType === t.Out
+        || this.LA(1).tokenType === t.Inout || this.isPostgresqlImageOneOf('VARIADIC'), DEF: () => this.OR([
+        { ALT: () => this.CONSUME(t.In) },
+        { ALT: () => this.CONSUME(t.Out) },
+        { ALT: () => this.CONSUME(t.Inout) },
+        { GATE: () => this.isPostgresqlImageOneOf('VARIADIC'), ALT: () => this.CONSUME(t.Identifier) },
+      ]) });
+      this.OPTION1({ GATE: () => this.isPostgresqlRoutineArgumentNameAhead(), DEF: () => this.SUBRULE(this.identifier) });
+      this.SUBRULE(this.postgresqlRoutineType);
+      this.OPTION2(() => { this.OR1([{ ALT: () => this.CONSUME(t.Default) }, { ALT: () => this.CONSUME(t.Equals) }]); this.SUBRULE(this.expression); });
+    });
+    this.RULE('postgresqlRoutineOption', () => {
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === t.Language, ALT: () => { this.CONSUME(t.Language); this.SUBRULE(this.identifier); } },
+        { GATE: () => this.isPostgresqlImageOneOf('TRANSFORM'), ALT: () => {
+          this.CONSUME(t.Identifier); // TRANSFORM
+          this.CONSUME(t.For); this.CONSUME(t.Type);
+          this.SUBRULE(this.postgresqlRoutineType);
+          this.MANY(() => {
+            this.CONSUME(t.Comma); this.CONSUME1(t.For); this.CONSUME1(t.Type);
+            this.SUBRULE1(this.postgresqlRoutineType);
+          });
+        } },
+        { GATE: () => this.LA(1).tokenType === t.Window, ALT: () => this.CONSUME(t.Window) },
+        { GATE: () => this.LA(1).tokenType === t.Set, ALT: () => this.SUBRULE(this.postgresqlRoutineSet) },
+        { GATE: () => this.isPostgresqlRoutineAttributeStart(), ALT: () => this.SUBRULE(this.postgresqlRoutineAttribute) },
+        { GATE: () => this.isPostgresqlRoutineSecurityOptionStart(), ALT: () => this.SUBRULE(this.postgresqlRoutineSecurityOption) },
+      ]);
+    });
+    this.RULE('postgresqlRoutineAttribute', () => {
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === t.Not, ALT: () => { this.CONSUME(t.Not); this.CONSUME(t.Identifier); } },
+        { GATE: () => this.isPostgresqlImageOneOf('IMMUTABLE', 'STABLE', 'VOLATILE', 'LEAKPROOF', 'STRICT'), ALT: () => this.CONSUME1(t.Identifier) },
+        { GATE: () => this.isPostgresqlImageOneOf('CALLED'), ALT: () => {
+          this.CONSUME2(t.Identifier); this.CONSUME(t.On); this.CONSUME(t.Null); this.CONSUME3(t.Identifier); // INPUT
+        } },
+        { GATE: () => this.LA(1).tokenType === t.Returns && this.LA(2).tokenType === t.Null, ALT: () => {
+          this.CONSUME(t.Returns); this.CONSUME1(t.Null); this.CONSUME1(t.On); this.CONSUME2(t.Null); this.CONSUME4(t.Identifier); // INPUT
+        } },
+      ]);
+    });
+    this.RULE('postgresqlRoutineSecurityOption', () => {
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === t.External, ALT: () => {
+          this.CONSUME(t.External); this.CONSUME(t.Identifier); // SECURITY
+          this.SUBRULE(this.identifier); // INVOKER | DEFINER
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('SECURITY'), ALT: () => {
+          this.CONSUME1(t.Identifier); this.SUBRULE1(this.identifier);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('PARALLEL'), ALT: () => {
+          this.CONSUME2(t.Identifier); this.SUBRULE2(this.identifier);
+        } },
+        { GATE: () => this.isPostgresqlImageOneOf('COST'), ALT: () => { this.CONSUME3(t.Identifier); this.CONSUME(t.NumberLiteral); } },
+        { GATE: () => this.LA(1).tokenType === t.Rows, ALT: () => { this.CONSUME(t.Rows); this.CONSUME1(t.NumberLiteral); } },
+        { GATE: () => this.isPostgresqlImageOneOf('ROWS'), ALT: () => { this.CONSUME4(t.Identifier); this.CONSUME2(t.NumberLiteral); } },
+        { GATE: () => this.isPostgresqlImageOneOf('SUPPORT'), ALT: () => { this.CONSUME5(t.Identifier); this.SUBRULE(this.qualifiedName); } },
+      ]);
+    });
+    this.RULE('postgresqlRoutineSet', () => {
+      this.CONSUME(t.Set); this.SUBRULE(this.qualifiedName);
+      this.OR([
+        { GATE: () => this.LA(1).tokenType === t.From, ALT: () => { this.CONSUME(t.From); this.CONSUME(t.Current); } },
+        { ALT: () => {
+          this.OR1([
+            { ALT: () => this.CONSUME(t.To) },
+            { ALT: () => this.CONSUME(t.Equals) },
+          ]);
+          this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlRoutineSetValue) });
+        } },
+      ]);
     });
     this.RULE('postgresqlAtomicBody', () => {
       this.CONSUME(t.Begin); this.CONSUME(t.Atomic);
       this.AT_LEAST_ONE(() => { this.SUBRULE(this.statement); this.CONSUME(t.Semicolon); });
       this.CONSUME(t.End);
     });
+    this.RULE('postgresqlRoutineBody', () => {
+      this.OR([
+        { ALT: () => {
+          this.CONSUME(t.As);
+          this.CONSUME(t.StringLiteral);
+          this.OPTION(() => { this.CONSUME(t.Comma); this.CONSUME1(t.StringLiteral); });
+        } },
+        { ALT: () => this.SUBRULE(this.postgresqlAtomicBody) },
+      ]);
+    });
     this.RULE('postgresqlCreateRoutine', () => {
       this.CONSUME(t.Create);
       this.OPTION(() => { this.CONSUME(t.Or); this.CONSUME(t.Replace); });
-      this.OR([{ ALT: () => this.CONSUME(t.FunctionKeyword) }, { ALT: () => this.CONSUME(t.Procedure) }]);
+      let isProcedure = false;
+      this.OR([
+        { ALT: () => this.CONSUME(t.FunctionKeyword) },
+        { ALT: () => { this.CONSUME(t.Procedure); isProcedure = true; } },
+      ]);
       this.SUBRULE(this.qualifiedName); this.CONSUME(t.LParen);
       this.OPTION1(() => this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlRoutineArgument) }));
       this.CONSUME(t.RParen);
-      this.OPTION2(() => { this.CONSUME(t.Returns); this.SUBRULE(this.typeName); });
       this.OR1([
-        { ALT: () => {
-          this.CONSUME(t.Language); this.SUBRULE(this.identifier);
-          this.OR2([{ ALT: () => { this.CONSUME(t.As); this.CONSUME(t.StringLiteral); } }, { ALT: () => this.SUBRULE(this.postgresqlAtomicBody) }]);
+        { GATE: () => !isProcedure, ALT: () => {
+          this.CONSUME(t.Returns);
+          this.OR2([
+            { GATE: () => this.LA(1).tokenType === t.Table, ALT: () => {
+              this.CONSUME1(t.Table);
+              this.CONSUME1(t.LParen);
+              this.AT_LEAST_ONE_SEP2({ SEP: t.Comma, DEF: () => this.SUBRULE(this.postgresqlRoutineTableColumn) });
+              this.CONSUME1(t.RParen);
+            } },
+            { ALT: () => this.SUBRULE(this.postgresqlRoutineType) },
+          ]);
         } },
-        { ALT: () => {
-          this.CONSUME1(t.As); this.CONSUME1(t.StringLiteral);
-          this.CONSUME1(t.Language); this.SUBRULE1(this.identifier);
-        } },
+        { GATE: () => isProcedure, ALT: () => { /* Procedures do not declare RETURNS. */ } },
       ]);
+      this.MANY(() => this.SUBRULE(this.postgresqlRoutineOption));
+      this.SUBRULE(this.postgresqlRoutineBody);
+      this.MANY1(() => this.SUBRULE1(this.postgresqlRoutineOption));
     });
     this.RULE('postgresqlDoStatement', () => {
       this.CONSUME(t.Do);
@@ -663,7 +952,7 @@ export class PostgreSqlParser extends BaseSqlParser {
           this.AT_LEAST_ONE_SEP({ SEP: t.Comma, DEF: () => {
             this.SUBRULE(this.postgresqlReloptionName);
             this.CONSUME(t.Equals);
-            this.SUBRULE1(this.expression);
+            this.SUBRULE(this.postgresqlReloptionValue);
           } });
           this.CONSUME(t.RParen);
         });
@@ -1341,7 +1630,7 @@ export class PostgreSqlParser extends BaseSqlParser {
           this.SUBRULE(this.postgresqlReloptionName);
           this.OPTION(() => {
             this.CONSUME(t.Equals);
-            this.SUBRULE(this.expression);
+            this.SUBRULE(this.postgresqlReloptionValue);
           });
         },
       });
@@ -1624,6 +1913,40 @@ export class PostgreSqlParser extends BaseSqlParser {
   private isPostgresqlImageOneOf(...images: string[]): boolean {
     const image = this.LA(1).image?.toUpperCase();
     return image !== undefined && images.includes(image);
+  }
+
+  private isPostgresqlRoutineTypeWordAhead(): boolean {
+    const token = this.LA(1);
+    if (token.tokenType !== t.Identifier && token.tokenType !== t.QuotedIdentifier
+      && token.tokenType !== t.To && token.tokenType !== t.With) {
+      return false;
+    }
+    return !POSTGRESQL_ROUTINE_TYPE_STOP_WORDS.has((token.image ?? '').toUpperCase());
+  }
+
+  /**
+   * PostgreSQL arguments are `[mode] [name] type [DEFAULT expr]`, and both the
+   * name and a user-defined type lex as identifiers. Treat the first identifier
+   * as the name only when another identifier follows; a lone `integer` is a
+   * type, while `x integer` is a named argument. Multi-word built-in types
+   * still parse, with the first word read as a name in the rare unnamed case.
+   */
+  private isPostgresqlRoutineArgumentNameAhead(): boolean {
+    const first = this.LA(1).tokenType;
+    if (first !== t.Identifier && first !== t.QuotedIdentifier) return false;
+    const next = this.LA(2).tokenType;
+    return next === t.Identifier || next === t.QuotedIdentifier || next === t.To || next === t.With;
+  }
+
+  private isPostgresqlRoutineAttributeStart(): boolean {
+    if (this.LA(1).tokenType === t.Not) return true;
+    if (this.LA(1).tokenType === t.Returns && this.LA(2).tokenType === t.Null) return true;
+    return this.isPostgresqlImageOneOf('IMMUTABLE', 'STABLE', 'VOLATILE', 'LEAKPROOF', 'STRICT', 'CALLED');
+  }
+
+  private isPostgresqlRoutineSecurityOptionStart(): boolean {
+    if (this.LA(1).tokenType === t.External || this.LA(1).tokenType === t.Rows) return true;
+    return this.isPostgresqlImageOneOf('SECURITY', 'PARALLEL', 'COST', 'SUPPORT', 'EXTERNAL', 'ROWS');
   }
 
   private isPostgresqlCreateFallback(): boolean {

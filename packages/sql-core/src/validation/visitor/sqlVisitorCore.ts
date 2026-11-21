@@ -1849,15 +1849,44 @@ export class SqlVisitor
   postgresqlDoStatement(): void { /* Procedural bodies remain opaque. */ }
   postgresqlAtomicBody(): void { /* Routine-local scope is not the outer script scope. */ }
   postgresqlRoutineArgument(): void { /* Signature names are not query columns. */ }
+  postgresqlRoutineType(): void { /* Types carry no query scope. */ }
+  postgresqlRoutineTypeWord(): void { /* Types carry no query scope. */ }
+  postgresqlRoutineTableColumn(): void { /* Signature names are not query columns. */ }
+  postgresqlRoutineOption(): void { /* Routine attributes carry no query scope. */ }
+  postgresqlRoutineAttribute(): void { /* Routine attributes carry no query scope. */ }
+  postgresqlRoutineSecurityOption(): void { /* Routine attributes carry no query scope. */ }
+  postgresqlRoutineSet(): void { /* SET values are configuration strings. */ }
+  postgresqlRoutineBody(): void { /* Procedural bodies remain opaque. */ }
+  postgresqlRoutineSetValue(): void { /* SET values are configuration strings. */ }
+  postgresqlReloptionValue(): void { /* Storage option values carry no scope. */ }
   postgresqlCreateType(ctx: Record<string, CstNode[]>): void { if (ctx.typeName) this.visit(ctx.typeName[0]); }
   postgresqlCreateIndex(): void { /* Index expressions are resolved against their target, not outer query scope. */ }
   postgresqlJsonTable(ctx: Record<string, CstNode[]>): ColumnInfo[] {
-    if (ctx.expression) this.visit(ctx.expression[0]);
-    return (ctx.identifier ?? []).map((node, index) => ({
-      name: this.visitAs<string>(node),
-      dataType: ctx.typeName?.[index] ? this.getCstText(ctx.typeName[index]) : undefined,
-    }));
+    for (const node of ctx.expression ?? []) this.visit(node);
+    return (ctx.postgresqlJsonTableColumn ?? [])
+      .flatMap(node => this.visitAs<ColumnInfo[]>(node) ?? []);
   }
+  postgresqlJsonTableColumn(ctx: Record<string, CstNode[]>): ColumnInfo[] {
+    const nested = ctx.postgresqlJsonTableNested?.[0];
+    if (nested) return this.visitAs<ColumnInfo[]>(nested) ?? [];
+    const regular = ctx.postgresqlJsonTableRegularColumn?.[0];
+    return regular ? this.visitAs<ColumnInfo[]>(regular) ?? [] : [];
+  }
+  postgresqlJsonTableRegularColumn(ctx: Record<string, CstNode[]>): ColumnInfo[] {
+    const name = ctx.identifier?.[0];
+    if (!name) return [];
+    return [{
+      name: this.visitAs<string>(name),
+      dataType: ctx.postgresqlRoutineType?.[0] ? this.getCstText(ctx.postgresqlRoutineType[0]) : undefined,
+    }];
+  }
+  postgresqlJsonTableNested(ctx: Record<string, CstNode[]>): ColumnInfo[] {
+    return (ctx.postgresqlJsonTableColumn ?? [])
+      .flatMap(node => this.visitAs<ColumnInfo[]>(node) ?? []);
+  }
+  postgresqlJsonTableWrapper(): void { /* Formatting option. */ }
+  postgresqlJsonTableQuotes(): void { /* Formatting option. */ }
+  postgresqlJsonTableOnClause(): void { /* Error-handling option. */ }
   postgresqlMergeWhen(ctx: Record<string, CstNode[]>): void { this.visitPostgresqlChildren(ctx); }
   postgresqlTransaction(): void { /* Session control has no column scope. */ }
   postgresqlOnConflict(ctx: Record<string, CstNode[]>): void {

@@ -27,6 +27,11 @@ describe('PostgreSQL semantic validation', () => {
     const sql = "CREATE FUNCTION public.f() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN CASE WHEN true THEN 1 ELSE 0 END; END $$";
     expect(validate(sql).filter(issue => issue.code.startsWith('PGP'))).toEqual([]);
   });
+  it('exposes JSON_TABLE top-level and nested columns to the enclosing query', () => {
+    const table = "JSON_TABLE('{\"a\":1,\"x\":[{\"b\":2}]}', '$' COLUMNS (a integer PATH '$.a', NESTED PATH '$.x[*]' COLUMNS (b integer PATH '$.b'))) jt";
+    expect(validate(`SELECT a, b FROM ${table}`).map(issue => issue.code)).not.toContain('SQL004');
+    expect(validate(`SELECT c FROM ${table}`).map(issue => issue.code)).toContain('SQL004');
+  });
   it.each([
     'SELECT 1 WHERE true',
     'SELECT "I".id, i.payload FROM items "I" CROSS JOIN items i',

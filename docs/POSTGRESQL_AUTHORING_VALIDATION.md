@@ -12,13 +12,18 @@ Covered forms include dollar-quoted and escape strings, Unicode identifiers,
 positional parameters, casts, arrays/subscripts, JSON operators, DISTINCT ON,
 VALUES queries, materialized and data-modifying CTEs, lateral/function sources,
 ordinality, ordered aggregates, named windows, ON CONFLICT, RETURNING,
-UPDATE FROM, DELETE USING, MERGE, basic JSON_TABLE, EXPLAIN options, identity
-and generated columns, common ALTER TABLE actions, enum/composite/domain
-types, indexes, and routine envelopes.
+UPDATE FROM, DELETE USING, MERGE, JSON_TABLE (including nested paths, EXISTS
+columns, FORMAT JSON and ON EMPTY/ON ERROR), EXPLAIN options, identity and
+generated columns, common ALTER TABLE actions, enum/composite/domain types,
+indexes (including operator-class parameters and storage options), and routine
+envelopes with named arguments, RETURNS TABLE/SETOF/array results, and
+attributes such as LANGUAGE, AS, BEGIN ATOMIC, IMMUTABLE/STABLE/VOLATILE,
+STRICT, SECURITY, SET, COST, ROWS, SUPPORT, WINDOW, TRANSFORM and PARALLEL.
 
 This is a tested SQL subset, not a complete implementation of PostgreSQL's
-grammar. Advanced routine options, nested JSON_TABLE clauses, index operator
-classes/storage options and some DDL forms remain outside the covered subset.
+grammar. Routine attributes that require server-side validation (C library
+availability, registered transforms) and some DDL forms remain outside the
+covered subset.
 
 PL/pgSQL string bodies are opaque to the SQL grammar. A separate structural
 analyzer (`PGP001`–`PGP009`) warns about block/IF/LOOP/CASE mismatches,
