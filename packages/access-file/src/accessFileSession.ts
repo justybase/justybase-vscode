@@ -1056,18 +1056,29 @@ async function installStagedFile(stagedPath: string, targetPath: string): Promis
     }
 
     const backupPath = makeBackupPath(targetPath);
+    let backupIsLink = false;
     try {
         await fs.link(targetPath, backupPath);
+        backupIsLink = true;
     } catch {
         await fs.rename(targetPath, backupPath);
     }
     try {
         await fs.rename(stagedPath, targetPath);
     } catch (error) {
-        await fs.rename(backupPath, targetPath).catch(async () => {
-            await fs.rm(targetPath, { force: true }).catch(() => undefined);
-            await fs.rename(backupPath, targetPath).catch(() => undefined);
-        });
+        if (backupIsLink) {
+            // The target was never moved: the backup is a second hard link to
+            // the untouched original, so removing it cannot lose user data.
+            // Leaving it behind would strand a stray `.bak` after a failed
+            // install (Windows rejects the staged rename while the target
+            // exists, and the restore rename can also fail there).
+            await fs.rm(backupPath, { force: true }).catch(() => undefined);
+        } else {
+            await fs.rename(backupPath, targetPath).catch(async () => {
+                await fs.rm(targetPath, { force: true }).catch(() => undefined);
+                await fs.rename(backupPath, targetPath).catch(() => undefined);
+            });
+        }
         throw error;
     }
     return backupPath;

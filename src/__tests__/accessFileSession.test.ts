@@ -367,4 +367,42 @@ describe('Access file format boundary', () => {
             await fs.rm(directory, { recursive: true, force: true });
         }
     });
+
+    it('removes the backup link without touching the original when the fallback restore is blocked', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-fallback-link-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        const before = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+        // The staged rename cannot replace the existing file, and the restore
+        // rename of the `.bak` link is refused as well.  The original file was
+        // never moved, so the backup link must be removed instead of stranded.
+        renameMock.mockImplementation(async (source: string, target: string) => {
+            const name = String(source);
+            if (name.endsWith('.tmp') || name.endsWith('.bak')) {
+                const error = new Error('EEXIST: file already exists') as NodeJS.ErrnoException;
+                error.code = 'EEXIST';
+                throw error;
+            }
+            await realRename(source, target);
+        });
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await expect(session.writeAtomically(async () => undefined)).rejects.toThrow(/EEXIST|exists/i);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            renameMock.mockReset();
+            renameMock.mockImplementation(realRename);
+        }
+        try {
+            const after = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+            expect(after).toBe(before);
+            const leftovers = (await fs.readdir(directory)).filter(name => name.includes('.justybase-'));
+            expect(leftovers).toEqual([]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
 });
