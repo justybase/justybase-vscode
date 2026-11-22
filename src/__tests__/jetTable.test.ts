@@ -466,6 +466,66 @@ describeWithAccessRuntime('AccessConnection DDL', () => {
         }
     });
 
+    it('truncates a table and accepts Access-qualified DELETE targets', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand('CREATE TABLE trunc_e2e (id LONG PRIMARY KEY, nazwa TEXT(50))').execute();
+            await connection.createCommand("INSERT INTO trunc_e2e (id, nazwa) VALUES (1, 'a')").execute();
+            await connection.createCommand("INSERT INTO trunc_e2e (id, nazwa) VALUES (2, 'b')").execute();
+            expect(Number((await readAllRows(connection, 'SELECT COUNT(*) FROM trunc_e2e'))[0]?.[0])).toBe(2);
+
+            await connection.createCommand('TRUNCATE TABLE trunc_e2e').execute();
+            expect(Number((await readAllRows(connection, 'SELECT COUNT(*) FROM trunc_e2e'))[0]?.[0])).toBe(0);
+
+            await connection.createCommand("INSERT INTO trunc_e2e (id, nazwa) VALUES (3, 'c')").execute();
+            await connection.createCommand('DELETE FROM default.trunc_e2e').execute();
+            expect(Number((await readAllRows(connection, 'SELECT COUNT(*) FROM trunc_e2e'))[0]?.[0])).toBe(0);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('exposes primary keys and indexes through the schema-tree metadata markers', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand('CREATE TABLE idx_e2e (id LONG PRIMARY KEY, code TEXT(20))').execute();
+            await connection.createCommand('CREATE UNIQUE INDEX idx_e2e_code ON idx_e2e (code)').execute();
+            await connection.createCommand('CREATE INDEX idx_e2e_code_plain ON idx_e2e (code)').execute();
+
+            const keys = await readAllRows(connection, "SELECT * FROM _access_metadata.keys WHERE TABLE = 'idx_e2e'");
+            expect(keys.some(row => row[1] === 'PRIMARY KEY')).toBe(true);
+            expect(keys.some(row => row[1] === 'UNIQUE')).toBe(true);
+
+            const indexes = await readAllRows(connection, "SELECT * FROM _access_metadata.indexes WHERE TABLE = 'idx_e2e'");
+            expect(indexes.map(row => row[0])).toContain('idx_e2e_code_plain');
+            expect(indexes.every(row => row[1] === 'INDEX')).toBe(true);
+
+            const triggers = await readAllRows(connection, "SELECT * FROM _access_metadata.triggers WHERE TABLE = 'idx_e2e'");
+            expect(triggers).toEqual([]);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('rejects a unique index over existing duplicate values', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand('CREATE TABLE dup_e2e (id LONG PRIMARY KEY, code TEXT(20))').execute();
+            await connection.createCommand("INSERT INTO dup_e2e (id, code) VALUES (1, 'x')").execute();
+            await connection.createCommand("INSERT INTO dup_e2e (id, code) VALUES (2, 'x')").execute();
+            await expect(connection.createCommand('CREATE UNIQUE INDEX dup_e2e_code ON dup_e2e (code)').execute())
+                .rejects.toThrow();
+        } finally {
+            await connection.close();
+        }
+    });
+
     it('creates and drops a view', async () => {
         const file = copyFixture('accessLike.mdb');
         const connection = new AccessConnection(createAccessConfig(file, false));

@@ -16,6 +16,6 @@ export const accessDialectTraits = createDatabaseDialectTraits({
         singleDotPathNamespace: 'none'
     },
     objects: {
-        supportsIndexes: false
+        supportsIndexes: true
     }
 });

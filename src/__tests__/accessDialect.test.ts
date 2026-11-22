@@ -3,11 +3,18 @@ import { accessSqlAuthoring } from '../dialects/access/sql/authoring';
 import { accessDialect } from '../../extensions/access/src/accessDialect';
 
 describe('Access dialect authoring contract', () => {
-    it('models Access as a flat, file-backed catalog without three-part names or indexes', () => {
+    it('models Access as a flat, file-backed catalog with two-part names and native indexes', () => {
         expect(accessDialectTraits.qualification.supportsThreePartName).toBe(false);
         expect(accessDialectTraits.qualification.twoPartNameStyle).toBe('database-object');
         expect(accessDialectTraits.completion.singleDotPathNamespace).toBe('none');
-        expect(accessDialectTraits.objects.supportsIndexes).toBe(false);
+        expect(accessDialectTraits.objects.supportsIndexes).toBe(true);
+    });
+
+    it('advertises index browsing and truncate support for the implemented surfaces', () => {
+        expect(accessDialect.capabilities.supportsIndexes).toBe(true);
+        expect(accessDialect.capabilities.supportsTruncateTable).toBe(true);
+        expect(accessDialect.capabilities.supportsPrimaryKeyChanges).toBe(true);
+        expect(accessDialect.capabilities.supportsForeignKeyChanges).toBe(true);
     });
 
     it('exposes Access SQL keywords, functions, and validation type aliases', () => {

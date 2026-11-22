@@ -213,10 +213,77 @@ function unquoteAccessIdentifier(value: string): string {
     return parsed.name;
 }
 
+interface AccessQualifiedName {
+    readonly name: string;
+    readonly start: number;
+    readonly end: number;
+    /** Raw last segment, including any brackets or double quotes. */
+    readonly lastRaw: string;
+}
+
+/**
+ * Reads `table`, `schema.table`, `database.schema.table`, and the Access
+ * `database..table` form. Access exposes a single flat catalog, so the last
+ * segment is the physical table name.
+ */
+function readAccessQualifiedNameAt(sql: string, start: number): AccessQualifiedName | undefined {
+    let index = start;
+    let last: { readonly name: string; readonly raw: string; readonly end: number } | undefined;
+    for (;;) {
+        const parsed = readAccessIdentifierAt(sql, index);
+        if (!parsed) break;
+        last = { name: parsed.name, raw: sql.slice(index, parsed.end), end: parsed.end };
+        index = parsed.end;
+        if (sql[index] !== '.') break;
+        index++;
+        // `DB..TABLE` has an empty schema segment.
+        while (sql[index] === '.') index++;
+    }
+    return last
+        ? { name: last.name, start, end: last.end, lastRaw: last.raw }
+        : undefined;
+}
+
 export function writeTargetTableName(sql: string): string | undefined {
     const statement = stripLeadingComments(sql);
     const prefix = statement.match(/^(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+/i);
-    return prefix ? readAccessIdentifierAt(statement, prefix[0].length)?.name : undefined;
+    return prefix ? readAccessQualifiedNameAt(statement, prefix[0].length)?.name : undefined;
+}
+
+/**
+ * The DuckDB mirror uses a flat `main` schema, so the Access-only catalog /
+ * schema qualifier must be removed before execution. Only the target name is
+ * rewritten; the rest of the statement is preserved.
+ */
+function normalizeAccessWriteTarget(sql: string): string {
+    const statement = stripLeadingComments(sql);
+    const prefix = statement.match(/^(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+/i);
+    if (!prefix) return statement;
+    const target = readAccessQualifiedNameAt(statement, prefix[0].length);
+    if (!target) return statement;
+    const qualifiedLength = target.end - target.start;
+    if (qualifiedLength === target.lastRaw.length) return statement;
+    return `${statement.slice(0, target.start)}${target.lastRaw}${statement.slice(target.end)}`;
+}
+
+/**
+ * Accepts `TRUNCATE table` and `TRUNCATE TABLE table`; the optional catalog or
+ * schema qualifier is discarded. Rejects any trailing clause so a malformed
+ * statement can never silently delete only part of a table.
+ */
+function readAccessTruncateTarget(sql: string): AccessQualifiedName | undefined {
+    const statement = stripLeadingComments(sql);
+    const prefix = statement.match(/^TRUNCATE\s+(?:TABLE\s+)?/i);
+    if (!prefix) return undefined;
+    const target = readAccessQualifiedNameAt(statement, prefix[0].length);
+    if (!target) {
+        throw new Error('TRUNCATE requires a table name.');
+    }
+    const rest = statement.slice(target.end).trim();
+    if (rest !== '' && rest !== ';') {
+        throw new Error('TRUNCATE accepts only a table name and does not support a WHERE clause.');
+    }
+    return target;
 }
 
 function identityValueKey(value: unknown): string | undefined {
@@ -431,6 +498,24 @@ async function metadataResult(
                 ]);
             return result(['RELATIONSHIP', 'TABLE', 'COLUMN', 'FOREIGN_TABLE', 'FOREIGN_COLUMN', 'ENFORCED', 'UPDATE_CASCADE', 'DELETE_CASCADE'], rows);
         }
+        case 'keys':
+        case 'indexes': {
+            const indexes = marker.table ? session.listIndexes(marker.table) : [];
+            const rows = indexes
+                .filter(index => marker.kind === 'keys'
+                    ? index.primaryKey || index.unique
+                    : !index.primaryKey && !index.unique)
+                .map((index, position) => [
+                    index.name || `${marker.kind === 'keys' ? 'Key' : 'Index'}${position + 1}`,
+                    marker.kind === 'keys'
+                        ? (index.primaryKey ? 'PRIMARY KEY' : 'UNIQUE')
+                        : 'INDEX',
+                    index.columns.join(', '),
+                ]);
+            return result(['NAME', 'KIND', 'DETAIL'], rows);
+        }
+        case 'triggers':
+            return result(['NAME', 'KIND', 'DETAIL'], []);
         case 'linked_tables': {
             const linkedTables = session.listLinkedTables();
             const rows = linkedTables
@@ -862,6 +947,10 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
             if (this._readOnly) {
                 throw new Error('Microsoft Access connection is read-only. Disable "Open database as read-only" to execute writes.');
             }
+            const truncateTarget = readAccessTruncateTarget(trimmedSql);
+            if (truncateTarget) {
+                return this.executeWrite(`DELETE FROM ${truncateTarget.lastRaw}`);
+            }
             if (/^(?:CREATE|DROP|ALTER)\b/i.test(stripLeadingComments(trimmedSql))) {
                 return this.executeDdl(trimmedSql);
             }
@@ -930,7 +1019,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
             if (!beforeTable) {
                 throw new Error(`Access snapshot for table '${definition.name}' is not available.`);
             }
-            const execution = await this._mirror.executeAndReadAll(sql);
+            const execution = await this._mirror.executeAndReadAll(normalizeAccessWriteTarget(sql));
             const afterTable = await this._mirror.snapshotTables([definition]).then(snapshots => snapshots[0]);
             if (!afterTable) {
                 throw new Error(`Access snapshot for table '${definition.name}' could not be refreshed.`);

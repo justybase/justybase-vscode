@@ -27,6 +27,50 @@ function applyDdl(filePath: string, statements: readonly string[]): void {
 }
 
 describe('JetDdlSql foreign keys (Phase 4)', () => {
+    it('keeps CREATE UNIQUE INDEX unique in the stored definition', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, [
+                'CREATE TABLE unique_t (id LONG PRIMARY KEY, code TEXT(20))',
+                'CREATE UNIQUE INDEX unique_t_code ON unique_t (code)',
+            ]);
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                expect(session.listIndexes('unique_t')).toEqual(expect.arrayContaining([
+                    expect.objectContaining({ name: 'unique_t_code', primaryKey: false, unique: true }),
+                ]));
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('accepts Access-qualified names in table, index, constraint and drop DDL', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, [
+                'CREATE TABLE default.q_parent (id LONG PRIMARY KEY)',
+                'CREATE TABLE [db].[q child] (id LONG PRIMARY KEY, pid LONG)',
+                'ALTER TABLE default.[q child] ADD CONSTRAINT FK_q FOREIGN KEY (pid) REFERENCES default.q_parent (id)',
+                'CREATE INDEX default.q_child_pid ON default.[q child] (pid)',
+                'ALTER TABLE default.[q child] DROP CONSTRAINT FK_q',
+                'DROP INDEX default.q_child_pid ON default.[q child]',
+                'DROP TABLE default.[q child]',
+            ]);
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                expect(session.listTables().map(table => table.name).sort()).toEqual(['q_parent', 't_people']);
+                expect(session.listIndexes('q_parent').map(index => index.name)).toContain('PrimaryKey');
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
     it('reports CREATE TABLE AS SELECT as unsupported before parsing columns', () => {
         const channel = new JetPageChannel(fs.readFileSync(SAMPLE), jetLayoutFor('accdb2007'));
         expect(() => applyDdlSql(channel, 'CREATE TABLE copy_t AS SELECT * FROM t_people'))

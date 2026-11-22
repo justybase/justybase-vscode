@@ -30,6 +30,7 @@ export const accessDialect: DatabaseDialect = {
         supportsPrimaryKeyChanges: true,
         supportsForeignKeyChanges: true,
         supportsUniqueConstraintChanges: true,
+        supportsIndexes: true,
     }),
     connectionForm: {
         fields: [

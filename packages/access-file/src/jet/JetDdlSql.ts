@@ -173,6 +173,63 @@ function stripDelims(name: string): string {
     return trimmed;
 }
 
+/**
+ * Reads a possibly qualified DDL object name (`table`, `schema.table`,
+ * `database..table`, `[db].[table]`) and returns the physical Access table
+ * name. UI-generated DDL qualifies names while the Jet writer uses the flat
+ * catalog, so qualifiers must not reach the table lookup.
+ */
+function readDdlObjectName(
+    tokens: Token[],
+    index: { value: number },
+    label: string,
+): string {
+    const isQuoted = (token: Token | undefined): boolean => Boolean(
+        token && (token.text.startsWith('[') || token.text.startsWith('"')),
+    );
+    let token = tokens[index.value];
+    if (!token) return '';
+    let name: string | undefined;
+    for (;;) {
+        if (isQuoted(token)) {
+            name = stripDelims(token.text);
+            index.value++;
+            break;
+        }
+        const parts = token.text.split('.').filter(Boolean);
+        if (parts.length > 1) {
+            name = parts[parts.length - 1]!;
+            index.value++;
+            break;
+        }
+        if (token.text.endsWith('.')) {
+            index.value++;
+            const next = tokens[index.value];
+            if (!next) {
+                throw new AccessFileError(`${label} requires a name after the qualifier.`);
+            }
+            token = next;
+            continue;
+        }
+        name = stripDelims(token.text);
+        index.value++;
+        break;
+    }
+    while (/^\.+$/.test(tokens[index.value]?.text ?? '')) {
+        index.value++;
+        const next = tokens[index.value];
+        if (!next) {
+            throw new AccessFileError(`${label} requires a name after the qualifier.`);
+        }
+        name = stripDelims(next.text);
+        index.value++;
+    }
+    if (!name) {
+        throw new AccessFileError(`${label} requires a name.`);
+    }
+    return name;
+}
+
 function parseType(tokens: Token[], index: { value: number }): { type: number; length?: number; precision?: number; scale?: number } {
     const name = tokens[index.value];
     if (!name) {
@@ -290,11 +347,7 @@ function parseColumnList(tokens: Token[], index: { value: number }): { name: str
 
 function parseCreateTable(channel: JetPageChannel, tokens: Token[], index: { value: number }): void {
     expect(tokens, index, 'table');
-    const tableName = stripDelims(tokens[index.value]?.text ?? '');
-    if (!tableName) {
-        throw new AccessFileError('CREATE TABLE requires a table name.');
-    }
-    index.value++;
+    const tableName = readDdlObjectName(tokens, index, 'CREATE TABLE');
     let asSelect = false;
     if (tokens[index.value]?.lower === 'as') {
         asSelect = true;
@@ -333,11 +386,7 @@ function parseCreateTable(channel: JetPageChannel, tokens: Token[], index: { val
                 expect(tokens, index, 'key');
                 const columnsList = parseColumnList(tokens, index);
                 expect(tokens, index, 'references');
-                const foreignTable = stripDelims(tokens[index.value]?.text ?? '');
-                if (!foreignTable) {
-                    throw new AccessFileError('FOREIGN KEY requires a referenced table.');
-                }
-                index.value++;
+                const foreignTable = readDdlObjectName(tokens, index, 'FOREIGN KEY REFERENCES');
                 relationships.push({
                     name: constraintName,
                     table: tableName,
@@ -379,8 +428,12 @@ function parseCreateTable(channel: JetPageChannel, tokens: Token[], index: { val
     createTable(channel, tableName, columns, indexes, relationships);
 }
 
-function parseCreateIndex(channel: JetPageChannel, tokens: Token[], index: { value: number }): void {
-    let unique = false;
+function parseCreateIndex(
+    channel: JetPageChannel,
+    tokens: Token[],
+    index: { value: number },
+    unique = false,
+): void {
     let primaryKey = false;
     let required = false;
     if (tokens[index.value]?.lower === 'unique') {
@@ -388,17 +441,9 @@ function parseCreateIndex(channel: JetPageChannel, tokens: Token[], index: { val
         index.value++;
     }
     expect(tokens, index, 'index');
-    const name = stripDelims(tokens[index.value]?.text ?? '');
-    if (!name) {
-        throw new AccessFileError('CREATE INDEX requires an index name.');
-    }
-    index.value++;
+    const name = readDdlObjectName(tokens, index, 'CREATE INDEX');
     expect(tokens, index, 'on');
-    const tableName = stripDelims(tokens[index.value]?.text ?? '');
-    if (!tableName) {
-        throw new AccessFileError('CREATE INDEX requires a table name.');
-    }
-    index.value++;
+    const tableName = readDdlObjectName(tokens, index, 'CREATE INDEX ON');
     expect(tokens, index, '(');
     const columns: { name: string; ascending: boolean }[] = [];
     while (tokens[index.value] && tokens[index.value]!.text !== ')') {
@@ -447,11 +492,7 @@ function parseCreateIndex(channel: JetPageChannel, tokens: Token[], index: { val
 
 function parseCreateView(channel: JetPageChannel, tokens: Token[], index: { value: number }): void {
     expect(tokens, index, 'view');
-    const viewName = stripDelims(tokens[index.value]?.text ?? '');
-    if (!viewName) {
-        throw new AccessFileError('CREATE VIEW requires a view name.');
-    }
-    index.value++;
+    const viewName = readDdlObjectName(tokens, index, 'CREATE VIEW');
     expect(tokens, index, 'as');
     // reconstruct the SELECT from the remaining tokens
     const selectSql = tokens.slice(index.value).map(token => token.text).join(' ');
@@ -462,26 +503,16 @@ function parseDrop(channel: JetPageChannel, tokens: Token[], index: { value: num
     const kind = tokens[index.value]?.lower;
     if (kind === 'table') {
         index.value++;
-        const name = stripDelims(tokens[index.value]?.text ?? '');
-        if (!name) {
-            throw new AccessFileError('DROP TABLE requires a table name.');
-        }
+        const name = readDdlObjectName(tokens, index, 'DROP TABLE');
         dropTable(channel, name);
         return;
     }
     if (kind === 'index') {
         index.value++;
-        const name = stripDelims(tokens[index.value]?.text ?? '');
-        if (!name) {
-            throw new AccessFileError('DROP INDEX requires an index name.');
-        }
-        index.value++;
+        const name = readDdlObjectName(tokens, index, 'DROP INDEX');
         if (tokens[index.value]?.lower === 'on') {
             index.value++;
-            const tableName = stripDelims(tokens[index.value]?.text ?? '');
-            if (!tableName) {
-                throw new AccessFileError('DROP INDEX requires a table name after ON.');
-            }
+            const tableName = readDdlObjectName(tokens, index, 'DROP INDEX ON');
             dropIndex(channel, tableName, name);
         } else {
             throw new AccessFileError('DROP INDEX requires "ON <table>".');
@@ -490,10 +521,7 @@ function parseDrop(channel: JetPageChannel, tokens: Token[], index: { value: num
     }
     if (kind === 'view') {
         index.value++;
-        const name = stripDelims(tokens[index.value]?.text ?? '');
-        if (!name) {
-            throw new AccessFileError('DROP VIEW requires a view name.');
-        }
+        const name = readDdlObjectName(tokens, index, 'DROP VIEW');
         dropView(channel, name);
         return;
     }
@@ -502,11 +530,7 @@ function parseDrop(channel: JetPageChannel, tokens: Token[], index: { value: num
 
 function parseAlterTable(channel: JetPageChannel, tokens: Token[], index: { value: number }): void {
     expect(tokens, index, 'table');
-    const tableName = stripDelims(tokens[index.value]?.text ?? '');
-    if (!tableName) {
-        throw new AccessFileError('ALTER TABLE requires a table name.');
-    }
-    index.value++;
+    const tableName = readDdlObjectName(tokens, index, 'ALTER TABLE');
     const action = tokens[index.value]?.lower;
     if (action === 'add') {
         index.value++;
@@ -525,11 +549,7 @@ function parseAlterTable(channel: JetPageChannel, tokens: Token[], index: { valu
             expect(tokens, index, 'key');
             const columnsList = parseColumnList(tokens, index);
             expect(tokens, index, 'references');
-            const foreignTable = stripDelims(tokens[index.value]?.text ?? '');
-            if (!foreignTable) {
-                throw new AccessFileError('FOREIGN KEY requires a referenced table.');
-            }
-            index.value++;
+            const foreignTable = readDdlObjectName(tokens, index, 'FOREIGN KEY REFERENCES');
             addRelationship(channel, {
                 name: name ?? `FK_${tableName}_${columnsList.map(column => column.name).join('_')}`,
                 table: tableName,
@@ -607,7 +627,7 @@ export function applyDdlSql(channel: JetPageChannel, sql: string): void {
             parseCreateIndex(channel, tokens, index);
         } else if (objType === 'unique') {
             index.value++;
-            parseCreateIndex(channel, tokens, index);
+            parseCreateIndex(channel, tokens, index, true);
         } else if (objType === 'view') {
             parseCreateView(channel, tokens, index);
         } else {

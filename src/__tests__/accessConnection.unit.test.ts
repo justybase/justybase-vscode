@@ -85,6 +85,13 @@ describe('AccessConnection statement splitting and locking', () => {
         expect(writeTargetTableName('DELETE FROM [a]]b] WHERE id = 2')).toBe('a]b');
     });
 
+    it('resolves Access-qualified write targets to the physical table name', () => {
+        expect(writeTargetTableName('DELETE FROM default.Orders')).toBe('Orders');
+        expect(writeTargetTableName('DELETE FROM db..[Order Details] WHERE id = 2')).toBe('Order Details');
+        expect(writeTargetTableName('UPDATE [My DB].[Order Details] SET id = 2')).toBe('Order Details');
+        expect(writeTargetTableName('INSERT INTO "db"."schema"."Orders" (id) VALUES (1)')).toBe('Orders');
+    });
+
     it('splits multi-statement scripts at top-level semicolons', async () => {
         const connection = createConnection();
         // the first statement is a write, which must be rejected as read-only
@@ -145,6 +152,15 @@ describe('accessMetadataProvider', () => {
         expect(accessMetadataProvider.buildListDatabasesQuery()).toContain('_access_metadata.databases');
         expect(accessMetadataProvider.buildTypeGroupsQuery('default')).toContain('_access_metadata.type_groups');
         expect(accessMetadataProvider.buildListProceduresQuery('default')).toContain('_access_metadata.procedures');
+    });
+
+    it('routes table detail folders through Access index metadata', () => {
+        expect(accessMetadataProvider.buildTableDetailQuery?.('default', 'default', 'Orders', 'indexes'))
+            .toContain("_access_metadata.indexes WHERE TABLE = 'Orders'");
+        expect(accessMetadataProvider.buildTableDetailQuery?.('default', 'default', 'Orders', 'keys'))
+            .toContain("_access_metadata.keys WHERE TABLE = 'Orders'");
+        expect(accessMetadataProvider.buildTableDetailQuery?.('default', 'default', 'Orders', 'triggers'))
+            .toContain("_access_metadata.triggers WHERE TABLE = 'Orders'");
     });
 
     it('embeds and escapes table names in column markers', () => {

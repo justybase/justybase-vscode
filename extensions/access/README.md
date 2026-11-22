@@ -22,7 +22,8 @@ Select a local file, browse tables and saved queries, write SQL, and inspect the
 - Browse ordinary tables, columns, table metadata, and non-parameterized saved `SELECT` QueryDefs.
 - Run `SELECT` queries and use the shared completion, diagnostics, result grid, filtering, profiling, and export tools.
 - Optional staged editing for ordinary-table `INSERT`, `UPDATE`, and `DELETE` operations.
-- Supported native DDL: `CREATE TABLE`, `DROP TABLE`, `CREATE INDEX`, `DROP INDEX`, `CREATE VIEW`, and `DROP VIEW`.
+- Supported native DDL: `CREATE TABLE`, `DROP TABLE`, `CREATE INDEX`, `DROP INDEX`, `CREATE VIEW`, `DROP VIEW`, `ALTER TABLE ADD/DROP CONSTRAINT`, and `TRUNCATE TABLE`.
+- Browse table keys and indexes in the schema tree.
 - Preserve required values and index uniqueness while writing; updated files are installed atomically.
 - No Java runtime, JAR, ODBC driver, Maven build, or Access installation is needed.
 
@@ -72,6 +73,8 @@ owning process ID, host, and start time.
 - Parameterized, crosstab/PIVOT, action, pass-through, and Access-only saved queries remain read-only metadata.
 - Jet 3 row writes are supported; Jet 3 DDL is not (the DDL engine targets Jet 4/ACE layouts).
 - Password-protected files are read-only in this release: the reader decrypts pages in memory, but the staged writer mutates raw pages, so writes to encrypted files are refused to protect the database.
+- Schema changes do not cover `ALTER TABLE ADD/DROP COLUMN`, `CREATE TABLE AS SELECT`, calculated fields, or complex/multivalue column writes.
+- `TRUNCATE TABLE` deletes every row but does not reset an AutoNumber seed.
 - Multi-file source editing is not part of Access support; export query results when you need a separate file.
 
 ## Runtime and development

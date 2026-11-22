@@ -75,6 +75,15 @@ export const accessMetadataProvider: DatabaseMetadataProvider = {
     buildTableCommentQuery(_database: string, _schema: string, tableName: string): string {
         return `SELECT * FROM _access_metadata.table_comment WHERE TABLE = ${quoteLiteral(tableName)}`;
     },
+    buildTableDetailQuery(
+        _database: string,
+        _schema: string,
+        tableName: string,
+        detail: 'keys' | 'indexes' | 'triggers',
+    ): string | undefined {
+        if (detail !== 'keys' && detail !== 'indexes' && detail !== 'triggers') return undefined;
+        return `${metadataQuery(detail)} WHERE TABLE = ${quoteLiteral(tableName)}`;
+    },
     buildObjectSearchQuery(_database: string, likePattern: string): string {
         return `SELECT * FROM _access_metadata.object_search WHERE PATTERN = ${quoteLiteral(likePattern)}`;
     },
