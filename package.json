@@ -5113,6 +5113,7 @@
     "test:file:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/fileSql.integration.test.ts",
     "test:access:integration": "cross-env NODE_ENV=test NODE_OPTIONS=--max-old-space-size=4096 jest --config jest.live.config.js --runInBand src/__tests__/integration/access.integration.test.ts",
     "test:access:com": "node scripts/access-com-crosscheck.cjs",
+    "test:access:read-parity": "node scripts/access-java-read-parity.cjs",
     "test:access:jet3": "node scripts/access-jet3-crosscheck.cjs",
     "test:access:sql": "node scripts/access-sql-crosscheck.cjs",
     "test:access-index-codes": "node scripts/generate-index-codes.cjs --check",

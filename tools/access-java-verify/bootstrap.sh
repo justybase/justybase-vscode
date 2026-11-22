@@ -31,5 +31,5 @@ download "org/apache/commons" "commons-math3" "3.6.1"
 download "org/agrona" "agrona" "1.21.2"
 
 CP="$(find "$LIB_DIR" -name '*.jar' | paste -sd: -)"
-javac -cp "$CP" -d "$CLASSES_DIR" "$SCRIPT_DIR/DumpFile.java"
-echo "Java Jackcess verify tool ready."
+javac -cp "$CP" -d "$CLASSES_DIR" "$SCRIPT_DIR/DumpFile.java" "$SCRIPT_DIR/ParityDump.java"
+echo "Java Jackcess verify tools ready."

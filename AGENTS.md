@@ -122,6 +122,7 @@ npm run test:metadata-cache:integration  # Local disk-restart/cache contract tes
 npm run test:duckdb:integration
 npm run test:file:integration
 npm run test:access:integration
+npm run test:access:read-parity # Jackcess read parity for every Access fixture (JDK 11+)
 npm run test:db2:integration
 npm run test:oracle:integration
 npm run test:mssql:integration

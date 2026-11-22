@@ -338,6 +338,9 @@ jobs:
         run: |
           node scripts/access-java-crosscheck.cjs
 
+      - name: Verify the reader against Jackcess
+        run: npm run test:access:read-parity
+
   parser-perf:
     name: Parser Construction Budget
     runs-on: ubuntu-latest

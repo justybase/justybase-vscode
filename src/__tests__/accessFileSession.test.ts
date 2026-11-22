@@ -185,6 +185,87 @@ describe('Access file format boundary', () => {
         }
     });
 
+    it('reads real Jet 3 and Jet 4 fixtures with stable value representations', async () => {
+        const accdb = await AccessFileSession.open({
+            filePath: path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'),
+        });
+        try {
+            const snapshot = await accdb.readTable('t_people');
+            expect(snapshot.rows).toHaveLength(3);
+            expect(snapshot.rows[0]?.slice(0, 3)).toEqual([1, 'Anna Kowalska', 34]);
+            // Currency keeps its fixed four-decimal Access representation.
+            expect(snapshot.rows[0]?.[3]).toBe('12500.5000');
+            // Access stores timezone-less wall-clock values; the reader exposes
+            // them as UTC so result formatting and CSV export keep the digits.
+            expect(snapshot.rows[0]?.[4]).toEqual(new Date('2020-06-15T09:30:00.000Z'));
+            expect(snapshot.rows[0]?.[5]).toBe(true);
+        } finally {
+            await accdb.close();
+        }
+
+        const mdb = await AccessFileSession.open({
+            filePath: path.join(__dirname, 'fixtures', 'access', 'sample2003.mdb'),
+        });
+        try {
+            const snapshot = await mdb.readTable('t_people');
+            expect(snapshot.rows.map(row => row[1])).toEqual([
+                'Anna Kowalska',
+                'Jan Nowak',
+                'Ewa Wiśniewska',
+            ]);
+        } finally {
+            await mdb.close();
+        }
+
+        const polish = await AccessFileSession.open({
+            filePath: path.join(__dirname, 'fixtures', 'access', 'sample_polish.accdb'),
+        });
+        try {
+            const snapshot = await polish.readTable('sample_table_01');
+            expect(snapshot.rows).toHaveLength(20);
+            expect(snapshot.rows[0]).toEqual([1, 'row_000000_text', 0]);
+            expect(polish.listIndexes('sample_table_01')).toEqual([
+                {
+                    name: 'PrimaryKey',
+                    columns: ['text_col1'],
+                    primaryKey: true,
+                    unique: true,
+                    ignoreNulls: false,
+                    required: true,
+                },
+                {
+                    name: 'num_col2',
+                    columns: ['num_col2'],
+                    primaryKey: false,
+                    unique: false,
+                    ignoreNulls: false,
+                    required: false,
+                },
+            ]);
+        } finally {
+            await polish.close();
+        }
+    });
+
+    it('reads Jet 3 primary-key index flags from the definition page', async () => {
+        const session = await AccessFileSession.open({
+            filePath: path.join(__dirname, 'fixtures', 'access', 'size97.mdb'),
+        });
+        try {
+            expect(session.listTableNames()).toEqual(['table1']);
+            expect(session.listIndexes('table1')).toEqual([{
+                name: 'PrimaryKey',
+                columns: ['ID'],
+                primaryKey: true,
+                unique: true,
+                ignoreNulls: false,
+                required: true,
+            }]);
+        } finally {
+            await session.close();
+        }
+    });
+
     it('refuses to write a password-protected file', async () => {
         const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-encrypted-'));
         const filePath = path.join(directory, 'sample.accdb');

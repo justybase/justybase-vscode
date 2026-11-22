@@ -85,9 +85,17 @@ The platform-specific VSIX includes the locked native DuckDB runtime for Windows
 npm run install:access
 npm run check-types:access
 npm run build:access
+npm run test:access:read-parity  # all fixtures compared with Jackcess (JDK 11+)
 ```
 
-Written files can be cross-checked with the optional readers in `tools/access-ddl-compare` and `tools/access-java-verify`.
+The read-parity gate compares every shipped fixture table, column, index and
+cell value with [Jackcess](https://jackcess.sourceforge.io/), while
+`scripts/access-java-crosscheck.cjs` verifies that Jackcess can read a file
+written by the TypeScript writer. On Windows with Microsoft Access installed,
+`npm run test:access:com` and `npm run test:access:sql` additionally compare
+metadata, writes and query semantics with DAO (set `ACCESS_COM_VALIDATE=1`).
+Written files can also be cross-checked with the optional readers in
+`tools/access-ddl-compare` and `tools/access-java-verify`.
 
 ## License
 

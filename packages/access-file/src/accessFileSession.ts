@@ -533,8 +533,12 @@ function parseTableIndexes(
             keys.push(columnNumber);
         }
         physicalKeys.push(keys);
-        // unique (0x01) / ignore-nulls (0x02) / required (0x08) flags
-        const flagOffset = physicalOffset + (format === 'jet3' ? 33 : 46);
+        // unique (0x01) / ignore-nulls (0x02) / required (0x08) flags.
+        // Jet 3 index entries store 10 key slots (30 bytes), a 4-byte usage
+        // map reference, a 4-byte root page and then the flags byte at 38.
+        // Using the Jet 4 offset here silently dropped uniqueness on .mdb
+        // primary keys.
+        const flagOffset = physicalOffset + (format === 'jet3' ? 38 : 46);
         physicalFlags.push(flagOffset < definition.length ? definition[flagOffset] : 0);
     }
 
