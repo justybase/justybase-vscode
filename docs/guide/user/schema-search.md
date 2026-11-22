@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.21.2
+product_version: 3.22.0
 ---
 
 # Schema Search
