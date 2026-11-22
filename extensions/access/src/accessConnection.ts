@@ -16,12 +16,12 @@ import {
     type AccessTableDefinition,
     type AccessTableSnapshot,
     type AccessValue,
-    type AccessFileFormat,
 } from '@justybase/access-file';
 import {
     AccessDuckDbMirror,
     type AccessMirrorColumn,
 } from './accessDuckDbMirror';
+import { acquireAccessFileLock } from './accessFileLock';
 import { writeAccessSnapshotChanges, applyDdlSql } from '@justybase/access-file';
 import { JetPageChannel } from '@justybase/access-file/jet/JetPageChannel';
 import { jetLayoutFor } from '@justybase/access-file/jet/JetLayout';
@@ -170,121 +170,6 @@ export function splitAccessStatements(sql: string): string[] {
         statements.push(current.trim());
     }
     return statements.filter(statement => stripLeadingComments(statement).length > 0);
-}
-
-interface HeldFileLock {
-    readonly lockKey: string;
-    refCount: number;
-    readonly releasePromise: Promise<() => Promise<void>>;
-}
-
-/**
- * In-process lock holders keyed by lock file path. Multiple connections in
- * the same extension process (the user's persistent connection plus the
- * short-lived connection used by metadata refresh / schema search) share one
- * lock file; the file is closed and removed only when the last holder
- * releases it. Cross-process conflicts still fail with EEXIST.
- */
-const heldFileLocks = new Map<string, HeldFileLock>();
-
-function makeRefCountedRelease(
-    holder: HeldFileLock,
-    release: () => Promise<void>,
-): () => Promise<void> {
-    let released = false;
-    return async () => {
-        if (released) {
-            return;
-        }
-        released = true;
-        holder.refCount -= 1;
-        if (holder.refCount <= 0) {
-            heldFileLocks.delete(holder.lockKey);
-            await release();
-        }
-    };
-}
-
-/**
- * Creates the database lock file (".ldb" for MDB, ".laccdb" for ACCDB) and
- * holds it open while the connection is writable, preventing another process
- * from writing to the same file concurrently (as MS Access / UCanAccess do).
- * Returns the release function, or null when the file is already locked.
- */
-async function acquireAccessFileLock(
-    databasePath: string,
-    format: AccessFileFormat,
-): Promise<() => Promise<void>> {
-    const isAccdb = format === 'accdb2007'
-        || format === 'accdb2010'
-        || format === 'accdb2013'
-        || format === 'accdb2016'
-        || format === 'accdb2019';
-    const lockExt = isAccdb ? '.laccdb' : '.ldb';
-    const lockPath = databasePath.replace(/\.(?:mdb|accdb)$/i, '') + lockExt;
-    const lockKey = accessFileLockKey(lockPath);
-
-    const existing = heldFileLocks.get(lockKey);
-    if (existing) {
-        existing.refCount += 1;
-        const release = await existing.releasePromise;
-        return makeRefCountedRelease(existing, release);
-    }
-
-    const holder: HeldFileLock = {
-        lockKey,
-        refCount: 1,
-        releasePromise: createLockFileHandle(lockPath, databasePath),
-    };
-    heldFileLocks.set(lockKey, holder);
-    try {
-        const release = await holder.releasePromise;
-        return makeRefCountedRelease(holder, release);
-    } catch (error) {
-        heldFileLocks.delete(lockKey);
-        throw error;
-    }
-}
-
-async function createLockFileHandle(
-    lockPath: string,
-    databasePath: string,
-): Promise<() => Promise<void>> {
-    let handle: Awaited<ReturnType<typeof fs.open>>;
-    try {
-        handle = await fs.open(lockPath, 'wx');
-    } catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error
-            ? (error as { code?: string }).code
-            : undefined;
-        if (code === 'EEXIST') {
-            throw new Error(
-                `The database '${databasePath}' is already open by another process (lock file '${lockPath}' exists).`,
-                { cause: error },
-            );
-        }
-        throw new Error(
-            `Cannot create the Access database lock file '${lockPath}'. Writable access is refused.`,
-            { cause: error },
-        );
-    }
-    let released = false;
-    return async () => {
-        if (released) {
-            return;
-        }
-        released = true;
-        try {
-            await handle.close();
-        } catch {
-            // best effort
-        }
-        try {
-            await fs.rm(lockPath, { force: true });
-        } catch {
-            // best effort (another process may have taken over)
-        }
-    };
 }
 
 function startsWithAccessWriteStatement(sql: string): boolean {

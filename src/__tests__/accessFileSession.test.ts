@@ -21,15 +21,23 @@ import { parseAccessPropertyMapDescription } from '../../packages/access-file/sr
 // both copies.
 jest.mock('node:fs/promises', () => {
     const actual = jest.requireActual('node:fs/promises');
-    return { ...actual, rename: jest.fn(actual.rename) };
+    return {
+        ...actual,
+        rename: jest.fn(actual.rename),
+        link: jest.fn(actual.link),
+    };
 });
 
 const realRename = (jest.requireActual('node:fs/promises') as typeof fs).rename;
+const realLink = (jest.requireActual('node:fs/promises') as typeof fs).link;
 const renameMock = fs.rename as jest.Mock;
+const linkMock = fs.link as jest.Mock;
 
 beforeEach(() => {
     renameMock.mockReset();
     renameMock.mockImplementation(realRename);
+    linkMock.mockReset();
+    linkMock.mockImplementation(realLink);
 });
 
 function accessHeader(engineName: string, version: number): Buffer {
@@ -401,6 +409,54 @@ describe('Access file format boundary', () => {
             expect(after).toBe(before);
             const leftovers = (await fs.readdir(directory)).filter(name => name.includes('.justybase-'));
             expect(leftovers).toEqual([]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('reports the retained backup path when neither install nor restore can complete', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-fallback-retained-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        const before = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+        // No hard link is available, so the original is moved to the `.bak`
+        // path.  Both the staged install and the restore then fail: the user
+        // must get the preserved path instead of a generic rename error.
+        linkMock.mockRejectedValueOnce(Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }));
+        renameMock.mockImplementation(async (source: string, target: string) => {
+            const name = String(source);
+            if (name.endsWith('.tmp') || name.endsWith('.bak')) {
+                const error = new Error('EEXIST: file already exists') as NodeJS.ErrnoException;
+                error.code = 'EEXIST';
+                throw error;
+            }
+            await realRename(source, target);
+        });
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await expect(session.writeAtomically(async () => undefined)).rejects.toThrow(
+                    /EEXIST[\s\S]*preserved at [\s\S]*\.bak/,
+                );
+            } finally {
+                await session.close();
+            }
+        } finally {
+            renameMock.mockReset();
+            renameMock.mockImplementation(realRename);
+            linkMock.mockReset();
+            linkMock.mockImplementation(realLink);
+        }
+        try {
+            // The original was moved to the retained backup, so the target is
+            // intentionally absent until the user moves the backup back.
+            await expect(fs.access(filePath)).rejects.toThrow();
+            const backups = (await fs.readdir(directory)).filter(name => name.endsWith('.bak'));
+            expect(backups).toHaveLength(1);
+            const retainedHash = createHash('sha256')
+                .update(await fs.readFile(path.join(directory, backups[0]!)))
+                .digest('hex');
+            expect(retainedHash).toBe(before);
         } finally {
             await fs.rm(directory, { recursive: true, force: true });
         }

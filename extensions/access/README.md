@@ -48,6 +48,25 @@ Access connections use the shared SQL editor, completion, result grid, filtering
 
 The optional password is stored in VS Code Secret Storage. The source file is not uploaded or copied into the repository.
 
+## Locks and recovery
+
+Writable connections create the same lock file Microsoft Access uses (`.ldb` for
+MDB, `.laccdb` for ACCDB) and hold it open while the connection is active. The
+companion also writes `<database>.justybase-lock.json` next to the file with the
+owning process ID, host, and start time.
+
+- A lock left by a crashed JustyBase process on the same machine is reclaimed on
+  the next writable connect.
+- A lock held by Microsoft Access, another machine, or an unknown process is
+  never removed automatically. When no Access window is open, run
+  **JustyBase Access: Clear Stale Lock File** from the Command Palette or the
+  Explorer context menu of the `.mdb`/`.accdb` file. The command refuses to
+  remove a lock that the operating system still reports as open.
+- If a staged write cannot be installed or restored, the error names the
+  preserved `.bak` file. Move it back into place after closing the process that
+  holds the database.
+- Password-protected files remain read-only, and the error explains why.
+
 ## Important boundaries
 
 - Parameterized, crosstab/PIVOT, action, pass-through, and Access-only saved queries remain read-only metadata.

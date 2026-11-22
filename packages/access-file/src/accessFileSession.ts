@@ -1073,21 +1073,66 @@ async function installStagedFile(stagedPath: string, targetPath: string): Promis
             // install (Windows rejects the staged rename while the target
             // exists, and the restore rename can also fail there).
             await fs.rm(backupPath, { force: true }).catch(() => undefined);
+            if (await pathExists(backupPath)) {
+                throw backupLinkRetainedError(error, backupPath);
+            }
         } else {
             await fs.rename(backupPath, targetPath).catch(async () => {
                 await fs.rm(targetPath, { force: true }).catch(() => undefined);
                 await fs.rename(backupPath, targetPath).catch(() => undefined);
             });
+            if (await pathExists(backupPath)) {
+                throw backupRetainedError(error, backupPath);
+            }
         }
         throw error;
     }
     return backupPath;
 }
 
-async function restoreBackup(backupPath: string | undefined, targetPath: string): Promise<void> {
-    if (!backupPath) return;
+/**
+ * Moves the backup back into place. Returns whether the original file was
+ * restored, retained at its backup path, or absent (no backup was created).
+ */
+async function restoreBackup(
+    backupPath: string | undefined,
+    targetPath: string,
+): Promise<'restored' | 'retained' | 'none'> {
+    if (!backupPath) return 'none';
     await fs.rm(targetPath, { force: true }).catch(() => undefined);
-    await fs.rename(backupPath, targetPath).catch(() => undefined);
+    try {
+        await fs.rename(backupPath, targetPath);
+        return 'restored';
+    } catch {
+        return await pathExists(backupPath) ? 'retained' : 'restored';
+    }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function backupRetainedError(error: unknown, backupPath: string): AccessFileError {
+    const message = error instanceof Error ? error.message : String(error);
+    return new AccessFileError(
+        `${message} The original file could not be restored automatically and is preserved at '${backupPath}'; `
+        + 'move it back after closing the process that holds the database.',
+        { cause: error instanceof Error ? error : undefined },
+    );
+}
+
+function backupLinkRetainedError(error: unknown, backupPath: string): AccessFileError {
+    const message = error instanceof Error ? error.message : String(error);
+    return new AccessFileError(
+        `${message} The original file is unchanged, but a redundant backup link remains at '${backupPath}' `
+        + 'and can be deleted after closing the process that holds the database.',
+        { cause: error instanceof Error ? error : undefined },
+    );
 }
 
 async function flushFile(filePath: string): Promise<void> {
@@ -1548,19 +1593,26 @@ export class AccessFileSession {
         try {
             await this.reloadFromDisk();
         } catch (error) {
-            await restoreBackup(backupPath, this.filePath);
-            let restored = false;
+            const restore = await restoreBackup(backupPath, this.filePath);
+            let sessionReopened = false;
             try {
                 await this.reloadFromDisk();
-                restored = true;
+                sessionReopened = true;
             } catch {
                 // The session cannot represent either version any more.  Keep
                 // the original failure as the cause so the user can reconnect.
             }
+            const recovery = restore === 'retained'
+                ? `the previous file could not be restored automatically and is preserved at '${backupPath}'`
+                : restore === 'restored'
+                    ? sessionReopened
+                        ? 'the previous file was restored'
+                        : 'the previous file was restored, but the session could not be reopened'
+                    : sessionReopened
+                        ? 'the session was reopened'
+                        : 'no backup was retained and the session could not be reopened';
             throw new AccessFileError(
-                `The Access file was installed but cannot be reopened; ${restored
-                    ? 'the previous file was restored'
-                    : 'restoring the previous file also failed'}: ${this.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+                `The Access file was installed but cannot be reopened; ${recovery}: ${this.filePath}: ${error instanceof Error ? error.message : String(error)}`,
                 { cause: error },
             );
         }

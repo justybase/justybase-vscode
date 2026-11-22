@@ -39,14 +39,32 @@
     "extensionDependencies": [
         "krzysztof-d.justybaselite-netezza"
     ],
-    "configuration": {
-        "title": "Microsoft Access",
-        "properties": {
-            "justybase.access.readOnly": {
-                "type": "boolean",
-                "default": true,
-                "scope": "machine",
-                "description": "Open Microsoft Access databases without write intent."
+    "contributes": {
+        "commands": [
+            {
+                "command": "justybase.access.clearStaleLock",
+                "title": "Clear Stale Lock File",
+                "category": "JustyBase Access"
+            }
+        ],
+        "menus": {
+            "explorer/context": [
+                {
+                    "command": "justybase.access.clearStaleLock",
+                    "when": "resourceExtname =~ /\\.(mdb|accdb)$/",
+                    "group": "navigation@9"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "Microsoft Access",
+            "properties": {
+                "justybase.access.readOnly": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "machine",
+                    "description": "Open Microsoft Access databases without write intent."
+                }
             }
         }
     },
