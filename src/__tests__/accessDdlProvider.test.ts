@@ -334,15 +334,15 @@ describe('accessDdlProvider', () => {
             ].join('\n'));
         });
 
-        it('emits a table-level PRIMARY KEY with NOT NULL for composite-key columns', async () => {
+        it('emits a table-level PRIMARY KEY and preserves Required flags for composite-key columns', async () => {
             const composite = [
-                { ATTNAME: 'A', FORMAT_TYPE: 'SHORT', IS_PK: 1, ATTNUM: 1 },
-                { ATTNAME: 'B', FORMAT_TYPE: 'SHORT', IS_PK: 1, ATTNUM: 2 },
+                { ATTNAME: 'A', FORMAT_TYPE: 'SHORT', IS_NOT_NULL: 1, IS_PK: 1, ATTNUM: 1 },
+                { ATTNAME: 'B', FORMAT_TYPE: 'SHORT', IS_NOT_NULL: 0, IS_PK: 1, ATTNUM: 2 },
             ];
             const connection = new FakeAccessConnection({ Pair: composite });
             const ddl = await accessDdlProvider.generateTableDDL(connection, 'default', 'default', 'Pair');
 
-            expect(ddl).toContain('    [A] SHORT NOT NULL,\n    [B] SHORT NOT NULL,\n    PRIMARY KEY ([A], [B])\n);');
+            expect(ddl).toContain('    [A] SHORT NOT NULL,\n    [B] SHORT,\n    PRIMARY KEY ([A], [B])\n);');
             expect(ddl).not.toContain('PRIMARY KEY,');
         });
 
@@ -354,6 +354,19 @@ describe('accessDdlProvider', () => {
             const ddl = await accessDdlProvider.generateTableDDL(connection, 'default', 'default', 'Lookup');
 
             expect(ddl).toContain('[Code] TEXT(255) NOT NULL PRIMARY KEY');
+        });
+
+        it('keeps a text primary key without NOT NULL when Access marks it not required', async () => {
+            const textPk = [
+                { ATTNAME: 'Code', FORMAT_TYPE: 'VARCHAR(50)', IS_NOT_NULL: 0, IS_PK: 1, ATTNUM: 1 },
+                { ATTNAME: 'Label', FORMAT_TYPE: 'VARCHAR(50)', IS_NOT_NULL: 1, IS_PK: 0, ATTNUM: 2 },
+            ];
+            const connection = new FakeAccessConnection({ Lookup: textPk });
+            const ddl = await accessDdlProvider.generateTableDDL(connection, 'default', 'default', 'Lookup');
+
+            expect(ddl).toContain('[Code] TEXT(50) PRIMARY KEY');
+            expect(ddl).not.toContain('[Code] TEXT(50) NOT NULL');
+            expect(ddl).toContain('[Label] TEXT(50) NOT NULL');
         });
 
         it('keeps AutoNumber primary-key columns without NOT NULL', async () => {

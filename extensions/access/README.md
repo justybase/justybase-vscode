@@ -86,16 +86,19 @@ npm run install:access
 npm run check-types:access
 npm run build:access
 npm run test:access:read-parity  # all fixtures compared with Jackcess (JDK 11+)
+npm run test:access:csharp-ddl   # generated DDL replayed by the C# UCanAccess port (.NET 10+)
 ```
 
 The read-parity gate compares every shipped fixture table, column, index and
 cell value with [Jackcess](https://jackcess.sourceforge.io/), while
 `scripts/access-java-crosscheck.cjs` verifies that Jackcess can read a file
-written by the TypeScript writer. On Windows with Microsoft Access installed,
-`npm run test:access:com` and `npm run test:access:sql` additionally compare
-metadata, writes and query semantics with DAO (set `ACCESS_COM_VALIDATE=1`).
-Written files can also be cross-checked with the optional readers in
-`tools/access-ddl-compare` and `tools/access-java-verify`.
+written by the TypeScript writer. The C# replay recreates each fixture schema
+from the extension's generated `CREATE TABLE` statements and verifies that
+Access `Required` columns keep their `NOT NULL` flag. On Windows with Microsoft
+Access installed, `npm run test:access:com` and `npm run test:access:sql`
+additionally compare metadata, writes and query semantics with DAO (set
+`ACCESS_COM_VALIDATE=1`). Written files can also be cross-checked with the
+optional readers in `tools/access-ddl-compare` and `tools/access-java-verify`.
 
 ## License
 

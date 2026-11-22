@@ -698,6 +698,92 @@ function tablePropertyBytes(reader: MDBReader, tableName: string): Buffer | unde
     return undefined;
 }
 
+/**
+ * Reads the per-column `Required` property from the table property map.
+ *
+ * Access stores Required as a column property, not in the column flags byte.
+ * mdb-reader exposes bit 0x02 of that byte as `nullable`, but Access uses it
+ * for variable-length fields; treating it as nullability marks required text
+ * columns as nullable, drops NOT NULL from generated DDL and lets the mirror
+ * accept NULL values that Access would reject.
+ */
+export function parseAccessRequiredColumns(
+    propertyBytes: Uint8Array | undefined,
+    format: AccessFileFormat,
+): Set<string> {
+    const required = new Set<string>();
+    try {
+        if (!propertyBytes || propertyBytes.length < 10) return required;
+        const bytes = Buffer.from(propertyBytes);
+        const header = bytes.subarray(0, 4).toString('ascii');
+        if (header !== 'MR2\0' && header !== 'KKD\0') return required;
+
+        const encoding = format === 'jet3' ? 'latin1' : 'utf16le';
+        let propertyNames: string[] | undefined;
+        let cursor = 4;
+        while (cursor + 6 <= bytes.length) {
+            const blockLength = bytes.readUInt32LE(cursor);
+            const blockType = bytes.readUInt16LE(cursor + 4);
+            if (blockLength < 6 || cursor + blockLength > bytes.length) break;
+            const blockStart = cursor + 6;
+            const blockEnd = cursor + blockLength;
+
+            if (blockType === 0x80) {
+                propertyNames = [];
+                let nameCursor = blockStart;
+                while (nameCursor + 2 <= blockEnd) {
+                    const nameLength = bytes.readUInt16LE(nameCursor);
+                    nameCursor += 2;
+                    if (nameCursor + nameLength > blockEnd) break;
+                    propertyNames.push(bytes.toString(encoding, nameCursor, nameCursor + nameLength));
+                    nameCursor += nameLength;
+                }
+            } else if (blockType === 0x01 && propertyNames) {
+                let valueCursor = blockStart;
+                let mapName: string | undefined;
+                if (valueCursor + 4 <= blockEnd) {
+                    const mapLength = bytes.readUInt32LE(valueCursor);
+                    const mapEnd = valueCursor + mapLength;
+                    valueCursor += 4;
+                    if (mapLength >= 6 && mapEnd <= blockEnd) {
+                        const nameLength = bytes.readUInt16LE(valueCursor);
+                        valueCursor += 2;
+                        if (valueCursor + nameLength <= mapEnd) {
+                            mapName = bytes.toString(encoding, valueCursor, valueCursor + nameLength);
+                        }
+                        valueCursor = mapEnd;
+                    }
+                }
+                while (valueCursor + 2 <= blockEnd) {
+                    const valueStart = valueCursor;
+                    const valueLength = bytes.readUInt16LE(valueCursor);
+                    const valueEnd = valueStart + valueLength;
+                    valueCursor += 2;
+                    if (valueLength < 9 || valueEnd > blockEnd || valueCursor + 7 > valueEnd) break;
+                    valueCursor += 1; // DDL flag
+                    const valueType = bytes[valueCursor++] ?? 0;
+                    const propertyIndex = bytes.readUInt16LE(valueCursor);
+                    valueCursor += 2;
+                    const dataLength = bytes.readUInt16LE(valueCursor);
+                    valueCursor += 2;
+                    const isTrue = dataLength > 0 && valueCursor < valueEnd && bytes[valueCursor] !== 0;
+                    if (isTrue
+                        && valueType === 0x01
+                        && propertyNames[propertyIndex]?.toLowerCase() === 'required'
+                        && mapName) {
+                        required.add(mapName.toLowerCase());
+                    }
+                    valueCursor = valueEnd;
+                }
+            }
+            cursor += blockLength;
+        }
+    } catch {
+        // Property metadata is optional; table data remains usable without it.
+    }
+    return required;
+}
+
 const DEFAULT_TEMPLATES: Record<AccessFileCreationFormat, string> = {
     mdb2000: 'empty.mdb',
     mdb2003: 'empty.mdb',
@@ -1377,11 +1463,17 @@ export class AccessFileSession {
             conceptualTablePage,
         );
         const enrichedDefinition = enrichComplexColumnMetadata(this._reader, definition, conceptualTablePage);
-        const description = parseAccessPropertyMapDescription(
-            tablePropertyBytes(this._reader, name),
-            this._format,
-        );
-        return description === undefined ? enrichedDefinition : { ...enrichedDefinition, description };
+        const propertyBytes = tablePropertyBytes(this._reader, name);
+        const requiredColumns = parseAccessRequiredColumns(propertyBytes, this._format);
+        const withRequired = {
+            ...enrichedDefinition,
+            columns: enrichedDefinition.columns.map(column => ({
+                ...column,
+                nullable: !requiredColumns.has(column.name.toLowerCase()),
+            })),
+        };
+        const description = parseAccessPropertyMapDescription(propertyBytes, this._format);
+        return description === undefined ? withRequired : { ...withRequired, description };
     }
 
     /**

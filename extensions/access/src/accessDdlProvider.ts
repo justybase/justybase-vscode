@@ -273,9 +273,6 @@ export const accessDdlProvider: AccessDdlProvider = {
         const singlePrimaryKeyColumn = primaryKeyColumns.length === 1
             ? primaryKeyColumns[0].toLowerCase()
             : undefined;
-        const compositePrimaryKeyColumns = new Set(
-            primaryKeyColumns.length > 1 ? primaryKeyColumns.map(column => column.toLowerCase()) : [],
-        );
 
         const columnLines: string[] = [];
         const skippedLines: string[] = [];
@@ -298,18 +295,15 @@ export const accessDdlProvider: AccessDdlProvider = {
             const columnKey = column.name.toLowerCase();
             const isSinglePrimaryKey = singlePrimaryKeyColumn !== undefined
                 && columnKey === singlePrimaryKeyColumn;
-            const isCompositePrimaryKey = compositePrimaryKeyColumns.has(columnKey);
-            if (isSinglePrimaryKey) {
-                if (!isAutoLike) {
-                    parts.push('NOT NULL');
-                }
-                parts.push('PRIMARY KEY');
-            } else if (isCompositePrimaryKey) {
-                if (!isAutoLike) {
-                    parts.push('NOT NULL');
-                }
-            } else if (column.notNull && !isAutoLike) {
+            // The primary-key index already enforces non-null values. Access
+            // keeps the column-level Required property separate, and a text
+            // primary key commonly has Required=False, so emit NOT NULL only
+            // when the source column itself carries that property.
+            if (column.notNull && !isAutoLike) {
                 parts.push('NOT NULL');
+            }
+            if (isSinglePrimaryKey) {
+                parts.push('PRIMARY KEY');
             }
             columnLines.push(`    ${parts.join(' ')}`);
         }

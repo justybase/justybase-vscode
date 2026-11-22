@@ -266,6 +266,26 @@ describe('Access file format boundary', () => {
         }
     });
 
+    it('reads the Access Required property separately from the nullable flag', async () => {
+        const session = await AccessFileSession.open({
+            filePath: path.join(__dirname, 'fixtures', 'access', 'accessLike.mdb'),
+        });
+        try {
+            expect(session.getTableDefinition('t_like1').columns).toMatchObject([
+                { name: 'a1', nullable: true },
+                { name: 'a2', nullable: false },
+            ]);
+            expect(session.getTableDefinition('t_like2').columns).toMatchObject([
+                { name: 'ID', nullable: true },
+                { name: 'Campo1', nullable: true },
+                { name: 'Campo2', nullable: false },
+                { name: 'Campo3', nullable: true },
+            ]);
+        } finally {
+            await session.close();
+        }
+    });
+
     it('refuses to write a password-protected file', async () => {
         const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-encrypted-'));
         const filePath = path.join(directory, 'sample.accdb');
