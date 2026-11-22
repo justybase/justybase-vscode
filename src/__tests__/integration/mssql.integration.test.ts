@@ -904,3 +904,9 @@ async function buildLiveMsSqlSchemaProvider(
 	});
 	return schemaProvider;
 }
+
+if (!config) {
+	console.log(
+		'⚠️ MSSQL integration test skipped: set MSSQL_LIVE_TEST_* env vars, or use the optional docker-compose workflow.',
+	);
+}

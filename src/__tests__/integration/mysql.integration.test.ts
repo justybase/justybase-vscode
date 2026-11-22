@@ -230,7 +230,7 @@ describeIfConfigured("mysql integration", () => {
   }, 30000);
 
   describe("connection and basic queries", () => {
-    it("uses the MySQL 8.0.34 TESTDB fixture", async () => {
+    it("uses a supported MySQL 8.x TESTDB fixture", async () => {
       const version = await readScalar(
         connection,
         "SELECT VERSION() AS VERSION",
@@ -240,7 +240,7 @@ describeIfConfigured("mysql integration", () => {
         "SELECT DATABASE() AS DATABASE_NAME",
       );
 
-      expect(String(version)).toMatch(/^8\.0\.34(?:[-+].*)?$/);
+      expect(String(version)).toMatch(/^8\.(?:0|4)\.\d+(?:[-+].*)?$/);
       expect(String(currentDatabase).toUpperCase()).toBe("TESTDB");
     });
 
@@ -767,6 +767,6 @@ describeIfConfigured("mysql integration", () => {
 
 if (!config) {
   console.log(
-    "⚠️ MySQL integration test skipped: set RUN_MYSQL_INTEGRATION=1 (or MYSQL_LIVE_TEST_ENABLED=1) with MYSQL_LIVE_TEST_* env vars for an explicit live-server run.",
+    "⚠️ MySQL integration test skipped: set RUN_MYSQL_INTEGRATION=1 (or MYSQL_LIVE_TEST_ENABLED=1) with MYSQL_LIVE_TEST_* env vars for an explicit live-server run, or use the optional docker-compose workflow.",
   );
 }

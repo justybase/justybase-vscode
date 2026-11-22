@@ -64,3 +64,59 @@ npm run lint
 npm run build
 npm run verify:mysql
 ```
+
+## Integration Testing
+
+Optional local integration against a live MySQL 8.4 LTS server:
+
+```bash
+npm run test:mysql:integration
+```
+
+The suite is opt-in: set `RUN_MYSQL_INTEGRATION=1` (or
+`MYSQL_LIVE_TEST_ENABLED=1`) together with `MYSQL_LIVE_TEST_HOST`,
+`MYSQL_LIVE_TEST_DATABASE`, `MYSQL_LIVE_TEST_USER` and
+`MYSQL_LIVE_TEST_PASSWORD`. `MYSQL_LIVE_TEST_PORT` defaults to `3306`.
+
+### Ephemeral local server (Docker in WSL2)
+
+A throwaway server is defined in
+[`extensions/mysql/docker-compose.integration.yml`](../extensions/mysql/docker-compose.integration.yml).
+It uses `mysql:8.4` (LTS), maps host port `53306` to container port `3306`, and
+creates the `TESTDB` database with a `justybase` user, matching the version and
+database names asserted by the live suite. Run the commands below from WSL2 with
+a running Docker daemon; `127.0.0.1:53306` is reachable from the same WSL shell
+(Remote-WSL is a separate host placement and must be checked separately):
+
+```bash
+docker compose -f extensions/mysql/docker-compose.integration.yml up -d --wait
+
+export RUN_MYSQL_INTEGRATION=1
+export MYSQL_LIVE_TEST_HOST=127.0.0.1
+export MYSQL_LIVE_TEST_PORT=53306
+export MYSQL_LIVE_TEST_DATABASE=TESTDB
+export MYSQL_LIVE_TEST_USER=justybase
+export MYSQL_LIVE_TEST_PASSWORD=justybase
+
+npm ci
+(cd extensions/mysql && npm ci)
+node scripts/mysql-integration-fixture.cjs create
+npm run test:mysql:integration
+node scripts/mysql-integration-fixture.cjs drop
+
+docker compose -f extensions/mysql/docker-compose.integration.yml down -v
+```
+
+The `--wait` flag relies on the compose healthcheck (`mysqladmin ping`), so the
+tests start only after the server is ready. `down -v` removes the container and
+its data volume, leaving no durable database state. The fixture script creates
+and drops the `departments` table used by the read-only View Data test; the
+suite itself creates its remaining objects with unique suffixes and removes
+them in `finally`. The credentials above are throwaway local values — never
+commit real credentials or generated database reports.
+
+Do not run `npm ci` from WSL against a checkout shared with Windows: it replaces
+platform-specific modules and breaks the other side. Either install
+dependencies for the platform you run on, or use a separate Linux clone. The
+MySQL runtime (`mysql2`) is pure JavaScript, so the existing
+`extensions/mysql/node_modules` also works from WSL.

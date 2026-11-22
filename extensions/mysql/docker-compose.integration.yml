@@ -1,0 +1,17 @@
+services:
+    mysql:
+        image: mysql:8.4
+        container_name: justybase-mysql-integration
+        ports:
+            - '53306:3306'
+        environment:
+            MYSQL_ROOT_PASSWORD: justybase-root
+            MYSQL_DATABASE: TESTDB
+            MYSQL_USER: justybase
+            MYSQL_PASSWORD: justybase
+        healthcheck:
+            test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -pjustybase-root']
+            interval: 5s
+            timeout: 5s
+            retries: 20
+            start_period: 30s

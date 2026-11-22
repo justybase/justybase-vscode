@@ -1,0 +1,16 @@
+services:
+    mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        container_name: justybase-mssql-integration
+        ports:
+            - '51433:1433'
+        environment:
+            ACCEPT_EULA: 'Y'
+            MSSQL_PID: Developer
+            MSSQL_SA_PASSWORD: 'Justybase!Passw0rd'
+        healthcheck:
+            test: ['CMD-SHELL', '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" -b -o /dev/null || exit 1']
+            interval: 5s
+            timeout: 5s
+            retries: 20
+            start_period: 30s

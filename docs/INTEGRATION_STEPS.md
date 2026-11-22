@@ -107,6 +107,47 @@ npm run test:mssql:integration
 npm run verify:mssql
 ```
 
+### Ephemeral local server (Docker in WSL2)
+
+A throwaway server is defined in
+[`extensions/mssql/docker-compose.integration.yml`](../extensions/mssql/docker-compose.integration.yml).
+It uses `mcr.microsoft.com/mssql/server:2022-latest`, maps host port `51433` to
+container port `1433`, and runs the Developer edition with a local SA password.
+Run the commands below from WSL2 with a running Docker daemon;
+`127.0.0.1:51433` is reachable from the same WSL shell (Remote-WSL is a separate
+host placement and must be checked separately):
+
+```bash
+docker compose -f extensions/mssql/docker-compose.integration.yml up -d --wait
+
+export MSSQL_LIVE_TEST_HOST=127.0.0.1
+export MSSQL_LIVE_TEST_PORT=51433
+export MSSQL_LIVE_TEST_DATABASE=justybase_mssql_local
+export MSSQL_LIVE_TEST_USER=sa
+export MSSQL_LIVE_TEST_PASSWORD='Justybase!Passw0rd'
+export MSSQL_LIVE_TEST_ENCRYPT=true
+export MSSQL_LIVE_TEST_TRUST_SERVER_CERTIFICATE=true
+export MSSQL_LIVE_TEST_CONNECT_TIMEOUT=30000
+export MSSQL_LIVE_TEST_REQUEST_TIMEOUT=30000
+
+node scripts/mssql-integration-database.cjs create
+npm run test:mssql:integration
+node scripts/mssql-integration-database.cjs drop
+
+docker compose -f extensions/mssql/docker-compose.integration.yml down -v
+```
+
+The `--wait` flag relies on the compose healthcheck (`sqlcmd -Q 'SELECT 1'`), so
+the tests start only after the server is ready. `down -v` removes the container
+and its data, leaving no durable database state. The `MSSQL_LIVE_TEST_*`
+credentials above are throwaway local values.
+
+Do not run `npm ci` from WSL against a checkout shared with Windows: it replaces
+platform-specific modules and breaks the other side. Either install
+dependencies for the platform you run on, or use a separate Linux clone. The
+MSSQL runtime (`mssql`/`tedious`) is pure JavaScript, so the existing
+`extensions/mssql/node_modules` also works from WSL.
+
 The deep suite exercises:
 
 - connection and compatibility shims (`CURRENT_CATALOG` / `CURRENT_SCHEMA` / `CURRENT_SID`)

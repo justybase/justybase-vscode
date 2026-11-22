@@ -17,7 +17,6 @@ permissions:
 jobs:
   mssql-integration:
     name: MSSQL Live Integration (Linux)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -27,8 +26,8 @@ jobs:
         env:
           ACCEPT_EULA: "Y"
           MSSQL_PID: Developer
-          MSSQL_SA_PASSWORD: ${{ secrets.MSSQL_TEST_SA_PASSWORD }}
-          SQLCMDPASSWORD: ${{ secrets.MSSQL_TEST_SA_PASSWORD }}
+          MSSQL_SA_PASSWORD: Justybase!Passw0rd
+          SQLCMDPASSWORD: Justybase!Passw0rd
         ports:
           - 1433:1433
         options: >-
@@ -43,7 +42,7 @@ jobs:
       MSSQL_LIVE_TEST_PORT: "1433"
       MSSQL_LIVE_TEST_DATABASE: justybase_mssql_ci
       MSSQL_LIVE_TEST_USER: sa
-      MSSQL_LIVE_TEST_PASSWORD: ${{ secrets.MSSQL_TEST_SA_PASSWORD }}
+      MSSQL_LIVE_TEST_PASSWORD: Justybase!Passw0rd
       MSSQL_LIVE_TEST_ENCRYPT: "true"
       MSSQL_LIVE_TEST_TRUST_SERVER_CERTIFICATE: "true"
       MSSQL_LIVE_TEST_CONNECT_TIMEOUT: "30000"

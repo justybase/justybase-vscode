@@ -66,6 +66,30 @@ npm run test:mssql:integration
 
 Set `MSSQL_LIVE_TEST_HOST`, `MSSQL_LIVE_TEST_PORT`, `MSSQL_LIVE_TEST_DATABASE`, `MSSQL_LIVE_TEST_USER`, and `MSSQL_LIVE_TEST_PASSWORD` locally. Never commit these values.
 
+For a throwaway local server, use the compose file in WSL2 (Docker required):
+
+```bash
+docker compose -f extensions/mssql/docker-compose.integration.yml up -d --wait
+
+export MSSQL_LIVE_TEST_HOST=127.0.0.1
+export MSSQL_LIVE_TEST_PORT=51433
+export MSSQL_LIVE_TEST_DATABASE=justybase_mssql_local
+export MSSQL_LIVE_TEST_USER=sa
+export MSSQL_LIVE_TEST_PASSWORD='Justybase!Passw0rd'
+export MSSQL_LIVE_TEST_ENCRYPT=true
+export MSSQL_LIVE_TEST_TRUST_SERVER_CERTIFICATE=true
+
+node scripts/mssql-integration-database.cjs create
+npm run test:mssql:integration
+node scripts/mssql-integration-database.cjs drop
+
+docker compose -f extensions/mssql/docker-compose.integration.yml down -v
+```
+
+The credentials are throwaway local values. Do not run `npm ci` from WSL against
+a checkout shared with Windows; use the dependencies already installed for the
+platform you run on, or a separate Linux clone.
+
 For a package build:
 
 ```bash
