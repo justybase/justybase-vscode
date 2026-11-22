@@ -1584,6 +1584,18 @@ describe('document Results workspace', () => {
         expect(state.getWorkspaceResults(documentUri).filter(rs => !rs.isLog).map(rs => rs.data)).toEqual([[[1], [3]], [[2]]]);
         expect(state.getActiveResultSetIndex(documentUri)).toBe(0);
     });
+
+    it('tracks the one-off profile separately from the tab identity', () => {
+        const state = new ResultStateManagerTracked();
+        const runAs = `${documentUri}#run-as-1`;
+        state.registerExecutionSource(documentUri, runAs);
+        state.markOneOffExecution(runAs, 'ADMIN');
+        expect(state.getOneOffConnectionName(runAs)).toBe('ADMIN');
+        expect(state.getOneOffConnectionName(documentUri)).toBeUndefined();
+        expect(state.getDocumentUri(runAs)).toBe(documentUri);
+        state.closeSource(runAs);
+        expect(state.getOneOffConnectionName(runAs)).toBeUndefined();
+    });
 });
 
 

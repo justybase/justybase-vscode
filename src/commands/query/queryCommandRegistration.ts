@@ -22,6 +22,7 @@ import {
 } from './queryCommandTuning';
 import { getExtensionConfiguration } from '../../compatibility/configuration';
 import { runSmartSequentialQuery } from './querySmartSequentialRun';
+import { registerRunAsCommands } from './queryRunAs';
 import {
     markQueryExecutionCancelling, getQueryExecutionCoordinator,
     tryAcquireQueryExecution,
@@ -567,6 +568,9 @@ export function registerQueryCommands(
                 const errMsg = err instanceof Error ? err.message : String(err);
                 vscode.window.showErrorMessage(`Format SQL failed: ${errMsg}`);
             }
-        })
+        }),
+
+        // Run As — one-off execution on another saved profile
+        ...registerRunAsCommands(deps)
     ];
 }

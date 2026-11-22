@@ -28,6 +28,26 @@ not move an already submitted request onto another request's session.
 A batch remains one request: its statements run sequentially on that request's
 owned session, preserving dependent statements and temporary-object semantics.
 
+## Run As (one-off) requests
+
+**Run As** (SQL editor context menu, **Run Query ▸ Run As**) executes the
+selection, the statement under the cursor, or the whole file on another saved
+connection profile for one operation. It submits an **independent request**:
+the run-as session is transient, opens against the selected profile's default
+database, and closes after the batch. The tab keeps its connection, persistent
+session, metadata context and existing result tabs, so no connection switch or
+metadata refresh happens.
+
+- The request is not serialized behind the tab's shared lane and does not block
+  later tab requests; per-tab and global independent limits still apply.
+- Logs entries are prefixed with `[Run As: <profile>]`; success, failure, and
+  cancellation are reported in the status bar and by notification.
+- Cancellation targets only that execution identity.
+- Changing the tab's connection, database override, or selection does not
+  invalidate a queued run-as request; editing the selected saved profile does.
+- Risky DML (`DELETE`/`UPDATE` without `WHERE`, `TRUNCATE`) always asks for an
+  extra confirmation, regardless of `justybase.safeExecute.enabled`.
+
 Open **JustyBase: Show SQL Execution Queue** from the Command Palette, or click
 the status bar's **Running | N queued** indicator. The **SQL Queue** tree in the
 JustyBase sidebar shows each tab's running SQL, pending SQL previews, queue count,

@@ -39,9 +39,18 @@ import {
     publishRuntimeErrorDiagnostic,
 } from '../../providers/runtimeErrorDiagnostics';
 
+/** A one-off execution on a saved profile without changing the tab's connection. */
+export interface RunAsExecutionOptions {
+    /** Saved connection profile that owns the transient run-as session. */
+    connectionName: string;
+}
+
 export interface SmartSequentialRunOptions {
     continueOnError?: boolean;
     wholeDocument?: boolean;
+    /** Explicit SQL that already reflects the caller's scope; skips editor resolution. */
+    queries?: readonly string[];
+    runAs?: RunAsExecutionOptions;
 }
 
 function resolveSmartSequentialQueries(
@@ -121,37 +130,52 @@ function buildQueryErrorResult(
 export async function runSmartSequentialQuery(
     deps: QueryCommandsDependencies,
     options: SmartSequentialRunOptions = {},
-): Promise<void> {
+): Promise<QueryQueueOutcome | undefined> {
     options = Object.freeze({ ...options });
     const { context, connectionManager } = deps;
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.showErrorMessage('No active editor found');
-        return;
+        return undefined;
     }
 
+    const runAs = options.runAs;
     const sourceUri = editor.document.uri.toString();
-    const connectionName = connectionManager.getConnectionForExecution(sourceUri)
-        || connectionManager.getActiveConnectionName();
+    const connectionName = runAs
+        ? runAs.connectionName
+        : connectionManager.getConnectionForExecution(sourceUri)
+            || connectionManager.getActiveConnectionName();
     const databaseKind = connectionName
         ? connectionManager.getConnectionDatabaseKind(connectionName)
         : undefined;
 
-    const resolved = resolveSmartSequentialQueries(editor, options.wholeDocument, connectionManager.getExecutionDatabaseKind(editor.document.uri.toString()));
-    if (!resolved) return;
+    const resolved = options.queries
+        ? { queries: [...options.queries], sourceUri }
+        : resolveSmartSequentialQueries(editor, options.wholeDocument, databaseKind);
+    if (!resolved) return undefined;
     const queries = resolved.queries;
     const sourceRange = new vscode.Range(editor.selection.start, editor.selection.end);
-    const keepConnectionOpen = connectionManager.getDocumentKeepConnectionOpen?.(sourceUri) ?? true;
+    // A run-as request owns a transient session on the selected profile; it
+    // must never reuse or replace the tab's persistent connection.
+    const keepConnectionOpen = runAs
+        ? false
+        : connectionManager.getDocumentKeepConnectionOpen?.(sourceUri) ?? true;
     const independentConnection = !keepConnectionOpen;
-    const executionUri = independentConnection ? `${sourceUri}#query-${randomUUID()}` : sourceUri;
+    const executionUri = independentConnection
+        ? `${sourceUri}#${runAs ? 'run-as' : 'query'}-${randomUUID()}`
+        : sourceUri;
     const recovery = createQueryExecutionRecovery(connectionManager, executionUri, connectionName ?? undefined);
     if (independentConnection) {
         recovery.allowForcedRecovery = false;
         recovery.resetConnection = async () => false;
         recovery.openFreshConnection = async () => false;
-        recovery.forcedRecoveryUnavailableMessage = 'This request owns a transient session. Cancel it and wait for its cleanup; other independent requests remain isolated.';
+        recovery.forcedRecoveryUnavailableMessage = runAs
+            ? 'Run As owns a transient session on the selected profile. Cancel it and wait for cleanup; this tab\'s session is untouched.'
+            : 'This request owns a transient session. Cancel it and wait for its cleanup; other independent requests remain isolated.';
     }
-    const databaseOverride = connectionManager.getDocumentDatabase(sourceUri);
+    // The tab's database override belongs to its own connection; a run-as
+    // request must keep the selected profile's default database.
+    const databaseOverride = runAs ? undefined : connectionManager.getDocumentDatabase(sourceUri);
     const profile = connectionName ? connectionManager.getConnection(connectionName).then(executionTargetFingerprint) : Promise.resolve(undefined);
     const coordinator = getQueryExecutionCoordinator();
     // Snapshot overlap synchronously before enqueue: preserve prior result tabs
@@ -160,20 +184,45 @@ export async function runSmartSequentialQuery(
     // must clear unpinned tabs instead of pinning them. The queue serializes
     // work, so by the time this job's run() starts the predecessor has already
     // finalized — checking at run() time would always see idle.
-    const preserveExistingResults = coordinator.hasPendingWork(sourceUri);
+    const preserveExistingResults = runAs !== undefined || coordinator.hasPendingWork(sourceUri);
+    // A run-as request keeps its own transient session identity so the tab's
+    // persistent connection, database override and metadata context are never touched.
+    const executionContext = runAs ? executionUri : sourceUri;
+    const logPrefix = runAs ? `[Run As: ${runAs.connectionName}] ` : '';
     deps.resultPanelProvider.registerExecutionSource?.(sourceUri, executionUri);
-    await coordinator.enqueue({ sourceUri, sql: queries.join(';\n\n'), connectionName: connectionName ?? undefined,
-        database: databaseOverride, sourceRange, executionUri }, {
+    if (runAs) {
+        // Result refresh/filter must keep the run-as identity, never the tab's.
+        deps.resultPanelProvider.markOneOffExecution?.(executionUri, runAs.connectionName);
+    }
+    return coordinator.enqueue({
+        sourceUri,
+        sql: queries.join(';\n\n'),
+        connectionName: connectionName ?? undefined,
+        database: databaseOverride, sourceRange, executionUri,
+    }, {
         document: editor.document,
-        origin: options.wholeDocument ? 'Run Query Batch' : options.continueOnError ? 'Run Query Continue on Error' : 'Run Query',
+        origin: runAs
+            ? 'Run As'
+            : options.wholeDocument ? 'Run Query Batch' : options.continueOnError ? 'Run Query Continue on Error' : 'Run Query',
         recovery, independentConnection,
     }, async signal => {
         try {
-            if (!(await confirmSafeExecute(queries))) return undefined;
+            // Run As already confirmed risky SQL against the selected profile;
+            // the standard safe-execute prompt must not ask a second time.
+            if (!runAs && !(await confirmSafeExecute(queries))) return undefined;
             if (signal.aborted) throw new Error('Query preparation cancelled');
             const prepared = await prepareQueuedQuery(queries, context, sourceUri, connectionManager,
-                connectionName ?? undefined, databaseOverride, await profile, signal);
-            return lease => executePreparedQuery(deps, options, executionUri, databaseKind, queries, lease, { ...prepared, sourceDocumentUri: sourceUri, keepConnectionOpenOverride: keepConnectionOpen }, preserveExistingResults);
+                connectionName ?? undefined, databaseOverride, await profile, signal, {
+                    explicitConnection: runAs !== undefined,
+                    // A Run As request targets the selected profile's dialect;
+                    // the tab's document dialect must not shape macro expansion.
+                    ...(runAs ? { databaseKind } : {}),
+                });
+            return lease => executePreparedQuery(deps, options, executionUri, databaseKind, queries, lease, {
+                ...prepared,
+                sourceDocumentUri: runAs ? executionContext : sourceUri,
+                keepConnectionOpenOverride: keepConnectionOpen,
+            }, preserveExistingResults, logPrefix, runAs ? sourceUri : undefined);
         } catch (error: unknown) {
             if (signal.aborted) throw error;
             void vscode.window.showErrorMessage(`Could not prepare queued query: ${error instanceof Error ? error.message : String(error)}`);
@@ -191,9 +240,15 @@ async function executePreparedQuery(
     executionGate: QueryExecutionLease,
     prepared: BatchQueryRunOptions,
     preserveExistingResults = false,
+    logPrefix = '',
+    editorUri?: string,
 ): Promise<QueryQueueOutcome> {
     const { context, connectionManager, resultPanelProvider } = deps;
-    const documentUri = prepared.sourceDocumentUri ?? executionGate.documentUri ?? executionUri;
+    // Execution identity may be synthetic (Run As); the panel workspace must
+    // still be the real editor document.
+    const executionDocumentUri = prepared.sourceDocumentUri ?? executionGate.documentUri ?? executionUri;
+    const documentUri = editorUri ?? executionDocumentUri;
+    const runAs = options.runAs;
     const queriesForError = queries;
     let hadFailure = false;
     let hadCancellation = false;
@@ -218,7 +273,13 @@ async function executePreparedQuery(
         resultPanelProvider.startExecution(executionUri, preserveExistingResults ? { preserveExistingResults: true } : undefined);
         executionStarted = true;
         clearRuntimeErrorDiagnostic(documentUri);
-        resultPanelProvider.log(executionUri, 'Preparing SQL execution...');
+        if (runAs) {
+            resultPanelProvider.log(
+                executionUri,
+                `${logPrefix}One-off session on "${runAs.connectionName}". This tab's connection, session and results are preserved.`,
+            );
+        }
+        resultPanelProvider.log(executionUri, `${logPrefix}Preparing SQL execution...`);
 
         const config = getExtensionConfiguration();
         const enableStreaming = !options.wholeDocument && (config.get<boolean>('enableStreaming', true) ?? true);
@@ -292,14 +353,16 @@ async function executePreparedQuery(
                         sql: queries[queryIndex] ?? sql,
                         operation: 'SQL execution',
                     });
-                    publishRuntimeErrorDiagnostic(
-                        documentUri,
-                        queries[queryIndex] ?? sql,
-                        errorMessage,
-                        errorDetails,
-                        databaseKind ?? '',
-                        queryIndex,
-                    );
+                    if (!runAs) {
+                        publishRuntimeErrorDiagnostic(
+                            documentUri,
+                            queries[queryIndex] ?? sql,
+                            errorMessage,
+                            errorDetails,
+                            databaseKind ?? '',
+                            queryIndex,
+                        );
+                    }
                     resultPanelProvider.updateResults(
                         [buildQueryErrorResult(queries[queryIndex] ?? sql, errorMessage, databaseKind, errorDetails)],
                         executionUri,
@@ -310,9 +373,11 @@ async function executePreparedQuery(
             : {}),
         };
 
-        const progressTitle = continueOnError
-            ? `Executing SQL (continue on error) for ${documentUri.split(/[\\/]/).pop()}...`
-            : `Executing SQL for ${documentUri.split(/[\\/]/).pop()}...`;
+        const progressTitle = runAs
+            ? `Run As ${runAs.connectionName}: executing ${queries.length} statement(s)...`
+            : continueOnError
+                ? `Executing SQL (continue on error) for ${documentUri.split(/[\\/]/).pop()}...`
+                : `Executing SQL for ${documentUri.split(/[\\/]/).pop()}...`;
 
         executionGate.markRunning();
         await vscode.window.withProgress(
@@ -338,7 +403,7 @@ async function executePreparedQuery(
                             executionUri,
                             msg => {
                                 if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.log(executionUri, msg);
+                                    resultPanelProvider.log(executionUri, `${logPrefix}${msg}`);
                                 }
                             },
                             (queryIndex: number, chunk: StreamingChunk, sql: string) => {
@@ -380,7 +445,7 @@ async function executePreparedQuery(
                             executionUri,
                             msg => {
                                 if (executionGate?.isCurrent()) {
-                                    resultPanelProvider.log(executionUri, msg);
+                                    resultPanelProvider.log(executionUri, `${logPrefix}${msg}`);
                                 }
                             },
                             queryResults => {
@@ -425,7 +490,9 @@ async function executePreparedQuery(
             clearRuntimeErrorDiagnostic(documentUri);
         }
         resultPanelProvider.finalizeExecution(executionUri);
-        void handleExecutionCompletion(documentUri);
+        // A run-as batch keeps focus in the SQL editor: results are already
+        // visible in the tab's panel and the caller reports the outcome.
+        if (!runAs) void handleExecutionCompletion(documentUri);
         if (runQueryTimer) {
             const successEvent = runQueryTimer.finish({
                 result: 'ok',
@@ -447,14 +514,16 @@ async function executePreparedQuery(
         executionGate.recordError(msg);
         if (isConnectionBrokenError(err)) executionGate.requireSessionIsolation();
         const errorDetails = extractDatabaseErrorDetails(err);
-        if (!isCancellationError(err) && queriesForError.length === 1) {
+        // A run-as failure belongs to the one-off identity, not to the tab's
+        // own diagnostics; the result panel and notification carry it.
+        if (!runAs && !isCancellationError(err) && queriesForError.length === 1) {
             publishRuntimeErrorDiagnostic(documentUri, queriesForError[0], msg, errorDetails, databaseKind ?? '', 0);
         }
 
         if (isCancellationError(err)) {
             executionGate.requireSessionIsolation();
             if (executionStarted) {
-                resultPanelProvider.log(executionUri, 'Query execution cancelled by user.');
+                resultPanelProvider.log(executionUri, `${logPrefix}Query execution cancelled by user.`);
                 resultPanelProvider.finalizeExecution(executionUri);
             }
             if (runQueryTimer) {
@@ -500,7 +569,9 @@ async function executePreparedQuery(
             sql: queriesForError.length === 1 ? queriesForError[0] : undefined,
             operation: 'SQL execution',
         }))) {
-            vscode.window.showErrorMessage(`Error executing query: ${msg}`);
+            void vscode.window.showErrorMessage(runAs
+                ? `Run As failed on connection "${runAs.connectionName}": ${msg}`
+                : `Error executing query: ${msg}`);
         }
         return 'failed';
     } finally {

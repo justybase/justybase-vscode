@@ -460,6 +460,65 @@ describe('ResultPanelView Integration', () => {
         }));
     });
 
+    test('runs a Run As result aggregation on its one-off profile, not the tab connection', async () => {
+        const queryRunner = jest.requireMock('../../core/queryRunner') as {
+            runQueryRaw: jest.MockedFunction<typeof RunQueryRaw>;
+        };
+        queryRunner.runQueryRaw.mockReset().mockResolvedValue({
+            columns: [{ name: 'agg_0_count' }, { name: '__JB_FILTERED_ROW_COUNT' }],
+            data: [[2, 2]],
+        } as QueryResult);
+        const sourceUri = 'file:///run-as-aggregate.sql';
+        const resultSet: ResultSet = {
+            resultSetId: 'run-as-aggregate',
+            columns: [{ name: 'AMOUNT', type: 'NUMERIC' }],
+            data: [[10]],
+            sql: 'SELECT AMOUNT FROM SALES',
+            refreshSql: 'SELECT AMOUNT FROM SALES',
+        };
+        provider.markOneOffExecution(sourceUri, 'ADMIN');
+        const privateProvider = provider as unknown as {
+            _context: vscode.ExtensionContext;
+            _connectionManager: {
+                getConnectionForExecution: jest.Mock;
+                getActiveConnectionName: jest.Mock;
+            };
+            _stateManager: { resultsMap: Map<string, ResultSet[]> };
+            _handleDatabaseAggregations: (...args: unknown[]) => Promise<unknown[]>;
+        };
+        privateProvider._context = {} as vscode.ExtensionContext;
+        privateProvider._connectionManager = {
+            getConnectionForExecution: jest.fn(() => 'TAB_CONN'),
+            getActiveConnectionName: jest.fn(() => undefined),
+        };
+        privateProvider._stateManager.resultsMap.set(sourceUri, [resultSet]);
+
+        await privateProvider._handleDatabaseAggregations(sourceUri, 0, [{ columnIndex: 0, fn: 'count' }]);
+
+        expect(privateProvider._connectionManager.getConnectionForExecution).not.toHaveBeenCalled();
+        expect(queryRunner.runQueryRaw).toHaveBeenCalledWith(expect.objectContaining({
+            connectionName: 'ADMIN',
+        }));
+    });
+
+    test('resolves result connection identity from the one-off profile when present', () => {
+        const sourceUri = 'file:///run-as-identity.sql';
+        const privateProvider = provider as unknown as {
+            _connectionManager: {
+                getConnectionForExecution: jest.Mock;
+                getActiveConnectionName: jest.Mock;
+            };
+            _connectionNameForResultSource: (uri: string) => string | undefined;
+        };
+        privateProvider._connectionManager = {
+            getConnectionForExecution: jest.fn(() => 'TAB_CONN'),
+            getActiveConnectionName: jest.fn(() => 'ACTIVE_CONN'),
+        };
+        expect(privateProvider._connectionNameForResultSource(sourceUri)).toBe('TAB_CONN');
+        provider.markOneOffExecution(sourceUri, 'ADMIN');
+        expect(privateProvider._connectionNameForResultSource(sourceUri)).toBe('ADMIN');
+    });
+
     test('should hydrate pending execution state when webview becomes ready after execution starts', () => {
         const { commands } = jest.requireMock('vscode') as MockedVsCodeModule;
         commands.executeCommand.mockClear();

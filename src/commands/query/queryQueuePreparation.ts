@@ -20,13 +20,14 @@ export async function prepareQueuedQuery(
     databaseOverride: string | undefined,
     profile: string | undefined,
     signal?: AbortSignal,
+    options: { explicitConnection?: boolean; databaseKind?: string } = {},
 ): Promise<BatchQueryRunOptions> {
     if (signal?.aborted) throw new Error('Query preparation cancelled');
     const fileContext = createMacroFileReadContext(sourceUri);
     const files = new Map<string, Promise<{ path: string; content: string }>>();
     let sealed = false;
     const macroFileContext: MacroPreprocessorContext = {
-        databaseKind: manager.getExecutionDatabaseKind?.(sourceUri),
+        databaseKind: options.databaseKind ?? manager.getExecutionDatabaseKind?.(sourceUri),
         sourceName: fileContext.sourceName,
         readFile: (path, fromSource) => {
             const key = JSON.stringify([path, fromSource]);
@@ -41,17 +42,27 @@ export async function prepareQueuedQuery(
     };
     const preparedVariables = Object.freeze(await resolveBatchVariables(queries, context, sourceUri, macroFileContext, signal));
     sealed = true;
-    return {
-        preparedVariables,
-        macroFileContext,
-        connectionName,
-        validateExecutionTarget: async () => {
+    // A run-as request targets an explicit profile only. The tab's connection
+    // and database override belong to a different session and must not
+    // invalidate it, while changes to the saved profile still must.
+    const validateExecutionTarget = options.explicitConnection
+        ? async () => {
+            if (!connectionName || executionTargetFingerprint(await manager.getConnection(connectionName)) !== profile) {
+                throw new Error('Queued query target changed or is unavailable. Restore its connection profile or remove it and submit again.');
+            }
+        }
+        : async () => {
             const currentName = manager.getConnectionForExecution(sourceUri) || manager.getActiveConnectionName();
             if (!connectionName || currentName !== connectionName
                 || manager.getDocumentDatabase(sourceUri) !== databaseOverride
                 || executionTargetFingerprint(await manager.getConnection(connectionName)) !== profile) {
                 throw new Error('Queued query target changed or is unavailable. Restore its connection/database or remove it and submit again.');
             }
-        },
+        };
+    return {
+        preparedVariables,
+        macroFileContext,
+        connectionName,
+        validateExecutionTarget,
     };
 }

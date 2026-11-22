@@ -197,10 +197,11 @@ describe('commands/queryCommands', () => {
 
             const disposables = registerQueryCommands(deps);
 
-            // Should register 11 commands: cancelQuery, cancelActiveQuery, viewTableData, runQuery, runQueryContinueOnError,
-            // executeAndLoadToDuckDb, runQueryBatch, explainQuery, explainQueryVerbose, tuningAdvisor, formatSQL
-            expect(disposables).toHaveLength(11);
-            expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(11);
+            // Should register 14 commands: cancelQuery, cancelActiveQuery, viewTableData, runQuery, runQueryContinueOnError,
+            // executeAndLoadToDuckDb, runQueryBatch, explainQuery, explainQueryVerbose, tuningAdvisor, formatSQL,
+            // runAsSelection, runAsStatement, runAsWholeFile
+            expect(disposables).toHaveLength(14);
+            expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(14);
         });
 
         it('should register netezza.cancelQuery command', () => {

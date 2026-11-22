@@ -43,6 +43,26 @@ The default lifecycle opens a connection when work needs it and releases it when
 - Cancellation requests the driver cancellation and stops further UI rendering. A database that cannot cancel immediately may finish server-side before the connection is reusable.
 - Metadata sessions are separate from user query sessions. On Netezza, the optional metadata session sweep needs the configured privilege; user queries are never dropped by that sweep.
 
+## Run As (one-off execution)
+
+When one operation needs higher privileges, do not switch the tab's connection: that closes its session, discards temporary objects, and reloads the metadata context. Use **Run As (one-off)** from the SQL editor context menu instead:
+
+- **Run As: Execute Selection on Another Connection…** (`netezza.runAsSelection`) runs the selected SQL.
+- **Run As: Execute Statement on Another Connection…** (`netezza.runAsStatement`) runs the statement under the cursor, or the selection when one exists.
+- **Run As: Execute Whole File on Another Connection…** (`netezza.runAsWholeFile`) runs the whole document (or the selection) as one batch.
+
+Each command asks for a saved connection profile, then opens a **transient session** on that profile, executes the SQL, and closes it. The tab keeps its connection, its persistent session, its database override, its metadata context, and its existing result tabs. Results appear as a separate execution in the same result panel; its Logs entries are prefixed with `[Run As: <profile>]`, and the status bar plus a notification report success, failure, or cancellation.
+
+Run As submits an independent request to the [SQL execution queue](../reference/sql-execution-queue.md), so it is not serialized behind the tab's own requests and is cancelled only by its own identity. Unsaved variable prompts and include files are captured when the request is submitted, exactly like a normal run.
+
+Limitations worth knowing:
+
+- The transient session does not see the tab session's temporary tables, session variables, or open transaction.
+- The tab's database override is ignored; the selected profile's default database is used.
+- Run As never creates or edits connection profiles; only saved profiles are offered. Create and test a profile first (see **Create and test a profile**).
+- `DELETE`/`UPDATE` without `WHERE` and `TRUNCATE` always require an extra confirmation, regardless of `justybase.safeExecute.enabled`.
+- For a long script that depends on one session, switch the tab connection instead.
+
 ## ClickHouse connections
 
 Install the ClickHouse companion and choose **HTTP** or **HTTPS / TLS** in the connection form. The default port is `8123`; use the database name, user, and password accepted by the ClickHouse HTTP interface. HTTPS supports certificate verification or an explicit “encrypt, skip validation” mode for environments where trust is terminated elsewhere. Query results stream over HTTP, and the companion keeps database scope in the selected tab.

@@ -218,6 +218,16 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         this._stateManager.registerExecutionSource(documentUri, executionUri);
     }
 
+    /** Remember the profile used by a one-off execution (Run As). */
+    public markOneOffExecution(executionUri: string, connectionName: string): void {
+        this._stateManager.markOneOffExecution(executionUri, connectionName);
+    }
+
+    /** Profile that owns a one-off result, so refresh/filter keeps its identity. */
+    public getOneOffConnectionName(sourceUri: string): string | undefined {
+        return this._stateManager.getOneOffConnectionName(sourceUri);
+    }
+
     public beginWorkspaceExecution(documentUri: string, executionUri: string, preserve: boolean): void {
         this._stateManager.beginWorkspaceExecution(documentUri, executionUri, preserve);
     }
@@ -431,7 +441,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
         const resultSet = this._stateManager.resultsMap.get(sourceUri)?.[resultSetIndex];
         const sql = (resultSet?.refreshSql || resultSet?.sql || '').trim();
-        const connectionName = this._connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri));
+        const connectionName = this._connectionNameForResultSource(sourceUri);
         if (!sql || !connectionName) {
             vscode.window.showErrorMessage('This result does not have a reusable SQL query or active connection.');
             return;
@@ -1483,10 +1493,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             ? buildDatabaseFilteredSql(baseRefreshSql, resultSet.columns, preservedFilterSpec)
             : baseRefreshSql;
 
-        const connectionName =
-            this._connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
-            || this._connectionManager.getActiveConnectionName()
-            || undefined;
+        // A Run As result keeps its profile, and does not borrow the tab session.
+        const connectionName = this._connectionNameForResultSource(sourceUri);
         if (!connectionName) {
             vscode.window.showErrorMessage('No database connection. Please connect first.');
             return false;
@@ -1618,11 +1626,20 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
     }
 
-    private _resolveConnectionForSource(sourceUri: string): string {
-        const connectionName =
-            this._connectionManager?.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
+    /**
+     * Resolve the connection that owns a result source. One-off (Run As)
+     * results keep the profile that produced them; every other result follows
+     * the tab's connection with the active connection as a final fallback.
+     */
+    private _connectionNameForResultSource(sourceUri: string): string | undefined {
+        return this._stateManager.getOneOffConnectionName(sourceUri)
+            || this._connectionManager?.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
             || this._connectionManager?.getActiveConnectionName()
             || undefined;
+    }
+
+    private _resolveConnectionForSource(sourceUri: string): string {
+        const connectionName = this._connectionNameForResultSource(sourceUri);
         if (!connectionName) {
             throw new Error('No database connection. Please connect first.');
         }
@@ -2263,9 +2280,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         }
 
         const documentUri = this._stateManager.getDocumentUri(request.sourceUri);
-        const connectionName = this._connectionManager.getConnectionForExecution(documentUri)
-            ?? this._connectionManager.getActiveConnectionName()
-            ?? undefined;
+        const connectionName = this._connectionNameForResultSource(request.sourceUri);
         const databaseKind = this._connectionManager.getConnectionDatabaseKind(connectionName);
         const target = request.editSource;
         const connection = connectionName
@@ -2370,10 +2385,7 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
             aggregations,
             querySpec ?? resultSet.databaseFilterSpec,
         );
-        const connectionName =
-            this._connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri))
-            || this._connectionManager.getActiveConnectionName()
-            || undefined;
+        const connectionName = this._connectionNameForResultSource(sourceUri);
         if (!connectionName) {
             throw new Error('No database connection. Please connect first.');
         }
@@ -3580,7 +3592,8 @@ export class ResultPanelView implements vscode.WebviewViewProvider {
         const statements = buildEditStatements(rs, editSource, edits, deleteRowIndices);
 
         try {
-            const connectionName = connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri));
+            const connectionName = this._stateManager.getOneOffConnectionName(sourceUri)
+                || connectionManager.getConnectionForExecution(this._stateManager.getDocumentUri(sourceUri));
             if (!connectionName) {
                 return { success: false, message: 'No connection found for this source.' };
             }

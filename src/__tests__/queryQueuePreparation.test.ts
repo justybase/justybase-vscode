@@ -57,6 +57,35 @@ describe('queue input snapshots', () => {
         await expect(prepared.validateExecutionTarget!()).rejects.toThrow('target changed');
     });
 
+    it('validates only the explicit profile for a run-as submission', async () => {
+        const owner = manager();
+        const prepared = await prepareQueuedQuery(['SELECT 1'], context, sourceUri,
+            owner as unknown as ConnectionManager, 'A', undefined, executionTargetFingerprint(profile),
+            undefined, { explicitConnection: true });
+        // The tab may switch its own connection or database; the run-as profile is unaffected.
+        owner.getConnectionForExecution.mockReturnValue('B');
+        owner.getDocumentDatabase.mockReturnValue('OTHERDB');
+        await expect(prepared.validateExecutionTarget!()).resolves.toBeUndefined();
+        // Editing the saved profile still invalidates the queued run-as request.
+        owner.getConnection.mockResolvedValue({ ...profile, host: 'different-server' });
+        await expect(prepared.validateExecutionTarget!()).rejects.toThrow('profile');
+    });
+
+    it('uses the explicit database kind for run-as macro preprocessing', async () => {
+        const owner = manager();
+        const prepared = await prepareQueuedQuery(['SELECT 1'], context, sourceUri,
+            owner as unknown as ConnectionManager, 'A', undefined, executionTargetFingerprint(profile),
+            undefined, { explicitConnection: true, databaseKind: 'postgresql' });
+        expect(prepared.macroFileContext?.databaseKind).toBe('postgresql');
+    });
+
+    it('falls back to the document database kind when no explicit kind is supplied', async () => {
+        const owner = { ...manager(), getExecutionDatabaseKind: jest.fn(() => 'netezza') };
+        const prepared = await prepareQueuedQuery(['SELECT 1'], context, sourceUri,
+            owner as unknown as ConnectionManager, 'A', undefined, executionTargetFingerprint(profile));
+        expect(prepared.macroFileContext?.databaseKind).toBe('netezza');
+    });
+
     it('does not execute session-dependent macros while collecting interactive inputs', async () => {
         const owner = manager();
         const prepared = await prepareQueuedQuery(['%LET x = %SQL(SELECT COUNT(*) FROM CUSTOMER); SELECT &x;'],

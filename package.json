@@ -152,6 +152,21 @@
         "icon": "$(debug-continue)"
       },
       {
+        "command": "netezza.runAsSelection",
+        "title": "Run As: Execute Selection on Another Connection…",
+        "icon": "$(account)"
+      },
+      {
+        "command": "netezza.runAsStatement",
+        "title": "Run As: Execute Statement on Another Connection…",
+        "icon": "$(account)"
+      },
+      {
+        "command": "netezza.runAsWholeFile",
+        "title": "Run As: Execute Whole File on Another Connection…",
+        "icon": "$(account)"
+      },
+      {
         "command": "netezza.navigatePreviousStatement",
         "title": "SQL: Go to Previous Statement"
       },
@@ -1661,6 +1676,11 @@
         "icon": "$(debug-start)"
       },
       {
+        "id": "netezza.runAs",
+        "label": "Run As (one-off)",
+        "icon": "$(account)"
+      },
+      {
         "id": "netezza.connectionConfig",
         "label": "Connection",
         "icon": "$(plug)"
@@ -1994,9 +2014,9 @@
           "group": "navigation@1"
         },
         {
-          "command": "netezza.validateSelectedSql",
+          "submenu": "netezza.runAs",
           "when": "editorLangId == sql",
-          "group": "navigation@2"
+          "group": "navigation@1.5"
         },
         {
           "command": "netezza.analyzeQueryPerformance",
@@ -2070,6 +2090,21 @@
           "group": "3_run"
         },
         {
+          "command": "netezza.runAsSelection",
+          "when": "resourceLangId == sql && editorHasSelection",
+          "group": "3_run@2"
+        },
+        {
+          "command": "netezza.runAsStatement",
+          "when": "resourceLangId == sql",
+          "group": "3_run@3"
+        },
+        {
+          "command": "netezza.runAsWholeFile",
+          "when": "resourceLangId == sql",
+          "group": "3_run@4"
+        },
+        {
           "command": "netezza.exportToXlsb",
           "when": "resourceLangId == sql",
           "args": {
@@ -2135,6 +2170,23 @@
           "command": "netezza.importDataAdvanced",
           "when": "resourceLangId == sql",
           "group": "3_import"
+        }
+      ],
+      "netezza.runAs": [
+        {
+          "command": "netezza.runAsSelection",
+          "when": "editorHasSelection && resourceLangId == sql",
+          "group": "1_scope"
+        },
+        {
+          "command": "netezza.runAsStatement",
+          "when": "resourceLangId == sql",
+          "group": "2_scope"
+        },
+        {
+          "command": "netezza.runAsWholeFile",
+          "when": "resourceLangId == sql",
+          "group": "3_scope"
         }
       ],
       "netezza.ctxSqlTools": [

@@ -458,6 +458,8 @@ export class ResultStateManager {
     }
     private readonly workspaceDocuments = new Set<string>();
     private readonly executionDocuments = new Map<string, string>();
+    /** Execution sources whose session belonged to another identity than the tab. */
+    private readonly oneOffExecutions = new Map<string, string>();
     private readonly workspaceSelection = new Map<string, string>();
     private readonly workspaceAutoOwner = new Map<string, string>();
 
@@ -466,6 +468,19 @@ export class ResultStateManager {
         if (documentUri === executionUri) return;
         this.workspaceDocuments.add(documentUri);
         this.executionDocuments.set(executionUri, documentUri);
+    }
+
+    /**
+     * Remember that a result source ran on another identity (Run As) so later
+     * refresh/filter/export operations replay it on the same profile instead of
+     * silently switching to the tab connection.
+     */
+    public markOneOffExecution(executionUri: string, connectionName: string): void {
+        this.oneOffExecutions.set(executionUri, connectionName);
+    }
+
+    public getOneOffConnectionName(sourceUri: string): string | undefined {
+        return this.oneOffExecutions.get(sourceUri);
     }
 
     public getDocumentUri(sourceUri: string): string {
@@ -2200,6 +2215,7 @@ export class ResultStateManager {
             this.workspaceDocuments.delete(sourceUri);
         }
         this.executionDocuments.delete(sourceUri);
+        this.oneOffExecutions.delete(sourceUri);
         this._executionGroups.delete(sourceUri);
         this._syncResultCoreSource(sourceUri);
         this._resultCoreState.apply({ type: 'close-source', sourceId: sourceUri });
