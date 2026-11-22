@@ -300,80 +300,6 @@ body.vscode-high-contrast-light .ui-data-grid-scroll {
   font: inherit;
 }
 
-/* Compact find-and-jump column field; unlike the global filter it does not
-   consume the remaining toolbar width. */
-.ui-result-toolbar-search.ui-result-column-search {
-  min-width: 150px;
-  max-width: 230px;
-  flex: 0 1 210px;
-}
-
-.ui-result-column-search-menu {
-  position: absolute;
-  z-index: 70;
-  top: calc(100% + 4px);
-  right: 0;
-  left: 0;
-  max-height: min(300px, calc(100vh - 120px));
-  overflow: auto;
-  padding: 4px;
-  border: 1px solid var(--justybase-grid-border);
-  border-radius: 4px;
-  background: var(--justybase-grid-surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
-}
-
-.ui-result-column-search-item {
-  display: flex;
-  width: 100%;
-  min-height: 0;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: 3px;
-  color: var(--justybase-grid-text);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-}
-
-.ui-result-column-search-item[aria-selected='true'],
-.ui-result-column-search-item:hover {
-  background: var(--justybase-grid-hover);
-}
-
-.ui-result-column-search-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ui-result-column-search-type {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--justybase-grid-muted);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.ui-result-column-search-hidden {
-  flex: 0 0 auto;
-  padding: 0 4px;
-  border-radius: 7px;
-  color: var(--justybase-grid-muted);
-  background: color-mix(in srgb, var(--justybase-grid-border) 45%, transparent);
-  font-size: 10px;
-}
-
-.ui-result-column-search-empty {
-  padding: 6px;
-  color: var(--justybase-grid-muted);
-  font-size: 11px;
-}
-
 .ui-data-grid-header-content.ui-data-grid-column-highlight {
   border-radius: 2px;
   box-shadow: inset 0 0 0 2px var(--justybase-grid-accent);
@@ -2321,7 +2247,7 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
 
 .ui-column-sidebar-list li {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto minmax(0, 1fr);
   gap: 5px;
   align-items: center;
   min-height: 23px;
@@ -2330,6 +2256,23 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
 }
 
 .ui-column-sidebar-list li:hover { background: var(--justybase-grid-hover); }
+
+.ui-column-sidebar-list li.is-drag-source { opacity: .45; }
+
+.ui-column-sidebar-list li.is-drop-before { box-shadow: inset 0 2px 0 var(--justybase-grid-accent); }
+
+.ui-column-sidebar-list li.is-drop-after { box-shadow: inset 0 -2px 0 var(--justybase-grid-accent); }
+
+.ui-column-sidebar-drag {
+  display: inline-flex;
+  width: 12px;
+  align-items: center;
+  justify-content: center;
+  color: var(--justybase-grid-muted);
+  cursor: grab;
+}
+
+.ui-column-sidebar-list li[draggable='true'] .ui-column-sidebar-drag:active { cursor: grabbing; }
 
 .ui-column-sidebar-list li.is-hidden .ui-column-sidebar-name {
   color: var(--justybase-grid-muted);
@@ -4434,8 +4377,7 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
   }
 
   .ui-result-toolbar { flex-wrap: wrap; }
-  .ui-result-toolbar .ui-result-toolbar-search:not(.ui-result-column-search) { flex-basis: 100%; max-width: none; order: 10; }
-  .ui-result-toolbar .ui-result-column-search { flex: 1 1 140px; max-width: none; order: 9; }
+  .ui-result-toolbar .ui-result-toolbar-search { flex-basis: 100%; max-width: none; order: 10; }
   .ui-result-tab-label { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .shared-schema-surface .ui-column-sidebar { width: 100%; }
 

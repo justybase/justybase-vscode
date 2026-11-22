@@ -1,9 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 async function settleLayout(page: Page): Promise<void> {
-  // The find-column control has its own functional parity test. Hide it from
-  // the shared visual baselines so they stay stable across CI platforms.
-  await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; } .ui-result-column-search { display: none !important; }' });
+  await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -25,23 +23,38 @@ test('column filter dialog stays inside a short result panel', async ({ page }) 
   expect(box!.y + box!.height).toBeLessThanOrEqual(420);
 });
 
-test('toolbar finder scrolls the grid to a searched result column', async ({ page }) => {
+test('columns sidebar finder scrolls the grid to a searched result column', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 600 });
   await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
   const panel = page.locator('#shared-ui-root');
   await expect(panel.locator('.ui-result-grid')).toBeVisible();
   const scroller = panel.locator('.ui-data-grid-scroll');
-  const finder = panel.getByRole('combobox', { name: 'Find column' });
+  await panel.getByRole('button', { name: 'Toggle column sidebar' }).click();
+  const finder = panel.getByRole('textbox', { name: 'Find column' });
 
   await finder.fill('payload');
-  await expect(panel.getByRole('option', { name: /PAYLOAD/ })).toBeVisible();
   await finder.press('Enter');
 
   await expect.poll(async () => scroller.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
   const payloadHeader = panel.getByRole('columnheader', { name: /PAYLOAD/ });
   await expect(payloadHeader).toBeVisible();
   await expect(payloadHeader.locator('.ui-data-grid-column-highlight')).toHaveCount(1);
-  await expect(finder).toHaveValue('PAYLOAD');
+  await expect(finder).toHaveValue('payload');
+});
+
+test('columns sidebar reorders result columns by dragging', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.goto('/test-harness/shared-data-grid.html?profile=panel', { waitUntil: 'networkidle' });
+  const panel = page.locator('#shared-ui-root');
+  await expect(panel.locator('.ui-result-grid')).toBeVisible();
+  await panel.getByRole('button', { name: 'Toggle column sidebar' }).click();
+  const items = panel.locator('.ui-column-sidebar-list li');
+  await expect(items).toHaveCount(8);
+  await expect(items.nth(0)).toContainText('ID');
+
+  await items.nth(2).dragTo(items.nth(0));
+  await expect(items.nth(0)).toContainText('NAME');
+  await expect(panel.locator('.ui-data-grid thead th').nth(1)).toContainText('NAME');
 });
 
 test('shared result panel keeps Excel-style filtering, grouping and inline editing', async ({ page }) => {

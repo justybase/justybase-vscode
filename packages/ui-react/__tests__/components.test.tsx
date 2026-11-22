@@ -1,5 +1,5 @@
 import { createRef } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UiResultSurfaceState } from '@justybase/ui-core';
 import {
@@ -34,8 +34,10 @@ import {
   formatDataGridCellValue,
   formatDataGridClipboard,
   formatDataGridIdentifierForSql,
+  moveDataGridColumnOrder,
   processDataGridRows,
   reorderDataGridGrouping,
+  resolveDataGridColumnOrder,
   resolveDataGridNavigationTarget,
   resolveDataGridScrollTop,
 } from '../src';
@@ -647,16 +649,6 @@ describe('shared React presentation', () => {
     unmount();
     act(() => handle?.scrollToColumn(0));
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
-  });
-
-  it('renders an optional column finder next to the result view controls', () => {
-    render(<ResultViewToolbar
-      columns={[{ name: 'ID' }]}
-      view={{ globalFilter: '', sorting: [], grouping: [], aggregation: undefined, pivotColumn: undefined }}
-      onChange={jest.fn()}
-      columnFinder={<span data-testid="column-finder" />}
-    />);
-    expect(screen.getByTestId('column-finder')).toBeInTheDocument();
   });
 
   it('calculates a bounded virtual window with stable pixel padding', () => {
@@ -1823,6 +1815,63 @@ describe('shared React presentation', () => {
     expect(screen.queryByRole('button', { name: 'ID' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Show NAME' }));
     expect(onToggleVisibility).toHaveBeenCalledWith(expect.objectContaining({ name: 'NAME' }), 1);
+  });
+
+  it('orders sidebar entries and reorders columns with drag and drop', () => {
+    const onMoveColumn = jest.fn();
+    render(<ResultColumnSidebar
+      columns={[{ name: 'ID' }, { name: 'NAME' }, { name: 'AMOUNT' }]}
+      order={[2, 0, 1]}
+      onMoveColumn={onMoveColumn}
+      onSelectColumn={jest.fn()}
+    />);
+    const items = screen.getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(within(items[0]!).getByRole('button', { name: 'AMOUNT' })).toBeInTheDocument();
+    expect(within(items[1]!).getByRole('button', { name: 'ID' })).toBeInTheDocument();
+    expect(within(items[2]!).getByRole('button', { name: 'NAME' })).toBeInTheDocument();
+
+    fireEvent.dragStart(items[0]!);
+    fireEvent.drop(items[2]!);
+    expect(onMoveColumn).toHaveBeenCalledWith(2, 1, false);
+  });
+
+  it('groups a column dropped from the sidebar list', () => {
+    const onGroupColumn = jest.fn();
+    render(<ResultColumnSidebar
+      columns={[{ name: 'ID' }, { name: 'NAME' }]}
+      onGroupColumn={onGroupColumn}
+    />);
+    fireEvent.drop(screen.getByText('Drag a column here'), { dataTransfer: { getData: () => '1' } });
+    expect(onGroupColumn).toHaveBeenCalledWith(expect.objectContaining({ name: 'NAME' }), 1);
+  });
+
+  it('jumps to the first matching column from the sidebar finder', () => {
+    const onSelectColumn = jest.fn();
+    render(<ResultColumnSidebar
+      columns={[{ name: 'ID' }, { name: 'CUSTOMER_NAME' }]}
+      onSelectColumn={onSelectColumn}
+    />);
+    const finder = screen.getByRole('textbox', { name: 'Find column' });
+    fireEvent.change(finder, { target: { value: 'customer' } });
+    fireEvent.keyDown(finder, { key: 'Enter' });
+    expect(onSelectColumn).toHaveBeenCalledWith(expect.objectContaining({ name: 'CUSTOMER_NAME' }), 1);
+  });
+
+  it('resolves column order and moves persisted keys without losing unknown columns', () => {
+    const columns = [{ name: 'ID' }, { name: 'NAME' }, { name: 'AMOUNT' }];
+    expect(resolveDataGridColumnOrder(columns)).toEqual([0, 1, 2]);
+    expect(resolveDataGridColumnOrder(columns, {
+      globalFilter: '',
+      columnFilters: {},
+      sorting: [],
+      grouping: [],
+      pinnedColumns: ['AMOUNT'],
+      columnOrder: ['NAME', 'ID'],
+    })).toEqual([2, 1, 0]);
+    expect(moveDataGridColumnOrder(columns, undefined, 2, 0, false)).toEqual(['AMOUNT', 'ID', 'NAME']);
+    expect(moveDataGridColumnOrder(columns, undefined, 0, 2, true)).toEqual(['NAME', 'AMOUNT', 'ID']);
+    expect(moveDataGridColumnOrder(columns, undefined, 1, 1, true)).toBeUndefined();
   });
 
   it('supports case and whitespace tolerant result diffs', () => {

@@ -740,7 +740,7 @@ describe('shared VS Code Result Panel adapter', () => {
         controller.dispose();
     });
 
-    it('jumps to a searched column from the toolbar finder', () => {
+    it('jumps to a searched column from the columns sidebar', () => {
         const controller = new SharedResultPanelController();
         const columns = ['ID', 'CUSTOMER_NAME', 'AMOUNT', 'REGION', 'CHANNEL', 'STATUS'].map(name => ({ name }));
         controller.handleHostMessage(hydrateMessage([{
@@ -750,9 +750,10 @@ describe('shared VS Code Result Panel adapter', () => {
             totalRowCount: 1,
         }]));
         const { container } = render(<SharedResultPanelApp controller={controller} />);
-        const finder = screen.getByRole('combobox', { name: 'Find column' });
+        fireEvent.click(screen.getByRole('button', { name: 'Toggle column sidebar' }));
+        const finder = screen.getByRole('textbox', { name: 'Find column' });
 
-        // The legacy More menu shortcut focuses the same toolbar field.
+        // The legacy More menu shortcut opens and focuses the sidebar field.
         fireEvent.click(screen.getByRole('button', { name: 'More result actions' }));
         fireEvent.click(screen.getByRole('menuitem', { name: /Find column/ }));
         expect(document.activeElement).toBe(finder);
@@ -761,7 +762,29 @@ describe('shared VS Code Result Panel adapter', () => {
         fireEvent.keyDown(finder, { key: 'Enter' });
         const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
         expect(scroller?.scrollLeft ?? 0).toBeGreaterThan(0);
-        expect(finder).toHaveValue('CHANNEL');
+        expect(finder).toHaveValue('channel');
+        controller.dispose();
+    });
+
+    it('reorders result columns by dragging in the columns sidebar', () => {
+        const controller = new SharedResultPanelController();
+        const columns = ['ID', 'CUSTOMER_NAME', 'AMOUNT', 'REGION'].map(name => ({ name }));
+        controller.handleHostMessage(hydrateMessage([{
+            resultSetId: 'column-reorder-result',
+            columns,
+            data: [[1, 'Ada', 10, 'EU']],
+            totalRowCount: 1,
+        }]));
+        const { container } = render(<SharedResultPanelApp controller={controller} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Toggle column sidebar' }));
+        const items = Array.from(container.querySelectorAll<HTMLElement>('.ui-column-sidebar-list li'));
+        expect(items.map(item => item.getAttribute('data-sidebar-column-index'))).toEqual(['0', '1', '2', '3']);
+
+        fireEvent.dragStart(items[1]!);
+        fireEvent.drop(items[0]!);
+        expect(controller.activeResult()?.view.columnOrder).toEqual(['CUSTOMER_NAME', 'ID', 'AMOUNT', 'REGION']);
+        expect(Array.from(container.querySelectorAll<HTMLElement>('.ui-column-sidebar-list li')).map(item => item.getAttribute('data-sidebar-column-index')))
+            .toEqual(['1', '0', '2', '3']);
         controller.dispose();
     });
 
@@ -776,11 +799,11 @@ describe('shared VS Code Result Panel adapter', () => {
         }]));
         controller.updateView('hidden-column-result', { columnVisibility: { CHANNEL: false } });
         const { container } = render(<SharedResultPanelApp controller={controller} />);
-        const finder = screen.getByRole('combobox', { name: 'Find column' });
+        fireEvent.click(screen.getByRole('button', { name: 'Toggle column sidebar' }));
+        const finder = screen.getByRole('textbox', { name: 'Find column' });
 
-        fireEvent.focus(finder);
         fireEvent.change(finder, { target: { value: 'channel' } });
-        expect(screen.getByRole('option', { name: /CHANNEL/ })).toHaveTextContent('hidden');
+        expect(screen.getByRole('button', { name: 'CHANNEL' }).closest('li')).toHaveClass('is-hidden');
         fireEvent.keyDown(finder, { key: 'Enter' });
 
         await waitFor(() => expect(controller.activeResult()?.view.columnVisibility?.CHANNEL).toBeUndefined());

@@ -573,7 +573,7 @@ function measuredHeaderMinimumWidth(column: DataGridColumn, cell: HTMLTableCellE
   return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, filterMinimum, required));
 }
 
-function orderColumns(columns: readonly DataGridColumn[], view: DataGridViewState): readonly number[] {
+function orderAllColumns(columns: readonly DataGridColumn[], view: DataGridViewState): readonly number[] {
   const defaultOrder = columns.map((_column, index) => index);
   const requested = view.columnOrder ?? [];
   const ordered: number[] = [];
@@ -599,10 +599,54 @@ function orderColumns(columns: readonly DataGridColumn[], view: DataGridViewStat
     ordered.push(index);
     orderedSet.add(index);
   }
-  const visible = ordered.filter(index => visibilityFor(columns[index]!, index, view));
-  const pinned = visible.filter(index => view.pinnedColumns?.some(key => columnMatchesKey(columns[index]!, index, key)) ?? false);
+  const pinned = ordered.filter(index => view.pinnedColumns?.some(key => columnMatchesKey(columns[index]!, index, key)) ?? false);
   const pinnedSet = new Set(pinned);
-  return [...pinned, ...visible.filter(index => !pinnedSet.has(index))];
+  return [...pinned, ...ordered.filter(index => !pinnedSet.has(index))];
+}
+
+function orderColumns(columns: readonly DataGridColumn[], view: DataGridViewState): readonly number[] {
+  return orderAllColumns(columns, view).filter(index => visibilityFor(columns[index]!, index, view));
+}
+
+/** Returns every column index in display order, including hidden columns. */
+export function resolveDataGridColumnOrder(
+  columns: readonly DataGridColumn[],
+  view: DataGridViewState = normaliseView(undefined),
+): readonly number[] {
+  return orderAllColumns(columns, normaliseView(view));
+}
+
+function canonicalColumnKeys(columns: readonly DataGridColumn[], view: DataGridViewState): string[] {
+  const keys = columns.map((column, index) => columnKey(column, index));
+  const order: string[] = [];
+  for (const key of view.columnOrder ?? keys) {
+    const index = resolveColumnIndex(columns, key);
+    if (index >= 0 && !order.includes(keys[index]!)) order.push(keys[index]!);
+  }
+  for (const key of keys) {
+    if (!order.includes(key)) order.push(key);
+  }
+  return order;
+}
+
+/** Moves a column relative to another one and returns the persisted key order. */
+export function moveDataGridColumnOrder(
+  columns: readonly DataGridColumn[],
+  view: DataGridViewState | undefined,
+  sourceIndex: number,
+  targetIndex: number,
+  after: boolean,
+): string[] | undefined {
+  const source = columns[sourceIndex];
+  const target = columns[targetIndex];
+  if (!source || !target || sourceIndex === targetIndex) return undefined;
+  const sourceKey = columnKey(source, sourceIndex);
+  const targetKey = columnKey(target, targetIndex);
+  const order = canonicalColumnKeys(columns, normaliseView(view)).filter(key => key !== sourceKey);
+  const targetPosition = order.indexOf(targetKey);
+  if (targetPosition < 0) return undefined;
+  order.splice(targetPosition + (after ? 1 : 0), 0, sourceKey);
+  return order;
 }
 
 function filterValue(view: DataGridViewState, column: DataGridColumn, index: number): string {
@@ -679,28 +723,9 @@ export function DataGridColumnMenu({ columns, view, onViewChange }: DataGridColu
     onViewChange({ pinnedColumns: pinned });
   }
 
-  /** Normalises persisted name/position keys into one canonical ordering. */
-  function canonicalColumnOrder(): string[] {
-    const keys = columns.map((column, index) => columnKey(column, index));
-    const order: string[] = [];
-    for (const key of activeView.columnOrder ?? keys) {
-      const index = resolveColumnIndex(columns, key);
-      if (index >= 0 && !order.includes(keys[index]!)) order.push(keys[index]!);
-    }
-    for (const key of keys) {
-      if (!order.includes(key)) order.push(key);
-    }
-    return order;
-  }
-
   function moveColumn(sourceIndex: number, targetIndex: number, after: boolean): void {
-    if (sourceIndex === targetIndex) return;
-    const sourceKey = columnKey(columns[sourceIndex]!, sourceIndex);
-    const targetKey = columnKey(columns[targetIndex]!, targetIndex);
-    const order = canonicalColumnOrder().filter(key => key !== sourceKey);
-    const targetPosition = order.indexOf(targetKey);
-    if (targetPosition < 0) return;
-    order.splice(targetPosition + (after ? 1 : 0), 0, sourceKey);
+    const order = moveDataGridColumnOrder(columns, activeView, sourceIndex, targetIndex, after);
+    if (!order) return;
     onViewChange({ columnOrder: order });
   }
 

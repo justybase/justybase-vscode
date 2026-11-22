@@ -35,12 +35,13 @@ import {
     AsyncStateView,
     DataGrid,
     DataGridColumnFilterPanel,
-    DataGridColumnMenu,
     DiffView,
     formatDataGridCellValue,
     isDataGridNumericColumn,
+    moveDataGridColumnOrder,
     processDataGridRowIndices,
     processDataGridRows,
+    resolveDataGridColumnOrder,
     resolveDataGridColumns,
     FocusOnMount,
     HistoryView,
@@ -56,7 +57,6 @@ import {
     ResultRefreshFailureBanner,
     ResultTabs,
     ResultAnalysisPanel,
-    ResultColumnSearch,
     ResultColumnSidebar,
     ResultViewToolbar,
     RowViewPanel,
@@ -4057,6 +4057,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const analysisGenerationRef = useRef(0);
     const dataGridRef = useRef<DataGridHandle>(null);
     const columnSearchRef = useRef<HTMLInputElement>(null);
+    const focusSidebarSearchRef = useRef(false);
     const pendingColumnScrollRef = useRef<{ readonly resultSetId: string; readonly columnIndex: number } | undefined>(undefined);
     const activeResult = controller.activeResult();
     const closeAnalysis = useCallback(() => {
@@ -4531,8 +4532,6 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         if (!result) return;
         controller.updateView(result.resultSetId, { grouping: [] });
     }, [controller]);
-    const isColumnVisible = useCallback((columnIndex: number): boolean =>
-        !isSharedColumnHidden(controller.activeResult(), columnIndex), [controller]);
     const scrollToGridColumn = useCallback((columnIndex: number): void => {
         const result = controller.activeResult();
         const column = result?.columns[columnIndex];
@@ -4560,22 +4559,46 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
         dataGridRef.current?.scrollToColumn(pending.columnIndex);
     }, [activeResult]);
     const openColumnSearch = useCallback((): void => {
+        if (sidebarOpen) {
+            columnSearchRef.current?.focus();
+            columnSearchRef.current?.select();
+            return;
+        }
+        focusSidebarSearchRef.current = true;
+        setSidebarOpen(true);
+    }, [sidebarOpen]);
+    useEffect(() => {
+        if (!focusSidebarSearchRef.current || !sidebarOpen) return;
+        focusSidebarSearchRef.current = false;
         columnSearchRef.current?.focus();
         columnSearchRef.current?.select();
-    }, []);
+    }, [sidebarOpen]);
+    const selectSidebarColumn = useCallback((_column: { readonly name: string }, columnIndex: number): void => {
+        scrollToGridColumn(columnIndex);
+    }, [scrollToGridColumn]);
+    const reorderSidebarColumn = useCallback((sourceIndex: number, targetIndex: number, after: boolean): void => {
+        const result = controller.activeResult();
+        if (!result) return;
+        const columnOrder = moveDataGridColumnOrder(result.columns, result.view, sourceIndex, targetIndex, after);
+        if (!columnOrder) return;
+        controller.updateView(result.resultSetId, { columnOrder });
+    }, [controller]);
     const columnSidebar = sidebarOpen && activeResult && !isLogResult && !isErrorResult && tableLayoutActive
         ? <ResultColumnSidebar
             columns={activeResult.columns}
+            order={resolveDataGridColumnOrder(activeResult.columns, activeResult.view)}
             visibility={activeResult.view.columnVisibility}
             onToggleVisibility={toggleSidebarColumn}
             onShowAll={showAllSidebarColumns}
             onHideAll={hideAllSidebarColumns}
-            onSelectColumn={scrollToSidebarColumn}
+            onSelectColumn={selectSidebarColumn}
             onClose={() => setSidebarOpen(false)}
             grouping={activeResult.view.grouping}
             onGroupColumn={groupSidebarColumn}
             onUngroupColumn={ungroupSidebarColumn}
             onClearGrouping={clearSidebarGrouping}
+            onMoveColumn={reorderSidebarColumn}
+            searchInputRef={columnSearchRef}
         />
         : undefined;
 
@@ -4659,16 +4682,6 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                                 onFindColumn={openColumnSearch}
                             />
                         </>)}
-                    columnFinder={activeResult && !isLogResult && !isErrorResult && tableLayoutActive
-                        ? <ResultColumnSearch
-                            key={activeResult.resultSetId}
-                            ref={columnSearchRef}
-                            columns={activeResult.columns}
-                            onSelect={scrollToGridColumn}
-                            isColumnVisible={isColumnVisible}
-                        />
-                        : undefined}
-                    columnMenu={activeResult && !isLogResult && !isErrorResult && tableLayoutActive ? <DataGridColumnMenu columns={activeResult.columns} view={view} onViewChange={updateView} /> : undefined}
                 />
                 {!isLogResult && <ResultExecutionBanner
                     status={executionStatus}
@@ -4847,6 +4860,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                 {activeResult
                     ? <ResultColumnSidebar
                         columns={activeResult.columns}
+                        order={resolveDataGridColumnOrder(activeResult.columns, activeResult.view)}
                         visibility={activeResult.view.columnVisibility}
                         onToggleVisibility={toggleSidebarColumn}
                         onShowAll={showAllSidebarColumns}
@@ -4856,6 +4870,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         onGroupColumn={groupSidebarColumn}
                         onUngroupColumn={ungroupSidebarColumn}
                         onClearGrouping={clearSidebarGrouping}
+                        onMoveColumn={reorderSidebarColumn}
                     />
                     : <AsyncStateView state="empty" emptyLabel="No active result set." />}
             </section>}
