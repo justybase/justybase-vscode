@@ -10,6 +10,7 @@ import type { DataGridAggregationCell } from './dataGridAggregation';
 import {
   formatDataGridCellValue,
   formatDataGridCellValueForSql,
+  formatDataGridIdentifierForSql,
   inferDataGridColumnMetadata,
   isDataGridBinaryType,
   isDataGridNumericColumn,
@@ -262,7 +263,11 @@ export interface DataGridProps {
   readonly editMode?: boolean;
   /** Receives a validated edit after the inline editor commits. */
   readonly onCellEdit?: (edit: DataGridCellEdit) => void;
-  /** Receives a SQL-ready cell representation on a non-editing double-click. */
+  /**
+   * Receives a SQL-ready cell representation on a non-editing cell
+   * double-click, and the SQL-ready column name when a column header is
+   * double-clicked.
+   */
   readonly onInsertCellContent?: (payload: { readonly text: string; readonly dataType?: string; readonly sqlText: string }) => void;
   readonly selectedRowIndex?: number;
   readonly view?: DataGridViewState;
@@ -350,6 +355,9 @@ const DEFAULT_VIEWPORT_HEIGHT = DATA_GRID_DEFAULT_VIEWPORT_HEIGHT;
 const VIRTUAL_OVERSCAN_ROWS = DATA_GRID_VIRTUAL_OVERSCAN_ROWS;
 const EMPTY_SELECTION_RANGES: readonly DataGridSelectionRange[] = Object.freeze([]);
 const COLUMN_WINDOW_THRESHOLD = DATA_GRID_COLUMN_WINDOW_THRESHOLD;
+// Wait long enough to tell a double-click from two separate sort clicks, but
+// keep a single click feeling responsive.
+const HEADER_SINGLE_CLICK_DELAY_MS = 250;
 
 /**
  * The shared grid contract is a fixed body-row height. Data, group and
@@ -1103,6 +1111,8 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
   const scroller = useRef<HTMLDivElement>(null);
   const [highlightedColumn, setHighlightedColumn] = useState<number | undefined>(undefined);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const headerSortTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const sortColumnRef = useRef<(columnIndex: number, extend?: boolean) => void>(() => undefined);
   const [internalView, setInternalView] = useState<DataGridViewState>(() => normaliseView(undefined));
   const [activeCellEditor, setActiveCellEditor] = useState<ActiveCellEditor | undefined>(undefined);
   const [aggregationMenu, setAggregationMenu] = useState<{ readonly columnIndex: number; readonly left: number; readonly top: number } | undefined>(undefined);
@@ -1126,6 +1136,8 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
       clearTimeout(highlightTimerRef.current);
       highlightTimerRef.current = undefined;
     }
+    for (const timer of headerSortTimersRef.current.values()) clearTimeout(timer);
+    headerSortTimersRef.current.clear();
   }, []);
   const resolvedColumnsCacheRef = useRef<{
     readonly resultSetId: string;
@@ -2152,6 +2164,53 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
         : activeView.sorting.map(item => columnMatchesKey(column, columnIndex, item.column) ? { ...item, descending: true } : item);
     updateView({ sorting: nextSorting });
   }
+  sortColumnRef.current = sortColumn;
+
+  function cancelHeaderSort(columnIndex: number): void {
+    const timer = headerSortTimersRef.current.get(columnIndex);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    headerSortTimersRef.current.delete(columnIndex);
+  }
+
+  /**
+   * A header label is both a sort control and (when the host can insert into
+   * an editor) the column-name insertion control. Pointer clicks are delayed so
+   * the second click of a double-click can cancel the sort; keyboard activation
+   * (`detail === 0`) still sorts immediately.
+   */
+  function handleHeaderLabelClick(event: ReactMouseEvent<HTMLButtonElement>, columnIndex: number): void {
+    if (event.detail > 1) {
+      cancelHeaderSort(columnIndex);
+      return;
+    }
+    const extend = event.shiftKey;
+    if (onInsertCellContent === undefined || event.detail === 0) {
+      cancelHeaderSort(columnIndex);
+      sortColumn(columnIndex, extend);
+      return;
+    }
+    cancelHeaderSort(columnIndex);
+    headerSortTimersRef.current.set(columnIndex, setTimeout(() => {
+      headerSortTimersRef.current.delete(columnIndex);
+      sortColumnRef.current(columnIndex, extend);
+    }, HEADER_SINGLE_CLICK_DELAY_MS));
+  }
+
+  function handleHeaderLabelDoubleClick(event: ReactMouseEvent<HTMLButtonElement>, columnIndex: number): void {
+    if (onInsertCellContent === undefined) return;
+    cancelHeaderSort(columnIndex);
+    const column = resolvedColumns[columnIndex];
+    if (column === undefined) return;
+    const sqlText = formatDataGridIdentifierForSql(column.name);
+    if (!sqlText) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onInsertCellContent({
+      text: column.name,
+      sqlText,
+    });
+  }
 
   function filterColumn(columnIndex: number, value: string): void {
     const id = columnKey(resolvedColumns[columnIndex]!, columnIndex);
@@ -2588,7 +2647,7 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
             return <th scope="col" key={`${entry.position}:${id}`} ref={element => { const refKey = `${id}:${columnIndex}`; if (element) columnHeaderRefs.current.set(refKey, element); else columnHeaderRefs.current.delete(refKey); }} className={[entry.pinned ? 'ui-data-grid-pinned' : '', columnDropTarget?.columnIndex === columnIndex ? (columnDropTarget.after ? 'ui-data-grid-column-drop-after' : 'ui-data-grid-column-drop-before') : ''].filter(Boolean).join(' ') || undefined} style={{ width: entry.width, minWidth: entry.width, ...(entry.left === undefined ? {} : { left: entry.left }) }} onDragOver={event => { if (draggedHeaderColumn === undefined) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; const rect = event.currentTarget.getBoundingClientRect(); setColumnDropTarget({ columnIndex, after: event.clientX > rect.left + rect.width / 2 }); }} onDrop={event => { event.preventDefault(); event.stopPropagation(); const source = draggedColumnRef.current; if (source !== undefined) reorderColumn(source, columnIndex, columnDropTarget?.columnIndex === columnIndex ? columnDropTarget.after : false); endHeaderColumnDrag(); }}>
               <div className={highlightedColumn === columnIndex ? 'ui-data-grid-header-content ui-data-grid-column-highlight' : 'ui-data-grid-header-content'}>
                 <button type="button" className="ui-data-grid-drag-handle" draggable aria-label={`Reorder ${column.name}`} title="Drag to reorder or to grouping panel" onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag}><svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" fill="currentColor"><circle cx="5" cy="4" r="1.1" /><circle cx="11" cy="4" r="1.1" /><circle cx="5" cy="8" r="1.1" /><circle cx="11" cy="8" r="1.1" /><circle cx="5" cy="12" r="1.1" /><circle cx="11" cy="12" r="1.1" /></svg></button>
-                <button type="button" className="ui-data-grid-header-label" draggable onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag} onClick={event => sortColumn(columnIndex, event.shiftKey)} title={`Sort by ${column.name}. Shift+Click to add another sort column. Drag to grouping panel.`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : `${sort.descending ? 'Sorted descending' : 'Sorted ascending'}${activeView.sorting.length > 1 ? `, priority ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}`}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}{sort !== undefined && activeView.sorting.length > 1 ? ` ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}</span></button>
+                <button type="button" className="ui-data-grid-header-label" draggable onDragStart={event => startHeaderColumnDrag(event, columnIndex)} onDragEnd={endHeaderColumnDrag} onClick={event => handleHeaderLabelClick(event, columnIndex)} onDoubleClick={event => handleHeaderLabelDoubleClick(event, columnIndex)} title={`Sort by ${column.name}.${onInsertCellContent === undefined ? '' : ' Double-click to insert the column name into the SQL editor.'} Shift+Click to add another sort column. Drag to grouping panel.`}><span>{column.name}</span><span className="ui-data-grid-sort" aria-label={sort === undefined ? 'Not sorted' : `${sort.descending ? 'Sorted descending' : 'Sorted ascending'}${activeView.sorting.length > 1 ? `, priority ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}`}>{sort?.descending ? '▼' : sort ? '▲' : '↕'}{sort !== undefined && activeView.sorting.length > 1 ? ` ${activeView.sorting.findIndex(item => columnMatchesKey(column, columnIndex, item.column)) + 1}` : ''}</span></button>
                 <span className={`ui-data-grid-type-badge ui-data-grid-type-${typeBadgeClass(column)}`}>{typeBadge(column)}</span>
                 {onOpenColumnFilter
                   ? <button type="button" className={`ui-data-grid-filter-action ${filterActive || columnAggregations(activeView, column, columnIndex).length > 0 ? 'active' : ''}`} aria-label={`Open filter for ${column.name}`} title={`Filter and summarize ${column.name}`} onClick={event => { event.stopPropagation(); onOpenColumnFilter({ columnIndex, column, anchor: event.currentTarget.getBoundingClientRect() }); }}><DataGridFilterIcon /></button>

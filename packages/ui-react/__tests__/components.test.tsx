@@ -33,6 +33,7 @@ import {
   downloadBlobFile,
   formatDataGridCellValue,
   formatDataGridClipboard,
+  formatDataGridIdentifierForSql,
   processDataGridRows,
   reorderDataGridGrouping,
   resolveDataGridNavigationTarget,
@@ -178,6 +179,14 @@ describe('shared React presentation', () => {
     expect(formatDataGridCellValue(20260315, 'INTEGER', { inferredDateInteger: true })).toBe('2026 03 15');
     expect(formatDataGridCellValue('AQIDBAUG', 'BLOB')).toBe('[BLOB · 6 B]');
     expect(formatDataGridCellValue({ nested: true }, 'JSON')).toBe('{"nested":true}');
+  });
+
+  it('formats simple and quoted SQL identifiers for editor insertion', () => {
+    expect(formatDataGridIdentifierForSql('CUSTOMER_ID')).toBe('CUSTOMER_ID');
+    expect(formatDataGridIdentifierForSql(' DB.SCHEMA.TABLE ')).toBe('DB.SCHEMA.TABLE');
+    expect(formatDataGridIdentifierForSql('Order Date')).toBe('"Order Date"');
+    expect(formatDataGridIdentifierForSql('say "hi"')).toBe('"say ""hi"""');
+    expect(formatDataGridIdentifierForSql('   ')).toBe('');
   });
 
   it('keeps typed clipboard formats identical across hosts', () => {
@@ -852,6 +861,42 @@ describe('shared React presentation', () => {
     expect(onContextMenu).toHaveBeenCalledWith({ rowIndex: 0, columnIndex: 1, clientX: 20, clientY: 40 });
     fireEvent.keyDown(screen.getByRole('table').parentElement as HTMLDivElement, { key: 'c', ctrlKey: true });
     expect(onCopySelection).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.any(Object) }));
+  });
+
+  it('sorts once on a single header click and inserts the column name on a double click', () => {
+    jest.useFakeTimers();
+    try {
+      const onViewChange = jest.fn();
+      const onInsertCellContent = jest.fn();
+      render(<DataGrid
+        resultSetId="header-double-click"
+        columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'Order Date', type: 'VARCHAR' }]}
+        rows={[[1, 'alpha']]}
+        view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: [] }}
+        onViewChange={onViewChange}
+        onInsertCellContent={onInsertCellContent}
+      />);
+
+      const idHeader = screen.getByRole('button', { name: /ID Not sorted/ });
+      fireEvent.click(idHeader, { detail: 1 });
+      expect(onViewChange).not.toHaveBeenCalled();
+      act(() => { jest.advanceTimersByTime(250); });
+      expect(onViewChange).toHaveBeenCalledWith({ sorting: [{ column: 'ID', descending: false }] });
+
+      onViewChange.mockClear();
+      const quotedHeader = screen.getByRole('button', { name: /Order Date Not sorted/ });
+      fireEvent.click(quotedHeader, { detail: 1 });
+      fireEvent.click(quotedHeader, { detail: 2 });
+      fireEvent.doubleClick(quotedHeader);
+      act(() => { jest.advanceTimersByTime(250); });
+      expect(onViewChange).not.toHaveBeenCalled();
+      expect(onInsertCellContent).toHaveBeenCalledWith({
+        text: 'Order Date',
+        sqlText: '"Order Date"',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('uses the compact Excel-like filter action instead of inline fields', () => {

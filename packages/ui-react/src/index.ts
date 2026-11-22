@@ -29,6 +29,7 @@ export type { DiffBaseline, DiffViewProps } from './diffView';
 export {
   formatCanonicalDataGridCellValue,
   formatDataGridBinaryPlaceholder,
+  formatDataGridIdentifierForSql,
   inferDataGridColumnMetadata,
   isDataGridBinaryType,
   isDataGridIntegerType,

@@ -483,6 +483,20 @@ export function formatCanonicalDataGridCellValue(
   return String(value);
 }
 
+const SIMPLE_SQL_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)*$/;
+
+/**
+ * Formats a column name as a SQL identifier for insertion into an editor.
+ * Mirrors the legacy result grid: simple identifiers stay bare and any other
+ * name is double-quoted with embedded quotes doubled.
+ */
+export function formatDataGridIdentifierForSql(identifier: string): string {
+  const normalized = String(identifier ?? '').trim();
+  if (!normalized) return '';
+  if (SIMPLE_SQL_IDENTIFIER_PATTERN.test(normalized)) return normalized;
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
 /**
  * Formats a raw cell value as a SQL literal for insertion into an editor.
  * Mirrors the legacy result grid: numbers stay unquoted, booleans become

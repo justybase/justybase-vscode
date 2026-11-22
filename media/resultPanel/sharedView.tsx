@@ -4645,7 +4645,6 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                                 <button type="button" disabled={pendingEditCount === 0} onClick={() => controller.saveEdits(activeResult)}>Save {pendingEditCount === 1 ? '1 change' : `${pendingEditCount} changes`}</button>
                                 <button type="button" disabled={pendingEditCount === 0} onClick={() => controller.discardEdits(activeResult)}>Discard</button>
                             </>}
-                            <button type="button" className="ui-result-toolbar-icon" aria-label="Formatting" title="Formatting" onClick={() => callPanelMethod('openResultFormattingPanel', { scope: 'result' })}><MenuIcon name="wrench" /></button>
                             <SharedMoreMenu
                                 onRefreshSql={requestRefresh}
                                 onClearFilters={() => controller.clearAllFilters(activeResult)}

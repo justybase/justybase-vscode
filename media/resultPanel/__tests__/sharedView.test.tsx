@@ -734,7 +734,7 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(selectedCell).toHaveClass('ui-data-grid-cell-selected');
         fireEvent.click(screen.getByRole('button', { name: 'Open filter for label' }));
         fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
-        fireEvent.click(screen.getByTitle('Sort by id. Shift+Click to add another sort column. Drag to grouping panel.'));
+        fireEvent.click(screen.getByTitle(/^Sort by id\./));
         fireEvent.click(screen.getByRole('row', { name: '2 two' }));
         expect(screen.queryByRole('heading', { name: 'Row details' })).not.toBeInTheDocument();
         controller.dispose();
