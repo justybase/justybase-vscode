@@ -1,4 +1,6 @@
 export {
+    AccessFileChangedError,
+    AccessFileEncryptedWriteError,
     AccessFileError,
     AccessFileReadOnlyError,
     AccessFileSession,
@@ -9,6 +11,7 @@ export { applyDdlSql } from './jet/JetDdlSql';
 export { ACCESS_COMPLEX_KIND } from './types';
 export type {
     AccessAtomicWriteContext,
+    AccessAtomicWriteExpectation,
     AccessAtomicWriteResult,
     AccessAtomicWriter,
     AccessAttachment,

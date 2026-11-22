@@ -2,9 +2,9 @@ import {
     buildBatchCreateTablePreview,
     buildBatchLoadPreview,
 } from '../../batchImportSupport';
-import { accessBatchImportConfig } from '../../accessImporter';
+import { accessBatchImportConfig, mapImportTypeToAccessType } from '../../accessImporter';
 import type { CreateTablePreviewInput, LoadSqlPreviewInput } from './DatabaseImportWizardAdapter';
-import { BaseImportWizardAdapter, getBaseImportTypeName, normalizeImportTypeName } from './DatabaseImportWizardAdapter';
+import { BaseImportWizardAdapter } from './DatabaseImportWizardAdapter';
 
 export class AccessImportWizardAdapter extends BaseImportWizardAdapter {
     public readonly kind = 'access' as const;
@@ -14,21 +14,10 @@ export class AccessImportWizardAdapter extends BaseImportWizardAdapter {
     }
 
     public mapInferredType(typeName: string): string {
-        const normalized = normalizeImportTypeName(typeName);
-        const baseType = getBaseImportTypeName(normalized);
-        if (baseType === 'BOOLEAN' || baseType === 'BIT') {
-            return 'BOOLEAN';
-        }
-        if (baseType === 'VARCHAR' || baseType === 'NVARCHAR') {
-            return 'TEXT(255)';
-        }
-        if (baseType === 'DATE' || baseType === 'TIMESTAMP' || baseType === 'DATETIME') {
-            return 'DATETIME';
-        }
-        if (baseType === 'BIGINT' || baseType === 'INT' || baseType === 'INTEGER') {
-            return 'INTEGER';
-        }
-        return normalized;
+        // Keep the wizard preview identical to batch execution; ACCDB is the
+        // default target because the wizard cannot know the file extension
+        // until execution, and BIGINT execution is validated there.
+        return mapImportTypeToAccessType(typeName, true);
     }
 
     public buildCreateTableSql(input: CreateTablePreviewInput): string {

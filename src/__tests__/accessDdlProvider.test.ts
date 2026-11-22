@@ -28,6 +28,8 @@ interface RelationshipRow {
     FOREIGN_TABLE?: string;
     FOREIGN_COLUMN?: string;
     ENFORCED?: number | string;
+    UPDATE_CASCADE?: number | string;
+    DELETE_CASCADE?: number | string;
 }
 
 const TABLE_COLUMNS = ['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC'];
@@ -160,8 +162,8 @@ class FakeAccessConnection implements DatabaseConnection {
                     relationship.FOREIGN_TABLE,
                     relationship.FOREIGN_COLUMN,
                     relationship.ENFORCED ?? 1,
-                    0,
-                    0,
+                    relationship.UPDATE_CASCADE ?? 0,
+                    relationship.DELETE_CASCADE ?? 0,
                 ]));
             }
             throw new Error(`Unexpected fake query: ${resolved}`);
@@ -234,6 +236,21 @@ describe('accessDdlProvider', () => {
             expect(ddl).not.toContain('[age_times_2] LONG');
         });
 
+        it('documents complex fields instead of emitting the unsupported COMPLEX type', async () => {
+            const connection = new FakeAccessConnection({
+                Attachments: [
+                    { ATTNAME: 'id', FORMAT_TYPE: 'LONG', ATTNUM: 1 },
+                    { ATTNAME: 'Files', FORMAT_TYPE: 'COMPLEX', ATTNUM: 2 },
+                ],
+            });
+            const result = await accessDdlProvider.getColumns(connection, 'default', 'default', 'Attachments');
+            expect(result[1]?.fullTypeName).toBe('COMPLEX');
+
+            const ddl = await accessDdlProvider.generateTableDDL(connection, 'default', 'default', 'Attachments');
+            expect(ddl).toContain('-- [Files] — complex (multi-value/attachment) field; recreated through its flat child table');
+            expect(ddl).not.toContain('[Files] COMPLEX');
+        });
+
         it('escapes literal quotes inside table names', async () => {
             const connection = new FakeAccessConnection({ "O'Reilly": columns });
             await expect(accessDdlProvider.getColumns(connection, 'default', 'default', "O'Reilly")).resolves.toHaveLength(5);
@@ -250,6 +267,25 @@ describe('accessDdlProvider', () => {
             expect(ddl).toContain(
                 'ALTER TABLE [Orders] ADD CONSTRAINT [FK_Orders_Customers] FOREIGN KEY ([CustomerID]) REFERENCES [Customers] ([ID]);',
             );
+        });
+
+        it('preserves relationship attributes as a comment because Access DDL cannot express them', async () => {
+            const connection = new FakeAccessConnection(
+                { Orders: [{ ATTNAME: 'CustomerID', FORMAT_TYPE: 'LONG', ATTNUM: 1 }] },
+                [],
+                [{
+                    RELATIONSHIP: 'FK_Orders_Customers',
+                    TABLE: 'Orders',
+                    COLUMN: 'CustomerID',
+                    FOREIGN_TABLE: 'Customers',
+                    FOREIGN_COLUMN: 'ID',
+                    ENFORCED: 0,
+                    UPDATE_CASCADE: 1,
+                    DELETE_CASCADE: 1,
+                }],
+            );
+            const ddl = await accessDdlProvider.generateTableDDL(connection, 'default', 'default', 'Orders');
+            expect(ddl).toContain('-- FK_Orders_Customers: not enforced, update cascade, delete cascade');
         });
     });
 

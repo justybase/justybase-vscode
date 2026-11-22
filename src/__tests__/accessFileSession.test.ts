@@ -1,7 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
+    AccessFileChangedError,
+    AccessFileEncryptedWriteError,
     AccessFileError,
     AccessFileReadOnlyError,
     AccessFileSession,
@@ -11,6 +14,23 @@ import {
 import type { AccessComplexValue } from '../../packages/access-file/src';
 import { serializeAccessComplexValue } from '../../packages/access-file/src/complexValues';
 import { parseAccessPropertyMapDescription } from '../../packages/access-file/src/accessFileSession';
+
+// `node:fs/promises` is copied by the Babel interop helper, so spying on the
+// test's namespace does not affect the module under test.  Mocking the module
+// keeps one shared jest.fn (wrapping the real implementation by default) for
+// both copies.
+jest.mock('node:fs/promises', () => {
+    const actual = jest.requireActual('node:fs/promises');
+    return { ...actual, rename: jest.fn(actual.rename) };
+});
+
+const realRename = (jest.requireActual('node:fs/promises') as typeof fs).rename;
+const renameMock = fs.rename as jest.Mock;
+
+beforeEach(() => {
+    renameMock.mockReset();
+    renameMock.mockImplementation(realRename);
+});
 
 function accessHeader(engineName: string, version: number): Buffer {
     const header = Buffer.alloc(21);
@@ -154,6 +174,197 @@ describe('Access file format boundary', () => {
             expect((attachment as readonly { data: Uint8Array | null }[])[0]?.data?.length).toBeGreaterThan(0);
         } finally {
             await session.close();
+        }
+    });
+
+    it('refuses to write a password-protected file', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-encrypted-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        try {
+            // The reader accepts a password for an unencrypted file, so this
+            // exercises the conservative write guard without shipping an
+            // encrypted binary fixture.
+            const session = await AccessFileSession.open({ filePath, password: 'secret', readOnly: false });
+            try {
+                await expect(session.writeAtomically(() => undefined))
+                    .rejects.toBeInstanceOf(AccessFileEncryptedWriteError);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('refuses a staged write after the file changed on disk', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-changed-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                const later = new Date(Date.now() + 10_000);
+                await fs.utimes(filePath, later, later);
+                await expect(session.writeAtomically(() => undefined))
+                    .rejects.toBeInstanceOf(AccessFileChangedError);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('does not install a staged file that cannot be read back', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-verify-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        const before = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await expect(session.writeAtomically(async context => {
+                    await fs.writeFile(context.stagedPath, Buffer.from('not an Access file'));
+                })).rejects.toThrow(/cannot be read back/i);
+            } finally {
+                await session.close();
+            }
+            const after = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+            expect(after).toBe(before);
+            const leftovers = (await fs.readdir(directory)).filter(name => name.includes('.justybase-'));
+            expect(leftovers).toEqual([]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a staged write whose table row count does not match the expectation', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-expect-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        const before = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                const actual = session.getTableDefinition('t_people').rowCount;
+                await expect(session.writeAtomically(async () => undefined, {
+                    tableRowCounts: { t_people: actual + 1 },
+                })).rejects.toThrow(/has \d+ rows, expected \d+/i);
+            } finally {
+                await session.close();
+            }
+            const after = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+            expect(after).toBe(before);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('checks for external changes after the writer ran', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-race-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await expect(session.writeAtomically(async () => {
+                    const later = new Date(Date.now() + 10_000);
+                    await fs.utimes(filePath, later, later);
+                })).rejects.toBeInstanceOf(AccessFileChangedError);
+            } finally {
+                await session.close();
+            }
+            const leftovers = (await fs.readdir(directory)).filter(name => name.includes('.justybase-'));
+            expect(leftovers).toEqual([]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('accepts a valid complex-column database when verifyAllTables is set', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-complex-write-'));
+        const filePath = path.join(directory, 'complex.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'complex.accdb'), filePath);
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await session.writeAtomically(async () => undefined, { verifyAllTables: true });
+                expect(session.listTableNames()).toContain('ComplexFixture');
+            } finally {
+                await session.close();
+            }
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('keeps a recoverable backup when the platform refuses a one-step replace', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-fallback-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        let failedOnce = false;
+        renameMock.mockImplementation(async (source: string, target: string) => {
+            if (!failedOnce && String(source).endsWith('.tmp')) {
+                failedOnce = true;
+                const error = new Error('EEXIST: file already exists') as NodeJS.ErrnoException;
+                error.code = 'EEXIST';
+                throw error;
+            }
+            await realRename(source, target);
+        });
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await session.writeAtomically(async () => undefined);
+                expect(session.listTableNames()).toContain('t_people');
+            } finally {
+                await session.close();
+            }
+        } finally {
+            renameMock.mockReset();
+            renameMock.mockImplementation(realRename);
+        }
+        try {
+            expect(failedOnce).toBe(true);
+            const leftovers = (await fs.readdir(directory)).filter(name => name.includes('.justybase-'));
+            expect(leftovers).toEqual([]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('restores the original file when the fallback install also fails', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'justybase-access-fallback-fail-'));
+        const filePath = path.join(directory, 'sample.accdb');
+        await fs.copyFile(path.join(__dirname, 'fixtures', 'access', 'sample2007.accdb'), filePath);
+        const before = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+        renameMock.mockImplementation(async (source: string, target: string) => {
+            if (String(source).endsWith('.tmp')) {
+                const error = new Error('EEXIST: file already exists') as NodeJS.ErrnoException;
+                error.code = 'EEXIST';
+                throw error;
+            }
+            await realRename(source, target);
+        });
+        try {
+            const session = await AccessFileSession.open({ filePath, readOnly: false });
+            try {
+                await expect(session.writeAtomically(async () => undefined)).rejects.toThrow(/EEXIST|exists/i);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            renameMock.mockReset();
+            renameMock.mockImplementation(realRename);
+        }
+        try {
+            const after = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+            expect(after).toBe(before);
+            const leftovers = (await fs.readdir(directory)).filter(name => name.includes('.justybase-'));
+            expect(leftovers).toEqual([]);
+        } finally {
+            await fs.rm(directory, { recursive: true, force: true });
         }
     });
 });

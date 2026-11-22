@@ -34,11 +34,9 @@ Profile columns, check nulls and distinct values, filter and sort rows, export t
 
 ![Interactive result chart](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/results-chart.png)
 
-### Build a query without starting from scratch
+### Completion and saved queries
 
-![Visual Query Builder](https://raw.githubusercontent.com/justybase/justybase-vscode/master/docs/screenshots/visual_query_builder.png)
-
-Use the shared Visual Query Builder to join tables, choose columns, add filters, and open generated SQL in the editor.
+Access connections use the shared SQL editor, completion, result grid, filtering, profiling, and export tools. Saved non-parameterized `SELECT` QueryDefs appear as views; other query types remain read-only metadata.
 
 ## Open an Access file
 
@@ -53,8 +51,8 @@ The optional password is stored in VS Code Secret Storage. The source file is no
 ## Important boundaries
 
 - Parameterized, crosstab/PIVOT, action, pass-through, and Access-only saved queries remain read-only metadata.
-- Jet 3 writes are disabled; the staged writer targets Jet 4/ACE files.
-- Password-protected files using newer strong-encryption variants may be outside the first native support slice.
+- Jet 3 row writes are supported; Jet 3 DDL is not (the DDL engine targets Jet 4/ACE layouts).
+- Password-protected files are read-only in this release: the reader decrypts pages in memory, but the staged writer mutates raw pages, so writes to encrypted files are refused to protect the database.
 - Multi-file source editing is not part of Access support; export query results when you need a separate file.
 
 ## Runtime and development

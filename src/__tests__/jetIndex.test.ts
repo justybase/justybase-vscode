@@ -3,7 +3,9 @@ import * as path from 'node:path';
 import { JetTable } from '../../packages/access-file/src/jet/JetTable';
 import { JetPageChannel } from '../../packages/access-file/src/jet/JetPageChannel';
 import { jetLayoutFor } from '../../packages/access-file/src/jet/JetLayout';
-import { ByteStream, JetGeneralIndexCodes } from '../../packages/access-file/src/jet/JetTextSortOrder';
+import { ByteStream, JetGeneralIndexCodes, JetTextSortOrder } from '../../packages/access-file/src/jet/JetTextSortOrder';
+import { JetTextColumnDescriptor } from '../../packages/access-file/src/jet/JetColumnDescriptor';
+import type { JetColumn } from '../../packages/access-file/src/jet/JetTableTypes';
 import { JetRowId, JetIndexEntry, byteCodeCompare } from '../../packages/access-file/src/jet/JetIndexEntry';
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'access');
@@ -121,5 +123,29 @@ describe('JetIndexEntry', () => {
         const same = new JetIndexEntry(new Uint8Array([0x01]), new JetRowId(2, 0));
         expect(a.compareTo(b)).toBeLessThan(0);
         expect(a.compareTo(same)).toBeLessThan(0);
+    });
+
+    it('refuses to encode unknown text sort orders instead of writing a legacy index', () => {
+        const column: JetColumn = {
+            name: 'name',
+            type: 0x0a,
+            columnNumber: 1,
+            variable: true,
+            variableIndex: 0,
+            fixedOffset: 0,
+            size: 100,
+            precision: 0,
+            scale: 0,
+            autoLong: false,
+            autoUuid: false,
+        };
+        // Reading an existing index must stay possible even when its sort
+        // order is not one we can encode.
+        const unknown = new JetTextColumnDescriptor(column, 0x01, new JetTextSortOrder(9999, 0));
+        expect(() => unknown.writeValue('abc', new ByteStream()))
+            .toThrow(/Unsupported collating sort order/);
+
+        const legacy = new JetTextColumnDescriptor(column, 0x01, JetTextSortOrder.Polish);
+        expect(() => legacy.writeValue('abc', new ByteStream())).not.toThrow();
     });
 });

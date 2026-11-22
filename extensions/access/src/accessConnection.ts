@@ -1008,7 +1008,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
                 const channel = new JetPageChannel(buffer, layout);
                 applyDdlSql(channel, sql);
                 await fs.writeFile(context.stagedPath, channel.buffer);
-            });
+            }, { verifyAllTables: true });
             await this.reloadSessionFromDisk();
             this._observedFileVersion = markAccessFileChanged(this._databasePath);
             return { columns: [], rows: [], recordsAffected: 0 };
@@ -1057,7 +1057,7 @@ export class AccessConnection extends EventEmitter implements DatabaseConnection
                     [beforeTable],
                     [afterTable],
                     definition.name,
-                ));
+                ), { tableRowCounts: { [definition.name]: afterTable.rows.length } });
                 const afterSnapshots = this._snapshots.map(snapshot => snapshot.definition.name.localeCompare(definition.name, undefined, { sensitivity: 'accent' }) === 0
                     ? afterTable
                     : snapshot);

@@ -3,7 +3,7 @@ import { netezzaImportWizardAdapter } from '../import/wizard/adapters/NetezzaImp
 import { snowflakeImportWizardAdapter } from '../import/wizard/adapters/SnowflakeImportWizardAdapter';
 import { verticaImportWizardAdapter } from '../import/wizard/adapters/VerticaImportWizardAdapter';
 import { accessImportWizardAdapter } from '../import/wizard/adapters/AccessImportWizardAdapter';
-import { accessBatchImportConfig } from '../import/accessImporter';
+import { accessBatchImportConfig, mapImportTypeToAccessType } from '../import/accessImporter';
 import { getImportWizardAdapter } from '../import/wizard/adapters';
 import { registerDatabaseDialect } from '../core/factories/databaseDialectRegistry';
 import { snowflakeDialect } from '../../extensions/snowflake/src/snowflakeDialect';
@@ -20,8 +20,8 @@ describe('import wizard adapters', () => {
     });
 
     it('maps Access source types and builds direct INSERT previews', () => {
-        expect(accessImportWizardAdapter.mapInferredType('VARCHAR(80)')).toBe('TEXT(255)');
-        expect(accessImportWizardAdapter.mapInferredType('BIGINT')).toBe('INTEGER');
+        expect(accessImportWizardAdapter.mapInferredType('VARCHAR(80)')).toBe('TEXT(80)');
+        expect(accessImportWizardAdapter.mapInferredType('BIGINT')).toBe('BIGINT');
         expect(accessImportWizardAdapter.mapInferredType('DATE')).toBe('DATETIME');
 
         const plan = accessImportWizardAdapter.buildExecutionPlan({
@@ -61,6 +61,24 @@ describe('import wizard adapters', () => {
         expect(accessBatchImportConfig.toSqlLiteral('0', column('BOOLEAN'), '.')).toBe('FALSE');
         expect(accessBatchImportConfig.toSqlLiteral("O'Reilly", column('TEXT(255)'), '.')).toBe("'O''Reilly'");
         expect(accessBatchImportConfig.toSqlLiteral('12.50', column('DECIMAL(10,2)'), '.')).toBe('12.50');
+        expect(accessBatchImportConfig.toSqlLiteral('2147483647', column('LONG'), '.')).toBe('2147483647');
+    });
+
+    it('maps Access import types without narrowing integers or truncating text', () => {
+        expect(mapImportTypeToAccessType('INT')).toBe('LONG');
+        expect(mapImportTypeToAccessType('INTEGER')).toBe('LONG');
+        expect(mapImportTypeToAccessType('SMALLINT')).toBe('SMALLINT');
+        expect(mapImportTypeToAccessType('TINYINT')).toBe('BYTE');
+        expect(mapImportTypeToAccessType('BIGINT')).toBe('BIGINT');
+        expect(() => mapImportTypeToAccessType('BIGINT', false)).toThrow(/mdb/i);
+        expect(mapImportTypeToAccessType('NVARCHAR(120)')).toBe('TEXT(120)');
+        expect(mapImportTypeToAccessType('NVARCHAR(4000)')).toBe('MEMO');
+        expect(mapImportTypeToAccessType('MEMO')).toBe('MEMO');
+        expect(mapImportTypeToAccessType('DECIMAL(12,3)')).toBe('DECIMAL(12,3)');
+        expect(mapImportTypeToAccessType('DOUBLE')).toBe('DOUBLE');
+        expect(mapImportTypeToAccessType('MONEY')).toBe('CURRENCY');
+        expect(mapImportTypeToAccessType('UUID')).toBe('GUID');
+        expect(mapImportTypeToAccessType('BLOB')).toBe('OLE');
     });
 
     it('uses standalone CREATE and load SQL previews for Netezza advanced mode', () => {

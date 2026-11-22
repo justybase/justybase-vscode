@@ -27,14 +27,24 @@ interface Token {
 const DATA_TYPES: Readonly<Record<string, { type: number; needsLength: boolean }>> = {
     BYTE: { type: 0x02, needsLength: false },
     TINYINT: { type: 0x02, needsLength: false },
+    // Access DDL defines INTEGER/INT as 4-byte Long Integer and SMALLINT as
+    // 2-byte Integer.  Writing INTEGER as a 2-byte Jet SHORT truncated values
+    // above 32767 on DDL replay and on import.
     SMALLINT: { type: 0x03, needsLength: false },
-    INTEGER: { type: 0x03, needsLength: false },
-    INT: { type: 0x03, needsLength: false },
     SHORT: { type: 0x03, needsLength: false },
+    SHORTINTEGER: { type: 0x03, needsLength: false },
+    INT2: { type: 0x03, needsLength: false },
+    INTEGER: { type: 0x04, needsLength: false },
+    INT: { type: 0x04, needsLength: false },
+    INT4: { type: 0x04, needsLength: false },
+    LONGINTEGER: { type: 0x04, needsLength: false },
     LONG: { type: 0x04, needsLength: false },
     BIGINT: { type: 0x13, needsLength: false },
+    BIGINTEGER: { type: 0x13, needsLength: false },
+    INT8: { type: 0x13, needsLength: false },
     COUNTER: { type: 0x04, needsLength: false },
     AUTONUMBER: { type: 0x04, needsLength: false },
+    IDENTITY: { type: 0x04, needsLength: false },
     MONEY: { type: 0x05, needsLength: false },
     CURRENCY: { type: 0x05, needsLength: false },
     SINGLE: { type: 0x06, needsLength: false },
@@ -212,6 +222,15 @@ function parseType(tokens: Token[], index: { value: number }): { type: number; l
         precision = 18;
         scale = scale ?? 0;
     }
+    if (definition.type === 0x0a && length !== undefined) {
+        // Access `TEXT(n)` counts characters, while the Jet column definition
+        // stores the byte length (UTF-16).  The previous code wrote `n` bytes,
+        // which halved every text column on DDL replay and on import.
+        if (length > 255) {
+            throw new AccessFileError(`Access TEXT length ${length} exceeds the maximum of 255 characters.`);
+        }
+        length *= 2;
+    }
     return { type: definition.type, length, precision, scale };
 }
 
@@ -222,9 +241,12 @@ function parseColumn(tokens: Token[], index: { value: number }): { column: JetDd
     }
     const name = stripDelims(nameToken.text);
     index.value++;
+    // COUNTER/AUTONUMBER are both the column type and the AutoNumber marker;
+    // the trailing-token loop below cannot see the type token.
+    const typeToken = tokens[index.value]?.lower;
     const typeInfo = parseType(tokens, index);
     let notNull = false;
-    let autoNumber = false;
+    let autoNumber = typeToken === 'counter' || typeToken === 'autonumber' || typeToken === 'identity';
     let primaryKey = false;
     while (tokens[index.value]) {
         const lower = tokens[index.value]!.lower;

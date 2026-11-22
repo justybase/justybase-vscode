@@ -608,6 +608,14 @@ export function createTable(
     if (columns.length === 0) {
         throw new AccessFileError('A table must have at least one column.');
     }
+    if (!layout.supportsBigInt && columns.some(column => column.type === 0x13)) {
+        // Jet 4 (MDB) predates the 64-bit Large Number type.  Access hangs or
+        // reports an unrecognized database when such a column is present, so
+        // refuse the write instead of producing a file Access cannot open.
+        throw new AccessFileError(
+            'BIGINT columns require an .accdb database; Jet 4 .mdb files cannot store 64-bit integers.',
+        );
+    }
     if (catalogRows(channel).some(row => row.name.toLowerCase() === name.toLowerCase())) {
         throw new AccessFileError(`An object named '${name}' already exists.`);
     }
@@ -693,6 +701,17 @@ export function dropTable(channel: JetPageChannel, name: string): void {
         if (String(row[2] ?? '').toLowerCase() === name.toLowerCase()) {
             catalog.deleteRowWithIndexes(location, row);
             break;
+        }
+    }
+    catalog.writeDefinitionCounters();
+
+    // Access removes relationships that reference a dropped table; leaving the
+    // MSysRelationships rows behind makes the database look corrupt.
+    const droppedName = name.toLowerCase();
+    for (const relationship of listRelationships(channel)) {
+        if (relationship.table.toLowerCase() === droppedName
+            || relationship.foreignTable.toLowerCase() === droppedName) {
+            dropRelationship(channel, relationship.name);
         }
     }
 
@@ -805,9 +824,10 @@ export function dropIndex(channel: JetPageChannel, tableName: string, indexName:
 }
 
 /** Foreign-key relationship attributes (DAO RelationshipAttribute values). */
-const RELATIONSHIP_ENFORCED = 0x01;
-const RELATIONSHIP_UPDATE_CASCADE = 0x08;
-const RELATIONSHIP_DELETE_CASCADE = 0x10;
+const RELATIONSHIP_NO_INTEGRITY = 0x0002;
+const RELATIONSHIP_UPDATE_CASCADE = 0x0100;
+const RELATIONSHIP_DELETE_CASCADE = 0x1000;
+const RELATIONSHIP_CASCADE_NULL = 0x2000;
 
 export interface JetRelationship {
     readonly name: string;
@@ -872,9 +892,24 @@ export function addRelationship(channel: JetPageChannel, relationship: JetRelati
     }
 
     const relationshipsTable = new JetTable(channel, 'MSysRelationships', systemTablePage(channel, 'MSysRelationships'));
-    const grbit = (relationship.enforced === false ? 0 : RELATIONSHIP_ENFORCED)
-        | (relationship.updateCascade ? RELATIONSHIP_UPDATE_CASCADE : 0)
-        | (relationship.deleteCascade ? RELATIONSHIP_DELETE_CASCADE : 0);
+    // Access stores the *negative* integrity flag: bit 0x0002 means the
+    // relationship is not enforced.  Cascade bits require integrity.
+    let grbit = 0;
+    if (relationship.enforced === false) {
+        grbit |= RELATIONSHIP_NO_INTEGRITY;
+    }
+    if (relationship.updateCascade) {
+        grbit |= RELATIONSHIP_UPDATE_CASCADE;
+    }
+    if (relationship.deleteCascade) {
+        grbit |= RELATIONSHIP_DELETE_CASCADE;
+    }
+    if ((grbit & RELATIONSHIP_NO_INTEGRITY) !== 0
+        && (grbit & (RELATIONSHIP_UPDATE_CASCADE | RELATIONSHIP_DELETE_CASCADE | RELATIONSHIP_CASCADE_NULL)) !== 0) {
+        throw new AccessFileError(
+            `Relationship '${relationship.name}' cannot cascade when referential integrity is disabled.`,
+        );
+    }
     for (let columnIndex = 0; columnIndex < relationship.columns.length; columnIndex++) {
         const row: AccessValue[] = relationshipsTable.columns.map(column => {
             switch (column.name.toLowerCase()) {
@@ -1086,6 +1121,11 @@ function recreateTableDefinition(
             const values = [...row];
             values[0] = tdefPageNumber;
             catalog.updateRowWithIndexes(location, row, values);
+            // updateRowWithIndexes mutates index pages through the page cache;
+            // they are persisted by writeDefinitionCounters().  Without this
+            // flush the catalog row keeps its new Id while the Id B-tree still
+            // points at the old (now reusable) page number.
+            catalog.writeDefinitionCounters();
             break;
         }
     }

@@ -47,6 +47,8 @@ interface RelationshipRow {
     FOREIGN_TABLE?: string;
     FOREIGN_COLUMN?: string;
     ENFORCED?: number | string;
+    UPDATE_CASCADE?: number | string;
+    DELETE_CASCADE?: number | string;
 }
 
 type AccessDdlProvider = NonNullable<DatabaseAdvancedFeatures['ddl']>;
@@ -237,7 +239,17 @@ export const accessDdlProvider: AccessDdlProvider = {
                 if (!name || columnsList.length === 0 || !foreignTable || foreignColumns.length !== columnsList.length) {
                     return null;
                 }
-                return `ALTER TABLE ${quoteAccessIdentifier(tableName)} ADD CONSTRAINT ${quoteAccessIdentifier(name)}`
+                // Access DDL cannot express the DAO relationship attributes
+                // (enforced / cascade).  Preserve them as a comment so the
+                // replayed schema can be corrected instead of silently
+                // changing referential behaviour.
+                const attributes = [
+                    isFlagSet(row.ENFORCED) ? 'enforced' : 'not enforced',
+                    isFlagSet(row.UPDATE_CASCADE) ? 'update cascade' : null,
+                    isFlagSet(row.DELETE_CASCADE) ? 'delete cascade' : null,
+                ].filter((value): value is string => Boolean(value));
+                return `-- ${name}: ${attributes.join(', ')}\n`
+                    + `ALTER TABLE ${quoteAccessIdentifier(tableName)} ADD CONSTRAINT ${quoteAccessIdentifier(name)}`
                     + ` FOREIGN KEY (${columnsList.join(', ')}) REFERENCES ${quoteAccessIdentifier(foreignTable)} (${foreignColumns.join(', ')});`;
             })
             .filter((statement): statement is string => statement !== null);
@@ -266,11 +278,14 @@ export const accessDdlProvider: AccessDdlProvider = {
         );
 
         const columnLines: string[] = [];
-        const calculatedLines: string[] = [];
+        const skippedLines: string[] = [];
         for (const column of columns) {
-            if (column.fullTypeName.toUpperCase() === 'CALCULATED') {
-                calculatedLines.push(
-                    `-- [${column.name.replace(/]/g, ']]')}] — calculated field; cannot be recreated through Access DDL`,
+            const typeName = column.fullTypeName.toUpperCase();
+            if (typeName === 'CALCULATED' || typeName === 'COMPLEX') {
+                skippedLines.push(
+                    `-- [${column.name.replace(/]/g, ']]')}] — ${typeName === 'COMPLEX'
+                        ? 'complex (multi-value/attachment) field; recreated through its flat child table'
+                        : 'calculated field; cannot be recreated through Access DDL'}`,
                 );
                 continue;
             }
@@ -304,8 +319,8 @@ export const accessDdlProvider: AccessDdlProvider = {
         }
 
         const createStatement = `CREATE TABLE ${quoteAccessIdentifier(tableName)} (\n${columnLines.join(',\n')}\n);`;
-        return calculatedLines.length > 0
-            ? `${calculatedLines.join('\n')}\n${createStatement}`
+        return skippedLines.length > 0
+            ? `${skippedLines.join('\n')}\n${createStatement}`
             : createStatement;
     },
     async generateViewDDL(

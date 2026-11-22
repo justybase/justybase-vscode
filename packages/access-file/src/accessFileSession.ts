@@ -5,6 +5,7 @@ import { constants as fsConstants } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import MDBReader, { type Column, type Table as MdbTable, type Value as MdbValue } from 'mdb-reader';
 import type {
+    AccessAtomicWriteExpectation,
     AccessAtomicWriteResult,
     AccessAtomicWriter,
     AccessAttachment,
@@ -30,9 +31,19 @@ import type {
     AccessVersion,
 } from './types';
 import { ACCESS_COMPLEX_KIND } from './types';
-import { AccessFileError, AccessFileReadOnlyError } from './accessErrors';
+import {
+    AccessFileChangedError,
+    AccessFileEncryptedWriteError,
+    AccessFileError,
+    AccessFileReadOnlyError,
+} from './accessErrors';
 
-export { AccessFileError, AccessFileReadOnlyError } from './accessErrors';
+export {
+    AccessFileChangedError,
+    AccessFileEncryptedWriteError,
+    AccessFileError,
+    AccessFileReadOnlyError,
+} from './accessErrors';
 
 const ACCESS_HEADER_SIZE = 21;
 const ACCESS_VERSION_OFFSET = 20;
@@ -963,28 +974,109 @@ function isReplaceRenameError(error: unknown): boolean {
         && ['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(String((error as { code?: unknown }).code));
 }
 
-async function replaceFileAtomically(stagedPath: string, targetPath: string): Promise<void> {
+interface AccessFileStamp {
+    readonly mtimeMs: number;
+    readonly size: number;
+}
+
+async function readFileStamp(filePath: string): Promise<AccessFileStamp> {
+    const stat = await fs.stat(filePath);
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
+}
+
+/**
+ * Opens the staged file with the reader the product itself uses.  A writer
+ * regression therefore fails before the original file is replaced instead of
+ * corrupting it in place.
+ */
+async function verifyStagedAccessFile(
+    filePath: string,
+    options: AccessFileSessionOptions,
+    expectation?: AccessAtomicWriteExpectation,
+): Promise<void> {
+    let staged: AccessFileSession | undefined;
+    try {
+        // Reopen through the same session code the product uses; this also
+        // covers hidden flat tables behind complex columns, which mdb-reader's
+        // plain getTableNames() call does not report.
+        staged = await AccessFileSession.open({
+            filePath,
+            password: options.password,
+            readOnly: true,
+        });
+        const tableNames = staged.listTableNames(false);
+
+        for (const [tableName, expectedCount] of Object.entries(expectation?.tableRowCounts ?? {})) {
+            const actualName = tableNames.find(candidate => candidate.toLowerCase() === tableName.toLowerCase());
+            if (!actualName) {
+                throw new AccessFileError(
+                    `The staged Access file does not contain the expected table '${tableName}'; the original file was not changed.`,
+                );
+            }
+            const actualCount = staged.getTableDefinition(actualName).rowCount;
+            if (actualCount !== expectedCount) {
+                throw new AccessFileError(
+                    `The staged Access table '${tableName}' has ${actualCount} rows, expected ${expectedCount}; the original file was not changed.`,
+                );
+            }
+        }
+
+        if (expectation?.verifyAllTables) {
+            for (const tableName of tableNames) {
+                staged.getTableDefinition(tableName);
+            }
+        }
+    } catch (error) {
+        if (error instanceof AccessFileError && /original file was not changed|was not installed/.test(error.message)) {
+            throw error;
+        }
+        throw new AccessFileError(
+            `The staged Access file cannot be read back and was not installed: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+        );
+    } finally {
+        await staged?.close();
+    }
+}
+
+/**
+ * Installs the staged file.  POSIX replaces the destination in one rename.
+ * Windows refuses that while the destination exists, so a hard link (or a
+ * rename when links are unavailable) keeps a recoverable copy until the
+ * caller has reopened the installed file.
+ */
+async function installStagedFile(stagedPath: string, targetPath: string): Promise<string | undefined> {
     try {
         await fs.rename(stagedPath, targetPath);
-        return;
+        return undefined;
     } catch (error) {
-        // POSIX replaces the destination in one rename. Windows refuses that
-        // operation while the destination exists, so keep a recoverable
-        // backup while performing the platform-specific fallback.
         if (!isReplaceRenameError(error)) {
             throw error;
         }
     }
 
     const backupPath = makeBackupPath(targetPath);
-    await fs.rename(targetPath, backupPath);
+    try {
+        await fs.link(targetPath, backupPath);
+    } catch {
+        await fs.rename(targetPath, backupPath);
+    }
     try {
         await fs.rename(stagedPath, targetPath);
     } catch (error) {
-        await fs.rename(backupPath, targetPath).catch(() => undefined);
+        await fs.rename(backupPath, targetPath).catch(async () => {
+            await fs.rm(targetPath, { force: true }).catch(() => undefined);
+            await fs.rename(backupPath, targetPath).catch(() => undefined);
+        });
         throw error;
     }
-    await fs.rm(backupPath, { force: true });
+    return backupPath;
+}
+
+async function restoreBackup(backupPath: string | undefined, targetPath: string): Promise<void> {
+    if (!backupPath) return;
+    await fs.rm(targetPath, { force: true }).catch(() => undefined);
+    await fs.rename(backupPath, targetPath).catch(() => undefined);
 }
 
 async function flushFile(filePath: string): Promise<void> {
@@ -999,18 +1091,25 @@ async function flushFile(filePath: string): Promise<void> {
 export class AccessFileSession {
     private _reader: MDBReader;
     private _closed = false;
+    private _fileStamp: AccessFileStamp;
+    private readonly _encrypted: boolean;
 
     private constructor(
         private readonly _options: AccessFileSessionOptions,
         private _buffer: Buffer,
         private _format: AccessFileFormat,
         reader: MDBReader,
+        fileStamp: AccessFileStamp,
+        encrypted: boolean,
     ) {
         this._reader = reader;
+        this._fileStamp = fileStamp;
+        this._encrypted = encrypted;
     }
 
     public static async open(options: AccessFileSessionOptions): Promise<AccessFileSession> {
         const filePath = path.resolve(options.filePath);
+        const fileStamp = await readFileStamp(filePath);
         const buffer = await fs.readFile(filePath);
         const format = detectAccessFileFormat(buffer, filePath);
         let reader: MDBReader;
@@ -1022,7 +1121,10 @@ export class AccessFileSession {
                 { cause: error },
             );
         }
-        return new AccessFileSession({ ...options, filePath }, buffer, format, reader);
+        // The reader decrypts pages in memory.  The Jet writer mutates raw
+        // pages, so an encrypted file must never reach the write path.
+        const encrypted = Boolean(options.password) || reader.getPassword() !== null;
+        return new AccessFileSession({ ...options, filePath }, buffer, format, reader, fileStamp, encrypted);
     }
 
     /**
@@ -1291,10 +1393,12 @@ export class AccessFileSession {
             updateCascade: boolean;
             deleteCascade: boolean;
         }>();
+        // DAO relation attributes: 0x0001 one-to-one, 0x0002 "don't enforce",
+        // 0x0100 cascade update, 0x1000 cascade delete (0x2000 cascade null).
         const grbitAttributes = (grbit: number): { enforced: boolean; updateCascade: boolean; deleteCascade: boolean } => ({
-            enforced: (grbit & 0x01) !== 0,
-            updateCascade: (grbit & 0x08) !== 0,
-            deleteCascade: (grbit & 0x10) !== 0,
+            enforced: (grbit & 0x0002) === 0,
+            updateCascade: (grbit & 0x0100) !== 0,
+            deleteCascade: (grbit & 0x1000) !== 0,
         });
         for (const row of rows) {
             const relationshipName = String(row.szRelationship ?? '');
@@ -1400,27 +1504,88 @@ export class AccessFileSession {
         }
     }
 
-    public async writeAtomically(writer: AccessAtomicWriter): Promise<AccessAtomicWriteResult> {
+    public async writeAtomically(
+        writer: AccessAtomicWriter,
+        expectation?: AccessAtomicWriteExpectation,
+    ): Promise<AccessAtomicWriteResult> {
         this.ensureOpen();
         if (this.readOnly) {
             throw new AccessFileReadOnlyError(this.filePath);
         }
+        if (this._encrypted) {
+            throw new AccessFileEncryptedWriteError(this.filePath);
+        }
+        await this.assertUnchangedOnDisk();
 
         const stagedPath = makeStagedPath(this.filePath);
+        let backupPath: string | undefined;
         try {
             await fs.copyFile(this.filePath, stagedPath);
             await writer({ sourcePath: this.filePath, stagedPath, format: this.format });
             await flushFile(stagedPath);
-            await replaceFileAtomically(stagedPath, this.filePath);
+            // Validate the staged copy before it becomes the user's file.
+            await verifyStagedAccessFile(stagedPath, this._options, expectation);
+            // Narrow the race window: the writer may have run long enough for
+            // Access or another editor to save the file in the meantime.
+            await this.assertUnchangedOnDisk();
+            backupPath = await installStagedFile(stagedPath, this.filePath);
         } catch (error) {
             await fs.rm(stagedPath, { force: true }).catch(() => undefined);
             throw error;
         }
 
-        this._buffer = await fs.readFile(this.filePath);
-        this._format = detectAccessFileFormat(this._buffer, this.filePath);
-        this._reader = new MDBReader(this._buffer, { password: this._options.password });
+        try {
+            await this.reloadFromDisk();
+        } catch (error) {
+            await restoreBackup(backupPath, this.filePath);
+            let restored = false;
+            try {
+                await this.reloadFromDisk();
+                restored = true;
+            } catch {
+                // The session cannot represent either version any more.  Keep
+                // the original failure as the cause so the user can reconnect.
+            }
+            throw new AccessFileError(
+                `The Access file was installed but cannot be reopened; ${restored
+                    ? 'the previous file was restored'
+                    : 'restoring the previous file also failed'}: ${this.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+                { cause: error },
+            );
+        }
+        if (backupPath) {
+            await fs.rm(backupPath, { force: true }).catch(() => undefined);
+        }
         return { targetPath: this.filePath, format: this.format };
+    }
+
+    /**
+     * Re-reads the database file after an atomic replacement.  Assigning the
+     * fields only after every step succeeded keeps the session pointed at a
+     * coherent buffer/reader pair if any step throws.
+     */
+    private async reloadFromDisk(): Promise<void> {
+        const buffer = await fs.readFile(this.filePath);
+        const format = detectAccessFileFormat(buffer, this.filePath);
+        const reader = new MDBReader(buffer, { password: this._options.password });
+        const fileStamp = await readFileStamp(this.filePath);
+        this._buffer = buffer;
+        this._format = format;
+        this._reader = reader;
+        this._fileStamp = fileStamp;
+    }
+
+    /**
+     * Refuses to overwrite changes made by Microsoft Access or another process
+     * after this session loaded the file.
+     */
+    private async assertUnchangedOnDisk(): Promise<void> {
+        const current = await readFileStamp(this.filePath).catch(() => undefined);
+        if (!current
+            || current.mtimeMs !== this._fileStamp.mtimeMs
+            || current.size !== this._fileStamp.size) {
+            throw new AccessFileChangedError(this.filePath);
+        }
     }
 
     private getMdbTable(name: string): MdbTable {

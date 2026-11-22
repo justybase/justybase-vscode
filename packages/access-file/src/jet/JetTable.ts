@@ -262,18 +262,21 @@ export class JetTable {
             const variableIndexOffset = layout.utf16 ? 7 : 3;
             const fixedOffsetOffset = layout.utf16 ? 21 : 14;
             const lengthOffset = layout.utf16 ? 23 : 16;
+            const flags = this._definition[offset + flagsOffset] ?? 0;
             const column: JetColumn = {
                 name: readName(this._definition, namesPosition, layout),
                 type: this._definition[offset] ?? 0,
                 columnNumber: readUInt(this._definition, offset + (layout.utf16 ? 5 : 1), 2),
-                variable: (((this._definition[offset + flagsOffset] ?? 0) & 0x01) === 0),
+                variable: (flags & 0x01) === 0,
                 variableIndex: readUInt(this._definition, offset + variableIndexOffset, 2),
                 fixedOffset: readUInt(this._definition, offset + fixedOffsetOffset, 2),
                 size: readUInt(this._definition, offset + lengthOffset, 2),
                 precision: this._definition[offset + 11] ?? 0,
                 scale: this._definition[offset + 12] ?? 0,
-                autoLong: (this._definition[offset + flagsOffset] ?? 0) === 0x07,
-                autoUuid: (this._definition[offset + flagsOffset] ?? 0) === 0x05,
+                // Jet stores AutoNumber as a bit, not as an exact flag value;
+                // 0x04 = long counter, 0x40 = ReplicationID/GUID counter.
+                autoLong: (flags & 0x04) !== 0,
+                autoUuid: (flags & 0x40) !== 0,
                 ...(layout.offsetColumnSortOrder >= 0
                     ? { sortOrder: readUInt(this._definition, offset + layout.offsetColumnSortOrder, 2) }
                     : {}),
@@ -728,13 +731,20 @@ export class JetTable {
      */
     public updateRowWithIndexes(location: JetRowLocation, oldValues: readonly AccessValue[], newValues: readonly AccessValue[]): void {
         const rowId = new JetRowId(location.pageNumber, location.rowNumber);
-        // Prepare every new entry before removing the old entries.  A failed
+        // Validate every new entry before removing the old entries.  A failed
         // uniqueness/required check must not leave this in-memory table with
         // its old index entries deleted.
-        const changes = this.indexDatas.map(index => index.prepareAddRow(newValues, rowId));
+        for (const index of this.indexDatas) {
+            index.prepareAddRow(newValues, rowId);
+        }
         for (const index of this.indexDatas) {
             index.deleteRow(oldValues, rowId);
         }
+        // The insertion positions from the validation pass are stale once the
+        // old entries are gone (a removal before the position shifts every
+        // later entry).  Prepare again against the current pages before
+        // committing; otherwise an updated row can leave the B-tree unsorted.
+        const changes = this.indexDatas.map(index => index.prepareAddRow(newValues, rowId));
         this.commitIndexChanges(changes);
         this.updateRow(location, oldValues, newValues);
     }

@@ -24,9 +24,22 @@ export class AccessImportDataType implements DatabaseImportDataType {
 
     public toString(): string {
         const normalized = normalizeType(this.dbType);
-        const base = normalized.replace(/\(.*$/, '');
-        if (/^(VARCHAR|NVARCHAR|CHAR|NCHAR|TEXT|STRING|BPCHAR|CLOB|LONGTEXT|MEMO|NTEXT|JSONB)$/.test(base)) {
-            return 'TEXT';
+        const base = normalized.replace(/\(.*$/, '').trim();
+        const typeArguments = normalized.match(/\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/);
+
+        if (/^(CLOB|LONGTEXT|MEMO|NTEXT|JSON|JSONB)$/.test(base)) {
+            return 'MEMO';
+        }
+        if (/^(VARCHAR|NVARCHAR|CHAR|NCHAR|CHARACTER|STRING|BPCHAR|TEXT)$/.test(base)) {
+            // Access TEXT(n) counts characters; values that cannot fit into
+            // 255 characters belong in MEMO.
+            const explicitLength = typeArguments ? Number(typeArguments[1]) : this.length;
+            if (explicitLength === undefined) {
+                // A bare TEXT is an unbounded long-text type, while a bare
+                // VARCHAR defaults to the Access text width.
+                return base === 'TEXT' ? 'MEMO' : 'TEXT(255)';
+            }
+            return explicitLength > 255 ? 'MEMO' : `TEXT(${Math.max(1, explicitLength)})`;
         }
         if (/^(INT|INTEGER|INT2|INT4|SMALLINT|TINYINT|SHORT|MEDIUMINT)$/.test(base)) {
             return 'INTEGER';
@@ -52,13 +65,15 @@ export class AccessImportDataType implements DatabaseImportDataType {
         if (/^(UUID|UNIQUEIDENTIFIER|GUID)$/.test(base)) {
             return 'GUID';
         }
-        if (/^(BINARY|VARBINARY|BLOB|IMAGE|BYTEA|OLE)$/.test(base)) {
-            return 'BINARY';
+        if (/^(BINARY|VARBINARY|BLOB|IMAGE|BYTEA|OLE|LONGBINARY|LONGVARBINARY)$/.test(base)) {
+            return 'OLE';
         }
         if (/^(NUMERIC|DECIMAL|DEC|NUMBER)$/.test(base)) {
-            return 'DECIMAL';
+            const precision = typeArguments ? Number(typeArguments[1]) : this.precision ?? 18;
+            const scale = typeArguments?.[2] ? Number(typeArguments[2]) : this.scale ?? 0;
+            return `DECIMAL(${precision},${scale})`;
         }
-        return base || 'TEXT';
+        return base || 'MEMO';
     }
 }
 

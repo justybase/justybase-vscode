@@ -4,6 +4,7 @@
  * JustyBase.UCanAccessCs / Jackcess).
  */
 
+import { AccessFileError } from '../accessErrors';
 import type { AccessValue } from '../types';
 import { flipBytes, getNullEntryFlag, getStartEntryFlag, ASC_BOOLEAN_TRUE, ASC_BOOLEAN_FALSE, DESC_BOOLEAN_TRUE, DESC_BOOLEAN_FALSE } from './JetIndexCodes';
 import type { JetColumn } from './JetTableTypes';
@@ -289,11 +290,20 @@ export class JetTextColumnDescriptor extends JetColumnDescriptor {
 
     public constructor(column: JetColumn, flags: number, sortOrder: JetTextSortOrder | null) {
         super(column, flags);
+        // Unknown sort orders must remain readable (JetIndexData.readFrom
+        // constructs descriptors while parsing existing indexes); the guard is
+        // enforced when an entry is actually encoded.
         this._sortOrder = sortOrder;
     }
 
     protected override writeNonNullValue(value: AccessValue, bout: ByteStream): void {
         const codes = indexCodesFor(this._sortOrder);
+        if (!codes) {
+            throw new AccessFileError(
+                `Unsupported collating sort order ${this._sortOrder?.value ?? '<default>'}/${this._sortOrder?.version ?? 0} `
+                + `for text index column '${this.column.name}'. Refusing to write an index with the wrong collation.`,
+            );
+        }
         codes.writeNonNullIndexTextValue(value, bout, this.isAscending);
     }
 }

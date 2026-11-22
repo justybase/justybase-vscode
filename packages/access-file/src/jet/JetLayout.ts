@@ -90,9 +90,11 @@ export interface JetLayout {
     readonly sizeSortOrder: number;
 
     readonly utf16: boolean;
+    /** ACCDB (ACE) supports the 64-bit Large Number column type; Jet 4 does not. */
+    readonly supportsBigInt: boolean;
 }
 
-function jet4Layout(pageSize = 4096): JetLayout {
+function jet4Layout(pageSize = 4096, supportsBigInt = false): JetLayout {
     return {
         pageSize,
         sizeRowLocation: 2,
@@ -156,6 +158,7 @@ function jet4Layout(pageSize = 4096): JetLayout {
         sizeSortOrder: 4,
 
         utf16: true,
+        supportsBigInt,
     };
 }
 
@@ -223,6 +226,7 @@ function jet3Layout(pageSize = 2048): JetLayout {
         sizeSortOrder: 2,
 
         utf16: false,
+        supportsBigInt: false,
     };
 }
 
@@ -230,8 +234,11 @@ export function jetLayoutFor(format: AccessFileFormat): JetLayout {
     if (format === 'jet3') {
         return jet3Layout();
     }
-    if (format === 'jet4' || format.startsWith('accdb')) {
+    if (format === 'jet4') {
         return jet4Layout();
+    }
+    if (format.startsWith('accdb')) {
+        return jet4Layout(4096, true);
     }
     throw new Error(`Unknown Access file format '${format}'.`);
 }

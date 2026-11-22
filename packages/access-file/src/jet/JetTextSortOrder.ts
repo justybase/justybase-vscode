@@ -699,15 +699,27 @@ function toIndexCharSequence(value: unknown): string {
     return str;
 }
 
-/** Resolves the index-codes variant for a text sort order. */
-export function indexCodesFor(sortOrder: JetTextSortOrder | null | undefined): JetGeneralIndexCodes {
+/**
+ * Resolves the index-codes variant for a text sort order.  GeneralLegacy
+ * (default for Jet 4) plus Polish/Russian/Turkish/Ukrainian all use the
+ * legacy encoding.  Any other collating sort order cannot be encoded safely,
+ * so callers must refuse the write instead of producing a B-tree sorted with
+ * the wrong collation.
+ */
+export function indexCodesFor(sortOrder: JetTextSortOrder | null | undefined): JetGeneralIndexCodes | undefined {
     if (sortOrder && sortOrder.equals(JetTextSortOrder.General)) {
         return JetGeneralIndexCodes.Gen;
     }
     if (sortOrder && sortOrder.equals(JetTextSortOrder.General97)) {
         return JetGeneralIndexCodes.Gen97;
     }
-    // GeneralLegacy (default for Jet 4) plus Polish/Russian/Turkish/Ukrainian
-    // all use the legacy encoding
-    return JetGeneralIndexCodes.GenLegacy;
+    if (!sortOrder
+        || sortOrder.equals(JetTextSortOrder.GeneralLegacy)
+        || sortOrder.equals(JetTextSortOrder.Polish)
+        || sortOrder.equals(JetTextSortOrder.Russian)
+        || sortOrder.equals(JetTextSortOrder.Turkish)
+        || sortOrder.equals(JetTextSortOrder.Ukrainian)) {
+        return JetGeneralIndexCodes.GenLegacy;
+    }
+    return undefined;
 }

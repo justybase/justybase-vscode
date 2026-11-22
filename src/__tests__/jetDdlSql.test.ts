@@ -3,7 +3,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { AccessFileSession } from '../../packages/access-file/src';
 import { applyDdlSql } from '../../packages/access-file/src/jet/JetDdlSql';
+import { addRelationship } from '../../packages/access-file/src/jet/JetDdl';
 import { JetPageChannel } from '../../packages/access-file/src/jet/JetPageChannel';
+import { JetTable } from '../../packages/access-file/src/jet/JetTable';
 import { jetLayoutFor } from '../../packages/access-file/src/jet/JetLayout';
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'access');
@@ -151,6 +153,205 @@ describe('JetDdlSql foreign keys (Phase 4)', () => {
                 const relationships = session.listRelationships();
                 expect(relationships).toHaveLength(1);
                 expect(relationships[0]).toMatchObject({ name: 'FK_child_parent', table: 'child_t', foreignTable: 'parent_t' });
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('detects GUID AutoNumber from the column flag bits', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, ['CREATE TABLE guid_t (id GUID AUTOINCREMENT, name TEXT(10))']);
+            const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('accdb2007'));
+            const catalog = new JetTable(channel, 'MSysObjects', 2);
+            const catalogRow = catalog.rowLocations()
+                .map(location => catalog.readRowValues(location))
+                .find(row => String(row[2] ?? '').toLowerCase() === 'guid_t');
+            expect(catalogRow).toBeDefined();
+            const table = new JetTable(channel, 'guid_t', Number(catalogRow?.[0]) & 0x00ffffff);
+            const id = table.columns.find(column => column.name.toLowerCase() === 'id');
+            expect(id).toMatchObject({ autoUuid: true, autoLong: false });
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('stores TEXT(n) as n characters (2 bytes each) in Jet', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, ['CREATE TABLE text_t (id LONG, name TEXT(50))']);
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                const name = session.getTableDefinition('text_t').columns
+                    .find(column => column.name === 'name');
+                expect(name?.size).toBe(100);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('round-trips enforced and cascade relationship attributes', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, [
+                'CREATE TABLE p (id LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'CREATE TABLE c1 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'CREATE TABLE c2 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'CREATE TABLE c3 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))',
+            ]);
+            const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('accdb2007'));
+            addRelationship(channel, {
+                name: 'FK_enf', table: 'c1', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'], enforced: true,
+            });
+            addRelationship(channel, {
+                name: 'FK_noenf', table: 'c2', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'], enforced: false,
+            });
+            addRelationship(channel, {
+                name: 'FK_casc', table: 'c3', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'],
+                enforced: true, updateCascade: true, deleteCascade: true,
+            });
+            fs.writeFileSync(filePath, channel.buffer);
+
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                const relationships = session.listRelationships();
+                expect(relationships).toHaveLength(3);
+                expect(relationships.find(relationship => relationship.name === 'FK_enf')).toMatchObject({
+                    enforced: true,
+                    updateCascade: false,
+                    deleteCascade: false,
+                });
+                expect(relationships.find(relationship => relationship.name === 'FK_noenf')).toMatchObject({
+                    enforced: false,
+                    updateCascade: false,
+                    deleteCascade: false,
+                });
+                expect(relationships.find(relationship => relationship.name === 'FK_casc')).toMatchObject({
+                    enforced: true,
+                    updateCascade: true,
+                    deleteCascade: true,
+                });
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('removes relationships that reference a dropped table', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, [
+                'CREATE TABLE p (id LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'CREATE TABLE c1 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'CREATE TABLE c2 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'ALTER TABLE c1 ADD CONSTRAINT FK_c1 FOREIGN KEY (pid) REFERENCES p (id)',
+                'ALTER TABLE c2 ADD CONSTRAINT FK_c2 FOREIGN KEY (pid) REFERENCES p (id)',
+            ]);
+            applyDdl(filePath, ['DROP TABLE c1']);
+
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                expect(session.listRelationships().map(relationship => relationship.name)).toEqual(['FK_c2']);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('maps Access INTEGER to a 4-byte Long Integer and SMALLINT to 2 bytes', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, ['CREATE TABLE int_types (a INTEGER, b SMALLINT)']);
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                const columns = session.getTableDefinition('int_types').columns;
+                expect(columns.find(column => column.name === 'a')?.size).toBe(4);
+                expect(columns.find(column => column.name === 'b')?.size).toBe(2);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects BIGINT columns in Jet 4 .mdb files', () => {
+        const filePath = path.join(FIXTURES, 'accessLike.mdb');
+        const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('jet4'));
+        expect(() => applyDdlSql(channel, 'CREATE TABLE big_t (a BIGINT)'))
+            .toThrow(/BIGINT.*\.accdb|Jet 4/i);
+    });
+
+    it('recreates an AutoNumber column from COUNTER', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, ['CREATE TABLE counter_t (id COUNTER, name TEXT(10))']);
+            const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('accdb2007'));
+            const catalog = new JetTable(channel, 'MSysObjects', 2);
+            const catalogRow = catalog.rowLocations()
+                .map(location => catalog.readRowValues(location))
+                .find(row => String(row[2] ?? '').toLowerCase() === 'counter_t');
+            expect(catalogRow).toBeDefined();
+            const table = new JetTable(channel, 'counter_t', Number(catalogRow?.[0]) & 0x00ffffff);
+            const id = table.columns.find(column => column.name.toLowerCase() === 'id');
+            expect(id).toMatchObject({ autoLong: true, autoUuid: false });
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('creates a table after dropping another without corrupting the catalog', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, [
+                'CREATE TABLE a (id LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'CREATE TABLE b (id LONG, CONSTRAINT PK PRIMARY KEY (id))',
+                'DROP TABLE a',
+                'CREATE TABLE c (id LONG, CONSTRAINT PK PRIMARY KEY (id))',
+            ]);
+            applyDdl(filePath, ['CREATE TABLE d (id LONG, CONSTRAINT PK PRIMARY KEY (id))']);
+
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                expect(session.listTables().map(table => table.name).sort()).toEqual(['b', 'c', 'd', 't_people']);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('adds an index to a table that already has rows', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('accdb2007'));
+            applyDdlSql(channel, 'CREATE TABLE idx_t (id LONG, name TEXT(20))');
+            const catalog = new JetTable(channel, 'MSysObjects', 2);
+            const catalogRow = catalog.rowLocations()
+                .map(location => catalog.readRowValues(location))
+                .find(row => String(row[2] ?? '').toLowerCase() === 'idx_t');
+            expect(catalogRow).toBeDefined();
+            const table = new JetTable(channel, 'idx_t', Number(catalogRow?.[0]) & 0x00ffffff);
+            table.addRowWithIndexes([1, 'one']);
+            table.addRowWithIndexes([2, 'two']);
+            applyDdlSql(channel, 'CREATE INDEX IX_idx_t ON idx_t (id)');
+            fs.writeFileSync(filePath, channel.buffer);
+
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                expect(session.listIndexes('idx_t').map(index => index.name)).toContain('IX_idx_t');
+                expect((await session.readTable('idx_t')).rows).toHaveLength(2);
             } finally {
                 await session.close();
             }

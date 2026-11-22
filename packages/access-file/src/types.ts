@@ -174,6 +174,17 @@ export interface AccessAtomicWriteContext {
 
 export type AccessAtomicWriter = (context: AccessAtomicWriteContext) => Promise<void> | void;
 
+/**
+ * Optional post-conditions checked against the staged file before it replaces
+ * the source database.  A failed check leaves the original file untouched.
+ */
+export interface AccessAtomicWriteExpectation {
+    /** Expected row count per table name; names are matched case-insensitively. */
+    readonly tableRowCounts?: Readonly<Record<string, number>>;
+    /** Open every catalog table definition to catch a broken catalog/table chain. */
+    readonly verifyAllTables?: boolean;
+}
+
 export interface AccessAtomicWriteResult {
     readonly targetPath: string;
     readonly format: AccessFileFormat;

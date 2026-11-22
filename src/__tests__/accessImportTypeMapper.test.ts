@@ -6,21 +6,25 @@ import * as path from 'node:path';
 
 describe('accessImportTypeMapper (Phase 5)', () => {
     it('maps generic source types to Access DDL types', () => {
-        expect(accessImportTypeMapper.createDataType('VARCHAR', undefined, undefined, 50).toString()).toBe('TEXT');
-        expect(accessImportTypeMapper.createDataType('NVARCHAR(100)').toString()).toBe('TEXT');
+        expect(accessImportTypeMapper.createDataType('VARCHAR', undefined, undefined, 50).toString()).toBe('TEXT(50)');
+        expect(accessImportTypeMapper.createDataType('NVARCHAR(100)').toString()).toBe('TEXT(100)');
+        expect(accessImportTypeMapper.createDataType('NVARCHAR(400)').toString()).toBe('MEMO');
         expect(accessImportTypeMapper.createDataType('INTEGER').toString()).toBe('INTEGER');
         expect(accessImportTypeMapper.createDataType('BIGINT').toString()).toBe('LONG');
         expect(accessImportTypeMapper.createDataType('DOUBLE').toString()).toBe('DOUBLE');
         expect(accessImportTypeMapper.createDataType('REAL').toString()).toBe('SINGLE');
-        expect(accessImportTypeMapper.createDataType('DECIMAL', 18, 2).toString()).toBe('DECIMAL');
+        expect(accessImportTypeMapper.createDataType('DECIMAL', 18, 2).toString()).toBe('DECIMAL(18,2)');
+        expect(accessImportTypeMapper.createDataType('NUMERIC(10,3)').toString()).toBe('DECIMAL(10,3)');
         expect(accessImportTypeMapper.createDataType('MONEY').toString()).toBe('CURRENCY');
         expect(accessImportTypeMapper.createDataType('DATETIME').toString()).toBe('DATETIME');
         expect(accessImportTypeMapper.createDataType('TIMESTAMP').toString()).toBe('DATETIME');
         expect(accessImportTypeMapper.createDataType('DATE').toString()).toBe('DATETIME');
+        expect(accessImportTypeMapper.createDataType('TIME').toString()).toBe('DATETIME');
         expect(accessImportTypeMapper.createDataType('BOOLEAN').toString()).toBe('BOOLEAN');
         expect(accessImportTypeMapper.createDataType('UUID').toString()).toBe('GUID');
-        expect(accessImportTypeMapper.createDataType('BLOB').toString()).toBe('BINARY');
-        expect(accessImportTypeMapper.createDataType('MEMO').toString()).toBe('TEXT');
+        expect(accessImportTypeMapper.createDataType('BLOB').toString()).toBe('OLE');
+        expect(accessImportTypeMapper.createDataType('MEMO').toString()).toBe('MEMO');
+        expect(accessImportTypeMapper.createDataType('TEXT').toString()).toBe('MEMO');
     });
 
     it('creates a working column type chooser', () => {

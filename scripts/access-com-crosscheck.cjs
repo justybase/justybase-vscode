@@ -1,5 +1,7 @@
 'use strict';
 
+require('tsx/cjs');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -9,6 +11,12 @@ const { spawn } = require('node:child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const harnessPath = path.join(repoRoot, 'scripts', 'access-com', 'access-com.ps1');
 const fixturePath = path.join(repoRoot, 'src', '__tests__', 'fixtures', 'access', 'sample2007.accdb');
+
+const { AccessFileSession } = require('../packages/access-file/src');
+const { applyDdlSql } = require('../packages/access-file/src/jet/JetDdlSql');
+const { addRelationship } = require('../packages/access-file/src/jet/JetDdl');
+const { JetPageChannel } = require('../packages/access-file/src/jet/JetPageChannel');
+const { jetLayoutFor } = require('../packages/access-file/src/jet/JetLayout');
 
 function skip(message) {
     console.log(`ACCESS COM cross-check skipped: ${message}`);
@@ -126,7 +134,73 @@ async function main() {
         assert.equal(written.relations[0].table, 'child_table');
         assert.equal(written.relations[0].foreignTable, 'parent_table');
 
-        console.log('ACCESS COM cross-check passed: describe, complex metadata, SELECT, CREATE, FK, Description and @@IDENTITY.');
+        // Writer -> DAO: verify text length semantics and relationship attribute
+        // bits produced by our Jet writer against real Access/DAO.
+        const ourPath = path.join(tempDir, 'our-writer.accdb');
+        const writeSession = await AccessFileSession.create({ filePath: ourPath, format: 'accdb2007' });
+        try {
+            await writeSession.writeAtomically(async context => {
+                const channel = new JetPageChannel(await fs.readFile(context.stagedPath), jetLayoutFor(context.format));
+                applyDdlSql(channel, 'CREATE TABLE p (id LONG, CONSTRAINT PK PRIMARY KEY (id))');
+                applyDdlSql(channel, 'CREATE TABLE c1 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))');
+                applyDdlSql(channel, 'CREATE TABLE c2 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))');
+                applyDdlSql(channel, 'CREATE TABLE c3 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))');
+                applyDdlSql(channel, 'CREATE TABLE text_t (id LONG, name TEXT(50))');
+                applyDdlSql(channel, 'CREATE TABLE auto_types (id COUNTER, qty INTEGER, small SMALLINT)');
+                addRelationship(channel, {
+                    name: 'FK_enf', table: 'c1', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'], enforced: true,
+                });
+                addRelationship(channel, {
+                    name: 'FK_noenf', table: 'c2', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'], enforced: false,
+                });
+                addRelationship(channel, {
+                    name: 'FK_casc', table: 'c3', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'],
+                    enforced: true, updateCascade: true, deleteCascade: true,
+                });
+                await fs.writeFile(context.stagedPath, channel.buffer);
+            }, { verifyAllTables: true });
+        } finally {
+            await writeSession.close();
+        }
+
+        const ourDescription = await runHarness(['describe', ourPath]);
+        const textColumn = ourDescription.tables
+            .find(table => table.name.toLowerCase() === 'text_t')
+            ?.columns.find(column => column.name.toLowerCase() === 'name');
+        assert.equal(textColumn?.size, 50, 'TEXT(50) must be 50 characters according to DAO');
+        const autoTypes = ourDescription.tables.find(table => table.name.toLowerCase() === 'auto_types');
+        const autoId = autoTypes?.columns.find(column => column.name.toLowerCase() === 'id');
+        const qty = autoTypes?.columns.find(column => column.name.toLowerCase() === 'qty');
+        const small = autoTypes?.columns.find(column => column.name.toLowerCase() === 'small');
+        assert.equal(autoId?.type, 'long');
+        assert.equal((autoId?.attributes ?? 0) & 16, 16, 'COUNTER must round-trip as a DAO AutoNumber');
+        assert.equal(qty?.type, 'long', 'INTEGER must be a 4-byte Long Integer');
+        assert.equal(qty?.size, 4);
+        assert.equal(small?.type, 'int', 'SMALLINT must be a 2-byte Integer');
+        assert.equal(small?.size, 2);
+        const relationsByName = new Map(ourDescription.relations.map(relation => [relation.name, relation]));
+        assert.equal(relationsByName.get('FK_enf')?.attributes, 0);
+        assert.equal(relationsByName.get('FK_noenf')?.attributes, 2);
+        assert.equal(relationsByName.get('FK_casc')?.attributes, 4352);
+
+        // DROP TABLE must also remove the relationship rows that reference it.
+        const dropSession = await AccessFileSession.open({ filePath: ourPath, readOnly: false });
+        try {
+            await dropSession.writeAtomically(async context => {
+                const channel = new JetPageChannel(await fs.readFile(context.stagedPath), jetLayoutFor(context.format));
+                applyDdlSql(channel, 'DROP TABLE c3');
+                await fs.writeFile(context.stagedPath, channel.buffer);
+            }, { verifyAllTables: true });
+        } finally {
+            await dropSession.close();
+        }
+        const afterDrop = await runHarness(['describe', ourPath]);
+        assert.deepEqual(
+            afterDrop.relations.map(relation => relation.name).sort(),
+            ['FK_enf', 'FK_noenf'],
+        );
+
+        console.log('ACCESS COM cross-check passed: describe, complex metadata, SELECT, CREATE, FK, Description, @@IDENTITY, TEXT length, AutoNumber/INTEGER widths, relationship flags and DROP TABLE cleanup.');
     } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
     }
