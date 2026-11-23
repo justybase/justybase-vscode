@@ -181,8 +181,8 @@ export class JetIndexData {
     /** prepares to add a row to this index (all constraints checked before returning) */
     public prepareAddRow(row: readonly AccessValue[], rowId: JetRowId): JetPendingChange | null {
         const nullCount = this.countNullValues(row);
-        const isNullEntry = nullCount === this.columns.length;
-        if (this.shouldIgnoreNulls && isNullEntry) {
+        const isAllNullEntry = nullCount === this.columns.length;
+        if (this.shouldIgnoreNulls && isAllNullEntry) {
             return null;
         }
         if (nullCount > 0 && (this.backingPrimaryKey || this.isRequired)) {
@@ -190,7 +190,16 @@ export class JetIndexData {
         }
 
         this.initialize();
-        return this.prepareAddEntry(new JetIndexEntry(this.createEntryBytes(row), rowId), isNullEntry, row);
+        // Access does not treat a key that contains a NULL as a duplicate: two
+        // rows with ('k', NULL) are both accepted by a unique index on (a, b),
+        // verified against DAO 16.  Only a fully populated key participates in
+        // the uniqueness check, which is why `isNullEntry` is not the "all
+        // components are NULL" flag used for `WITH IGNORE NULL` above.
+        return this.prepareAddEntry(
+            new JetIndexEntry(this.createEntryBytes(row), rowId),
+            nullCount > 0,
+            row,
+        );
     }
 
     private prepareAddEntry(newEntry: JetIndexEntry, isNullEntry: boolean, row: readonly AccessValue[]): JetPendingChange {

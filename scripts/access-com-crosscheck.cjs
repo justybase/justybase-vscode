@@ -146,6 +146,42 @@ async function main() {
         assert.equal(written.relations[0].table, 'child_table');
         assert.equal(written.relations[0].foreignTable, 'parent_table');
 
+        // The schema tree reads a table description through the
+        // `_access_metadata.table_comment` marker; a description written by
+        // Access itself must come back through that marker unchanged.
+        const descriptionConnection = new AccessConnection({
+            host: '',
+            database: createdPath,
+            user: '',
+            options: { readOnly: true },
+        });
+        try {
+            await descriptionConnection.connect();
+            const commentReader = await descriptionConnection
+                .createCommand("SELECT * FROM _access_metadata.table_comment WHERE TABLE = 'child_table'")
+                .executeReader();
+            try {
+                assert.equal(await commentReader.read(), true);
+                assert.equal(commentReader.getValue(0), 'COM description cross-check');
+            } finally {
+                await commentReader.close();
+            }
+            const tablesReader = await descriptionConnection
+                .createCommand("SELECT * FROM _access_metadata.tables WHERE TABLE = 'child_table'")
+                .executeReader();
+            try {
+                const descriptions = new Map();
+                while (await tablesReader.read()) {
+                    descriptions.set(String(tablesReader.getValue(0)), tablesReader.getValue(4));
+                }
+                assert.equal(descriptions.get('child_table'), 'COM description cross-check');
+            } finally {
+                await tablesReader.close();
+            }
+        } finally {
+            await descriptionConnection.close();
+        }
+
         // Writer -> DAO: verify text length semantics and relationship attribute
         // bits produced by our Jet writer against real Access/DAO.
         const ourPath = path.join(tempDir, 'our-writer.accdb');
@@ -363,6 +399,145 @@ async function main() {
         assert.equal(writerRuleVerdicts.results[2].accepted, false, 'Access must reject an empty string when AllowZeroLength=False');
         assert.equal(writerRuleVerdicts.results[3].accepted, true, 'NULL stays allowed when AllowZeroLength=False');
 
+        // --- Key and relationship parity ---------------------------------
+        // Access compares text keys ignoring case and trailing spaces, keeps
+        // duplicate NULL keys in a unique index, rejects a partially NULL
+        // composite key, and enforces relationships.  The mirror must reach the
+        // same verdict as DAO for every statement below.  The two engines run
+        // against separate copies of the schema: otherwise the DAO pass would
+        // leave rows behind for the mirror pass to trip over.
+        const keysSchema = [
+            'CREATE TABLE keys_pk (code TEXT(20) NOT NULL, n LONG, CONSTRAINT pk_keys PRIMARY KEY (code))',
+            'CREATE TABLE keys_unique (id LONG, code TEXT(20))',
+            'CREATE UNIQUE INDEX UX_keys_unique ON keys_unique (code)',
+            'CREATE TABLE keys_comp (id LONG, a TEXT(10), b TEXT(10))',
+            'CREATE UNIQUE INDEX UX_keys_comp ON keys_comp (a, b)',
+            'CREATE TABLE keys_required (id LONG, code TEXT(20))',
+            'CREATE INDEX IX_keys_required ON keys_required (code) WITH DISALLOW NULL',
+            'CREATE TABLE keys_parent (id LONG NOT NULL, CONSTRAINT pk_keys_parent PRIMARY KEY (id))',
+            'CREATE TABLE keys_child (id LONG, pid LONG)',
+            'CREATE TABLE keys_number_parent (id LONG NOT NULL, CONSTRAINT pk_keys_np PRIMARY KEY (id))',
+            'CREATE TABLE keys_number_child (id LONG, pid LONG)',
+        ];
+        const keysPath = path.join(tempDir, 'keys-dao.accdb');
+        const keysMirrorPath = path.join(tempDir, 'keys-mirror.accdb');
+        for (const filePath of [keysPath, keysMirrorPath]) {
+            await runHarness(['create-db', filePath, 'accdb2007']);
+            for (const ddl of keysSchema) {
+                await runHarness(['apply-ddl', filePath, ddl]);
+            }
+            await runHarness(['add-relation', filePath, 'FK_keys', 'keys_child', 'keys_parent', 'pid', 'id', '0']);
+            await runHarness(['add-relation', filePath, 'FK_keys_number', 'keys_number_child', 'keys_number_parent', 'pid', 'id', '0']);
+        }
+
+        const keyStatements = [
+            "INSERT INTO keys_pk (code, n) VALUES ('a', 1)",
+            "INSERT INTO keys_pk (code, n) VALUES ('A', 2)",
+            "INSERT INTO keys_pk (code, n) VALUES ('a ', 3)",
+            "INSERT INTO keys_pk (code, n) VALUES (' a', 4)",
+            'INSERT INTO keys_pk (code, n) VALUES (NULL, 5)',
+            "INSERT INTO keys_unique (id, code) VALUES (1, 'a')",
+            "INSERT INTO keys_unique (id, code) VALUES (2, 'A')",
+            "INSERT INTO keys_unique (id, code) VALUES (3, 'a ')",
+            'INSERT INTO keys_unique (id, code) VALUES (4, NULL)',
+            'INSERT INTO keys_unique (id, code) VALUES (5, NULL)',
+            "INSERT INTO keys_comp (id, a, b) VALUES (1, 'k', NULL)",
+            "INSERT INTO keys_comp (id, a, b) VALUES (2, 'k', NULL)",
+            "INSERT INTO keys_comp (id, a, b) VALUES (3, NULL, 'v')",
+            "INSERT INTO keys_comp (id, a, b) VALUES (4, 'k', 'v')",
+            "INSERT INTO keys_comp (id, a, b) VALUES (5, 'K', 'V')",
+            "INSERT INTO keys_required (id, code) VALUES (1, 'a')",
+            "INSERT INTO keys_required (id, code) VALUES (2, 'a')",
+            'INSERT INTO keys_required (id, code) VALUES (3, NULL)',
+            'INSERT INTO keys_parent (id) VALUES (1)',
+            'INSERT INTO keys_child (id, pid) VALUES (1, 1)',
+            'INSERT INTO keys_child (id, pid) VALUES (2, 99)',
+            'INSERT INTO keys_child (id, pid) VALUES (3, NULL)',
+            'DELETE FROM keys_parent WHERE id = 1',
+            'INSERT INTO keys_number_parent (id) VALUES (1)',
+            'INSERT INTO keys_number_child (id, pid) VALUES (1, 1)',
+            'INSERT INTO keys_number_child (id, pid) VALUES (2, 99)',
+        ];
+        const keyDaoVerdicts = (await runHarness(['try-batch', keysPath, keyStatements.join('\n')]))
+            .results.map(entry => ({ sql: entry.sql, accepted: entry.accepted, error: entry.error }));
+
+        const keyConnection = new AccessConnection({
+            host: '',
+            database: keysMirrorPath,
+            user: '',
+            options: { readOnly: false },
+        });
+        const keyMirrorVerdicts = [];
+        await keyConnection.connect();
+        try {
+            for (const sql of keyStatements) {
+                try {
+                    await keyConnection.createCommand(sql).execute();
+                    keyMirrorVerdicts.push({ sql, accepted: true });
+                } catch (error) {
+                    keyMirrorVerdicts.push({ sql, accepted: false, error: String(error) });
+                }
+            }
+        } finally {
+            await keyConnection.close();
+        }
+
+        assert.equal(keyMirrorVerdicts.length, keyDaoVerdicts.length);
+        for (let index = 0; index < keyDaoVerdicts.length; index++) {
+            assert.equal(
+                keyMirrorVerdicts[index].accepted,
+                keyDaoVerdicts[index].accepted,
+                `mirror and Access disagree on key behaviour: ${keyDaoVerdicts[index].sql}\n`
+                + `Access: ${keyDaoVerdicts[index].error ?? 'accepted'}\n`
+                + `mirror: ${keyMirrorVerdicts[index].error ?? 'accepted'}`,
+            );
+        }
+        const duplicateNullVerdict = keyDaoVerdicts.find(entry => entry.sql.includes('keys_unique (id, code) VALUES (5, NULL)'));
+        assert.equal(duplicateNullVerdict?.accepted, true, 'Access keeps duplicate NULL keys in a unique index');
+        const orphanVerdict = keyDaoVerdicts.find(entry => entry.sql.includes('keys_child (id, pid) VALUES (2, 99)'));
+        assert.equal(orphanVerdict?.accepted, false, 'Access rejects an orphan child row');
+        const numberOrphanVerdict = keyDaoVerdicts.find(entry => entry.sql.includes('keys_number_child (id, pid) VALUES (2, 99)'));
+        assert.equal(numberOrphanVerdict?.accepted, false, 'Access rejects a numeric orphan too');
+
+        // The rows the mirror accepted must reach the file unchanged, so a
+        // later DAO read sees the same data the editor produced.
+        const keysSession = await AccessFileSession.open({ filePath: keysMirrorPath });
+        let keysDefinition;
+        let keysRows;
+        try {
+            keysDefinition = keysSession.getTableDefinition('keys_comp');
+            keysRows = (await keysSession.readTable('keys_comp')).rows;
+        } finally {
+            await keysSession.close();
+        }
+        assert.deepEqual(
+            keysDefinition.columns.map(column => column.name),
+            ['id', 'a', 'b'],
+        );
+        assert.deepEqual(keysRows.map(row => [row[0], row[1], row[2]]), [
+            [1, 'k', null],
+            [2, 'k', null],
+            [3, null, 'v'],
+            [4, 'k', 'v'],
+        ]);
+        const storedFileVerdicts = await runHarness(['try-batch', keysMirrorPath, [
+            "INSERT INTO keys_unique (id, code) VALUES (9, 'A')",
+            "INSERT INTO keys_comp (id, a, b) VALUES (9, 'K', 'V')",
+            'INSERT INTO keys_child (id, pid) VALUES (9, 99)',
+            'DELETE FROM keys_number_parent WHERE id = 1',
+            'SELECT COUNT(*) FROM keys_unique',
+        ].join('\n')]);
+        // Access must reject exactly what the mirror already rejected while it
+        // wrote the file: the case-only duplicate, the orphan and the cascade-
+        // less parent delete.
+        assert.equal(storedFileVerdicts.results[0].accepted, false);
+        assert.equal(storedFileVerdicts.results[1].accepted, false);
+        assert.equal(storedFileVerdicts.results[2].accepted, false);
+        assert.equal(storedFileVerdicts.results[3].accepted, false);
+        const keysDescription = await runHarness(['describe', keysMirrorPath]);
+        const compTable = keysDescription.tables.find(table => table.name.toLowerCase() === 'keys_comp');
+        assert.equal(compTable?.indexes.find(index => index.name === 'UX_keys_comp')?.unique, true);
+
         // DROP TABLE must also remove the relationship rows that reference it.
         const dropSession = await AccessFileSession.open({ filePath: ourPath, readOnly: false });
         try {
@@ -380,7 +555,7 @@ async function main() {
             ['FK_enf', 'FK_noenf'],
         );
 
-        console.log('ACCESS COM cross-check passed: describe, complex metadata, SELECT, CREATE, FK, Description, @@IDENTITY, TEXT length, AutoNumber/INTEGER widths, Required/DefaultValue/AllowZeroLength/ValidationRule properties, mirror rule parity, relationship flags and DROP TABLE cleanup.');
+        console.log('ACCESS COM cross-check passed: describe, complex metadata, SELECT, CREATE, FK, Description, @@IDENTITY, TEXT length, AutoNumber/INTEGER widths, Required/DefaultValue/AllowZeroLength/ValidationRule properties, mirror rule parity, key/uniqueness/relationship verdict parity, relationship flags and DROP TABLE cleanup.');
     } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
     }

@@ -7,6 +7,8 @@ import type {
 import type {
     AccessColumnDefinition,
     AccessComplexValue,
+    AccessIndexDefinition,
+    AccessRelationshipDefinition,
     AccessScalarValue,
     AccessTableDefinition,
     AccessTableSnapshot,
@@ -14,6 +16,18 @@ import type {
 } from '@justybase/access-file';
 import { AccessFileError, AccessFileSession } from '@justybase/access-file';
 import { serializeAccessComplexValue } from '@justybase/access-file/complexValues';
+import {
+    accessMirrorKeyConstraintSql,
+    accessMirrorKeyIndexSql,
+    planAccessMirrorKeys,
+    type AccessMirrorKeyPlan,
+} from './accessMirrorKeys';
+import {
+    accessMirrorReferenceSql,
+    orderTablesForMirror,
+    planAccessMirrorReferences,
+    type AccessMirrorReferencePlan,
+} from './accessMirrorReferences';
 import { translateAccessFunctions } from './accessSqlFunctions';
 import { buildAccessCheckConstraints, buildAccessZeroLengthCheck } from './accessValidationRules';
 
@@ -776,17 +790,72 @@ function columnDefaultSql(definition: AccessTableDefinition, column: AccessColum
     return translated === undefined ? '' : ` DEFAULT ${translated}`;
 }
 
-function createTableSql(definition: AccessTableDefinition, includeValidation: boolean): string {
+/** Schema pieces the mirror reproduces for one table. */
+export interface AccessMirrorTableSchema {
+    readonly definition: AccessTableDefinition;
+    readonly keys: readonly AccessMirrorKeyPlan[];
+    readonly references: readonly AccessMirrorReferencePlan[];
+    /** Columns that must reject NULL because of an index (`WITH DISALLOW NULL`). */
+    readonly requiredColumns: ReadonlySet<string>;
+}
+
+/** Human-readable list of what a fallback schema still enforces. */
+function describeAccessMirrorLevel(options: AccessMirrorTableSqlOptions): string {
+    const parts: string[] = [];
+    if (options.includeValidation) parts.push('validation rules');
+    if (options.includeKeys) parts.push('keys');
+    if (options.includeReferences) parts.push('foreign keys');
+    return parts.length === 0 ? 'no constraints' : parts.join(', ');
+}
+
+export interface AccessMirrorTableSqlOptions {
+    readonly includeValidation: boolean;
+    readonly includeKeys: boolean;
+    readonly includeReferences: boolean;
+}
+
+/**
+ * `CREATE TABLE` for one mirrored table.
+ *
+ * Keys come from the file's own indexes rather than from `nullable`, and a
+ * primary key is not spelled `PRIMARY KEY` when it contains text: Access
+ * compares text keys case- and trailing-space-insensitively, which only a
+ * unique index over `lower(rtrim(column, ' '))` reproduces.  Such a key is
+ * enforced by `accessMirrorKeyIndexes` plus `NOT NULL` on its columns.
+ */
+export function buildAccessMirrorTableSql(
+    schema: AccessMirrorTableSchema,
+    options: AccessMirrorTableSqlOptions,
+): string {
+    const { definition } = schema;
+    const required = options.includeKeys ? schema.requiredColumns : undefined;
     const columns = definition.columns.map(column => {
-        const nullable = column.nullable ? '' : ' NOT NULL';
+        const notNull = !column.nullable || required?.has(column.name) ? ' NOT NULL' : '';
         const defaultValue = columnDefaultSql(definition, column);
         const collation = isTextLike(column) ? ' COLLATE NOCASE' : '';
-        return `${quoteIdentifier(column.name)} ${duckDbType(column)}${collation}${defaultValue}${nullable}`;
+        return `${quoteIdentifier(column.name)} ${duckDbType(column)}${collation}${defaultValue}${notNull}`;
     });
     if (columns.length === 0) {
         throw new AccessFileError(`Access table '${definition.name}' has no columns.`);
     }
-    if (includeValidation) {
+    if (options.includeKeys) {
+        for (const key of schema.keys) {
+            if (key.asConstraint) {
+                // Non-text keys compare identically in both engines, so a real
+                // table constraint is both accurate and readable.
+                columns.push(accessMirrorKeyConstraintSql(key));
+            }
+        }
+    }
+    if (options.includeReferences) {
+        for (const reference of schema.references) {
+            columns.push(accessMirrorReferenceSql(reference));
+            for (const guard of reference.nullGuards) {
+                columns.push(`CHECK ${guard}`);
+            }
+        }
+    }
+    if (options.includeValidation) {
         // Field-level and record-level ValidationRule properties become CHECK
         // constraints so the mirror rejects the same values Access rejects.
         // AllowZeroLength=False is the one validation flag Access keeps as a
@@ -840,9 +909,7 @@ export class AccessDuckDbMirror {
             const connection = await instance.connect();
             this._instance = instance;
             this._connection = connection;
-            for (const definition of session.listTables()) {
-                await this.loadTable(session, definition, duckdb);
-            }
+            await this.loadTables(session, duckdb);
             for (const query of session.listQueryDefinitions()) {
                 if (query.type !== 'select' || query.hasParameters || !query.sql) {
                     continue;
@@ -937,10 +1004,89 @@ export class AccessDuckDbMirror {
         return readColumns(result);
     }
 
+    private async loadTables(session: AccessFileSession, duckdb: DuckDbModule): Promise<void> {
+        const definitions = session.listTables();
+        const keysByTable = new Map<string, readonly AccessMirrorKeyPlan[]>();
+        const requiredByTable = new Map<string, ReadonlySet<string>>();
+        for (const definition of definitions) {
+            const plan = planAccessMirrorKeys(definition, this.readIndexes(session, definition));
+            keysByTable.set(definition.name.toLowerCase(), plan.keys);
+            requiredByTable.set(definition.name.toLowerCase(), new Set(plan.requiredColumns));
+            this._warnings.push(...plan.warnings);
+        }
+        const references = planAccessMirrorReferences({
+            definitions,
+            relationships: this.readRelationships(session),
+            keysByTable,
+            typeOf: duckDbType,
+        });
+        this._warnings.push(...references.warnings);
+
+        const order = orderTablesForMirror(
+            definitions.map(definition => definition.name),
+            references.dependencies,
+        );
+        const byName = new Map(definitions.map(definition => [definition.name.toLowerCase(), definition]));
+        // A reference is only emitted when the parent already exists; a cycle
+        // would otherwise need a table that the plan has not created yet.
+        const created = new Set<string>();
+        for (const name of order) {
+            const lower = name.toLowerCase();
+            const definition = byName.get(lower);
+            if (!definition) continue;
+            const planned = references.references.filter(reference =>
+                reference.childTable.toLowerCase() === lower);
+            const usable = planned.filter(reference => created.has(reference.parentTable.toLowerCase()));
+            for (const reference of planned) {
+                if (!usable.includes(reference)) {
+                    this._warnings.push(
+                        `Relationship '${reference.accessName}' was mirrored without a foreign key: `
+                        + `table '${reference.parentTable}' is created later (cyclic reference).`,
+                    );
+                }
+            }
+            await this.loadTable(session, definition, duckdb, {
+                definition,
+                keys: keysByTable.get(lower) ?? [],
+                references: usable,
+                requiredColumns: requiredByTable.get(lower) ?? new Set<string>(),
+            });
+            created.add(lower);
+        }
+    }
+
+    /**
+     * Indexes are read from the file itself; a table whose index chain cannot
+     * be parsed simply mirrors without keys instead of failing the open.
+     */
+    private readIndexes(
+        session: AccessFileSession,
+        definition: AccessTableDefinition,
+    ): readonly AccessIndexDefinition[] {
+        try {
+            return session.listIndexes(definition.name);
+        } catch {
+            this._warnings.push(
+                `Table '${definition.name}' was mirrored without keys: the file index chain could not be read.`,
+            );
+            return [];
+        }
+    }
+
+    private readRelationships(session: AccessFileSession): readonly AccessRelationshipDefinition[] {
+        try {
+            return session.listRelationships();
+        } catch {
+            this._warnings.push('The file relationships could not be read; the mirror has no foreign keys.');
+            return [];
+        }
+    }
+
     private async loadTable(
         session: AccessFileSession,
         definition: AccessTableDefinition,
         duckdb: DuckDbModule,
+        schema: AccessMirrorTableSchema,
     ): Promise<void> {
         const connection = this.requireRuntimeConnection();
         const snapshot: AccessTableSnapshot = await session.readTable(definition.name);
@@ -955,31 +1101,53 @@ export class AccessDuckDbMirror {
                 `CREATE SEQUENCE ${quoteIdentifier(sequenceName(definition, column))} START WITH ${Math.max(1, Math.trunc(maximum) + 1)}`,
             );
         }
-        // Validation constraints are advisory: an Access rule that DuckDB
-        // cannot evaluate, or legacy rows that already violate the rule, must
-        // not stop the file from opening.  Try the constrained schema first,
-        // then fall back to the plain schema and record why.
-        try {
-            await this.createTableWithRows(definition, snapshot, duckdb, true);
-        } catch (error) {
-            this._warnings.push(
-                `Table '${definition.name}' was mirrored without validation constraints: `
-                + (error instanceof Error ? error.message : String(error)),
-            );
-            await connection.run(`DROP TABLE IF EXISTS ${quoteIdentifier(definition.name)}`);
-            await this.createTableWithRows(definition, snapshot, duckdb, false);
+        // Every constraint layer is advisory: an Access rule that DuckDB
+        // cannot evaluate, legacy rows that already violate a stored rule or
+        // index, and a constraint the mirror cannot express must not stop the
+        // file from opening.  Try the fully constrained schema first, then
+        // drop one layer at a time and record why.
+        const levels: readonly AccessMirrorTableSqlOptions[] = [
+            { includeValidation: true, includeKeys: true, includeReferences: true },
+            { includeValidation: false, includeKeys: true, includeReferences: true },
+            { includeValidation: false, includeKeys: true, includeReferences: false },
+            { includeValidation: false, includeKeys: false, includeReferences: false },
+        ];
+        let lastError: unknown;
+        for (let index = 0; index < levels.length; index++) {
+            const options = levels[index]!;
+            try {
+                await this.createTableWithRows(schema, snapshot, duckdb, options);
+                if (index > 0) {
+                    this._warnings.push(
+                        `Table '${definition.name}' was mirrored with reduced constraints `
+                        + `(${describeAccessMirrorLevel(options)}): `
+                        + (lastError instanceof Error ? lastError.message : String(lastError)),
+                    );
+                }
+                return;
+            } catch (error) {
+                lastError = error;
+                await connection.run(`DROP TABLE IF EXISTS ${quoteIdentifier(definition.name)}`);
+            }
         }
+        throw new AccessFileError(
+            `Access table '${definition.name}' could not be mirrored: `
+            + (lastError instanceof Error ? lastError.message : String(lastError)),
+            { cause: lastError },
+        );
     }
 
     private async createTableWithRows(
-        definition: AccessTableDefinition,
+        schema: AccessMirrorTableSchema,
         snapshot: AccessTableSnapshot,
         duckdb: DuckDbModule,
-        includeValidation: boolean,
+        options: AccessMirrorTableSqlOptions,
     ): Promise<void> {
         const connection = this.requireRuntimeConnection();
-        await connection.run(createTableSql(definition, includeValidation));
+        const { definition } = schema;
+        await connection.run(buildAccessMirrorTableSql(schema, options));
         if (snapshot.rows.length === 0) {
+            await this.createKeyIndexes(schema, options);
             return;
         }
         const placeholders = snapshot.definition.columns.map(() => '?').join(', ');
@@ -992,6 +1160,28 @@ export class AccessDuckDbMirror {
                 `INSERT INTO ${quoteIdentifier(definition.name)} VALUES ${rowPlaceholders}`,
                 values,
             );
+        }
+        await this.createKeyIndexes(schema, options);
+    }
+
+    /**
+     * Text keys are enforced by a unique index over the Access comparison
+     * expression, which cannot be a table constraint.  Legacy rows that already
+     * contain duplicates fail here, which is what triggers the reduced schema.
+     */
+    private async createKeyIndexes(
+        schema: AccessMirrorTableSchema,
+        options: AccessMirrorTableSqlOptions,
+    ): Promise<void> {
+        if (!options.includeKeys) {
+            return;
+        }
+        const connection = this.requireRuntimeConnection();
+        for (const key of schema.keys) {
+            if (key.asConstraint) {
+                continue;
+            }
+            await connection.run(accessMirrorKeyIndexSql(schema.definition.name, key));
         }
     }
 

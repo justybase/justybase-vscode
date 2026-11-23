@@ -28,6 +28,8 @@ Select a local file, browse tables and saved queries, write SQL, and inspect the
 - Preserve required values, column `DefaultValue` expressions, `AllowZeroLength`, validation rules and index uniqueness while writing; updated files are installed atomically.
 - New tables store `Required`, `DefaultValue`, `AllowZeroLength` and `ValidationRule`/`ValidationText` in the Access property map, so Access and DAO apply the same defaults and rules as the SQL mirror.
 - The SQL mirror translates the column and record validation rules Access evaluates (`>0`, `Between … And …`, `Is Null Or …`, `Not (…)`, `In (…)`, comparisons and casts) into `CHECK` constraints, so a query that would fail in Access also fails in the editor. Rules outside that subset — `Like`, `Len`, `DLookup` or another table's field — are preserved in the file but not enforced by the mirror.
+- Keys and relationships are mirrored too: a primary key or unique index rejects the same duplicates Access rejects (text keys compare ignoring case and trailing spaces, `NULL` keys stay duplicated), `WITH DISALLOW NULL` columns reject `NULL`, and an enforced relationship rejects an orphan child row or a parent delete that is still referenced.
+- `SELECT * FROM _access_metadata.mirror_warnings` lists every constraint the mirror had to drop or relax for the open file.
 - No Java runtime, JAR, ODBC driver, Maven build, or Access installation is needed.
 
 ### Explore data visually
@@ -79,6 +81,8 @@ owning process ID, host, and start time.
 - Schema changes do not cover `ALTER TABLE ADD/DROP COLUMN`, `CREATE TABLE AS SELECT`, calculated fields, or complex/multivalue column writes.
 - Column defaults from the source file are applied by the SQL mirror for literals and a few zero-argument date functions; Access-only expressions (`DLookup`, field references) are preserved in the file but not evaluated inside the mirror.
 - Validation rules are enforced by the mirror only for the translatable subset; a rule that cannot be translated, or legacy rows that already violate a stored rule, downgrade the table to an unconstrained mirror (the mirror records the reason in `warnings`) instead of blocking the file.
+- Keys and foreign keys are advisory in the same way: a `MEMO`/`OLE` index, a self-referencing or cyclic relationship, a text key DuckDB cannot point a foreign key at, or legacy rows that already break a key drop just that constraint and record why. A cascading relationship keeps its key but not its cascade, so a parent delete or key update Access would cascade is refused rather than writing orphan children.
+- `SELECT * FROM _access_metadata.mirror_warnings` lists every mirror constraint that was dropped or relaxed for the open file.
 - Access' DDL grammar has no `CHECK` syntax (DAO 16 and the C# UCanAccess port both reject it), so `ValidationRule`, `ValidationText` and `AllowZeroLength` survive through the property map and are not emitted in generated DDL.
 - `TRUNCATE TABLE` deletes every row but does not reset an AutoNumber seed.
 - Multi-file source editing is not part of Access support; export query results when you need a separate file.
@@ -108,8 +112,11 @@ metadata, writes and query semantics with DAO (set `ACCESS_COM_VALIDATE=1`),
 including the DAO `Required`/`DefaultValue`/`AllowZeroLength` field properties
 and the validation rule/rule message pair Access reports. The DAO gate also
 drives the same `INSERT` values through Access and the SQL mirror and asserts
-that both reach the same accept/reject verdict, and that a table written by
-the TypeScript writer enforces its stored rule and `AllowZeroLength=False`
+that both reach the same accept/reject verdict, including the text-key case and
+trailing-space rules, duplicate `NULL` keys, `WITH DISALLOW NULL` indexes,
+numeric and text foreign keys, orphan child rows and referenced parent deletes,
+and that a table written by the TypeScript writer enforces its stored rule and
+`AllowZeroLength=False`
 inside Access itself. Written files can also be cross-checked with the
 optional readers in `tools/access-ddl-compare` and `tools/access-java-verify`.
 

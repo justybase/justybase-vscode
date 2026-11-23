@@ -460,7 +460,7 @@ async function metadataResult(
                 ? queries.filter(query => query.type === 'select')
                     .map(query => [query.name, query.objectId, 'VIEW', null, null])
                 : requestedType === 'TABLE'
-                    ? tables.map(table => [table.name, table.name, 'TABLE', null, null])
+                    ? tables.map(table => [table.name, table.name, 'TABLE', null, table.description ?? null])
                     : [];
             return result(['OBJNAME', 'OBJID', 'OBJTYPE', 'SCHEMA', 'DESCRIPTION'], rows);
         }
@@ -474,8 +474,19 @@ async function metadataResult(
             return detailedColumnsMetadata(tables, queries, marker.table, false, mirror);
         case 'column_metadata':
             return detailedColumnsMetadata(tables, queries, marker.table, true, mirror);
-        case 'table_comment':
-            return result(['DESCRIPTION'], [['']]);
+        case 'table_comment': {
+            // Access keeps a table description in the table-definition
+            // property block; the schema tree reads it through this marker.
+            const table = tables.find(candidate =>
+                !marker.table
+                || candidate.name.localeCompare(marker.table, undefined, { sensitivity: 'accent' }) === 0);
+            return result(['DESCRIPTION'], [[table?.description ?? '']]);
+        }
+        case 'mirror_warnings':
+            // Constraints the mirror had to drop or translate differently.
+            // Access itself would still open the file, so these messages are
+            // diagnostics rather than errors.
+            return result(['WARNING'], mirror.warnings.map(warning => [warning]));
         case 'object_search':
             return objectSearchMetadata(tables, queries, marker.pattern);
         case 'view_source_search':

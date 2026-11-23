@@ -802,3 +802,150 @@ describeWithAccessRuntime('AccessConnection DDL', () => {
         }
     });
 });
+
+describeWithAccessRuntime('AccessConnection mirror keys and relationships', () => {
+    async function readAllRows(connection: AccessConnection, sql: string): Promise<unknown[][]> {
+        const reader = await connection.createCommand(sql).executeReader();
+        const rows: unknown[][] = [];
+        try {
+            while (await reader.read()) {
+                rows.push(Array.from({ length: reader.fieldCount }, (_, i) => reader.getValue(i)));
+            }
+        } finally {
+            await reader.close();
+        }
+        return rows;
+    }
+
+    it('enforces an Access text primary key with its case and trailing-space rules', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            // Access rejects a text key that differs only by case or trailing
+            // spaces, and accepts a leading space; a DuckDB PRIMARY KEY would
+            // do the opposite, so the mirror uses the Access comparison.
+            await connection.createCommand('CREATE TABLE key_e2e (code TEXT(20) PRIMARY KEY, n LONG)').execute();
+            await connection.createCommand("INSERT INTO key_e2e (code, n) VALUES ('a', 1)").execute();
+            await expect(connection.createCommand("INSERT INTO key_e2e (code, n) VALUES ('A', 2)").execute())
+                .rejects.toThrow(/unique|duplicate|constraint/i);
+            await expect(connection.createCommand("INSERT INTO key_e2e (code, n) VALUES ('a ', 3)").execute())
+                .rejects.toThrow(/unique|duplicate|constraint/i);
+            await connection.createCommand("INSERT INTO key_e2e (code, n) VALUES (' a', 4)").execute();
+            // A primary key cannot hold NULL at all.
+            await expect(connection.createCommand('INSERT INTO key_e2e (code, n) VALUES (NULL, 5)').execute())
+                .rejects.toThrow(/NOT NULL|NULL/i);
+            expect(await readAllRows(connection, 'SELECT code FROM key_e2e ORDER BY code'))
+                .toEqual([[' a'], ['a']]);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('rejects a duplicate on a unique index and still allows repeated NULL keys', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand('CREATE TABLE uniq_e2e (id LONG PRIMARY KEY, code TEXT(20))').execute();
+            await connection.createCommand('CREATE UNIQUE INDEX UX_uniq_e2e ON uniq_e2e (code)').execute();
+            await connection.createCommand("INSERT INTO uniq_e2e (id, code) VALUES (1, 'a')").execute();
+            await expect(connection.createCommand("INSERT INTO uniq_e2e (id, code) VALUES (2, 'A')").execute())
+                .rejects.toThrow(/unique|duplicate|constraint/i);
+            // Access tolerates duplicate NULLs in a unique index regardless of
+            // `WITH IGNORE NULL`, so the mirror must too.
+            await connection.createCommand('INSERT INTO uniq_e2e (id, code) VALUES (3, NULL)').execute();
+            await connection.createCommand('INSERT INTO uniq_e2e (id, code) VALUES (4, NULL)').execute();
+            // The case-only duplicate was rejected above, so the table keeps
+            // the first row plus both NULL keys.
+            expect(Number((await readAllRows(connection, 'SELECT COUNT(*) FROM uniq_e2e'))[0]?.[0])).toBe(3);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('enforces a composite unique index with an all-or-nothing NULL rule', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand(
+                'CREATE TABLE comp_e2e (id LONG PRIMARY KEY, a TEXT(10), b TEXT(10))',
+            ).execute();
+            await connection.createCommand('CREATE UNIQUE INDEX UX_comp_e2e ON comp_e2e (a, b)').execute();
+            await connection.createCommand("INSERT INTO comp_e2e (id, a, b) VALUES (1, 'k', NULL)").execute();
+            // Two rows whose key contains a NULL are both allowed.
+            await connection.createCommand("INSERT INTO comp_e2e (id, a, b) VALUES (2, 'k', NULL)").execute();
+            await connection.createCommand("INSERT INTO comp_e2e (id, a, b) VALUES (3, 'k', 'v')").execute();
+            await expect(connection.createCommand("INSERT INTO comp_e2e (id, a, b) VALUES (4, 'K', 'V')").execute())
+                .rejects.toThrow(/unique|duplicate|constraint/i);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('enforces an Access relationship stored in the file', async () => {
+        const file = copyFixture('sample2007.accdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand('CREATE TABLE fk_parent (id LONG PRIMARY KEY, name TEXT(20))').execute();
+            await connection.createCommand('CREATE TABLE fk_child (id LONG PRIMARY KEY, pid LONG, note TEXT(20))').execute();
+            await connection.createCommand(
+                'ALTER TABLE fk_child ADD CONSTRAINT FK_child_parent FOREIGN KEY (pid) REFERENCES fk_parent (id)',
+            ).execute();
+
+            await connection.createCommand("INSERT INTO fk_parent (id, name) VALUES (1, 'parent')").execute();
+            await connection.createCommand('INSERT INTO fk_child (id, pid) VALUES (1, 1)').execute();
+            // An orphan child and a parent that is still referenced are both
+            // rejected exactly like Access does.
+            await expect(connection.createCommand('INSERT INTO fk_child (id, pid) VALUES (2, 99)').execute())
+                .rejects.toThrow(/foreign key|constraint/i);
+            await expect(connection.createCommand('DELETE FROM fk_parent WHERE id = 1').execute())
+                .rejects.toThrow(/foreign key|constraint/i);
+            await connection.createCommand('INSERT INTO fk_child (id, pid) VALUES (3, NULL)').execute();
+            expect(Number((await readAllRows(connection, 'SELECT COUNT(*) FROM fk_child'))[0]?.[0])).toBe(2);
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('reports table descriptions through the schema-tree markers', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            // Access keeps a description in the table-definition property
+            // block.  The schema tree reads it through two markers, so both
+            // must report the same text (the fixtures carry none, which must be
+            // an empty string rather than a missing row).
+            const tables = await readAllRows(connection, 'SELECT * FROM _access_metadata.tables');
+            for (const row of tables) {
+                const name = String(row[0]);
+                const comment = await readAllRows(
+                    connection,
+                    `SELECT * FROM _access_metadata.table_comment WHERE TABLE = '${name.replace(/'/g, "''")}'`,
+                );
+                expect(comment).toHaveLength(1);
+                expect(String(comment[0]?.[0] ?? '')).toBe(String(row[4] ?? ''));
+            }
+        } finally {
+            await connection.close();
+        }
+    });
+
+    it('exposes mirror warnings instead of hiding relaxed constraints', async () => {
+        const file = copyFixture('complex.accdb');
+        const connection = new AccessConnection(createAccessConfig(file, true));
+        await connection.connect();
+        try {
+            // complex.accdb stores multivalue/attachment indexes that DuckDB
+            // cannot reproduce, so the mirror must say so.
+            const warnings = await readAllRows(connection, 'SELECT * FROM _access_metadata.mirror_warnings');
+            expect(warnings.length).toBeGreaterThan(0);
+            expect(warnings.map(row => String(row[0])).join('\n')).toMatch(/index|complex|key/i);
+        } finally {
+            await connection.close();
+        }
+    });
+});
