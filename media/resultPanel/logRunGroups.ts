@@ -104,6 +104,18 @@ function appendChip(parent: HTMLElement, text: string | undefined, extraClass?: 
 }
 
 /**
+ * Running statements use an animated ring instead of the static play glyph so
+ * a long statement is recognisable at a glance inside the Logs transcript.
+ */
+function createRunStatusIcon(status: RunStatus): HTMLElement {
+    const icon = document.createElement('span');
+    icon.className = status === 'running' ? 'log-status-icon log-status-icon-spinner' : 'log-status-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    if (status !== 'running') icon.textContent = STATUS_ICON[status];
+    return icon;
+}
+
+/**
  * Renders the card header: status badge + time/meta row + truncated SQL preview.
  * Everything is set via textContent so statement text can never inject markup.
  */
@@ -121,14 +133,11 @@ function renderRunSummary(
 
     const badge = document.createElement('span');
     badge.className = `log-status log-status--${status}`;
-    const icon = document.createElement('span');
-    icon.className = 'log-status-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = STATUS_ICON[status];
+    badge.appendChild(createRunStatusIcon(status));
     const label = document.createElement('span');
     label.className = 'log-status-label';
     label.textContent = STATUS_LABEL[status];
-    badge.append(icon, label);
+    badge.append(label);
     summary.appendChild(badge);
 
     const main = document.createElement('span');
@@ -205,13 +214,10 @@ function createErrorLine(errorText: string): HTMLElement {
     line.className = 'console-line status-error log-error-line';
     const label = document.createElement('span');
     label.className = 'log-status log-status--error';
-    const icon = document.createElement('span');
-    icon.className = 'log-status-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = STATUS_ICON.error;
+    label.appendChild(createRunStatusIcon('error'));
     const labelText = document.createElement('span');
     labelText.textContent = 'ERROR';
-    label.append(icon, labelText);
+    label.append(labelText);
     const message = document.createElement('span');
     message.className = 'console-msg';
     message.textContent = errorText;

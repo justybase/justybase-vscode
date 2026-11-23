@@ -357,9 +357,55 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(screen.queryByRole('button', { name: 'Group' })).not.toBeInTheDocument();
         expect(screen.queryByRole('textbox', { name: 'Filter results' })).not.toBeInTheDocument();
         expect(screen.getByRole('log', { name: 'Query log' })).toHaveTextContent('ready');
+        // Idle Logs must not claim work in progress.
+        expect(document.querySelector('.ui-log-running')).toBeNull();
+        expect(document.querySelector('.ui-result-tab-busy')).toBeNull();
         const errorHint = document.querySelector('.log-error-hint')?.textContent ?? '';
         expect(errorHint).toContain('found "," (at char 10)');
         expect(errorHint).not.toContain('COL_40');
+        controller.dispose();
+    });
+
+    it('shows the running indicator on the Logs tab and header while SQL executes', async () => {
+        const controller = new SharedResultPanelController();
+        controller.handleHostMessage(hydrateMessage([
+            {
+                resultSetId: 'logs-running',
+                columns: [{ name: 'Time' }, { name: 'Message' }],
+                data: [['12:00', '▶ RUNNING: SELECT * FROM BIG_TABLE', { executionId: 'run', event: 'start', status: 'running', sql: 'SELECT * FROM BIG_TABLE' }]],
+                totalRowCount: 1,
+                isLog: true,
+            },
+        ], 0, ['file:///query.sql']));
+        render(<SharedResultPanelApp controller={controller} />);
+
+        // The Logs tab carries the animated tab spinner and reports aria-busy.
+        const logsTab = screen.getByRole('tab', { name: 'Logs' });
+        expect(logsTab).toHaveAttribute('aria-busy', 'true');
+        expect(logsTab.querySelector('.ui-result-tab-spinner')).not.toBeNull();
+
+        // The Logs header shows a dedicated running chip with a spinner and a
+        // Cancel action, because the generic execution banner is not rendered
+        // for the Logs surface.
+        expect(screen.getByRole('button', { name: 'Clear Logs' })).toBeInTheDocument();
+        const runningChip = document.querySelector('.ui-log-running');
+        expect(runningChip).not.toBeNull();
+        expect(runningChip).toHaveTextContent('Running…');
+        expect(runningChip?.querySelector('.ui-activity-spinner')).not.toBeNull();
+        expect(runningChip?.querySelector('.ui-log-running-elapsed')).not.toBeNull();
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+        expect(document.querySelector('.log-status--running .log-status-icon-spinner')).not.toBeNull();
+
+        // Cancelling switches the chip label until the host acknowledges it.
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(document.querySelector('.ui-log-running-cancelling')).not.toBeNull();
+        expect(document.querySelector('.ui-log-running')).toHaveTextContent('Cancelling…');
+
+        await act(async () => {
+            controller.handleHostMessage({ command: 'setActiveSource', sourceUri: 'file:///query.sql', activeResultSetIndex: 0, executingSourcesJson: '[]', sourcesJson: '["file:///query.sql"]', pinnedSourcesJson: '[]' });
+        });
+        await waitFor(() => expect(document.querySelector('.ui-log-running')).toBeNull());
+        await waitFor(() => expect(document.querySelector('.ui-result-tab-busy')).toBeNull());
         controller.dispose();
     });
 

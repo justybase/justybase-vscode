@@ -36,8 +36,12 @@ describe('SQL queue and grouped Logs', () => {
         const state={...lane(),maxConcurrency:1,paused:true,queued:[],running:[{id:'a',status:'cancelling',sql:'SELECT 1'}]};
         updateSqlQueueLogs(JSON.stringify([state]), 'file:///a.sql');
         expect(document.querySelector('strong')?.textContent).toBe('1 running · 0 queued · Paused');
+        // A cancelling queue row has no spinning marker.
+        expect(document.querySelectorAll('.sql-queue-job-status .log-status-icon-spinner')).toHaveLength(0);
         document.querySelector('button')!.click();expect(posted.mock.calls[0][0].action).toBe('resume');
         expect(document.querySelector<HTMLButtonElement>('.sql-queue-job button')!.disabled).toBe(true);
+        updateSqlQueueLogs(JSON.stringify([lane()]), 'file:///a.sql');
+        expect(document.querySelectorAll('.sql-queue-job-status .log-status-icon-spinner')).toHaveLength(1);
         updateSqlQueueLogs(undefined, 'file:///other.sql');
         expect(document.querySelector('.sql-queue-overview')).toBeNull();
         const archive={sourceUri:'file:///a.sql#query-old',rows:[['now','✓ SUCCESS: SELECT 4',{executionId:'old',event:'end',status:'success'}]]};
@@ -54,10 +58,15 @@ describe('SQL queue and grouped Logs', () => {
         const line=(row: unknown[])=>{const element=document.createElement('div');element.textContent=String(row[1]);return element;};
         appendRunLogRows(container,[['now','Legacy message'],['now','RUNNING',{executionId:'run',event:'start',status:'running',sql:'SELECT <unsafe>'}]],line);
         expect(container.querySelectorAll('details')).toHaveLength(1);
+        // A long-running statement keeps an animated ring in its status badge,
+        // so the transcript visibly reports work in flight.
+        expect(container.querySelector('.log-status--running .log-status-icon-spinner')).not.toBeNull();
         const run=container.querySelector('details')!;run.open=true;run.dispatchEvent(new Event('toggle'));
         appendRunLogRows(container,[['now','Progress',{executionId:'run',event:'message'}],['later','SUCCESS',{executionId:'run',event:'end',status:'success'}]],line);
         expect(run.open).toBe(true);expect(run.dataset.status).toBe('success');expect(run.querySelector('.log-run-body')?.textContent).toContain('Progress');
-        expect(run.querySelector('summary')?.textContent).toContain('SUCCESS');expect(run.querySelector('unsafe')).toBeNull();
+        expect(run.querySelector('summary')?.textContent).toContain('SUCCESS');
+        expect(run.querySelector('.log-status--success .log-status-icon-spinner')).toBeNull();
+        expect(run.querySelector('unsafe')).toBeNull();
         container.innerHTML='';appendRunLogRows(container,[['now','RUNNING',{executionId:'run',event:'start',status:'running'}]],line);
         expect(container.querySelector('details')!.open).toBe(true);
         for(let i=0;i<501;i++){

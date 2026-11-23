@@ -196,6 +196,38 @@ body.vscode-high-contrast-light .ui-data-grid-scroll {
   scrollbar-color: color-mix(in srgb, var(--justybase-grid-text) 40%, transparent) transparent;
 }
 
+/* Indeterminate execution strip for an in-flight query. It sits at the very
+   top of the result surface so long-running SQL stays visible without moving
+   the virtualized grid or blocking interaction. */
+.ui-data-grid-progress {
+  position: absolute;
+  z-index: 40;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--jb-color-accent) 24%, transparent);
+}
+
+.ui-data-grid-progress > span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--jb-color-accent);
+  animation: ui-data-grid-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes ui-data-grid-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(350%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-data-grid-progress > span { width: 100%; animation: none; opacity: .7; }
+}
+
 .ui-data-grid-scroll:focus-visible {
   box-shadow: inset 0 0 0 1px var(--justybase-grid-accent);
 }
@@ -2700,6 +2732,17 @@ body.vscode-high-contrast-light .ui-column-sidebar-type.type-binary { color: #85
 .ui-result-grid .console-msg { min-width: 0; color: var(--justybase-grid-text); }
 .ui-result-grid .log-status { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--justybase-grid-border); border-radius: 4px; color: var(--justybase-grid-muted); background: var(--justybase-grid-surface); font-size: 11px; font-weight: 700; letter-spacing: .4px; line-height: 1.6; user-select: none; }
 .ui-result-grid .log-status-icon { font-size: 10px; line-height: 1; }
+/* The RUNNING badge keeps an animated ring so a long statement stays visibly
+   in progress inside the transcript itself. */
+.ui-result-grid .log-status-icon-spinner {
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ui-activity-spin .8s linear infinite;
+}
 .ui-result-grid .log-status--running { color: #3794ff; border-color: #3794ff; background: transparent; }
 .ui-result-grid .log-status--success { color: #4ec94e; border-color: #4ec94e; background: transparent; }
 .ui-result-grid .log-status--error { color: #f14c4c; border-color: #f14c4c; background: transparent; }
@@ -2795,6 +2838,17 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
   color: var(--vscode-badge-foreground, var(--justybase-grid-text));
   font-size: 11px;
 }
+.ui-legacy-log .sql-queue-job-status .log-status-icon-spinner {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ui-activity-spin .8s linear infinite;
+  vertical-align: -1px;
+}
 .ui-legacy-log .sql-queue-job[data-status='running'] .sql-queue-job-status {
   border: 1px solid var(--vscode-progressBar-background, #3794ff);
   background: var(--justybase-grid-bg);
@@ -2864,6 +2918,11 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
   padding: 16px;
   color: var(--justybase-grid-muted);
 }
+
+/* Keep the loading ring on the first text line; `center` would also vertically
+   center the whole pane when the split gives `.ui-async-state` extra height. */
+.ui-async-state { display: flex; align-items: flex-start; gap: 8px; }
+.ui-async-state .ui-activity-spinner { margin-top: 4px; }
 
 /* Explore is mounted from the feature module's DOM; give it the full pane. */
 .ui-legacy-explore {
@@ -4283,6 +4342,43 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
 .ui-result-tab-badge-partial { color: var(--vscode-editorWarning-foreground, #cca700); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 16%, transparent); }
 .ui-result-tab-badge-empty { color: var(--vscode-descriptionForeground, #999); background: color-mix(in srgb, var(--vscode-descriptionForeground, #999) 16%, transparent); }
 
+/* Animated "query still running" ring. A query can take minutes, so every
+   surface that reports execution (tabs, banners, Logs header) keeps a visible,
+   moving indicator instead of a static glyph. */
+@keyframes ui-activity-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ui-activity-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ui-activity-spin .8s linear infinite;
+  vertical-align: -1px;
+}
+
+/* The busy tab keeps the accent colour, so the spinner reads as active work
+   rather than a decorative icon next to the label. */
+.ui-result-tab-busy .ui-result-tab-label { color: var(--jb-color-accent); }
+.ui-result-tab-busy .ui-result-tab-label[aria-selected='true'] { color: var(--jb-color-text); }
+.ui-result-tab-spinner { margin-right: 4px; color: var(--jb-color-accent); }
+.ui-result-tab-busy .ui-result-tab-label[aria-selected='true'] .ui-result-tab-spinner { color: var(--jb-color-accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-activity-spinner,
+  .ui-result-grid .log-status-icon-spinner,
+  .ui-legacy-log .sql-queue-job-status .log-status-icon-spinner {
+    border-color: currentColor;
+    animation: none;
+    opacity: .85;
+  }
+}
+
 .ui-data-grid-row-deleted td,
 .ui-data-grid-row-deleted th { color: var(--vscode-disabledForeground, #888); text-decoration: line-through; text-decoration-color: var(--vscode-errorForeground, #f48771); opacity: .72; }
 
@@ -4327,8 +4423,50 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
 .ui-result-limit-icon,
 .ui-refresh-failure-icon { display: inline-grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; font-size: 10px; font-weight: 700; }
 .ui-execution-banner-icon { background: var(--vscode-focusBorder, #6689a7); color: var(--vscode-button-foreground, #fff); }
+.ui-execution-banner-icon.ui-execution-banner-icon-finalizing { background: var(--vscode-editorWarning-foreground, #cca700); color: #1e1e1e; }
+/* The banner icon is a ring while the query runs, so the strip itself carries a
+   motion cue even when the grid is empty and nothing else changes. */
+.ui-execution-banner-icon .ui-activity-spinner { width: 9px; height: 9px; border-width: 1.5px; }
 .ui-execution-banner-message { flex: 1 1 auto; min-width: 0; }
+.ui-execution-banner-elapsed { color: var(--vscode-descriptionForeground, inherit); font-variant-numeric: tabular-nums; }
 .ui-execution-banner-cancel { min-height: 20px; padding: 0 8px; }
+
+/* Logs header status: the Long-running query bubble sits in the log toolbar,
+   which stays visible above the transcript while the query executes. Selectors
+   stay two-class deep so the generic `.ui-log-toolbar span/button` rules cannot
+   mute the accent colour or stretch the cancel button. */
+.ui-log-toolbar .ui-log-running {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--vscode-progressBar-background, #3794ff) 60%, transparent);
+  border-radius: 10px;
+  color: var(--vscode-progressBar-background, #3794ff);
+  background: color-mix(in srgb, var(--vscode-progressBar-background, #3794ff) 12%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ui-log-toolbar .ui-log-running span { color: inherit; font-size: inherit; }
+.ui-log-toolbar .ui-log-running .ui-log-running-state { display: inline-flex; align-items: center; gap: 5px; }
+.ui-log-toolbar .ui-log-running .ui-log-running-elapsed { color: var(--justybase-grid-muted); font-variant-numeric: tabular-nums; font-weight: 400; }
+.ui-log-toolbar .ui-log-running-cancel {
+  min-height: 16px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.ui-log-toolbar .ui-log-running-cancel:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
+.ui-log-toolbar .ui-log-running.ui-log-running-cancelling { color: var(--vscode-editorWarning-foreground, #cca700); border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 60%, transparent); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 12%, transparent); }
+body.vscode-light .ui-log-toolbar .ui-log-running,
+body.vscode-high-contrast-light .ui-log-toolbar .ui-log-running { color: #0369a1; border-color: color-mix(in srgb, #0369a1 55%, transparent); background: color-mix(in srgb, #0369a1 10%, transparent); }
 
 .ui-result-limit-banner { color: var(--vscode-editorWarning-foreground, #cca700); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 12%, transparent); }
 .ui-result-limit-icon { background: var(--vscode-editorWarning-foreground, #cca700); color: #1e1e1e; }

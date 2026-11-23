@@ -32,10 +32,12 @@ import {
     type UiStore,
 } from '@justybase/ui-core';
 import {
+    ActivitySpinner,
     AsyncStateView,
     DataGrid,
     DataGridColumnFilterPanel,
     DiffView,
+    ExecutionElapsed,
     formatDataGridCellValue,
     isDataGridNumericColumn,
     moveDataGridColumnOrder,
@@ -74,6 +76,7 @@ import type {
     DiffBaseline,
     PivotAggregation,
     PivotConfiguration,
+    ResultExecutionBannerStatus,
     ResultLayoutKind,
 } from '@justybase/ui-react';
 import { asHostMessage, callPanelMethod, getHostState, postHostMessage, setHostState } from './protocol.js';
@@ -958,6 +961,10 @@ export class SharedResultPanelController {
     private queryRowLimit = 200_000;
     private sqlQueueJson: string | undefined;
     private executingSources = new Set<string>();
+    /** When the current execution for a source started (webview clock). */
+    private executionStartedAt = new Map<string, number>();
+    /** Sources whose cancellation was requested but not finished yet. */
+    private cancellingSources = new Set<string>();
     private readonly refreshFailures = new Map<string, SharedRefreshFailure>();
     private readonly limitReached = new Set<string>();
     private readonly diskQuerySpecKeys = new Map<string, string>();
@@ -1082,6 +1089,32 @@ export class SharedResultPanelController {
 
     public isSourceExecuting(sourceId: string | undefined): boolean {
         return sourceId !== undefined && this.executingSources.has(sourceId);
+    }
+
+    /** Wall-clock start of the current run for a source, used by elapsed indicators. */
+    public getExecutionStartedAt(sourceId: string | undefined): number | undefined {
+        return sourceId === undefined ? undefined : this.executionStartedAt.get(sourceId);
+    }
+
+    /** True between a Cancel click and the host acknowledging the cancellation. */
+    public isSourceCancelling(sourceId: string | undefined): boolean {
+        return sourceId !== undefined && this.cancellingSources.has(sourceId);
+    }
+
+    private setExecutingSources(sourceIds: readonly string[]): void {
+        const next = new Set(sourceIds);
+        const startedAt = Date.now();
+        for (const sourceId of next) {
+            if (!this.executionStartedAt.has(sourceId)) this.executionStartedAt.set(sourceId, startedAt);
+        }
+        for (const sourceId of [...this.executionStartedAt.keys()]) {
+            if (!next.has(sourceId)) this.executionStartedAt.delete(sourceId);
+        }
+        // A finished execution resolves any pending cancellation.
+        for (const sourceId of [...this.cancellingSources]) {
+            if (!next.has(sourceId)) this.cancellingSources.delete(sourceId);
+        }
+        this.executingSources = next;
     }
 
     public getRefreshFailure(result: UiResultSurfaceState | undefined): SharedRefreshFailure | undefined {
@@ -1267,7 +1300,7 @@ export class SharedResultPanelController {
                 break;
             case 'setActiveSource':
                 if (valid.formatSettings !== undefined) this.formatSettings = valid.formatSettings;
-                this.executingSources = new Set(parseJsonStrings(valid.executingSourcesJson));
+                this.setExecutingSources(parseJsonStrings(valid.executingSourcesJson));
                 if (valid.pinnedResultsJson !== undefined) {
                     this.pinnedResults = parseSharedPinnedResults(valid.pinnedResultsJson);
                 }
@@ -1317,6 +1350,7 @@ export class SharedResultPanelController {
                 this.applyDatabaseGroupingResult(valid);
                 break;
             case 'cancelExecution':
+                if (valid.sourceUri) this.cancellingSources.delete(valid.sourceUri);
                 this.applyCancellation(valid.sourceUri);
                 break;
             case 'switchToResultSet':
@@ -1728,9 +1762,24 @@ export class SharedResultPanelController {
     public cancel(sourceId: string | undefined): void {
         const activeSource = sourceId ?? this.getState().results.activeSourceId;
         if (!activeSource) return;
-        const result = Object.values(this.getState().results.byResultSetId)
-            .find(candidate => candidate.sourceId === activeSource && (candidate.status === 'loading' || candidate.status === 'streaming'));
-        if (!result) return;
+        const runningResults = Object.values(this.getState().results.byResultSetId)
+            .filter(candidate => candidate.sourceId === activeSource
+                && (candidate.status === 'loading' || candidate.status === 'streaming'));
+        // Prefer the data result for the cancellation handshake; the Logs tab has
+        // its own stable lifecycle and is only a fallback when no data result
+        // exists yet.
+        const result = runningResults.find(candidate => !this.isLogResult(candidate)) ?? runningResults[0];
+        // Nothing to cancel: do not leave a stale cancellation flag behind for a
+        // future run of the same source.
+        if (!result && !this.isSourceExecuting(activeSource)) return;
+        this.cancellingSources.add(activeSource);
+        if (!result) {
+            // Batch DML/DDL can run for minutes without a data result. The Logs
+            // tab is the only surface then, so cancel must still reach the host.
+            postHostMessage({ command: 'cancelQuery', sourceUri: activeSource });
+            this.notify();
+            return;
+        }
         const requestId = `vscode-cancel-${++this.streamRevision}`;
         this.cancelRequests.set(sourceIndexKey(result.sourceId, result.statementIndex), requestId);
         this.dispatch({
@@ -2275,7 +2324,7 @@ export class SharedResultPanelController {
         this.queryRowLimit = asNonNegativeInteger(data.queryRowLimit) ?? this.queryRowLimit;
         const activeResultSetIndex = asNonNegativeInteger(data.activeResultSetIndex) ?? 0;
         const executingSources = new Set(parseJsonStrings(data.executingSourcesJson));
-        this.executingSources = executingSources;
+        this.setExecutingSources([...executingSources]);
         const version = asNonNegativeInteger(data.dataVersion)
             ?? asNonNegativeInteger(data.resultSyncVersion)
             ?? ++this.streamRevision;
@@ -3824,9 +3873,9 @@ function createSharedLogLine(row: LogRow): HTMLElement {
     const badge = document.createElement('span');
     badge.className = `log-status log-status--${parsed.status}`;
     const icon = document.createElement('span');
-    icon.className = 'log-status-icon';
+    icon.className = parsed.status === 'running' ? 'log-status-icon log-status-icon-spinner' : 'log-status-icon';
     icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = LOG_STATUS_ICONS[parsed.status] ?? '';
+    if (parsed.status !== 'running') icon.textContent = LOG_STATUS_ICONS[parsed.status] ?? '';
     const label = document.createElement('span');
     label.textContent = parsed.status.toUpperCase();
     badge.append(icon, label);
@@ -3846,7 +3895,24 @@ function createSharedLogLine(row: LogRow): HTMLElement {
  * so the shared Logs tab matches the legacy transcript instead of flattening
  * every row into one text line.
  */
-function SharedLogConsole({ rows, lanesJson, sourceUri }: { readonly rows: readonly (readonly unknown[])[]; readonly lanesJson?: string; readonly sourceUri?: string }): ReactNode {
+function SharedLogConsole({
+    rows,
+    lanesJson,
+    sourceUri,
+    executing = false,
+    cancelling = false,
+    startedAt,
+    onCancel,
+}: {
+    readonly rows: readonly (readonly unknown[])[];
+    readonly lanesJson?: string;
+    readonly sourceUri?: string;
+    readonly executing?: boolean;
+    readonly cancelling?: boolean;
+    /** Epoch milliseconds when the current execution started. */
+    readonly startedAt?: number;
+    readonly onCancel?: () => void;
+}): ReactNode {
     const view = useRef<HTMLDivElement>(null);
     const wrapper = useRef<HTMLDivElement>(null);
     const [search, setSearch] = useState('');
@@ -3875,6 +3941,14 @@ function SharedLogConsole({ rows, lanesJson, sourceUri }: { readonly rows: reado
     }, [filteredRows, lanesJson, search, sourceUri]);
     return <div className="ui-result-grid ui-legacy-log console-wrapper" ref={wrapper}>
         <div className="ui-log-toolbar">
+            {executing && <span className={`ui-log-running${cancelling ? ' ui-log-running-cancelling' : ''}`}>
+                <span className="ui-log-running-state" role="status" aria-live="polite">
+                    <ActivitySpinner />
+                    <span>{cancelling ? 'Cancelling…' : 'Running…'}</span>
+                </span>
+                {startedAt !== undefined && <ExecutionElapsed className="ui-log-running-elapsed" startedAt={startedAt} />}
+                {cancelling || onCancel === undefined ? null : <button type="button" className="ui-log-running-cancel" onClick={onCancel}>Cancel</button>}
+            </span>}
             <input
                 aria-label="Search log"
                 placeholder="Search log…"
@@ -4266,14 +4340,8 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const activeSql = controller.getResultSql(activeResult);
     const resultState = asyncStateFor(activeResult, rows.length);
     const activeResultKey = activeResult ? resultKey(activeResult.sourceId, activeResult.resultSetId) : undefined;
-    const executionStatus = activeResult?.status === 'loading' || activeResult?.status === 'streaming'
-        ? (activeResult.cancellation === 'requested' || activeResult.cancellation === 'acknowledged' ? 'finalizing' : 'loading')
-        : activeResult?.status === 'cancelled'
-            ? 'cancelled'
-            : activeResult?.status === 'error'
-                ? 'error'
-                : 'idle';
-    const cancelling = activeResult?.cancellation === 'requested' || activeResult?.cancellation === 'acknowledged';
+    const sourceExecuting = controller.isSourceExecuting(state.results.activeSourceId);
+    const sourceExecutionStartedAt = controller.getExecutionStartedAt(state.results.activeSourceId);
     const showLimitBanner = activeResult?.limitReached === true && activeResultKey !== dismissedLimitKey;
     const refreshFailure = controller.getRefreshFailure(activeResult);
     // Range charts follow the grid's filtered/sorted order and hide columns
@@ -4368,6 +4436,23 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
     const pendingEditCount = controller.getPendingEditCount(activeResult);
     const isLogResult = controller.isLogResult(activeResult);
     const isErrorResult = activeResult?.status === 'error';
+    // Any result of this source can own the cancellation request (the Logs tab
+    // itself never does), so derive it from the source-level cancel state.
+    const cancelling = controller.isSourceCancelling(state.results.activeSourceId);
+    // A source-level executing flag is authoritative for "query still running":
+    // a Logs result keeps its own lifecycle state and a previously completed
+    // data result can stay selected while the next statement runs.
+    const executionStatus: ResultExecutionBannerStatus = sourceExecuting
+        ? (cancelling ? 'finalizing' : 'loading')
+        : activeResult?.status === 'loading' || activeResult?.status === 'streaming'
+            ? (cancelling ? 'finalizing' : 'loading')
+            : activeResult?.status === 'cancelled'
+                ? 'cancelled'
+                : activeResult?.status === 'error'
+                    ? 'error'
+                    : 'idle';
+    // The banner is hidden for Logs (that surface owns its own header chip), so
+    // it only needs the clock for the data-result lifecycle.
     const view: UiResultSurfaceState['view'] = activeResult?.view ?? { globalFilter: '', columnFilters: {}, sorting: [], grouping: [], aggregation: undefined, columnAggregations: undefined, pivotColumn: undefined, scrollTop: 0, scrollLeft: 0 };
     const hasAggregations = Object.keys(view.columnAggregations ?? {}).length > 0;
     const rowViewDisplayRows = useMemo(() => {
@@ -4614,6 +4699,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                     isPinned={result => controller.isResultPinned(result)}
                     onTogglePin={result => controller.toggleResultPin(result)}
                     onClose={result => controller.closeResult(result)}
+                    isBusy={result => controller.isLogResult(result) ? controller.isSourceExecuting(result.sourceId) : undefined}
                 />
                 <ResultViewToolbar
                     columns={activeResult?.columns ?? []}
@@ -4687,6 +4773,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                     status={executionStatus}
                     message={activeResult?.message}
                     cancelling={cancelling}
+                    startedAt={sourceExecuting ? sourceExecutionStartedAt : undefined}
                     onCancel={activeResult ? () => controller.cancel(activeResult.sourceId) : undefined}
                 />}
                 {showLimitBanner && <ResultLimitBanner
@@ -4743,7 +4830,15 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                     />
                     : <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
                     {activeResult && (isLogResult
-                        ? <SharedLogConsole rows={rows} lanesJson={controller.getSqlQueueJson()} sourceUri={activeResult?.sourceId} />
+                        ? <SharedLogConsole
+                            rows={rows}
+                            lanesJson={controller.getSqlQueueJson()}
+                            sourceUri={activeResult?.sourceId}
+                            executing={sourceExecuting}
+                            cancelling={cancelling}
+                            startedAt={sourceExecutionStartedAt}
+                            onCancel={(executionStatus === 'loading' || executionStatus === 'finalizing') && !cancelling ? () => controller.cancel(activeResult.sourceId) : undefined}
+                        />
                         : viewLayout === 'charts'
                         ? <LazySharedRangeChart columns={chartColumnProps} rows={chartRows} />
                         : viewLayout === 'mini-charts'
@@ -4774,7 +4869,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         rows={rows}
                         getColumnFormatting={getColumnFormatting}
                         totalRowCount={activeResult.totalRowCount}
-                        busy={activeResult.status === 'loading' || activeResult.status === 'streaming' || analysisLoading}
+                        busy={sourceExecuting || activeResult.status === 'loading' || activeResult.status === 'streaming' || analysisLoading}
                         view={activeResult.view}
                         onViewChange={updateView}
                         showContextMenu

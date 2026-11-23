@@ -17,6 +17,7 @@ import {
   PivotDialog,
   ResultColumnSidebar,
   ResultErrorView,
+  ResultExecutionBanner,
   ResultLayoutSwitcher,
   ResultTabs,
   ResultAnalysisPanel,
@@ -416,6 +417,7 @@ describe('shared React presentation', () => {
   it('renders every async state with accessible status semantics', () => {
     const { rerender } = render(<AsyncStateView state="loading" />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading');
+    expect(screen.getByRole('status').querySelector('.ui-activity-spinner')).not.toBeNull();
     rerender(<AsyncStateView state="empty" emptyLabel="No rows" />);
     expect(screen.getByRole('status')).toHaveTextContent('No rows');
     rerender(<AsyncStateView state="error" message="Request failed" />);
@@ -424,6 +426,45 @@ describe('shared React presentation', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Cancelled');
     rerender(<AsyncStateView state="ready">ready content</AsyncStateView>);
     expect(screen.getByText('ready content')).toBeInTheDocument();
+  });
+
+  it('marks a running tab and the execution banner with an animated spinner', () => {
+    const { rerender } = render(<ResultTabs
+      results={[{ ...result, status: 'loading', totalRowCount: 0 }]}
+      activeResultSetId={result.resultSetId}
+      onSelect={jest.fn()}
+    />);
+    const tab = screen.getByRole('tab', { name: /Result 1/ });
+    expect(tab).toHaveAttribute('aria-busy', 'true');
+    expect(tab.querySelector('.ui-activity-spinner.ui-result-tab-spinner')).not.toBeNull();
+
+    // Host-level executing flags keep the Logs tab visually alive even though
+    // the Logs result itself keeps a stable lifecycle.
+    rerender(<ResultTabs
+      results={[{ ...result, status: 'complete' }]}
+      activeResultSetId={result.resultSetId}
+      onSelect={jest.fn()}
+      getLabel={() => 'Logs'}
+      isBusy={() => true}
+    />);
+    const logsTab = screen.getByRole('tab', { name: 'Logs' });
+    expect(logsTab).toHaveAttribute('aria-busy', 'true');
+    expect(logsTab.querySelector('.ui-result-tab-spinner')).not.toBeNull();
+    expect(logsTab).toHaveAttribute('title', expect.stringContaining('still running'));
+  });
+
+  it('shows an elapsed clock and spinner while the query runs, hiding it once idle', () => {
+    const onCancel = jest.fn();
+    const startedAt = Date.now() - 65_000;
+    const { rerender } = render(<ResultExecutionBanner status="loading" startedAt={startedAt} onCancel={onCancel} />);
+    const banner = screen.getByRole('status');
+    expect(banner).toHaveTextContent('Running query…');
+    expect(banner).toHaveTextContent('1m 05s');
+    expect(banner.querySelector('.ui-activity-spinner')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+
+    rerender(<ResultExecutionBanner status="success" startedAt={startedAt} onCancel={onCancel} />);
+    expect(screen.queryByText(/Running query/)).not.toBeInTheDocument();
   });
 
   it('offers a Copilot fix action for failed SQL and keeps the driver caret text intact', () => {
@@ -1888,8 +1929,10 @@ describe('shared React presentation', () => {
     expect(screen.getByText('No differences detected.')).toBeInTheDocument();
   });
 
-  it('exposes aria-busy while the shared grid is loading', () => {
+  it('exposes aria-busy and an indeterminate progress strip while the shared grid is loading', () => {
     const { container } = render(<DataGrid resultSetId="busy-grid" columns={[{ name: 'ID', type: 'INTEGER' }]} rows={[[1]]} busy />);
     expect(container.querySelector('.ui-result-grid')).toHaveAttribute('aria-busy', 'true');
+    expect(container.querySelector('.ui-data-grid-progress')).not.toBeNull();
+    expect(container.querySelector('.ui-data-grid-progress > span')).not.toBeNull();
   });
 });

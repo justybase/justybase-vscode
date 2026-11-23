@@ -122,6 +122,9 @@ Queues are held only in memory and are never restored after restarting VS Code.
 The result panel's **Logs** tab shows the document's running requests and queued
 SQL above the execution transcript. Independent sessions display a count such as
 **3 running / 4**, and each running request has its own **Cancel** action.
+While anything is running, the Logs header also shows a spinner chip with the
+elapsed time and a single **Cancel**, so the state is readable without expanding
+a request or moving to another tab.
 **Remove** discards one waiting request. **Clear queued** discards waiting requests
 without cancelling active sessions. **Pause queue** prevents new starts; it does
 not interrupt running SQL. **Resume queue** continues admission after a pause.

@@ -94,6 +94,16 @@ The **Logs** result tab keeps the execution log for the source. Use **Clear
 Logs** on that tab to clear it; the tab does not expose table editing or
 analysis actions.
 
+While a statement is running, the shared result panel keeps a moving indicator
+visible instead of a static glyph: the executing result tab (including **Logs**)
+shows an animated ring, the Logs header shows a **Running…** chip with the
+elapsed time and a **Cancel** action, and the status badge of the running
+statement card spins. The same ring appears in the execution banner above the
+grid and as a thin indeterminate strip along the top edge of the grid, so a
+query that takes minutes is still visibly in progress. The tab and chip clear as
+soon as the source finishes; a cancelled query keeps the **Cancelling…** state
+until the host acknowledges it.
+
 Selecting one or more cells reports the selection size, count, distinct count,
 and numeric sum/min/max to the VS Code status bar. Ctrl+click (Cmd+click on
 macOS) toggles individual cells without clearing the current selection, so you

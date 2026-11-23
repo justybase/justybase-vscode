@@ -2592,6 +2592,10 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
   };
 
   return <div className={`ui-result-grid result-grid${onOpenColumnFilter && !showInlineColumnFilters ? ' ui-data-grid-compact' : ''}`} aria-busy={busy || undefined}>
+    {/* A query can stream rows for minutes. The grid keeps an indeterminate
+        progress strip pinned over its header so execution stays visible even
+        when arriving rows look like a finished page. */}
+    {busy && <div className="ui-data-grid-progress" aria-hidden="true"><span /></div>}
     {showColumnMenu && <DataGridColumnMenu columns={resolvedColumns} view={activeView} onViewChange={updateView} />}
     {(showGroupingPanel || draggedHeaderColumn !== undefined) && <div
       className={`ui-data-grid-group-panel${activeView.grouping.length > 0 ? ' ui-data-grid-group-panel-active' : ''}${draggedHeaderColumn !== undefined ? ' ui-data-grid-group-panel-dragging' : ''}`}

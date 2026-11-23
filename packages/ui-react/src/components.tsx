@@ -28,7 +28,10 @@ export interface AsyncStateViewProps {
 export function AsyncStateView({ state, message, loadingLabel = 'Loading…', emptyLabel = 'Nothing to show.', cancelledLabel = 'Cancelled.', children }: AsyncStateViewProps): ReactNode {
   if (state === 'ready') return <>{children}</>;
   const label = state === 'loading' ? loadingLabel : state === 'empty' ? emptyLabel : state === 'cancelled' ? cancelledLabel : message ?? 'Something went wrong.';
-  return <div className={`ui-async-state ui-async-${state}`} role={state === 'error' ? 'alert' : 'status'} aria-live="polite">{label}</div>;
+  return <div className={`ui-async-state ui-async-${state}`} role={state === 'error' ? 'alert' : 'status'} aria-live="polite">
+    {state === 'loading' && <span className="ui-activity-spinner" aria-hidden="true" />}
+    <span>{label}</span>
+  </div>;
 }
 
 export interface ErrorDiagnosticsProps {
@@ -75,6 +78,60 @@ export interface ResultExecutionBannerProps {
   readonly message?: string;
   readonly cancelling?: boolean;
   readonly onCancel?: () => void;
+  /** Epoch milliseconds when the current query started; drives the elapsed clock. */
+  readonly startedAt?: number;
+}
+
+/** Shared animated activity ring used by every "query still executing" surface. */
+export interface ActivitySpinnerProps {
+  readonly className?: string;
+}
+
+export function ActivitySpinner({ className }: ActivitySpinnerProps): ReactNode {
+  return <span className={className ? `ui-activity-spinner ${className}` : 'ui-activity-spinner'} aria-hidden="true" />;
+}
+
+export interface ExecutionElapsedProps {
+  /** Epoch milliseconds when the current query started. */
+  readonly startedAt?: number;
+  readonly className?: string;
+}
+
+/** Ticking whole seconds since `startedAt`; isolated so parents avoid re-rendering. */
+function useElapsedSeconds(startedAt: number | undefined): number | undefined {
+  const [seconds, setSeconds] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (startedAt === undefined) {
+      setSeconds(current => current === undefined ? current : undefined);
+      return undefined;
+    }
+    const tick = (): void => {
+      const next = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      setSeconds(current => current === next ? current : next);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  return seconds;
+}
+
+function formatElapsedSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(Math.floor(seconds % 60)).padStart(2, '0')}s`;
+}
+
+/**
+ * Decorative elapsed clock for long-running queries. The value is marked
+ * `aria-hidden`, so a per-second update inside a polite live region cannot
+ * flood screen readers with the whole banner message.
+ */
+export function ExecutionElapsed({ startedAt, className }: ExecutionElapsedProps): ReactNode {
+  const seconds = useElapsedSeconds(startedAt);
+  if (seconds === undefined) return null;
+  return <span className={className} aria-hidden="true">{formatElapsedSeconds(seconds)}</span>;
 }
 
 /**
@@ -82,8 +139,9 @@ export interface ResultExecutionBannerProps {
  * panel kept this information in a separate DOM banner; shared mode owns the
  * same status surface so Cancel is never hidden behind the grid.
  */
-export function ResultExecutionBanner({ status, message, cancelling = false, onCancel }: ResultExecutionBannerProps): ReactNode {
+export function ResultExecutionBanner({ status, message, cancelling = false, onCancel, startedAt }: ResultExecutionBannerProps): ReactNode {
   if (status === 'idle' || status === 'success') return null;
+  const running = status === 'loading' || status === 'retrying' || status === 'finalizing';
   const label = status === 'loading'
     ? 'Running query…'
     : status === 'finalizing'
@@ -95,8 +153,13 @@ export function ResultExecutionBanner({ status, message, cancelling = false, onC
           : message ?? 'Query failed.';
   const canCancel = onCancel !== undefined && (status === 'loading' || status === 'retrying');
   return <div className={`ui-execution-banner ui-execution-${status}`} role={status === 'error' ? 'alert' : 'status'} aria-live="polite">
-    <span className="ui-execution-banner-icon" aria-hidden="true">{status === 'cancelled' ? '⊘' : status === 'error' ? '✗' : '▶'}</span>
-    <span className="ui-execution-banner-message">{label}</span>
+    {running
+      ? <span className={`ui-execution-banner-icon${status === 'finalizing' ? ' ui-execution-banner-icon-finalizing' : ''}`} aria-hidden="true"><ActivitySpinner /></span>
+      : <span className="ui-execution-banner-icon" aria-hidden="true">{status === 'cancelled' ? '⊘' : '✗'}</span>}
+    <span className="ui-execution-banner-message">
+      {label}
+      {running && startedAt !== undefined && <span className="ui-execution-banner-elapsed"> · <ExecutionElapsed startedAt={startedAt} /></span>}
+    </span>
     {canCancel && <button type="button" className="ui-execution-banner-cancel" disabled={cancelling} onClick={onCancel}>{cancelling ? 'Cancelling…' : 'Cancel'}</button>}
   </div>;
 }
@@ -302,7 +365,7 @@ export function FocusOnMount({ children }: { readonly children: ReactNode }): Re
   return <div ref={ref} tabIndex={-1}>{children}</div>;
 }
 
-export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect, execution, getLabel, isPinned, onTogglePin, onClose }: ResultTabsProps): ReactNode {
+export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelect, execution, getLabel, isPinned, onTogglePin, onClose, isBusy }: ResultTabsProps): ReactNode {
   const matchingActiveResults = results.filter(result => result.resultSetId === activeResultSetId);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const focusTab = (index: number): void => {
@@ -323,13 +386,17 @@ export function ResultTabs({ results, activeResultSetId, activeSourceId, onSelec
     const statement = execution?.statements[result.statementIndex];
     const label = getLabel?.(result, index) ?? `Result ${index + 1}`;
     const pinned = isPinned?.(result) === true;
-    return <div className={`ui-result-tab${active ? ' ui-result-tab-active' : ''}${pinned ? ' ui-result-tab-pinned' : ''}`} key={`${result.sourceId}:${result.resultSetId}`}>
-      <button type="button" role="tab" className="ui-result-tab-label" ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} data-result-status={result.status} data-statement-index={result.statementIndex} data-statement-status={statement?.status} title={statement ? `Statement ${result.statementIndex + 1}: ${statement.status}` : undefined} onKeyDown={event => {
+    const override = isBusy?.(result);
+    const busy = override === undefined
+      ? result.status === 'loading' || result.status === 'streaming'
+      : override;
+    return <div className={`ui-result-tab${active ? ' ui-result-tab-active' : ''}${pinned ? ' ui-result-tab-pinned' : ''}${busy ? ' ui-result-tab-busy' : ''}`} key={`${result.sourceId}:${result.resultSetId}`}>
+      <button type="button" role="tab" className="ui-result-tab-label" ref={element => { tabRefs.current[index] = element; }} tabIndex={tabIndex} aria-selected={active} aria-busy={busy || undefined} data-result-status={result.status} data-statement-index={result.statementIndex} data-statement-status={statement?.status} title={busy ? `${label} — query is still running` : statement ? `Statement ${result.statementIndex + 1}: ${statement.status}` : undefined} onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault();
         const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? results.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + results.length) % results.length;
         focusTab(nextIndex);
-      }} onClick={() => onSelect(result.resultSetId, result.sourceId)}>{label}{result.status === 'streaming' ? ' · streaming' : ''}{result.status === 'error' ? <span className="ui-result-tab-badge ui-result-tab-badge-error">Error</span> : result.status === 'cancelled' ? <span className="ui-result-tab-badge ui-result-tab-badge-partial">Partial</span> : result.status === 'empty' ? <span className="ui-result-tab-badge ui-result-tab-badge-empty">Empty</span> : null}</button>
+      }} onClick={() => onSelect(result.resultSetId, result.sourceId)}>{busy && <ActivitySpinner className="ui-result-tab-spinner" />}{label}{result.status === 'error' ? <span className="ui-result-tab-badge ui-result-tab-badge-error">Error</span> : result.status === 'cancelled' ? <span className="ui-result-tab-badge ui-result-tab-badge-partial">Partial</span> : result.status === 'empty' ? <span className="ui-result-tab-badge ui-result-tab-badge-empty">Empty</span> : null}</button>
       {onTogglePin && <button
         type="button"
         className="ui-result-tab-pin"
@@ -632,6 +699,13 @@ export interface ResultTabsProps {
   readonly isPinned?: (result: UiResultSurfaceState) => boolean;
   readonly onTogglePin?: (result: UiResultSurfaceState) => void;
   readonly onClose?: (result: UiResultSurfaceState) => void;
+  /**
+   * Reports whether the tab still has work in flight. Logs results keep a
+   * stable result lifecycle, so the host's source-level executing flag is the
+   * only reliable "query running" signal for that tab. Returning `undefined`
+   * keeps the default status-based busy state.
+   */
+  readonly isBusy?: (result: UiResultSurfaceState) => boolean | undefined;
 }
 
 export interface SchemaTreeProps {

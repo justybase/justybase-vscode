@@ -45,6 +45,7 @@ export type {
 export type { DataGridClipboardFormat, DataGridClipboardOptions, DataGridClipboardPayload } from './dataGridClipboard';
 export type { SqlProblem, SqlProblemSeverity } from '@justybase/ui-core';
 export {
+  ActivitySpinner,
   AsyncStateView,
   CellValueViewer,
   CapabilityGate,
@@ -52,6 +53,7 @@ export {
   DesignerForm,
   EditorSurface,
   ErrorDiagnostics,
+  ExecutionElapsed,
   ExplainView,
   FocusOnMount,
   HistoryView,
@@ -71,6 +73,7 @@ export {
   WorkspaceTabs,
 } from './components';
 export type {
+  ActivitySpinnerProps,
   AsyncStateViewProps,
   AsyncViewState,
   CellValueViewerProps,
@@ -78,6 +81,7 @@ export type {
   DesignerFormProps,
   EditorSurfaceProps,
   ErrorDiagnosticsProps,
+  ExecutionElapsedProps,
   ExplainViewProps,
   GridScrollPosition,
   RefreshLimitDialogProps,
