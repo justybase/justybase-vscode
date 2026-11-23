@@ -343,6 +343,7 @@ describe('JetTable writes on real Access fixtures', () => {
 });
 
 import { AccessConnection } from '../../extensions/access/src/accessConnection';
+import { AccessDuckDbMirror } from '../../extensions/access/src/accessDuckDbMirror';
 import type { DatabaseConnectionConfig } from '../contracts/database';
 
 /**
@@ -523,6 +524,154 @@ describeWithAccessRuntime('AccessConnection DDL', () => {
                 .rejects.toThrow();
         } finally {
             await connection.close();
+        }
+    });
+
+    it('applies Access column defaults to INSERTs that omit the column', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            // accessLike.mdb declares Campo1 DEFAULT "campo1". Access would fill
+            // it on an INSERT that omits the column; the mirror and the file
+            // write must do the same, otherwise editing a file silently stores
+            // values Access would never produce.
+            await connection.createCommand('INSERT INTO t_like2 (ID, Campo2) VALUES (99, \'x\')').execute();
+            const rows = await readAllRows(connection, 'SELECT ID, Campo1, Campo2 FROM t_like2 WHERE ID = 99');
+            expect(rows).toEqual([[99, 'campo1', 'x']]);
+
+            // The metadata markers must expose the source DefaultValue and the
+            // Required flag, because DDL export and the edit-data panel read
+            // them from here rather than from the session object.
+            const columns = await readAllRows(
+                connection,
+                "SELECT * FROM _access_metadata.table_columns WHERE TABLE = 't_like2'",
+            );
+            const campo1 = columns.find(row => row[0] === 'Campo1');
+            expect(campo1?.[3]).toBe(0);
+            expect(campo1?.[4]).toBe('"campo1"');
+            const campo2 = columns.find(row => row[0] === 'Campo2');
+            expect(campo2?.[3]).toBe(1);
+        } finally {
+            await connection.close();
+        }
+        const session = await AccessFileSession.open({ filePath: file });
+        try {
+            const rows = (await session.readTable('t_like2')).rows.filter(row => row[0] === 99);
+            expect(rows).toEqual([[99, 'campo1', 'x', null]]);
+        } finally {
+            await session.close();
+        }
+    });
+
+    it('keeps a Required column rejected when an INSERT omits it', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            // Campo2 is Required in the fixture.  The mirror must enforce that,
+            // because the writer only copies rows that the mirror accepted.
+            await expect(connection.createCommand('INSERT INTO t_like2 (ID, Campo1) VALUES (100, \'y\')').execute())
+                .rejects.toThrow(/NOT NULL|NULL/i);
+        } finally {
+            await connection.close();
+        }
+        const session = await AccessFileSession.open({ filePath: file });
+        try {
+            expect((await session.readTable('t_like2')).rows.some(row => row[0] === 100)).toBe(false);
+        } finally {
+            await session.close();
+        }
+    });
+
+    it('enforces AllowZeroLength and ValidationRule the same way Access does', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            // accessLike.mdb stores AllowZeroLength=False on Campo2 and a
+            // column rule on t_like1.a1.  Both come from the property map.
+            await expect(connection.createCommand("INSERT INTO t_like2 (ID, Campo1, Campo2) VALUES (199, 'x', '')").execute())
+                .rejects.toThrow(/CHECK|constraint/i);
+            await connection.createCommand("INSERT INTO t_like2 (ID, Campo1, Campo2) VALUES (200, 'x', 'ok')").execute();
+            expect(await readAllRows(connection, 'SELECT ID, Campo1, Campo2 FROM t_like2 WHERE ID = 200'))
+                .toEqual([[200, 'x', 'ok']]);
+
+            // NULL still passes: Access only rejects values whose rule is false.
+            const columns = await readAllRows(
+                connection,
+                "SELECT * FROM _access_metadata.table_columns WHERE TABLE = 't_like2'",
+            );
+            expect(columns.find(row => row[0] === 'Campo2')?.[11]).toBe(0);
+            expect(columns.find(row => row[0] === 'Campo3')?.[11]).toBe(1);
+        } finally {
+            await connection.close();
+        }
+        const session = await AccessFileSession.open({ filePath: file });
+        try {
+            const definition = session.getTableDefinition('t_like2');
+            expect(definition.columns.find(column => column.name === 'Campo2')?.allowZeroLength).toBe(false);
+            expect(definition.columns.find(column => column.name === 'Campo1')?.allowZeroLength).toBe(true);
+            // The rejected row must never reach the file.
+            expect((await session.readTable('t_like2')).rows.some(row => row[0] === 199)).toBe(false);
+        } finally {
+            await session.close();
+        }
+    });
+
+    it('relaxes validation only when legacy rows already violate the rule', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const { rows } = openNamed(file, 't_like2', 50);
+        // Write a row that breaks AllowZeroLength directly through the writer,
+        // which is how a file made by another tool can carry legacy bad data.
+        await applyWrite(file, 'jet4', 't_like2', rows, [...rows, [300, 'legacy', '', null]]);
+
+        const session = await AccessFileSession.open({ filePath: file });
+        const mirror = new AccessDuckDbMirror();
+        // The mirror consumes the published package types; the test opens the
+        // source session, which is structurally identical.
+        await mirror.open(session as unknown as Parameters<AccessDuckDbMirror['open']>[0]);
+        try {
+            // Access would still open such a file, so the mirror must too; the
+            // constraint is dropped with a warning instead of blocking the file.
+            expect(mirror.warnings.join('\n')).toContain('t_like2');
+            await mirror.executeAndReadAll("INSERT INTO t_like2 (ID, Campo1, Campo2) VALUES (301, 'x', 'ok')");
+            const count = await mirror.executeAndReadAll('SELECT COUNT(*) AS c FROM t_like2');
+            expect(Number(count.rows?.[0]?.[0])).toBe(rows.length + 2);
+        } finally {
+            await mirror.close();
+            await session.close();
+        }
+    });
+
+    it('creates a table with DEFAULT columns and keeps them through a reopen', async () => {
+        const file = copyFixture('accessLike.mdb');
+        const connection = new AccessConnection(createAccessConfig(file, false));
+        await connection.connect();
+        try {
+            await connection.createCommand(
+                'CREATE TABLE default_e2e (id LONG PRIMARY KEY, code TEXT(20) DEFAULT "abc", n LONG DEFAULT (3), flag BOOLEAN DEFAULT True)',
+            ).execute();
+            await connection.createCommand('INSERT INTO default_e2e (id) VALUES (1)').execute();
+            expect(await readAllRows(connection, 'SELECT id, code, n, flag FROM default_e2e'))
+                .toEqual([[1, 'abc', 3, true]]);
+        } finally {
+            await connection.close();
+        }
+        const session = await AccessFileSession.open({ filePath: file });
+        try {
+            expect(session.getTableDefinition('default_e2e').columns.map(column => ({
+                name: column.name,
+                nullable: column.nullable,
+                defaultValue: column.defaultValue,
+            }))).toEqual([
+                { name: 'id', nullable: true, defaultValue: undefined },
+                { name: 'code', nullable: true, defaultValue: '"abc"' },
+                { name: 'n', nullable: true, defaultValue: '(3)' },
+                { name: 'flag', nullable: true, defaultValue: 'True' },
+            ]);
+        } finally {
+            await session.close();
         }
     });
 

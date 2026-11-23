@@ -35,6 +35,14 @@ export interface JetDdlColumn {
     readonly scale?: number;
     readonly notNull?: boolean;
     readonly autoNumber?: boolean;
+    /** Access `DefaultValue` expression, stored in the column property map. */
+    readonly defaultValue?: string;
+    /** Access `AllowZeroLength` property; false rejects empty strings. */
+    readonly allowZeroLength?: boolean;
+    /** Access column-level `ValidationRule` expression. */
+    readonly validationRule?: string;
+    /** Message Access shows when the column rule rejects a value. */
+    readonly validationText?: string;
 }
 
 export interface JetDdlIndex {
@@ -590,6 +598,103 @@ function findObjectOwner(): Uint8Array {
     return new Uint8Array([0xa6, 0x33]);
 }
 
+function buildColumnPropertyBytes(
+    columns: readonly JetDdlColumn[],
+    layout: JetLayout,
+): Uint8Array | undefined {
+    const withDefault = columns.filter(column => column.defaultValue !== undefined && column.defaultValue.trim().length > 0);
+    const required = columns.filter(column => column.notNull);
+    const zeroLength = columns.filter(column => column.allowZeroLength === false);
+    const withRule = columns.filter(column => column.validationRule !== undefined && column.validationRule.trim().length > 0);
+    const withRuleText = columns.filter(column => column.validationText !== undefined && column.validationText.trim().length > 0);
+    if (required.length === 0 && withDefault.length === 0 && zeroLength.length === 0
+        && withRule.length === 0 && withRuleText.length === 0) {
+        return undefined;
+    }
+
+    const encoding = layout.utf16 ? 'utf16le' : 'latin1';
+    const propertyNames: string[] = [];
+    if (required.length > 0) propertyNames.push('Required');
+    if (withDefault.length > 0) propertyNames.push('DefaultValue');
+    if (zeroLength.length > 0) propertyNames.push('AllowZeroLength');
+    if (withRule.length > 0) propertyNames.push('ValidationRule');
+    if (withRuleText.length > 0) propertyNames.push('ValidationText');
+
+    const short = (value: number): Buffer => {
+        const buffer = Buffer.alloc(2);
+        buffer.writeUInt16LE(value, 0);
+        return buffer;
+    };
+    const int = (value: number): Buffer => {
+        const buffer = Buffer.alloc(4);
+        buffer.writeUInt32LE(value, 0);
+        return buffer;
+    };
+    const name = (value: string): Buffer => {
+        const bytes = Buffer.from(value, encoding);
+        return Buffer.concat([short(bytes.length), bytes]);
+    };
+    const propertyValue = (type: number, propertyIndex: number, data: Buffer): Buffer => {
+        const length = 2 + 1 + 1 + 2 + 2 + data.length;
+        return Buffer.concat([
+            short(length),
+            Buffer.from([1, type]),
+            short(propertyIndex),
+            short(data.length),
+            data,
+        ]);
+    };
+    const hasProperties = (column: JetDdlColumn): boolean => column.notNull === true
+        || column.allowZeroLength === false
+        || (column.defaultValue !== undefined && column.defaultValue.trim().length > 0)
+        || (column.validationRule !== undefined && column.validationRule.trim().length > 0)
+        || (column.validationText !== undefined && column.validationText.trim().length > 0);
+    const propertyValues = (column: JetDdlColumn): Buffer[] => {
+        const values: Buffer[] = [];
+        if (column.notNull) {
+            values.push(propertyValue(0x01, propertyNames.indexOf('Required'), Buffer.from([0xff])));
+        }
+        if (column.allowZeroLength === false) {
+            // Access stores boolean properties as a single byte; 0x00 is FALSE.
+            values.push(propertyValue(0x01, propertyNames.indexOf('AllowZeroLength'), Buffer.from([0x00])));
+        }
+        if (column.defaultValue !== undefined && column.defaultValue.trim().length > 0) {
+            values.push(propertyValue(0x0c, propertyNames.indexOf('DefaultValue'), Buffer.from(column.defaultValue, encoding)));
+        }
+        if (column.validationRule !== undefined && column.validationRule.trim().length > 0) {
+            values.push(propertyValue(0x0c, propertyNames.indexOf('ValidationRule'), Buffer.from(column.validationRule, encoding)));
+        }
+        if (column.validationText !== undefined && column.validationText.trim().length > 0) {
+            values.push(propertyValue(0x0a, propertyNames.indexOf('ValidationText'), Buffer.from(column.validationText, encoding)));
+        }
+        return values;
+    };
+
+    const namesBlock = Buffer.concat([
+        int(6 + propertyNames.reduce((length, propertyName) => length + 2 + Buffer.from(propertyName, encoding).length, 0)),
+        short(0x80),
+        ...propertyNames.map(name),
+    ]);
+    const blocks: Buffer[] = [Buffer.from(layout.utf16 ? 'MR2\0' : 'KKD\0', 'ascii'), namesBlock];
+    for (const column of columns) {
+        if (!hasProperties(column)) {
+            continue;
+        }
+        const mapName = Buffer.from(column.name, encoding);
+        const mapNameLength = 6 + mapName.length;
+        const values = propertyValues(column);
+        const valuesLength = values.reduce((length, value) => length + value.length, 0);
+        blocks.push(Buffer.concat([
+            int(6 + mapNameLength + valuesLength),
+            short(0x01),
+            int(mapNameLength),
+            name(column.name),
+            ...values,
+        ]));
+    }
+    return Buffer.concat(blocks);
+}
+
 /**
  * Creates a new table with the given columns and indexes.
  * Returns the new table's definition page number.
@@ -660,6 +765,7 @@ export function createTable(
     const catalog = new JetTable(channel, 'MSysObjects', 2);
     const tablesParentId = findTablesParentId(channel);
     const owner = findObjectOwner();
+    const columnPropertyBytes = buildColumnPropertyBytes(columns, layout);
     const values: AccessValue[] = catalog.columns.map(column => {
         switch (column.name.toLowerCase()) {
             case 'id': return tdefPageNumber;
@@ -670,6 +776,7 @@ export function createTable(
             case 'dateupdate': return new Date();
             case 'owner': return owner;
             case 'flags': return 0;
+            case 'lvprop': return columnPropertyBytes ?? null;
             default: return null;
         }
     });

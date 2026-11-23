@@ -155,8 +155,14 @@ static Dictionary<string, List<string>> DumpSchema(string databasePath)
                 "scale=" + column.Scale,
                 "required=" + column.Required,
                 "calc=" + column.Calculated,
+                "default=" + NormalizeDefaultExpression(column.DefaultValue),
                 "#" + column.ColumnNumber));
         }
+        // Access DDL has no syntax for CHECK constraints, AllowZeroLength or the
+        // ValidationRule/ValidationText pair: DAO 16 rejects every CHECK form,
+        // and this C# port stores only Required/DefaultValue in the property
+        // map.  Those properties therefore intentionally stay out of the DDL
+        // replay comparison; the DAO gate (`test:access:com`) covers them.
         foreach (IndexInfo index in db.GetIndexInfo(name).Where(i => i.PrimaryKey))
         {
             string columns = string.Join(",", index.Columns.Select(c => c.Name + (c.Ascending ? "" : " DESC")));
@@ -165,6 +171,21 @@ static Dictionary<string, List<string>> DumpSchema(string databasePath)
         schema[name] = lines;
     }
     return schema;
+}
+
+static string NormalizeDefaultExpression(string? expression)
+{
+    if (string.IsNullOrEmpty(expression))
+    {
+        return "";
+    }
+    // Access stores string defaults exactly as written; the C# DDL replayer
+    // normalizes double-quoted literals to single-quoted ones.
+    if (expression.Length >= 2 && expression[0] == '"' && expression[^1] == '"')
+    {
+        return "'" + expression[1..^1].Replace("'", "''") + "'";
+    }
+    return expression;
 }
 
 static int CompareSchemas(Dictionary<string, List<string>> sourceSchema, Dictionary<string, List<string>> copySchema)

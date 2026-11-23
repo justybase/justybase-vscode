@@ -599,11 +599,181 @@ function tableIndexes(
     }
 }
 
+interface AccessPropertyValue {
+    readonly name: string;
+    readonly type: number;
+    readonly data: Buffer;
+}
+
+interface AccessPropertyBlocks {
+    readonly table: Map<string, AccessPropertyValue>;
+    readonly columns: Map<string, Map<string, AccessPropertyValue>>;
+}
+
 /**
- * Reads the "Description" property from the table-definition property block
- * (Jet property map).  Returns undefined when the file has no property block
- * or the property is absent.
+ * Walks the Jet property map stored in `MSysObjects.LvProp`.
+ *
+ * Layout: a `MR2\0` (Jet 4/ACE) or `KKD\0` (Jet 3) header, a property-name
+ * list (block 0x80), then one table-level value block (0x00) and one named
+ * value block per column (0x01).  Every value carries a length, a DDL flag, a
+ * type, a property-name index, a data length and the raw bytes.
+ *
+ * Property names are shared across the table and column blocks, so the walker
+ * keeps the whole name list instead of resolving it per block.
  */
+function walkAccessPropertyBlocks(bytes: Buffer, encoding: 'utf16le' | 'latin1'): AccessPropertyBlocks {
+    const table = new Map<string, AccessPropertyValue>();
+    const columns = new Map<string, Map<string, AccessPropertyValue>>();
+    let propertyNames: string[] | undefined;
+    let cursor = 4;
+    while (cursor + 6 <= bytes.length) {
+        const blockLength = bytes.readUInt32LE(cursor);
+        const blockType = bytes.readUInt16LE(cursor + 4);
+        if (blockLength < 6 || cursor + blockLength > bytes.length) break;
+        const blockStart = cursor + 6;
+        const blockEnd = cursor + blockLength;
+
+        if (blockType === 0x80) {
+            propertyNames = [];
+            let nameCursor = blockStart;
+            while (nameCursor + 2 <= blockEnd) {
+                const nameLength = bytes.readUInt16LE(nameCursor);
+                nameCursor += 2;
+                if (nameCursor + nameLength > blockEnd) break;
+                propertyNames.push(bytes.toString(encoding, nameCursor, nameCursor + nameLength));
+                nameCursor += nameLength;
+            }
+            cursor += blockLength;
+            continue;
+        }
+
+        if (!propertyNames || (blockType !== 0x00 && blockType !== 0x01)) {
+            cursor += blockLength;
+            continue;
+        }
+
+        let valueCursor = blockStart;
+        let mapName = '';
+        if (blockStart + 4 <= blockEnd) {
+            const mapLength = bytes.readUInt32LE(blockStart);
+            const mapEnd = blockStart + mapLength;
+            if (mapLength >= 6 && mapEnd <= blockEnd) {
+                const nameLength = bytes.readUInt16LE(blockStart + 4);
+                if (blockStart + 6 + nameLength <= mapEnd) {
+                    mapName = bytes.toString(encoding, blockStart + 6, blockStart + 6 + nameLength);
+                }
+                valueCursor = mapEnd;
+            }
+        }
+
+        let target: Map<string, AccessPropertyValue>;
+        if (blockType === 0x00) {
+            target = table;
+        } else {
+            if (!mapName) {
+                // A column block without a map name cannot be attributed;
+                // dropping it is safer than assigning it to the table.
+                cursor += blockLength;
+                continue;
+            }
+            const key = mapName.toLowerCase();
+            let column = columns.get(key);
+            if (!column) {
+                column = new Map();
+                columns.set(key, column);
+            }
+            target = column;
+        }
+
+        while (valueCursor + 2 <= blockEnd) {
+            const valueStart = valueCursor;
+            const valueLength = bytes.readUInt16LE(valueCursor);
+            const valueEnd = valueStart + valueLength;
+            valueCursor += 2;
+            if (valueLength < 9 || valueEnd > blockEnd || valueCursor + 7 > valueEnd) break;
+            valueCursor += 1; // DDL flag
+            const valueType = bytes[valueCursor++] ?? 0;
+            const propertyIndex = bytes.readUInt16LE(valueCursor);
+            valueCursor += 2;
+            const dataLength = bytes.readUInt16LE(valueCursor);
+            valueCursor += 2;
+            if (valueCursor + dataLength > valueEnd) break;
+            const propertyName = propertyNames[propertyIndex];
+            if (propertyName) {
+                target.set(propertyName.toLowerCase(), {
+                    name: propertyName,
+                    type: valueType,
+                    data: bytes.subarray(valueCursor, valueCursor + dataLength),
+                });
+            }
+            valueCursor = valueEnd;
+        }
+        cursor += blockLength;
+    }
+    return { table, columns };
+}
+
+/**
+ * Decodes a text property.
+ *
+ * Access writes inline text (type 0x0a) without a length prefix, and DAO
+ * sometimes stores the same text as type 0x0c.  Jackcess prefixes long 0x0c
+ * values with their byte length; detect that prefix instead of guessing from
+ * the property name.
+ */
+function decodeAccessPropertyText(
+    value: AccessPropertyValue | undefined,
+    encoding: 'utf16le' | 'latin1',
+): string | undefined {
+    if (!value || (value.type !== 0x0a && value.type !== 0x0c)) return undefined;
+    let start = 0;
+    if (value.type === 0x0c && value.data.length >= 4 && value.data.readUInt32LE(0) === value.data.length - 4) {
+        start = 4;
+    }
+    const text = Buffer.from(value.data.subarray(start)).toString(encoding).replace(/\0+$/, '');
+    return text.length > 0 ? text : undefined;
+}
+
+function decodeAccessPropertyBoolean(value: AccessPropertyValue | undefined): boolean | undefined {
+    if (!value || value.type !== 0x01 || value.data.length === 0) return undefined;
+    return value.data[0] !== 0;
+}
+
+export interface AccessTableProperties {
+    readonly description?: string;
+    readonly validationRule?: string;
+    readonly validationText?: string;
+}
+
+/**
+ * Reads table-level properties from the `LvProp` property map: Description and
+ * the record-level `ValidationRule`/`ValidationText` pair Access evaluates on
+ * every insert and update.
+ */
+export function parseAccessTableProperties(
+    propertyBytes: Uint8Array | undefined,
+    format: AccessFileFormat,
+): AccessTableProperties {
+    try {
+        if (!propertyBytes || propertyBytes.length < 10) return {};
+        const bytes = Buffer.from(propertyBytes);
+        const header = bytes.subarray(0, 4).toString('ascii');
+        if (header !== 'MR2\0' && header !== 'KKD\0') return {};
+        const encoding = format === 'jet3' ? 'latin1' : 'utf16le';
+        const values = walkAccessPropertyBlocks(bytes, encoding).table;
+        const description = decodeAccessPropertyText(values.get('description'), encoding);
+        const validationRule = decodeAccessPropertyText(values.get('validationrule'), encoding);
+        const validationText = decodeAccessPropertyText(values.get('validationtext'), encoding);
+        return {
+            ...(description === undefined ? {} : { description }),
+            ...(validationRule === undefined ? {} : { validationRule }),
+            ...(validationText === undefined ? {} : { validationText }),
+        };
+    } catch {
+        return {};
+    }
+}
+
 /**
  * Decodes the table-level Description from MSysObjects.LvProp.
  *
@@ -617,73 +787,7 @@ export function parseAccessPropertyMapDescription(
     propertyBytes: Uint8Array | undefined,
     format: AccessFileFormat,
 ): string | undefined {
-    try {
-        if (!propertyBytes || propertyBytes.length < 10) return undefined;
-        const bytes = Buffer.from(propertyBytes);
-        const header = bytes.subarray(0, 4).toString('ascii');
-        if (header !== 'MR2\0' && header !== 'KKD\0') return undefined;
-
-        const utf16 = format !== 'jet3';
-        const encoding = utf16 ? 'utf16le' : 'latin1';
-        let propertyNames: string[] | undefined;
-        let cursor = 4;
-        while (cursor + 6 <= bytes.length) {
-            const blockLength = bytes.readUInt32LE(cursor);
-            const blockType = bytes.readUInt16LE(cursor + 4);
-            if (blockLength < 6 || cursor + blockLength > bytes.length) return undefined;
-            const blockStart = cursor + 6;
-            const blockEnd = cursor + blockLength;
-
-            if (blockType === 0x80) {
-                propertyNames = [];
-                let nameCursor = blockStart;
-                while (nameCursor + 2 <= blockEnd) {
-                    const nameLength = bytes.readUInt16LE(nameCursor);
-                    nameCursor += 2;
-                    if (nameCursor + nameLength > blockEnd) return undefined;
-                    propertyNames.push(bytes.toString(encoding, nameCursor, nameCursor + nameLength));
-                    nameCursor += nameLength;
-                }
-            } else if (blockType === 0x00 && propertyNames) {
-                // Table-level maps have an empty map name.  The four-byte
-                // prefix includes the two-byte name length and its six-byte
-                // minimum envelope, matching Jackcess/PropertyMapCodec.
-                if (blockStart + 4 > blockEnd) return undefined;
-                const mapLength = bytes.readUInt32LE(blockStart);
-                if (mapLength < 6 || blockStart + mapLength > blockEnd) return undefined;
-                let valueCursor = blockStart + mapLength;
-                while (valueCursor + 2 <= blockEnd) {
-                    const valueStart = valueCursor;
-                    const valueLength = bytes.readUInt16LE(valueCursor);
-                    const valueEnd = valueStart + valueLength;
-                    valueCursor += 2;
-                    if (valueLength < 8 || valueEnd > blockEnd || valueCursor + 6 > valueEnd) return undefined;
-                    valueCursor += 1; // DDL flag
-                    const valueType = bytes[valueCursor++] ?? 0;
-                    const propertyIndex = bytes.readUInt16LE(valueCursor);
-                    valueCursor += 2;
-                    const dataLength = bytes.readUInt16LE(valueCursor);
-                    valueCursor += 2;
-                    if (valueCursor + dataLength > valueEnd) return undefined;
-                    const propertyName = propertyNames[propertyIndex];
-                    if (propertyName?.toLowerCase() === 'description'
-                        && (valueType === 0x0a || valueType === 0x0c)) {
-                        // Inline text (0x0a) starts at valueCursor.  Long
-                        // text (0x0c) carries a four-byte length prefix
-                        // before the encoded characters.
-                        const textStart = valueType === 0x0c ? valueCursor + 4 : valueCursor;
-                        if (textStart > valueCursor + dataLength) return undefined;
-                        return bytes.toString(encoding, textStart, valueCursor + dataLength).replace(/\0+$/, '');
-                    }
-                    valueCursor = valueEnd;
-                }
-            }
-            cursor += blockLength;
-        }
-        return undefined;
-    } catch {
-        return undefined;
-    }
+    return parseAccessTableProperties(propertyBytes, format).description;
 }
 
 function tablePropertyBytes(reader: MDBReader, tableName: string): Buffer | undefined {
@@ -699,87 +803,66 @@ function tablePropertyBytes(reader: MDBReader, tableName: string): Buffer | unde
 }
 
 /**
- * Reads the per-column `Required` property from the table property map.
+ * Reads per-column properties from the table property map.
  *
- * Access stores Required as a column property, not in the column flags byte.
- * mdb-reader exposes bit 0x02 of that byte as `nullable`, but Access uses it
- * for variable-length fields; treating it as nullability marks required text
- * columns as nullable, drops NOT NULL from generated DDL and lets the mirror
- * accept NULL values that Access would reject.
+ * Access stores `Required`, `DefaultValue`, `AllowZeroLength` and the
+ * `ValidationRule`/`ValidationText` pair as column properties, not in the
+ * column flags byte.  mdb-reader exposes bit 0x02 of that byte as `nullable`,
+ * but Access uses it for variable-length fields; treating it as nullability
+ * marks required text columns as nullable, drops NOT NULL from generated DDL
+ * and lets the mirror accept NULL values that Access would reject.
  */
+export interface AccessColumnProperties {
+    readonly required: boolean;
+    readonly defaultValue?: string;
+    /** False means Access rejects an empty string; absent means Access allows it. */
+    readonly allowZeroLength?: boolean;
+    readonly validationRule?: string;
+    readonly validationText?: string;
+}
+
+export function parseAccessColumnProperties(
+    propertyBytes: Uint8Array | undefined,
+    format: AccessFileFormat,
+): Map<string, AccessColumnProperties> {
+    const properties = new Map<string, AccessColumnProperties>();
+    try {
+        if (!propertyBytes || propertyBytes.length < 10) return properties;
+        const bytes = Buffer.from(propertyBytes);
+        const header = bytes.subarray(0, 4).toString('ascii');
+        if (header !== 'MR2\0' && header !== 'KKD\0') return properties;
+
+        const encoding = format === 'jet3' ? 'latin1' : 'utf16le';
+        const blocks = walkAccessPropertyBlocks(bytes, encoding);
+        for (const [name, values] of blocks.columns) {
+            const required = decodeAccessPropertyBoolean(values.get('required')) ?? false;
+            const allowZeroLength = decodeAccessPropertyBoolean(values.get('allowzerolength'));
+            const defaultValue = decodeAccessPropertyText(values.get('defaultvalue'), encoding);
+            const validationRule = decodeAccessPropertyText(values.get('validationrule'), encoding);
+            const validationText = decodeAccessPropertyText(values.get('validationtext'), encoding);
+            properties.set(name, {
+                required,
+                ...(defaultValue === undefined ? {} : { defaultValue }),
+                ...(allowZeroLength === undefined ? {} : { allowZeroLength }),
+                ...(validationRule === undefined ? {} : { validationRule }),
+                ...(validationText === undefined ? {} : { validationText }),
+            });
+        }
+    } catch {
+        // Property metadata is optional; table data remains usable without it.
+    }
+    return properties;
+}
+
 export function parseAccessRequiredColumns(
     propertyBytes: Uint8Array | undefined,
     format: AccessFileFormat,
 ): Set<string> {
+    // Kept for callers that only need the Required flag; the full property map
+    // (including DefaultValue) is available from parseAccessColumnProperties.
     const required = new Set<string>();
-    try {
-        if (!propertyBytes || propertyBytes.length < 10) return required;
-        const bytes = Buffer.from(propertyBytes);
-        const header = bytes.subarray(0, 4).toString('ascii');
-        if (header !== 'MR2\0' && header !== 'KKD\0') return required;
-
-        const encoding = format === 'jet3' ? 'latin1' : 'utf16le';
-        let propertyNames: string[] | undefined;
-        let cursor = 4;
-        while (cursor + 6 <= bytes.length) {
-            const blockLength = bytes.readUInt32LE(cursor);
-            const blockType = bytes.readUInt16LE(cursor + 4);
-            if (blockLength < 6 || cursor + blockLength > bytes.length) break;
-            const blockStart = cursor + 6;
-            const blockEnd = cursor + blockLength;
-
-            if (blockType === 0x80) {
-                propertyNames = [];
-                let nameCursor = blockStart;
-                while (nameCursor + 2 <= blockEnd) {
-                    const nameLength = bytes.readUInt16LE(nameCursor);
-                    nameCursor += 2;
-                    if (nameCursor + nameLength > blockEnd) break;
-                    propertyNames.push(bytes.toString(encoding, nameCursor, nameCursor + nameLength));
-                    nameCursor += nameLength;
-                }
-            } else if (blockType === 0x01 && propertyNames) {
-                let valueCursor = blockStart;
-                let mapName: string | undefined;
-                if (valueCursor + 4 <= blockEnd) {
-                    const mapLength = bytes.readUInt32LE(valueCursor);
-                    const mapEnd = valueCursor + mapLength;
-                    valueCursor += 4;
-                    if (mapLength >= 6 && mapEnd <= blockEnd) {
-                        const nameLength = bytes.readUInt16LE(valueCursor);
-                        valueCursor += 2;
-                        if (valueCursor + nameLength <= mapEnd) {
-                            mapName = bytes.toString(encoding, valueCursor, valueCursor + nameLength);
-                        }
-                        valueCursor = mapEnd;
-                    }
-                }
-                while (valueCursor + 2 <= blockEnd) {
-                    const valueStart = valueCursor;
-                    const valueLength = bytes.readUInt16LE(valueCursor);
-                    const valueEnd = valueStart + valueLength;
-                    valueCursor += 2;
-                    if (valueLength < 9 || valueEnd > blockEnd || valueCursor + 7 > valueEnd) break;
-                    valueCursor += 1; // DDL flag
-                    const valueType = bytes[valueCursor++] ?? 0;
-                    const propertyIndex = bytes.readUInt16LE(valueCursor);
-                    valueCursor += 2;
-                    const dataLength = bytes.readUInt16LE(valueCursor);
-                    valueCursor += 2;
-                    const isTrue = dataLength > 0 && valueCursor < valueEnd && bytes[valueCursor] !== 0;
-                    if (isTrue
-                        && valueType === 0x01
-                        && propertyNames[propertyIndex]?.toLowerCase() === 'required'
-                        && mapName) {
-                        required.add(mapName.toLowerCase());
-                    }
-                    valueCursor = valueEnd;
-                }
-            }
-            cursor += blockLength;
-        }
-    } catch {
-        // Property metadata is optional; table data remains usable without it.
+    for (const [name, properties] of parseAccessColumnProperties(propertyBytes, format)) {
+        if (properties.required) required.add(name);
     }
     return required;
 }
@@ -1464,16 +1547,24 @@ export class AccessFileSession {
         );
         const enrichedDefinition = enrichComplexColumnMetadata(this._reader, definition, conceptualTablePage);
         const propertyBytes = tablePropertyBytes(this._reader, name);
-        const requiredColumns = parseAccessRequiredColumns(propertyBytes, this._format);
-        const withRequired = {
+        const columnProperties = parseAccessColumnProperties(propertyBytes, this._format);
+        const tableProperties = parseAccessTableProperties(propertyBytes, this._format);
+        const withProperties = {
             ...enrichedDefinition,
-            columns: enrichedDefinition.columns.map(column => ({
-                ...column,
-                nullable: !requiredColumns.has(column.name.toLowerCase()),
-            })),
+            columns: enrichedDefinition.columns.map(column => {
+                const properties = columnProperties.get(column.name.toLowerCase());
+                return {
+                    ...column,
+                    nullable: !properties?.required,
+                    ...(properties?.defaultValue === undefined ? {} : { defaultValue: properties.defaultValue }),
+                    ...(properties?.allowZeroLength === undefined ? {} : { allowZeroLength: properties.allowZeroLength }),
+                    ...(properties?.validationRule === undefined ? {} : { validationRule: properties.validationRule }),
+                    ...(properties?.validationText === undefined ? {} : { validationText: properties.validationText }),
+                };
+            }),
+            ...tableProperties,
         };
-        const description = parseAccessPropertyMapDescription(propertyBytes, this._format);
-        return description === undefined ? withRequired : { ...withRequired, description };
+        return withProperties;
     }
 
     /**

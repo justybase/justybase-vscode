@@ -272,15 +272,35 @@ describe('Access file format boundary', () => {
         });
         try {
             expect(session.getTableDefinition('t_like1').columns).toMatchObject([
-                { name: 'a1', nullable: true },
+                { name: 'a1', nullable: true, defaultValue: '"rrr"', validationRule: 'CLng("a1")>2' },
                 { name: 'a2', nullable: false },
             ]);
             expect(session.getTableDefinition('t_like2').columns).toMatchObject([
                 { name: 'ID', nullable: true },
-                { name: 'Campo1', nullable: true },
-                { name: 'Campo2', nullable: false },
-                { name: 'Campo3', nullable: true },
+                { name: 'Campo1', nullable: true, defaultValue: '"campo1"', allowZeroLength: true },
+                { name: 'Campo2', nullable: false, allowZeroLength: false },
+                { name: 'Campo3', nullable: true, allowZeroLength: true },
             ]);
+            // Absent properties stay undefined; Access' DAO default of False
+            // is only reported when an explicit value is stored.
+            expect(session.getTableDefinition('t_like2').columns[0].allowZeroLength).toBeUndefined();
+        } finally {
+            await session.close();
+        }
+    });
+
+    it('reads column validation rules and AllowZeroLength from the property map', async () => {
+        const session = await AccessFileSession.open({
+            filePath: path.join(__dirname, 'fixtures', 'access', 'accessLike.mdb'),
+        });
+        try {
+            const like1 = session.getTableDefinition('t_like1');
+            expect(like1.columns[0].validationRule).toBe('CLng("a1")>2');
+            expect(like1.columns[0].validationText).toBeUndefined();
+            expect(like1.columns[1].validationRule).toBeUndefined();
+            // Record-level rules are only present in files that stored them;
+            // the DAO gate covers that path against a live database.
+            expect(like1.validationRule).toBeUndefined();
         } finally {
             await session.close();
         }

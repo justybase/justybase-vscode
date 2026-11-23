@@ -12,7 +12,8 @@
       describe <file>                     TableDefs + columns + indexes + relations
                                           (with raw MSysRelationships grbit rows),
                                           table/column Description properties,
-                                          linked-table markers. Read-only.
+                                          DAO field Required/DefaultValue/AllowZeroLength
+                                          properties, linked-table markers. Read-only.
       create-db <path> <format>           Create a fresh empty database.
                                           format: mdb2000 | mdb2003 | accdb2007
                                           | accdb2010 | accdb2016
@@ -27,6 +28,17 @@
                                           DAO constant bitmask (decimal).
       link-table <file> <name> <sourcePath> <sourceTable>
                                           Create a linked table via TransferDatabase.
+      set-property <file> <table> <field|-> <property> <value>
+                                          Set a DAO field property (Required,
+                                          AllowZeroLength, DefaultValue,
+                                          ValidationRule, ValidationText) or a
+                                          TableDef property when field is '-'.
+      try-execute <file> <sql>             Execute one statement; reports whether
+                                          Access accepted or rejected it instead
+                                          of failing the process.
+      try-batch <file> <statements>        Execute newline-separated statements
+                                          in one connection and report each
+                                          accept/reject verdict.
 
     The database is always closed and COM released before the script exits
     (try/finally), so the .laccdb/.ldb lock is released promptly.
@@ -120,9 +132,20 @@ function Get-ComText {
     param($Object, [string]$Name)
     $value = Get-ComProperty $Object $Name
     if ($null -eq $value) { return $null }
-    $text = [string]$value
+    # DAO hands back some stored text properties with a trailing NUL; strip
+    # control characters so the comparison is against the text Access shows.
+    $text = ([string]$value).Trim([char]0, ' ', "`t", "`r", "`n")
     if ([string]::IsNullOrEmpty($text)) { return $null }
     return $text
+}
+
+function Read-BoolProperty {
+    param($Object, [string]$Name)
+    # DAO always exposes these property objects, so the value alone cannot
+    # tell "absent" from "explicit false".  The property-map reader is the
+    # authority for presence; this harness value is compared only for columns
+    # where the file stores an explicit property.
+    try { return [bool](Get-ComProperty $Object $Name) } catch { return $null }
 }
 
 function Get-AccessHeaderFormat {
@@ -199,6 +222,10 @@ function Invoke-Describe {
                 description = Get-PropertyValue (Get-ComProperty $td 'Properties') 'Description'
                 dateCreated = Format-Value (Get-ComProperty $td 'DateCreated')
                 lastUpdated = Format-Value (Get-ComProperty $td 'LastUpdated')
+                # Record-level ValidationRule/ValidationText live on TableDef,
+                # field-level copies live on each Field (see below).
+                validationRule = Get-ComText $td 'ValidationRule'
+                validationText = Get-ComText $td 'ValidationText'
                 columns = @()
                 indexes = @()
             }
@@ -214,6 +241,15 @@ function Invoke-Describe {
                         attributes = [int](Get-ComProperty $field 'Attributes')
                         sourceField = Get-ComText $field 'SourceField'
                         description = Get-PropertyValue (Get-ComProperty $field 'Properties') 'Description'
+                        # Required, DefaultValue, AllowZeroLength and the
+                        # validation pair are DAO field properties, not
+                        # column-flag bits; the TS reader stores them in the Jet
+                        # property map and the cross-check compares them here.
+                        required = [bool](Get-ComProperty $field 'Required')
+                        defaultValue = Get-PropertyValue (Get-ComProperty $field 'Properties') 'DefaultValue'
+                        allowZeroLength = Read-BoolProperty $field 'AllowZeroLength'
+                        validationRule = Get-ComText $field 'ValidationRule'
+                        validationText = Get-ComText $field 'ValidationText'
                     }
                 }
                 foreach ($index in $td.Indexes) {
@@ -442,6 +478,86 @@ function Invoke-LinkTable {
     }
 }
 
+function Convert-SettingValue {
+    param([string]$Property, [string]$Value)
+    switch -Regex ($Property) {
+        '^(AllowZeroLength|Required)$' {
+            return [bool]($Value -match '^(1|true|yes)$')
+        }
+        default {
+            # DefaultValue and the validation pair are stored raw; an empty
+            # string clears them, which DAO accepts.
+            return $Value
+        }
+    }
+}
+
+function Invoke-SetProperty {
+    param([string]$FilePath, [string]$TableName, [string]$FieldName, [string]$Property, [string]$Value)
+    $context = Open-Db -FilePath $FilePath -ReadOnly $false -Exclusive $false
+    $db = $context.Database
+    try {
+        $td = $db.TableDefs($TableName)
+        $setting = Convert-SettingValue $Property $Value
+        if ([string]::IsNullOrEmpty($FieldName)) {
+            $td.$Property = $setting
+        } else {
+            $td.Fields.Item($FieldName).$Property = $setting
+        }
+        # Read back through `describe` instead of the dynamic property accessor:
+        # DAO returns the property object for some field properties.
+        return [ordered]@{
+            table = $TableName
+            field = if ([string]::IsNullOrEmpty($FieldName)) { $null } else { $FieldName }
+            property = $Property
+            value = $Value
+        }
+    } finally {
+        Close-Db $context
+    }
+}
+
+function Invoke-TryExecute {
+    param([string]$FilePath, [string]$Sql)
+    $context = Open-Db -FilePath $FilePath -ReadOnly $false -Exclusive $false
+    $db = $context.Database
+    try {
+        try {
+            $db.Execute($Sql, 0x80)
+            return [ordered]@{ accepted = $true; recordsAffected = [int](Get-ComProperty $db 'RecordsAffected') }
+        } catch {
+            return [ordered]@{ accepted = $false; error = $_.Exception.Message.Trim() }
+        }
+    } finally {
+        Close-Db $context
+    }
+}
+
+function Invoke-TryBatch {
+    param([string]$FilePath, [string]$Statements)
+    # One connection for the whole batch: DAO keeps a per-file lock, so probing
+    # dozens of values one process at a time is both slow and racy.  Blank lines
+    # separate statements; every statement is a single-line INSERT.
+    $context = Open-Db -FilePath $FilePath -ReadOnly $false -Exclusive $false
+    $db = $context.Database
+    try {
+        $results = @()
+        foreach ($line in ($Statements -split "`n")) {
+            $sql = $line.Trim()
+            if ([string]::IsNullOrEmpty($sql)) { continue }
+            try {
+                $db.Execute($sql, 0x80)
+                $results += [ordered]@{ sql = $sql; accepted = $true }
+            } catch {
+                $results += [ordered]@{ sql = $sql; accepted = $false; error = $_.Exception.Message.Trim() }
+            }
+        }
+        return [ordered]@{ results = $results }
+    } finally {
+        Close-Db $context
+    }
+}
+
 function Invoke-Capabilities {
     $engine = $null
     try {
@@ -491,6 +607,19 @@ try {
         'link-table' {
             if ($remainingArgs.Count -ne 4) { throw 'link-table requires: <file> <name> <sourcePath> <sourceTable>' }
             Write-Result (Invoke-LinkTable -FilePath $remainingArgs[0] -Name $remainingArgs[1] -SourcePath $remainingArgs[2] -SourceTable $remainingArgs[3])
+        }
+        'set-property' {
+            if ($remainingArgs.Count -ne 5) { throw 'set-property requires: <file> <table> <field|-> <property> <value>' }
+            $fieldName = if ($remainingArgs[2] -eq '-' -or $remainingArgs[2] -eq 'table') { '' } else { $remainingArgs[2] }
+            Write-Result (Invoke-SetProperty -FilePath $remainingArgs[0] -TableName $remainingArgs[1] -FieldName $fieldName -Property $remainingArgs[3] -Value $remainingArgs[4])
+        }
+        'try-execute' {
+            if ($remainingArgs.Count -ne 2) { throw 'try-execute requires: <file> <sql>' }
+            Write-Result (Invoke-TryExecute -FilePath $remainingArgs[0] -Sql $remainingArgs[1])
+        }
+        'try-batch' {
+            if ($remainingArgs.Count -ne 2) { throw 'try-batch requires: <file> <statements>' }
+            Write-Result (Invoke-TryBatch -FilePath $remainingArgs[0] -Statements $remainingArgs[1])
         }
         default { throw "Unknown command: $Command" }
     }

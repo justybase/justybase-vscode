@@ -15,6 +15,7 @@ import type {
 import { AccessFileError, AccessFileSession } from '@justybase/access-file';
 import { serializeAccessComplexValue } from '@justybase/access-file/complexValues';
 import { translateAccessFunctions } from './accessSqlFunctions';
+import { buildAccessCheckConstraints, buildAccessZeroLengthCheck } from './accessValidationRules';
 
 export interface AccessMirrorColumn {
     readonly name: string;
@@ -678,17 +679,127 @@ function isTextLike(column: AccessColumnDefinition): boolean {
     );
 }
 
-function createTableSql(definition: AccessTableDefinition): string {
+const ACCESS_DEFAULT_FUNCTIONS: Readonly<Record<string, string>> = {
+    date: 'current_date',
+    now: 'current_timestamp',
+    time: 'current_time',
+};
+
+/**
+ * Translates an Access `DefaultValue` expression into a DuckDB expression.
+ *
+ * Access stores the raw expression, so an omitted INSERT column must get the
+ * same value Access would store.  Only literals and a few zero-argument
+ * functions are translatable; anything else (domain functions, field
+ * references, `DLookup`, concatenation) returns undefined so the mirror keeps
+ * the column without a default instead of failing to load the table.
+ */
+export function translateAccessDefaultExpression(
+    expression: string | undefined,
+    accessType: string,
+): string | undefined {
+    let source = expression?.trim();
+    if (!source) {
+        return undefined;
+    }
+    if (source.startsWith('=')) {
+        // A leading "=" is the Access expression marker, not an operator.
+        source = source.slice(1).trim();
+    }
+    if (!source) {
+        return undefined;
+    }
+
+    const quoted = /^"(?:[^"]|"")*"$/.test(source) || /^'(?:[^']|'')*'$/.test(source);
+    if (quoted) {
+        const body = decodeAccessQuotedText(source).replace(/'/g, "''");
+        return `'${body}'`;
+    }
+
+    if (/^#.*#$/.test(source)) {
+        return translateAccessDateLiterals(source);
+    }
+
+    let unwrapped = source;
+    while (/^\((?:[^()]|\([^()]*\))*\)$/.test(unwrapped)) {
+        unwrapped = unwrapped.slice(1, -1).trim();
+    }
+    if (accessType === 'boolean') {
+        // Access stores True/False as -1/0 in some paths and as Yes/No words in
+        // others; both mean the boolean, and the numeric branch below must not
+        // treat a numeric 0 as a boolean on a non-boolean column.
+        if (/^(?:true|yes|on|-1|1)$/i.test(unwrapped)) {
+            return 'TRUE';
+        }
+        if (/^(?:false|no|off|0)$/i.test(unwrapped)) {
+            return 'FALSE';
+        }
+        return undefined;
+    }
+    if (isDateLike(accessType)) {
+        // A bare number on a date column is an Access date serial; DuckDB
+        // cannot cast it to TIMESTAMP, and guessing the epoch would silently
+        // store a different date.  Date functions are handled below.
+        if (/^[+-]?\d+(?:[.,]\d+)?$/.test(unwrapped)) {
+            return undefined;
+        }
+    } else if (/^[+-]?\d+(?:[.,]\d+)?$/.test(unwrapped)) {
+        return unwrapped.replace(',', '.');
+    }
+
+    const functionCall = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)$/.exec(unwrapped);
+    const duckDbFunction = functionCall ? ACCESS_DEFAULT_FUNCTIONS[functionCall[1].toLowerCase()] : undefined;
+    if (duckDbFunction && (isDateLike(accessType) || accessType === 'text' || accessType === 'memo')) {
+        // `Date()` is a date, `Now()` a timestamp; the column type decides the
+        // literal cast DuckDB accepts.  Date functions on a numeric column are
+        // not valid Access defaults either, so they stay unsupported there.
+        return duckDbFunction === 'current_date' && isDateLike(accessType)
+            ? 'CAST(current_date AS TIMESTAMP)'
+            : duckDbFunction;
+    }
+
+    return undefined;
+}
+
+function isDateLike(accessType: string): boolean {
+    return accessType === 'datetime' || accessType === 'datetimextended';
+}
+
+function columnDefaultSql(definition: AccessTableDefinition, column: AccessColumnDefinition): string {
+    if (column.autoLong && column.accessType !== 'complex') {
+        return ` DEFAULT nextval('${sequenceName(definition, column)}')`;
+    }
+    if (column.autoUuid) {
+        return ' DEFAULT uuid()';
+    }
+    const translated = translateAccessDefaultExpression(column.defaultValue, column.accessType);
+    return translated === undefined ? '' : ` DEFAULT ${translated}`;
+}
+
+function createTableSql(definition: AccessTableDefinition, includeValidation: boolean): string {
     const columns = definition.columns.map(column => {
         const nullable = column.nullable ? '' : ' NOT NULL';
-        const defaultValue = column.autoLong && column.accessType !== 'complex'
-            ? ` DEFAULT nextval('${sequenceName(definition, column)}')`
-            : column.autoUuid ? ' DEFAULT uuid()' : '';
+        const defaultValue = columnDefaultSql(definition, column);
         const collation = isTextLike(column) ? ' COLLATE NOCASE' : '';
         return `${quoteIdentifier(column.name)} ${duckDbType(column)}${collation}${defaultValue}${nullable}`;
     });
     if (columns.length === 0) {
         throw new AccessFileError(`Access table '${definition.name}' has no columns.`);
+    }
+    if (includeValidation) {
+        // Field-level and record-level ValidationRule properties become CHECK
+        // constraints so the mirror rejects the same values Access rejects.
+        // AllowZeroLength=False is the one validation flag Access keeps as a
+        // boolean; it rejects '' but still accepts NULL.  It only means
+        // something for text columns, so numeric columns never get that CHECK.
+        for (const column of definition.columns) {
+            if (column.allowZeroLength === false && isTextLike(column)) {
+                columns.push(`CHECK ${buildAccessZeroLengthCheck(column.name)}`);
+            }
+        }
+        for (const check of buildAccessCheckConstraints(definition.columns, definition.validationRule)) {
+            columns.push(`CHECK ${check}`);
+        }
     }
     return `CREATE TABLE ${quoteIdentifier(definition.name)} (${columns.join(', ')})`;
 }
@@ -711,9 +822,19 @@ async function loadDuckDb(): Promise<DuckDbModule> {
 export class AccessDuckDbMirror {
     private _instance?: DuckDBInstance;
     private _connection?: DuckDbRuntimeConnection;
+    private readonly _warnings: string[] = [];
+
+    /** Non-fatal messages from mirror construction, for logs and diagnostics. */
+    public get warnings(): readonly string[] {
+        return this._warnings;
+    }
 
     public async open(session: AccessFileSession): Promise<void> {
         const duckdb = await loadDuckDb();
+        // A reconnect reuses the mirror instance; warnings describe the file
+        // currently open, so stale messages from the previous session would be
+        // misleading.
+        this._warnings.length = 0;
         const instance = await duckdb.DuckDBInstance.create();
         try {
             const connection = await instance.connect();
@@ -834,7 +955,30 @@ export class AccessDuckDbMirror {
                 `CREATE SEQUENCE ${quoteIdentifier(sequenceName(definition, column))} START WITH ${Math.max(1, Math.trunc(maximum) + 1)}`,
             );
         }
-        await connection.run(createTableSql(definition));
+        // Validation constraints are advisory: an Access rule that DuckDB
+        // cannot evaluate, or legacy rows that already violate the rule, must
+        // not stop the file from opening.  Try the constrained schema first,
+        // then fall back to the plain schema and record why.
+        try {
+            await this.createTableWithRows(definition, snapshot, duckdb, true);
+        } catch (error) {
+            this._warnings.push(
+                `Table '${definition.name}' was mirrored without validation constraints: `
+                + (error instanceof Error ? error.message : String(error)),
+            );
+            await connection.run(`DROP TABLE IF EXISTS ${quoteIdentifier(definition.name)}`);
+            await this.createTableWithRows(definition, snapshot, duckdb, false);
+        }
+    }
+
+    private async createTableWithRows(
+        definition: AccessTableDefinition,
+        snapshot: AccessTableSnapshot,
+        duckdb: DuckDbModule,
+        includeValidation: boolean,
+    ): Promise<void> {
+        const connection = this.requireRuntimeConnection();
+        await connection.run(createTableSql(definition, includeValidation));
         if (snapshot.rows.length === 0) {
             return;
         }

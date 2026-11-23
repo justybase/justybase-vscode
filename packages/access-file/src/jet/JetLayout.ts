@@ -92,6 +92,13 @@ export interface JetLayout {
     readonly utf16: boolean;
     /** ACCDB (ACE) supports the 64-bit Large Number column type; Jet 4 does not. */
     readonly supportsBigInt: boolean;
+    /**
+     * The DDL engine writes Jet 4/ACE table-definition layouts.  Jet 3 uses
+     * narrower column headers and name lengths, so writing DDL into a Jet 3
+     * file produces a table that neither Access nor Jackcess can read; the
+     * DDL entry points refuse that layout instead of corrupting the file.
+     */
+    readonly ddlSupported: boolean;
 }
 
 function jet4Layout(pageSize = 4096, supportsBigInt = false): JetLayout {
@@ -159,6 +166,7 @@ function jet4Layout(pageSize = 4096, supportsBigInt = false): JetLayout {
 
         utf16: true,
         supportsBigInt,
+        ddlSupported: true,
     };
 }
 
@@ -227,6 +235,7 @@ function jet3Layout(pageSize = 2048): JetLayout {
 
         utf16: false,
         supportsBigInt: false,
+        ddlSupported: false,
     };
 }
 

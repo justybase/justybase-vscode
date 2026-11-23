@@ -14,9 +14,21 @@ const fixturePath = path.join(repoRoot, 'src', '__tests__', 'fixtures', 'access'
 
 const { AccessFileSession } = require('../packages/access-file/src');
 const { applyDdlSql } = require('../packages/access-file/src/jet/JetDdlSql');
-const { addRelationship } = require('../packages/access-file/src/jet/JetDdl');
+const { addRelationship, createTable } = require('../packages/access-file/src/jet/JetDdl');
 const { JetPageChannel } = require('../packages/access-file/src/jet/JetPageChannel');
 const { jetLayoutFor } = require('../packages/access-file/src/jet/JetLayout');
+
+// AccessConnection imports `vscode` for one settings lookup; the DAO gate runs
+// outside the extension host, so stub only that surface.
+const Module = require('node:module');
+const originalLoad = Module._load;
+Module._load = function load(request, parent, isMain) {
+    if (request === 'vscode') {
+        return { workspace: { getConfiguration: () => ({ get: (_key, fallback) => fallback }) } };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+};
+const { AccessConnection } = require('../extensions/access/src/accessConnection');
 
 function skip(message) {
     console.log(`ACCESS COM cross-check skipped: ${message}`);
@@ -147,6 +159,8 @@ async function main() {
                 applyDdlSql(channel, 'CREATE TABLE c3 (id LONG, pid LONG, CONSTRAINT PK PRIMARY KEY (id))');
                 applyDdlSql(channel, 'CREATE TABLE text_t (id LONG, name TEXT(50))');
                 applyDdlSql(channel, 'CREATE TABLE auto_types (id COUNTER, qty INTEGER, small SMALLINT)');
+                applyDdlSql(channel, 'CREATE TABLE property_t (pk_text TEXT(50) PRIMARY KEY, with_default TEXT(10) DEFAULT "abc", required_only TEXT(10) NOT NULL, n LONG DEFAULT (3))');
+                applyDdlSql(channel, 'CREATE TABLE call_default_t (id LONG, d DATETIME DEFAULT Date(), s TEXT(10) DEFAULT \'z\')');
                 addRelationship(channel, {
                     name: 'FK_enf', table: 'c1', columns: ['pid'], foreignTable: 'p', foreignColumns: ['id'], enforced: true,
                 });
@@ -178,10 +192,176 @@ async function main() {
         assert.equal(qty?.size, 4);
         assert.equal(small?.type, 'int', 'SMALLINT must be a 2-byte Integer');
         assert.equal(small?.size, 2);
+
+        // Required and DefaultValue are DAO field properties stored in the Jet
+        // property map. A column may carry DEFAULT without being Required, and a
+        // text primary key may be Required=False while its index still enforces
+        // non-null values.
+        const propertyTable = ourDescription.tables.find(table => table.name.toLowerCase() === 'property_t');
+        assert.ok(propertyTable, 'property_t must exist in the writer output');
+        const requiredDefault = propertyTable.columns.find(column => column.name.toLowerCase() === 'with_default');
+        assert.equal(requiredDefault?.required, false, 'DEFAULT alone must not set Required');
+        assert.equal(requiredDefault?.defaultValue, '"abc"');
+        const requiredOnly = propertyTable.columns.find(column => column.name.toLowerCase() === 'required_only');
+        assert.equal(requiredOnly?.required, true, 'NOT NULL must round-trip as DAO Required');
+        const plainPrimaryKey = propertyTable.columns.find(column => column.name.toLowerCase() === 'pk_text');
+        assert.equal(plainPrimaryKey?.required, false, 'a text primary key must stay Required=False');
+        const numericDefault = propertyTable.columns.find(column => column.name.toLowerCase() === 'n');
+        assert.equal(numericDefault?.defaultValue, '(3)');
+
+        // End-to-end: Access itself must apply the stored DefaultValue when an
+        // INSERT omits the column, exactly like the SQL mirror does.
+        const propertyInsert = await runHarness(['insert', ourPath, 'INSERT INTO property_t (pk_text, required_only) VALUES (\'k\', \'r\')']);
+        assert.equal(propertyInsert.recordsAffected, 1);
+        const applied = await runHarness(['select', ourPath, 'SELECT pk_text, with_default, n FROM property_t']);
+        assert.deepEqual(applied.rows, [{ pk_text: 'k', with_default: 'abc', n: 3 }]);
+
+        // A zero-argument Access function must also survive the property map
+        // and be evaluated by Access itself.
+        const callDefaultInsert = await runHarness(['insert', ourPath, 'INSERT INTO call_default_t (id) VALUES (1)']);
+        assert.equal(callDefaultInsert.recordsAffected, 1);
+        const callDefaultRow = await runHarness(['select', ourPath, 'SELECT id, d, s FROM call_default_t']);
+        assert.equal(callDefaultRow.rows.length, 1);
+        assert.equal(callDefaultRow.rows[0].s, 'z');
+        assert.match(String(callDefaultRow.rows[0].d), /\d{4}-\d{2}-\d{2}/);
+
         const relationsByName = new Map(ourDescription.relations.map(relation => [relation.name, relation]));
         assert.equal(relationsByName.get('FK_enf')?.attributes, 0);
         assert.equal(relationsByName.get('FK_noenf')?.attributes, 2);
         assert.equal(relationsByName.get('FK_casc')?.attributes, 4352);
+
+        // --- ValidationRule / AllowZeroLength parity -------------------------
+        // Access keeps these in the property map: field rules in the column
+        // block, the record-level rule in the table block.  The reader must
+        // report them and the SQL mirror must reject exactly what Access
+        // rejects, so the two verdict lists are compared entry by entry.
+        const rulesPath = path.join(tempDir, 'rules.accdb');
+        await runHarness(['create-db', rulesPath, 'accdb2007']);
+        await runHarness(['apply-ddl', rulesPath, 'CREATE TABLE rules_t (id LONG, num LONG, label TEXT(20))']);
+        await runHarness(['apply-ddl', rulesPath, 'CREATE TABLE zero_t (id LONG, a TEXT(20), b TEXT(20))']);
+        await runHarness(['set-property', rulesPath, 'rules_t', 'num', 'ValidationRule', '>0']);
+        await runHarness(['set-property', rulesPath, 'rules_t', 'num', 'ValidationText', 'must be positive']);
+        // The record-level rule lives on the TableDef, so the field argument is
+        // the '-' placeholder.
+        await runHarness(['set-property', rulesPath, 'rules_t', '-', 'ValidationRule', 'Not ([num] = 7)']);
+        await runHarness(['set-property', rulesPath, 'zero_t', 'a', 'AllowZeroLength', '0']);
+
+        const rulesDescription = await runHarness(['describe', rulesPath]);
+        const rulesTable = rulesDescription.tables.find(table => table.name.toLowerCase() === 'rules_t');
+        const numColumn = rulesTable?.columns.find(column => column.name.toLowerCase() === 'num');
+        assert.equal(numColumn?.validationRule, '>0');
+        assert.equal(numColumn?.validationText, 'must be positive');
+        const rulesSession = await AccessFileSession.open({ filePath: rulesPath });
+        let rulesDefinition;
+        try {
+            rulesDefinition = rulesSession.getTableDefinition('rules_t');
+            // Field rule, field message and the record-level rule must all come
+            // back from the property map, not from guesswork.
+            assert.equal(rulesDefinition.columns[1].validationRule, numColumn?.validationRule);
+            assert.equal(rulesDefinition.columns[1].validationText, numColumn?.validationText);
+            assert.equal(rulesDefinition.validationRule, rulesTable?.validationRule);
+            assert.equal(rulesDefinition.columns[2].validationRule, undefined, 'a column without a rule must stay undefined');
+        } finally {
+            await rulesSession.close();
+        }
+        const zeroDescription = await runHarness(['describe', rulesPath]);
+        const zeroTable = zeroDescription.tables.find(table => table.name.toLowerCase() === 'zero_t');
+        assert.equal(zeroTable?.columns.find(column => column.name.toLowerCase() === 'a')?.allowZeroLength, false);
+        const zeroSession = await AccessFileSession.open({ filePath: rulesPath });
+        try {
+            const zeroDefinition = zeroSession.getTableDefinition('zero_t');
+            assert.equal(zeroDefinition.columns[1].allowZeroLength, false, 'explicit AllowZeroLength=False must be read');
+            assert.equal(zeroDefinition.columns[2].allowZeroLength, undefined, 'an absent property must stay undefined');
+        } finally {
+            await zeroSession.close();
+        }
+
+        // Verdict parity: the same INSERTs run through DAO and the mirror.
+        // 7 is rejected by the record-level rule (`Not ([num] = 7)`), while
+        // NULL passes both the column rule and the table rule.
+        const ruleInserts = ['NULL', '-1', '0', '2', '7', '50'].map(value =>
+            `INSERT INTO rules_t (id, num) VALUES (1, ${value})`);
+        const zeroInserts = [
+            "INSERT INTO zero_t (id, a, b) VALUES (1, '', 'x')",
+            "INSERT INTO zero_t (id, a, b) VALUES (2, NULL, 'x')",
+            "INSERT INTO zero_t (id, a, b) VALUES (3, 'x', 'x')",
+            "INSERT INTO zero_t (id, a, b) VALUES (4, 'x', '')",
+        ];
+        const daoVerdicts = (await runHarness(['try-batch', rulesPath, ruleInserts.concat(zeroInserts).join('\n')]))
+            .results.map(entry => ({ sql: entry.sql, accepted: entry.accepted, error: entry.error }));
+
+        // Run the same INSERTs through the product path: AccessConnection drives
+        // the DuckDB mirror and, for accepted rows, the staged Jet writer.
+        const mirrorVerdicts = [];
+        const connection = new AccessConnection({
+            host: '',
+            database: rulesPath,
+            user: '',
+            options: { readOnly: false },
+        });
+        await connection.connect();
+        try {
+            for (const sql of ruleInserts.concat(zeroInserts)) {
+                try {
+                    await connection.createCommand(sql).execute();
+                    mirrorVerdicts.push({ sql, accepted: true });
+                } catch (error) {
+                    mirrorVerdicts.push({ sql, accepted: false, error: String(error) });
+                }
+            }
+        } finally {
+            await connection.close();
+        }
+
+        assert.equal(mirrorVerdicts.length, daoVerdicts.length);
+        for (let index = 0; index < daoVerdicts.length; index++) {
+            assert.equal(
+                mirrorVerdicts[index].accepted,
+                daoVerdicts[index].accepted,
+                `mirror and Access disagree on: ${daoVerdicts[index].sql}\n`
+                + `Access: ${daoVerdicts[index].error ?? 'accepted'}\n`
+                + `mirror: ${mirrorVerdicts[index].error ?? 'accepted'}`,
+            );
+        }
+        // The ValidationText must be what Access reports back.
+        const rejectedZero = daoVerdicts.find(entry => !entry.accepted);
+        assert.match(rejectedZero?.error ?? '', /must be positive|zero-length|zerowej/i);
+        const rejectedRule = daoVerdicts.find(entry => entry.sql.includes('VALUES (1, 7)'));
+        assert.equal(rejectedRule?.accepted, false, 'the record-level rule must reject 7');
+
+        // Writer -> DAO: the property-map writer supports rule and zero-length
+        // properties even though the SQL DDL surface has no syntax for them
+        // (Access rejects CHECK), so this is verified at the library boundary.
+        const writerRulesPath = path.join(tempDir, 'writer-rules.accdb');
+        await runHarness(['create-db', writerRulesPath, 'accdb2007']);
+        const writerRulesSession = await AccessFileSession.open({ filePath: writerRulesPath, readOnly: false });
+        try {
+            await writerRulesSession.writeAtomically(async context => {
+                const channel = new JetPageChannel(await fs.readFile(context.stagedPath), jetLayoutFor(context.format));
+                createTable(channel, 'writer_rules', [
+                    { name: 'id', type: 0x04 },
+                    { name: 'num', type: 0x04, validationRule: '>0', validationText: 'must be positive' },
+                    { name: 'code', type: 0x0a, length: 20, allowZeroLength: false },
+                ]);
+                await fs.writeFile(context.stagedPath, channel.buffer);
+            }, { verifyAllTables: true });
+        } finally {
+            await writerRulesSession.close();
+        }
+        const writerRulesDescribe = await runHarness(['describe', writerRulesPath]);
+        const writerRulesTable = writerRulesDescribe.tables.find(table => table.name.toLowerCase() === 'writer_rules');
+        assert.equal(writerRulesTable?.columns.find(column => column.name.toLowerCase() === 'num')?.validationRule, '>0');
+        assert.equal(writerRulesTable?.columns.find(column => column.name.toLowerCase() === 'code')?.allowZeroLength, false);
+        const writerRuleVerdicts = await runHarness(['try-batch', writerRulesPath, [
+            'INSERT INTO writer_rules (id, num, code) VALUES (1, -1, \'x\')',
+            'INSERT INTO writer_rules (id, num, code) VALUES (2, 5, \'x\')',
+            'INSERT INTO writer_rules (id, num, code) VALUES (3, 5, \'\')',
+            'INSERT INTO writer_rules (id, num, code) VALUES (4, 5, NULL)',
+        ].join('\n')]);
+        assert.equal(writerRuleVerdicts.results[0].accepted, false, 'Access must reject a rule violation written by us');
+        assert.equal(writerRuleVerdicts.results[1].accepted, true);
+        assert.equal(writerRuleVerdicts.results[2].accepted, false, 'Access must reject an empty string when AllowZeroLength=False');
+        assert.equal(writerRuleVerdicts.results[3].accepted, true, 'NULL stays allowed when AllowZeroLength=False');
 
         // DROP TABLE must also remove the relationship rows that reference it.
         const dropSession = await AccessFileSession.open({ filePath: ourPath, readOnly: false });
@@ -200,7 +380,7 @@ async function main() {
             ['FK_enf', 'FK_noenf'],
         );
 
-        console.log('ACCESS COM cross-check passed: describe, complex metadata, SELECT, CREATE, FK, Description, @@IDENTITY, TEXT length, AutoNumber/INTEGER widths, relationship flags and DROP TABLE cleanup.');
+        console.log('ACCESS COM cross-check passed: describe, complex metadata, SELECT, CREATE, FK, Description, @@IDENTITY, TEXT length, AutoNumber/INTEGER widths, Required/DefaultValue/AllowZeroLength/ValidationRule properties, mirror rule parity, relationship flags and DROP TABLE cleanup.');
     } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
     }

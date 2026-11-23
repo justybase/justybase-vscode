@@ -130,6 +130,11 @@ function parseParityDump(text) {
                 precision: Number(fields[6] ?? '0'),
                 scale: Number(fields[7] ?? '0'),
                 autoNumber: fields[8] === 'true',
+                required: fields[9] === undefined ? undefined : fields[9] === 'true',
+                defaultValue: fields[10] === undefined ? undefined : unescapeField(fields[10]),
+                allowZeroLength: fields[11] === undefined ? undefined : fields[11] === 'true',
+                validationRule: fields[12] === undefined ? undefined : unescapeField(fields[12]),
+                validationText: fields[13] === undefined ? undefined : unescapeField(fields[13]),
             });
             continue;
         }
@@ -266,6 +271,31 @@ function compareTable(jackcessTable, ourDefinition, ourIndexes, ourRows) {
         }
         if (expected.autoNumber !== (actual.autoLong || actual.autoUuid)) {
             problems.push(`column ${actual.name}: autoNumber ${actual.autoLong || actual.autoUuid} vs ${expected.autoNumber}`);
+        }
+        if (expected.required !== undefined && expected.required !== !actual.nullable) {
+            problems.push(`column ${actual.name}: required ${!actual.nullable} vs ${expected.required}`);
+        }
+        if (expected.defaultValue !== undefined) {
+            const expectedDefault = expected.defaultValue.trim();
+            const actualDefault = (actual.defaultValue ?? '').trim();
+            if (expectedDefault !== actualDefault) {
+                problems.push(`column ${actual.name}: default ${JSON.stringify(actualDefault)} vs Jackcess ${JSON.stringify(expectedDefault)}`);
+            }
+        }
+        if (expected.allowZeroLength !== undefined && actual.allowZeroLength !== undefined
+            && expected.allowZeroLength !== actual.allowZeroLength) {
+            // Jackcess returns the boolean default (false) for an absent
+            // property, while the JustyBase reader only reports a property that
+            // is actually stored.  Compare them only when both are explicit.
+            problems.push(`column ${actual.name}: allowZeroLength ${actual.allowZeroLength} vs Jackcess ${expected.allowZeroLength}`);
+        }
+        if (expected.validationRule !== undefined
+            && expected.validationRule.trim() !== (actual.validationRule ?? '').trim()) {
+            problems.push(`column ${actual.name}: validationRule ${JSON.stringify(actual.validationRule ?? '')} vs Jackcess ${JSON.stringify(expected.validationRule)}`);
+        }
+        if (expected.validationText !== undefined
+            && expected.validationText.trim() !== (actual.validationText ?? '').trim()) {
+            problems.push(`column ${actual.name}: validationText ${JSON.stringify(actual.validationText ?? '')} vs Jackcess ${JSON.stringify(expected.validationText)}`);
         }
         if (primaryKeyColumns.has(actual.name.toLowerCase()) !== actual.isPrimaryKey) {
             problems.push(`column ${actual.name}: primary key ${actual.isPrimaryKey} vs ${primaryKeyColumns.has(actual.name.toLowerCase())}`);

@@ -22,9 +22,12 @@ Select a local file, browse tables and saved queries, write SQL, and inspect the
 - Browse ordinary tables, columns, table metadata, and non-parameterized saved `SELECT` QueryDefs.
 - Run `SELECT` queries and use the shared completion, diagnostics, result grid, filtering, profiling, and export tools.
 - Optional staged editing for ordinary-table `INSERT`, `UPDATE`, and `DELETE` operations.
-- Supported native DDL: `CREATE TABLE`, `DROP TABLE`, `CREATE INDEX`, `DROP INDEX`, `CREATE VIEW`, `DROP VIEW`, `ALTER TABLE ADD/DROP CONSTRAINT`, and `TRUNCATE TABLE`.
+- Supported native DDL: `CREATE TABLE`, `DROP TABLE`, `CREATE INDEX`, `DROP INDEX`, `CREATE VIEW`, `DROP VIEW`, `ALTER TABLE ADD/DROP CONSTRAINT`, and `TRUNCATE TABLE`. `CREATE TABLE` accepts `NOT NULL` and Access `DEFAULT` expressions.
+- Access' own SQL window rejects `DEFAULT` in `CREATE TABLE` (verified against DAO 16). The extension's DDL engine accepts it and stores the value in the column property map, which is where Access keeps defaults; exported DDL that contains `DEFAULT` therefore replays inside JustyBase, not in Access' query designer.
 - Browse table keys and indexes in the schema tree.
-- Preserve required values and index uniqueness while writing; updated files are installed atomically.
+- Preserve required values, column `DefaultValue` expressions, `AllowZeroLength`, validation rules and index uniqueness while writing; updated files are installed atomically.
+- New tables store `Required`, `DefaultValue`, `AllowZeroLength` and `ValidationRule`/`ValidationText` in the Access property map, so Access and DAO apply the same defaults and rules as the SQL mirror.
+- The SQL mirror translates the column and record validation rules Access evaluates (`>0`, `Between … And …`, `Is Null Or …`, `Not (…)`, `In (…)`, comparisons and casts) into `CHECK` constraints, so a query that would fail in Access also fails in the editor. Rules outside that subset — `Like`, `Len`, `DLookup` or another table's field — are preserved in the file but not enforced by the mirror.
 - No Java runtime, JAR, ODBC driver, Maven build, or Access installation is needed.
 
 ### Explore data visually
@@ -71,9 +74,12 @@ owning process ID, host, and start time.
 ## Important boundaries
 
 - Parameterized, crosstab/PIVOT, action, pass-through, and Access-only saved queries remain read-only metadata.
-- Jet 3 row writes are supported; Jet 3 DDL is not (the DDL engine targets Jet 4/ACE layouts).
+- Jet 3 row writes are supported; Jet 3 DDL is refused with an explicit error (the DDL engine targets Jet 4/ACE layouts).
 - Password-protected files are read-only in this release: the reader decrypts pages in memory, but the staged writer mutates raw pages, so writes to encrypted files are refused to protect the database.
 - Schema changes do not cover `ALTER TABLE ADD/DROP COLUMN`, `CREATE TABLE AS SELECT`, calculated fields, or complex/multivalue column writes.
+- Column defaults from the source file are applied by the SQL mirror for literals and a few zero-argument date functions; Access-only expressions (`DLookup`, field references) are preserved in the file but not evaluated inside the mirror.
+- Validation rules are enforced by the mirror only for the translatable subset; a rule that cannot be translated, or legacy rows that already violate a stored rule, downgrade the table to an unconstrained mirror (the mirror records the reason in `warnings`) instead of blocking the file.
+- Access' DDL grammar has no `CHECK` syntax (DAO 16 and the C# UCanAccess port both reject it), so `ValidationRule`, `ValidationText` and `AllowZeroLength` survive through the property map and are not emitted in generated DDL.
 - `TRUNCATE TABLE` deletes every row but does not reset an AutoNumber seed.
 - Multi-file source editing is not part of Access support; export query results when you need a separate file.
 
@@ -89,15 +95,22 @@ npm run test:access:read-parity  # all fixtures compared with Jackcess (JDK 11+)
 npm run test:access:csharp-ddl   # generated DDL replayed by the C# UCanAccess port (.NET 10+)
 ```
 
-The read-parity gate compares every shipped fixture table, column, index and
-cell value with [Jackcess](https://jackcess.sourceforge.io/), while
+The read-parity gate compares every shipped fixture table, column, index, cell
+value, Access `Required` property and `DefaultValue` expression with
+[Jackcess](https://jackcess.sourceforge.io/), while
 `scripts/access-java-crosscheck.cjs` verifies that Jackcess can read a file
 written by the TypeScript writer. The C# replay recreates each fixture schema
 from the extension's generated `CREATE TABLE` statements and verifies that
-Access `Required` columns keep their `NOT NULL` flag. On Windows with Microsoft
-Access installed, `npm run test:access:com` and `npm run test:access:sql`
-additionally compare metadata, writes and query semantics with DAO (set
-`ACCESS_COM_VALIDATE=1`). Written files can also be cross-checked with the
+Access `Required` columns keep their `NOT NULL` flag and `DefaultValue`
+expressions replay unchanged. On Windows with Microsoft Access installed,
+`npm run test:access:com` and `npm run test:access:sql` additionally compare
+metadata, writes and query semantics with DAO (set `ACCESS_COM_VALIDATE=1`),
+including the DAO `Required`/`DefaultValue`/`AllowZeroLength` field properties
+and the validation rule/rule message pair Access reports. The DAO gate also
+drives the same `INSERT` values through Access and the SQL mirror and asserts
+that both reach the same accept/reject verdict, and that a table written by
+the TypeScript writer enforces its stored rule and `AllowZeroLength=False`
+inside Access itself. Written files can also be cross-checked with the
 optional readers in `tools/access-ddl-compare` and `tools/access-java-verify`.
 
 ## License

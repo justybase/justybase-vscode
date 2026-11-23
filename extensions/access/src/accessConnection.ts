@@ -535,6 +535,10 @@ interface MetadataColumn {
     readonly isPrimaryKey: boolean;
     readonly isAuto: boolean;
     readonly isCalculated: boolean;
+    readonly defaultValue?: string;
+    readonly allowZeroLength?: boolean;
+    readonly validationRule?: string;
+    readonly validationText?: string;
 }
 
 /**
@@ -569,6 +573,10 @@ async function metadataColumnsFor(
                 isPrimaryKey: column.isPrimaryKey,
                 isAuto: column.autoLong || column.autoUuid,
                 isCalculated: isCalculatedColumn(column),
+                ...(column.defaultValue === undefined ? {} : { defaultValue: column.defaultValue }),
+                ...(column.allowZeroLength === undefined ? {} : { allowZeroLength: column.allowZeroLength }),
+                ...(column.validationRule === undefined ? {} : { validationRule: column.validationRule }),
+                ...(column.validationText === undefined ? {} : { validationText: column.validationText }),
             })),
         };
     }
@@ -629,14 +637,33 @@ async function detailedColumnsMetadata(
     const rows = (object?.columns ?? []).map((column, index) => {
         const isAuto = column.isAuto ? 1 : 0;
         const isCalculated = column.isCalculated ? 1 : 0;
-        const base = [column.name, column.type, column.type, column.nullable ? 0 : 1, null, null, column.isPrimaryKey ? 1 : 0, 0, index + 1];
+        const base = [
+            column.name,
+            column.type,
+            column.type,
+            column.nullable ? 0 : 1,
+            column.defaultValue ?? null,
+            null,
+            column.isPrimaryKey ? 1 : 0,
+            0,
+            index + 1,
+        ];
+        const extended = [
+            ...base,
+            isAuto,
+            isCalculated,
+            column.allowZeroLength === undefined ? null : (column.allowZeroLength ? 1 : 0),
+            column.validationRule ?? null,
+            column.validationText ?? null,
+        ];
         return includeMetadataFlag
-            ? [base[0], base[1], base[2], base[3], base[3], base[4], base[5], base[6], base[7], base[8], isAuto, isCalculated]
-            : [...base, isAuto, isCalculated];
+            ? [base[0], base[1], base[2], base[3], base[3], base[4], base[5], base[6], base[7], base[8], isAuto, isCalculated,
+                extended[11], extended[12], extended[13]]
+            : extended;
     });
     return includeMetadataFlag
-        ? result(['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'ATTNOTNULL', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC'], rows)
-        : result(['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC'], rows);
+        ? result(['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'ATTNOTNULL', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC', 'ALLOW_ZERO_LENGTH', 'VALIDATION_RULE', 'VALIDATION_TEXT'], rows)
+        : result(['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC', 'ALLOW_ZERO_LENGTH', 'VALIDATION_RULE', 'VALIDATION_TEXT'], rows);
 }
 
 function objectSearchMetadata(

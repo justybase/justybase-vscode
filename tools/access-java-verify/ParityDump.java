@@ -13,9 +13,13 @@ import java.util.List;
  * written as UTF-8; pass -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8.
  *
  *   TABLE  <name> <rowCount>
- *   COLUMN <table> <name> <type> <length> <lengthInUnits> <precision> <scale> <autoNumber>
+ *   COLUMN <table> <name> <type> <length> <lengthInUnits> <precision> <scale> <autoNumber> <required> <default> <allowZeroLength> <validationRule> <validationText>
  *   INDEX  <table> <name> <primaryKey> <unique> <required> <ignoreNulls> <col1+,-col2...>
  *   ROW    <table> <value>...
+ *
+ * Required, default, allowZeroLength and the validation pair are read from the
+ * column property map, which is how Access stores them; all are compared by
+ * the read-parity gate.
  *
  * Usage: java -cp <jackcess jars>:classes ParityDump <path-to-mdb-or-accdb>
  */
@@ -38,6 +42,41 @@ public final class ParityDump {
                 System.out.println("TABLE\t" + escape(tableName) + "\t" + table.getRowCount());
 
                 for (Column column : table.getColumns()) {
+                    String required = "";
+                    String defaultValue = "";
+                    String allowZeroLength = "";
+                    String validationRule = "";
+                    String validationText = "";
+                    try {
+                        PropertyMap properties = column.getProperties();
+                        if (properties != null) {
+                            // `getValue` falls back to the Access default when
+                            // the property is absent, so check whether the
+                            // property is actually stored before reporting it.
+                            if (properties.get(PropertyMap.REQUIRED_PROP) != null) {
+                                Object value = properties.getValue(PropertyMap.REQUIRED_PROP);
+                                required = value == null ? "" : value.toString();
+                            }
+                            if (properties.get(PropertyMap.DEFAULT_VALUE_PROP) != null) {
+                                Object value = properties.getValue(PropertyMap.DEFAULT_VALUE_PROP);
+                                defaultValue = value == null ? "" : value.toString();
+                            }
+                            if (properties.get(PropertyMap.ALLOW_ZERO_LEN_PROP) != null) {
+                                Object value = properties.getValue(PropertyMap.ALLOW_ZERO_LEN_PROP);
+                                allowZeroLength = value == null ? "" : value.toString();
+                            }
+                            if (properties.get(PropertyMap.VALIDATION_RULE_PROP) != null) {
+                                Object value = properties.getValue(PropertyMap.VALIDATION_RULE_PROP);
+                                validationRule = value == null ? "" : value.toString();
+                            }
+                            if (properties.get(PropertyMap.VALIDATION_TEXT_PROP) != null) {
+                                Object value = properties.getValue(PropertyMap.VALIDATION_TEXT_PROP);
+                                validationText = value == null ? "" : value.toString();
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // Property metadata is optional; keep the column row.
+                    }
                     System.out.println("COLUMN\t" + escape(tableName)
                         + "\t" + escape(column.getName())
                         + "\t" + column.getType().name()
@@ -45,7 +84,12 @@ public final class ParityDump {
                         + "\t" + column.getLengthInUnits()
                         + "\t" + column.getPrecision()
                         + "\t" + column.getScale()
-                        + "\t" + column.isAutoNumber());
+                        + "\t" + column.isAutoNumber()
+                        + "\t" + escape(required)
+                        + "\t" + escape(defaultValue)
+                        + "\t" + escape(allowZeroLength)
+                        + "\t" + escape(validationRule)
+                        + "\t" + escape(validationText));
                 }
 
                 for (Index index : table.getIndexes()) {

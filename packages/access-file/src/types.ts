@@ -76,6 +76,17 @@ export interface AccessColumnDefinition {
     readonly autoUuid: boolean;
     /** True when the column belongs to the table's primary-key index. */
     readonly isPrimaryKey: boolean;
+    /** Access `DefaultValue` property, when the column defines one. */
+    readonly defaultValue?: string;
+    /**
+     * Access `AllowZeroLength` property.  Access defaults this to true, so a
+     * text column accepts an empty string unless the property says otherwise.
+     */
+    readonly allowZeroLength?: boolean;
+    /** Access column-level `ValidationRule` expression, when present. */
+    readonly validationRule?: string;
+    /** Message Access shows when `validationRule` rejects a value. */
+    readonly validationText?: string;
     /** Complex type object id from MSysComplexColumns, when accessType is complex. */
     readonly complexTypeId?: number;
     /** Table-definition page of the conceptual table for a complex column. */
@@ -98,6 +109,10 @@ export interface AccessTableDefinition {
     readonly isSystem: boolean;
     /** Object description stored in the table-definition property block. */
     readonly description?: string;
+    /** Access table-level `ValidationRule` expression, when present. */
+    readonly validationRule?: string;
+    /** Message Access shows when the table-level rule rejects a record. */
+    readonly validationText?: string;
 }
 
 export interface AccessRelationshipDefinition {

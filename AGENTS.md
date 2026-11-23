@@ -124,6 +124,8 @@ npm run test:file:integration
 npm run test:access:integration
 npm run test:access:read-parity # Jackcess read parity for every Access fixture (JDK 11+)
 npm run test:access:csharp-ddl  # generated DDL replay with the C# UCanAccess port (.NET 10+)
+ACCESS_COM_VALIDATE=1 npm run test:access:com  # DAO metadata/writes/properties (Windows + Access)
+ACCESS_COM_VALIDATE=1 npm run test:access:sql  # DAO query-semantics parity (Windows + Access)
 npm run test:db2:integration
 npm run test:oracle:integration
 npm run test:mssql:integration

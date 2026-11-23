@@ -29,6 +29,7 @@ interface TableColumnRow {
     IS_CALC?: number | string;
     ATTNUM?: number | string;
     DESCRIPTION?: string | null;
+    COLDEFAULT?: string | null;
 }
 
 interface ObjectNameRow {
@@ -170,7 +171,9 @@ export const accessDdlProvider: AccessDdlProvider = {
                 ? 'CALCULATED'
                 : toAccessDdlType(row.FORMAT_TYPE ?? 'UNKNOWN', isFlagSet(row.IS_AUTO)),
             notNull: isFlagSet(row.IS_NOT_NULL),
-            defaultValue: null,
+            defaultValue: row.COLDEFAULT === null || row.COLDEFAULT === undefined || row.COLDEFAULT === ''
+                ? null
+                : String(row.COLDEFAULT),
         }));
     },
     async getDistributionInfo(): Promise<string[]> {
@@ -301,6 +304,9 @@ export const accessDdlProvider: AccessDdlProvider = {
             // when the source column itself carries that property.
             if (column.notNull && !isAutoLike) {
                 parts.push('NOT NULL');
+            }
+            if (column.defaultValue !== null && column.defaultValue !== '') {
+                parts.push(`DEFAULT ${column.defaultValue}`);
             }
             if (isSinglePrimaryKey) {
                 parts.push('PRIMARY KEY');

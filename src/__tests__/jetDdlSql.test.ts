@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { AccessFileSession } from '../../packages/access-file/src';
 import { applyDdlSql } from '../../packages/access-file/src/jet/JetDdlSql';
-import { addRelationship } from '../../packages/access-file/src/jet/JetDdl';
+import { addRelationship, createTable } from '../../packages/access-file/src/jet/JetDdl';
 import { JetPageChannel } from '../../packages/access-file/src/jet/JetPageChannel';
 import { JetTable } from '../../packages/access-file/src/jet/JetTable';
 import { jetLayoutFor } from '../../packages/access-file/src/jet/JetLayout';
@@ -336,6 +336,13 @@ describe('JetDdlSql foreign keys (Phase 4)', () => {
             .toThrow(/BIGINT.*\.accdb|Jet 4/i);
     });
 
+    it('refuses DDL against a Jet 3 file instead of writing an unreadable table', () => {
+        const filePath = path.join(FIXTURES, 'size97.mdb');
+        const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('jet3'));
+        expect(() => applyDdlSql(channel, 'CREATE TABLE jet3_t (id LONG)'))
+            .toThrow(/Jet 3/i);
+    });
+
     it('recreates an AutoNumber column from COUNTER', async () => {
         const { directory, filePath } = makeWorkingFile();
         try {
@@ -349,6 +356,92 @@ describe('JetDdlSql foreign keys (Phase 4)', () => {
             const table = new JetTable(channel, 'counter_t', Number(catalogRow?.[0]) & 0x00ffffff);
             const id = table.columns.find(column => column.name.toLowerCase() === 'id');
             expect(id).toMatchObject({ autoLong: true, autoUuid: false });
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('stores column DEFAULT expressions in the table property map', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, [
+                'CREATE TABLE default_t (id LONG, code TEXT(10) DEFAULT "abc", n LONG DEFAULT (-3), neg LONG DEFAULT -7, opt TEXT(5) NOT NULL DEFAULT \'x\')',
+                'CREATE TABLE default_call_t (d DATETIME DEFAULT Date())',
+            ]);
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                const columns = session.getTableDefinition('default_t').columns;
+                expect(columns.map(column => ({
+                    name: column.name,
+                    nullable: column.nullable,
+                    defaultValue: column.defaultValue,
+                }))).toEqual([
+                    { name: 'id', nullable: true, defaultValue: undefined },
+                    { name: 'code', nullable: true, defaultValue: '"abc"' },
+                    { name: 'n', nullable: true, defaultValue: '(-3)' },
+                    { name: 'neg', nullable: true, defaultValue: '-7' },
+                    { name: 'opt', nullable: false, defaultValue: "'x'" },
+                ]);
+                expect(session.getTableDefinition('default_call_t').columns[0]?.defaultValue)
+                    .toBe('Date()');
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('keeps DEFAULT out of the column-flag byte and matches the NOT NULL properties', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            applyDdl(filePath, ['CREATE TABLE plain_t (id LONG, code TEXT(10) DEFAULT "abc")']);
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                // A column with DEFAULT but without NOT NULL stays nullable; the
+                // property map must not flip the Required flag.
+                expect(session.getTableDefinition('plain_t').columns.map(column => ({
+                    name: column.name,
+                    nullable: column.nullable,
+                    defaultValue: column.defaultValue,
+                }))).toEqual([
+                    { name: 'id', nullable: true, defaultValue: undefined },
+                    { name: 'code', nullable: true, defaultValue: '"abc"' },
+                ]);
+            } finally {
+                await session.close();
+            }
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('stores ValidationRule, ValidationText and AllowZeroLength in the property map', async () => {
+        const { directory, filePath } = makeWorkingFile();
+        try {
+            const channel = new JetPageChannel(fs.readFileSync(filePath), jetLayoutFor('accdb2007'));
+            createTable(channel, 'rules_t', [
+                { name: 'id', type: 0x04 },
+                { name: 'num', type: 0x04, validationRule: '>0', validationText: 'must be positive' },
+                { name: 'code', type: 0x0a, length: 20, allowZeroLength: false },
+            ]);
+            fs.writeFileSync(filePath, channel.buffer);
+
+            const session = await AccessFileSession.open({ filePath });
+            try {
+                expect(session.getTableDefinition('rules_t').columns.map(column => ({
+                    name: column.name,
+                    rule: column.validationRule,
+                    text: column.validationText,
+                    zero: column.allowZeroLength,
+                }))).toEqual([
+                    { name: 'id', rule: undefined, text: undefined, zero: undefined },
+                    { name: 'num', rule: '>0', text: 'must be positive', zero: undefined },
+                    { name: 'code', rule: undefined, text: undefined, zero: false },
+                ]);
+            } finally {
+                await session.close();
+            }
         } finally {
             fs.rmSync(directory, { recursive: true, force: true });
         }

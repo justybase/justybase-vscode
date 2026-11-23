@@ -1,5 +1,44 @@
-import { translateAccessSql } from '../../extensions/access/src/accessDuckDbMirror';
+import {
+    translateAccessDefaultExpression,
+    translateAccessSql,
+} from '../../extensions/access/src/accessDuckDbMirror';
 import { serializeAccessComplexValue } from '../../packages/access-file/src/complexValues';
+
+describe('translateAccessDefaultExpression', () => {
+    it('translates Access literal defaults into DuckDB expressions', () => {
+        expect(translateAccessDefaultExpression('"rrr"', 'text')).toBe("'rrr'");
+        expect(translateAccessDefaultExpression("'campo1'", 'text')).toBe("'campo1'");
+        expect(translateAccessDefaultExpression('(3)', 'long')).toBe('3');
+        expect(translateAccessDefaultExpression('-1', 'long')).toBe('-1');
+        expect(translateAccessDefaultExpression('True', 'boolean')).toBe('TRUE');
+        expect(translateAccessDefaultExpression('No', 'boolean')).toBe('FALSE');
+        expect(translateAccessDefaultExpression('#2020-01-02#', 'datetime'))
+            .toBe("TIMESTAMP '2020-01-02'");
+    });
+
+    it('unwraps Access expression markers and zero-argument date functions', () => {
+        expect(translateAccessDefaultExpression('="abc"', 'text')).toBe("'abc'");
+        expect(translateAccessDefaultExpression('Date()', 'datetime')).toBe('CAST(current_date AS TIMESTAMP)');
+        expect(translateAccessDefaultExpression('Now()', 'datetime')).toBe('current_timestamp');
+    });
+
+    it('keeps unsupported Access-only defaults out of the mirror', () => {
+        expect(translateAccessDefaultExpression(undefined, 'text')).toBeUndefined();
+        expect(translateAccessDefaultExpression('', 'text')).toBeUndefined();
+        expect(translateAccessDefaultExpression('DLookup("x", "t")', 'text')).toBeUndefined();
+        expect(translateAccessDefaultExpression('[field]', 'text')).toBeUndefined();
+    });
+
+    it('maps numeric defaults by column type instead of guessing', () => {
+        // `0` on a boolean column means FALSE; on an integer column it stays a
+        // number, and a bare serial on a date column is not a timestamp.
+        expect(translateAccessDefaultExpression('0', 'boolean')).toBe('FALSE');
+        expect(translateAccessDefaultExpression('-1', 'boolean')).toBe('TRUE');
+        expect(translateAccessDefaultExpression('0', 'long')).toBe('0');
+        expect(translateAccessDefaultExpression('3', 'datetime')).toBeUndefined();
+        expect(translateAccessDefaultExpression('Date()', 'long')).toBeUndefined();
+    });
+});
 
 describe('translateAccessSql (Faza 3)', () => {
     it('rewrites DISTINCTROW and IIF/NZ', () => {

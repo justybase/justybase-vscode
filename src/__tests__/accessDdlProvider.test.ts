@@ -14,6 +14,10 @@ interface TableColumnRow {
     IS_AUTO?: number | string;
     IS_CALC?: number | string;
     ATTNUM?: number | string;
+    COLDEFAULT?: string | null;
+    ALLOW_ZERO_LENGTH?: number | null;
+    VALIDATION_RULE?: string | null;
+    VALIDATION_TEXT?: string | null;
 }
 
 interface ViewSourceRow {
@@ -32,7 +36,11 @@ interface RelationshipRow {
     DELETE_CASCADE?: number | string;
 }
 
-const TABLE_COLUMNS = ['ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION', 'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC'];
+const TABLE_COLUMNS = [
+    'ATTNAME', 'FORMAT_TYPE', 'FULL_TYPE', 'IS_NOT_NULL', 'COLDEFAULT', 'DESCRIPTION',
+    'IS_PK', 'IS_FK', 'ATTNUM', 'IS_AUTO', 'IS_CALC',
+    'ALLOW_ZERO_LENGTH', 'VALIDATION_RULE', 'VALIDATION_TEXT',
+];
 const VIEW_SOURCE_COLUMNS = ['NAME', 'SCHEMA', 'DATABASE', 'SOURCE'];
 const RELATIONSHIP_COLUMNS = ['RELATIONSHIP', 'TABLE', 'COLUMN', 'FOREIGN_TABLE', 'FOREIGN_COLUMN', 'ENFORCED', 'UPDATE_CASCADE', 'DELETE_CASCADE'];
 
@@ -42,13 +50,16 @@ function columnRows(rows: TableColumnRow[]): unknown[][] {
         row.FORMAT_TYPE,
         row.FORMAT_TYPE,
         row.IS_NOT_NULL ?? 0,
-        null,
+        row.COLDEFAULT ?? null,
         null,
         row.IS_PK ?? 0,
         0,
         row.ATTNUM,
         row.IS_AUTO ?? 0,
         row.IS_CALC ?? 0,
+        row.ALLOW_ZERO_LENGTH ?? null,
+        row.VALIDATION_RULE ?? null,
+        row.VALIDATION_TEXT ?? null,
     ]);
 }
 
@@ -195,6 +206,22 @@ describe('accessDdlProvider', () => {
             { ATTNAME: 'Active', FORMAT_TYPE: 'BOOLEAN', ATTNUM: 4 },
             { ATTNAME: 'Memo', FORMAT_TYPE: 'MEMO', ATTNUM: 5 },
         ];
+
+        it('emits the Access DefaultValue expression and keeps a text primary key replayable', async () => {
+            const withDefaults = [
+                { ATTNAME: 'Code', FORMAT_TYPE: 'VARCHAR(50)', IS_NOT_NULL: 0, IS_PK: 1, ATTNUM: 1, COLDEFAULT: '"rrr"' } as TableColumnRow,
+                { ATTNAME: 'Label', FORMAT_TYPE: 'VARCHAR(50)', IS_NOT_NULL: 1, ATTNUM: 2, COLDEFAULT: '(3)' } as TableColumnRow,
+                { ATTNAME: 'Bare', FORMAT_TYPE: 'VARCHAR(50)', IS_NOT_NULL: 0, ATTNUM: 3 } as TableColumnRow,
+            ];
+            const connection = new FakeAccessConnection({ Lookup: withDefaults });
+            const ddl = await accessDdlProvider.generateTableDDL(connection, 'default', 'default', 'Lookup');
+
+            expect(ddl).toContain('[Code] TEXT(50) DEFAULT "rrr" PRIMARY KEY');
+            expect(ddl).not.toContain('[Code] TEXT(50) NOT NULL');
+            expect(ddl).toContain('[Label] TEXT(50) NOT NULL DEFAULT (3)');
+            expect(ddl).toContain('[Bare] TEXT(50)');
+            expect(ddl).not.toContain('[Bare] TEXT(50) DEFAULT');
+        });
 
         it('maps Access FORMAT_TYPE values to replayable DDL type names', async () => {
             const connection = new FakeAccessConnection({ Products: columns });

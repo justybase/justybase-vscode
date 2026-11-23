@@ -291,6 +291,55 @@ function parseType(tokens: Token[], index: { value: number }): { type: number; l
     return { type: definition.type, length, precision, scale };
 }
 
+/** Reads a balanced `(...)` group and returns its text without padding inside the parens. */
+function readParenthesized(tokens: Token[], index: { value: number }, label: string): string {
+    const parts: string[] = [];
+    let depth = 0;
+    while (tokens[index.value]) {
+        const current = tokens[index.value]!;
+        if (current.text === '(') depth++;
+        else if (current.text === ')') depth--;
+        parts.push(current.text);
+        index.value++;
+        if (depth === 0) {
+            return parts.join(' ')
+                .replace(/\(\s+/g, '(')
+                .replace(/\s+\)/g, ')')
+                .replace(/\s*,\s*/g, ', ');
+        }
+    }
+    throw new AccessFileError(`${label} has an unbalanced parenthesis.`);
+}
+
+/**
+ * Reads the expression after `DEFAULT`.
+ *
+ * Access stores the default as raw text (`"abc"`, `(3)`, `Date()`, `#1/2/2020#`),
+ * so the replay must accept the same shapes the DDL provider emits.  Anything
+ * more complex than a literal or a function call is rejected instead of being
+ * silently truncated and stored as a different default.
+ */
+function readDefaultExpression(tokens: Token[], index: { value: number }): string {
+    const token = tokens[index.value];
+    if (!token || token.text === ',' || token.text === ')') {
+        throw new AccessFileError('DEFAULT requires an expression.');
+    }
+    if (token.text === '(') {
+        return readParenthesized(tokens, index, 'DEFAULT expression');
+    }
+    if (token.text === '-' && tokens[index.value + 1]) {
+        // A negative literal is tokenized as `-` plus the number.
+        const value = tokens[index.value + 1]!.text;
+        index.value += 2;
+        return `-${value}`;
+    }
+    index.value++;
+    if (tokens[index.value]?.text === '(') {
+        return `${token.text}${readParenthesized(tokens, index, 'DEFAULT expression')}`;
+    }
+    return token.text;
+}
+
 function parseColumn(tokens: Token[], index: { value: number }): { column: JetDdlColumn; primaryKey: boolean } {
     const nameToken = tokens[index.value];
     if (!nameToken) {
@@ -303,6 +352,7 @@ function parseColumn(tokens: Token[], index: { value: number }): { column: JetDd
     const typeToken = tokens[index.value]?.lower;
     const typeInfo = parseType(tokens, index);
     let notNull = false;
+    let defaultExpression: string | undefined;
     let autoNumber = typeToken === 'counter' || typeToken === 'autonumber' || typeToken === 'identity';
     let primaryKey = false;
     while (tokens[index.value]) {
@@ -319,14 +369,27 @@ function parseColumn(tokens: Token[], index: { value: number }): { column: JetDd
         }
         if (lower === 'primary' && tokens[index.value + 1]?.lower === 'key') {
             primaryKey = true;
-            notNull = true;
             index.value += 2;
+            continue;
+        }
+        if (lower === 'default') {
+            index.value++;
+            defaultExpression = readDefaultExpression(tokens, index);
             continue;
         }
         break;
     }
     return {
-        column: { name, type: typeInfo.type, length: typeInfo.length, precision: typeInfo.precision, scale: typeInfo.scale, notNull, autoNumber },
+        column: {
+            name,
+            type: typeInfo.type,
+            length: typeInfo.length,
+            precision: typeInfo.precision,
+            scale: typeInfo.scale,
+            notNull,
+            autoNumber,
+            ...(defaultExpression === undefined ? {} : { defaultValue: defaultExpression }),
+        },
         primaryKey,
     };
 }
@@ -612,6 +675,12 @@ function parseAlterTable(channel: JetPageChannel, tokens: Token[], index: { valu
  * (staged) page channel.
  */
 export function applyDdlSql(channel: JetPageChannel, sql: string): void {
+    if (!channel.layout.ddlSupported) {
+        // Jet 3 table definitions use 18-byte column headers and one-byte
+        // name lengths; the writer emits the Jet 4/ACE layout and would leave
+        // a table neither Access nor Jackcess can open.
+        throw new AccessFileError('DDL changes are not supported for Jet 3 (.mdb) files; use a Jet 4 or .accdb database.');
+    }
     const tokens = tokenize(sql);
     const index = { value: 0 };
     if (tokens.length === 0) {
