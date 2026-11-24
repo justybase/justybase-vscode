@@ -5,7 +5,7 @@ audience: developer
 category: Developers
 status: Supported
 last_verified: 2026-08-31
-product_version: 3.22.1
+product_version: 3.22.2
 ---
 
 # Testing and documentation workflow

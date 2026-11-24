@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.22.1
+product_version: 3.22.2
 ---
 
 # Statuses and permissions
