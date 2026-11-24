@@ -184,6 +184,20 @@ npm run db2:seed-live-fixture -- --force
 npm run db2:verify-live-fixture
 ```
 
+Or run everything against a disposable local container with EXPLAIN tables and
+the `JBL_LIVE` fixture provisioned automatically (no remote host required):
+
+```bash
+npm run test:db2:live:ephemeral
+npm run verify:db2:live   # packaging gates + ephemeral live suites
+```
+
+`test:db2:live:ephemeral` uses a cached `icr.io/db2_community/db2` image, a
+random loopback port, `JUSTYBASE_DB2_EPHEMERAL=1` (strict EXPLAIN/RUNSTATS/
+fixture assertions) and always removes its container. It never touches an
+existing Db2 container and never pulls an image unless
+`DB2_HARNESS_ALLOW_PULL=1` is set. On Windows it drives Docker through WSL.
+
 The deep suite exercises:
 
 - connection context (`CURRENT SERVER` / `CURRENT SCHEMA` / `SYSIBM.SYSDUMMY1`)
@@ -191,11 +205,11 @@ The deep suite exercises:
 - DDL generation, disposable composite index / partition fixtures, `JBL_LIVE` fixture when seeded
 - live completion E2E (`LspCompletionEngine` + live Db2 metadata; keywords `FETCH FIRST` / `WITH UR`, no `GROOM`)
 - live SQL quality (`SqlQualityEngine` / DB2001–DB2008, strict GROOM/`LIMIT`/`DB..TABLE` rejection, SQL004 unknown column + SQL025 type mismatch against live column metadata)
-
-Local `npm run test:db2:integration` **requires** `DB2_LIVE_TEST_*` (fails if missing). Live runs are not wired into GitHub Actions — run locally against a Db2 host.
-- explain JSON parse + tuning advisor (soft-skip if explain tables missing)
-- RUNSTATS maintenance (soft-skip on privilege errors)
+- explain JSON parse + tuning advisor (strict with the ephemeral harness, soft-skip otherwise)
+- RUNSTATS maintenance, including every `DB2_RUNSTATS_OPTIONS` variant in `db2Runstats.live.integration.test.ts` (strict with the ephemeral harness)
 - session-monitor storage provider
+
+Local `npm run test:db2:integration` **requires** `DB2_LIVE_TEST_*` (fails if missing). Live runs are not wired into GitHub Actions — use the ephemeral harness locally.
 
 Db2 does not mirror Netezza distribution/skew UI. See [docs/db2.md](db2.md).
 

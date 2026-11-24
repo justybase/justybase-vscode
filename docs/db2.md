@@ -96,9 +96,24 @@ npm run db2:drop-live-fixture
 
 | Layer | Examples |
 |-------|----------|
-| Unit | explain parser, tuning advisor, quality rules DB2001–8, streaming cancel mocks, Db2 parser LUW + authoring |
-| Live | `test:db2:integration` — metadata, DDL, completion E2E, DB2xxx + SQL004/SQL025 quality, explain/tuning soft-skip, maintenance, fixture |
+| Unit | explain parser, tuning advisor, quality rules DB2001–8, streaming cancel mocks, Db2 parser LUW + authoring, ephemeral harness config/wiring |
+| Live | `test:db2:integration` — metadata, DDL, completion E2E, DB2xxx + SQL004/SQL025 quality, maintenance, fixture; `test:db2:integration:all` adds the RUNSTATS matrix |
+| Ephemeral live | `test:db2:live:ephemeral` — disposable Docker container in WSL Ubuntu, EXPLAIN tables + `JBL_LIVE` fixture provisioned automatically, strict failures instead of soft skips; `verify:db2:live` runs packaging plus this suite |
 | Manual | F5 Extension Host with Db2 VSIX; optionally set `DB2_VSCODE_RUNTIME_LIVE=true` for a live smoke query |
+
+### Ephemeral Db2 harness
+
+`npm run test:db2:live:ephemeral` starts a throwaway Db2 LUW container from a
+locally cached image (no implicit pull), publishes it on a random loopback port,
+installs the EXPLAIN tables, seeds the `JBL_LIVE` fixture, runs both live suites
+with `JUSTYBASE_DB2_EPHEMERAL=1`, and removes the container in `finally`.
+
+- Existing Db2 containers are never touched: name and host port are unique per run.
+- `DB2_HARNESS_IMAGE` selects a cached image (default `icr.io/db2_community/db2:11.5.8.0`; `ibmcom/db2:11.5.8.0` works too).
+- `DB2_HARNESS_KEEP=1` keeps the container for inspection; `DB2_HARNESS_ALLOW_PULL=1` explicitly permits an image pull.
+- With `JUSTYBASE_DB2_EPHEMERAL=1`, EXPLAIN/RUNSTATS/fixture environment errors fail the run instead of silently passing.
+- On Windows the runner drives Docker through WSL (`JUSTYBASE_WSL_DISTRO`, default `Ubuntu`).
+
 
 ## Migration notes (ibm_db runtime → TypeScript driver)
 

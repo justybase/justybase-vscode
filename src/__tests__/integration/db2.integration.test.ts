@@ -371,6 +371,8 @@ async function buildLiveDb2SchemaProvider(
 }
 
 const config = db2Harness.config;
+// Ephemeral Docker runs must fail loudly: no soft skips for EXPLAIN, RUNSTATS or fixture.
+const strictEphemeral = process.env.JUSTYBASE_DB2_EPHEMERAL === '1';
 // Local runs are mandatory (fail if DB2_LIVE_TEST_* is missing).
 // GitHub Actions soft-skips when secrets are absent — do not set DB2_LIVE_TEST_REQUIRED there.
 const isCi = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
@@ -686,7 +688,7 @@ describeIfConfigured('db2 integration', () => {
 					expect.arrayContaining(['DB2TA-001']),
 				);
 			} catch (error: unknown) {
-				if (isDb2ExplainEnvironmentError(error)) {
+				if (isDb2ExplainEnvironmentError(error) && !strictEphemeral) {
 					console.warn(
 						`Skipping Db2 EXPLAIN/tuning assertion: ${error instanceof Error ? error.message : String(error)}`,
 					);
@@ -721,7 +723,7 @@ describeIfConfigured('db2 integration', () => {
 				expect(statsRows).toHaveLength(1);
 				expect(String(statsRows[0].TABNAME).trim().toUpperCase()).toBe(tableName);
 			} catch (error: unknown) {
-				if (isDb2MaintenanceEnvironmentError(error)) {
+				if (isDb2MaintenanceEnvironmentError(error) && !strictEphemeral) {
 					console.warn(
 						`Skipping Db2 RUNSTATS assertion: ${error instanceof Error ? error.message : String(error)}`,
 					);
@@ -1028,6 +1030,19 @@ describeIfConfigured('db2 persistent live fixture', () => {
 	let connection: Db2Connection;
 	let fixtureAvailable = false;
 
+	const requireFixture = (): boolean => {
+		if (fixtureAvailable) {
+			return true;
+		}
+		if (strictEphemeral) {
+			throw new Error(
+				`Fixture schema ${fixtureSchemaName} is required when JUSTYBASE_DB2_EPHEMERAL=1. `
+				+ 'Seed it with the ephemeral harness or npm run db2:seed-live-fixture.',
+			);
+		}
+		return false;
+	};
+
 	beforeAll(async () => {
 		connection = db2Harness.createConnection(config!) as Db2Connection;
 		await connection.connect();
@@ -1044,8 +1059,11 @@ describeIfConfigured('db2 persistent live fixture', () => {
 		}
 	});
 
-	it('skips when JBL_LIVE fixture schema is not seeded', () => {
+	it('requires the fixture schema when running the ephemeral harness', () => {
 		if (!fixtureAvailable) {
+			if (strictEphemeral) {
+				requireFixture();
+			}
 			console.warn(
 				`Skipping fixture tests: schema ${fixtureSchemaName} not found. Run npm run db2:seed-live-fixture -- --force`,
 			);
@@ -1054,7 +1072,7 @@ describeIfConfigured('db2 persistent live fixture', () => {
 	});
 
 	it('lists fixture tables, views, aliases, and procedures via metadata provider', async () => {
-		if (!fixtureAvailable) {
+		if (!requireFixture()) {
 			return;
 		}
 
@@ -1086,7 +1104,7 @@ describeIfConfigured('db2 persistent live fixture', () => {
 	});
 
 	it('reads fixture row counts and employee hierarchy', async () => {
-		if (!fixtureAvailable) {
+		if (!requireFixture()) {
 			return;
 		}
 
@@ -1105,7 +1123,7 @@ describeIfConfigured('db2 persistent live fixture', () => {
 	});
 
 	it('generates DDL for partitioned sales fact table', async () => {
-		if (!fixtureAvailable) {
+		if (!requireFixture()) {
 			return;
 		}
 
@@ -1121,7 +1139,7 @@ describeIfConfigured('db2 persistent live fixture', () => {
 	});
 
 	it('finds fixture view source marker through view search', async () => {
-		if (!fixtureAvailable) {
+		if (!requireFixture()) {
 			return;
 		}
 
