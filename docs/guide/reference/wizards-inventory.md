@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-10-02
-product_version: 3.22.2
+product_version: 3.22.3
 ---
 
 # Wizard and designer inventory
