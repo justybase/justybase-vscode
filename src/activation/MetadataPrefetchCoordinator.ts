@@ -17,6 +17,7 @@ import {
     type DatabaseUsageHistory,
 } from '../metadata/databaseUsageHistory';
 import { getExtensionConfiguration } from '../compatibility/configuration';
+import { getMetadataPrefetchScope } from '../metadata/prefetchScope';
 import type { ExtensionServices } from './extensionServices';
 import type { NzConnection } from '../types';
 
@@ -168,6 +169,17 @@ export class MetadataPrefetchCoordinator {
                     connectionName,
                     connectionRunner(),
                 ).catch(error => this.logger.warn('FK metadata recovery failed', error));
+            }
+
+            if (getMetadataPrefetchScope() === 'connection') {
+                // Eager scope: one connection-wide prefetch keeps the original
+                // all-databases behaviour. Per-database snapshots are still
+                // recorded afterwards by the prefetcher.
+                this.services.metadataCache.triggerConnectionPrefetch(
+                    connectionName,
+                    connectionRunner(),
+                );
+                return;
             }
 
             const databases = await this.resolvePrefetchDatabases(connectionName, preferredDatabase);

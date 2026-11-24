@@ -143,6 +143,12 @@ gate. A connection can therefore hold a mix of fresh and missing databases.
   databases from `DatabaseUsageHistory`.
 - `justybase.metadata.popularDatabases` (0–5, default `2`) bounds the popular
   set. `0` warms only the active database.
+- `justybase.metadata.prefetchScope` selects the warm-up scope:
+  `activeAndPopular` (default) keeps the database-scoped prefetch described in
+  this section; `connection` restores the eager connection-wide prefetch while
+  keeping per-database snapshots, DDL coalescing and the fallback policy.
+- `justybase.metadata.queryConcurrency` (1–16, default `3`) caps concurrent
+  catalog queries per connection outside the full-refresh column pool.
 - Explicit "Refresh database" invalidates every layer for that database and
   rebuilds a **full** snapshot, including optional object details (view
   definitions and procedure sources).

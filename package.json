@@ -2,7 +2,7 @@
   "name": "justybaselite-netezza",
   "displayName": "JustyBase SQL Editor (Netezza)",
   "description": "Netezza-first SQL workspace for VS Code: connect without ODBC drivers, write and validate SQL, explore results, browse schemas, and manage warehouse workflows.",
-  "version": "3.22.2",
+  "version": "3.22.3",
   "workspaces": [
     "packages/*"
   ],
@@ -4410,10 +4410,10 @@
         },
         "justybase.metadata.queryConcurrency": {
           "type": "integer",
-          "default": 1,
+          "default": 3,
           "minimum": 1,
           "maximum": 16,
-          "description": "Maximum number of concurrent metadata catalog queries outside the dedicated full-refresh column pool. The safe default is one query per connection; increase only when the Netezza workload allows it. Applied to per-connection query limiting in the extension host and metadata warm-up batching in the language server. Default: 1."
+          "description": "Maximum number of concurrent metadata catalog queries outside the dedicated full-refresh column pool. The default is three queries per connection; lower it to 1 on warehouse-sensitive workloads. Applied to per-connection query limiting in the extension host and metadata warm-up batching in the language server. Default: 3."
         },
         "justybase.metadata.fullRefreshColumnConnections": {
           "type": "integer",
@@ -4428,6 +4428,19 @@
           "minimum": 0,
           "maximum": 5,
           "description": "Number of recently used Netezza databases warmed together with the active database. The rest stay lazy and are loaded when opened. Default: 2. Set to 0 to warm only the active database."
+        },
+        "justybase.metadata.prefetchScope": {
+          "type": "string",
+          "enum": [
+            "activeAndPopular",
+            "connection"
+          ],
+          "enumDescriptions": [
+            "Warm the active database and the most recently used ones; every other database stays lazy and loads on first use (default).",
+            "Warm every database on the connection at startup, restoring the eager all-databases behaviour."
+          ],
+          "default": "activeAndPopular",
+          "description": "Scope of the automatic metadata warm-up. Connection-wide prefetch loads all databases at startup and can be slower on large warehouses."
         },
         "justybase.metadata.liveFallback": {
           "type": "string",

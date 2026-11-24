@@ -5,7 +5,7 @@ audience: user
 category: Product guides
 status: Supported
 last_verified: 2026-11-10
-product_version: 3.22.2
+product_version: 3.22.3
 ---
 
 # Schema Browser, DDL and metadata cache
@@ -69,6 +69,7 @@ The cache is cache-first, TTL-aware, and layered. Table-like objects (tables, vi
 Metadata warm-up is scoped to databases rather than the whole connection:
 
 - VS Code warms the **active database** (the SQL editor's database override, or the profile database) and the **most used databases** from query history.
+- `justybase.metadata.prefetchScope` selects the scope: `activeAndPopular` (default) keeps this database-scoped warm-up; `connection` restores the eager all-databases prefetch at startup.
 - `justybase.metadata.popularDatabases` (0–5, default `2`) controls how many recently used databases are warmed. Set it to `0` to warm only the active database.
 - Every other database stays lazy: the first expansion, `DB..` reference, or explicit refresh builds that database's snapshot.
 - **Refresh Selected Metadata** on a database rebuilds the full scope for that database only, including view definitions and procedure sources.

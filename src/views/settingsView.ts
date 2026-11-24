@@ -271,10 +271,10 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
             {
                 id: 'metadata-query-concurrency',
                 label: 'Metadata Query Concurrency',
-                description: 'Maximum number of parallel metadata catalog queries per connection (1–16)',
+                description: 'Maximum number of parallel metadata catalog queries per connection (1–16). Default: 3',
                 type: 'number',
                 configKey: 'metadata.queryConcurrency',
-                defaultValue: 1
+                defaultValue: 3
             },
             {
                 id: 'metadata-full-refresh-column-connections',
@@ -291,6 +291,18 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
                 type: 'number',
                 configKey: 'metadata.popularDatabases',
                 defaultValue: 2
+            },
+            {
+                id: 'metadata-prefetch-scope',
+                label: 'Metadata Warm-up Scope',
+                description: 'Active + recent databases (default) or every database on the connection at startup',
+                type: 'select',
+                configKey: 'metadata.prefetchScope',
+                options: [
+                    { label: 'Active and popular databases (default)', value: 'activeAndPopular' },
+                    { label: 'Whole connection (eager)', value: 'connection' }
+                ],
+                defaultValue: 'activeAndPopular'
             },
             {
                 id: 'metadata-live-fallback',

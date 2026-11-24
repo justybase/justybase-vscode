@@ -42,7 +42,7 @@ For a cold or forced refresh, the order is as follows:
 5. for each live database: regular columns; additionally, external table
    columns if stage 3 detected an `EXTERNAL TABLE` in that database.
 
-The default metadata query concurrency limit is `1`. A full connection refresh
+The default metadata query concurrency limit is `3`. A full connection refresh
 uses one primary physical Netezza session for databases, schemas, objects and
 procedures. Its column stage can use the independently configured
 `justybase.metadata.fullRefreshColumnConnections` pool (default `1`, maximum

@@ -5,7 +5,7 @@ audience: reference
 category: Reference
 status: Supported
 last_verified: 2026-08-19
-product_version: 3.22.2
+product_version: 3.22.3
 ---
 
 # Settings reference
@@ -18,7 +18,7 @@ The table below is generated from the root and companion extension manifests dur
 
 - `justybase.query.*` controls fetched row limits and execution timeouts.
 - `justybase.results.*` controls result retention, SQLite spill, formatting, and export display values.
-- `justybase.metadata.*` and `justybase.cacheTTL` control catalog refresh and persistence. `justybase.metadata.fullRefreshColumnConnections` (1 by default, up to 8) controls the optional physical-session pool used only for the full-refresh column stage. `justybase.metadata.popularDatabases` (0–5, default 2) sets how many recently used databases are warmed with the active database, and `justybase.metadata.liveFallback` (`never` / `onDemand` / `always`) controls whether authoring may query the live catalog on a cache miss.
+- `justybase.metadata.*` and `justybase.cacheTTL` control catalog refresh and persistence. `justybase.metadata.fullRefreshColumnConnections` (1 by default, up to 8) controls the optional physical-session pool used only for the full-refresh column stage. `justybase.metadata.prefetchScope` selects the warm-up scope: `activeAndPopular` (default) warms the active and recently used databases, while `connection` restores the eager all-databases prefetch. `justybase.metadata.popularDatabases` (0–5, default 2) sets how many recently used databases are warmed with the active database, `justybase.metadata.queryConcurrency` (1–16, default 3) caps concurrent catalog queries per connection, and `justybase.metadata.liveFallback` (`never` / `onDemand` / `always`) controls whether authoring may query the live catalog on a cache miss.
 - `justybase.linter.*` controls quality diagnostics and severity.
 - `justybase.copilot.*`, `justybase.mcp.*`, and `justybase.ai.tools` control AI availability, context, privacy confirmation, and per-surface tool access. Read-only is the default for every surface.
 - `justybase.importWizard.*` controls preview and background validation.

@@ -1,5 +1,5 @@
 /** Default max concurrent metadata (_V_*) queries per logical connection name. */
-const DEFAULT_METADATA_QUERY_CONCURRENCY = 1;
+const DEFAULT_METADATA_QUERY_CONCURRENCY = 3;
 
 /** Upper bound matching the `justybase.metadata.queryConcurrency` setting maximum. */
 export const MAX_METADATA_QUERY_CONCURRENCY = 16;
@@ -31,9 +31,9 @@ export function getMetadataQueryConcurrencyLimit(): number {
 /**
  * Set the max concurrent metadata queries per connection from configuration.
  * The extension host and the LSP server both call this with the value of the
- * `justybase.metadata.queryConcurrency` setting. The conservative default is
- * one active catalog query per connection; users can opt into higher
- * parallelism when their Netezza workload allows it.
+ * `justybase.metadata.queryConcurrency` setting. The default is three active
+ * catalog queries per connection; lower it to one on warehouse-sensitive
+ * workloads.
  */
 export function setMetadataQueryConcurrencyLimit(limit: number): void {
     if (!Number.isFinite(limit)) {

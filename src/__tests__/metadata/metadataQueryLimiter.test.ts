@@ -39,9 +39,9 @@ describe('metadataQueryLimiter', () => {
 
     it('honors a configured concurrency limit and resets to the default', async () => {
         resetMetadataQueryLimiterForTests();
-        expect(getMetadataQueryConcurrencyLimit()).toBe(1);
-        setMetadataQueryConcurrencyLimit(3);
         expect(getMetadataQueryConcurrencyLimit()).toBe(3);
+        setMetadataQueryConcurrencyLimit(2);
+        expect(getMetadataQueryConcurrencyLimit()).toBe(2);
 
         let inFlight = 0;
         let maxInFlight = 0;
@@ -59,7 +59,7 @@ describe('metadataQueryLimiter', () => {
         );
 
         await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(maxInFlight).toBe(3);
+        expect(maxInFlight).toBe(2);
 
         while (release.length > 0) {
             release.shift()?.();
@@ -70,7 +70,7 @@ describe('metadataQueryLimiter', () => {
         expect(inFlight).toBe(0);
 
         resetMetadataQueryLimiterForTests();
-        expect(getMetadataQueryConcurrencyLimit()).toBe(1);
+        expect(getMetadataQueryConcurrencyLimit()).toBe(3);
     });
 
     it('clamps invalid configured limits to at least 1', () => {
@@ -87,12 +87,13 @@ describe('metadataQueryLimiter', () => {
         setMetadataQueryConcurrencyLimit(100);
         expect(getMetadataQueryConcurrencyLimit()).toBe(16);
         setMetadataQueryConcurrencyLimit(NaN);
-        expect(getMetadataQueryConcurrencyLimit()).toBe(1);
+        expect(getMetadataQueryConcurrencyLimit()).toBe(3);
         resetMetadataQueryLimiterForTests();
     });
 
     it('passes queue wait time to the operation after a connection-level wait', async () => {
         resetMetadataQueryLimiterForTests();
+        setMetadataQueryConcurrencyLimit(1);
         let releaseFirst: (() => void) | undefined;
         const first = runWithMetadataQueryConcurrencyLimit('conn-queue', async (queueWaitMs) => {
             expect(queueWaitMs).toBe(0);
@@ -111,5 +112,6 @@ describe('metadataQueryLimiter', () => {
         releaseFirst?.();
         await Promise.all([first, second]);
         expect(secondQueueWait).toBeGreaterThanOrEqual(0);
+        resetMetadataQueryLimiterForTests();
     });
 });

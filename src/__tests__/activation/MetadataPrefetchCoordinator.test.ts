@@ -8,8 +8,23 @@ jest.mock('vscode');
 jest.mock('../../metadata/connectionScopedMetadataQueryRunner', () => ({
     createConnectionScopedMetadataQueryRunner: jest.fn(() => jest.fn(async () => undefined)),
 }));
+jest.mock('../../metadata/prefetchScope', () => ({
+    getMetadataPrefetchScope: jest.fn(() => 'activeAndPopular'),
+    DEFAULT_METADATA_PREFETCH_SCOPE: 'activeAndPopular',
+    normalizeMetadataPrefetchScope: (value: unknown) =>
+        value === 'connection' ? 'connection' : 'activeAndPopular',
+}));
+
+import { getMetadataPrefetchScope } from '../../metadata/prefetchScope';
+
+const getMetadataPrefetchScopeMock = getMetadataPrefetchScope as unknown as jest.Mock;
 
 describe('MetadataPrefetchCoordinator', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        getMetadataPrefetchScopeMock.mockReturnValue('activeAndPopular');
+    });
+
     function createCoordinator(
         isFresh: boolean,
         databaseFresh = true,
@@ -61,6 +76,20 @@ describe('MetadataPrefetchCoordinator', () => {
             usageHistory,
         };
     }
+
+    it('runs a connection-wide prefetch when prefetchScope is connection', async () => {
+        getMetadataPrefetchScopeMock.mockReturnValue('connection');
+        const { coordinator, metadataCache, usageHistory } = createCoordinator(false, false, ['ARCHIVE']);
+
+        coordinator.triggerForConnection('NZ');
+        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>(resolve => setImmediate(resolve));
+
+        expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith('NZ', expect.any(Function));
+        expect(metadataCache.triggerDatabasePrefetch).not.toHaveBeenCalled();
+        expect(usageHistory.getPopular).not.toHaveBeenCalled();
+        expect(metadataCache.recordConnectionPrefetchSkipped).not.toHaveBeenCalled();
+    });
 
     it('recovers FK metadata when the core snapshot is fresh', async () => {
         const { coordinator, metadataCache } = createCoordinator(true);
