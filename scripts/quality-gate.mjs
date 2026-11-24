@@ -186,9 +186,18 @@ function isNonExecutableAstLine(file, lineNumber) {
     let hasTemplateText = false;
     let hasPureTemplateInterpolation = false;
     let hasExecutableExpressionOnLine = false;
+    const closingTagRanges = [];
     const visit = node => {
       const startLine = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile)).line + 1;
       const endLine = ts.getLineAndCharacterOfPosition(sourceFile, node.end).line + 1;
+      // Closing tags (`</div>;`, `</span>`) are pure markup: they belong to a
+      // createElement call opened on an earlier line, so Istanbul never emits a
+      // DA record for them. Remove their ranges from the line and treat the
+      // remainder as markup only when nothing else is left, so a line that also
+      // opens an element or renders a value stays executable.
+      if (ts.isJsxClosingElement(node) || ts.isJsxClosingFragment(node)) {
+        closingTagRanges.push({ start: node.getStart(sourceFile), end: node.end });
+      }
       if ((ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isNoSubstitutionTemplateLiteral(node))
           && lineNumber > startLine && lineNumber <= endLine) { hasTemplateText = true; }
       if (ts.isTemplateExpression(node)) {
@@ -267,6 +276,25 @@ function isNonExecutableAstLine(file, lineNumber) {
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
+    // A line whose content is only closing tags plus punctuation is markup that
+    // belongs to a createElement call opened on an earlier line, so Istanbul
+    // never emits a DA record for it. Removing the tag ranges keeps this from
+    // masking a line that also opens an element or renders a value.
+    if (!declarationLine && closingTagRanges.length > 0) {
+      const lineStarts = sourceFile.getLineStarts();
+      const lineStart = lineStarts[lineNumber - 1];
+      if (lineStart !== undefined) {
+        const lineEnd = lineNumber < lineStarts.length ? lineStarts[lineNumber] : source.length;
+        let remainder = source.slice(lineStart, lineEnd);
+        for (const range of [...closingTagRanges].sort((a, b) => b.start - a.start)) {
+          if (range.start < lineStart || range.end > lineEnd) continue;
+          const from = range.start - lineStart;
+          const to = range.end - lineStart;
+          remainder = `${remainder.slice(0, from)}${remainder.slice(to)}`;
+        }
+        if (/^[\s;,(){}[\]]*$/u.test(remainder)) return true;
+      }
+    }
     return declarationLine || ((hasPureTemplateInterpolation || hasTemplateText) && !hasExecutableExpressionOnLine);
   } catch {
     return false;

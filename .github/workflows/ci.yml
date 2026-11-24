@@ -252,6 +252,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The harness resolves `stable` through the VS Code release API.  A cached
+      # build lets that resolution fall back to the installed copy when the API
+      # is throttled or unreachable, which is the failure that turned this gate
+      # red on 2026-11-23; the restore key keeps testing new stable builds when
+      # the API answers normally.
+      - name: Cache the VS Code test build
+        uses: actions/cache@v6
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            vscode-test-${{ runner.os }}-
+
       - name: Run real VS Code result-panel scenario
         run: xvfb-run -a npm run test:extension-host
 

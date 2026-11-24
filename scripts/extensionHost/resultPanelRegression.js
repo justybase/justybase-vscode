@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { runTests } = require('@vscode/test-electron');
+const { resolveVSCodeExecutable } = require('./vscodeTestRuntime');
 
 const repositoryRoot = path.resolve(__dirname, '..', '..');
 const smokeTestPath = path.join(__dirname, 'resultPanelRegressionSmoke.js');
@@ -26,33 +27,33 @@ async function main() {
     requirePath(smokeTestPath, 'regression smoke test');
 
     const userDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'justybase-result-panel-vscode-'));
-    const options = {
-        extensionDevelopmentPath: repositoryRoot,
-        extensionTestsPath: smokeTestPath,
-        extensionTestsEnv: {
-            ...process.env,
-            NODE_ENV: 'test',
-            JUSTYBASE_RESULT_PANEL_TRACE: '1',
-            ...(process.platform === 'linux' ? { ELECTRON_DISABLE_SANDBOX: '1' } : {}),
-        },
-        // The disposable Linux runners used by CI/WSL containers do not expose
-        // the Chromium sandbox namespace. Windows keeps the default sandbox.
-        launchArgs: [
-            `--user-data-dir=${userDataDirectory}`,
-            '--disable-extensions',
-            '--disable-gpu',
-            ...(process.platform === 'linux'
-                ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu-sandbox']
-                : []),
-        ],
-    };
-
-    if (requestedVersion && requestedVersion !== 'stable') {
-        options.version = requestedVersion;
-    }
-
-    console.log(`=== result-panel VS Code Extension Host regression (${requestedVersion}) ===`);
     try {
+        // Resolve the build once so a cached install needs no network and a
+        // real outage reports a readable reason instead of a bare exit code.
+        const vscodeExecutablePath = await resolveVSCodeExecutable({ version: requestedVersion });
+        const options = {
+            extensionDevelopmentPath: repositoryRoot,
+            extensionTestsPath: smokeTestPath,
+            vscodeExecutablePath,
+            extensionTestsEnv: {
+                ...process.env,
+                NODE_ENV: 'test',
+                JUSTYBASE_RESULT_PANEL_TRACE: '1',
+                ...(process.platform === 'linux' ? { ELECTRON_DISABLE_SANDBOX: '1' } : {}),
+            },
+            // The disposable Linux runners used by CI/WSL containers do not expose
+            // the Chromium sandbox namespace. Windows keeps the default sandbox.
+            launchArgs: [
+                `--user-data-dir=${userDataDirectory}`,
+                '--disable-extensions',
+                '--disable-gpu',
+                ...(process.platform === 'linux'
+                    ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu-sandbox']
+                    : []),
+            ],
+        };
+
+        console.log(`=== result-panel VS Code Extension Host regression (${requestedVersion}) ===`);
         const exitCode = await runTests(options);
         if (exitCode !== 0) {
             throw new Error(`Result-panel Extension Host exited with code ${exitCode}.`);

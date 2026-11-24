@@ -106,7 +106,10 @@ value, Access `Required` property and `DefaultValue` expression with
 written by the TypeScript writer. The C# replay recreates each fixture schema
 from the extension's generated `CREATE TABLE` statements and verifies that
 Access `Required` columns keep their `NOT NULL` flag and `DefaultValue`
-expressions replay unchanged. On Windows with Microsoft Access installed,
+expressions replay unchanged. The read-parity gate builds
+`packages/access-file` first on a clean checkout; the C# replay instead resolves
+`@justybase/access-file` to the package sources, so it runs straight after
+`npm ci` without a prebuilt `dist/`. On Windows with Microsoft Access installed,
 `npm run test:access:com` and `npm run test:access:sql` additionally compare
 metadata, writes and query semantics with DAO (set `ACCESS_COM_VALIDATE=1`),
 including the DAO `Required`/`DefaultValue`/`AllowZeroLength` field properties

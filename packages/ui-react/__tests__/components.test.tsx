@@ -10,6 +10,7 @@ import {
   DesignerForm,
   DiffView,
   EditorSurface,
+  ExecutionElapsed,
   ExplainView,
   FocusOnMount,
   HistoryView,
@@ -467,6 +468,125 @@ describe('shared React presentation', () => {
     expect(screen.queryByText(/Running query/)).not.toBeInTheDocument();
   });
 
+  it('counts whole seconds, covers every running status and drops the clock without a start time', () => {
+    jest.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const { rerender, container } = render(<ResultExecutionBanner status="loading" startedAt={startedAt} />);
+      // Under a minute the clock renders seconds; the first tick is immediate.
+      expect(screen.getByRole('status')).toHaveTextContent('0s');
+      act(() => { jest.advanceTimersByTime(3000); });
+      expect(screen.getByRole('status')).toHaveTextContent('3s');
+
+      // A retry keeps the running spinner and the clock.
+      rerender(<ResultExecutionBanner status="retrying" startedAt={startedAt} />);
+      expect(screen.getByRole('status')).toHaveTextContent('Retrying query…');
+      expect(container.querySelector('.ui-execution-banner-elapsed')).not.toBeNull();
+
+      // Finalizing is still "running", but marks the icon as finalizing.
+      rerender(<ResultExecutionBanner status="finalizing" startedAt={startedAt} />);
+      expect(screen.getByRole('status')).toHaveTextContent('Finalizing result…');
+      expect(container.querySelector('.ui-execution-banner-icon-finalizing .ui-activity-spinner')).not.toBeNull();
+
+      // A tick that does not cross a second boundary must not re-render: freeze
+      // the wall clock while the interval fires.
+      const frozen = Date.now();
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(frozen);
+      try {
+        const before = container.querySelector('.ui-execution-banner-elapsed')?.textContent;
+        act(() => { jest.advanceTimersByTime(1000); });
+        expect(container.querySelector('.ui-execution-banner-elapsed')?.textContent).toBe(before);
+      } finally {
+        nowSpy.mockRestore();
+      }
+
+      // Terminal states swap the spinner for a static icon and stop the clock.
+      rerender(<ResultExecutionBanner status="cancelled" startedAt={startedAt} />);
+      expect(screen.getByRole('status')).toHaveTextContent('Query cancelled.');
+      expect(container.querySelector('.ui-execution-banner-elapsed')).toBeNull();
+      expect(container.querySelector('.ui-activity-spinner')).toBeNull();
+
+      rerender(<ResultExecutionBanner status="error" message="boom" startedAt={startedAt} />);
+      expect(screen.getByRole('alert')).toHaveTextContent('boom');
+      expect(container.querySelector('.ui-activity-spinner')).toBeNull();
+
+      // Without a start time the running banner keeps its spinner but shows no clock.
+      rerender(<ResultExecutionBanner status="loading" />);
+      expect(container.querySelector('.ui-execution-banner-elapsed')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('omits the elapsed clock for a missing or unusable start time', () => {
+    // No start time on first mount exercises the reset path with no prior value.
+    const { container, rerender } = render(<ExecutionElapsed />);
+    expect(container.firstChild).toBeNull();
+
+    // A real value followed by removal resets the stored seconds.
+    rerender(<ExecutionElapsed startedAt={Date.now()} />);
+    expect(container.textContent).toBe('0s');
+    rerender(<ExecutionElapsed />);
+    expect(container.firstChild).toBeNull();
+
+    // A non-finite start time must not render NaN or Infinity.
+    rerender(<ExecutionElapsed startedAt={Number.NaN} />);
+    expect(container.textContent).toBe('');
+    rerender(<ExecutionElapsed startedAt={Date.now() + 5_000} />);
+    expect(container.textContent).toBe('0s');
+  });
+
+  it('marks terminal result tabs with badges, pins and running titles', () => {
+    const onTogglePin = jest.fn();
+    const { rerender, container } = render(<ResultTabs
+      results={[
+        { ...result, resultSetId: 'error', status: 'error' },
+        { ...result, resultSetId: 'cancelled', status: 'cancelled' },
+        { ...result, resultSetId: 'empty', status: 'empty' },
+        { ...result, resultSetId: 'done', status: 'complete' },
+      ]}
+      activeResultSetId="done"
+      onSelect={jest.fn()}
+      isPinned={item => item.resultSetId === 'error'}
+      onTogglePin={onTogglePin}
+    />);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(4);
+    expect(tabs[0]?.querySelector('.ui-result-tab-badge-error')?.textContent).toBe('Error');
+    expect(tabs[1]?.querySelector('.ui-result-tab-badge-partial')?.textContent).toBe('Partial');
+    expect(tabs[2]?.querySelector('.ui-result-tab-badge-empty')?.textContent).toBe('Empty');
+    expect(tabs[3]?.querySelector('.ui-result-tab-badge')).toBeNull();
+    // Only the pinned tab carries the pinned class and pressed pin state.
+    expect(container.querySelectorAll('.ui-result-tab-pinned')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Unpin Result 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Pin Result 2' })).toHaveAttribute('aria-pressed', 'false');
+
+    // Statement metadata drives the inactive-tab tooltip.
+    rerender(<ResultTabs
+      results={[
+        { ...result, resultSetId: 'error', status: 'error' },
+        { ...result, resultSetId: 'statement', status: 'complete', statementIndex: 1 },
+        { ...result, resultSetId: 'streaming', status: 'streaming', statementIndex: 1 },
+      ]}
+      activeResultSetId="error"
+      onSelect={jest.fn()}
+      execution={{
+        sourceId: result.sourceId,
+        executionId: result.executionId,
+        mode: 'script',
+        statementCount: 2,
+        completedStatements: 1,
+        status: 'running',
+        statements: { 1: { statementIndex: 1, status: 'pending' } },
+      }}
+    />);
+    expect(screen.getByRole('tab', { name: /Result 2/ })).toHaveAttribute('title', 'Statement 2: pending');
+    // Only the streaming result is busy; terminal statuses stay quiet.
+    const busyTabs = screen.getAllByRole('tab').filter(tab => tab.getAttribute('aria-busy') === 'true');
+    expect(busyTabs).toHaveLength(1);
+    expect(busyTabs[0]).toHaveTextContent('Result 3');
+  });
+
   it('offers a Copilot fix action for failed SQL and keeps the driver caret text intact', () => {
     const onFixWithAi = jest.fn();
     const message = "ERROR: 'SELECT 1,2 FROM DIMDATE'\nerror           ^ found \",\" (at char 10) expecting an identifier";
@@ -504,6 +624,26 @@ describe('shared React presentation', () => {
     expect(hint).toContain('found "," (at char 10)');
     expect(hint.length).toBeLessThan(longSql.length);
     expect(hint).not.toContain('COL_40');
+  });
+
+  it('animates only the running log badge and keeps terminal statuses static', () => {
+    const { container } = render(<LogConsole rows={[
+      ['12:00', '▶ RUNNING: SELECT 1 | CONN | 5 s | 10 rows'],
+      ['12:01', '✓ SUCCESS: SELECT 1 | CONN | 90 ms | 10 rows'],
+      ['12:02', '✗ ERROR: SELECT 1 | CONN | 90 ms | 1 row | boom'],
+    ]} />);
+    const badges = [...container.querySelectorAll('.log-status')];
+    expect(badges).toHaveLength(3);
+
+    expect(badges[0]?.querySelector('.log-status-icon-spinner')).not.toBeNull();
+    expect(badges[0]?.textContent).toContain('RUNNING');
+    // Terminal statuses keep their glyph: only work in flight gets a spinner.
+    expect(badges[1]?.querySelector('.log-status-icon-spinner')).toBeNull();
+    expect(badges[1]?.querySelector('.log-status-icon')?.textContent).toBe('✓');
+    expect(badges[1]?.textContent).toContain('SUCCESS');
+    expect(badges[2]?.querySelector('.log-status-icon-spinner')).toBeNull();
+    expect(badges[2]?.querySelector('.log-status-icon')?.textContent).toBe('✗');
+    expect(badges[2]?.textContent).toContain('ERROR');
   });
 
   it('hides the Copilot fix action when no SQL is available', () => {

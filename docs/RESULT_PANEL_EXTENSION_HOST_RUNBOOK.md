@@ -28,6 +28,13 @@ The Extension Host build requires one:
 xvfb-run -a npm run test:extension-host
 ```
 
+The VS Code build is resolved once, before the first iteration, into the
+gitignored `.vscode-test/` cache. A cached install needs no network at all; an
+uncached one is downloaded with up to three attempts, and a genuine outage
+fails with the underlying reason instead of an empty message. `stable` is
+resolved through the release API, so pin `RESULT_PANEL_VSCODE_TEST_VERSION` when
+a run must use an exact build.
+
 To repeat the complete source-switch/race sequence in a local or nightly run,
 set `JUSTYBASE_EXTENSION_HOST_REPEAT` to a value from 1 through 100. Twenty
 iterations is the recommended race stress value:

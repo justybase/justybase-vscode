@@ -13,6 +13,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { runTests } = require('@vscode/test-electron');
 const { ExtensionHostScreenshotSession } = require('./extensionHostScreenshot');
+const { describeVSCodeTestFailure, resolveVSCodeExecutable, toVSCodeTestError } = require('./vscodeTestRuntime');
 const {
     createSqliteFixture,
     createSqliteFilterPerformanceFixture,
@@ -286,6 +287,11 @@ async function main() {
     const iterationErrors = [];
     console.log(`=== Extension Host ${suite} scenario (${engine}, ${requestedVersion}, ${repeatCount} iteration(s)) ===`);
     try {
+        // Resolve the VS Code build once, before the first iteration.  Passing
+        // only `.version` makes @vscode/test-electron resolve `stable` over the
+        // network inside every iteration; a transient CDN failure there aborts
+        // the gate with an empty reason instead of a scenario failure.
+        const vscodeExecutablePath = await resolveVSCodeExecutable({ version: requestedVersion });
         for (let iteration = 1; iteration <= repeatCount; iteration += 1) {
             const iterationReportPath = iterationArtifactPath(reportPath, iteration, repeatCount);
             const iterationTracePath = iterationArtifactPath(tracePath, iteration, repeatCount);
@@ -314,6 +320,7 @@ async function main() {
             const options = {
                 extensionDevelopmentPath: repositoryRoot,
                 extensionTestsPath: smokeTestPath,
+                vscodeExecutablePath,
                 extensionTestsEnv: {
                     ...extensionTestsEnv,
                     JUSTYBASE_EXTENSION_HOST_ITERATION: String(iteration),
@@ -346,14 +353,13 @@ async function main() {
                         : []),
                 ],
             };
-            if (requestedVersion && requestedVersion !== 'stable') options.version = requestedVersion;
             screenshotSession?.start();
             let iterationError;
             try {
                 const exitCode = await runTests(options);
                 if (exitCode !== 0) throw new Error(`Extension Host exited with code ${exitCode}.`);
             } catch (error) {
-                iterationError = error;
+                iterationError = toVSCodeTestError(error);
             } finally {
                 try {
                     await screenshotSession?.stop();
@@ -409,8 +415,7 @@ async function main() {
             completionReportPath = summaryPath;
         }
         if (iterationErrors.length > 0 || iterationResults.some(result => result.status === 'failed')) {
-            const firstError = iterationErrors[0];
-            const detail = firstError instanceof Error ? firstError.message : String(firstError ?? 'scenario report failed');
+            const detail = describeVSCodeTestFailure(iterationErrors[0] ?? new Error('scenario report failed'));
             throw new Error(`${iterationResults.filter(result => result.status === 'failed').length}/${repeatCount} Extension Host iteration(s) failed: ${detail}`);
         }
         passed = true;

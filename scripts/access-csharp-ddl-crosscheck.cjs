@@ -27,6 +27,7 @@ const { spawnSync } = require('node:child_process');
 require('tsx/cjs');
 
 const Module = require('node:module');
+const { installAccessFileSourceHook } = require('./access-file-source-runtime.cjs');
 const originalLoad = Module._load;
 Module._load = function load(request, parent, isMain) {
     if (request === 'vscode') {
@@ -34,6 +35,10 @@ Module._load = function load(request, parent, isMain) {
     }
     return originalLoad.call(this, request, parent, isMain);
 };
+// The extension imports the published `@justybase/access-file` name, whose
+// entry point is `dist/index.js`; a clean checkout has no dist/, so resolve the
+// specifier to the package sources that `tsx` compiles for this script.
+installAccessFileSourceHook(Module);
 
 const { AccessConnection } = require('../extensions/access/src/accessConnection');
 const { accessDdlProvider } = require('../extensions/access/src/accessDdlProvider');

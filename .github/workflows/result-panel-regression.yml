@@ -60,6 +60,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # A cached VS Code build is also the offline fallback when the release API
+      # is throttled (see docs/RESULT_PANEL_EXTENSION_HOST_RUNBOOK.md).
+      - name: Cache the VS Code test build
+        uses: actions/cache@v6
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            vscode-test-${{ runner.os }}-
       - name: Run SQLite Extension Host regression (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:extension-host
@@ -125,6 +134,13 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Cache the VS Code test build
+        uses: actions/cache@v6
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            vscode-test-${{ runner.os }}-
       - name: Run repeated SQLite Extension Host regression
         env:
           JUSTYBASE_EXTENSION_HOST_ARTIFACT_DIR: ${{ runner.temp }}/justybase-extension-host-repeat

@@ -436,6 +436,41 @@ test('ignores pure JSX expression child lines inside components', () => {
   }
 });
 
+test('treats pure JSX closing-tag lines as markup but keeps opening lines executable', () => {
+  const fixturePath = path.resolve(process.cwd(), 'src/__quality_jsx_closing_fixture__.tsx');
+  const fixture = [
+    'export function render(label: string) {',
+    '  return <section>',
+    '    <span>{label}</span>',
+    '  </section>;',
+    '}',
+  ].join('\n');
+  fs.writeFileSync(fixturePath, fixture);
+  const baseline = { changedHighRiskCoverage: { lines: 80, branches: 70, roots: ['src/'] } };
+  const lcov = 'SF:src/__quality_jsx_closing_fixture__.tsx\nDA:2,1\nend_of_record\n';
+  try {
+    // Istanbul records the whole element on the `return <section>` line, so a
+    // pure closing-tag line has no DA record of its own and must stay out of
+    // the changed-line denominator.
+    const closing = checkChangedCoverage({
+      diff: '+++ b/src/__quality_jsx_closing_fixture__.tsx\n@@ -0,0 +4 @@\n',
+      lcov,
+      baseline,
+    });
+    assert.deepEqual(closing.failures, []);
+
+    // The element-opening line is still executable, so it must be covered.
+    const opening = checkChangedCoverage({
+      diff: '+++ b/src/__quality_jsx_closing_fixture__.tsx\n@@ -0,0 +2 @@\n',
+      lcov: 'SF:src/__quality_jsx_closing_fixture__.tsx\nDA:1,1\nend_of_record\n',
+      baseline,
+    });
+    assert.match(opening.failures[0] ?? '', /missing from LCOV/);
+  } finally {
+    fs.rmSync(fixturePath, { force: true });
+  }
+});
+
 test('does not require an LCOV record for changed declaration-only files', () => {
   const result = checkChangedCoverage({
     diff: '+++ b/media/resultPanel/selectionStatsTypes.ts\n@@ -1 +2 @@\n',
