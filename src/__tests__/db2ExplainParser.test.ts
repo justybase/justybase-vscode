@@ -53,6 +53,9 @@ describe('db2ExplainParser', () => {
 
     it('builds Db2 explain queries', () => {
         expect(buildDb2ExplainQuery('SELECT * FROM orders')).toContain('EXPLAIN');
-        expect(buildDb2ExplainRetrieveQuery()).toContain('EXPLAIN_OPERATOR');
+        const retrieve = buildDb2ExplainRetrieveQuery();
+        expect(retrieve).toContain('EXPLAIN_OPERATOR');
+        expect(retrieve).toContain('EXPLAIN_STREAM');
+        expect(retrieve).toContain('S.TARGET_ID = O.OPERATOR_ID');
     });
 });

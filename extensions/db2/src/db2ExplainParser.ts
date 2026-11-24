@@ -267,5 +267,33 @@ export function buildDb2ExplainQuery(sql: string): string {
 }
 
 export function buildDb2ExplainRetrieveQuery(): string {
-    return 'SELECT OPERATOR_TYPE, OBJECT_SCHEMA, OBJECT_NAME, TOTAL_COST, STREAM_COUNT, IO_COST, CPU_COST, COLUMN_NAMES FROM EXPLAIN_OPERATOR ORDER BY OPERATOR_ID';
+    // OBJECT_SCHEMA/OBJECT_NAME/STREAM_COUNT/COLUMN_NAMES live on EXPLAIN_STREAM,
+    // not EXPLAIN_OPERATOR. Restrict to the newest explain request and to the
+    // data stream (SOURCE_ID = -1) so each operator yields one row.
+    return `
+        SELECT
+            O.OPERATOR_ID,
+            O.OPERATOR_TYPE,
+            S.OBJECT_SCHEMA,
+            S.OBJECT_NAME,
+            O.TOTAL_COST,
+            S.STREAM_COUNT,
+            O.IO_COST,
+            O.CPU_COST,
+            S.COLUMN_NAMES
+        FROM EXPLAIN_OPERATOR O
+        LEFT JOIN EXPLAIN_STREAM S
+            ON S.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
+           AND S.EXPLAIN_TIME = O.EXPLAIN_TIME
+           AND S.SOURCE_NAME = O.SOURCE_NAME
+           AND S.SOURCE_SCHEMA = O.SOURCE_SCHEMA
+           AND S.SOURCE_VERSION = O.SOURCE_VERSION
+           AND S.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
+           AND S.STMTNO = O.STMTNO
+           AND S.SECTNO = O.SECTNO
+           AND S.TARGET_ID = O.OPERATOR_ID
+           AND S.SOURCE_ID = -1
+        WHERE O.EXPLAIN_TIME = (SELECT MAX(EXPLAIN_TIME) FROM EXPLAIN_INSTANCE)
+        ORDER BY O.OPERATOR_ID
+    `;
 }
