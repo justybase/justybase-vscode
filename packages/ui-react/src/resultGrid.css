@@ -196,38 +196,6 @@ body.vscode-high-contrast-light .ui-data-grid-scroll {
   scrollbar-color: color-mix(in srgb, var(--justybase-grid-text) 40%, transparent) transparent;
 }
 
-/* Indeterminate execution strip for an in-flight query. It sits at the very
-   top of the result surface so long-running SQL stays visible without moving
-   the virtualized grid or blocking interaction. */
-.ui-data-grid-progress {
-  position: absolute;
-  z-index: 40;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 2px;
-  overflow: hidden;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--jb-color-accent) 24%, transparent);
-}
-
-.ui-data-grid-progress > span {
-  display: block;
-  width: 40%;
-  height: 100%;
-  background: var(--jb-color-accent);
-  animation: ui-data-grid-progress 1.2s ease-in-out infinite;
-}
-
-@keyframes ui-data-grid-progress {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(350%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ui-data-grid-progress > span { width: 100%; animation: none; opacity: .7; }
-}
-
 .ui-data-grid-scroll:focus-visible {
   box-shadow: inset 0 0 0 1px var(--justybase-grid-accent);
 }
@@ -2732,17 +2700,6 @@ body.vscode-high-contrast-light .ui-column-sidebar-type.type-binary { color: #85
 .ui-result-grid .console-msg { min-width: 0; color: var(--justybase-grid-text); }
 .ui-result-grid .log-status { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--justybase-grid-border); border-radius: 4px; color: var(--justybase-grid-muted); background: var(--justybase-grid-surface); font-size: 11px; font-weight: 700; letter-spacing: .4px; line-height: 1.6; user-select: none; }
 .ui-result-grid .log-status-icon { font-size: 10px; line-height: 1; }
-/* The RUNNING badge keeps an animated ring so a long statement stays visibly
-   in progress inside the transcript itself. */
-.ui-result-grid .log-status-icon-spinner {
-  width: 9px;
-  height: 9px;
-  box-sizing: border-box;
-  border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: ui-activity-spin .8s linear infinite;
-}
 .ui-result-grid .log-status--running { color: #3794ff; border-color: #3794ff; background: transparent; }
 .ui-result-grid .log-status--success { color: #4ec94e; border-color: #4ec94e; background: transparent; }
 .ui-result-grid .log-status--error { color: #f14c4c; border-color: #f14c4c; background: transparent; }
@@ -2838,17 +2795,6 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
   color: var(--vscode-badge-foreground, var(--justybase-grid-text));
   font-size: 11px;
 }
-.ui-legacy-log .sql-queue-job-status .log-status-icon-spinner {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 4px;
-  border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: ui-activity-spin .8s linear infinite;
-  vertical-align: -1px;
-}
 .ui-legacy-log .sql-queue-job[data-status='running'] .sql-queue-job-status {
   border: 1px solid var(--vscode-progressBar-background, #3794ff);
   background: var(--justybase-grid-bg);
@@ -2912,7 +2858,6 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-
 .ui-async-state,
 .ui-capability-state {
   padding: 16px;
@@ -2920,7 +2865,8 @@ body.vscode-high-contrast-light .ui-result-grid .log-error-hint { color: var(--v
 }
 
 /* Keep the loading ring on the first text line; `center` would also vertically
-   center the whole pane when the split gives `.ui-async-state` extra height. */
+   center the whole pane when the split gives `.ui-async-state` extra height.
+   Hosts pass `showActivity={false}` when the tab header owns execution progress. */
 .ui-async-state { display: flex; align-items: flex-start; gap: 8px; }
 .ui-async-state .ui-activity-spinner { margin-top: 4px; }
 
@@ -4342,9 +4288,10 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
 .ui-result-tab-badge-partial { color: var(--vscode-editorWarning-foreground, #cca700); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 16%, transparent); }
 .ui-result-tab-badge-empty { color: var(--vscode-descriptionForeground, #999); background: color-mix(in srgb, var(--vscode-descriptionForeground, #999) 16%, transparent); }
 
-/* Animated "query still running" ring. A query can take minutes, so every
-   surface that reports execution (tabs, banners, Logs header) keeps a visible,
-   moving indicator instead of a static glyph. */
+/* The single animated "query still running" ring. It is rendered only in the
+   header of the executing result tab — including Logs, which is the only tab
+   present while a statement has not produced a data result yet. Every other
+   execution cue (banner, transcript badges, queue rows) stays static. */
 @keyframes ui-activity-spin {
   to { transform: rotate(360deg); }
 }
@@ -4370,9 +4317,7 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
 .ui-result-tab-busy .ui-result-tab-label[aria-selected='true'] .ui-result-tab-spinner { color: var(--jb-color-accent); }
 
 @media (prefers-reduced-motion: reduce) {
-  .ui-activity-spinner,
-  .ui-result-grid .log-status-icon-spinner,
-  .ui-legacy-log .sql-queue-job-status .log-status-icon-spinner {
+  .ui-activity-spinner {
     border-color: currentColor;
     animation: none;
     opacity: .85;
@@ -4424,9 +4369,8 @@ body.vscode-high-contrast-light .ui-log-badge-retrying { color: #92400e; backgro
 .ui-refresh-failure-icon { display: inline-grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; font-size: 10px; font-weight: 700; }
 .ui-execution-banner-icon { background: var(--vscode-focusBorder, #6689a7); color: var(--vscode-button-foreground, #fff); }
 .ui-execution-banner-icon.ui-execution-banner-icon-finalizing { background: var(--vscode-editorWarning-foreground, #cca700); color: #1e1e1e; }
-/* The banner icon is a ring while the query runs, so the strip itself carries a
-   motion cue even when the grid is empty and nothing else changes. */
-.ui-execution-banner-icon .ui-activity-spinner { width: 9px; height: 9px; border-width: 1.5px; }
+/* The banner icon is a static glyph: the animated ring lives in the result and
+   Logs tab headers, so a single query never shows several indicators at once. */
 .ui-execution-banner-message { flex: 1 1 auto; min-width: 0; }
 .ui-execution-banner-elapsed { color: var(--vscode-descriptionForeground, inherit); font-variant-numeric: tabular-nums; }
 .ui-execution-banner-cancel { min-height: 20px; padding: 0 8px; }

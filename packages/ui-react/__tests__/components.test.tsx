@@ -419,6 +419,10 @@ describe('shared React presentation', () => {
     const { rerender } = render(<AsyncStateView state="loading" />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading');
     expect(screen.getByRole('status').querySelector('.ui-activity-spinner')).not.toBeNull();
+    // Result-panel hosts already animate the tab header, so the pane can opt out.
+    rerender(<AsyncStateView state="loading" showActivity={false} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading');
+    expect(screen.getByRole('status').querySelector('.ui-activity-spinner')).toBeNull();
     rerender(<AsyncStateView state="empty" emptyLabel="No rows" />);
     expect(screen.getByRole('status')).toHaveTextContent('No rows');
     rerender(<AsyncStateView state="error" message="Request failed" />);
@@ -454,14 +458,16 @@ describe('shared React presentation', () => {
     expect(logsTab).toHaveAttribute('title', expect.stringContaining('still running'));
   });
 
-  it('shows an elapsed clock and spinner while the query runs, hiding it once idle', () => {
+  it('shows an elapsed clock for a running query without a second spinner', () => {
     const onCancel = jest.fn();
     const startedAt = Date.now() - 65_000;
     const { rerender } = render(<ResultExecutionBanner status="loading" startedAt={startedAt} onCancel={onCancel} />);
     const banner = screen.getByRole('status');
     expect(banner).toHaveTextContent('Running query…');
     expect(banner).toHaveTextContent('1m 05s');
-    expect(banner.querySelector('.ui-activity-spinner')).not.toBeNull();
+    // One query means one animated indicator: the tab header owns it.
+    expect(banner.querySelector('.ui-activity-spinner')).toBeNull();
+    expect(banner.querySelector('.ui-execution-banner-icon')?.textContent).toBe('▶');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
 
     rerender(<ResultExecutionBanner status="success" startedAt={startedAt} onCancel={onCancel} />);
@@ -486,7 +492,9 @@ describe('shared React presentation', () => {
       // Finalizing is still "running", but marks the icon as finalizing.
       rerender(<ResultExecutionBanner status="finalizing" startedAt={startedAt} />);
       expect(screen.getByRole('status')).toHaveTextContent('Finalizing result…');
-      expect(container.querySelector('.ui-execution-banner-icon-finalizing .ui-activity-spinner')).not.toBeNull();
+      expect(container.querySelector('.ui-execution-banner-icon-finalizing')).not.toBeNull();
+      // The banner never animates: the tab header owns the single spinner.
+      expect(container.querySelector('.ui-activity-spinner')).toBeNull();
 
       // A tick that does not cross a second boundary must not re-render: freeze
       // the wall clock while the interval fires.
@@ -500,7 +508,7 @@ describe('shared React presentation', () => {
         nowSpy.mockRestore();
       }
 
-      // Terminal states swap the spinner for a static icon and stop the clock.
+      // Terminal states keep a static icon and stop the clock.
       rerender(<ResultExecutionBanner status="cancelled" startedAt={startedAt} />);
       expect(screen.getByRole('status')).toHaveTextContent('Query cancelled.');
       expect(container.querySelector('.ui-execution-banner-elapsed')).toBeNull();
@@ -626,7 +634,7 @@ describe('shared React presentation', () => {
     expect(hint).not.toContain('COL_40');
   });
 
-  it('animates only the running log badge and keeps terminal statuses static', () => {
+  it('keeps every log badge static because the tab header owns the spinner', () => {
     const { container } = render(<LogConsole rows={[
       ['12:00', '▶ RUNNING: SELECT 1 | CONN | 5 s | 10 rows'],
       ['12:01', '✓ SUCCESS: SELECT 1 | CONN | 90 ms | 10 rows'],
@@ -635,9 +643,11 @@ describe('shared React presentation', () => {
     const badges = [...container.querySelectorAll('.log-status')];
     expect(badges).toHaveLength(3);
 
-    expect(badges[0]?.querySelector('.log-status-icon-spinner')).not.toBeNull();
+    // The transcript reports state with a glyph; only the tab header animates,
+    // so a running statement does not add a second ring to the same view.
+    expect(badges[0]?.querySelector('.log-status-icon-spinner')).toBeNull();
+    expect(badges[0]?.querySelector('.log-status-icon')?.textContent).toBe('▶');
     expect(badges[0]?.textContent).toContain('RUNNING');
-    // Terminal statuses keep their glyph: only work in flight gets a spinner.
     expect(badges[1]?.querySelector('.log-status-icon-spinner')).toBeNull();
     expect(badges[1]?.querySelector('.log-status-icon')?.textContent).toBe('✓');
     expect(badges[1]?.textContent).toContain('SUCCESS');
@@ -2069,10 +2079,11 @@ describe('shared React presentation', () => {
     expect(screen.getByText('No differences detected.')).toBeInTheDocument();
   });
 
-  it('exposes aria-busy and an indeterminate progress strip while the shared grid is loading', () => {
+  it('reports busy state without a second progress strip in the grid', () => {
     const { container } = render(<DataGrid resultSetId="busy-grid" columns={[{ name: 'ID', type: 'INTEGER' }]} rows={[[1]]} busy />);
     expect(container.querySelector('.ui-result-grid')).toHaveAttribute('aria-busy', 'true');
-    expect(container.querySelector('.ui-data-grid-progress')).not.toBeNull();
-    expect(container.querySelector('.ui-data-grid-progress > span')).not.toBeNull();
+    // Progress is animated in the result-tab header only, so the grid itself
+    // carries the accessible busy state and no flying bar.
+    expect(container.querySelector('.ui-data-grid-progress')).toBeNull();
   });
 });

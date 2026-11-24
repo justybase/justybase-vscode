@@ -22,14 +22,20 @@ export interface AsyncStateViewProps {
   readonly loadingLabel?: string;
   readonly emptyLabel?: string;
   readonly cancelledLabel?: string;
+  /**
+   * Renders the animated ring for the loading state. Hosts that already show
+   * execution progress in a tab header turn it off so one query does not paint
+   * two indicators at once.
+   */
+  readonly showActivity?: boolean;
   readonly children?: ReactNode;
 }
 
-export function AsyncStateView({ state, message, loadingLabel = 'Loading…', emptyLabel = 'Nothing to show.', cancelledLabel = 'Cancelled.', children }: AsyncStateViewProps): ReactNode {
+export function AsyncStateView({ state, message, loadingLabel = 'Loading…', emptyLabel = 'Nothing to show.', cancelledLabel = 'Cancelled.', showActivity = true, children }: AsyncStateViewProps): ReactNode {
   if (state === 'ready') return <>{children}</>;
   const label = state === 'loading' ? loadingLabel : state === 'empty' ? emptyLabel : state === 'cancelled' ? cancelledLabel : message ?? 'Something went wrong.';
   return <div className={`ui-async-state ui-async-${state}`} role={state === 'error' ? 'alert' : 'status'} aria-live="polite">
-    {state === 'loading' && <span className="ui-activity-spinner" aria-hidden="true" />}
+    {state === 'loading' && showActivity && <span className="ui-activity-spinner" aria-hidden="true" />}
     <span>{label}</span>
   </div>;
 }
@@ -152,10 +158,11 @@ export function ResultExecutionBanner({ status, message, cancelling = false, onC
           ? 'Query cancelled.'
           : message ?? 'Query failed.';
   const canCancel = onCancel !== undefined && (status === 'loading' || status === 'retrying');
+  // Execution progress is animated only in the result/Logs tab headers. The
+  // banner keeps a static icon and the text/clock/Cancel, so one query never
+  // paints several spinning rings at once.
   return <div className={`ui-execution-banner ui-execution-${status}`} role={status === 'error' ? 'alert' : 'status'} aria-live="polite">
-    {running
-      ? <span className={`ui-execution-banner-icon${status === 'finalizing' ? ' ui-execution-banner-icon-finalizing' : ''}`} aria-hidden="true"><ActivitySpinner /></span>
-      : <span className="ui-execution-banner-icon" aria-hidden="true">{status === 'cancelled' ? '⊘' : '✗'}</span>}
+    <span className={`ui-execution-banner-icon${status === 'finalizing' ? ' ui-execution-banner-icon-finalizing' : ''}`} aria-hidden="true">{running ? '▶' : status === 'cancelled' ? '⊘' : '✗'}</span>
     <span className="ui-execution-banner-message">
       {label}
       {running && startedAt !== undefined && <span className="ui-execution-banner-elapsed"> · <ExecutionElapsed startedAt={startedAt} /></span>}

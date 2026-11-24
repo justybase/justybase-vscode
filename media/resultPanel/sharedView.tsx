@@ -32,7 +32,6 @@ import {
     type UiStore,
 } from '@justybase/ui-core';
 import {
-    ActivitySpinner,
     AsyncStateView,
     DataGrid,
     DataGridColumnFilterPanel,
@@ -3873,9 +3872,9 @@ function createSharedLogLine(row: LogRow): HTMLElement {
     const badge = document.createElement('span');
     badge.className = `log-status log-status--${parsed.status}`;
     const icon = document.createElement('span');
-    icon.className = parsed.status === 'running' ? 'log-status-icon log-status-icon-spinner' : 'log-status-icon';
+    icon.className = 'log-status-icon';
     icon.setAttribute('aria-hidden', 'true');
-    if (parsed.status !== 'running') icon.textContent = LOG_STATUS_ICONS[parsed.status] ?? '';
+    icon.textContent = LOG_STATUS_ICONS[parsed.status];
     const label = document.createElement('span');
     label.textContent = parsed.status.toUpperCase();
     badge.append(icon, label);
@@ -3942,8 +3941,9 @@ function SharedLogConsole({
     return <div className="ui-result-grid ui-legacy-log console-wrapper" ref={wrapper}>
         <div className="ui-log-toolbar">
             {executing && <span className={`ui-log-running${cancelling ? ' ui-log-running-cancelling' : ''}`}>
+                {/* The Logs tab header already spins; this chip adds the state text,
+                    the elapsed clock and Cancel without a second animated ring. */}
                 <span className="ui-log-running-state" role="status" aria-live="polite">
-                    <ActivitySpinner />
                     <span>{cancelling ? 'Cancelling…' : 'Running…'}</span>
                 </span>
                 {startedAt !== undefined && <ExecutionElapsed className="ui-log-running-elapsed" startedAt={startedAt} />}
@@ -4828,7 +4828,7 @@ export function SharedResultPanelApp({ controller }: { readonly controller: Shar
                         sql={activeSql?.sql}
                         refreshSql={activeSql?.refreshSql}
                     />
-                    : <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…">
+                    : <AsyncStateView state={resultState} message={activeResult?.message} loadingLabel="Waiting for result data…" showActivity={false}>
                     {activeResult && (isLogResult
                         ? <SharedLogConsole
                             rows={rows}

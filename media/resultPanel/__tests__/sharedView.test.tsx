@@ -384,17 +384,20 @@ describe('shared VS Code Result Panel adapter', () => {
         expect(logsTab).toHaveAttribute('aria-busy', 'true');
         expect(logsTab.querySelector('.ui-result-tab-spinner')).not.toBeNull();
 
-        // The Logs header shows a dedicated running chip with a spinner and a
-        // Cancel action, because the generic execution banner is not rendered
-        // for the Logs surface.
+        // The Logs header shows a dedicated running chip with the elapsed time
+        // and a Cancel action, because the generic execution banner is not
+        // rendered for the Logs surface. The only animated ring in the view is
+        // the Logs tab header; the chip and transcript badges stay static.
         expect(screen.getByRole('button', { name: 'Clear Logs' })).toBeInTheDocument();
         const runningChip = document.querySelector('.ui-log-running');
         expect(runningChip).not.toBeNull();
         expect(runningChip).toHaveTextContent('Running…');
-        expect(runningChip?.querySelector('.ui-activity-spinner')).not.toBeNull();
+        expect(runningChip?.querySelector('.ui-activity-spinner')).toBeNull();
         expect(runningChip?.querySelector('.ui-log-running-elapsed')).not.toBeNull();
         expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-        expect(document.querySelector('.log-status--running .log-status-icon-spinner')).not.toBeNull();
+        expect(document.querySelectorAll('.ui-activity-spinner')).toHaveLength(1);
+        expect(document.querySelector('.log-status--running .log-status-icon-spinner')).toBeNull();
+        expect(document.querySelector('.log-status--running .log-status-icon')?.textContent).toBe('▶');
 
         // Cancelling switches the chip label until the host acknowledges it.
         fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

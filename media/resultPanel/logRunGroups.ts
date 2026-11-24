@@ -104,14 +104,15 @@ function appendChip(parent: HTMLElement, text: string | undefined, extraClass?: 
 }
 
 /**
- * Running statements use an animated ring instead of the static play glyph so
- * a long statement is recognisable at a glance inside the Logs transcript.
+ * Execution progress is animated only in the result-tab header. The transcript
+ * badge therefore keeps a static glyph so a single query does not paint
+ * several rings at once.
  */
 function createRunStatusIcon(status: RunStatus): HTMLElement {
     const icon = document.createElement('span');
-    icon.className = status === 'running' ? 'log-status-icon log-status-icon-spinner' : 'log-status-icon';
+    icon.className = 'log-status-icon';
     icon.setAttribute('aria-hidden', 'true');
-    if (status !== 'running') icon.textContent = STATUS_ICON[status];
+    icon.textContent = STATUS_ICON[status];
     return icon;
 }
 

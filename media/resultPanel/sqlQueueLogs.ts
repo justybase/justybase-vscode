@@ -79,14 +79,6 @@ export function renderSqlQueueLogs(wrapper: HTMLElement, sourceUri?: string): vo
         row.dataset.status = job.status;
         const status = document.createElement('span');
         status.className = 'sql-queue-job-status';
-        if (job.status === 'running') {
-            // The queue overview is the only in-panel surface when a request is
-            // waiting behind a long statement; keep the running marker animated.
-            const spinner = document.createElement('span');
-            spinner.className = 'log-status-icon log-status-icon-spinner';
-            spinner.setAttribute('aria-hidden', 'true');
-            status.appendChild(spinner);
-        }
         status.appendChild(document.createTextNode(job.status === 'queued' ? `QUEUED #${index - lane.running.length + 1}` : job.status.toUpperCase()));
         const sql = document.createElement('code');
         sql.textContent = job.sql.replace(/\s+/g, ' ').slice(0, 180);

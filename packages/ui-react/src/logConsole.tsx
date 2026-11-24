@@ -140,9 +140,8 @@ export function LogConsole({ rows, columns, emptyLabel = 'No log messages yet.' 
         const meta = [parsed.connection, parsed.duration, parsed.rowCount].filter((part): part is string => !!part);
         return <div className={`console-line status-${parsed.status}`} key={index}>
           <span className="console-time">{time}</span>
-          <span className={`log-status log-status--${parsed.status}`}>{parsed.status === 'running'
-            ? <span className="log-status-icon log-status-icon-spinner" aria-hidden="true" />
-            : <span className="log-status-icon" aria-hidden="true">{STATUS_ICONS[parsed.status]}</span>}<span>{STATUS_LABELS[parsed.status]}</span></span>
+          <span className={`log-status log-status--${parsed.status}`}>
+            <span className="log-status-icon" aria-hidden="true">{STATUS_ICONS[parsed.status]}</span><span>{STATUS_LABELS[parsed.status]}</span></span>
           <span className="console-msg">
             {parsed.sqlPreview && <span className="log-line-sql">{parsed.sqlPreview}</span>}
             {meta.length > 0 && <span className="log-meta-inline">{meta.join('  ·  ')}</span>}
