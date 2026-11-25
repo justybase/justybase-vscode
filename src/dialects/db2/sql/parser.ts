@@ -115,7 +115,31 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	}
 
 	protected getAdditionalPrimaryExpressionAlternatives(): OrAlternative[] {
-		return [{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDate) }];
+		// Db2 special registers lex as one multi-word token each, so every one
+		// must be an expression alternative or `SELECT CURRENT SCHEMA` fails.
+		return [
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDate) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTime) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTimestamp) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSchema) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentServer) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentUser) },
+		];
+	}
+
+	protected getNetezzaIdentifierTokens() {
+		// `SET CURRENT SCHEMA x`, `SET CURRENT SQLID`, and `SET CURRENT DEGREE`
+		// all route through `commandTail` → `identifier`, and the Db2 lexer emits
+		// those registers as one multi-word token each.
+		return [
+			...super.getNetezzaIdentifierTokens(),
+			db2Lexer.Db2CurrentSchema,
+			db2Lexer.Db2CurrentServer,
+			db2Lexer.Db2CurrentDate,
+			db2Lexer.Db2CurrentTime,
+			db2Lexer.Db2CurrentTimestamp,
+			db2Lexer.Db2CurrentUser,
+		];
 	}
 
 	protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {

@@ -104,6 +104,23 @@ describe('Db2SqlParser LUW', () => {
 		expect(result.actionableParserErrors.length).toBeGreaterThan(0);
 	});
 
+	it.each([
+		['current schema', 'SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1'],
+		['current server', 'SELECT CURRENT SERVER AS DATABASE FROM SYSIBM.SYSDUMMY1 WITH UR'],
+		['current user', 'SELECT CURRENT USER FROM SYSIBM.SYSDUMMY1'],
+		['current time', 'SELECT CURRENT TIME FROM SYSIBM.SYSDUMMY1'],
+		['current timestamp', 'SELECT CURRENT TIMESTAMP FROM SYSIBM.SYSDUMMY1'],
+		['current date in predicate', 'SELECT ID FROM T WHERE TS > CURRENT DATE'],
+		['values current schema', 'VALUES CURRENT SCHEMA'],
+		['set current schema', 'SET CURRENT SCHEMA JBL_LIVE'],
+		['set current isolation', 'SET CURRENT ISOLATION UR'],
+		['set schema', 'SET SCHEMA JBL_LIVE'],
+	])('parses the Db2 special register in %s', (_name, sql) => {
+		const result = parse(sql);
+		expect(result.lexResult.errors).toHaveLength(0);
+		expect(result.actionableParserErrors).toHaveLength(0);
+	});
+
 	it('parses LANGUAGE SQL procedure units as one CST statement', () => {
 		const result = parse(`CREATE OR REPLACE PROCEDURE demo_proc (IN p_in INTEGER, OUT p_out INTEGER)
 LANGUAGE SQL
