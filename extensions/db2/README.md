@@ -26,6 +26,22 @@ Connect to a Db2 LUW database, browse `SYSCAT` metadata, write SQL, execute it, 
 - Quality rules **DB2001–DB2008** for common Db2 SQL problems.
 - DDL extraction, explain-plan graph, tuning advisor, session monitor, `RUNSTATS`, `REORG`, and index/partition helpers.
 
+### Explain plans
+
+**Explain Query Plan** runs `EXPLAIN PLAN FOR`, reads the plan back from
+`EXPLAIN_OPERATOR`/`EXPLAIN_STREAM`, and renders the same plan graph and tuning
+advisor as the other dialects. Db2 stores the plan in `EXPLAIN_*` catalog tables
+rather than returning it, so those tables must exist in the database:
+
+```sql
+CALL SYSPROC.SYSINSTALLOBJECTS('EXPLAIN', 'C', CURRENT SCHEMA, '');
+```
+
+The `EXPLAIN.DDL` script from your Db2 instance works too. The connected user
+needs `INSERT` on the `EXPLAIN_*` tables and `SELECT` on `EXPLAIN_OPERATOR` and
+`EXPLAIN_STREAM`. When the tables are missing the command shows the Db2 error
+with this hint instead of an empty plan.
+
 ### Design indexes and partitions
 
 The table context menu provides dedicated Db2 webviews for structural maintenance:

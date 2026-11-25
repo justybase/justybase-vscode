@@ -8,8 +8,6 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Db2Connection } from '../../../extensions/db2/src/db2Connection';
 import { db2Dialect } from '../../../extensions/db2/src/db2Dialect';
 import {
-	buildDb2ExplainQuery,
-	buildDb2ExplainRetrieveQuery,
 	parseDb2ExplainJson,
 	renderDb2ExplainPlan,
 } from '../../../extensions/db2/src/db2ExplainParser';
@@ -150,46 +148,6 @@ function createMockConnectionManager(config: DatabaseConnectionConfig): Connecti
 		getActiveConnectionName: () => 'db2-live-test',
 		getConnection: async () => toConnectionDetails(config),
 	} as unknown as ConnectionManager;
-}
-
-function toOptionalNumber(value: unknown): number | undefined {
-	if (typeof value === 'number' && Number.isFinite(value)) {
-		return value;
-	}
-	if (typeof value === 'string' && value.trim().length > 0) {
-		const parsed = Number(value);
-		return Number.isFinite(parsed) ? parsed : undefined;
-	}
-	return undefined;
-}
-
-function toOptionalString(value: unknown): string | undefined {
-	return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-/** Convert flat EXPLAIN_OPERATOR rows into nested JSON for parseDb2ExplainJson. */
-function buildDb2ExplainTreeFromOperatorRows(
-	rows: ReadonlyArray<Record<string, unknown>>,
-): Record<string, unknown> {
-	if (rows.length === 0) {
-		throw new Error('EXPLAIN_OPERATOR returned no rows for the explained statement.');
-	}
-
-	type MutableNode = Record<string, unknown> & { children: MutableNode[] };
-	const nodes: MutableNode[] = rows.map((row) => ({
-		operator_type: toOptionalString(row.OPERATOR_TYPE) ?? 'Unknown',
-		object_schema: toOptionalString(row.OBJECT_SCHEMA),
-		object_name: toOptionalString(row.OBJECT_NAME),
-		total_cost: toOptionalNumber(row.TOTAL_COST) ?? 0,
-		estimated_rows: toOptionalNumber(row.STREAM_COUNT) ?? 0,
-		ios_cost: toOptionalNumber(row.IO_COST),
-		cpu_cost: toOptionalNumber(row.CPU_COST),
-		children: [] as MutableNode[],
-	}));
-
-	const root = nodes[0];
-	root.children = nodes.slice(1);
-	return { plan: root };
 }
 
 function isDb2ExplainEnvironmentError(error: unknown): boolean {
@@ -662,21 +620,41 @@ describeIfConfigured('db2 integration', () => {
 		it('runs EXPLAIN PLAN, parses the plan tree, and surfaces SELECT * tuning advice', async () => {
 			const qualifiedTable = buildQualifiedName(schemaName, tableName);
 			const explainedSql = `SELECT * FROM ${qualifiedTable} WHERE ID = 1`;
-			const explainSql = buildDb2ExplainQuery(explainedSql);
+			const explainProvider = db2Dialect.advancedFeatures?.explain;
+			expect(explainProvider).toBeDefined();
+
+			const explainSql = explainProvider!.buildQuery(explainedSql, { verbose: true });
 			expect(explainSql).toContain('EXPLAIN PLAN FOR');
 
 			try {
 				await connection.createCommand(explainSql).execute();
 
-				const planRows = await readRows(connection, buildDb2ExplainRetrieveQuery());
+				const retrieveQuery = explainProvider!.buildRetrieveQuery!();
+				const planRows = await readRows(connection, retrieveQuery);
 				expect(planRows.length).toBeGreaterThan(0);
 				expect(planRows.some((row) => String(row.OPERATOR_TYPE ?? '').length > 0)).toBe(true);
 
-				const explainEnvelope = buildDb2ExplainTreeFromOperatorRows(planRows);
-				const explainPlanText = JSON.stringify(explainEnvelope);
+				// The retrieval rows are already the persisted plan: the provider has to
+				// rebuild the tree from PARENT_ID without a test-only adapter.
+				const explainPlanText = JSON.stringify(planRows);
 				const parsed = parseDb2ExplainJson(explainPlanText);
 				expect(parsed.root.operatorType.length).toBeGreaterThan(0);
 				expect(renderDb2ExplainPlan(parsed)).toContain(parsed.root.operatorType);
+
+				// Every operator must remain reachable in the rebuilt tree.
+				const collected: string[] = [];
+				const stack = [parsed.root];
+				while (stack.length > 0) {
+					const node = stack.pop()!;
+					collected.push(node.operatorType);
+					stack.push(...node.children);
+				}
+				expect(collected).toHaveLength(planRows.length);
+				expect(collected.filter((type) => type.length > 0)).toHaveLength(planRows.length);
+
+				const normalized = explainProvider!.normalizeOutput!(explainPlanText);
+				expect(normalized).toContain(parsed.root.operatorType);
+				expect(normalized).toMatch(/\(cost=[\d.]+\.\.[\d.]+ rows=\d+ width=\d+ conf=[\d.]+\)/);
 
 				const tuningAdvisor = db2Dialect.advancedFeatures?.tuningAdvisor;
 				expect(tuningAdvisor).toBeDefined();

@@ -11,6 +11,7 @@ import { CopilotValidationTools } from './tools/CopilotValidationTools';
 import { CopilotDependencyTools } from './tools/CopilotDependencyTools';
 import { CopilotProcedureRepairService } from './tools/procedureRepairService';
 import type { ProcedureRepairInput } from './tools/procedureRepairUtils';
+import type { ExplainRequest } from '../../core/explain/explainRequest';
 
 export class CopilotToolsHandler {
     private readonly runtime: CopilotToolRuntime;
@@ -58,7 +59,8 @@ export class CopilotToolsHandler {
 
         this.validationTools = new CopilotValidationTools({
             runtime: this.runtime,
-            getExplainPlan: (sql, verbose, database) => this.getExplainPlan(sql, verbose, database)
+            getExplainPlan: (sql, verbose, database) => this.getExplainPlan(sql, verbose, database),
+            getExplainRequest: (sql, verbose) => this.explainTuningTools.buildExplainRequest(sql, verbose),
         });
 
         this.dependencyTools = new CopilotDependencyTools({
@@ -80,6 +82,14 @@ export class CopilotToolsHandler {
 
     async getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string> {
         return this.explainTuningTools.getExplainPlan(sql, verbose, database);
+    }
+
+    /**
+     * EXPLAIN statement the active dialect will actually run. Persisted-plan
+     * dialects (Db2) also return the retrieval statement.
+     */
+    buildExplainRequest(sql: string, verbose: boolean): ExplainRequest {
+        return this.explainTuningTools.buildExplainRequest(sql, verbose);
     }
 
     async getExplainPlanAnalysis(sql: string, verbose: boolean, database?: string): Promise<string> {

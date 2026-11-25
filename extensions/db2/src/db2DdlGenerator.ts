@@ -967,6 +967,7 @@ async function generateObjectDDL(connection: DatabaseConnection, schema: string,
     return readDdl(connection, normalizedType, schema, objectName);
 }
 import { db2ImportTypeMapper } from './db2ImportTypeMapper';
+import { db2ExplainProvider } from './db2ExplainParser';
 import { db2MaintenanceProvider } from './db2MaintenanceProvider';
 import { db2CopilotReferenceProvider } from './db2ReferenceProvider';
 import { db2SessionMonitorProvider } from './db2SessionMonitorProvider';
@@ -974,6 +975,7 @@ import { db2TuningAdvisor } from './db2TuningAdvisor';
 
 export const db2AdvancedFeatures: DatabaseAdvancedFeatures = {
     importTypeMapper: db2ImportTypeMapper,
+    explain: db2ExplainProvider,
     tuningAdvisor: db2TuningAdvisor,
     maintenance: db2MaintenanceProvider,
     copilotReferenceProvider: db2CopilotReferenceProvider,

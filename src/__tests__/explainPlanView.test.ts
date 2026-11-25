@@ -52,8 +52,11 @@ Sequential Scan table "BIGTAB" (cost=1..20000000 rows=600000 width=16 conf=0)
 
         const parsed = parseExplainOutput(text);
 
-        expect(parsed.nodes).toHaveLength(2);
-        expect(parsed.nodes[0].children).toHaveLength(0);
+        // Leading indentation is the plan tree: the indented operator is the child
+        // of the scan above it, not a second root.
+        expect(parsed.nodes).toHaveLength(1);
+        expect(parsed.nodes[0].children).toHaveLength(1);
+        expect(parsed.nodes[0].children[0].type).toBe('Nested Loop');
         expect(parsed.totalCost).toBe(20000000000);
         expect(parsed.warnings.length).toBeGreaterThan(0);
         expect(parsed.warnings.some(w => w.type === 'critical')).toBe(true);
@@ -64,6 +67,42 @@ Sequential Scan table "BIGTAB" (cost=1..20000000 rows=600000 width=16 conf=0)
         expect(parsed.nodes).toEqual([]);
         expect(parsed.totalCost).toBe(0);
         expect(parsed.warnings).toEqual([]);
+    });
+
+    it('keeps Netezza join inputs under their join operator', () => {
+        // Netezza marks join inputs with `l:` / `r:`; the marker is not
+        // indentation, so the children stay under the join either way.
+        const text = `NOTICE: QUERY PLAN
+PLANTEXT:
+l: Hash Join (cost=1..100 rows=10 width=8 conf=100)
+r:    Nested Loop (cost=1..30 rows=10 width=4 conf=100)
+r:       Index Scan table "B" (cost=1..5 rows=1 width=4 conf=100)
+l:    Sequential Scan table "A" (cost=1..20 rows=100 width=4 conf=100)`;
+
+        const parsed = parseExplainOutput(text);
+
+        expect(parsed.nodes).toHaveLength(1);
+        const join = parsed.nodes[0];
+        expect(join.type).toBe('Hash Join');
+        expect(join.children.map(child => child.type)).toEqual(['Nested Loop', 'Sequential Scan']);
+        expect(join.children[0].children.map(child => child.type)).toEqual(['Index Scan']);
+    });
+
+    it('skips plan metadata lines and keeps indentation when there is no PLANTEXT header', () => {
+        // Without a `PLANTEXT:` header every candidate line reaches the parser,
+        // including the metadata that verbose Netezza plans append per node.
+        const text = [
+            '   (xpath_foo=1)',
+            '      locus=dn',
+            '   Table scan table "analytics.orders" (cost=1..100 rows=1000 width=32 conf=1)',
+            '      Index Scan table "analytics.idx" (cost=1..5 rows=10 width=4 conf=1)',
+        ].join('\n');
+
+        const parsed = parseExplainOutput(text);
+
+        expect(parsed.nodes).toHaveLength(1);
+        expect(parsed.nodes[0]?.type).toBe('Table scan');
+        expect(parsed.nodes[0]?.children.map(child => child.type)).toEqual(['Index Scan']);
     });
 
     it('should parse shared explain lines with qualified table names', () => {

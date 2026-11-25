@@ -1,4 +1,5 @@
 import { clampConfidence } from '@justybase/contracts';
+import type { DatabaseExplainOptions, DatabaseExplainProvider } from '@justybase/contracts';
 
 export interface Db2ExplainNode {
     id: number;
@@ -12,6 +13,8 @@ export interface Db2ExplainNode {
     actualRows?: number;
     buffers?: number;
     sortRequired?: boolean;
+    /** Columns carried by the operator's data stream; 0 when unknown. */
+    columnCount?: number;
     children: Db2ExplainNode[];
     raw: Record<string, unknown>;
 }
@@ -86,6 +89,33 @@ function getChildArray(record: Record<string, unknown>): unknown[] {
     return [];
 }
 
+function hasAnyKey(record: Record<string, unknown>, keys: string[]): boolean {
+    return keys.some((key) => record[key] !== undefined);
+}
+
+const OPERATOR_ID_KEYS = ['OPERATOR_ID', 'operator_id', 'operatorId'];
+const PARENT_ID_KEYS = ['PARENT_ID', 'parent_id', 'parentId'];
+
+/**
+ * `buildDb2ExplainRetrieveQuery` returns one flat row per `EXPLAIN_OPERATOR`
+ * entry. That shape is not the nested plan used by the shared graph, so it is
+ * recognised separately from a nested JSON envelope.
+ */
+export function isDb2ExplainOperatorRows(input: unknown): input is Record<string, unknown>[] {
+    if (!Array.isArray(input) || input.length === 0) {
+        return false;
+    }
+
+    const first = input[0];
+    if (!first || typeof first !== 'object' || Array.isArray(first)) {
+        return false;
+    }
+
+    const record = first as Record<string, unknown>;
+    return hasAnyKey(record, OPERATOR_ID_KEYS)
+        && hasAnyKey(record, ['operator_type', 'OPERATOR_TYPE', 'operatorType']);
+}
+
 function buildNode(record: Record<string, unknown>, nextId: () => number): Db2ExplainNode {
     const childRecords = getChildArray(record);
 
@@ -100,12 +130,72 @@ function buildNode(record: Record<string, unknown>, nextId: () => number): Db2Ex
         cpuCost: toOptionalNumber(caseGet(record, 'cpu_cost', 'CPU_COST', 'cpuCost')),
         actualRows: toOptionalNumber(caseGet(record, 'actual_rows', 'ACTUAL_ROWS', 'actualRows')),
         buffers: toOptionalNumber(caseGet(record, 'buffers', 'BUFFERS')),
+        columnCount: toOptionalNumber(caseGet(record, 'column_count', 'COLUMN_COUNT', 'columnCount')),
         sortRequired: toOptionalBoolean(caseGet(record, 'sort_required', 'SORT_REQUIRED', 'sortRequired')),
         children: childRecords
             .filter((child): child is Record<string, unknown> => !!child && typeof child === 'object' && !Array.isArray(child))
             .map((child) => buildNode(child, nextId)),
         raw: record,
     };
+}
+
+/**
+ * Rebuilds the plan tree from flat EXPLAIN_OPERATOR rows. `PARENT_ID` comes
+ * from the operator-to-operator stream in EXPLAIN_STREAM; when it is missing the
+ * rows are attached under the most expensive operator so no node is lost.
+ */
+function buildPlanFromOperatorRows(rows: readonly Record<string, unknown>[]): Db2ExplainPlan {
+    let currentId = 0;
+    const nextId = (): number => {
+        currentId += 1;
+        return currentId;
+    };
+
+    const byOperatorId = new Map<number, Db2ExplainNode>();
+    const parentByNodeId = new Map<number, number>();
+    const ordered: Db2ExplainNode[] = [];
+
+    for (const row of rows) {
+        const node = buildNode(row, nextId);
+        const operatorId = toOptionalNumber(caseGet(row, ...OPERATOR_ID_KEYS));
+        const parentId = toOptionalNumber(caseGet(row, ...PARENT_ID_KEYS));
+        if (operatorId !== undefined) {
+            byOperatorId.set(operatorId, node);
+        }
+        if (parentId !== undefined) {
+            parentByNodeId.set(node.id, parentId);
+        }
+        ordered.push(node);
+    }
+
+    const roots: Db2ExplainNode[] = [];
+    for (const node of ordered) {
+        const parentOperatorId = parentByNodeId.get(node.id);
+        const parent = parentOperatorId !== undefined ? byOperatorId.get(parentOperatorId) : undefined;
+        if (parent && parent !== node && !parent.children.includes(node)) {
+            parent.children.push(node);
+            continue;
+        }
+        roots.push(node);
+    }
+
+    if (roots.length === 0) {
+        // Every node claimed a parent (a cycle): keep the first as the root.
+        const [first, ...rest] = ordered;
+        if (!first) {
+            throw new Error('Unsupported Db2 EXPLAIN JSON payload: empty array.');
+        }
+        first.children.push(...rest);
+        return { root: first, totalCost: first.totalCost };
+    }
+
+    const root = roots.reduce((best, node) => (node.totalCost > best.totalCost ? node : best));
+    const extraRoots = roots.filter((node) => node !== root);
+    if (extraRoots.length > 0) {
+        root.children.push(...extraRoots);
+    }
+
+    return { root, totalCost: root.totalCost };
 }
 
 function normalizeEnvelope(input: unknown): Record<string, unknown> {
@@ -207,7 +297,20 @@ export function isDb2ExplainJson(text: string): boolean {
 }
 
 export function parseDb2ExplainJson(input: string | unknown): Db2ExplainPlan {
-    const envelope = normalizeEnvelope(input);
+    let parsedInput = input;
+    if (typeof input === 'string') {
+        try {
+            parsedInput = JSON.parse(input);
+        } catch {
+            throw new Error('Invalid JSON in Db2 EXPLAIN payload.');
+        }
+    }
+
+    if (isDb2ExplainOperatorRows(parsedInput)) {
+        return buildPlanFromOperatorRows(parsedInput);
+    }
+
+    const envelope = normalizeEnvelope(parsedInput);
 
     let currentId = 0;
     const nextId = (): number => {
@@ -236,13 +339,17 @@ function getQualifiedObjectName(node: Db2ExplainNode): string | undefined {
 
 function formatNodeLabel(node: Db2ExplainNode): string {
     const objectName = getQualifiedObjectName(node);
-    const objectSuffix = objectName ? ` ${objectName}` : '';
+    const objectSuffix = objectName ? ` table "${objectName}"` : '';
     const confidence =
         node.actualRows !== undefined && node.estimatedRows > 0
             ? clampConfidence(1 / (1 + Math.abs(Math.log10(Math.max(node.actualRows, 1) / Math.max(node.estimatedRows, 1)))))
             : 1;
+    const width = node.columnCount ?? 0;
 
-    return `${node.operatorType}${objectSuffix} (cost=${node.totalCost.toFixed(2)} rows=${Math.round(node.estimatedRows)} conf=${confidence.toFixed(2)})`;
+    // Keep the shared `(cost=A..B rows=N width=W conf=C)` shape so the common
+    // Explain Plan webview can build its graph from Db2 output too. Db2 reports a
+    // single total cost per operator, so both bounds carry the same value.
+    return `${node.operatorType}${objectSuffix} (cost=${node.totalCost.toFixed(2)}..${node.totalCost.toFixed(2)} rows=${Math.round(node.estimatedRows)} width=${width} conf=${confidence.toFixed(2)})`;
 }
 
 function flattenExplainText(node: Db2ExplainNode, depth = 0): string[] {
@@ -267,33 +374,133 @@ export function buildDb2ExplainQuery(sql: string): string {
 }
 
 export function buildDb2ExplainRetrieveQuery(): string {
-    // OBJECT_SCHEMA/OBJECT_NAME/STREAM_COUNT/COLUMN_NAMES live on EXPLAIN_STREAM,
-    // not EXPLAIN_OPERATOR. Restrict to the newest explain request and to the
-    // data stream (SOURCE_ID = -1) so each operator yields one row.
+    // OBJECT_SCHEMA/OBJECT_NAME belong to the data-object stream that feeds an
+    // operator (SOURCE_ID = -1), while STREAM_COUNT/COLUMN_COUNT describe the
+    // stream the operator produces. Using one join for both would leave every
+    // join's cardinality at 0, so the two shapes are read separately with
+    // scalar subqueries that always yield at most one value per operator.
+    //
+    // PARENT_ID comes from the operator-to-operator streams: the operator that
+    // consumes this operator's output (TARGET_ID of a stream whose SOURCE_ID is
+    // the current operator) is its parent in the plan tree.
     return `
         SELECT
             O.OPERATOR_ID,
             O.OPERATOR_TYPE,
-            S.OBJECT_SCHEMA,
-            S.OBJECT_NAME,
+            (
+                SELECT MIN(D.OBJECT_SCHEMA)
+                FROM EXPLAIN_STREAM D
+                WHERE D.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
+                  AND D.EXPLAIN_TIME = O.EXPLAIN_TIME
+                  AND D.SOURCE_NAME = O.SOURCE_NAME
+                  AND D.SOURCE_SCHEMA = O.SOURCE_SCHEMA
+                  AND D.SOURCE_VERSION = O.SOURCE_VERSION
+                  AND D.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
+                  AND D.STMTNO = O.STMTNO
+                  AND D.SECTNO = O.SECTNO
+                  AND D.TARGET_ID = O.OPERATOR_ID
+                  AND D.SOURCE_ID = -1
+            ) AS OBJECT_SCHEMA,
+            (
+                SELECT MIN(D.OBJECT_NAME)
+                FROM EXPLAIN_STREAM D
+                WHERE D.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
+                  AND D.EXPLAIN_TIME = O.EXPLAIN_TIME
+                  AND D.SOURCE_NAME = O.SOURCE_NAME
+                  AND D.SOURCE_SCHEMA = O.SOURCE_SCHEMA
+                  AND D.SOURCE_VERSION = O.SOURCE_VERSION
+                  AND D.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
+                  AND D.STMTNO = O.STMTNO
+                  AND D.SECTNO = O.SECTNO
+                  AND D.TARGET_ID = O.OPERATOR_ID
+                  AND D.SOURCE_ID = -1
+            ) AS OBJECT_NAME,
             O.TOTAL_COST,
-            S.STREAM_COUNT,
+            (
+                SELECT MIN(OUT.STREAM_COUNT)
+                FROM EXPLAIN_STREAM OUT
+                WHERE OUT.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
+                  AND OUT.EXPLAIN_TIME = O.EXPLAIN_TIME
+                  AND OUT.SOURCE_NAME = O.SOURCE_NAME
+                  AND OUT.SOURCE_SCHEMA = O.SOURCE_SCHEMA
+                  AND OUT.SOURCE_VERSION = O.SOURCE_VERSION
+                  AND OUT.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
+                  AND OUT.STMTNO = O.STMTNO
+                  AND OUT.SECTNO = O.SECTNO
+                  AND OUT.SOURCE_ID = O.OPERATOR_ID
+                  AND OUT.SOURCE_TYPE = 'O'
+            ) AS STREAM_COUNT,
             O.IO_COST,
             O.CPU_COST,
-            S.COLUMN_NAMES
+            (
+                SELECT MIN(OUT.COLUMN_COUNT)
+                FROM EXPLAIN_STREAM OUT
+                WHERE OUT.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
+                  AND OUT.EXPLAIN_TIME = O.EXPLAIN_TIME
+                  AND OUT.SOURCE_NAME = O.SOURCE_NAME
+                  AND OUT.SOURCE_SCHEMA = O.SOURCE_SCHEMA
+                  AND OUT.SOURCE_VERSION = O.SOURCE_VERSION
+                  AND OUT.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
+                  AND OUT.STMTNO = O.STMTNO
+                  AND OUT.SECTNO = O.SECTNO
+                  AND OUT.SOURCE_ID = O.OPERATOR_ID
+                  AND OUT.SOURCE_TYPE = 'O'
+            ) AS COLUMN_COUNT,
+            (
+                SELECT MIN(P.TARGET_ID)
+                FROM EXPLAIN_STREAM P
+                WHERE P.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
+                  AND P.EXPLAIN_TIME = O.EXPLAIN_TIME
+                  AND P.SOURCE_NAME = O.SOURCE_NAME
+                  AND P.SOURCE_SCHEMA = O.SOURCE_SCHEMA
+                  AND P.SOURCE_VERSION = O.SOURCE_VERSION
+                  AND P.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
+                  AND P.STMTNO = O.STMTNO
+                  AND P.SECTNO = O.SECTNO
+                  AND P.SOURCE_ID = O.OPERATOR_ID
+                  AND P.SOURCE_TYPE = 'O'
+                  AND P.TARGET_TYPE = 'O'
+            ) AS PARENT_ID
         FROM EXPLAIN_OPERATOR O
-        LEFT JOIN EXPLAIN_STREAM S
-            ON S.EXPLAIN_REQUESTER = O.EXPLAIN_REQUESTER
-           AND S.EXPLAIN_TIME = O.EXPLAIN_TIME
-           AND S.SOURCE_NAME = O.SOURCE_NAME
-           AND S.SOURCE_SCHEMA = O.SOURCE_SCHEMA
-           AND S.SOURCE_VERSION = O.SOURCE_VERSION
-           AND S.EXPLAIN_LEVEL = O.EXPLAIN_LEVEL
-           AND S.STMTNO = O.STMTNO
-           AND S.SECTNO = O.SECTNO
-           AND S.TARGET_ID = O.OPERATOR_ID
-           AND S.SOURCE_ID = -1
-        WHERE O.EXPLAIN_TIME = (SELECT MAX(EXPLAIN_TIME) FROM EXPLAIN_INSTANCE)
+        WHERE O.EXPLAIN_REQUESTER = CURRENT USER
+          AND O.EXPLAIN_TIME = (
+              SELECT MAX(I.EXPLAIN_TIME)
+              FROM EXPLAIN_INSTANCE I
+              WHERE I.EXPLAIN_REQUESTER = CURRENT USER
+          )
         ORDER BY O.OPERATOR_ID
     `;
 }
+
+/**
+ * Db2 `EXPLAIN PLAN FOR` writes the plan into the EXPLAIN_* tables instead of
+ * returning it, so the provider also supplies the retrieval statement. The
+ * shared runner executes it on the same connection and hands the rows back as
+ * JSON, which `normalizeOutput` turns into the shared plan-text shape used by
+ * the Explain Plan webview and the tuning advisor.
+ */
+export const db2ExplainProvider: DatabaseExplainProvider = {
+    buildQuery(sql: string, _options?: DatabaseExplainOptions): string {
+        return buildDb2ExplainQuery(sql);
+    },
+    buildRetrieveQuery(): string {
+        return buildDb2ExplainRetrieveQuery();
+    },
+    normalizeOutput(output: string): string {
+        if (!isDb2ExplainJson(output)) {
+            return output;
+        }
+
+        const plan = parseDb2ExplainJson(output);
+        return renderDb2ExplainPlan(plan);
+    },
+    formatError(message: string): string | undefined {
+        if (/SQL0219N|SQL0204N.*EXPLAIN_|EXPLAIN_OPERATOR|EXPLAIN_INSTANCE/i.test(message)) {
+            return `${message}\n\nDb2 EXPLAIN needs its catalog tables. Run the EXPLAIN.DDL script from your Db2 instance (usually \`/opt/ibm/db2/V11.5/misc/EXPLAIN.DDL\`, or \`CALL SYSPROC.SYSINSTALLOBJECTS('EXPLAIN', 'C', ...)\` on older versions), then retry.`;
+        }
+        if (/SQL0551N|SQL0443N/i.test(message)) {
+            return `${message}\n\nThe connected Db2 user must be able to write to the EXPLAIN tables and read EXPLAIN_OPERATOR / EXPLAIN_STREAM.`;
+        }
+        return undefined;
+    },
+};

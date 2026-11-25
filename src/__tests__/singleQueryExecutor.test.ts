@@ -1238,6 +1238,50 @@ describe('singleQueryExecutor', () => {
 
             expect(mockConn.close).toHaveBeenCalled();
         });
+
+        it('should run the retrieval query and return its rows as JSON', async () => {
+            const explainReader = {
+                read: jest.fn().mockResolvedValue(false),
+                nextResult: jest.fn().mockResolvedValue(false),
+                close: jest.fn().mockResolvedValue(undefined),
+                fieldCount: 0,
+            };
+            const retrieveReader = {
+                read: jest.fn()
+                    .mockResolvedValueOnce(true)
+                    .mockResolvedValueOnce(true)
+                    .mockResolvedValueOnce(false),
+                nextResult: jest.fn().mockResolvedValue(false),
+                close: jest.fn().mockResolvedValue(undefined),
+                fieldCount: 2,
+                getName: jest.fn((index: number) => (index === 0 ? 'OPERATOR_TYPE' : 'TOTAL_COST')),
+                getValue: jest.fn()
+                    .mockReturnValueOnce('RETURN').mockReturnValueOnce(10n)
+                    .mockReturnValueOnce('TBSCAN').mockReturnValueOnce(4.5),
+            };
+            mockConn.createCommand
+                .mockReturnValueOnce({ executeReader: jest.fn().mockResolvedValue(explainReader), commandTimeout: 0 })
+                .mockReturnValueOnce({ executeReader: jest.fn().mockResolvedValue(retrieveReader), commandTimeout: 0 });
+
+            const result = await runExplainQuery(
+                mockContext,
+                'EXPLAIN PLAN FOR SELECT 1 FROM SYSIBM.SYSDUMMY1',
+                undefined,
+                mockConnManager,
+                'file:///test.sql',
+                undefined,
+                { retrieveQuery: 'SELECT OPERATOR_TYPE, TOTAL_COST FROM EXPLAIN_OPERATOR' },
+            );
+
+            const parsed = JSON.parse(result) as Array<Record<string, unknown>>;
+            expect(parsed).toEqual([
+                { OPERATOR_TYPE: 'RETURN', TOTAL_COST: '10' },
+                { OPERATOR_TYPE: 'TBSCAN', TOTAL_COST: 4.5 },
+            ]);
+            expect(mockConn.createCommand).toHaveBeenCalledWith(
+                'SELECT OPERATOR_TYPE, TOTAL_COST FROM EXPLAIN_OPERATOR',
+            );
+        });
     });
 
     // ── runQueryWithCatalog ─────────────────────────────────────────

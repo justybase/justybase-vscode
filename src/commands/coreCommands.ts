@@ -19,11 +19,16 @@ import { EtlProjectManager } from '../etl/etlProjectManager';
 import { buildExecCommand } from '../utils/shellUtils';
 import {
     runQueryRaw,
-    runExplainQuery,
     runQueriesWithStreaming,
     runQueriesSequentially,
     queryResultToRows,
 } from '../core/queryRunner';
+import {
+    buildExplainRequest,
+    formatExplainErrorForDialect,
+    normalizeExplainOutputForDisplay,
+} from '../core/explain/explainRequest';
+import { runExplainRequest } from '../core/explain/runExplain';
 import {
     supportsLegacyMetadataPrefetch,
     supportsLegacyMetadataPrefetchForConnection,
@@ -1265,7 +1270,8 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                 }
 
                 try {
-                    const explainSql = `EXPLAIN VERBOSE ${statementSql.trim()}`;
+                    const databaseKind = connectionManager.getExecutionDatabaseKind(sourceUri);
+                    const explainRequest = buildExplainRequest(statementSql, databaseKind, { verbose: true });
 
                     executionGate.markRunning();
                     const explainResult = await vscode.window.withProgress(
@@ -1275,12 +1281,12 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                             cancellable: false,
                         },
                         async () => {
-                            return await runExplainQuery(
+                            return await runExplainRequest(
                                 context,
-                                explainSql,
-                                connectionName,
                                 connectionManager,
+                                connectionName,
                                 sourceUri,
+                                explainRequest,
                             );
                         },
                     );
@@ -1291,8 +1297,9 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     }
 
                     if (explainResult && explainResult.trim()) {
+                        const normalized = normalizeExplainOutputForDisplay(explainResult, databaseKind);
                         const doc = await vscode.workspace.openTextDocument({
-                            content: explainResult,
+                            content: normalized,
                             language: 'plaintext',
                         });
                         await vscode.window.showTextDocument(doc, { preview: true });
@@ -1305,7 +1312,10 @@ export function registerCoreCommands(ctx: CoreCommandsContext): vscode.Disposabl
                     if (!executionStillCurrent) {
                         return;
                     }
-                    const msg = err instanceof Error ? err.message : String(err);
+                    const msg = formatExplainErrorForDialect(
+                        err instanceof Error ? err.message : String(err),
+                        connectionManager.getExecutionDatabaseKind(sourceUri),
+                    );
                     vscode.window.showErrorMessage(`EXPLAIN failed: ${msg}`);
                 } finally {
                     executionGate.dispose();

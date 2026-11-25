@@ -56,6 +56,8 @@ describe('db2ExplainParser', () => {
         const retrieve = buildDb2ExplainRetrieveQuery();
         expect(retrieve).toContain('EXPLAIN_OPERATOR');
         expect(retrieve).toContain('EXPLAIN_STREAM');
-        expect(retrieve).toContain('S.TARGET_ID = O.OPERATOR_ID');
+        expect(retrieve).toContain('D.TARGET_ID = O.OPERATOR_ID');
+        expect(retrieve).toContain('OUT.SOURCE_ID = O.OPERATOR_ID');
+        expect(retrieve).toContain('AS PARENT_ID');
     });
 });

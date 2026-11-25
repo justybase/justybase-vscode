@@ -1058,6 +1058,10 @@ function formatExplainValue(value: unknown): string {
 /**
  * Run EXPLAIN query and capture either NOTICE messages or regular result rows.
  * Netezza returns EXPLAIN output via NOTICE messages, while PostgreSQL returns row data.
+ *
+ * Dialects whose EXPLAIN only writes the plan into catalog tables (Db2
+ * `EXPLAIN PLAN FOR`, Oracle `PLAN_TABLE`) pass `retrieveQuery`; it runs on the
+ * same connection right after the EXPLAIN and its rows are returned as JSON.
  */
 export async function runExplainQuery(
   context: vscode.ExtensionContext,
@@ -1066,6 +1070,7 @@ export async function runExplainQuery(
   connectionManager?: ConnectionManager,
   documentUri?: string,
   connectionOverride?: NzConnection,
+  options: RunExplainQueryOptions = {},
 ): Promise<string> {
   const connManager = connectionManager || new ConnectionManager(context);
   const keepConnectionOpen = documentUri
@@ -1141,6 +1146,20 @@ export async function runExplainQuery(
       } finally {
         commandHandle?.unregister();
       }
+
+      if (options.retrieveQuery) {
+        const retrieveRows = await readExplainRetrieveRows(
+          connection,
+          options.retrieveQuery,
+          queryTimeout,
+          documentUri,
+        );
+        if (retrieveRows.length > 0) {
+          return JSON.stringify(retrieveRows, (_key, value) =>
+            typeof value === "bigint" ? value.toString() : value,
+          );
+        }
+      }
     } finally {
       connection.removeListener("notice", noticeHandler);
     }
@@ -1155,4 +1174,49 @@ export async function runExplainQuery(
   }
 
   return rows.join("\n");
+}
+
+export interface RunExplainQueryOptions {
+  /**
+   * Statement that reads the persisted plan for `query` (for example Db2
+   * `EXPLAIN_OPERATOR`/`EXPLAIN_STREAM`). Its rows are returned as JSON.
+   */
+  retrieveQuery?: string;
+}
+
+/** Drains a plan-retrieval statement into plain row objects. */
+async function readExplainRetrieveRows(
+  connection: NzConnection,
+  sql: string,
+  queryTimeout: number,
+  documentUri?: string,
+): Promise<Record<string, unknown>[]> {
+  const cmd = connection.createCommand(sql);
+  cmd.commandTimeout = queryTimeout;
+
+  let commandHandle:
+    | ReturnType<typeof streamingManager.registerCommand>
+    | undefined;
+  if (documentUri) {
+    commandHandle = streamingManager.registerCommand(documentUri, cmd);
+  }
+
+  try {
+    const reader = await cmd.executeReader();
+    try {
+      const rows: Record<string, unknown>[] = [];
+      while (await reader.read()) {
+        const row: Record<string, unknown> = {};
+        for (let index = 0; index < reader.fieldCount; index += 1) {
+          row[reader.getName(index)] = reader.getValue(index);
+        }
+        rows.push(row);
+      }
+      return rows;
+    } finally {
+      await reader.close();
+    }
+  } finally {
+    commandHandle?.unregister();
+  }
 }

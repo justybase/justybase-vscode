@@ -639,7 +639,21 @@ export interface DatabaseExplainOptions {
 /** Builds and optionally normalizes a dialect-specific EXPLAIN statement. */
 export interface DatabaseExplainProvider {
   buildQuery(sql: string, options?: DatabaseExplainOptions): string;
+  /**
+   * Some engines persist the plan in catalog tables instead of returning it
+   * (Db2 `EXPLAIN PLAN FOR`, Oracle `PLAN_TABLE`). When this is present the
+   * runner executes it on the same connection right after `buildQuery`, passes
+   * the retrieved rows to `normalizeOutput` as a JSON array, and uses that text
+   * as the raw plan payload.
+   */
+  buildRetrieveQuery?(): string;
   normalizeOutput?(output: string): string;
+  /**
+   * Maps a driver error raised while producing the plan to a user-facing hint
+   * (for example, "create the EXPLAIN tables first"). Returning `undefined`
+   * keeps the original message.
+   */
+  formatError?(message: string): string | undefined;
 }
 
 /** Query-history and operator-profile SQL/rendering owned by a dialect. */

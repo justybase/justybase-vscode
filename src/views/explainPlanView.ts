@@ -77,10 +77,16 @@ export function parseExplainOutput(text: string): ParsedPlan {
     const lines = text.split('\n').filter(l => l.trim());
     const isVerbose = text.includes('QUERY VERBOSE PLAN:') || text.includes('Node 1.');
 
-    // Remove NOTICE prefix and headers
+    // Remove NOTICE prefix and headers, but keep leading indentation: it is the
+    // only tree information in normalized plan text (MySQL, PostgreSQL, Db2, ...).
     const cleanLines = lines
-        .map(l => l.replace(/^NOTICE:\s*/i, '').trim())
-        .filter(l => l && !l.startsWith('QUERY PLAN') && !l.startsWith('QUERY VERBOSE'));
+        .map(l => l.replace(/^NOTICE:\s*/i, ''))
+        .filter(l => {
+            const trimmed = l.trim();
+            return trimmed.length > 0
+                && !trimmed.startsWith('QUERY PLAN')
+                && !trimmed.startsWith('QUERY VERBOSE');
+        });
 
     const nodes: ExplainNode[] = [];
     const warnings: PlanWarning[] = [];
@@ -91,19 +97,23 @@ export function parseExplainOutput(text: string): ParsedPlan {
     const planTextStart = cleanLines.findIndex(l => l.includes('PLANTEXT:'));
     const planLines =
         planTextStart >= 0
-            ? cleanLines.slice(planTextStart + 1).filter(l => !l.startsWith('(') && !l.includes('locus='))
+            ? cleanLines.slice(planTextStart + 1).filter(l => !l.trim().startsWith('(') && !l.includes('locus='))
             : cleanLines;
 
     const nodeStack: ExplainNode[] = [];
 
     for (const line of planLines) {
-        if (!line.trim()) continue;
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue;
 
         // Skip metadata lines
-        if (line.startsWith('(xpath_') || line.includes('locus=')) continue;
+        if (trimmedLine.startsWith('(xpath_') || trimmedLine.includes('locus=')) continue;
 
-        // Calculate indent level
-        const leadingSpaces = line.match(/^(\s*)/)?.[1]?.length || 0;
+        // Netezza marks join inputs with `l:` / `r:` in front of the operator.
+        // Those two characters are not indentation, so they are removed before
+        // the leading whitespace is counted.
+        const lineWithoutMarker = line.replace(/^(\s*)[lr]:/i, '$1');
+        const leadingSpaces = lineWithoutMarker.match(/^(\s*)/)?.[1]?.length ?? 0;
         const indent = Math.floor(leadingSpaces / 3);
 
         // Parse node type and details
@@ -127,7 +137,7 @@ export function parseExplainOutput(text: string): ParsedPlan {
                 confidence: parseFloat(conf),
                 indent,
                 children: [],
-                raw: line.trim(),
+                raw: trimmedLine,
                 warnings: []
             };
 

@@ -17,10 +17,10 @@ const db2ConnectionConstructor =
   Db2Connection as unknown as DatabaseConnectionStaticConstructor;
 
 const db2Capabilities: DatabaseCapabilities = {
-  // Db2 requires provisioned explain tables (`EXPLAIN PLAN FOR`); a dedicated
-  // provider is needed before this can be advertised.
-  supportsExplainPlan: false,
-  supportsExplainGraph: false,
+  // Db2 `EXPLAIN PLAN FOR` writes the plan into the EXPLAIN_* tables; the
+  // provider supplies both the EXPLAIN and the retrieval statement.
+  supportsExplainPlan: true,
+  supportsExplainGraph: true,
   supportsTuningAdvisor: true,
   supportsExternalTables: false,
   supportsProcedures: true,

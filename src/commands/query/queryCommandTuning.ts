@@ -3,11 +3,17 @@ import { compactSqlErrorMessage } from '@justybase/ui-core';
 import { ConnectionManager } from '../../core/connectionManager';
 import {
     getDatabaseDialect,
-    getDatabaseExplainProvider,
     getRequiredDatabaseDdlProvider,
     getRequiredDatabaseTuningAdvisor,
 } from '../../core/connectionFactory';
-import { runExplainQuery, runQueryRaw, queryResultToRows } from '../../core/queryRunner';
+import { runQueryRaw, queryResultToRows } from '../../core/queryRunner';
+import {
+    buildExplainRequest,
+    formatExplainErrorForDialect,
+    normalizeExplainOutputForDisplay,
+    stripExplainPrefix,
+} from '../../core/explain/explainRequest';
+import { runExplainRequest } from '../../core/explain/runExplain';
 import { assertExecutionCurrent, type ExecutionCurrentCheck } from '../../core/executionGuard';
 import { SqlParser } from '../../sql/sqlParser';
 import { createPerformanceTimer, formatPerformanceEvent } from '../../services/perf/performanceEvents';
@@ -109,40 +115,6 @@ function toNumberValue(value: unknown): number | undefined {
     }
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function stripExplainPrefix(sql: string): string {
-    const trimmed = sql.trim();
-    if (!trimmed.toUpperCase().startsWith('EXPLAIN')) {
-        return trimmed;
-    }
-    return trimmed.replace(/^EXPLAIN\s+(?:(?:QUERY\s+PLAN)|VERBOSE)?\s*/i, '').trim();
-}
-
-async function buildExplainSqlForDialect(
-    sql: string,
-    databaseKind: string | undefined,
-    options: { verbose: boolean; analyze?: boolean },
-): Promise<string> {
-    const strippedSql = stripExplainPrefix(sql);
-    const provider = getDatabaseExplainProvider(databaseKind);
-    if (provider) {
-        return provider.buildQuery(strippedSql, options);
-    }
-
-    return options.verbose ? `EXPLAIN VERBOSE ${strippedSql}` : `EXPLAIN ${strippedSql}`;
-}
-
-async function normalizeExplainOutputForDisplay(
-    explainOutput: string,
-    databaseKind: string | undefined,
-): Promise<string> {
-    const provider = getDatabaseExplainProvider(databaseKind);
-    if (provider?.normalizeOutput) {
-        return provider.normalizeOutput(explainOutput);
-    }
-
-    return explainOutput;
 }
 
 function resolveTuningFeedbackKind(selection: string | undefined): TuningFeedbackKind {
@@ -637,10 +609,7 @@ export async function executeExplainQuery(
         payloadSize: text.length,
     });
 
-    let cleanQuery = text.trim();
-    if (cleanQuery.toUpperCase().startsWith('EXPLAIN')) {
-        cleanQuery = cleanQuery.replace(/^EXPLAIN\s+(?:VERBOSE\s+)?/i, '');
-    }
+    const cleanQuery = stripExplainPrefix(text);
 
     let executionGate: Awaited<ReturnType<typeof tryAcquireQueryExecution>>;
     try {
@@ -670,15 +639,15 @@ export async function executeExplainQuery(
                 cancellable: false,
             },
             async () => {
-                const explainQueryText = await buildExplainSqlForDialect(cleanQuery, databaseKind, {
+                const explainRequest = buildExplainRequest(cleanQuery, databaseKind, {
                     verbose,
                 });
-                return await runExplainQuery(
+                return await runExplainRequest(
                     context,
-                    explainQueryText,
-                    connectionName,
                     connectionManager,
+                    connectionName,
                     documentUri,
+                    explainRequest,
                 );
             },
         );
@@ -691,7 +660,7 @@ export async function executeExplainQuery(
             if (!executionGate.isCurrent()) {
                 return;
             }
-            const normalizedExplainOutput = await normalizeExplainOutputForDisplay(result, databaseKind);
+            const normalizedExplainOutput = normalizeExplainOutputForDisplay(result, databaseKind);
             if (!executionGate.isCurrent()) {
                 return;
             }
@@ -711,7 +680,11 @@ export async function executeExplainQuery(
         if (executionGate && !executionGate.isCurrent()) {
             return;
         }
-        const msg = compactSqlErrorMessage(err instanceof Error ? err.message : String(err));
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        const msg = formatExplainErrorForDialect(
+            compactSqlErrorMessage(rawMessage),
+            connectionManager.getExecutionDatabaseKind(document.uri.toString()),
+        );
         const errorEvent = explainTimer.finish({
             result: 'error',
             errorCode: toPerfErrorCode(msg),
@@ -779,7 +752,7 @@ export async function executeTuningAdvisor(
             return;
         }
         const tuningExecutionGate = executionGate;
-        const explainSql = await buildExplainSqlForDialect(sql, databaseKind, {
+        const explainRequest = buildExplainRequest(sql, databaseKind, {
             verbose: true,
         });
 
@@ -791,12 +764,12 @@ export async function executeTuningAdvisor(
                 cancellable: false,
             },
             async () => {
-                const explainPlanText = await runExplainQuery(
+                const explainPlanText = await runExplainRequest(
                     context,
-                    explainSql,
-                    connectionName,
                     connectionManager,
+                    connectionName,
                     sourceUri,
+                    explainRequest,
                 );
                 if (!tuningExecutionGate.isCurrent()) {
                     return undefined;
@@ -873,7 +846,11 @@ export async function executeTuningAdvisor(
         if (!executionStillCurrent) {
             return;
         }
-        const msg = compactSqlErrorMessage(err instanceof Error ? err.message : String(err));
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        const msg = formatExplainErrorForDialect(
+            compactSqlErrorMessage(rawMessage),
+            connectionManager.getExecutionDatabaseKind(editor.document.uri.toString()),
+        );
         const errorEvent = tuningTimer.finish({
             result: 'error',
             errorCode: toPerfErrorCode(msg),

@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../../../core/connectionManager';
-import { runExplainQuery } from '../../../core/queryRunner';
+import { buildExplainRequest, normalizeExplainOutputForDisplay } from '../../../core/explain/explainRequest';
+import { runExplainRequest } from '../../../core/explain/runExplain';
+import type { ExplainRequest } from '../../../core/explain/explainRequest';
 import {
     analyzeExplainPlanSemantic,
     collectExplainHotspotNextActions
@@ -17,22 +19,47 @@ interface CopilotExplainTuningToolsDeps {
 export class CopilotExplainTuningTools {
     constructor(private readonly deps: CopilotExplainTuningToolsDeps) { }
 
+    /** EXPLAIN statement the active dialect will actually run. */
+    buildExplainRequest(sql: string, verbose: boolean): ExplainRequest {
+        const activeConn = this.deps.connectionManager.getActiveConnectionName();
+        const databaseKind = this.deps.connectionManager.getConnectionDatabaseKind(activeConn ?? undefined);
+        return buildExplainRequest(sql, databaseKind, { verbose });
+    }
+
     async getExplainPlan(sql: string, verbose: boolean, database?: string): Promise<string> {
         const activeConn = this.deps.connectionManager.getActiveConnectionName();
         if (!activeConn) throw new Error('No active connection');
 
-        const explainSql = buildSafeExplainSql(sql, verbose);
+        // `buildSafeExplainSql` only validates the statement; the dialect decides
+        // the real EXPLAIN syntax (`EXPLAIN PLAN FOR` on Db2, `FORMAT=JSON` on
+        // MySQL, and so on).
+        buildSafeExplainSql(sql, verbose);
+        const databaseKind = this.deps.connectionManager.getConnectionDatabaseKind(activeConn);
+        const request = buildExplainRequest(sql, databaseKind, { verbose });
 
         const scopedDatabase = this.deps.runtime.normalizeScopeDatabase(database);
-        const plan = scopedDatabase
-            ? await this.deps.runtime.runExplainInDatabaseScope(explainSql, scopedDatabase)
-            : await runExplainQuery(this.deps.context, explainSql, activeConn, this.deps.connectionManager, undefined);
+        const rawPlan = scopedDatabase
+            ? await this.deps.runtime.runExplainInDatabaseScope(request, scopedDatabase)
+            : await runExplainRequest(
+                this.deps.context,
+                this.deps.connectionManager,
+                activeConn,
+                undefined,
+                request,
+            );
+
+        // Persisted-plan dialects return JSON rows; the semantic analyzer and
+        // every caller expect the shared plan-text shape.
+        const plan = rawPlan ? normalizeExplainOutputForDisplay(rawPlan, databaseKind) : rawPlan;
         return plan || 'No execution plan returned';
     }
 
     async getExplainPlanAnalysis(sql: string, verbose: boolean, database?: string): Promise<string> {
         const normalizedSql = sql.trim();
-        const explainSql = buildSafeExplainSql(normalizedSql, verbose);
+        const databaseKind = this.deps.connectionManager.getConnectionDatabaseKind(
+            this.deps.connectionManager.getActiveConnectionName() ?? undefined,
+        );
+        const explainSql = buildExplainRequest(normalizedSql, databaseKind, { verbose }).explainSql;
         const plan = await this.getExplainPlan(normalizedSql, verbose, database);
         const analysis = analyzeExplainPlanSemantic(plan);
 

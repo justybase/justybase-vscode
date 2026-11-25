@@ -5,6 +5,7 @@ import { getQualityRuleIdForParserCode } from '../../../providers/qualityRuleReg
 import { analyzeExplainPlanSemantic, collectExplainHotspotNextActions } from '../../tuning/explainPlanSemanticAnalyzer';
 import { CopilotToolRuntime } from './copilotToolRuntime';
 import { buildSafeExplainSql } from '../../copilotTools/aiSqlSafety';
+import type { ExplainRequest } from '../../../core/explain/explainRequest';
 
 interface AntiPatternFixProfile {
     rationale: string;
@@ -126,6 +127,7 @@ export class CopilotValidationTools {
     constructor(private readonly deps: {
         runtime: CopilotToolRuntime;
         getExplainPlan: (sql: string, verbose: boolean, database?: string) => Promise<string>;
+        getExplainRequest: (sql: string, verbose: boolean) => ExplainRequest;
     }) { }
 
     private getSeverityWeight(severity: vscode.DiagnosticSeverity): number {
@@ -306,7 +308,8 @@ export class CopilotValidationTools {
 
         let explainSql: string;
         try {
-            explainSql = buildSafeExplainSql(statementSql, true);
+            buildSafeExplainSql(statementSql, true);
+            explainSql = this.deps.getExplainRequest(statementSql, true).explainSql;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return this.deps.runtime.formatStructuredToolResponse({

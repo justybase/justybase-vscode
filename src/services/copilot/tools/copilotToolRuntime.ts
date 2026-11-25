@@ -6,9 +6,11 @@ import {
     createConnectedDatabaseConnectionFromDetails,
     executeDatabaseQuery
 } from '../../../core/connectionFactory';
+import type { ExplainRequest } from '../../../core/explain/explainRequest';
 import { runQuery } from '../../../core/queryRunner';
 import { getQueryConfig } from '../../../core/queryBatchExecutor';
 import type { ConnectionDetails, DatabaseCommand, DatabaseDataReader, ResultSet } from '../../../types';
+import type { DatabaseConnection } from '../../../contracts/database';
 import { ResultPanelView } from '../../../views/resultPanelView';
 
 export interface ProcedureStatementExecutionResult {
@@ -63,7 +65,7 @@ export class CopilotToolRuntime {
         }
     }
 
-    async runExplainInDatabaseScope(explainSql: string, database: string): Promise<string> {
+    async runExplainInDatabaseScope(request: ExplainRequest, database: string): Promise<string> {
         const { connectionDetails } = await this.getActiveConnectionDetails();
         const connection = await createConnectedDatabaseConnectionFromDetails(connectionDetails, database);
         const notices: string[] = [];
@@ -78,7 +80,7 @@ export class CopilotToolRuntime {
         connection.on('notice', noticeHandler);
 
         try {
-            const command = connection.createCommand(explainSql);
+            const command = connection.createCommand(request.explainSql);
             const reader = await command.executeReader();
             try {
                 while (await reader.read()) {
@@ -87,12 +89,46 @@ export class CopilotToolRuntime {
             } finally {
                 await reader.close();
             }
+
+            if (request.retrieveQuery) {
+                const planJson = await this.readExplainRowsAsJson(connection, request.retrieveQuery);
+                if (planJson) {
+                    return planJson;
+                }
+            }
         } finally {
             connection.removeListener('notice', noticeHandler);
             await connection.close();
         }
 
         return notices.join('\n');
+    }
+
+    /** Reads a persisted plan (Db2 EXPLAIN_* tables) and returns it as JSON. */
+    private async readExplainRowsAsJson(
+        connection: DatabaseConnection,
+        retrieveQuery: string,
+    ): Promise<string | undefined> {
+        const command = connection.createCommand(retrieveQuery);
+        const reader = await command.executeReader();
+        try {
+            const rows: Record<string, unknown>[] = [];
+            while (await reader.read()) {
+                const row: Record<string, unknown> = {};
+                for (let index = 0; index < reader.fieldCount; index += 1) {
+                    row[reader.getName(index)] = reader.getValue(index);
+                }
+                rows.push(row);
+            }
+            if (rows.length === 0) {
+                return undefined;
+            }
+            return JSON.stringify(rows, (_key, value) =>
+                typeof value === 'bigint' ? value.toString() : value,
+            );
+        } finally {
+            await reader.close();
+        }
     }
 
     async runQuerySafe(sql: string, description: string, database?: string): Promise<string> {

@@ -33,7 +33,7 @@ The Db2 pack is published with `"preview": true`. Treat it as a **near-full comp
 - Import type mapper (DECIMAL/DECFLOAT/GRAPHIC/CLOB/BLOB/…)
 - Shared export with soft cancel via `Db2Command.cancel()`
 - DDL reconstruction from `SYSCAT.*` (constraints, indexes, partitions, aliases, nicknames)
-- Explain plan JSON parse + tuning advisor (`DB2TA-*`)
+- Explain plan: `EXPLAIN PLAN FOR`, plan retrieval from `EXPLAIN_OPERATOR`/`EXPLAIN_STREAM`, plan graph in the shared Explain Plan webview, and the `DB2TA-*` tuning advisor
 - Table maintenance: RUNSTATS, REORG, index/partition helpers
 - Session monitor storage provider
 
@@ -57,6 +57,20 @@ The actions are available from the table context menu only for Db2 connections.
 Adding or attaching a partition requires an existing range-partitioned table;
 the view explains this limitation for a non-partitioned table. **Db2: Reorganize
 Indexes** remains a separate maintenance command and is not part of the webview.
+
+### EXPLAIN tables
+
+Db2 writes `EXPLAIN PLAN FOR` output into the `EXPLAIN_*` catalog tables instead of
+returning it to the client, so the extension creates neither the tables nor their
+privileges: provision them once per database, for example by running the
+`EXPLAIN.DDL` script shipped with the instance
+(`/opt/ibm/db2/V11.5/misc/EXPLAIN.DDL`; Windows:
+`C:\Program Files\IBM\SQLLIB\misc\EXPLAIN.DDL`), or by calling
+`CALL SYSPROC.SYSINSTALLOBJECTS('EXPLAIN', 'C', CURRENT SCHEMA, '')` on older
+versions. The connected user needs `INSERT` on the `EXPLAIN_*` tables and
+`SELECT` on `EXPLAIN_OPERATOR` and `EXPLAIN_STREAM`. When the tables are missing,
+**Explain Query Plan** reports the Db2 error together with this provisioning
+hint. The ephemeral live harness installs the tables automatically.
 
 ## Environment variables (live)
 

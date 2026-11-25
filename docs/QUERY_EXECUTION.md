@@ -58,6 +58,11 @@ Analyze how Netezza will execute your query **before running it**.
 | Standard | Explain Query Plan | `Ctrl+L` | Basic plan with operations and costs |
 | Verbose | Explain Query Plan (Verbose) | - | Detailed plan with statistics |
 
+The command runs the active dialect's own EXPLAIN form, so the same shortcut
+works on every supported database. On Db2 it issues `EXPLAIN PLAN FOR` and reads
+the plan back from the `EXPLAIN_*` catalog tables, which must be provisioned once
+per database (see [Db2 support](db2.md#explain-tables)).
+
 ### Understanding the Plan
 
 The plan shows:
