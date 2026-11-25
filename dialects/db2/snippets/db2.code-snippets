@@ -55,5 +55,124 @@
       "END"
     ],
     "description": "Db2 SQL PL procedure skeleton"
+  },
+  "SQL PL IF / ELSIF / ELSE": {
+    "prefix": "db2-if",
+    "body": [
+      "IF ${1:condition} THEN",
+      "  ${2:-- statements}",
+      "ELSIF ${3:condition} THEN",
+      "  ${4:-- statements}",
+      "ELSE",
+      "  ${5:-- statements}",
+      "END IF;"
+    ],
+    "description": "Db2 SQL PL IF statement"
+  },
+  "SQL PL CASE statement": {
+    "prefix": "db2-case",
+    "body": [
+      "CASE",
+      "  WHEN ${1:condition} THEN",
+      "    ${2:-- statements}",
+      "  ELSE",
+      "    ${3:-- statements}",
+      "END CASE;"
+    ],
+    "description": "Db2 SQL PL CASE statement"
+  },
+  "SQL PL WHILE loop": {
+    "prefix": "db2-while",
+    "body": [
+      "WHILE ${1:condition} DO",
+      "  ${2:-- statements}",
+      "END WHILE;"
+    ],
+    "description": "Db2 SQL PL WHILE loop"
+  },
+  "SQL PL REPEAT loop": {
+    "prefix": "db2-repeat",
+    "body": [
+      "REPEAT",
+      "  ${1:-- statements}",
+      "  UNTIL ${2:condition}",
+      "END REPEAT;"
+    ],
+    "description": "Db2 SQL PL REPEAT loop"
+  },
+  "SQL PL cursor FOR loop": {
+    "prefix": "db2-for",
+    "body": [
+      "FOR ${1:r} AS ${2:cursor_select} DO",
+      "  ${3:-- statements}",
+      "END FOR;"
+    ],
+    "description": "Db2 SQL PL row cursor loop"
+  },
+  "SQL PL condition handler": {
+    "prefix": "db2-handler",
+    "body": [
+      "DECLARE ${1:CONTINUE} HANDLER FOR ${2:SQLEXCEPTION}",
+      "  ${3:-- handler statements}"
+    ],
+    "description": "Db2 SQL PL condition handler"
+  },
+  "CREATE TRIGGER ... BEGIN ATOMIC": {
+    "prefix": "db2-trigger",
+    "body": [
+      "CREATE TRIGGER ${1:schema}.${2:trg_name}",
+      "  ${3:AFTER} ${4:INSERT} ON ${5:schema}.${6:table}",
+      "  REFERENCING NEW AS N",
+      "  FOR EACH ROW MODE DB2SQL",
+      "BEGIN ATOMIC",
+      "  ${7:-- trigger body}",
+      "END;"
+    ],
+    "description": "Db2 trigger with an atomic compound body"
+  },
+  "CREATE INDEX": {
+    "prefix": "db2-create-index",
+    "body": [
+      "CREATE ${1:UNIQUE }INDEX ${2:schema}.${3:index_name}",
+      "  ON ${4:schema}.${5:table} (${6:key_column} ${7:ASC})",
+      "  INCLUDE (${8:included_column})",
+      "  ALLOW REVERSE SCANS",
+      "  COMPRESS ${9:YES}",
+      "  IN ${10:USERSPACE1};"
+    ],
+    "description": "Db2 index with designer options"
+  },
+  "ALTER TABLE ... ADD PARTITION": {
+    "prefix": "db2-add-partition",
+    "body": [
+      "ALTER TABLE ${1:schema}.${2:table}",
+      "  ADD PARTITION ${3:p_2026}",
+      "  STARTING FROM (${4:'2026-01-01'}) INCLUSIVE",
+      "  ENDING AT (${5:'2027-01-01'}) EXCLUSIVE",
+      "  IN ${6:USERSPACE1};"
+    ],
+    "description": "Db2 range partition"
+  },
+  "RUNSTATS": {
+    "prefix": "db2-runstats",
+    "body": [
+      "CALL SYSPROC.ADMIN_CMD('RUNSTATS ON TABLE ${1:schema}.${2:table} ON KEY COLUMNS AND INDEXES ALL');"
+    ],
+    "description": "Db2 RUNSTATS through ADMIN_CMD"
+  },
+  "REORG TABLE": {
+    "prefix": "db2-reorg",
+    "body": [
+      "CALL SYSPROC.ADMIN_CMD('REORG TABLE ${1:schema}.${2:table}');"
+    ],
+    "description": "Db2 REORG TABLE through ADMIN_CMD"
+  },
+  "EXPLAIN PLAN FOR": {
+    "prefix": "db2-explain",
+    "body": [
+      "EXPLAIN PLAN FOR",
+      "${1:SELECT * FROM schema.table};"
+    ],
+    "description": "Db2 EXPLAIN PLAN FOR"
   }
 }

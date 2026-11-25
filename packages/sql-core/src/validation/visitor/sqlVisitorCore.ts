@@ -1308,6 +1308,47 @@ export class SqlVisitor
   db2PartitionBoundary(): void { /* Partition boundary expressions are not query rows. */ }
   db2PartitionInclusivity(): void { /* Partition boundary attributes have no query scope. */ }
   db2ConstraintAttributes(): void { /* Enforcement attributes do not introduce query scope. */ }
+  db2AlterTablePartitionAction(ctx: Record<string, CstNode[]>): void {
+    // Partition boundaries are literal ranges, not query scope. Visiting the
+    // action keeps ALTER TABLE from reporting a missing action.
+    for (const node of ctx.db2PartitionRangeDefinition ?? []) {
+      this.visit(node);
+    }
+    for (const node of ctx.qualifiedName ?? []) {
+      this.visit(node);
+    }
+  }
+  db2PartitionRangeDefinition(ctx: Record<string, CstNode[]>): void {
+    for (const node of [
+      ...(ctx.db2PartitionStartClause ?? []),
+      ...(ctx.db2PartitionEndClause ?? []),
+    ]) {
+      this.visit(node);
+    }
+  }
+  db2PartitionStartClause(ctx: Record<string, CstNode[]>): void {
+    for (const node of ctx.db2PartitionBoundaryValue ?? []) this.visit(node);
+  }
+  db2PartitionEndClause(ctx: Record<string, CstNode[]>): void {
+    for (const node of ctx.db2PartitionBoundaryValue ?? []) this.visit(node);
+  }
+  db2PartitionBoundaryValue(): void { /* Boundary literals are not query rows. */ }
+  db2PartitionKeywordOrIdentifier(): void { /* The PARTITION keyword has no query scope. */ }
+  db2CreateIndexStatement(): void { /* Index keys resolve against the target table, not query scope. */ }
+  db2IndexTailToken(): void { /* Physical index options have no query scope. */ }
+  db2IndexKeyList(): void { /* Index keys are not query rows. */ }
+  db2IndexKeyColumn(): void { /* Index keys are not query rows. */ }
+  db2RenameTableStatement(): void { /* Rename targets carry no query scope. */ }
+  db2AdminCommandStatement(): void { /* Utility options have no query scope. */ }
+  db2CreateTriggerStatement(): void { /* Trigger bodies compile in their own scope. */ }
+  db2LabelStatement(): void { /* Label text is a literal. */ }
+  db2ExportStatement(ctx: Record<string, CstNode[]>): void {
+    for (const node of ctx.selectStatement ?? []) this.visit(node);
+    for (const node of ctx.withAnyStatement ?? []) this.visit(node);
+  }
+  db2ImportStatement(): void { /* Import target modes are utility options. */ }
+  db2EndBlockKeyword(): void { /* Structural END keyword. */ }
+  db2CompoundBody(): void { /* Compound bodies compile in their own scope. */ }
   postgresqlTableOption(): void { /* Physical table options do not introduce query scope. */ }
 
   createDatabaseStatement(ctx: Record<string, CstNode[]>): void {

@@ -132,6 +132,58 @@ export const Db2Nickname = createToken({
 	longer_alt: baseLexer.Identifier,
 });
 
+/**
+ * Command-leading Db2 words that must not be `Identifier` in the statement
+ * FIRST set. `identifier` accepts most Db2 keywords, so a statement
+ * alternative that starts with `Identifier` gives Chevrotain a huge
+ * first-set overlap and parser self-analysis becomes quadratic.
+ */
+export const Db2RenameTable = createToken({
+	name: 'Db2RenameTable',
+	pattern: /RENAME\s+TABLE\b/i,
+});
+
+export const Db2LabelOn = createToken({
+	name: 'Db2LabelOn',
+	pattern: /LABEL\s+ON\b/i,
+});
+
+export const Db2Reorg = createToken({
+	name: 'Db2Reorg',
+	pattern: /REORG\b/i,
+	longer_alt: baseLexer.Identifier,
+});
+
+export const Db2Runstats = createToken({
+	name: 'Db2Runstats',
+	pattern: /RUNSTATS\b/i,
+	longer_alt: baseLexer.Identifier,
+});
+
+export const Db2Export = createToken({
+	name: 'Db2Export',
+	pattern: /EXPORT\b/i,
+	longer_alt: baseLexer.Identifier,
+});
+
+export const Db2Import = createToken({
+	name: 'Db2Import',
+	pattern: /IMPORT\b/i,
+	longer_alt: baseLexer.Identifier,
+});
+
+export const Db2Index = createToken({
+	name: 'Db2Index',
+	pattern: /INDEX\b/i,
+	longer_alt: baseLexer.Identifier,
+});
+
+export const Db2Trigger = createToken({
+	name: 'Db2Trigger',
+	pattern: /TRIGGER\b/i,
+	longer_alt: baseLexer.Identifier,
+});
+
 const db2OnlyTokens = [
 	Db2OptimizeFor,
 	Db2WithUr,
@@ -158,6 +210,14 @@ const db2OnlyTokens = [
 	Db2LanguageSql,
 	Db2Nickname,
 	Db2Identity,
+	Db2RenameTable,
+	Db2LabelOn,
+	Db2Reorg,
+	Db2Runstats,
+	Db2Export,
+	Db2Import,
+	Db2Index,
+	Db2Trigger,
 ];
 
 const db2AllTokens = [...db2OnlyTokens, ...baseLexer.allTokens];

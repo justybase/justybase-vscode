@@ -19,6 +19,12 @@ const accepted: [string, string][] = [
   ['db2', "CREATE TABLE t (id INTEGER, event_at TIMESTAMP) PARTITION BY RANGE (event_at) (PARTITION p_old STARTING MINVALUE ENDING ('2027-01-01-00.00.00.000000'), PARTITION p_max STARTING ('2027-01-01-00.00.00.000000') ENDING MAXVALUE)"],
   ['db2', "CREATE TABLE t (event_at TIMESTAMP) PARTITION BY RANGE (event_at) (PARTITION p_1 STARTING FROM '2027-01-01-00.00.00.000000' INCLUSIVE ENDING AT '2028-01-01-00.00.00.000000' EXCLUSIVE IN userspace1)"],
   ['db2', 'ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY (id) ENFORCED'],
+  ['db2', 'CREATE UNIQUE INDEX app.idx_amt ON app.orders (order_id ASC, amount DESC) INCLUDE (customer_id) ALLOW REVERSE SCANS COMPRESS YES CLUSTER IN userspace1'],
+  ['db2', 'ALTER TABLE app.orders ADD PARTITION p_2026 STARTING FROM (\'2026-01-01\') INCLUSIVE ENDING AT (\'2027-01-01\') EXCLUSIVE IN userspace1'],
+  ['db2', 'ALTER TABLE app.orders DETACH PARTITION p_2024 INTO app.orders_old'],
+  ['db2', 'CREATE TRIGGER app.trg_orders AFTER INSERT ON app.orders REFERENCING NEW AS N FOR EACH ROW MODE DB2SQL BEGIN ATOMIC SET N.amount = 0; END'],
+  ['db2', 'RENAME TABLE app.orders TO orders_archive'],
+  ['db2', 'RUNSTATS ON TABLE app.orders ON KEY COLUMNS AND INDEXES ALL'],
   ['db2', 'ALTER TABLE t ADD CONSTRAINT ck_t CHECK (id > 0) NOT ENFORCED'],
   ['db2', 'CREATE TABLE t (id INTEGER, pid INTEGER, FOREIGN KEY (pid) REFERENCES p (id) ON DELETE CASCADE)'],
   ['postgresql', 'CREATE TABLE public.events (id integer, event_date date) PARTITION BY RANGE (event_date)'],
@@ -61,6 +67,27 @@ describe('Dialect DDL conformance regressions', () => {
 
   it('validates the original DB2 script, including its enforced primary key', () => {
     const sql = `${accepted[0][1]}; ALTER TABLE DB2INST1.PRODUCTS ADD CONSTRAINT pk_products PRIMARY KEY (PRODUCT_ID) ENFORCED;`;
+    const result = new SqlValidator(undefined, db2SqlAuthoring.validation).validate(sql);
+    expect(result.errors.filter(error => error.code.startsWith('PAR'))).toEqual([]);
+  });
+
+  it.each([
+    [
+      'add',
+      "ALTER TABLE app.orders ADD PARTITION p_2026 STARTING FROM ('2026-01-01') INCLUSIVE ENDING AT ('2027-01-01') EXCLUSIVE IN userspace1",
+    ],
+    [
+      'attach',
+      "ALTER TABLE app.orders ATTACH PARTITION p_2027 STARTING FROM ('2027-01-01') INCLUSIVE ENDING AT ('2028-01-01') EXCLUSIVE FROM TABLE app.stage",
+    ],
+    [
+      'detach',
+      'ALTER TABLE app.orders DETACH PARTITION p_2024 INTO app.orders_old',
+    ],
+  ])('does not report a missing ALTER TABLE action for Db2 %s partition DDL', (_name, sql) => {
+    // The partition grammar is a Db2 rule the shared visitor has no method for;
+    // without the dialect-action fallback the linter claims the action is
+    // missing on DDL the product itself generates.
     const result = new SqlValidator(undefined, db2SqlAuthoring.validation).validate(sql);
     expect(result.errors.filter(error => error.code.startsWith('PAR'))).toEqual([]);
   });

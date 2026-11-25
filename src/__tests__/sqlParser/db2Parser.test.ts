@@ -84,6 +84,54 @@ describe('Db2SqlParser LUW', () => {
 			'final table source',
 			'SELECT * FROM FINAL TABLE (INSERT INTO T (ID) VALUES (1))',
 		],
+		[
+			'create index with designer clauses',
+			'CREATE UNIQUE INDEX JBL_LIVE.IDX_AMT ON JBL_LIVE.JBL_ORDERS (ORDER_ID ASC, AMOUNT DESC) INCLUDE (CUSTOMER_ID) ALLOW REVERSE SCANS COMPRESS YES PCTFREE 10 CLUSTER IN USERSPACE1',
+		],
+		[
+			'drop index',
+			'DROP INDEX JBL_LIVE.IDX_AMT',
+		],
+		[
+			'rename table',
+			'RENAME TABLE JBL_LIVE.T1 TO T2',
+		],
+		[
+			'add partition',
+			"ALTER TABLE JBL_LIVE.JBL_SALES_FACT ADD PARTITION P_2026 STARTING FROM ('2026-01-01') INCLUSIVE ENDING AT ('2027-01-01') EXCLUSIVE IN USERSPACE1",
+		],
+		[
+			'attach partition',
+			"ALTER TABLE JBL_LIVE.JBL_SALES_FACT ATTACH PARTITION P_2027 STARTING FROM ('2027-01-01') INCLUSIVE ENDING AT ('2028-01-01') EXCLUSIVE FROM TABLE JBL_LIVE.JBL_STAGE",
+		],
+		[
+			'detach partition',
+			'ALTER TABLE JBL_LIVE.JBL_SALES_FACT DETACH PARTITION P_2024 INTO JBL_LIVE.JBL_OLD',
+		],
+		[
+			'reorg table',
+			'REORG TABLE JBL_LIVE.JBL_ORDERS',
+		],
+		[
+			'runstats',
+			'RUNSTATS ON TABLE JBL_LIVE.JBL_ORDERS ON KEY COLUMNS AND INDEXES ALL',
+		],
+		[
+			'create trigger',
+			'CREATE TRIGGER JBL_LIVE.TRG AFTER INSERT ON JBL_LIVE.JBL_ORDERS REFERENCING NEW AS N FOR EACH ROW MODE DB2SQL BEGIN ATOMIC SET N.AMOUNT = 0; END',
+		],
+		[
+			'label on table',
+			"LABEL ON TABLE JBL_LIVE.JBL_ORDERS IS 'Orders'",
+		],
+		[
+			'export',
+			'EXPORT TO /tmp/orders.ixf OF IXF SELECT * FROM JBL_LIVE.JBL_ORDERS',
+		],
+		[
+			'import',
+			'IMPORT FROM /tmp/orders.ixf OF IXF INSERT INTO JBL_LIVE.JBL_ORDERS',
+		],
 	])('parses %s without actionable errors', (_name, sql) => {
 		const result = parse(sql);
 		expect(result.lexResult.errors).toHaveLength(0);
@@ -130,6 +178,74 @@ END`);
 		expect(result.lexResult.errors).toHaveLength(0);
 		expect(result.actionableParserErrors).toHaveLength(0);
 		expect(result.cst).toBeDefined();
+	});
+
+	it.each([
+		[
+			'IF / THEN / ELSE / END IF',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN IF a > 1 THEN SET a = 2; ELSE SET a = 3; END IF; END`,
+		],
+		[
+			'CASE statement',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN CASE WHEN a > 1 THEN SET a = 2; ELSE SET a = 3; END CASE; END`,
+		],
+		[
+			'WHILE / DO / END WHILE',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN WHILE a < 10 DO SET a = a + 1; END WHILE; END`,
+		],
+		[
+			'REPEAT / UNTIL / END REPEAT',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN REPEAT SET a = a - 1; UNTIL a <= 0 END REPEAT; END`,
+		],
+		[
+			'FOR loop',
+			`CREATE PROCEDURE p () LANGUAGE SQL BEGIN FOR r AS SELECT 1 AS x FROM SYSIBM.SYSDUMMY1 DO SET y = r.x; END FOR; END`,
+		],
+		[
+			'nested compound statement',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN IF a > 1 THEN BEGIN SET a = 2; END; END IF; END`,
+		],
+		[
+			'CASE expression inside a body statement',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN SET b = CASE WHEN a > 1 THEN 2 ELSE 3 END; END`,
+		],
+		[
+			'DECLARE ... DEFAULT',
+			`CREATE PROCEDURE p () LANGUAGE SQL BEGIN DECLARE b INTEGER DEFAULT 0; SET b = 1; END`,
+		],
+		[
+			'SIGNAL SQLSTATE',
+			`CREATE PROCEDURE p () LANGUAGE SQL BEGIN SIGNAL SQLSTATE '75000' SET MESSAGE_TEXT = 'boom'; END`,
+		],
+		[
+			'DECLARE CONTINUE HANDLER',
+			`CREATE PROCEDURE p () LANGUAGE SQL BEGIN DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET x = 1; END`,
+		],
+		[
+			'COMMIT / ROLLBACK',
+			`CREATE PROCEDURE p () LANGUAGE SQL BEGIN COMMIT; ROLLBACK; END`,
+		],
+		[
+			'cursor FETCH',
+			`CREATE PROCEDURE p () LANGUAGE SQL BEGIN DECLARE c CURSOR FOR SELECT 1 FROM SYSIBM.SYSDUMMY1; OPEN c; FETCH c INTO x; CLOSE c; END`,
+		],
+		[
+			'BETWEEN predicate',
+			`CREATE PROCEDURE p (IN a INTEGER) LANGUAGE SQL BEGIN IF a BETWEEN 1 AND 5 THEN SET a = 0; END IF; END`,
+		],
+	])('parses the SQL PL construct %s', (_name, sql) => {
+		const result = parse(sql);
+		expect(result.lexResult.errors).toHaveLength(0);
+		expect(result.actionableParserErrors).toHaveLength(0);
+	});
+
+	it('keeps the parser cheap to construct (self-analysis budget)', () => {
+		const start = performance.now();
+		createSqlParserInstance();
+		// Db2 identifier handling accepts most keywords, so a statement
+		// alternative that starts with a generic identifier makes Chevrotain's
+		// self-analysis explode. Guard the budget that keeps activation fast.
+		expect(performance.now() - start).toBeLessThan(2000);
 	});
 
 	it('creates an isolated parser instance', () => {

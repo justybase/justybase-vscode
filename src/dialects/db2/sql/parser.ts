@@ -6,18 +6,19 @@ import { NetezzaSqlParser } from '../../netezza/sql/parser';
 
 type AnyRule = () => CstNode;
 
-/** Tokens allowed in procedure headers / compound bodies (not Begin/End — those are structural). */
-const DB2_PROGRAM_TOKENS: TokenType[] = [
+/**
+ * Tokens allowed in SQL PL units that are not reachable through
+ * `commandTailToken` (the shared token soup used for the body).
+ *
+ * The `CURRENT …` special registers are intentionally absent: the Db2
+ * identifier rule already accepts them, and listing them here would make the
+ * `db2ProgramToken` alternatives overlap (Chevrotain ambiguity).
+ */
+const DB2_PROGRAM_ONLY_TOKENS: TokenType[] = [
 	db2Lexer.Db2LanguageSql,
 	db2Lexer.Db2GeneratedAlways,
 	db2Lexer.Db2GeneratedByDefault,
 	db2Lexer.Db2Identity,
-	db2Lexer.Db2CurrentSchema,
-	db2Lexer.Db2CurrentServer,
-	db2Lexer.Db2CurrentDate,
-	db2Lexer.Db2CurrentTime,
-	db2Lexer.Db2CurrentTimestamp,
-	db2Lexer.Db2CurrentUser,
 	db2Lexer.Db2WithUr,
 	db2Lexer.Db2WithCs,
 	db2Lexer.Db2WithRs,
@@ -25,57 +26,22 @@ const DB2_PROGRAM_TOKENS: TokenType[] = [
 	db2Lexer.Db2OptimizeFor,
 	db2Lexer.Db2ForReadOnly,
 	db2Lexer.Db2ForUpdate,
-	baseLexer.Create,
-	baseLexer.Or,
-	baseLexer.Replace,
-	baseLexer.Procedure,
-	baseLexer.Declare,
-	baseLexer.If,
-	baseLexer.Then,
-	baseLexer.Else,
-	baseLexer.While,
-	baseLexer.Loop,
-	baseLexer.Return,
-	baseLexer.Returns,
-	baseLexer.Set,
-	baseLexer.Select,
-	baseLexer.From,
-	baseLexer.Where,
-	baseLexer.Into,
-	baseLexer.Insert,
-	baseLexer.Update,
-	baseLexer.Delete,
-	baseLexer.Call,
-	baseLexer.As,
-	baseLexer.In,
+	db2Lexer.Db2FinalTable,
+	db2Lexer.Db2OldTable,
+	db2Lexer.Db2NewTable,
+	db2Lexer.Db2ModifiedBy,
+	db2Lexer.Db2DeclareGlobalTemporary,
+	db2Lexer.Db2OrganizeBy,
+	db2Lexer.Db2DataCapture,
+	db2Lexer.Db2Nickname,
+	// SQL PL keywords that lex as dedicated tokens but are not part of the
+	// Netezza identifier surface (`DEFAULT`, `BETWEEN`, `COMMIT`, `FETCH`, ...
+	// are already covered through `commandTailToken`).
+	baseLexer.Sqlstate,
 	baseLexer.Out,
-	baseLexer.Is,
-	baseLexer.Null,
-	baseLexer.Not,
-	baseLexer.And,
-	baseLexer.For,
-	baseLexer.Like,
-	baseLexer.Language,
-	baseLexer.Identifier,
-	baseLexer.QuotedIdentifier,
-	baseLexer.NumberLiteral,
-	baseLexer.StringLiteral,
-	baseLexer.Equals,
-	baseLexer.NotEquals,
-	baseLexer.LessThan,
-	baseLexer.GreaterThan,
-	baseLexer.LessThanEquals,
-	baseLexer.GreaterThanEquals,
-	baseLexer.Assign,
-	baseLexer.Plus,
-	baseLexer.Minus,
-	baseLexer.Multiply,
-	baseLexer.Divide,
-	baseLexer.Dot,
-	baseLexer.Comma,
+	baseLexer.Inout,
+	baseLexer.Cast,
 	baseLexer.Semicolon,
-	baseLexer.LParen,
-	baseLexer.RParen,
 ];
 
 /**
@@ -105,6 +71,25 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	db2PartitionBoundary!: AnyRule;
 	db2PartitionInclusivity!: AnyRule;
 	db2ConstraintAttributes!: AnyRule;
+	db2CreateIndexStatement!: AnyRule;
+	db2IndexKeyList!: AnyRule;
+	db2IndexKeyColumn!: AnyRule;
+	db2IndexTailToken!: AnyRule;
+	db2RenameTableStatement!: AnyRule;
+	db2AlterTablePartitionAction!: AnyRule;
+	db2PartitionRangeDefinition!: AnyRule;
+	db2PartitionStartClause!: AnyRule;
+	db2PartitionEndClause!: AnyRule;
+	db2PartitionBoundaryValue!: AnyRule;
+	db2PartitionKeywordOrIdentifier!: AnyRule;
+	db2AdminCommandStatement!: AnyRule;
+	db2EndBlockKeyword!: AnyRule;
+	db2ProgramKeyword!: AnyRule;
+	db2CompoundBody!: AnyRule;
+	db2CreateTriggerStatement!: AnyRule;
+	db2LabelStatement!: AnyRule;
+	db2ExportStatement!: AnyRule;
+	db2ImportStatement!: AnyRule;
 
 	public constructor() {
 		super(db2Lexer);
@@ -139,6 +124,15 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			db2Lexer.Db2CurrentTime,
 			db2Lexer.Db2CurrentTimestamp,
 			db2Lexer.Db2CurrentUser,
+			// Command-leading Db2 words stay usable as unquoted object/column
+			// names. They are not reserved words, so excluding them would reject
+			// valid schemas that happen to be named `INDEX`, `REORG`, ...
+			db2Lexer.Db2Index,
+			db2Lexer.Db2Trigger,
+			db2Lexer.Db2Reorg,
+			db2Lexer.Db2Runstats,
+			db2Lexer.Db2Export,
+			db2Lexer.Db2Import,
 		];
 	}
 
@@ -155,12 +149,35 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			this.CONSUME(baseLexer.Alter);
 			this.CONSUME(baseLexer.Table);
 			this.SUBRULE(this.qualifiedName);
-			this.OPTION(() => this.SUBRULE(this.alterTableAction));
+			this.OPTION(() => {
+				this.OR([
+					{
+						// ADD / ATTACH / DETACH PARTITION, emitted by the Db2 partition designer.
+						GATE: () => this.startsDb2PartitionAction(),
+						ALT: () => this.SUBRULE(this.db2AlterTablePartitionAction),
+					},
+					{ ALT: () => this.SUBRULE(this.alterTableAction) },
+				]);
+			});
 		});
 	}
 
+	private startsDb2PartitionAction(): boolean {
+		const la1 = this.LA(1).image.toUpperCase();
+		if (la1 === 'ATTACH' || la1 === 'DETACH') {
+			return true;
+		}
+		return la1 === 'ADD' && this.isDb2KeywordAt(2, 'PARTITION');
+	}
+
 	protected getAdditionalDropObjectAlternatives(): OrAlternative[] {
-		return [];
+		// `DROP INDEX schema.name` — emitted by the Db2 designer and used by DBAs.
+		return [
+			{
+				GATE: () => this.LA(1).tokenType === db2Lexer.Db2Index,
+				ALT: () => this.CONSUME1(db2Lexer.Db2Index),
+			},
+		];
 	}
 
 	protected getAdditionalExplainOptionAlternatives(): OrAlternative[] {
@@ -205,7 +222,93 @@ export class Db2SqlParser extends NetezzaSqlParser {
 					&& this.LA(2).tokenType === db2Lexer.Db2Nickname,
 				ALT: () => this.SUBRULE(this.db2CreateNicknameStatement),
 			},
+			{
+				// CREATE [UNIQUE] INDEX … — the Db2 index designer emits this.
+				GATE: () => this.startsDb2CreateIndex(),
+				ALT: () => this.SUBRULE(this.db2CreateIndexStatement),
+			},
+			{
+				// Db2 rejects ALTER TABLE … RENAME TO; the rename command emits this form.
+				GATE: () => this.LA(1).tokenType === db2Lexer.Db2RenameTable,
+				ALT: () => this.SUBRULE(this.db2RenameTableStatement),
+			},
+			{
+				// REORG / RUNSTATS are Db2 administration commands with long option
+				// lists; the maintenance provider wraps them in ADMIN_CMD, but users
+				// also run them directly.
+				GATE: () => this.LA(1).tokenType === db2Lexer.Db2Reorg || this.LA(1).tokenType === db2Lexer.Db2Runstats,
+				ALT: () => this.SUBRULE(this.db2AdminCommandStatement),
+			},
+			{
+				// Db2 triggers carry a `BEGIN ATOMIC` compound body.
+				GATE: () => this.startsDb2Trigger(),
+				ALT: () => this.SUBRULE(this.db2CreateTriggerStatement),
+			},
+			{
+				// Db2 labels are the native alternative to COMMENT ON.
+				GATE: () => this.LA(1).tokenType === db2Lexer.Db2LabelOn,
+				ALT: () => this.SUBRULE(this.db2LabelStatement),
+			},
+			{
+				// EXPORT / IMPORT are the Db2 data-movement utilities.
+				GATE: () => this.LA(1).tokenType === db2Lexer.Db2Export,
+				ALT: () => this.SUBRULE(this.db2ExportStatement),
+			},
+			{
+				GATE: () => this.LA(1).tokenType === db2Lexer.Db2Import,
+				ALT: () => this.SUBRULE(this.db2ImportStatement),
+			},
 		];
+	}
+
+	private startsDb2CreateIndex(): boolean {
+		if (this.LA(1).tokenType !== baseLexer.Create) {
+			return false;
+		}
+		if (this.LA(2).tokenType === db2Lexer.Db2Index) {
+			return true;
+		}
+		return (
+			this.LA(2).tokenType === baseLexer.Unique
+			&& this.LA(3).tokenType === db2Lexer.Db2Index
+		);
+	}
+
+	private startsDb2Trigger(): boolean {
+		return this.LA(1).tokenType === baseLexer.Create && this.LA(2).tokenType === db2Lexer.Db2Trigger;
+	}
+
+	private isDb2KeywordAt(lookahead: number, keyword: string): boolean {
+		return this.LA(lookahead).image.toUpperCase() === keyword;
+	}
+
+	/**
+	 * A compound body continues until the `END` that closes it. An `END`
+	 * followed by a block keyword (`END IF`, `END WHILE`, `END LOOP`,
+	 * `END REPEAT`, `END FOR`, `END CASE`) terminates an inner construct and
+	 * keeps the outer body open. A plain `END` closes a nested `BEGIN` or a
+	 * case expression while the block stack is non-empty, and otherwise closes
+	 * the body itself.
+	 */
+	private shouldContinueDb2Body(blockStack: readonly ('begin' | 'case')[]): boolean {
+		if (blockStack.length > 0) {
+			return true;
+		}
+		if (this.LA(1).tokenType !== baseLexer.End) {
+			return true;
+		}
+		return this.isDb2BlockTerminator(this.LA(2).tokenType);
+	}
+
+	private isDb2BlockTerminator(nextType: TokenType): boolean {
+		return (
+			nextType === baseLexer.If
+			|| nextType === baseLexer.While
+			|| nextType === baseLexer.Loop
+			|| nextType === baseLexer.Case
+			|| nextType === baseLexer.For
+			|| (nextType === baseLexer.Identifier && this.isDb2KeywordAt(2, 'REPEAT'))
+		);
 	}
 
 	private startsDb2Procedure(): boolean {
@@ -439,16 +542,315 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			this.OPTION(() => this.SUBRULE(this.commandTail));
 		});
 
-		this.RULE('db2ProgramToken', () => {
-			this.OR(this.getTokenAlternatives(DB2_PROGRAM_TOKENS));
+		/**
+		 * `CREATE [UNIQUE] INDEX name ON table (keys) INCLUDE (...) ...`
+		 *
+		 * The trailing physical clauses (INCLUDE / ALLOW REVERSE SCANS / COMPRESS /
+		 * PCTFREE / IN tablespace / CLUSTER) are emitted by the Db2 index designer,
+		 * so they must round-trip through the strict parser.
+		 */
+		this.RULE('db2CreateIndexStatement', () => {
+			this.CONSUME(baseLexer.Create);
+			this.OPTION(() => this.CONSUME(baseLexer.Unique));
+			this.CONSUME(db2Lexer.Db2Index);
+			this.SUBRULE(this.qualifiedName);
+			this.CONSUME(baseLexer.On);
+			this.SUBRULE1(this.qualifiedName);
+			this.SUBRULE(this.db2IndexKeyList);
+			// INCLUDE / ALLOW REVERSE SCANS / COMPRESS / PCTFREE / LEVEL2 PCTFREE /
+			// MINPCTUSED / PAGE SPLIT / COLLECT ... STATISTICS / IN tablespace /
+			// CLUSTER. The list is long and version-specific, so it stays an
+			// offset-stable token tail instead of a rule per clause.
+			this.MANY(() => this.SUBRULE(this.db2IndexTailToken));
+		});
+
+		this.RULE('db2IndexTailToken', () => {
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === baseLexer.Reverse, ALT: () => this.CONSUME(baseLexer.Reverse) },
+				{ ALT: () => this.SUBRULE(this.commandTailToken) },
+			]);
+		});
+
+		this.RULE('db2IndexKeyList', () => {
+			this.CONSUME(baseLexer.LParen);
+			this.AT_LEAST_ONE_SEP({ SEP: baseLexer.Comma, DEF: () => this.SUBRULE(this.db2IndexKeyColumn) });
+			this.CONSUME(baseLexer.RParen);
+		});
+
+		this.RULE('db2IndexKeyColumn', () => {
+			this.SUBRULE(this.identifier);
+			this.OPTION(() => this.OR([
+				{ ALT: () => this.CONSUME(baseLexer.Asc) },
+				{ ALT: () => this.CONSUME(baseLexer.Desc) },
+			]));
+		});
+
+		this.RULE('db2RenameTableStatement', () => {
+			this.CONSUME(db2Lexer.Db2RenameTable);
+			this.SUBRULE(this.qualifiedName);
+			this.CONSUME(baseLexer.To);
+			// Db2 rejects a qualified target (SQLCODE -108).
+			this.SUBRULE1(this.identifier);
 		});
 
 		/**
-		 * Thin SQL PL unit: explicit CREATE … PROCEDURE header, then BEGIN … END.
-		 * Nested BEGIN/END is not modeled yet (phase-4 depth); header stops at BEGIN.
-		 * The explicit header narrows the rule FIRST set to {Create} so the shared
-		 * statement OR stays cheap to self-analyze (catch-all token soups first sets
-		 * overlap every DML alternative and blow up Chevrotain's lookahead analysis).
+		 * `ALTER TABLE t ADD PARTITION …` / `ATTACH PARTITION … FROM TABLE s` /
+		 * `DETACH PARTITION … INTO TABLE d`, all emitted by the Db2 partition
+		 * designer. The TO TABLE words in `DETACH … INTO TABLE` are optional in
+		 * Db2 and omitted by the designer's `INTO <table>` form.
+		 */
+		this.RULE('db2AlterTablePartitionAction', () => {
+			this.OR([
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'ADD'),
+					ALT: () => {
+						this.CONSUME(baseLexer.Add);
+						this.SUBRULE(this.db2PartitionRangeDefinition);
+					},
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'ATTACH'),
+					ALT: () => {
+						this.CONSUME1(baseLexer.Identifier);
+						this.SUBRULE1(this.db2PartitionRangeDefinition);
+						this.CONSUME(baseLexer.From);
+						this.CONSUME(baseLexer.Table);
+						this.SUBRULE(this.qualifiedName);
+					},
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'DETACH'),
+					ALT: () => {
+						this.CONSUME2(baseLexer.Identifier);
+						this.SUBRULE2(this.db2PartitionRangeDefinition);
+					},
+				},
+			]);
+		});
+
+		/**
+		 * `PARTITION p STARTING FROM (…) INCLUSIVE ENDING AT (…) EXCLUSIVE`
+		 * plus the `IN` / `INDEX IN` / `LONG IN` tablespace clauses. Add/attach
+		 * use the `STARTING FROM … ENDING AT …` form, detach only needs the
+		 * partition name and the `INTO TABLE` target.
+		 */
+		this.RULE('db2PartitionRangeDefinition', () => {
+			this.SUBRULE(this.db2PartitionKeywordOrIdentifier);
+			this.SUBRULE(this.identifier);
+			this.OPTION(() => this.SUBRULE(this.db2PartitionStartClause));
+			this.OPTION1(() => this.SUBRULE(this.db2PartitionEndClause));
+			this.OPTION2(() => {
+				this.CONSUME(baseLexer.In);
+				this.SUBRULE1(this.identifier);
+			});
+			this.OPTION3(() => {
+				this.OR([
+					{ GATE: () => this.isDb2KeywordAt(1, 'INDEX'), ALT: () => this.CONSUME1(baseLexer.Identifier) },
+					{ GATE: () => this.isDb2KeywordAt(1, 'LONG'), ALT: () => this.CONSUME2(baseLexer.Identifier) },
+				]);
+				this.CONSUME1(baseLexer.In);
+				this.SUBRULE2(this.identifier);
+			});
+			this.OPTION4(() => {
+				this.CONSUME(baseLexer.Into);
+				this.OPTION5(() => this.CONSUME(baseLexer.Table));
+				this.SUBRULE3(this.qualifiedName);
+			});
+		});
+
+		this.RULE('db2PartitionStartClause', () => {
+			this.OR([
+				{ GATE: () => this.isDb2KeywordAt(1, 'STARTING'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'START'), ALT: () => this.CONSUME1(baseLexer.Identifier) },
+			]);
+			this.OPTION(() => this.CONSUME(baseLexer.From));
+			this.SUBRULE(this.db2PartitionBoundaryValue);
+			this.OPTION1(() => this.SUBRULE(this.db2PartitionInclusivity));
+		});
+
+		this.RULE('db2PartitionEndClause', () => {
+			this.OR([
+				{ GATE: () => this.isDb2KeywordAt(1, 'ENDING'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'END'), ALT: () => this.CONSUME1(baseLexer.Identifier) },
+			]);
+			this.OPTION(() => {
+				this.OR1([
+					{ GATE: () => this.isDb2KeywordAt(1, 'AT'), ALT: () => this.CONSUME2(baseLexer.Identifier) },
+					{ GATE: () => this.isDb2KeywordAt(1, 'FROM'), ALT: () => this.CONSUME(baseLexer.From) },
+				]);
+			});
+			this.SUBRULE(this.db2PartitionBoundaryValue);
+			this.OPTION1(() => this.SUBRULE(this.db2PartitionInclusivity));
+		});
+
+		this.RULE('db2PartitionBoundaryValue', () => {
+			this.OR([
+				{ GATE: () => this.isDb2KeywordAt(1, 'MINVALUE'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'MAXVALUE'), ALT: () => this.CONSUME1(baseLexer.Identifier) },
+				{ ALT: () => {
+					this.CONSUME(baseLexer.LParen);
+					this.AT_LEAST_ONE_SEP({ SEP: baseLexer.Comma, DEF: () => this.SUBRULE(this.expression) });
+					this.CONSUME(baseLexer.RParen);
+				} },
+			]);
+		});
+
+		this.RULE('db2PartitionKeywordOrIdentifier', () => {
+			this.OR([{ GATE: () => this.isDb2KeywordAt(1, 'PARTITION'), ALT: () => this.CONSUME(baseLexer.Identifier) }]);
+		});
+
+		/**
+		 * `REORG TABLE t` / `RUNSTATS ON TABLE t ...` and their `REORG INDEXES ALL
+		 * FOR TABLE t` / `REORG TABLE t ...` variants. Option lists are long and
+		 * version-specific, so the tail is an offset-stable token sequence.
+		 */
+		this.RULE('db2AdminCommandStatement', () => {
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === db2Lexer.Db2Reorg, ALT: () => this.CONSUME(db2Lexer.Db2Reorg) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2Runstats) },
+			]);
+			this.MANY(() => this.SUBRULE(this.commandTailToken));
+		});
+
+		/**
+		 * `CREATE TRIGGER name AFTER|BEFORE|INSTEAD OF … ON table … BEGIN ATOMIC … END`
+		 *
+		 * The header carries a long, version-specific option list
+		 * (`REFERENCING … FOR EACH ROW MODE DB2SQL`, `UPDATE OF …`, …), so it is
+		 * an offset-stable token sequence that stops at `BEGIN`. The body reuses
+		 * the depth-tracked compound body; `ATOMIC` is just the first body token.
+		 */
+		this.RULE('db2CreateTriggerStatement', () => {
+			this.CONSUME(baseLexer.Create);
+			this.CONSUME(db2Lexer.Db2Trigger);
+			this.SUBRULE(this.qualifiedName);
+			this.MANY({
+				GATE: () => this.LA(1).tokenType !== baseLexer.Begin,
+				DEF: () => this.SUBRULE(this.db2ProgramToken),
+			});
+			this.SUBRULE(this.db2CompoundBody);
+		});
+
+		/**
+		 * `LABEL ON TABLE|COLUMN|INDEX|ALIAS … IS '…'`. The object-kind word and
+		 * the qualified target are the only structure; the label text is a literal.
+		 */
+		this.RULE('db2LabelStatement', () => {
+			this.CONSUME(db2Lexer.Db2LabelOn);
+			this.SUBRULE(this.identifier);
+			this.SUBRULE(this.qualifiedName);
+			this.OPTION(() => this.SUBRULE(this.commandTail));
+		});
+
+		/**
+		 * `EXPORT TO file OF IXF SELECT …` — the file and format are not SQL
+		 * expressions, so they stay a token sequence; the embedded query keeps its
+		 * own rule so scope analysis still sees the referenced tables.
+		 */
+		this.RULE('db2ExportStatement', () => {
+			this.CONSUME(db2Lexer.Db2Export);
+			this.MANY({
+				GATE: () => this.LA(1).tokenType !== baseLexer.Select
+					&& this.LA(1).tokenType !== baseLexer.With,
+				DEF: () => this.SUBRULE(this.commandTailToken),
+			});
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === baseLexer.With, ALT: () => this.SUBRULE(this.withAnyStatement) },
+				{ ALT: () => this.SUBRULE(this.selectStatement) },
+			]);
+		});
+
+		/**
+		 * `IMPORT FROM file OF IXF INSERT INTO t …`. The target import mode is a
+		 * utility option list, not SQL, so the whole statement is an offset-stable
+		 * token sequence.
+		 */
+		this.RULE('db2ImportStatement', () => {
+			this.CONSUME(db2Lexer.Db2Import);
+			this.MANY(() => this.SUBRULE(this.commandTailToken));
+		});
+
+		this.RULE('db2ProgramToken', () => {
+			// SQL PL bodies are an offset-stable token sequence, not a modelled
+			// statement grammar. `commandTailToken` already accepts identifiers,
+			// literals and punctuation; the Db2-only multi-word tokens are added
+			// here and are disjoint from it, so the OR stays unambiguous.
+			this.OR([
+				{ ALT: () => this.SUBRULE(this.commandTailToken) },
+				{ ALT: () => this.SUBRULE(this.db2ProgramKeyword) },
+			]);
+		});
+
+		this.RULE('db2ProgramKeyword', () => {
+			this.OR(this.getTokenAlternatives(DB2_PROGRAM_ONLY_TOKENS));
+		});
+
+		/** `END IF` / `END WHILE` / `END LOOP` / `END FOR` / `END REPEAT` / `END CASE`. */
+		this.RULE('db2EndBlockKeyword', () => {
+			this.CONSUME(baseLexer.End);
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === baseLexer.If, ALT: () => this.CONSUME(baseLexer.If) },
+				{ GATE: () => this.LA(1).tokenType === baseLexer.While, ALT: () => this.CONSUME(baseLexer.While) },
+				{ GATE: () => this.LA(1).tokenType === baseLexer.Loop, ALT: () => this.CONSUME(baseLexer.Loop) },
+				{ GATE: () => this.LA(1).tokenType === baseLexer.Case, ALT: () => this.CONSUME(baseLexer.Case) },
+				{ GATE: () => this.LA(1).tokenType === baseLexer.For, ALT: () => this.CONSUME(baseLexer.For) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'REPEAT'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+			]);
+		});
+
+		/**
+		 * `BEGIN … END` with nesting. The body stays an offset-stable token
+		 * sequence, but the `BEGIN` / `CASE` stack is tracked so `IF … END IF`,
+		 * `WHILE … END WHILE`, `CASE … END CASE`, case expressions and nested
+		 * compound statements all end where they should.
+		 */
+		this.RULE('db2CompoundBody', () => {
+			this.CONSUME(baseLexer.Begin);
+			const blockStack: Array<'begin' | 'case'> = [];
+			this.MANY({
+				GATE: () => this.shouldContinueDb2Body(blockStack),
+				DEF: () => {
+					const tokenType = this.LA(1).tokenType;
+					const nextType = this.LA(2).tokenType;
+					if (tokenType === baseLexer.End) {
+						if (this.isDb2BlockTerminator(nextType)) {
+							// `END IF` / `END WHILE` / `END LOOP` / `END REPEAT` /
+							// `END FOR` close an inner construct; only `END CASE`
+							// also closes a tracked `CASE`.
+							if (nextType === baseLexer.Case && blockStack[blockStack.length - 1] === 'case') {
+								blockStack.pop();
+							}
+							this.SUBRULE(this.db2EndBlockKeyword);
+							return;
+						}
+						// A plain `END` closes the innermost `BEGIN` or case expression.
+						if (blockStack.length > 0) {
+							blockStack.pop();
+						}
+						this.CONSUME1(baseLexer.End);
+						return;
+					}
+					if (tokenType === baseLexer.Case) {
+						blockStack.push('case');
+					} else if (tokenType === baseLexer.Begin) {
+						blockStack.push('begin');
+					}
+					this.SUBRULE(this.db2ProgramToken);
+				},
+			});
+			this.CONSUME(baseLexer.End);
+		});
+
+		/**
+		 * Thin SQL PL unit: explicit `CREATE … PROCEDURE` header, then `BEGIN … END`.
+		 *
+		 * The header is a token sequence that stops at `BEGIN`; the body tracks
+		 * `BEGIN` and `CASE` depth, so `IF … END IF`, `WHILE … END WHILE`,
+		 * nested compound statements and `CASE` expressions all end where they
+		 * should. The explicit header narrows the rule FIRST set to {Create} so
+		 * the shared statement OR stays cheap to self-analyze (catch-all token
+		 * soups first sets overlap every DML alternative and blow up
+		 * Chevrotain's lookahead analysis).
 		 */
 		this.RULE('db2ProcedureUnit', () => {
 			this.CONSUME(baseLexer.Create);
@@ -462,18 +864,8 @@ export class Db2SqlParser extends NetezzaSqlParser {
 				GATE: () => this.LA(1).tokenType !== baseLexer.Begin,
 				DEF: () => this.SUBRULE(this.db2ProgramToken),
 			});
-			this.CONSUME(baseLexer.Begin);
-			this.MANY1({
-				GATE: () => this.LA(1).tokenType !== baseLexer.End,
-				DEF: () => this.SUBRULE1(this.db2ProgramToken),
-			});
-			this.CONSUME(baseLexer.End);
-			this.OPTION1(() => {
-				this.OR([
-					{ ALT: () => this.CONSUME(baseLexer.Identifier) },
-					{ ALT: () => this.CONSUME(baseLexer.QuotedIdentifier) },
-				]);
-			});
+			this.SUBRULE(this.db2CompoundBody);
+			this.OPTION1(() => this.SUBRULE(this.identifier));
 		});
 
 		// No LIMIT (Netezza-only). Keep FETCH FIRST + Db2 trailing clauses.

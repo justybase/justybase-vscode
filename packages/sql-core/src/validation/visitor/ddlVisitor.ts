@@ -332,8 +332,20 @@ export function alterTableStatement(
   // Set pending rename source so alterTableRenameTableAction can use it
   host.setPendingRenameSource(oldTable);
 
+  // Dialect-specific ALTER TABLE actions (for example Db2 range-partition
+  // management) are grammar rules the shared visitor does not know by name.
+  // Any such child rule counts as the action instead of "missing".
+  const dialectAction = Object.entries(ctx).find(
+    ([name, nodes]) =>
+      name !== "alterTableAction" &&
+      /[Aa]lterTable\w*Action$/.test(name) &&
+      nodes.length > 0,
+  );
+
   if (ctx.alterTableAction) {
     host.visit(ctx.alterTableAction[0]);
+  } else if (dialectAction) {
+    host.visit(dialectAction[1][0]);
   } else if (!ctx.organizeClause && ctx.qualifiedName) {
     const tableToken = host.getFirstTokenFromCst(
       ctx.qualifiedName[0] as CstNode,

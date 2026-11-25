@@ -7,7 +7,7 @@ Db2 support is delivered as the optional sibling extension in [`extensions/db2`]
 The Db2 pack is published with `"preview": true`. Treat it as a **near-full companion**:
 
 - **Runtime:** Advanced — connect, SYSCAT metadata (including aliases/nicknames/federated groups), DDL fallback, import/export, explain/tuning, RUNSTATS/REORG, session monitor, dedicated Index Designer and Partition Manager webviews, dedicated live suite + optional `JBL_LIVE` fixture.
-- **Editor:** Advanced (LUW SQL + CST linter/semantic) — **DB2001–DB2008** quality rules, strict Chevrotain runtime (`FETCH FIRST`, `OPTIMIZE FOR`, isolation, `FOR READ ONLY`, `FINAL TABLE`, DGTT, thin SQL PL units), dialect-aware semantic tokens. Deep SQL PL (SQL037–039 visitor depth) remains a follow-on.
+- **Editor:** Advanced (LUW SQL + CST linter/semantic) — **DB2001–DB2008** quality rules, strict Chevrotain runtime (`FETCH FIRST`, `OPTIMIZE FOR`, isolation, `FOR READ ONLY`, `FINAL TABLE`, DGTT, `CREATE [UNIQUE] INDEX`, `RENAME TABLE`, `REORG`/`RUNSTATS`, `CREATE TRIGGER … BEGIN ATOMIC`, `LABEL ON`, `EXPORT`/`IMPORT`, SQL PL units with depth-tracked `BEGIN`/`CASE` bodies), dialect-aware semantic tokens. SQL PL bodies remain an offset-stable token sequence, so the SQL037–SQL039 procedure checks are not yet emitted for Db2 (follow-on).
 
 **Netezza (core)** remains the reference full experience. Db2 does **not** expose Netezza distribution/skew/GROOM UI actions.
 
@@ -26,7 +26,7 @@ The Db2 pack is published with `"preview": true`. Treat it as a **near-full comp
 - Quality rules **DB2001–DB2008** (`SELECT *`, DELETE/UPDATE without WHERE, reject `GROOM` / `DISTRIBUTE ON` / `LIMIT` / `DB..TABLE`, top-N without `ORDER BY`)
 - Dedicated Db2 parser runtime (`DB2_SQL_PARSING_RUNTIME`) with **strict** syntax validation
 - Dialect-aware semantic tokens (Db2 lexer + authoring builtins)
-- Grammar: `dialects/db2/syntaxes/db2.tmLanguage.json`; snippets: `dialects/db2/snippets/db2.code-snippets`
+- Grammar: `dialects/db2/syntaxes/db2.tmLanguage.json` (DDL, DML, SQL PL and `CURRENT …` register scopes); snippets: `dialects/db2/snippets/db2.code-snippets` (17 entries, every one parse-verified)
 
 ### Data and operations
 

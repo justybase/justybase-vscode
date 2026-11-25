@@ -4,8 +4,28 @@
   "injectionSelector": "L:source.sql - (string.quoted | comment.line | comment.block)",
   "patterns": [
     {
+      "name": "keyword.other.ddl.db2.sql",
+      "match": "(?i)\\b(CREATE\\s+(?:UNIQUE\\s+)?INDEX|RENAME\\s+TABLE|LABEL\\s+ON|REORG\\s+(?:TABLE|INDEXES)|RUNSTATS|SET\\s+INTEGRITY|EXPORT\\s+TO|IMPORT\\s+FROM|CREATE\\s+(?:ALIAS|NICKNAME|TRIGGER)|DROP\\s+INDEX)\\b"
+    },
+    {
+      "name": "keyword.other.dml.db2.sql",
+      "match": "(?i)\\b(FETCH\\s+FIRST|OPTIMIZE\\s+FOR|FOR\\s+READ\\s+ONLY|FOR\\s+UPDATE|WITH\\s+(?:UR|CS|RS|RR)|FINAL\\s+TABLE|OLD\\s+TABLE|NEW\\s+TABLE|MODIFIED\\s+BY|INCLUDE\\s*\\(|ALLOW\\s+REVERSE\\s+SCANS|DISALLOW\\s+REVERSE\\s+SCANS|ON\\s+COMMIT\\s+(?:PRESERVE|DELETE)\\s+ROWS)\\b"
+    },
+    {
       "name": "keyword.other.db2.sql",
-      "match": "(?i)\\b(FETCH\\s+FIRST|OPTIMIZE\\s+FOR|FOR\\s+READ\\s+ONLY|FOR\\s+UPDATE|WITH\\s+(?:UR|CS|RS|RR)|FINAL\\s+TABLE|OLD\\s+TABLE|NEW\\s+TABLE|MODIFIED\\s+BY|DECLARE\\s+GLOBAL\\s+TEMPORARY|GENERATED\\s+(?:ALWAYS|BY\\s+DEFAULT)|IDENTITY|ORGANIZE\\s+BY|DATA\\s+CAPTURE|LANGUAGE\\s+SQL|CREATE\\s+(?:ALIAS|NICKNAME)|CURRENT\\s+(?:SCHEMA|SERVER|DATE|TIME|TIMESTAMP|USER))\\b"
+      "match": "(?i)\\b(DECLARE\\s+GLOBAL\\s+TEMPORARY|GENERATED\\s+(?:ALWAYS|BY\\s+DEFAULT)|IDENTITY|ORGANIZE\\s+BY|DATA\\s+CAPTURE|LANGUAGE\\s+SQL|CURRENT\\s+(?:SCHEMA|SERVER|DATE|TIME|TIMESTAMP|USER)|STARTING\\s+FROM|ENDING\\s+AT|MINVALUE|MAXVALUE|INCLUSIVE|EXCLUSIVE|COMPRESS\\s+(?:YES|NO)|PCTFREE|MINPCTUSED|ORGANIZE\\s+BY\\s+(?:ROW|COLUMN))\\b"
+    },
+    {
+      "name": "keyword.control.sqlpl.db2.sql",
+      "match": "(?i)\\b(END\\s+(?:IF|WHILE|LOOP|FOR|REPEAT|CASE)|BEGIN\\s+ATOMIC|ELSIF|ELSEIF|WHILE|REPEAT|UNTIL|LOOP|SIGNAL|RESIGNAL|HANDLER|SQLEXCEPTION|SQLWARNING|NOT\\s+FOUND|SQLSTATE|SQLCODE|SQLERRM|MESSAGE_TEXT)\\b"
+    },
+    {
+      "name": "storage.type.sqlpl.db2.sql",
+      "match": "(?i)\\b(ALIAS\\s+FOR|CONSTANT|NOT\\s+NULL|VARRAY|ROWTYPE|RECORD|DECLARE\\s+(?:CONTINUE|EXIT)\\s+HANDLER)\\b"
+    },
+    {
+      "name": "entity.name.function.db2.sql",
+      "match": "(?i)\\b(ADMIN_CMD|SYSINSTALLOBJECTS|SYSPROC\\.\\w+|MON_GET_\\w+|SYSIBM\\.\\w+|SNAP_\\w+)\\b"
     }
   ],
   "repository": {}
