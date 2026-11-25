@@ -96,6 +96,13 @@ describe('Db2 TextMate injection', () => {
 		expect(scopeOf(tokens, 'CURRENT SCHEMA').join(' ')).toContain('keyword.other.db2');
 	});
 
+	it('scopes the utility and maintenance statements the extension emits', async () => {
+		const tokens = await tokenize('REFRESH TABLE t');
+		expect(scopeOf(tokens, 'REFRESH TABLE').join(' ')).toContain('keyword.other.ddl.db2');
+		const alterTokens = await tokenize('ALTER SEQUENCE s RESTART WITH 1');
+		expect(scopeOf(alterTokens, 'ALTER SEQUENCE').join(' ')).toContain('keyword.other.ddl.db2');
+	});
+
 	it('scopes SQL PL control words', async () => {
 		const tokens = await tokenize('END IF;');
 		expect(scopeOf(tokens, 'END IF').join(' ')).toContain('keyword.control.sqlpl.db2');

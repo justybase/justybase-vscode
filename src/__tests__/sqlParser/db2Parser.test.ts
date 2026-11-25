@@ -73,6 +73,10 @@ describe('Db2SqlParser LUW', () => {
 			'CREATE ALIAS APP.ORDERS_A FOR APP.ORDERS',
 		],
 		[
+			'create synonym',
+			'CREATE SYNONYM APP.ORDERS_S FOR APP.ORDERS',
+		],
+		[
 			'create nickname',
 			'CREATE NICKNAME APP.REMOTE_ORDERS FOR FEDSERVER.REMOTE_SCHEMA.ORDERS',
 		],
@@ -132,6 +136,94 @@ describe('Db2SqlParser LUW', () => {
 			'import',
 			'IMPORT FROM /tmp/orders.ixf OF IXF INSERT INTO JBL_LIVE.JBL_ORDERS',
 		],
+		[
+			'create table identity column',
+			'CREATE TABLE JBL_LIVE.JBL_SEQ (ID BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL, NAME VARCHAR(40))',
+		],
+		[
+			'refresh materialized query table',
+			'REFRESH TABLE JBL_LIVE.MQT_SALES',
+		],
+		[
+			'comment on constraint',
+			"COMMENT ON CONSTRAINT JBL_LIVE.JBL_ORDERS.PK_ORDERS IS 'Primary key'",
+		],
+		[
+			'alter table activate not logged initially',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS ACTIVATE NOT LOGGED INITIALLY',
+		],
+		[
+			'alter table not logged initially',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS NOT LOGGED INITIALLY',
+		],
+		[
+			'alter table compress',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS COMPRESS YES',
+		],
+		[
+			'alter table data capture',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS DATA CAPTURE CHANGES',
+		],
+		[
+			'alter table append',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS APPEND ON',
+		],
+		[
+			'create table compress adaptive',
+			'CREATE TABLE JBL_LIVE.JBL_ORDERS (ID INT) COMPRESS YES ADAPTIVE',
+		],
+		[
+			'create global temporary table not logged',
+			'CREATE GLOBAL TEMPORARY TABLE SESSION.TMP2 (ID INT) ON COMMIT DELETE ROWS NOT LOGGED',
+		],
+		[
+			'alter column set data type',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS ALTER COLUMN AMOUNT SET DATA TYPE DECIMAL(12,2)',
+		],
+		[
+			'alter column set not null',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS ALTER COLUMN AMOUNT SET NOT NULL',
+		],
+		[
+			'alter column drop not null',
+			'ALTER TABLE JBL_LIVE.JBL_ORDERS ALTER COLUMN AMOUNT DROP NOT NULL',
+		],
+		[
+			'alter sequence restart',
+			'ALTER SEQUENCE JBL_LIVE.JBL_SEQ RESTART WITH 100',
+		],
+		[
+			'create materialized query table',
+			'CREATE TABLE JBL_LIVE.MQT_SALES AS (SELECT ID FROM JBL_LIVE.JBL_ORDERS) DATA INITIALLY DEFERRED REFRESH DEFERRED',
+		],
+		[
+			'execute immediate',
+			"EXECUTE IMMEDIATE 'SELECT 1 FROM SYSIBM.SYSDUMMY1'",
+		],
+		[
+			'declare cursor',
+			'DECLARE CSR CURSOR WITH RETURN FOR SELECT * FROM JBL_LIVE.JBL_ORDERS',
+		],
+		[
+			'open cursor',
+			'OPEN CSR',
+		],
+		[
+			'fetch cursor',
+			'FETCH FROM CSR INTO V_AMOUNT',
+		],
+		[
+			'close cursor',
+			'CLOSE CSR',
+		],
+		[
+			'prepare',
+			"PREPARE S FROM 'SELECT 1 FROM SYSIBM.SYSDUMMY1'",
+		],
+		[
+			'truncate immediate',
+			'TRUNCATE TABLE JBL_LIVE.JBL_ORDERS IMMEDIATE',
+		],
 	])('parses %s without actionable errors', (_name, sql) => {
 		const result = parse(sql);
 		expect(result.lexResult.errors).toHaveLength(0);
@@ -146,8 +238,7 @@ describe('Db2SqlParser LUW', () => {
 		'GENERATE STATISTICS ON sales',
 		'CREATE TABLE t (a INT) DISTRIBUTE ON (a)',
 		'CREATE EXTERNAL TABLE ext_sales (id INT)',
-		'CREATE SYNONYM APP.ORDERS_S FOR APP.ORDERS',
-	])('rejects Netezza-only or non-Db2 synonym syntax: %s', (sql) => {
+	])('rejects Netezza-only or non-Db2 syntax: %s', (sql) => {
 		const result = parse(sql);
 		expect(result.actionableParserErrors.length).toBeGreaterThan(0);
 	});

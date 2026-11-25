@@ -59,6 +59,9 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	db2ForClause!: AnyRule;
 	db2DeclareGlobalTempTable!: AnyRule;
 	db2CreateAliasStatement!: AnyRule;
+	db2CreateSynonymStatement!: AnyRule;
+	db2ExecuteImmediateStatement!: AnyRule;
+	db2CursorStatement!: AnyRule;
 	db2CreateNicknameStatement!: AnyRule;
 	db2ProgramToken!: AnyRule;
 	db2ProcedureUnit!: AnyRule;
@@ -76,6 +79,17 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	db2IndexKeyColumn!: AnyRule;
 	db2IndexTailToken!: AnyRule;
 	db2RenameTableStatement!: AnyRule;
+	db2IdentityClause!: AnyRule;
+	db2IdentityOptionToken!: AnyRule;
+	db2CommentConstraint!: AnyRule;
+	db2RefreshTableStatement!: AnyRule;
+	db2AlterTableOptionAction!: AnyRule;
+	db2CompressClause!: AnyRule;
+	db2DataCaptureClause!: AnyRule;
+	db2OnCommitClause!: AnyRule;
+	db2NotLoggedInitiallyClause!: AnyRule;
+	db2DataInitiallyDeferredClause!: AnyRule;
+	db2DistributeClause!: AnyRule;
 	db2AlterTablePartitionAction!: AnyRule;
 	db2PartitionRangeDefinition!: AnyRule;
 	db2PartitionStartClause!: AnyRule;
@@ -140,8 +154,53 @@ export class Db2SqlParser extends NetezzaSqlParser {
 		return event === 'DELETE' ? ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL'] : [];
 	}
 
+	protected getAdditionalColumnDefinitionAlternatives(): OrAlternative[] {
+		// Db2 identity columns: `GENERATED ALWAYS AS IDENTITY [(options)]`.
+		return [
+			{
+				GATE: () =>
+					this.LA(1).tokenType === db2Lexer.Db2GeneratedAlways
+					|| this.LA(1).tokenType === db2Lexer.Db2GeneratedByDefault,
+				ALT: () => this.SUBRULE(this.db2IdentityClause),
+			},
+		];
+	}
+
+	protected getAdditionalCommentAlternatives(): OrAlternative[] {
+		// `COMMENT ON CONSTRAINT table.constraint IS '…'` — Db2's form, emitted
+		// by the DDL generator for constraint comments.
+		return [
+			{
+				GATE: () => this.isDb2KeywordAt(1, 'CONSTRAINT'),
+				ALT: () => this.SUBRULE(this.db2CommentConstraint),
+			},
+		];
+	}
+
 	protected registerCreateTableDialectClauses(): void {
-		this.MANY(() => this.SUBRULE(this.db2TableOption));
+		this.MANY({
+			GATE: () => this.startsDb2TableOption(),
+			DEF: () => this.SUBRULE(this.db2TableOption),
+		});
+	}
+
+	/**
+	 * Db2 table options all start with a fixed word (or a multi-word Db2 token).
+	 * Gating the `MANY` keeps a trailing unknown identifier from being parsed as
+	 * an option and keeps grammar analysis cheap.
+	 */
+	private startsDb2TableOption(): boolean {
+		const type = this.LA(1).tokenType;
+		if (
+			type === db2Lexer.Db2OrganizeBy
+			|| type === db2Lexer.Db2DataCapture
+			|| type === baseLexer.In
+			|| type === baseLexer.Distribute
+			|| type === baseLexer.PartitionBy
+		) {
+			return true;
+		}
+		return /^(COMPRESS|ON|NOT|DATA)$/i.test(this.LA(1).image);
 	}
 
 	protected registerAlterTableDialectRule(): void {
@@ -156,10 +215,77 @@ export class Db2SqlParser extends NetezzaSqlParser {
 						GATE: () => this.startsDb2PartitionAction(),
 						ALT: () => this.SUBRULE(this.db2AlterTablePartitionAction),
 					},
+					{
+						// ACTIVATE NOT LOGGED INITIALLY / COMPRESS / DATA CAPTURE / APPEND.
+						GATE: () => this.startsDb2AlterTableOption(),
+						ALT: () => this.SUBRULE(this.db2AlterTableOptionAction),
+					},
 					{ ALT: () => this.SUBRULE(this.alterTableAction) },
 				]);
 			});
 		});
+
+		// Db2 ALTER COLUMN also accepts SET DATA TYPE / SET NOT NULL /
+		// DROP NOT NULL, which the shared ANSI action does not model.
+		this.OVERRIDE_RULE('alterTableAlterColumnAction', () => {
+			this.CONSUME(baseLexer.Alter);
+			this.OPTION(() => this.CONSUME(baseLexer.Column));
+			this.SUBRULE(this.columnName);
+			this.OR([
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'SET') && this.isDb2KeywordAt(2, 'DATA'),
+					ALT: () => {
+						this.CONSUME(baseLexer.Set);
+						// SET DATA TYPE
+						this.CONSUME(baseLexer.Identifier);
+						this.CONSUME(baseLexer.Type);
+						this.SUBRULE(this.typeName);
+					},
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'SET') && this.isDb2KeywordAt(2, 'NOT'),
+					ALT: () => {
+						this.CONSUME1(baseLexer.Set);
+						this.CONSUME(baseLexer.Not);
+						this.CONSUME(baseLexer.Null);
+					},
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'DROP') && this.isDb2KeywordAt(2, 'NOT'),
+					ALT: () => {
+						this.CONSUME(baseLexer.Drop);
+						this.CONSUME1(baseLexer.Not);
+						this.CONSUME1(baseLexer.Null);
+					},
+				},
+				{
+					ALT: () => {
+						this.CONSUME2(baseLexer.Set);
+						this.CONSUME(baseLexer.Default);
+						this.SUBRULE(this.additiveExpression);
+					},
+				},
+				{
+					ALT: () => {
+						this.CONSUME1(baseLexer.Drop);
+						this.CONSUME1(baseLexer.Default);
+					},
+				},
+			]);
+		});
+	}
+
+	private startsDb2AlterTableOption(): boolean {
+		if (this.isDb2KeywordAt(1, 'ACTIVATE') || this.isDb2KeywordAt(1, 'COMPRESS')) {
+			return true;
+		}
+		if (this.isDb2KeywordAt(1, 'APPEND')) {
+			return true;
+		}
+		if (this.isDb2KeywordAt(1, 'NOT') && this.isDb2KeywordAt(2, 'LOGGED')) {
+			return true;
+		}
+		return this.LA(1).tokenType === db2Lexer.Db2DataCapture;
 	}
 
 	private startsDb2PartitionAction(): boolean {
@@ -198,6 +324,10 @@ export class Db2SqlParser extends NetezzaSqlParser {
 
 	protected getAdditionalStatementAlternatives(): OrAlternative[] {
 		return [
+			// ALTER SEQUENCE / DATABASE / USER / VIEW / SCHEMA / PROCEDURE reuse
+			// the shared offset-stable object rule. ALTER TABLE is claimed earlier
+			// by `alterTableStatement`, so Db2 table actions still win.
+			{ ALT: () => this.SUBRULE(this.alterObjectStatement) },
 			{ GATE: () => this.LA(1).tokenType === baseLexer.Values, ALT: () => this.SUBRULE(this.db2ValuesQuery) },
 			{
 				GATE: () => this.startsDb2Procedure(),
@@ -208,8 +338,14 @@ export class Db2SqlParser extends NetezzaSqlParser {
 				ALT: () => this.SUBRULE(this.db2DeclareGlobalTempTable),
 			},
 			{
-				// IBM Db2: CREATE ALIAS … FOR … (synonyms are deprecated / not LUW DDL).
-				// See https://www.ibm.com/docs/en/db2-for-zos/12.0.0?topic=elements-aliases
+				// IBM documents SYNONYM as an accepted spelling of ALIAS.
+				GATE: () =>
+					this.LA(1).tokenType === baseLexer.Create
+					&& this.LA(2).tokenType === baseLexer.Synonym,
+				ALT: () => this.SUBRULE(this.db2CreateSynonymStatement),
+			},
+			{
+				// IBM Db2: CREATE ALIAS … FOR …
 				GATE: () =>
 					this.LA(1).tokenType === baseLexer.Create
 					&& this.LA(2).tokenType === baseLexer.Alias,
@@ -258,7 +394,29 @@ export class Db2SqlParser extends NetezzaSqlParser {
 				GATE: () => this.LA(1).tokenType === db2Lexer.Db2Import,
 				ALT: () => this.SUBRULE(this.db2ImportStatement),
 			},
+			{
+				// MQT refresh command emitted by the schema menu.
+				GATE: () => this.isDb2KeywordAt(1, 'REFRESH') && this.isDb2KeywordAt(2, 'TABLE'),
+				ALT: () => this.SUBRULE(this.db2RefreshTableStatement),
+			},
+			{
+				// `EXECUTE IMMEDIATE '…'` — Db2 dynamic SQL, not a procedure call.
+				GATE: () =>
+					this.LA(1).tokenType === baseLexer.Execute
+					&& this.LA(2).tokenType === baseLexer.Immediate,
+				ALT: () => this.SUBRULE(this.db2ExecuteImmediateStatement),
+			},
+			{
+				// SQL PL cursor control and PREPARE run as ordinary statements.
+				GATE: () => this.startsDb2CursorStatement(),
+				ALT: () => this.SUBRULE(this.db2CursorStatement),
+			},
 		];
+	}
+
+	/** `DECLARE c CURSOR …` / `OPEN c` / `FETCH … FROM c` / `CLOSE c` / `PREPARE`. */
+	private startsDb2CursorStatement(): boolean {
+		return /^(DECLARE|OPEN|FETCH|CLOSE|PREPARE|DESCRIBE)$/i.test(this.LA(1).image);
 	}
 
 	private startsDb2CreateIndex(): boolean {
@@ -356,28 +514,78 @@ export class Db2SqlParser extends NetezzaSqlParser {
 					]);
 				} },
 				{ ALT: () => { this.CONSUME(baseLexer.In); this.SUBRULE(this.identifier); } },
-				{ GATE: () => this.LA(1).image.toUpperCase() === 'COMPRESS', ALT: () => {
-					this.CONSUME1(baseLexer.Identifier);
-					const compressed = this.LA(1).image.toUpperCase() === 'YES';
-					this.OR2([{ GATE: () => /^(YES|NO)$/i.test(this.LA(1).image), ALT: () => this.CONSUME2(baseLexer.Identifier) }]);
-					this.OPTION({ GATE: () => compressed && /^(ADAPTIVE|STATIC)$/i.test(this.LA(1).image), DEF: () => this.CONSUME3(baseLexer.Identifier) });
-				} },
-				{ ALT: () => {
-					this.CONSUME(db2Lexer.Db2DataCapture);
-					this.OR3([
-						{ ALT: () => this.CONSUME(baseLexer.None) },
-						{ GATE: () => this.LA(1).image.toUpperCase() === 'CHANGES', ALT: () => this.CONSUME4(baseLexer.Identifier) },
-					]);
-				} },
-				{ ALT: () => {
-					this.CONSUME(baseLexer.Distribute);
-					this.OR4([{ GATE: () => this.LA(1).image.toUpperCase() === 'BY', ALT: () => this.CONSUME5(baseLexer.Identifier) }]);
-					this.OR5([
-						{ ALT: () => { this.CONSUME(baseLexer.Hash); this.SUBRULE1(this.columnList); } },
-						{ ALT: () => this.CONSUME(baseLexer.Random) },
-					]);
-				} },
+				{ GATE: () => this.isDb2KeywordAt(1, 'COMPRESS'), ALT: () => this.SUBRULE(this.db2CompressClause) },
+				{ ALT: () => this.SUBRULE(this.db2DataCaptureClause) },
+				{ ALT: () => this.SUBRULE(this.db2OnCommitClause) },
+				{ ALT: () => this.SUBRULE(this.db2NotLoggedInitiallyClause) },
+				{ ALT: () => this.SUBRULE(this.db2DataInitiallyDeferredClause) },
+				{ ALT: () => this.SUBRULE(this.db2DistributeClause) },
 				{ ALT: () => this.SUBRULE(this.db2PartitionClause) },
+			]);
+		});
+
+		/** `COMPRESS YES [ADAPTIVE|STATIC]` / `COMPRESS NO`. */
+		this.RULE('db2CompressClause', () => {
+			// COMPRESS is a plain word in Db2 and has no dedicated token.
+			this.CONSUME(baseLexer.Identifier);
+			this.OR([
+				{
+					GATE: () => /^(YES|NO)$/i.test(this.LA(1).image),
+					ALT: () => this.CONSUME1(baseLexer.Identifier),
+				},
+			]);
+			this.OPTION({ GATE: () => /^(ADAPTIVE|STATIC)$/i.test(this.LA(1).image), DEF: () => this.CONSUME2(baseLexer.Identifier) });
+		});
+
+		/** `DATA CAPTURE CHANGES` / `DATA CAPTURE NONE`. */
+		this.RULE('db2DataCaptureClause', () => {
+			this.CONSUME(db2Lexer.Db2DataCapture);
+			this.OR([
+				{ ALT: () => this.CONSUME(baseLexer.None) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'CHANGES'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+			]);
+		});
+
+		/** `ON COMMIT DELETE ROWS` / `ON COMMIT PRESERVE ROWS` (declared global temp tables). */
+		this.RULE('db2OnCommitClause', () => {
+			this.CONSUME(baseLexer.On);
+			this.CONSUME(baseLexer.Commit);
+			this.OR([
+				{ ALT: () => this.CONSUME(baseLexer.Delete) },
+				{ ALT: () => this.CONSUME(baseLexer.Drop) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'PRESERVE'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+			]);
+			this.CONSUME(baseLexer.Rows);
+		});
+
+		/** `NOT LOGGED [INITIALLY]` — created global temporary tables omit INITIALLY. */
+		this.RULE('db2NotLoggedInitiallyClause', () => {
+			this.CONSUME(baseLexer.Not);
+			this.CONSUME(baseLexer.Identifier);
+			this.OPTION({ GATE: () => this.LA(1).tokenType === baseLexer.Initially, DEF: () => this.CONSUME(baseLexer.Initially) });
+		});
+
+		/** `DATA INITIALLY DEFERRED REFRESH DEFERRED` (materialized query tables). */
+		this.RULE('db2DataInitiallyDeferredClause', () => {
+			this.CONSUME(baseLexer.Identifier);
+			this.CONSUME(baseLexer.Initially);
+			this.CONSUME(baseLexer.Deferred);
+			this.OR([
+				{ GATE: () => this.isDb2KeywordAt(1, 'REFRESH'), ALT: () => this.CONSUME1(baseLexer.Identifier) },
+				{ GATE: () => this.isDb2KeywordAt(1, 'ENABLE'), ALT: () => this.CONSUME2(baseLexer.Identifier) },
+			]);
+			this.CONSUME1(baseLexer.Deferred);
+		});
+
+		/** `DISTRIBUTE BY HASH (cols)` / `DISTRIBUTE BY RANDOM`. */
+		this.RULE('db2DistributeClause', () => {
+			this.CONSUME(baseLexer.Distribute);
+			this.OR([
+				{ GATE: () => this.isDb2KeywordAt(1, 'BY'), ALT: () => this.CONSUME(baseLexer.Identifier) },
+			]);
+			this.OR1([
+				{ GATE: () => this.LA(1).tokenType === baseLexer.Hash, ALT: () => { this.CONSUME(baseLexer.Hash); this.SUBRULE(this.columnList); } },
+				{ ALT: () => this.CONSUME(baseLexer.Random) },
 			]);
 		});
 
@@ -532,6 +740,25 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			this.SUBRULE1(this.qualifiedName);
 		});
 
+		/**
+		 * `CREATE SYNONYM name FOR target` — IBM documents SYNONYM as an accepted
+		 * spelling of ALIAS (see the CREATE SYNONYM reference page for Db2 LUW).
+		 */
+		this.RULE('db2CreateSynonymStatement', () => {
+			this.CONSUME(baseLexer.Create);
+			this.CONSUME(baseLexer.Synonym);
+			this.SUBRULE(this.qualifiedName);
+			this.CONSUME(baseLexer.For);
+			this.SUBRULE1(this.qualifiedName);
+		});
+
+		/** `EXECUTE IMMEDIATE <string expression>` — Db2 dynamic SQL. */
+		this.RULE('db2ExecuteImmediateStatement', () => {
+			this.CONSUME(baseLexer.Execute);
+			this.CONSUME(baseLexer.Immediate);
+			this.SUBRULE(this.commandTail);
+		});
+
 		this.RULE('db2CreateNicknameStatement', () => {
 			this.CONSUME(baseLexer.Create);
 			this.CONSUME(db2Lexer.Db2Nickname);
@@ -591,6 +818,111 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			this.CONSUME(baseLexer.To);
 			// Db2 rejects a qualified target (SQLCODE -108).
 			this.SUBRULE1(this.identifier);
+		});
+
+		this.RULE('db2IdentityClause', () => {
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === db2Lexer.Db2GeneratedAlways, ALT: () => this.CONSUME(db2Lexer.Db2GeneratedAlways) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2GeneratedByDefault) },
+			]);
+			this.CONSUME(baseLexer.As);
+			this.CONSUME(db2Lexer.Db2Identity);
+			this.OPTION(() => {
+				this.CONSUME(baseLexer.LParen);
+				this.MANY(() => this.SUBRULE(this.db2IdentityOptionToken));
+				this.CONSUME(baseLexer.RParen);
+			});
+		});
+
+		/**
+		 * `START WITH n INCREMENT BY n MINVALUE n MAXVALUE n CYCLE|NO CYCLE CACHE n`
+		 * and the other identity/sequence options. Kept token-by-token (not
+		 * `commandTailToken`) so the closing parenthesis stays structural.
+		 */
+		this.RULE('db2IdentityOptionToken', () => {
+			this.OR([
+				{ ALT: () => this.SUBRULE(this.identifier) },
+				{ ALT: () => this.CONSUME(baseLexer.NumberLiteral) },
+				{ ALT: () => this.SUBRULE(this.db2ProgramKeyword) },
+			]);
+		});
+
+		this.RULE('db2CommentConstraint', () => {
+			this.CONSUME(baseLexer.Constraint);
+			// `table-name.constraint-name` (optionally schema/database qualified):
+			// the last segment is the constraint, so reuse the shared multi-part
+			// comment target rule.
+			this.SUBRULE(this.commentColumnTarget);
+			this.CONSUME(baseLexer.Is);
+			this.CONSUME(baseLexer.StringLiteral);
+		});
+
+		this.RULE('db2RefreshTableStatement', () => {
+			this.CONSUME(baseLexer.Identifier);
+			this.CONSUME(baseLexer.Table);
+			this.SUBRULE(this.qualifiedName);
+		});
+
+		/**
+		 * Cursor control and dynamic-SQL preparation as standalone statements:
+		 * `DECLARE c CURSOR WITH RETURN FOR …`, `OPEN c`, `FETCH … FROM c INTO …`,
+		 * `CLOSE c`, `PREPARE s FROM …`, `DESCRIBE …`. The option tail is
+		 * offset-stable because every form differs by version and context.
+		 */
+		this.RULE('db2CursorStatement', () => {
+			this.OR([
+				{ GATE: () => this.LA(1).tokenType === baseLexer.Declare, ALT: () => this.CONSUME(baseLexer.Declare) },
+				{
+					GATE: () => /^(OPEN|CLOSE|PREPARE|DESCRIBE)$/i.test(this.LA(1).image),
+					ALT: () => this.CONSUME(baseLexer.Identifier),
+				},
+				{ ALT: () => this.CONSUME(baseLexer.Fetch) },
+			]);
+			this.SUBRULE(this.commandTail);
+		});
+
+		/**
+		 * `ALTER TABLE t ACTIVATE NOT LOGGED INITIALLY` / `NOT LOGGED INITIALLY`
+		 * / `COMPRESS YES|NO [ADAPTIVE|STATIC]` / `DATA CAPTURE CHANGES|NONE` /
+		 * `APPEND ON|OFF`. Db2 keeps these outside the ADD/DROP/ALTER action set.
+		 */
+		this.RULE('db2AlterTableOptionAction', () => {
+			this.OR([
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'ACTIVATE'),
+					ALT: () => {
+						// ACTIVATE NOT LOGGED INITIALLY
+						this.CONSUME(baseLexer.Identifier);
+						this.CONSUME(baseLexer.Not);
+						this.CONSUME1(baseLexer.Identifier);
+						this.CONSUME(baseLexer.Initially);
+					},
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'NOT'),
+					ALT: () => {
+						// NOT LOGGED INITIALLY
+						this.CONSUME1(baseLexer.Not);
+						this.CONSUME2(baseLexer.Identifier);
+						this.CONSUME1(baseLexer.Initially);
+					},
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'COMPRESS'),
+					ALT: () => this.SUBRULE(this.db2CompressClause),
+				},
+				{
+					GATE: () => this.isDb2KeywordAt(1, 'APPEND'),
+					ALT: () => {
+						this.CONSUME3(baseLexer.Identifier);
+						this.OR1([
+							{ ALT: () => this.CONSUME(baseLexer.On) },
+							{ GATE: () => this.isDb2KeywordAt(1, 'OFF'), ALT: () => this.CONSUME4(baseLexer.Identifier) },
+						]);
+					},
+				},
+				{ ALT: () => this.SUBRULE(this.db2DataCaptureClause) },
+			]);
 		});
 
 		/**

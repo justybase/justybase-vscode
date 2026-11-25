@@ -225,6 +225,19 @@ export class BaseSqlParser extends CstParser {
 
   protected registerCreateTableDialectClauses(): void {}
 
+  /**
+   * Extra column-level clauses a dialect accepts after the type. Db2 adds
+   * `GENERATED ALWAYS AS IDENTITY`, which the shared ANSI rule does not model.
+   */
+  protected getAdditionalColumnDefinitionAlternatives(): OrAlternative[] {
+    return [];
+  }
+
+  /** Extra `COMMENT ON …` object kinds a dialect supports. */
+  protected getAdditionalCommentAlternatives(): OrAlternative[] {
+    return [];
+  }
+
   /** Opt in per dialect; dialects without referential actions return an empty list. */
   protected getForeignKeyActions(event: 'DELETE' | 'UPDATE'): readonly string[] {
     switch (event) {
@@ -941,6 +954,7 @@ export class BaseSqlParser extends CstParser {
             this.CONSUME2(StringLiteral);
           },
         },
+        ...this.getAdditionalCommentAlternatives(),
       ]);
     });
 
@@ -1262,6 +1276,7 @@ export class BaseSqlParser extends CstParser {
             },
           },
           { ALT: () => this.SUBRULE1(this.constraintDefinition) },
+          ...this.getAdditionalColumnDefinitionAlternatives(),
         ]);
       });
     });

@@ -828,6 +828,13 @@ export class SqlVisitor
       this.visit(ctx[postgresqlRule][0]);
       return;
     }
+    // Every `db2*` child of `statement` comes from the Db2-only statement
+    // alternatives; clause rules appear under their own parents, never here.
+    const db2Rule = Object.keys(ctx).find(name => name.startsWith('db2'));
+    if (db2Rule && ctx[db2Rule]?.[0]) {
+      this.visit(ctx[db2Rule][0]);
+      return;
+    }
     // Delegate to specific statement type
     if (ctx.selectStatement) {
       this.visit(ctx.selectStatement[0]);
@@ -1349,6 +1356,42 @@ export class SqlVisitor
   db2ImportStatement(): void { /* Import target modes are utility options. */ }
   db2EndBlockKeyword(): void { /* Structural END keyword. */ }
   db2CompoundBody(): void { /* Compound bodies compile in their own scope. */ }
+  db2IdentityClause(): void { /* Identity generation options do not introduce query scope. */ }
+  db2IdentityOptionToken(): void { /* Identity generation options do not introduce query scope. */ }
+  db2CommentConstraint(): void { /* Constraint comments carry no query scope. */ }
+  db2RefreshTableStatement(ctx: Record<string, CstNode[]>): void {
+    // REFRESH TABLE resolves a materialized query table; report it like any
+    // other relation reference so the table-existence check still applies.
+    for (const node of ctx.qualifiedName ?? []) this.visit(node);
+  }
+  db2AlterTableOptionAction(): void { /* Physical table options have no query scope. */ }
+  db2CompressClause(): void { /* Physical table options have no query scope. */ }
+  db2DataCaptureClause(): void { /* Capture modes have no query scope. */ }
+  db2OnCommitClause(): void { /* Temporary-table lifecycle has no query scope. */ }
+  db2NotLoggedInitiallyClause(): void { /* Logging mode has no query scope. */ }
+  db2DataInitiallyDeferredClause(): void { /* MQT refresh policy has no query scope. */ }
+  db2DistributeClause(): void { /* Distribution keys are physical metadata. */ }
+  db2CreateAliasStatement(): void { /* Alias targets need no query scope. */ }
+  db2CreateSynonymStatement(): void { /* Synonym targets need no query scope. */ }
+  db2CreateNicknameStatement(): void { /* Nickname targets need no query scope. */ }
+  db2DeclareGlobalTempTable(): void { /* Temporary-table declaration has no query scope. */ }
+  db2ExecuteImmediateStatement(): void { /* Dynamic SQL text is a literal. */ }
+  db2CursorStatement(): void { /* Cursor control has no query scope. */ }
+  db2ProcedureUnit(): void { /* SQL PL units compile in their own scope. */ }
+  db2ProgramToken(): void { /* Body token soup carries no query scope. */ }
+  db2ProgramKeyword(): void { /* Body token soup carries no query scope. */ }
+  db2IsolationClause(): void { /* Isolation level is a physical hint. */ }
+  db2OptimizeForClause(): void { /* Optimizer hint has no query scope. */ }
+  db2ForClause(): void { /* Read-only / update hint has no query scope. */ }
+  db2ValuesQuery(ctx: Record<string, CstNode[]>): void {
+    for (const node of ctx.expression ?? []) this.visit(node);
+  }
+  db2TableResultClause(ctx: Record<string, CstNode[]>): void {
+    for (const node of ctx.insertStatement ?? []) this.visit(node);
+    for (const node of ctx.updateStatement ?? []) this.visit(node);
+    for (const node of ctx.deleteStatement ?? []) this.visit(node);
+    for (const node of ctx.selectStatement ?? []) this.visit(node);
+  }
   postgresqlTableOption(): void { /* Physical table options do not introduce query scope. */ }
 
   createDatabaseStatement(ctx: Record<string, CstNode[]>): void {

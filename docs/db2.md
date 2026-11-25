@@ -24,9 +24,10 @@ The Db2 pack is published with `"preview": true`. Treat it as a **near-full comp
 
 - Authoring keywords/types/signatures for Db2 LUW
 - Quality rules **DB2001–DB2008** (`SELECT *`, DELETE/UPDATE without WHERE, reject `GROOM` / `DISTRIBUTE ON` / `LIMIT` / `DB..TABLE`, top-N without `ORDER BY`)
-- Dedicated Db2 parser runtime (`DB2_SQL_PARSING_RUNTIME`) with **strict** syntax validation
+- Dedicated Db2 parser runtime (`DB2_SQL_PARSING_RUNTIME`) with **strict** syntax validation. Beyond DML it accepts the DDL and utilities Db2 shops run daily: `CREATE [UNIQUE] INDEX` with the designer's physical clauses, `ALTER TABLE … ADD|ATTACH|DETACH PARTITION`, `ALTER TABLE` storage actions (`ACTIVATE NOT LOGGED INITIALLY`, `COMPRESS`, `DATA CAPTURE`, `APPEND`, `NOT LOGGED INITIALLY`), `ALTER COLUMN … SET DATA TYPE|SET NOT NULL|DROP NOT NULL`, `ALTER SEQUENCE`, `RENAME TABLE`, `TRUNCATE … IMMEDIATE`, `REFRESH TABLE`, `COMMENT ON CONSTRAINT`, `LABEL ON`, `REORG`/`RUNSTATS`, `EXPORT`/`IMPORT`, `CREATE ALIAS`/`SYNONYM`/`NICKNAME`, MQTs, identity columns, `EXECUTE IMMEDIATE`, `PREPARE`, cursor `DECLARE`/`OPEN`/`FETCH`/`CLOSE`, and `CREATE TRIGGER … BEGIN ATOMIC` bodies
+- SQL PL bodies track `BEGIN`/`CASE` nesting, so `IF`/`WHILE`/`REPEAT`/`FOR`/handlers/case expressions terminate on the matching `END` instead of the first one
 - Dialect-aware semantic tokens (Db2 lexer + authoring builtins)
-- Grammar: `dialects/db2/syntaxes/db2.tmLanguage.json` (DDL, DML, SQL PL and `CURRENT …` register scopes); snippets: `dialects/db2/snippets/db2.code-snippets` (17 entries, every one parse-verified)
+- Grammar: `dialects/db2/syntaxes/db2.tmLanguage.json` (DDL, DML, SQL PL and `CURRENT …` register scopes); snippets: `dialects/db2/snippets/db2.code-snippets` (21 entries, every one parse-verified)
 
 ### Data and operations
 

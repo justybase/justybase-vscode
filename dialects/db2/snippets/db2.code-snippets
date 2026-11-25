@@ -153,6 +153,37 @@
     ],
     "description": "Db2 range partition"
   },
+  "ALTER TABLE ... ALTER COLUMN ... SET DATA TYPE": {
+    "prefix": "db2-alter-column-type",
+    "body": [
+      "ALTER TABLE ${1:schema}.${2:table}",
+      "  ALTER COLUMN ${3:column_name} SET DATA TYPE ${4:DECIMAL(12,2)};"
+    ],
+    "description": "Db2 column type change (no PostgreSQL USING clause)"
+  },
+  "ALTER TABLE ... COMPRESS / DATA CAPTURE": {
+    "prefix": "db2-table-storage",
+    "body": [
+      "ALTER TABLE ${1:schema}.${2:table} COMPRESS ${3:YES} ${4:ADAPTIVE};",
+      "ALTER TABLE ${1:schema}.${2:table} DATA CAPTURE ${5:CHANGES};"
+    ],
+    "description": "Db2 table compression and change-data capture"
+  },
+  "REFRESH TABLE (materialized query table)": {
+    "prefix": "db2-refresh-mqt",
+    "body": [
+      "REFRESH TABLE ${1:schema}.${2:mqt_name};"
+    ],
+    "description": "Db2 refresh of a REFRESH DEFERRED materialized query table"
+  },
+  "EXECUTE IMMEDIATE": {
+    "prefix": "db2-execute-immediate",
+    "body": [
+      "EXECUTE IMMEDIATE",
+      "  '${1:UPDATE schema.table SET column_name = 1}';"
+    ],
+    "description": "Db2 dynamic SQL outside a procedure body"
+  },
   "RUNSTATS": {
     "prefix": "db2-runstats",
     "body": [
