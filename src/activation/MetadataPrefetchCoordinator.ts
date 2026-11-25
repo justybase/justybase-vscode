@@ -104,6 +104,8 @@ export class MetadataPrefetchCoordinator {
             }),
         );
 
+        this.registerWarmupScopeListener(context);
+
         void metadataCacheInit
             .then(async () => {
                 for (const document of vscode.workspace.textDocuments) {
@@ -135,6 +137,29 @@ export class MetadataPrefetchCoordinator {
                         database,
                     ),
                 );
+            }),
+        );
+    }
+
+    /**
+     * Apply a warm-up scope change immediately. Without this, switching to
+     * `connection` only takes effect on the next editor/connection event and a
+     * stale freshness marker can suppress the very refresh the user requested.
+     */
+    private registerWarmupScopeListener(context: vscode.ExtensionContext): void {
+        context.subscriptions.push(
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (!event.affectsConfiguration('justybase.metadata.prefetchScope')) {
+                    return;
+                }
+                const active = this.services.connectionManager.getActiveConnectionName();
+                if (!active) {
+                    return;
+                }
+                this.logger.info(
+                    `Netezza extension: metadata warm-up scope changed to '${getMetadataPrefetchScope()}' for ${active}`,
+                );
+                this.triggerForConnection(active);
             }),
         );
     }

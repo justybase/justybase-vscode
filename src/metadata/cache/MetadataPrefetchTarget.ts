@@ -99,6 +99,13 @@ export interface MetadataPrefetchTarget extends MetadataStorageReader {
   verifyCompleteSnapshot?(connectionName: string, logMissing?: boolean): boolean;
   /** Per-database snapshot freshness for scoped prefetch. */
   isDatabaseSnapshotFresh?(connectionName: string, dbName: string): boolean;
+  /**
+   * True only when every live database known to the catalog has a fresh
+   * per-database snapshot. A scoped refresh cannot advertise connection-wide
+   * completeness on its own, so the connection-level freshness skip requires
+   * this in addition to layer completeness.
+   */
+  hasCompleteDatabaseCoverage?(connectionName: string): boolean;
   markDatabaseSnapshotComplete?(
     connectionName: string,
     dbName: string,

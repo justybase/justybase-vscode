@@ -338,6 +338,48 @@ describe('CachePrefetcher', () => {
       expect(prefetcher.hasDatabasePrefetchInProgress(connName, 'DB1')).toBe(false);
       expect(prefetcher.getDatabasePrefetchTimestamp(connName, 'DB1')).toBeUndefined();
     });
+
+    it('checkpoints instead of persisting a complete snapshot while databases remain lazy', async () => {
+      mockCache.isDatabaseSnapshotFresh = jest.fn().mockReturnValue(false);
+      mockCache.markDatabaseSnapshotComplete = jest.fn();
+      // Layers for the refreshed database are complete, but another database
+      // was never warmed, so the connection snapshot is still partial.
+      mockCache.verifyCompleteSnapshot = jest.fn().mockReturnValue(true);
+      mockCache.hasCompleteDatabaseCoverage = jest.fn().mockReturnValue(false) as never;
+      jest
+        .spyOn(prefetcher as unknown as {
+          executeDatabasePrefetch: (...args: unknown[]) => Promise<{ coreComplete: boolean; detailsComplete: boolean }>;
+        }, 'executeDatabasePrefetch')
+        .mockResolvedValue({ coreComplete: true, detailsComplete: true });
+
+      await prefetcher.triggerDatabasePrefetch(connName, 'DB1', mockRunQuery);
+
+      expect(mockCache.checkpointSave).toHaveBeenCalled();
+      expect(mockCache.saveConnectionToDiskAfterPrefetch).not.toHaveBeenCalled();
+      expect(prefetcher.getConnectionPrefetchTimestamp(connName)).toBeUndefined();
+    });
+
+    it('persists a complete snapshot once every database is covered', async () => {
+      mockCache.isDatabaseSnapshotFresh = jest.fn().mockReturnValue(false);
+      mockCache.markDatabaseSnapshotComplete = jest.fn();
+      mockCache.verifyCompleteSnapshot = jest.fn().mockReturnValue(true);
+      mockCache.hasCompleteDatabaseCoverage = jest.fn().mockReturnValue(true) as never;
+      jest
+        .spyOn(prefetcher as unknown as {
+          executeDatabasePrefetch: (...args: unknown[]) => Promise<{ coreComplete: boolean; detailsComplete: boolean }>;
+        }, 'executeDatabasePrefetch')
+        .mockResolvedValue({ coreComplete: true, detailsComplete: true });
+
+      await prefetcher.triggerDatabasePrefetch(connName, 'DB1', mockRunQuery);
+
+      expect(mockCache.saveConnectionToDiskAfterPrefetch).toHaveBeenCalledWith(
+        connName,
+        false,
+        expect.anything(),
+      );
+      expect(mockCache.checkpointSave).not.toHaveBeenCalled();
+      expect(prefetcher.getConnectionPrefetchTimestamp(connName)).toEqual(expect.any(Number));
+    });
   });
 
   describe('prefetchColumnsForSchema', () => {
@@ -1204,6 +1246,37 @@ describe('prefetchAllColumnsForConnection serial execution', () => {
       expect(verifyCompleteSnapshot).toHaveBeenCalledWith(connName);
       expect(mockCache.discardExpiredConnectionMetadata).not.toHaveBeenCalled();
       expect(mockRunQuery).toHaveBeenCalled();
+    });
+
+    it('should refresh when cached layers are complete but databases are not covered', async () => {
+      const verifyCompleteSnapshot = jest.fn().mockReturnValue(true);
+      (mockCache as unknown as { verifyCompleteSnapshot: jest.Mock }).verifyCompleteSnapshot =
+        verifyCompleteSnapshot;
+      mockCache.hasCompleteDatabaseCoverage = jest.fn().mockReturnValue(false) as never;
+      const skipped = jest.spyOn(prefetcher, 'recordConnectionPrefetchSkipped');
+      prefetcher['connectionPrefetchTriggered'].set(connName, Date.now() - 1000);
+      mockRunQuery.mockResolvedValue({ columns: [], data: [] });
+
+      await (prefetcher as any).runConnectionPrefetch(connName, mockRunQuery);
+
+      // A scoped `activeAndPopular` snapshot must never satisfy the eager
+      // `connection` scope while other databases were never warmed.
+      expect(mockCache.hasCompleteDatabaseCoverage).toHaveBeenCalledWith(connName);
+      expect(mockRunQuery).toHaveBeenCalled();
+      expect(skipped).not.toHaveBeenCalled();
+    });
+
+    it('should skip when cached layers and database coverage are both complete', async () => {
+      (mockCache as unknown as { verifyCompleteSnapshot: jest.Mock }).verifyCompleteSnapshot =
+        jest.fn().mockReturnValue(true);
+      mockCache.hasCompleteDatabaseCoverage = jest.fn().mockReturnValue(true) as never;
+      const skipped = jest.spyOn(prefetcher, 'recordConnectionPrefetchSkipped');
+      prefetcher['connectionPrefetchTriggered'].set(connName, Date.now() - 1000);
+
+      await (prefetcher as any).runConnectionPrefetch(connName, mockRunQuery);
+
+      expect(mockRunQuery).not.toHaveBeenCalled();
+      expect(skipped).toHaveBeenCalledWith(connName, 'fresh');
     });
 
     it('should allow first prefetch when not yet triggered', async () => {

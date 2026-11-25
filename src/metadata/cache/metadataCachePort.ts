@@ -29,6 +29,12 @@ export interface MetadataCachePort extends MetadataStorageReader {
     timestamp?: number,
     scope?: import('../types').DatabaseSnapshotScope,
   ): void;
+  /**
+   * True only when every live database known to the catalog has a fresh
+   * per-database snapshot. Used to keep connection-level freshness from being
+   * claimed by a scoped warm-up that deliberately skipped databases.
+   */
+  hasCompleteDatabaseCoverage?(connectionName: string): boolean;
   getDatabaseSnapshotStates?(connectionName?: string): Record<string, import('../types').DatabaseSnapshotDiskState>;
   restoreDatabaseSnapshotStates?(
     connectionName: string,
@@ -64,6 +70,12 @@ export interface MetadataCachePort extends MetadataStorageReader {
   isNetezzaConnection(connectionName: string): boolean;
   isLargeTableCatalog(connectionName: string, dbName: string): boolean;
   isCacheGenerationCurrent(generation: number): boolean;
+  /**
+   * Exact column layer keys known to exist on disk for this connection.
+   * Persisted snapshots use this to keep layers that were never hydrated into
+   * RAM instead of pruning their files on the next save.
+   */
+  getColumnLayerKeysOnDisk?(connectionName: string): readonly string[];
 
   getDatabases(connectionName: string): DatabaseMetadata[] | undefined;
   setDatabases(connectionName: string, data: DatabaseMetadata[]): void;
@@ -88,6 +100,12 @@ export interface MetadataCachePort extends MetadataStorageReader {
     tableName: string,
   ): ColumnMetadata[] | undefined;
   ensureColumnsLoadedForTableKey(connectionName: string, layerKey: string): Promise<void>;
+  /** True when the whole database column file was hydrated into RAM. */
+  isColumnsLoaded?(connectionName: string, databaseName: string): boolean;
+  /** Column layers implied by the cached table catalog (all databases). */
+  getExpectedColumnLayerKeys?(connectionName: string): readonly string[];
+  /** True when this session explicitly dropped a column layer (DDL/refresh). */
+  isColumnLayerInvalidated?(connectionName: string, layerKey: string): boolean;
   markPrefetchObjectTypesCatalogLoaded(connectionName: string, cacheKey: string): void;
   markProcedureCatalogLoaded(connectionName: string, dbName: string): void;
   markObjectsCatalogLoaded(connectionName: string, layerKey: string, objType: string): void;

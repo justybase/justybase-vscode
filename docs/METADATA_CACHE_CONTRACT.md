@@ -147,6 +147,19 @@ gate. A connection can therefore hold a mix of fresh and missing databases.
   `activeAndPopular` (default) keeps the database-scoped prefetch described in
   this section; `connection` restores the eager connection-wide prefetch while
   keeping per-database snapshots, DDL coalescing and the fallback policy.
+  Changing the setting re-runs the warm-up for the active connection immediately.
+- **Connection freshness requires database coverage.** The eager `connection`
+  warm-up only skips a refresh when the cached layers are complete **and**
+  `hasCompleteDatabaseCoverage` is true — that is, every live database in the
+  catalog layer has a fresh per-database snapshot. A scoped `activeAndPopular`
+  refresh therefore cannot suppress the eager scope: cached layers are not
+  evidence about databases that were intentionally never warmed. Authoring
+  consumers (`isConnectionPrefetchFresh`) keep the narrower "cached layers are
+  fresh" meaning.
+- A per-database refresh persists a **complete** connection snapshot only when
+  the refreshed database finished *and* coverage is complete; otherwise it
+  writes a checkpoint so the partial snapshot is never advertised as
+  `isComplete`.
 - `justybase.metadata.queryConcurrency` (1–16, default `3`) caps concurrent
   catalog queries per connection outside the full-refresh column pool.
 - Explicit "Refresh database" invalidates every layer for that database and
@@ -332,6 +345,15 @@ that refresh starts; the refresh then discards the connection snapshot before
 querying. An expired disk snapshot is excluded from startup hydration and its
 payload is deleted, so it cannot be used as the next refresh's merge base.
 
+The restored snapshot is expected to drive authoring surfaces, not just the
+schema tree. Databases, schemas, tables, views and procedures come back from the
+manifest; column layers (including catalog comments, PK/FK flags and join
+references) come back lazily from the per-database column files. LSP completion
+asks the host for `cachedTableInfo` when database fetches are disallowed, and
+that request reads through `getCachedColumnsFromMetadataCacheAsync` /
+`ensureColumnsLoadedForTableKey`. A post-restart completion therefore hydrates
+only the requested table and keeps `DESCRIPTION` on the column item.
+
 ### Column load paths (restart-safe)
 
 | API | When used | Behavior |
@@ -351,6 +373,16 @@ payload is deleted, so it cannot be used as the next refresh's merge base.
 - Skip full DB hydrate and eager column preload for that database.
 - Load only requested table layers on demand (schema tree expand, completion).
 - Parsed column files are cached in RAM (`parsedColumnFileCache`) so the second table in the same DB reuses the gzip parse without re-reading disk.
+
+**Column persistence is partial-aware.** A save only replaces a database's
+column file when everything the cached catalog *and* the previous snapshot
+expect for it is already in RAM (or the file was fully hydrated). A partially
+hydrated database is merged with its persisted file instead: layers in RAM win
+(a dropped table disappears), layers never loaded are kept, and layers
+explicitly invalidated by DDL are dropped. A database is pruned only when the
+catalog proves it no longer exists (or through `removeConnection`,
+`invalidateSchema`, expiry); an unread catalog never prunes, because it cannot
+distinguish a dropped database from a lazy one.
 
 **Schema tree** (`SchemaProvider.getChildren` for `netezza:TABLE|VIEW|…`) calls `ensureColumnsLoadedForTableKey` then reads RAM. It does **not** issue SQL when `hasTreeReadyColumnCache` passes (columns present with `isPk` defined). Column rows written to cache use `normalizeColumnCacheEntry` so missing `isDistributionKey` does not cause refetch loops.
 
@@ -440,13 +472,23 @@ npm run test:metadata-cache:integration
 
 Tests simulate: populate cache → `dispose` (disk write) → new `MetadataCache` → `initialize()` → column/object-list access without `runQueryRaw` (TABLE, PROCEDURE, SEQUENCE, SYNONYM, MATERIALIZED VIEW, SYSTEM VIEW, schemas).
 
+`metadataCacheCompletionRestart.integration.test.ts` closes the loop above the
+cache: it hydrates the restarted snapshot through `handleMetadataRequest` +
+`MetadataBridge` + `LspCompletionEngine` and asserts database, schema, table,
+view, procedure and column completions, including table/column comments and
+comments edited before the restart. The live counterpart
+(`netezzaMetadataRestartCompletion.live.integration.test.ts`) runs a real
+prefetch, restarts against a brand-new cache and completes against the instance
+catalog without any follow-up catalog SQL.
+
 Key files:
 
 - `packages/metadata-core/__tests__/rules.test.ts`
 
 - `src/__tests__/integration/metadataCacheRestart.integration.test.ts`
+- `src/__tests__/integration/metadataCacheCompletionRestart.integration.test.ts`
+- `src/__tests__/integration/netezzaMetadataRestartCompletion.live.integration.test.ts`
 - `src/__tests__/fixtures/metadataCacheRestartFixture.ts`
-
 ## Related modules
 
 | Module | Role |

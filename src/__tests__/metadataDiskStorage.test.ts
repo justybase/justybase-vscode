@@ -96,6 +96,10 @@ describe('MetadataDiskStorage', () => {
 
     function populateTwoDatabases(connectionName: string): void {
         populateCache(connectionName);
+        cache.setDatabases(connectionName, [
+            { DATABASE: 'DB1', label: 'DB1', kind: 9 },
+            { DATABASE: 'DB2', label: 'DB2', kind: 9 },
+        ]);
         cache.setSchemas(connectionName, 'DB2', [{ SCHEMA: 'S2', label: 'S2', kind: 19 }]);
         const idMap = new Map<string, number>();
         idMap.set('DB2.S2.T2', 2);
@@ -336,6 +340,84 @@ describe('MetadataDiskStorage', () => {
 
         const loaded = await storage.loadAllConnections();
         expect(loaded.get('conn1')).toBeUndefined();
+    });
+
+    it('merges a partially hydrated database file instead of dropping persisted layers', async () => {
+        // A full snapshot persisted both layers.
+        populateCache('conn1');
+        cache.setTables('conn1', 'DB1.S1', [
+            { OBJNAME: 'T1', OBJID: 1, SCHEMA: 'S1', label: 'T1', objType: 'TABLE', kind: 6 },
+            { OBJNAME: 'T2', OBJID: 2, SCHEMA: 'S1', label: 'T2', objType: 'TABLE', kind: 6 },
+        ], new Map([['DB1.S1.T1', 1], ['DB1.S1.T2', 2]]));
+        cache.setColumns('conn1', 'DB1.S1.T2', [{ ATTNAME: 'C2', FORMAT_TYPE: 'INT', label: 'C2' }]);
+        await storage.saveConnection(cache, 'conn1', Date.now());
+        const columnPath = getV3ColumnFilePath(tempDir, 'conn1', 'DB1');
+        expect(fs.existsSync(columnPath)).toBe(true);
+
+        // The next session hydrates the catalog but only one column layer.
+        cache['_store'].columnCache.delete('conn1|@NZEX@DB1.S1.T2');
+        cache['_columnLoaderState'].columnLayerKeysOnDisk.set(
+            'conn1',
+            new Set(['@NZEX@DB1.S1.T1', '@NZEX@DB1.S1.T2']),
+        );
+
+        await storage.saveConnection(cache, 'conn1', Date.now());
+
+        // The file and both layer keys survive; overwriting the file with the
+        // single hydrated layer would silently drop T2's columns.
+        expect(fs.existsSync(columnPath)).toBe(true);
+        const manifests = await storage.loadAllConnectionManifests();
+        expect(manifests.get('conn1')?.columnLayerKeys?.sort())
+            .toEqual(['@NZEX@DB1.S1.T1', '@NZEX@DB1.S1.T2']);
+        const { gunzipSync } = require('zlib');
+        const rewritten = JSON.parse(gunzipSync(fs.readFileSync(columnPath)).toString('utf8')) as {
+            layers: Record<string, unknown>;
+        };
+        expect(Object.keys(rewritten.layers).sort())
+            .toEqual(['@NZEX@DB1.S1.T1', '@NZEX@DB1.S1.T2']);
+    });
+
+    it('drops a layer invalidated in this session from the merged file and the manifest', async () => {
+        populateCache('conn1');
+        cache.setTables('conn1', 'DB1.S1', [
+            { OBJNAME: 'T1', OBJID: 1, SCHEMA: 'S1', label: 'T1', objType: 'TABLE', kind: 6 },
+            { OBJNAME: 'T2', OBJID: 2, SCHEMA: 'S1', label: 'T2', objType: 'TABLE', kind: 6 },
+        ], new Map([['DB1.S1.T1', 1], ['DB1.S1.T2', 2]]));
+        cache.setColumns('conn1', 'DB1.S1.T1', [{ ATTNAME: 'C1', FORMAT_TYPE: 'INT', label: 'C1' }]);
+        cache.setColumns('conn1', 'DB1.S1.T2', [{ ATTNAME: 'C2', FORMAT_TYPE: 'INT', label: 'C2' }]);
+        await storage.saveConnection(cache, 'conn1', Date.now());
+
+        // T2 is dropped while the rest of the file stays lazy/untouched.
+        cache.invalidateTableColumns('conn1', 'DB1', 'S1', 'T2');
+        cache['_columnLoaderState'].columnLayerKeysOnDisk.set(
+            'conn1',
+            new Set(['@NZEX@DB1.S1.T1', '@NZEX@DB1.S1.T2']),
+        );
+        await storage.saveConnection(cache, 'conn1', Date.now());
+
+        const manifests = await storage.loadAllConnectionManifests();
+        expect(manifests.get('conn1')?.columnLayerKeys).toEqual(['@NZEX@DB1.S1.T1']);
+        const { gunzipSync } = require('zlib');
+        const rewritten = JSON.parse(
+            gunzipSync(fs.readFileSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB1'))).toString('utf8'),
+        ) as { layers: Record<string, unknown> };
+        expect(Object.keys(rewritten.layers)).toEqual(['@NZEX@DB1.S1.T1']);
+    });
+
+    it('prunes a database that disappeared from the catalog', async () => {
+        populateTwoDatabases('conn1');
+        await storage.saveConnection(cache, 'conn1', Date.now());
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB2'))).toBe(true);
+
+        // DB2 was dropped server-side; the catalog now only knows DB1.
+        cache.setDatabases('conn1', [{ DATABASE: 'DB1', label: 'DB1', kind: 9 }]);
+        cache['_columnLoaderState'].columnLayerKeysOnDisk.delete('conn1');
+        await storage.saveConnection(cache, 'conn1', Date.now());
+
+        expect(fs.existsSync(getV3ColumnFilePath(tempDir, 'conn1', 'DB2'))).toBe(false);
+        const manifests = await storage.loadAllConnectionManifests();
+        expect(manifests.get('conn1')?.columnDatabases).toEqual(['@NZEX@DB1']);
+        expect(manifests.get('conn1')?.columnLayerKeys).toEqual(['@NZEX@DB1.S1.T1']);
     });
 
     it('should write separate column files per database', async () => {

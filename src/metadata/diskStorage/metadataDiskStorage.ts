@@ -9,6 +9,8 @@ import { promisify } from 'util';
 import type { MetadataConnectionManager } from '../../core/connectionManagerPorts';
 import type { MetadataCachePort } from '../cache/metadataCachePort';
 import type { ForeignKeyRelationshipCacheSlice } from '../foreignKeyRelationships';
+import type { ColumnMetadata } from '../types';
+import type { SerializedLayerEntry } from './metadataDiskTypes';
 import { Logger } from '../../utils/logger';
 import { compressJsonToGzip } from './metadataDiskCompress';
 import { yieldToEventLoop } from '../hydrateScheduler';
@@ -21,10 +23,12 @@ import {
     serializeColumnsByDatabase,
     serializeConnectionMetadataFromCache,
 } from './metadataDiskSerializer';
+import { decodeColumnFile, encodeColumnLayers } from './metadataColumnCodec';
 import { MetadataDiskLock, type DiskLease } from './metadataDiskLock';
 import {
     databaseFileSegmentFromColumnFileName,
     encodeDatabaseFileSegment,
+    extractDatabaseFromLayerKey,
     V3_FOREIGN_KEY_FILE_SUFFIX,
     getCacheV3Dir,
     getV3ColumnFilePath,
@@ -73,6 +77,21 @@ const SAVE_LOCK_WAIT_MS = 30_000;
 const SAVE_LOCK_POLL_MS = 100;
 const SAVE_LOCK_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_ATTEMPTS = 3;
+
+/**
+ * Compare layer keys from different sources (freshly serialized RAM vs. a
+ * legacy persisted file). Netezza keeps exact catalog case behind the `@NZEX@`
+ * marker while legacy files spell the database plainly, so both forms must
+ * fold to the same key. Comparison is case-insensitive, matching
+ * `resolveColumnLayerKeyInFile`, which already treats them as one layer.
+ */
+function canonicalColumnLayerKey(layerKey: string): string {
+    const database = extractDatabaseFromLayerKey(layerKey);
+    const decoded = database
+        ? `${decodeNetezzaCacheDatabasePart(database)}${layerKey.slice(database.length)}`
+        : layerKey;
+    return decoded.toUpperCase();
+}
 
 interface PendingSaveState {
     metadataCache: MetadataCachePort;
@@ -384,6 +403,84 @@ export class MetadataDiskStorage {
         return isNetezzaExactCachePart(databaseName)
             ? decodeNetezzaCacheDatabasePart(databaseName)
             : databaseName;
+    }
+
+    /**
+     * Overlay freshly serialized layers on the persisted file for a database
+     * that was only partially hydrated into RAM.
+     *
+     * Layers present in RAM are authoritative (a dropped table must disappear),
+     * while layers that were never loaded stay exactly as persisted. Layers the
+     * session explicitly invalidated are removed so a dropped table cannot
+     * reappear from disk.
+     */
+    private mergeColumnFiles(
+        connectionName: string,
+        database: string,
+        persisted: SerializedColumnFile,
+        current: SerializedColumnFile,
+        metadataCache: MetadataCachePort,
+    ): SerializedColumnFile {
+        const persistedLayers = decodeColumnFile(persisted);
+        const currentLayers = decodeColumnFile(current);
+        // A legacy file may spell a layer with the decoded database name while
+        // the cache uses the exact `@NZEX@` form. Compare on a canonical key so
+        // a merged file never carries the same table twice.
+        const currentKeys = new Set(Object.keys(currentLayers).map(canonicalColumnLayerKey));
+        const merged: Record<string, SerializedLayerEntry<ColumnMetadata>> = {};
+        for (const [layerKey, entry] of Object.entries(persistedLayers)) {
+            if (metadataCache.isColumnLayerInvalidated?.(connectionName, layerKey) === true) {
+                continue;
+            }
+            if (currentKeys.has(canonicalColumnLayerKey(layerKey))) {
+                // The RAM copy is authoritative for this layer.
+                continue;
+            }
+            merged[layerKey] = entry;
+        }
+        Object.assign(merged, currentLayers);
+        return encodeColumnLayers(database, merged);
+    }
+
+    /**
+     * Database identities currently present in the catalog layer, if known.
+     * An unread catalog (`undefined` or empty) means "unknown", and a save must
+     * never prune on an unknown catalog: it cannot tell a dropped database from
+     * one that was simply never listed.
+     */
+    private resolveKnownColumnDatabases(
+        metadataCache: MetadataCachePort,
+        connectionName: string,
+    ): Set<string> | undefined {
+        const databases = metadataCache.getDatabases(connectionName);
+        if (!databases || databases.length === 0) {
+            return undefined;
+        }
+        const known = new Set<string>();
+        for (const database of databases) {
+            const name = String(database.DATABASE || database.label || '').trim();
+            if (name) {
+                known.add(this.columnDatabaseIdentity(metadataCache, connectionName, name));
+            }
+        }
+        return known.size > 0 ? known : undefined;
+    }
+
+    /**
+     * Column file identities are catalog names, so Netezza keeps their case and
+     * every other dialect compares them case-insensitively.
+     */
+    private columnDatabaseIdentity(
+        metadataCache: MetadataCachePort,
+        connectionName: string,
+        database: string,
+    ): string {
+        const decoded = isNetezzaExactCachePart(database)
+            ? decodeNetezzaCacheDatabasePart(database)
+            : database;
+        return metadataCache.isNetezzaConnection(connectionName)
+            ? decoded
+            : decoded.toUpperCase();
     }
 
     async loadConnectionMetadataOnly(
@@ -953,14 +1050,137 @@ export class MetadataDiskStorage {
         }
 
         const columnFiles = serializeColumnsByDatabase(metadataCache, connectionName);
-        const columnDatabases = [...columnFiles.keys()];
-        const columnLayerKeys = [...new Set(
-            [...columnFiles.values()].flatMap((columnFile) =>
+        // The in-memory column cache is deliberately partial: large catalogs
+        // are hydrated one table at a time and untouched databases stay lazy.
+        // A save rewrites only what it fully owns; the rest is merged on top of
+        // the persisted file so untouched layers survive.
+        const onDiskColumnLayerKeys = metadataCache.getColumnLayerKeysOnDisk?.(connectionName) ?? [];
+        const knownColumnDatabases = this.resolveKnownColumnDatabases(
+            metadataCache,
+            connectionName,
+        );
+        const identity = (database: string): string =>
+            this.columnDatabaseIdentity(metadataCache, connectionName, database);
+
+        const expectedLayerKeysByDatabase = new Map<string, Set<string>>();
+        for (const layerKey of metadataCache.getExpectedColumnLayerKeys?.(connectionName) ?? []) {
+            const database = identity(extractDatabaseFromLayerKey(layerKey));
+            const keys = expectedLayerKeysByDatabase.get(database) ?? new Set<string>();
+            keys.add(layerKey);
+            expectedLayerKeysByDatabase.set(database, keys);
+        }
+        // Keys the previous snapshot already promised for that database. When
+        // the table catalog has no layer for it (lazy database, or one whose
+        // other schemas were never loaded), they are the only evidence of what
+        // the persisted file is expected to contain.
+        const rememberedLayerKeysByDatabase = new Map<string, Set<string>>();
+        for (const layerKey of [
+            ...onDiskColumnLayerKeys,
+            ...(current?.columnLayerKeys ?? []),
+        ]) {
+            if (metadataCache.isColumnLayerInvalidated?.(connectionName, layerKey) === true) {
+                // A table dropped in this session must not keep the database
+                // pinned in the merge path forever.
+                continue;
+            }
+            const database = identity(extractDatabaseFromLayerKey(layerKey));
+            const keys = rememberedLayerKeysByDatabase.get(database) ?? new Set<string>();
+            keys.add(layerKey);
+            rememberedLayerKeysByDatabase.set(database, keys);
+        }
+
+        // A database owns its column file only when everything the catalog and
+        // the previous snapshot expect is already in RAM. A partially hydrated
+        // database must be merged into its persisted file: overwriting it would
+        // silently drop the columns that were never loaded, while skipping it
+        // would lose freshly fetched ones.
+        const columnFileEntries = new Map<string, SerializedColumnFile>();
+        const materializedDatabases = new Set<string>();
+        for (const [database, columnFile] of columnFiles) {
+            const databaseIdentity = identity(database);
+            const serializedKeys = new Set(
+                columnFile.schemaVersion === COLUMN_FILE_SCHEMA_VERSION
+                    ? Object.keys(columnFile.layers)
+                    : Object.keys(columnFile.column),
+            );
+            const requiredKeys = new Set([
+                ...(expectedLayerKeysByDatabase.get(databaseIdentity) ?? []),
+                ...(rememberedLayerKeysByDatabase.get(databaseIdentity) ?? []),
+            ]);
+            const ownsItsFile = metadataCache.isColumnsLoaded?.(connectionName, database) === true
+                || requiredKeys.size === 0
+                || [...requiredKeys].every(layerKey => serializedKeys.has(layerKey));
+            if (ownsItsFile) {
+                materializedDatabases.add(databaseIdentity);
+                columnFileEntries.set(database, columnFile);
+                continue;
+            }
+            const existing = await this.loadColumnFileForDatabase(connectionName, database);
+            columnFileEntries.set(
+                database,
+                existing
+                    ? this.mergeColumnFiles(
+                        connectionName,
+                        database,
+                        existing,
+                        columnFile,
+                        metadataCache,
+                    )
+                    : columnFile,
+            );
+        }
+
+        const storedColumnDatabases = [...columnFileEntries.keys()];
+        const storedColumnLayerKeys = [...new Set(
+            [...columnFileEntries.values()].flatMap((columnFile) =>
                 columnFile.schemaVersion === COLUMN_FILE_SCHEMA_VERSION
                     ? Object.keys(columnFile.layers)
                     : Object.keys(columnFile.column),
             ),
         )];
+        // Persisted names win: they already use the cache-key spelling that the
+        // index, manifest and column file paths expect.
+        const columnDatabaseNames = new Map<string, string>();
+        for (const database of [
+            ...(current?.columnDatabases ?? []),
+            ...onDiskColumnLayerKeys.map(extractDatabaseFromLayerKey),
+            ...storedColumnDatabases,
+        ]) {
+            if (!database) {
+                continue;
+            }
+            const databaseIdentity = identity(database);
+            if (!columnDatabaseNames.has(databaseIdentity)) {
+                columnDatabaseNames.set(databaseIdentity, database);
+            }
+        }
+        const columnDatabases = [...columnDatabaseNames.entries()]
+            // Only a database known to be gone from the catalog is pruned. An
+            // unread catalog (`undefined`) means "unknown", and a save must
+            // never guess: it cannot tell a dropped database from a lazy one.
+            .filter(([databaseIdentity]) => knownColumnDatabases === undefined
+                || knownColumnDatabases.has(databaseIdentity))
+            .map(([, database]) => database);
+        const retainedDatabases = new Set(columnDatabases.map(identity));
+        const columnLayerKeys = [...new Set([
+            ...storedColumnLayerKeys,
+            ...onDiskColumnLayerKeys,
+            ...(current?.columnLayerKeys ?? []),
+        ])].filter(layerKey => {
+            // A layer this session invalidated (DDL/refresh) must never come
+            // back through the manifest, whichever file rewrite path ran.
+            if (metadataCache.isColumnLayerInvalidated?.(connectionName, layerKey) === true) {
+                return false;
+            }
+            const databaseIdentity = identity(extractDatabaseFromLayerKey(layerKey));
+            if (!retainedDatabases.has(databaseIdentity)) {
+                return false;
+            }
+            // A fully materialized database owns its layer list; keeping a
+            // remembered key there would resurrect a dropped table's columns.
+            return !materializedDatabases.has(databaseIdentity)
+                || storedColumnLayerKeys.includes(layerKey);
+        });
         const foreignKeyRelationships = metadataCache.isNetezzaConnection(connectionName)
             ? metadataCache.getForeignKeyRelationshipSlices(connectionName)
             : [];
@@ -972,7 +1192,14 @@ export class MetadataDiskStorage {
             metadata,
         );
 
-        for (const [dbName, columnFile] of columnFiles) {
+        // Merge, never replace: a database whose catalog was only partially
+        // hydrated keeps the layers that are still on disk.
+        for (const [dbName, columnFile] of columnFileEntries) {
+            if (!retainedDatabases.has(identity(dbName))) {
+                // The catalog no longer knows this database; do not resurrect
+                // it right before the prune step deletes it again.
+                continue;
+            }
             await this.writeGzipJson(
                 getV3ColumnFilePath(
                     this.storageDir,

@@ -1851,7 +1851,17 @@ export class CachePrefetcher {
                 message: `Metadata ready for ${database}`,
             });
 
-            if (this.cache.verifyCompleteSnapshot?.(connectionName, false) === true) {
+            // A database-level prefetch only completes the *connection*
+            // snapshot once every live database is covered as well. Layers can
+            // be complete while a scoped warm-up still left databases lazy,
+            // and claiming connection completeness there would persist a
+            // partial snapshot as `isComplete`.
+            const coverageComplete =
+                this.cache.hasCompleteDatabaseCoverage?.(connectionName) ?? true;
+            if (
+                coverageComplete
+                && this.cache.verifyCompleteSnapshot?.(connectionName, false) === true
+            ) {
                 this.connectionPrefetchTriggered.set(connectionName, Date.now());
                 await this.cache.saveConnectionToDiskAfterPrefetch(connectionName, false, lease);
             } else {
@@ -2283,8 +2293,15 @@ export class CachePrefetcher {
         const isInProgress = this.connectionPrefetchInProgress.has(connectionName);
         const lastPrefetchTime = this.connectionPrefetchTriggered.get(connectionName);
         const cacheTTL = this.cache.getCacheTTL();
-        const snapshotComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
+        // Layer completeness is not connection completeness: a scoped refresh
+        // (active + popular databases) leaves the remaining databases lazy.
+        // Only a snapshot that also covers every live database may satisfy the
+        // freshness skip, otherwise the eager `connection` scope would be
+        // silently skipped by an `activeAndPopular` snapshot.
+        const layersComplete = this.cache.verifyCompleteSnapshot?.(connectionName)
             ?? this.cache.hasTableCacheForConnection(connectionName);
+        const coverageComplete = this.cache.hasCompleteDatabaseCoverage?.(connectionName) ?? true;
+        const snapshotComplete = layersComplete && coverageComplete;
         const plan = createMetadataPrefetchPlan({
             lastPrefetchAt: lastPrefetchTime,
             now: Date.now(),

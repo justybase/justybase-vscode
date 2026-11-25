@@ -33,6 +33,7 @@ module.exports = [
   "netezzaImport.live.integration.test.ts",
   "netezzaImportFormats.live.integration.test.ts",
   "netezzaSchemaRefresh.live.integration.test.ts",
+  "netezzaMetadataRestartCompletion.live.integration.test.ts",
   "databaseAnalysis.live.integration.test.ts",
   "netezzaCompletionKeywordLegality.live.integration.test.ts",
   "netezzaCrossSchemaCompletion.live.integration.test.ts",

@@ -2347,4 +2347,51 @@ describe("Concurrent Schema Refresh Simulation", () => {
     expect(cache.getObjectDetails("conn1", "DB1.ADMIN.ORDERS")).toBeUndefined();
     expect(cache.getObjectDetailsForDatabase("conn1", "DB1")).toHaveLength(0);
   });
+
+  it("reports connection-wide database coverage only when every live database is fresh", () => {
+    const now = Date.now();
+    cache.setDatabases("conn1", [
+      { DATABASE: "DB1", label: "DB1", kind: 9 },
+      { DATABASE: "DB2", label: "DB2", kind: 9 },
+    ]);
+
+    expect(cache.hasCompleteDatabaseCoverage("conn1")).toBe(false);
+
+    cache.markDatabaseSnapshotComplete("conn1", "DB1", now, "core");
+    expect(cache.hasCompleteDatabaseCoverage("conn1")).toBe(false);
+
+    cache.markDatabaseSnapshotComplete("conn1", "DB2", now, "core");
+    expect(cache.hasCompleteDatabaseCoverage("conn1")).toBe(true);
+
+    cache.invalidateDatabaseSnapshot("conn1", "DB2");
+    expect(cache.hasCompleteDatabaseCoverage("conn1")).toBe(false);
+
+    // A database the server rejects (dead) must not keep coverage open forever.
+    cache.restoreDatabaseSnapshotStates("conn1", {
+      DB1: { prefetchCompletedAt: now, scope: "core" },
+      DB2: { prefetchCompletedAt: now, scope: "core" },
+    });
+    cache.markDatabaseDead("conn1", "DB2");
+    expect(cache.hasCompleteDatabaseCoverage("conn1")).toBe(true);
+  });
+
+  it("exposes persisted column layers without the ones this session invalidated", () => {
+    cache['_columnLoaderState'].columnLayerKeysOnDisk.set(
+      "conn1",
+      new Set(["DB1.S1.T1", "DB1.S1.T2"]),
+    );
+
+    expect(cache.getColumnLayerKeysOnDisk("conn1")).toEqual([
+      "DB1.S1.T1",
+      "DB1.S1.T2",
+    ]);
+
+    cache.invalidateTableColumns("conn1", "DB1", "S1", "T2");
+    expect(cache.isColumnLayerInvalidated("conn1", "DB1.S1.T2")).toBe(true);
+    expect(cache.getColumnLayerKeysOnDisk("conn1")).toEqual(["DB1.S1.T1"]);
+
+    // Refetching the table clears the invalidation again.
+    cache.setColumns("conn1", "DB1.S1.T2", [{ ATTNAME: "C2", FORMAT_TYPE: "INT" }]);
+    expect(cache.isColumnLayerInvalidated("conn1", "DB1.S1.T2")).toBe(false);
+  });
 });

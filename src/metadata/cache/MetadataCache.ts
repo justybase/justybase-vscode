@@ -404,6 +404,30 @@ export class MetadataCache implements MetadataPrefetchTarget {
     );
   }
 
+  /**
+   * Exact column layers present in the persisted column files.
+   *
+   * The in-memory column cache is intentionally partial: large catalogs and
+   * untouched databases are hydrated lazily. Persisting a snapshot must
+   * therefore treat these keys as live data, otherwise the next save would
+   * prune the files and drop the layers from the manifest. Keys invalidated by
+   * this session are excluded so a dropped table cannot be resurrected.
+   */
+  getColumnLayerKeysOnDisk(connectionName: string): readonly string[] {
+    const keys = this._columnLoaderState.columnLayerKeysOnDisk.get(connectionName);
+    if (!keys || keys.size === 0) {
+      return [];
+    }
+    return [...keys].filter(
+      (layerKey) => !this._invalidatedColumnLayerKeys.has(`${connectionName}|${layerKey}`),
+    );
+  }
+
+  /** True when this session explicitly dropped a column layer (DDL/refresh). */
+  isColumnLayerInvalidated(connectionName: string, layerKey: string): boolean {
+    return this._invalidatedColumnLayerKeys.has(`${connectionName}|${layerKey}`);
+  }
+
   hasColumnLayerOnDisk(connectionName: string, columnKey: string): boolean {
     if (!this.isNetezzaConnection(connectionName)) {
       return hasColumnLayerOnDisk(this._columnLoaderState, connectionName, columnKey);
@@ -948,6 +972,34 @@ export class MetadataCache implements MetadataPrefetchTarget {
       `${connectionName}|${this.databaseIdentity(connectionName, dbName)}`,
     );
     return entry !== undefined && this._store.isEntryFresh(entry.timestamp);
+  }
+
+  /**
+   * True only when every reachable database known to the catalog has a fresh
+   * per-database snapshot.
+   *
+   * A scoped refresh (`activeAndPopular`) deliberately warms a subset of the
+   * databases, so layer completeness alone must never advertise connection-wide
+   * freshness: that would make the eager `connection` scope skip the databases
+   * it exists to warm.
+   */
+  hasCompleteDatabaseCoverage(connectionName: string): boolean {
+    const databases = this.getDatabases(connectionName);
+    if (!databases || databases.length === 0) {
+      return false;
+    }
+    let liveDatabases = 0;
+    for (const database of databases) {
+      const dbName = String(database.DATABASE || database.label || '').trim();
+      if (!dbName || this.isDatabaseDead(connectionName, dbName)) {
+        continue;
+      }
+      liveDatabases += 1;
+      if (!this.isDatabaseSnapshotFresh(connectionName, dbName)) {
+        return false;
+      }
+    }
+    return liveDatabases > 0;
   }
 
   invalidateDatabaseSnapshot(connectionName: string, dbName?: string): void {
@@ -1671,6 +1723,10 @@ export class MetadataCache implements MetadataPrefetchTarget {
       return true;
     }
     const complete = this.verifyCompleteSnapshot(connectionName, false);
+    // "Cached layers are usable and fresh" is what authoring paths (linter,
+    // completion, FK recovery) need. Connection-wide *coverage* is a separate
+    // question owned by the prefetch gate (`hasCompleteDatabaseCoverage`),
+    // because a scoped warm-up legitimately leaves unused databases lazy.
     const fresh = freshByTimestamp && complete;
     if (!fresh) {
       Logger.getInstance().debug(
@@ -1794,6 +1850,15 @@ export class MetadataCache implements MetadataPrefetchTarget {
 
   getMissingColumnLayerKeys(connectionName: string): string[] {
     return this.getColumnLayerCompleteness(connectionName).missingColumnKeys;
+  }
+
+  /**
+   * Every column layer the cached table catalog implies for this connection.
+   * Persistence uses it to tell a fully materialized database (safe to rewrite)
+   * from one that was only partially hydrated into RAM.
+   */
+  getExpectedColumnLayerKeys(connectionName: string): string[] {
+    return this.getColumnLayerCompleteness(connectionName).expectedColumnKeys;
   }
 
   private getColumnLayerCompleteness(connectionName: string): {

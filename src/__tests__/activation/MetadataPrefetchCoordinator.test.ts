@@ -29,6 +29,7 @@ describe('MetadataPrefetchCoordinator', () => {
         isFresh: boolean,
         databaseFresh = true,
         popularDatabases: string[] = [],
+        activeConnection: string | undefined = undefined,
     ) {
         const metadataCache = {
             whenDiskReady: jest.fn(async () => undefined),
@@ -43,18 +44,24 @@ describe('MetadataPrefetchCoordinator', () => {
             getCurrentSchema: jest.fn(() => 'PUBLIC'),
             invalidateCurrentSchema: jest.fn(),
             setCurrentSchema: jest.fn(),
+            onDidPrefetchProgress: jest.fn(() => ({ dispose: jest.fn() })),
+            onDidNeedColumnRecovery: jest.fn(() => ({ dispose: jest.fn() })),
+            preloadColumnsForConnection: jest.fn(async () => undefined),
+            isConnectionMetadataHydrating: jest.fn(() => false),
+            whenConnectionMetadataHydrated: jest.fn(async () => undefined),
         };
         const connectionManager = {
             getConnectionDatabaseKind: jest.fn(() => 'netezza'),
             getConnectionMetadata: jest.fn(() => ({ database: 'DWH' })),
             getConnectionForExecution: jest.fn(() => 'NZ'),
-            getActiveConnectionName: jest.fn(() => undefined),
+            getActiveConnectionName: jest.fn(() => activeConnection),
             getEffectiveDatabase: jest.fn(async () => 'DWH'),
             createTransientConnectionForDocument: jest.fn(),
             getDocumentPersistentConnection: jest.fn(),
         };
         const logger = {
             debug: jest.fn(),
+            info: jest.fn(),
             warn: jest.fn(),
         } as unknown as Logger;
         const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
@@ -69,6 +76,7 @@ describe('MetadataPrefetchCoordinator', () => {
         } as unknown as ExtensionServices;
         return {
             coordinator: new MetadataPrefetchCoordinator(context, services, logger, usageHistory),
+            context,
             metadataCache,
             connectionManager,
             queryExecutor,
@@ -182,5 +190,35 @@ describe('MetadataPrefetchCoordinator', () => {
         expect(connectionManager.getDocumentPersistentConnection).not.toHaveBeenCalled();
         expect(transient.close).toHaveBeenCalledTimes(1);
         expect(metadataCache.setCurrentSchema).toHaveBeenCalledWith('NZ', 'DWH', 'ADMIN');
+    });
+
+    it('re-runs the warm-up immediately when the prefetch scope changes', async () => {
+        const { coordinator, context, metadataCache, connectionManager } =
+            createCoordinator(false, false, [], 'NZ');
+        let configurationListener: ((event: { affectsConfiguration: (key: string) => boolean }) => void) | undefined;
+        (vscode.workspace.onDidChangeConfiguration as jest.Mock).mockImplementation(
+            (listener: (event: { affectsConfiguration: (key: string) => boolean }) => void) => {
+                configurationListener = listener;
+                return { dispose: jest.fn() };
+            },
+        );
+
+        coordinator.register(context, Promise.resolve());
+        expect(configurationListener).toBeDefined();
+
+        // Unrelated settings must not trigger metadata work.
+        configurationListener!({ affectsConfiguration: () => false });
+        expect(metadataCache.triggerDatabasePrefetch).not.toHaveBeenCalled();
+        expect(metadataCache.triggerConnectionPrefetch).not.toHaveBeenCalled();
+
+        getMetadataPrefetchScopeMock.mockReturnValue('connection');
+        configurationListener!({
+            affectsConfiguration: (key: string) => key === 'justybase.metadata.prefetchScope',
+        });
+        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>(resolve => setImmediate(resolve));
+
+        expect(connectionManager.getActiveConnectionName).toHaveBeenCalled();
+        expect(metadataCache.triggerConnectionPrefetch).toHaveBeenCalledWith('NZ', expect.any(Function));
     });
 });
