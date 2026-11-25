@@ -179,14 +179,27 @@ test('shared result panel keeps Excel-style filtering, grouping and inline editi
   await expect(panel.locator('.ui-data-grid-group-row').first()).toBeVisible();
   const groupToggle = panel.locator('.ui-data-grid-group-toggle').first();
   const groupMarker = groupToggle.locator('.ui-data-grid-group-marker');
+  const groupLabel = groupToggle.locator('.ui-data-grid-group-label');
   await groupToggle.hover();
   expect(await groupToggle.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
   const toggleBox = await groupToggle.boundingBox();
   const markerBox = await groupMarker.boundingBox();
+  const labelBox = await groupLabel.boundingBox();
   expect(toggleBox).not.toBeNull();
   expect(markerBox).not.toBeNull();
-  expect(Math.abs((toggleBox!.x + toggleBox!.width / 2) - (markerBox!.x + markerBox!.width / 2))).toBeLessThan(2);
-  expect(Math.abs((toggleBox!.y + toggleBox!.height / 2) - (markerBox!.y + markerBox!.height / 2))).toBeLessThan(2);
+  expect(labelBox).not.toBeNull();
+  // The chevron sits at the left edge of the band and the label follows it, so
+  // the whole name is part of the button rather than a separate inert text run.
+  expect(markerBox!.x - toggleBox!.x).toBeLessThan(6);
+  expect(Math.abs(markerBox!.y + markerBox!.height / 2 - (toggleBox!.y + toggleBox!.height / 2))).toBeLessThan(2);
+  expect(labelBox!.x).toBeGreaterThanOrEqual(markerBox!.x + markerBox!.width - 1);
+  expect(labelBox!.width).toBeGreaterThan(20);
+  expect(toggleBox!.width).toBeGreaterThan(labelBox!.width);
+  // Clicking the visible name (not just the arrow) expands the band.
+  await groupLabel.click();
+  await expect(groupToggle).toHaveAttribute('aria-expanded', 'true');
+  await groupLabel.click();
+  await expect(groupToggle).toHaveAttribute('aria-expanded', 'false');
   // Group bands stay anchored to the left edge while data scrolls sideways.
   const groupCell = panel.locator('.ui-data-grid-group-cell').first();
   const groupContent = panel.locator('.ui-data-grid-group-content').first();

@@ -969,6 +969,13 @@ body.vscode-high-contrast-light .ui-data-grid-scroll {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--justybase-grid-accent) 70%, transparent);
 }
 
+/* The current (focus) cell inside a selection keeps a stronger outline so the
+   moving end of a keyboard navigation or drag stays identifiable. */
+.ui-data-grid-cell-current {
+  z-index: 4;
+  box-shadow: inset 0 0 0 2px var(--justybase-grid-accent);
+}
+
 .ui-data-grid-value-null {
   color: var(--vscode-disabledForeground, #64748b) !important;
   font-style: italic;
@@ -1855,12 +1862,15 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
   height: var(--jb-grid-row-height, 26px);
 }
 
-.ui-data-grid-group-row td {
-  /* The group band is a single full-width cell. The label itself is sticky
-     (see .ui-data-grid-group-content) so it stays visible while the data
-     columns scroll sideways, without making the wide cell sticky. */
+.ui-data-grid-group-row td,
+.ui-data-grid-group-row th.ui-data-grid-row-number {
+  /* The group band is a single full-width cell after the row-number gutter.
+     The label itself is sticky (see .ui-data-grid-group-content) so it stays
+     visible while the data columns scroll sideways, without making the wide
+     cell sticky. z-index 5 keeps the band above pinned body cells (4) and
+     below the sticky header. */
   position: relative;
-  z-index: 4;
+  z-index: 5;
   height: var(--jb-grid-row-height, 26px);
   padding: 0;
   color: var(--vscode-textLink-foreground, #93c5fd);
@@ -1868,6 +1878,24 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
   font-weight: 600;
   line-height: 20px;
   vertical-align: middle;
+}
+
+/* Group bands keep the gutter visible and numbered, so the band never looks
+   detached from the rows it summarizes while the columns scroll. */
+.ui-data-grid-group-row th.ui-data-grid-row-number {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  height: var(--jb-grid-row-height, 26px);
+  padding: 0 4px;
+  border-bottom: 0;
+  color: var(--justybase-grid-muted);
+  font-size: 11px;
+  text-align: center;
+  user-select: none;
 }
 
 .ui-data-grid td.ui-data-grid-group-cell {
@@ -1884,17 +1912,21 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
   height: var(--jb-grid-row-height, 26px);
   align-items: center;
   overflow: hidden;
-  padding-right: 10px;
+  /* Bands start just inside the gutter; every deeper level adds exactly one
+     indent step through the tree guides. */
+  padding: 0 10px 0 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
 }
 
-.ui-data-grid-group-row[data-group-level='1'] td {
+.ui-data-grid-group-row[data-group-level='1'] td,
+.ui-data-grid-group-row[data-group-level='1'] th.ui-data-grid-row-number {
   background: color-mix(in srgb, var(--justybase-grid-surface) 78%, var(--justybase-grid-accent));
 }
 
-.ui-data-grid-group-row:hover td {
+.ui-data-grid-group-row:hover td,
+.ui-data-grid-group-row:hover th.ui-data-grid-row-number {
   background-color: var(--justybase-grid-bg);
   background-image: linear-gradient(var(--justybase-grid-hover), var(--justybase-grid-hover));
 }
@@ -1903,20 +1935,28 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
   display: inline-flex;
   height: 18px;
   align-items: stretch;
-  gap: 17px;
   margin-right: 2px;
   vertical-align: middle;
 }
 
+/* One guide per ancestor level, spaced by the 16px level indent so a nested
+   band lines up with its parent label instead of drifting to the right. */
 .ui-data-grid-group-tree-indent > span {
-  width: 1px;
-  background: color-mix(in srgb, var(--justybase-grid-muted) 45%, transparent);
+  width: 16px;
+  background: linear-gradient(
+    to right,
+    transparent 7px,
+    color-mix(in srgb, var(--justybase-grid-muted) 45%, transparent) 7px,
+    color-mix(in srgb, var(--justybase-grid-muted) 45%, transparent) 8px,
+    transparent 8px
+  );
 }
 
 .ui-data-grid-group-marker {
   display: inline-flex;
   width: 18px;
   height: 18px;
+  flex: 0 0 18px;
   align-items: center;
   justify-content: center;
   color: inherit;
@@ -1936,22 +1976,25 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
   transform: rotate(-90deg) translateX(1px);
 }
 
+/* The band label is the toggle, so the whole name plus its row count is a hit
+   target. Only the chevron stays narrow: hit-area padding would otherwise
+   shift the label away from the indent guides. */
 .ui-data-grid-group-toggle {
   display: inline-flex;
-  width: 22px;
+  min-width: 0;
   height: 22px;
   align-items: center;
-  justify-content: center;
-  margin: -2px 2px -2px -4px;
+  margin: -2px 0 -2px -4px;
   padding: 0;
   border: 0;
   color: inherit;
   background: transparent;
   cursor: pointer;
   font: inherit;
+  text-align: left;
 }
 
-.ui-data-grid-group-toggle[aria-expanded='false'] {
+.ui-data-grid-group-toggle[aria-expanded='false'] .ui-data-grid-group-marker {
   color: var(--justybase-grid-accent);
 }
 
@@ -1963,11 +2006,21 @@ body.vscode-high-contrast-light .ui-data-grid-type-boolean {
 .ui-data-grid-group-toggle:focus-visible {
   border-radius: 2px;
   color: var(--justybase-grid-accent);
+  /* Inset: `.ui-data-grid-group-content` clips overflow, so an outer ring
+     would be partially cut off at the band edge. */
   outline: 1px solid var(--justybase-grid-accent);
   outline-offset: -2px;
 }
 
+.ui-data-grid-group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ui-data-grid-group-count {
+  flex: 0 0 auto;
   margin-left: 10px;
   color: var(--justybase-grid-muted);
   font-size: 10px;

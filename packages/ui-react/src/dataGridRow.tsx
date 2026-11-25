@@ -50,6 +50,13 @@ export interface DataGridRowProps {
   readonly hostSelected: boolean;
   /** Selected rectangles projected onto display-order column positions. */
   readonly selectionRanges: readonly DataGridSelectionRange[];
+  /**
+   * Display coordinates of the selection's current (focus) cell. It stays
+   * visible inside a multi-cell selection so keyboard navigation and drags
+   * keep an unambiguous orientation.
+   */
+  readonly focusRow?: number;
+  readonly focusColumn?: number;
   /** Width of skipped columns before/after the mounted window. */
   readonly leftSpacer: number;
   readonly rightSpacer: number;
@@ -143,6 +150,8 @@ export const DataGridRow = memo(function DataGridRow({
   deleted = false,
   hostSelected,
   selectionRanges,
+  focusRow,
+  focusColumn,
   leftSpacer,
   rightSpacer,
   onRowClick,
@@ -180,7 +189,14 @@ export const DataGridRow = memo(function DataGridRow({
         && displayIndex <= range.maxRow
         && cell.position >= range.minColumn
         && cell.position <= range.maxColumn);
-      const className = selected ? `${cell.className} ui-data-grid-cell-selected` : cell.className;
+      // The current cell of a multi-cell selection keeps a distinct outline so
+      // a keyboard move or drag always has a visible orientation point.
+      const current = selected && focusRow === displayIndex && focusColumn === cell.position;
+      const className = [
+        cell.className,
+        selected ? 'ui-data-grid-cell-selected' : '',
+        current ? 'ui-data-grid-cell-current' : '',
+      ].filter(Boolean).join(' ');
       return <td
         key={cell.key}
         data-column-index={cell.columnIndex}

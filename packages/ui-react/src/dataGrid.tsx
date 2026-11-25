@@ -329,6 +329,12 @@ interface RenderedGroup {
   readonly count: number;
   readonly ancestorIds: readonly string[];
   readonly level: number;
+  /**
+   * 1-based ordinal of the group's first result row. The band keeps the
+   * row-number gutter visible, so this number ties the band to the data it
+   * contains instead of leaving the gutter empty.
+   */
+  readonly rowNumber: number;
 }
 
 interface RenderedDataRow extends IndexedRow {
@@ -1084,7 +1090,9 @@ function groupRows(columns: readonly DataGridColumn[], rows: readonly IndexedRow
     for (const [valueKey, group] of groups) {
       const id = JSON.stringify([...ancestorIds, valueKey]);
       const label = `${column?.name ?? groupingKey}: ${group.value}`;
-      rendered.push({ kind: 'group', id, label, count: group.rows.length, ancestorIds, level });
+      // Depth-first emission means the first data row of this group is the
+      // next one emitted, so its 1-based ordinal is the current count + 1.
+      rendered.push({ kind: 'group', id, label, count: group.rows.length, ancestorIds, level, rowNumber: displayIndex + 1 });
       appendLevel(level + 1, group.rows, [...ancestorIds, id]);
     }
   };
@@ -1498,11 +1506,20 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     () => activeView.grouping.length > 0 ? groupRows(resolvedColumns, processedRows, activeView.grouping, getCellMetadata) : undefined,
     [activeView.grouping, getCellMetadata, processedRows, resolvedColumns],
   );
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  /*
+   * Groups render collapsed by default so adding a grouping column shows the
+   * tree shape immediately instead of pushing thousands of leaf rows into
+   * view. Expansion is ephemeral: a different grouping starts collapsed again.
+   */
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
+  const groupingSignature = activeView.grouping.join('\u0000');
+  useEffect(() => {
+    setExpandedGroups(previous => previous.size === 0 ? previous : new Set());
+  }, [groupingSignature]);
   const visibleRowCount = groupedRows === undefined ? processedRows.length : groupedRows.length;
   const visibleGroupedRows = useMemo(
-    () => groupedRows?.filter(row => !row.ancestorIds.some(groupId => collapsedGroups.has(groupId))),
-    [collapsedGroups, groupedRows],
+    () => groupedRows?.filter(row => !row.ancestorIds.some(groupId => !expandedGroups.has(groupId))),
+    [expandedGroups, groupedRows],
   );
   const columnAggregationRows = useMemo(() => {
     const definitions = activeView.columnAggregations;
@@ -1676,6 +1693,13 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     }
     return projected;
   }, [selection, visibleColumnIndexes]);
+  // The current cell is stored in raw column indexes; the renderer compares
+  // display positions, so project it once next to the selection rectangles.
+  const displayFocusColumn = useMemo(() => {
+    if (selection === undefined) return undefined;
+    const position = visibleColumnIndexes.indexOf(selection.focusColumn);
+    return position >= 0 ? position : undefined;
+  }, [selection, visibleColumnIndexes]);
   // Keep one stable array per distinct per-row selection shape so a pointer
   // drag re-renders only rows whose selected columns actually changed.
   const selectionRangesForRow = (displayIndex: number): readonly DataGridSelectionRange[] => {
@@ -1754,7 +1778,6 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     dragSelectingRef.current = false;
     selectionRef.current = undefined;
     setSelection(undefined);
-    setCollapsedGroups(new Set());
     setContextMenu(undefined);
     selectionChangeRef.current?.(undefined);
   }, [selectionScope]);
@@ -1965,7 +1988,10 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     if (verticalDirection !== 0 && rowCount > 0) {
       const viewportHeight = Math.max(ROW_HEIGHT, element.clientHeight || DEFAULT_VIEWPORT_HEIGHT);
       const visibleRows = Math.max(1, Math.ceil((viewportHeight - selectionMetricsRef.current.headerHeight) / ROW_HEIGHT));
-      const firstVisibleRow = Math.min(rowCount - 1, Math.floor(Math.max(0, element.scrollTop) / ROW_HEIGHT));
+      // Rows under the sticky header are partially covered, so the first
+      // fully visible row is the first one whose top edge has scrolled past
+      // the header; partial rows must not become the drag target.
+      const firstVisibleRow = Math.min(rowCount - 1, Math.ceil(Math.max(0, element.scrollTop) / ROW_HEIGHT));
       const lastVisibleRow = Math.min(rowCount - 1, firstVisibleRow + visibleRows - 1);
       focusRow = verticalDirection < 0 ? firstVisibleRow : lastVisibleRow;
     }
@@ -2115,13 +2141,21 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
     return true;
   }
 
-  /** Keeps a keyboard target below the sticky header and outside pinned columns. */
+  /**
+   * Keeps a keyboard target below the sticky header and outside pinned columns.
+   *
+   * The sticky `<thead>` is part of the scroll content, so body row `N` starts
+   * at `headerHeight + N * ROW_HEIGHT` in content coordinates while the header
+   * covers the first `headerHeight` pixels of the viewport. Comparing virtual
+   * row offsets without that header term hid the focused row by exactly one
+   * header height at the bottom edge and scrolled one row too early at the top.
+   */
   function scrollCellIntoView(rowIndex: number, columnIndex: number): void {
     const element = scroller.current;
     const layout = columnLayoutRef.current;
     if (!element || layout.length === 0) return;
     const header = columnHeaderHeightRef.current;
-    const rowTop = rowIndex * ROW_HEIGHT;
+    const rowTop = header + rowIndex * ROW_HEIGHT;
     const maxTop = Math.max(0, element.scrollHeight - element.clientHeight);
     let nextTop = element.scrollTop;
     if (rowTop < nextTop + header) nextTop = rowTop - header;
@@ -2698,8 +2732,33 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
               : visibleGroupedRows[item.index];
             if (rendered === undefined) return null;
             if (rendered.kind === 'group') {
-              const collapsed = collapsedGroups.has(rendered.id);
-              return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} aria-level={rendered.level + 1} key={`group:${rendered.id}`}><td className="ui-data-grid-group-cell" colSpan={mountedCellCount}><div className="ui-data-grid-group-content" style={{ paddingLeft: `${10 + rendered.level * 18}px` }}><span className="ui-data-grid-group-tree-indent" aria-hidden="true">{Array.from({ length: rendered.level }, (_value, level) => <span key={level} />)}</span><button type="button" className="ui-data-grid-group-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} group ${rendered.label}`} aria-expanded={!collapsed} onClick={() => setCollapsedGroups(previous => { const next = new Set(previous); if (collapsed) next.delete(rendered.id); else next.add(rendered.id); return next; })}><span className="ui-data-grid-group-marker" aria-hidden="true" /></button>{rendered.label}<span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span></div></td></tr>;
+              const expanded = expandedGroups.has(rendered.id);
+              // The whole band label is the toggle. A separate chevron button
+              // would leave the visible name inert, which reads as a bug when
+              // the band highlights on hover.
+              return <tr className="ui-data-grid-group-row" data-group-id={rendered.id} data-group-level={rendered.level} aria-level={rendered.level + 1} key={`group:${rendered.id}`}>
+                <th scope="row" className="ui-data-grid-row-number ui-data-grid-group-row-number" aria-label={`Group starting at row ${rendered.rowNumber}`}><span aria-hidden="true">{rendered.rowNumber}</span></th>
+                <td className="ui-data-grid-group-cell" colSpan={mountedCellCount - 1}>
+                  <div className="ui-data-grid-group-content">
+                    <span className="ui-data-grid-group-tree-indent" aria-hidden="true">{Array.from({ length: rendered.level }, (_value, level) => <span key={level} />)}</span>
+                    <button
+                      type="button"
+                      className="ui-data-grid-group-toggle"
+                      aria-label={`${expanded ? 'Collapse' : 'Expand'} group ${rendered.label}`}
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedGroups(previous => {
+                        const next = new Set(previous);
+                        if (expanded) next.delete(rendered.id); else next.add(rendered.id);
+                        return next;
+                      })}
+                    >
+                      <span className="ui-data-grid-group-marker" aria-hidden="true" />
+                      <span className="ui-data-grid-group-label">{rendered.label}</span>
+                      <span className="ui-data-grid-group-count">{rendered.count.toLocaleString()} rows</span>
+                    </button>
+                  </div>
+                </td>
+              </tr>;
             }
             return <DataGridRow
               key={`${resultSetId}:${rendered.sourceIndex}`}
@@ -2714,6 +2773,8 @@ export const DataGrid = forwardRef<DataGridHandle, DataGridProps>(function DataG
               deleted={isRowDeleted?.(rendered.sourceIndex) === true}
               hostSelected={selectedRowIndex === rendered.sourceIndex}
               selectionRanges={selectionRangesForRow(rendered.displayIndex)}
+              focusRow={selection?.focusRow}
+              focusColumn={displayFocusColumn}
               leftSpacer={leftColumnSpacer}
               rightSpacer={rightColumnSpacer}
               onRowClick={handleRowClick}

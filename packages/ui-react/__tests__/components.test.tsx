@@ -1393,7 +1393,19 @@ describe('shared React presentation', () => {
     }));
   });
 
-  it('can collapse and reopen grouped rows without changing the shared view', () => {
+  it('numbers group bands with the first row of the group and starts collapsed', () => {
+    render(<DataGrid
+      resultSetId="group-band-numbers"
+      columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
+      rows={[['A', 1], ['A', 2], ['B', 3]]}
+      view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['0'] }}
+    />);
+    const bands = Array.from(document.querySelectorAll('.ui-data-grid-group-row'));
+    expect(bands.map(band => band.querySelector('.ui-data-grid-row-number')?.textContent)).toEqual(['1', '3']);
+    expect(bands.every(band => band.querySelector('.ui-data-grid-row-number')?.getAttribute('aria-label')?.startsWith('Group starting at row'))).toBe(true);
+  });
+
+  it('starts grouped rows collapsed and reopens them on demand', () => {
     render(<DataGrid
       resultSetId="collapsible-groups"
       columns={[{ name: 'TEAM' }, { name: 'VALUE', type: 'INTEGER' }]}
@@ -1402,11 +1414,18 @@ describe('shared React presentation', () => {
     />);
     expect(screen.getByText('1 rows')).toBeInTheDocument();
     expect(screen.getByText('2 rows')).toBeInTheDocument();
-    const group = screen.getByRole('button', { name: 'Collapse group TEAM: A' });
-    fireEvent.click(group);
+    // Adding a grouping column shows only the group bands until a band is opened.
     expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Expand group TEAM: A' }));
+    const expandButton = screen.getByRole('button', { name: 'Expand group TEAM: A' });
+    expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+    // The visible name is inside the toggle, so clicking the label (not only
+    // the chevron) expands the band.
+    const label = expandButton.querySelector('.ui-data-grid-group-label');
+    expect(label).toHaveTextContent('TEAM: A');
+    fireEvent.click(label!);
     expect(screen.getByRole('row', { name: /A 1/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse group TEAM: A' }));
+    expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
   });
 
   it('removes collapsed children from the virtual scroll extent', () => {
@@ -1426,11 +1445,14 @@ describe('shared React presentation', () => {
       act(() => { jest.runOnlyPendingTimers(); });
       const spacerHeight = (): number => Array.from(container.querySelectorAll<HTMLTableRowElement>('.ui-data-grid-virtual-spacer'))
         .reduce((sum, spacer) => sum + Number.parseFloat(spacer.querySelector('.ui-data-grid-virtual-spacer-inner')?.getAttribute('style')?.match(/height:\s*([\d.]+)px/u)?.[1] ?? '0'), 0);
-      const before = spacerHeight();
+      expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Expand group TEAM: A' }));
+      act(() => { jest.runOnlyPendingTimers(); });
+      const expanded = spacerHeight();
       fireEvent.click(screen.getByRole('button', { name: 'Collapse group TEAM: A' }));
       act(() => { jest.runOnlyPendingTimers(); });
-      const after = spacerHeight();
-      expect(after).toBeLessThan(before);
+      const collapsed = spacerHeight();
+      expect(collapsed).toBeLessThan(expanded);
       expect(screen.queryByRole('row', { name: /A 1/ })).not.toBeInTheDocument();
       expect(screen.getAllByRole('row', { name: /B 500/ }).length).toBeGreaterThanOrEqual(1);
     } finally {
@@ -1447,6 +1469,8 @@ describe('shared React presentation', () => {
       view={{ globalFilter: '', columnFilters: {}, sorting: [], grouping: ['0'] }}
       onRowSelect={onRowSelect}
     />);
+    fireEvent.click(screen.getByRole('button', { name: 'Expand group TEAM: A' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand group TEAM: B' }));
     expect(screen.getByRole('button', { name: 'Select row 1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select row 2' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select row 3' })).toBeInTheDocument();
@@ -1892,6 +1916,48 @@ describe('shared React presentation', () => {
       columns: [expect.objectContaining({ name: 'NAME' })],
       rows: [['a'], ['b'], ['c']],
     }));
+  });
+
+  it('keeps the keyboard focus row fully visible under the sticky header', () => {
+    const { container } = render(<DataGrid
+      resultSetId="keyboard-scroll-header"
+      columns={[{ name: 'ID', type: 'INTEGER' }, { name: 'NAME' }]}
+      rows={Array.from({ length: 100 }, (_value, index) => [index + 1, `row-${index + 1}`])}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 260 });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 100 * 26 });
+    const header = 62;
+    // Walk to the last row that still fits below the sticky header; the next
+    // press must scroll by the overflow (header included), not by a whole row.
+    for (let index = 0; index < 8; index += 1) fireEvent.keyDown(scroller, { key: 'ArrowDown' });
+    expect(scroller.scrollTop).toBe(header + 8 * 26 + 26 - 260);
+    // Scrolling back to the top must stop when row 0 sits directly below the
+    // header; the header offset must never be re-subtracted into a gap.
+    for (let index = 0; index < 10; index += 1) fireEvent.keyDown(scroller, { key: 'ArrowUp' });
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it('marks the current cell inside a multi-cell keyboard selection', () => {
+    const { container } = render(<DataGrid
+      resultSetId="keyboard-current-cell"
+      columns={[{ name: 'A' }, { name: 'B' }]}
+      rows={Array.from({ length: 6 }, (_value, index) => [index, index])}
+    />);
+    const scroller = container.querySelector<HTMLDivElement>('.ui-data-grid-scroll');
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+    fireEvent.keyDown(scroller, { key: 'ArrowDown' });
+    fireEvent.keyDown(scroller, { key: 'ArrowDown', shiftKey: true });
+    fireEvent.keyDown(scroller, { key: 'ArrowRight', shiftKey: true });
+    const current = container.querySelectorAll('.ui-data-grid-cell-current');
+    expect(current).toHaveLength(1);
+    expect(current[0]?.closest('tr')?.getAttribute('data-row-index')).toBe('2');
+    expect(current[0]?.getAttribute('data-column-index')).toBe('1');
+    expect(current[0]).toHaveClass('ui-data-grid-cell-selected');
+    expect(container.querySelectorAll('.ui-data-grid-cell-selected')).toHaveLength(4);
   });
 
   it('navigates and extends the shared grid selection from the keyboard', () => {

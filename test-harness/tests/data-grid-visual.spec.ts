@@ -23,6 +23,18 @@ test('renders the canonical shared result grid in stable and interactive states'
 
   await page.getByRole('button', { name: 'Pin ID' }).click();
   await page.getByRole('button', { name: 'Group by CATEGORY' }).click();
+  // Grouping starts collapsed. The band label is part of the toggle, so
+  // clicking the visible name opens the band exactly like the chevron.
+  const groupToggle = page.locator('.ui-data-grid-group-toggle').first();
+  const groupLabel = groupToggle.locator('.ui-data-grid-group-label');
+  await expect(groupToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(groupLabel).toBeVisible();
+  await groupLabel.click();
+  await expect(groupToggle).toHaveAttribute('aria-expanded', 'true');
+  await groupLabel.click();
+  await expect(groupToggle).toHaveAttribute('aria-expanded', 'false');
+  await groupToggle.click();
+  await expect(groupToggle).toHaveAttribute('aria-expanded', 'true');
   await page.getByRole('textbox', { name: 'Filter NAME' }).fill('needle');
   const grid = page.locator('.ui-data-grid-scroll');
   await grid.evaluate(element => {

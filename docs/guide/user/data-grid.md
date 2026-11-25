@@ -37,7 +37,13 @@ removed because they duplicated those controls. Drag additional columns into
 the grouping surface to create nested groups; the chip order is
 the grouping priority. Each group is rendered as a tree row with an expand/
 collapse chevron, indentation, row count, and preserved row selection/copy
-coordinates. Removing the last grouping returns the flat result grid.
+coordinates. The whole band label — chevron, group name and row count — is the
+toggle, so clicking the visible name expands or collapses the group just like
+clicking the arrow. Groups start collapsed, and the row-number gutter stays
+visible on each group band: the number is the ordinal of the group's first row,
+so an open band and its first row share the same number. Deep levels add one
+indent step each, and changing the grouping collapses the tree again. Removing
+the last grouping returns the flat result grid.
 
 Open **Analyze → Pivot…** (or the Pivot toolbar button) to choose a row column,
 a pivot column, a numeric value column, and the aggregation. The dialog states
@@ -110,6 +116,13 @@ macOS) toggles individual cells without clearing the current selection, so you
 can summarize or copy non-adjacent cells. Copy and export use the bounding
 rectangle of the selection, matching Excel and the legacy grid. Grouped views do
 not report cell statistics because group headers are not data cells.
+
+Arrow keys move the selection one cell and scroll the grid only when the target
+leaves the viewport; the focused row always stays fully visible below the
+sticky column header. Inside a multi-cell selection or drag, the current
+(focus) cell carries a stronger inner outline so the moving end stays
+identifiable, while the rest of the rectangle keeps the ordinary selection
+tint.
 
 Double-click a data cell outside edit mode to insert its value into the active
 SQL editor. The value is formatted as a SQL literal: numbers stay unquoted,

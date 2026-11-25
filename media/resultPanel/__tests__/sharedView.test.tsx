@@ -778,12 +778,17 @@ describe('shared VS Code Result Panel adapter', () => {
             columnFilterDefinitions: { label: { operator: 'contains', value: 'one' } },
             grouping: ['label'],
         });
+        // Groups arrive collapsed; opening the band reveals its single row.
+        fireEvent.click(screen.getByRole('button', { name: 'Expand group label: one' }));
         const selectedCell = screen.getByRole('cell', { name: 'one' });
         fireEvent.mouseDown(selectedCell, { button: 0 });
         expect(selectedCell).toHaveClass('ui-data-grid-cell-selected');
         fireEvent.click(screen.getByRole('button', { name: 'Open filter for label' }));
         fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
         fireEvent.click(screen.getByTitle(/^Sort by id\./));
+        // Clearing the filter keeps the already-open band, so only the second
+        // group needs expanding before its row can be clicked.
+        fireEvent.click(screen.getByRole('button', { name: 'Expand group label: two' }));
         fireEvent.click(screen.getByRole('row', { name: '2 two' }));
         expect(screen.queryByRole('heading', { name: 'Row details' })).not.toBeInTheDocument();
         controller.dispose();
