@@ -103,6 +103,13 @@ describe('Db2 TextMate injection', () => {
 		expect(scopeOf(alterTokens, 'ALTER SEQUENCE').join(' ')).toContain('keyword.other.ddl.db2');
 	});
 
+	it('scopes SET CURRENT registers that parse through command tails', async () => {
+		const tokens = await tokenize('SET CURRENT SQLID = \'DB2INST1\'; SET CURRENT EXPLAIN MODE YES; SET CURRENT LOCK TIMEOUT 30');
+		for (const needle of ['CURRENT SQLID', 'CURRENT EXPLAIN MODE', 'CURRENT LOCK TIMEOUT']) {
+			expect(scopeOf(tokens, needle).join(' ')).toContain('keyword.other.db2');
+		}
+	});
+
 	it('scopes SQL PL control words', async () => {
 		const tokens = await tokenize('END IF;');
 		expect(scopeOf(tokens, 'END IF').join(' ')).toContain('keyword.control.sqlpl.db2');
