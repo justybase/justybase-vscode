@@ -153,6 +153,7 @@ const db2FormatterProfile = extendFormatterProfile(BASE_SQL_FORMATTER_PROFILE, {
 });
 
 const db2ValidationProfile: DatabaseSqlValidationProfile = {
+	databaseKind: 'db2',
 	builtinFunctions: mergeStringSets(BASE_SQL_BUILTIN_FUNCTIONS, DB2_BUILTIN_FUNCTION_OVERLAYS),
 	systemColumns: new Set(),
 	specialBuiltinValues: mergeStringSets(BASE_SQL_SPECIAL_BUILTIN_VALUES, DB2_SPECIAL_BUILTIN_VALUE_OVERLAYS),

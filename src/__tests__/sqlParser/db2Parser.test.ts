@@ -1,6 +1,7 @@
 jest.unmock('chevrotain');
 
 import { describe, expect, it } from '@jest/globals';
+import type { CstElement, CstNode, IToken } from 'chevrotain';
 import { DB2_SQL_PARSING_RUNTIME, parseSqlStatements } from '../../sqlParser/parsingRuntime';
 import { createSqlParserInstance } from '../../dialects/db2/sql/parser';
 import { SqlLexer } from '../../dialects/db2/sql/lexer';
@@ -8,6 +9,23 @@ import { db2SqlAuthoring } from '../../../extensions/db2/src/sql/authoring';
 
 function parse(sql: string) {
 	return parseSqlStatements({ sql, runtime: DB2_SQL_PARSING_RUNTIME });
+}
+
+function isToken(element: CstElement | undefined): element is IToken {
+	return !!element && (element as IToken).image !== undefined;
+}
+
+function findCstNode(node: CstNode, name: string): CstNode | undefined {
+	if (node.name === name) return node;
+	for (const children of Object.values(node.children)) {
+		for (const child of children) {
+			if (!isToken(child)) {
+				const found = findCstNode(child, name);
+				if (found) return found;
+			}
+		}
+	}
+	return undefined;
 }
 
 describe('Db2SqlParser LUW', () => {
@@ -252,12 +270,52 @@ describe('Db2SqlParser LUW', () => {
 		['current date in predicate', 'SELECT ID FROM T WHERE TS > CURRENT DATE'],
 		['values current schema', 'VALUES CURRENT SCHEMA'],
 		['set current schema', 'SET CURRENT SCHEMA JBL_LIVE'],
+		['set current sqlid', `SET CURRENT SQLID = 'DB2INST1'`],
+		['set current degree', `SET CURRENT DEGREE 'ANY'`],
+		['set current explain mode', 'SET CURRENT EXPLAIN MODE YES'],
+		['set current explain snapshot', 'SET CURRENT EXPLAIN SNAPSHOT YES'],
+		['set current lock timeout', 'SET CURRENT LOCK TIMEOUT 30'],
+		['set current refresh age', 'SET CURRENT REFRESH AGE ANY'],
+		['set current query optimization', 'SET CURRENT QUERY OPTIMIZATION 5'],
+		['set current path', 'SET CURRENT PATH = CURRENT PATH, SYSIBM, SYSFUN'],
+		['set current path null', 'SET CURRENT PATH NULL'],
+		['set current optimization profile', `SET CURRENT OPTIMIZATION PROFILE = 'APP.PROFILE1'`],
+		['set current maintained table types', 'SET CURRENT MAINTAINED TABLE TYPES FOR OPTIMIZATION SYSTEM'],
+		['set current temporal system time', `SET CURRENT TEMPORAL SYSTEM_TIME = '2024-01-01'`],
+		['set current decfloat rounding mode', 'SET CURRENT DECFLOAT ROUNDING MODE ROUND_HALF_EVEN'],
+		['select current sqlid', 'SELECT CURRENT SQLID FROM SYSIBM.SYSDUMMY1'],
+		['values current lock timeout', 'VALUES CURRENT LOCK TIMEOUT'],
 		['set current isolation', 'SET CURRENT ISOLATION UR'],
 		['set schema', 'SET SCHEMA JBL_LIVE'],
 	])('parses the Db2 special register in %s', (_name, sql) => {
 		const result = parse(sql);
 		expect(result.lexResult.errors).toHaveLength(0);
 		expect(result.actionableParserErrors).toHaveLength(0);
+	});
+
+	it('records the SET CURRENT register in the CST instead of the command tail', () => {
+		const cases: Array<[string, string, string, string]> = [
+			['sqlid', `SET CURRENT SQLID = 'DB2INST1'`, 'Db2CurrentSqlid', 'CURRENT SQLID'],
+			['degree', `SET CURRENT DEGREE 'ANY'`, 'Db2CurrentDegree', 'CURRENT DEGREE'],
+			['explain mode', 'SET CURRENT EXPLAIN MODE YES', 'Db2CurrentExplainMode', 'CURRENT EXPLAIN MODE'],
+			['lock timeout', 'SET CURRENT LOCK TIMEOUT 30', 'Db2CurrentLockTimeout', 'CURRENT LOCK TIMEOUT'],
+			['path', 'SET CURRENT PATH = CURRENT PATH, SYSIBM', 'Db2CurrentPath', 'CURRENT PATH'],
+			[
+				'maintained table types',
+				'SET CURRENT MAINTAINED TABLE TYPES FOR OPTIMIZATION SYSTEM',
+				'Db2CurrentMaintainedTableTypes',
+				'CURRENT MAINTAINED TABLE TYPES FOR OPTIMIZATION',
+			],
+		];
+		for (const [name, sql, tokenName, image] of cases) {
+			const result = parse(sql);
+			expect(result.actionableParserErrors).toHaveLength(0);
+			if (!result.cst) throw new Error(`missing CST for ${name}`);
+			const register = findCstNode(result.cst, 'db2SetRegister');
+			if (!register) throw new Error(`missing db2SetRegister for ${name}`);
+			const token = register.children[tokenName]?.[0];
+			expect(isToken(token) ? token.image : undefined).toBe(image);
+		}
 	});
 
 	it('parses LANGUAGE SQL procedure units as one CST statement', () => {

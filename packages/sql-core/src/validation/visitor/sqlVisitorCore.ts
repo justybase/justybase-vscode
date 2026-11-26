@@ -1379,6 +1379,7 @@ export class SqlVisitor
   db2DeclareGlobalTempTable(): void { /* Temporary-table declaration has no query scope. */ }
   db2ExecuteImmediateStatement(): void { /* Dynamic SQL text is a literal. */ }
   db2CursorStatement(): void { /* Cursor control has no query scope. */ }
+  db2SetRegister(): void { /* The special-register name is a keyword, not a column. */ }
   db2ProcedureUnit(ctx: Record<string, CstNode[]>): void {
     procedureVisitor.db2ProcedureUnit(this, ctx);
   }

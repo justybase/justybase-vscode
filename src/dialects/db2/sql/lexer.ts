@@ -121,6 +121,119 @@ export const Db2CurrentUser = createToken({
 	pattern: /CURRENT\s+USER\b/i,
 });
 
+/**
+ * Settable Db2 special registers. Each register is a single token so
+ * `SET CURRENT …` statements expose the register in the CST instead of
+ * leaving it as an opaque command tail. The value after the register stays
+ * a command tail: registers accept identifiers, string/number literals and
+ * comma lists, and referencing another register (`SET CURRENT PATH = CURRENT
+ * PATH, …`) must keep working.
+ */
+export const Db2CurrentSqlid = createToken({
+	name: 'Db2CurrentSqlid',
+	pattern: /CURRENT\s+SQLID\b/i,
+});
+
+export const Db2CurrentDegree = createToken({
+	name: 'Db2CurrentDegree',
+	pattern: /CURRENT\s+DEGREE\b/i,
+});
+
+export const Db2CurrentExplainMode = createToken({
+	name: 'Db2CurrentExplainMode',
+	pattern: /CURRENT\s+EXPLAIN\s+MODE\b/i,
+});
+
+export const Db2CurrentExplainSnapshot = createToken({
+	name: 'Db2CurrentExplainSnapshot',
+	pattern: /CURRENT\s+EXPLAIN\s+SNAPSHOT\b/i,
+});
+
+export const Db2CurrentSnapshot = createToken({
+	name: 'Db2CurrentSnapshot',
+	pattern: /CURRENT\s+SNAPSHOT\b/i,
+});
+
+export const Db2CurrentLockTimeout = createToken({
+	name: 'Db2CurrentLockTimeout',
+	pattern: /CURRENT\s+LOCK\s+TIMEOUT\b/i,
+});
+
+export const Db2CurrentRefreshAge = createToken({
+	name: 'Db2CurrentRefreshAge',
+	pattern: /CURRENT\s+REFRESH\s+AGE\b/i,
+});
+
+export const Db2CurrentQueryOptimization = createToken({
+	name: 'Db2CurrentQueryOptimization',
+	pattern: /CURRENT\s+QUERY\s+OPTIMIZATION\b/i,
+});
+
+export const Db2CurrentQueryAcceleration = createToken({
+	name: 'Db2CurrentQueryAcceleration',
+	pattern: /CURRENT\s+QUERY\s+ACCELERATION\b/i,
+});
+
+export const Db2CurrentPath = createToken({
+	name: 'Db2CurrentPath',
+	pattern: /CURRENT\s+PATH\b/i,
+});
+
+export const Db2CurrentIsolation = createToken({
+	name: 'Db2CurrentIsolation',
+	pattern: /CURRENT\s+ISOLATION\b/i,
+});
+
+export const Db2CurrentMaintainedTableTypes = createToken({
+	name: 'Db2CurrentMaintainedTableTypes',
+	pattern: /CURRENT\s+MAINTAINED\s+TABLE\s+TYPES\s+FOR\s+OPTIMIZATION\b/i,
+});
+
+export const Db2CurrentDecfloatRoundingMode = createToken({
+	name: 'Db2CurrentDecfloatRoundingMode',
+	pattern: /CURRENT\s+DECFLOAT\s+ROUNDING\s+MODE\b/i,
+});
+
+export const Db2CurrentApplicationCompatibility = createToken({
+	name: 'Db2CurrentApplicationCompatibility',
+	pattern: /CURRENT\s+APPLICATION\s+COMPATIBILITY\b/i,
+});
+
+export const Db2CurrentPackagePath = createToken({
+	name: 'Db2CurrentPackagePath',
+	pattern: /CURRENT\s+PACKAGE\s+PATH\b/i,
+});
+
+export const Db2CurrentDefaultTransformGroup = createToken({
+	name: 'Db2CurrentDefaultTransformGroup',
+	pattern: /CURRENT\s+DEFAULT\s+TRANSFORM\s+GROUP\b/i,
+});
+
+export const Db2CurrentOptimizationProfile = createToken({
+	name: 'Db2CurrentOptimizationProfile',
+	pattern: /CURRENT\s+OPTIMIZATION\s+PROFILE\b/i,
+});
+
+export const Db2CurrentFederatedAsynchrony = createToken({
+	name: 'Db2CurrentFederatedAsynchrony',
+	pattern: /CURRENT\s+FEDERATED\s+ASYNCHRONY\b/i,
+});
+
+export const Db2CurrentImplicitXmlparseOption = createToken({
+	name: 'Db2CurrentImplicitXmlparseOption',
+	pattern: /CURRENT\s+IMPLICIT\s+XMLPARSE\s+OPTION\b/i,
+});
+
+export const Db2CurrentTemporalSystemTime = createToken({
+	name: 'Db2CurrentTemporalSystemTime',
+	pattern: /CURRENT\s+TEMPORAL\s+SYSTEM_TIME\b/i,
+});
+
+export const Db2CurrentTemporalBusinessTime = createToken({
+	name: 'Db2CurrentTemporalBusinessTime',
+	pattern: /CURRENT\s+TEMPORAL\s+BUSINESS_TIME\b/i,
+});
+
 export const Db2LanguageSql = createToken({
 	name: 'Db2LanguageSql',
 	pattern: /LANGUAGE\s+SQL\b/i,
@@ -207,6 +320,27 @@ const db2OnlyTokens = [
 	Db2CurrentTime,
 	Db2CurrentTimestamp,
 	Db2CurrentUser,
+	Db2CurrentSqlid,
+	Db2CurrentDegree,
+	Db2CurrentExplainMode,
+	Db2CurrentExplainSnapshot,
+	Db2CurrentSnapshot,
+	Db2CurrentLockTimeout,
+	Db2CurrentRefreshAge,
+	Db2CurrentQueryOptimization,
+	Db2CurrentQueryAcceleration,
+	Db2CurrentPath,
+	Db2CurrentIsolation,
+	Db2CurrentMaintainedTableTypes,
+	Db2CurrentDecfloatRoundingMode,
+	Db2CurrentApplicationCompatibility,
+	Db2CurrentPackagePath,
+	Db2CurrentDefaultTransformGroup,
+	Db2CurrentOptimizationProfile,
+	Db2CurrentFederatedAsynchrony,
+	Db2CurrentImplicitXmlparseOption,
+	Db2CurrentTemporalSystemTime,
+	Db2CurrentTemporalBusinessTime,
 	Db2LanguageSql,
 	Db2Nickname,
 	Db2Identity,

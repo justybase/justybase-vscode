@@ -30,8 +30,9 @@ describe('Db2 quality rules', () => {
 		]);
 	});
 
-	it('uses strict syntax validation', () => {
+	it('uses strict syntax validation and identifies as Db2', () => {
 		expect(db2SqlAuthoring.validation.syntaxValidationMode).toBe('strict');
+		expect(db2SqlAuthoring.validation.databaseKind).toBe('db2');
 	});
 
 	it('flags SELECT * as DB2001', () => {
@@ -160,6 +161,31 @@ describe('Db2 quality rules', () => {
 
 		const clean = trigger.replace('SELECT id FROM app.t;', 'SELECT id INTO v_id FROM app.t;');
 		expect(validator.validate(clean).warnings.map(warning => warning.code)).toEqual([]);
+	});
+
+	it('treats Db2 special registers as registers, not columns', () => {
+		const schemaProvider = new InMemorySchemaProvider(true);
+		schemaProvider.addTable({
+			name: 'SYSDUMMY1',
+			database: 'TESTDB',
+			schema: 'SYSIBM',
+			isCte: false,
+			isTempTable: false,
+			columns: [{ name: 'IBMREQD', dataType: 'CHAR(1)' }],
+		});
+		const validator = new SqlValidator(schemaProvider, db2SqlAuthoring.validation);
+
+		expect(
+			validator.validate('SELECT CURRENT SQLID FROM SYSIBM.SYSDUMMY1').warnings.map(warning => warning.code),
+		).toEqual([]);
+		expect(
+			validator
+				.validate('SELECT CURRENT PATH, CURRENT LOCK TIMEOUT FROM SYSIBM.SYSDUMMY1')
+				.warnings.map(warning => warning.code),
+		).toEqual([]);
+		expect(
+			validator.validate(`SET CURRENT SQLID = 'DB2INST1'`).warnings.map(warning => warning.code),
+		).toEqual([]);
 	});
 
 	it('emits SQL004 and SQL025 against an in-memory Db2 schema', () => {

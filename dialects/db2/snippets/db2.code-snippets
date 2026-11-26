@@ -205,5 +205,12 @@
       "${1:SELECT * FROM schema.table};"
     ],
     "description": "Db2 EXPLAIN PLAN FOR"
+  },
+  "SET CURRENT special register": {
+    "prefix": "db2-set-current",
+    "body": [
+      "SET CURRENT ${1:SQLID} = ${2:'DB2INST1'};"
+    ],
+    "description": "Db2 SET CURRENT special register"
   }
 }

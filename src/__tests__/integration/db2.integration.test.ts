@@ -731,6 +731,23 @@ describeIfConfigured('db2 integration', () => {
 			expect(String(rows[0].CURRENT_SCHEMA ?? '').trim()).toBe(schemaName);
 			expect(Number(rows[0].DUMMY_VALUE)).toBe(1);
 		});
+
+		it('executes SET CURRENT register statements', async () => {
+			const originalSchema = String(
+				await readScalar(connection, 'SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1 WITH UR'),
+			).trim();
+			try {
+				// The parser now exposes the register as a dedicated CST node;
+				// verify Db2 accepts the statement the editor accepts.
+				await connection.createCommand(`SET CURRENT SCHEMA ${schemaName}`).execute();
+				const currentSchema = String(
+					await readScalar(connection, 'SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1 WITH UR'),
+				).trim();
+				expect(currentSchema).toBe(schemaName);
+			} finally {
+				await connection.createCommand(`SET CURRENT SCHEMA ${originalSchema}`).execute();
+			}
+		});
 	});
 
 	describe('Db2 live completion (Oracle-parity E2E)', () => {

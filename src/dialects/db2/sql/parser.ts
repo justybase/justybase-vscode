@@ -104,6 +104,7 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	db2LabelStatement!: AnyRule;
 	db2ExportStatement!: AnyRule;
 	db2ImportStatement!: AnyRule;
+	db2SetRegister!: AnyRule;
 
 	public constructor() {
 		super(db2Lexer);
@@ -116,6 +117,8 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	protected getAdditionalPrimaryExpressionAlternatives(): OrAlternative[] {
 		// Db2 special registers lex as one multi-word token each, so every one
 		// must be an expression alternative or `SELECT CURRENT SCHEMA` fails.
+		// The settable registers double as readable special registers
+		// (`VALUES CURRENT SQLID`), so they belong here too.
 		return [
 			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDate) },
 			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTime) },
@@ -123,13 +126,35 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSchema) },
 			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentServer) },
 			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentUser) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSqlid) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDegree) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentExplainMode) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentExplainSnapshot) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSnapshot) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentLockTimeout) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentRefreshAge) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentQueryOptimization) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentQueryAcceleration) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentPath) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentIsolation) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentMaintainedTableTypes) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDecfloatRoundingMode) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentApplicationCompatibility) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentPackagePath) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDefaultTransformGroup) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentOptimizationProfile) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentFederatedAsynchrony) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentImplicitXmlparseOption) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTemporalSystemTime) },
+			{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTemporalBusinessTime) },
 		];
 	}
 
 	protected getNetezzaIdentifierTokens() {
-		// `SET CURRENT SCHEMA x`, `SET CURRENT SQLID`, and `SET CURRENT DEGREE`
-		// all route through `commandTail` → `identifier`, and the Db2 lexer emits
-		// those registers as one multi-word token each.
+		// `SET CURRENT <register>` values can reference another register
+		// (`SET CURRENT PATH = CURRENT PATH, …`), and the SQL PL body token
+		// soup runs through `commandTailToken` → `identifier`, so every
+		// register token must stay in the identifier surface.
 		return [
 			...super.getNetezzaIdentifierTokens(),
 			db2Lexer.Db2CurrentSchema,
@@ -138,6 +163,27 @@ export class Db2SqlParser extends NetezzaSqlParser {
 			db2Lexer.Db2CurrentTime,
 			db2Lexer.Db2CurrentTimestamp,
 			db2Lexer.Db2CurrentUser,
+			db2Lexer.Db2CurrentSqlid,
+			db2Lexer.Db2CurrentDegree,
+			db2Lexer.Db2CurrentExplainMode,
+			db2Lexer.Db2CurrentExplainSnapshot,
+			db2Lexer.Db2CurrentSnapshot,
+			db2Lexer.Db2CurrentLockTimeout,
+			db2Lexer.Db2CurrentRefreshAge,
+			db2Lexer.Db2CurrentQueryOptimization,
+			db2Lexer.Db2CurrentQueryAcceleration,
+			db2Lexer.Db2CurrentPath,
+			db2Lexer.Db2CurrentIsolation,
+			db2Lexer.Db2CurrentMaintainedTableTypes,
+			db2Lexer.Db2CurrentDecfloatRoundingMode,
+			db2Lexer.Db2CurrentApplicationCompatibility,
+			db2Lexer.Db2CurrentPackagePath,
+			db2Lexer.Db2CurrentDefaultTransformGroup,
+			db2Lexer.Db2CurrentOptimizationProfile,
+			db2Lexer.Db2CurrentFederatedAsynchrony,
+			db2Lexer.Db2CurrentImplicitXmlparseOption,
+			db2Lexer.Db2CurrentTemporalSystemTime,
+			db2Lexer.Db2CurrentTemporalBusinessTime,
 			// Command-leading Db2 words stay usable as unquoted object/column
 			// names. They are not reserved words, so excluding them would reject
 			// valid schemas that happen to be named `INDEX`, `REORG`, ...
@@ -417,6 +463,35 @@ export class Db2SqlParser extends NetezzaSqlParser {
 	/** `DECLARE c CURSOR …` / `OPEN c` / `FETCH … FROM c` / `CLOSE c` / `PREPARE`. */
 	private startsDb2CursorStatement(): boolean {
 		return /^(DECLARE|OPEN|FETCH|CLOSE|PREPARE|DESCRIBE)$/i.test(this.LA(1).image);
+	}
+
+	/** Token set accepted by `db2SetRegister`; the register name is a keyword. */
+	private startsDb2SetRegister(): boolean {
+		const type = this.LA(1).tokenType;
+		return (
+			type === db2Lexer.Db2CurrentSchema
+			|| type === db2Lexer.Db2CurrentSqlid
+			|| type === db2Lexer.Db2CurrentDegree
+			|| type === db2Lexer.Db2CurrentExplainMode
+			|| type === db2Lexer.Db2CurrentExplainSnapshot
+			|| type === db2Lexer.Db2CurrentSnapshot
+			|| type === db2Lexer.Db2CurrentLockTimeout
+			|| type === db2Lexer.Db2CurrentRefreshAge
+			|| type === db2Lexer.Db2CurrentQueryOptimization
+			|| type === db2Lexer.Db2CurrentQueryAcceleration
+			|| type === db2Lexer.Db2CurrentPath
+			|| type === db2Lexer.Db2CurrentIsolation
+			|| type === db2Lexer.Db2CurrentMaintainedTableTypes
+			|| type === db2Lexer.Db2CurrentDecfloatRoundingMode
+			|| type === db2Lexer.Db2CurrentApplicationCompatibility
+			|| type === db2Lexer.Db2CurrentPackagePath
+			|| type === db2Lexer.Db2CurrentDefaultTransformGroup
+			|| type === db2Lexer.Db2CurrentOptimizationProfile
+			|| type === db2Lexer.Db2CurrentFederatedAsynchrony
+			|| type === db2Lexer.Db2CurrentImplicitXmlparseOption
+			|| type === db2Lexer.Db2CurrentTemporalSystemTime
+			|| type === db2Lexer.Db2CurrentTemporalBusinessTime
+		);
 	}
 
 	private startsDb2CreateIndex(): boolean {
@@ -879,6 +954,50 @@ export class Db2SqlParser extends NetezzaSqlParser {
 				{ ALT: () => this.CONSUME(baseLexer.Fetch) },
 			]);
 			this.SUBRULE(this.commandTail);
+		});
+
+		/**
+		 * `SET CURRENT <register> <value>` — Db2 special registers. Each register
+		 * name is a dedicated multi-word token, so the CST records which register
+		 * is set instead of leaving the whole statement as a command tail. The
+		 * value stays an offset-stable tail because registers accept identifiers,
+		 * string/number literals and comma lists, and can reference another
+		 * register (`SET CURRENT PATH = CURRENT PATH, SYSIBM`).
+		 */
+		this.OVERRIDE_RULE('setStatement', () => {
+			this.CONSUME(baseLexer.Set);
+			this.OPTION({
+				GATE: () => this.startsDb2SetRegister(),
+				DEF: () => this.SUBRULE(this.db2SetRegister),
+			});
+			this.SUBRULE(this.commandTail);
+		});
+
+		this.RULE('db2SetRegister', () => {
+			this.OR([
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSchema) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSqlid) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDegree) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentExplainMode) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentExplainSnapshot) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentSnapshot) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentLockTimeout) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentRefreshAge) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentQueryOptimization) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentQueryAcceleration) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentPath) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentIsolation) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentMaintainedTableTypes) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDecfloatRoundingMode) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentApplicationCompatibility) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentPackagePath) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentDefaultTransformGroup) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentOptimizationProfile) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentFederatedAsynchrony) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentImplicitXmlparseOption) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTemporalSystemTime) },
+				{ ALT: () => this.CONSUME(db2Lexer.Db2CurrentTemporalBusinessTime) },
+			]);
 		});
 
 		/**

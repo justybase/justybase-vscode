@@ -110,6 +110,19 @@ describe('Db2 TextMate injection', () => {
 		}
 	});
 
+	it('scopes the extended SET CURRENT register set', async () => {
+		const tokens = await tokenize(
+			'SET CURRENT TEMPORAL SYSTEM_TIME = \'2024-01-01\'; SET CURRENT DECFLOAT ROUNDING MODE ROUND_HALF_EVEN; SET CURRENT MAINTAINED TABLE TYPES FOR OPTIMIZATION SYSTEM',
+		);
+		for (const needle of [
+			'CURRENT TEMPORAL SYSTEM_TIME',
+			'CURRENT DECFLOAT ROUNDING MODE',
+			'CURRENT MAINTAINED TABLE TYPES FOR OPTIMIZATION',
+		]) {
+			expect(scopeOf(tokens, needle).join(' ')).toContain('keyword.other.db2');
+		}
+	});
+
 	it('scopes SQL PL control words', async () => {
 		const tokens = await tokenize('END IF;');
 		expect(scopeOf(tokens, 'END IF').join(' ')).toContain('keyword.control.sqlpl.db2');
