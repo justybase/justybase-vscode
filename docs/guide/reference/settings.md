@@ -23,4 +23,4 @@ The table below is generated from the root and companion extension manifests dur
 - `justybase.copilot.*`, `justybase.mcp.*`, and `justybase.ai.tools` control AI availability, context, privacy confirmation, and per-surface tool access. Read-only is the default for every surface.
 - `justybase.importWizard.*` controls preview and background validation.
 
-Use the exact keys in the generated table. The current query controls are `justybase.query.rowLimit`, `justybase.query.enforceRowLimitWhenDiskBacked`, and `justybase.query.executionTimeout`.
+Use the exact keys in the generated table. The current query controls are `justybase.query.rowLimit` and `justybase.query.executionTimeout`.

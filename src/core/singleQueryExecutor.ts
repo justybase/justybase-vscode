@@ -33,7 +33,6 @@ import {
   getQueryConfig,
   isCancellationError,
 } from "./queryBatchExecutor";
-import { resolveQueryMaxRows } from "./resultDataProvider/queryRowLimit";
 import {
   isBusyConnectionError,
   isConnectionRecoveryError,
@@ -274,7 +273,6 @@ export async function runQueryRaw(
       metadataSession,
       isExecutionCurrent,
       onMetadataExecutionComplete,
-      isUserQuery,
     );
     assertExecutionCurrent(isExecutionCurrent);
 
@@ -340,7 +338,6 @@ export async function runQueryRaw(
           metadataSession,
           isExecutionCurrent,
           onMetadataExecutionComplete,
-          isUserQuery,
         );
         assertExecutionCurrent(isExecutionCurrent);
 
@@ -446,15 +443,9 @@ export async function executeRawQuery(
   metadataSession?: MetadataQuerySession,
   isExecutionCurrent?: ExecutionCurrentCheck,
   onMetadataExecutionComplete?: (timing: MetadataQueryTiming) => void,
-  isUserQuery = true,
 ): Promise<QueryResult> {
   assertExecutionCurrent(isExecutionCurrent);
   const { queryTimeout, rowLimit } = getQueryConfig();
-  // User queries stream in full to SQLite when disk-backed results are
-  // available; internal catalog/analysis queries keep the configured cap.
-  const effectiveMaxRows = isUserQuery
-    ? resolveQueryMaxRows(rowLimit, maxRows)
-    : (maxRows ?? rowLimit);
   const target: {
     result?: QueryResult;
     retrying: boolean;
@@ -472,7 +463,7 @@ export async function executeRawQuery(
           keepConnectionOpen,
           documentUri,
           queryToExecute,
-          effectiveMaxRows,
+          maxRows,
           logger,
           macroValues,
           timeoutSeconds,
@@ -538,7 +529,7 @@ export async function executeRawQuery(
     statements: [statement],
     delivery: 'buffered',
     connectionMode: documentUri && keepConnectionOpen && !connectionOverride ? 'persistent' : 'transient',
-    maxRows: effectiveMaxRows,
+    maxRows: maxRows ?? rowLimit,
     timeoutSeconds: timeoutSeconds ?? queryTimeout,
     readOnly: false,
     retryPolicy: isRetryAttempt ? 'disabled' : 'safe-read-only-on-broken-connection',

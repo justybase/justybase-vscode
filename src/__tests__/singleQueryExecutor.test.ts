@@ -971,38 +971,6 @@ describe('singleQueryExecutor', () => {
             expect(mockConnManager.setDocumentLastSessionId).toHaveBeenCalled();
         });
 
-        it('streams a full user query when disk-backed results are available', async () => {
-            mockExecuteAndFetch.mockResolvedValue({
-                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
-                error: null,
-            });
-
-            await executeRawQuery(
-                mockConnManager, 'testConn', true, undefined,
-                'SELECT 1', undefined, logger,
-            );
-
-            const callArgs = mockExecuteAndFetch.mock.calls[0];
-            expect(callArgs[2]).toBe(Number.MAX_SAFE_INTEGER);
-        });
-
-        it('keeps the configured rowLimit for non-user queries', async () => {
-            mockExecuteAndFetch.mockResolvedValue({
-                results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],
-                error: null,
-            });
-
-            await executeRawQuery(
-                mockConnManager, 'testConn', true, undefined,
-                'SELECT 1', undefined, logger, {}, undefined, false,
-                undefined, undefined, false, undefined, undefined, undefined,
-                undefined, undefined, false,
-            );
-
-            const callArgs = mockExecuteAndFetch.mock.calls[0];
-            expect(callArgs[2]).toBe(200000);
-        });
-
         it('should use maxRows when provided instead of rowLimit', async () => {
             mockExecuteAndFetch.mockResolvedValue({
                 results: [{ columns: [{ name: 'x' }], rows: [[1]], limitReached: false }],

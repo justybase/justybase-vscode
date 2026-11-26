@@ -4380,12 +4380,7 @@
           "default": 200000,
           "minimum": 1,
           "maximum": 10000000,
-          "description": "Maximum number of rows to fetch per query execution when disk-backed results are not available"
-        },
-        "justybase.query.enforceRowLimitWhenDiskBacked": {
-          "type": "boolean",
-          "default": false,
-          "description": "Keep applying query.rowLimit to user queries even when disk-backed results are available. When off, the full result streams to SQLite instead of being truncated at the row limit."
+          "description": "Maximum number of rows to fetch per query execution"
         },
         "justybase.query.executionTimeout": {
           "type": "number",
