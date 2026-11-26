@@ -35,6 +35,18 @@ describe('Db2 quality rules', () => {
 		expect(db2SqlAuthoring.validation.databaseKind).toBe('db2');
 	});
 
+	it('offers the SET CURRENT registers in completion', () => {
+		expect(db2SqlAuthoring.completionKeywords).toEqual(
+			expect.arrayContaining([
+				'CURRENT SQLID',
+				'CURRENT EXPLAIN MODE',
+				'CURRENT LOCK TIMEOUT',
+				'CURRENT MAINTAINED TABLE TYPES FOR OPTIMIZATION',
+				'CURRENT TEMPORAL SYSTEM_TIME',
+			]),
+		);
+	});
+
 	it('flags SELECT * as DB2001', () => {
 		const issues = ruleDB2001.check('SELECT * FROM T');
 		expect(issues).toHaveLength(1);
