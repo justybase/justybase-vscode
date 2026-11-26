@@ -112,6 +112,40 @@ describeIfSqlite('ResultStateManager disk-backed migration', () => {
         expect(resultSet.diskStoreId).toBeUndefined();
     });
 
+    it('keeps ingesting rows into SQLite after the row limit is exceeded', () => {
+        const sourceUri = 'file:///disk-beyond-limit.sql';
+        manager.startExecution(sourceUri);
+
+        manager.appendStreamingChunk(sourceUri, {
+            columns: [{ name: 'id', type: 'INTEGER' }],
+            rows: [[1], [2], [3], [4], [5]],
+            isFirstChunk: true,
+            isLastChunk: false,
+            totalRowsSoFar: 5,
+            limitReached: false,
+        }, 'SELECT * FROM t');
+
+        const resultSet = manager.resultsMap.get(sourceUri)![1];
+        expect(resultSet.storageMode).toBe('sqlite');
+
+        for (let start = 6; start <= 12; start += 2) {
+            manager.appendStreamingChunk(sourceUri, {
+                columns: [],
+                rows: [[start], [start + 1]],
+                isFirstChunk: false,
+                isLastChunk: false,
+                totalRowsSoFar: start + 1,
+                limitReached: false,
+            }, 'SELECT * FROM t');
+        }
+
+        expect(resultSet.totalRowCount).toBe(13);
+        expect(resultSet.limitReached).toBe(false);
+        expect(manager.getDiskBackedRows(resultSet.diskStoreId!, 0, 20)).toEqual(
+            Array.from({ length: 13 }, (_, index) => [index + 1]),
+        );
+    });
+
     it('migrates to SQLite and clears host data when threshold is reached', () => {
         const sourceUri = 'file:///disk-test.sql';
         manager.startExecution(sourceUri);

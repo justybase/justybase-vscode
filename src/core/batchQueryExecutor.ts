@@ -40,6 +40,7 @@ import {
     skipLeadingSqlTrivia,
 } from './queryRetrySafety';
 import { ensureQueryErrorMessage } from './errorPresentation';
+import { resolveQueryMaxRows } from './resultDataProvider/queryRowLimit';
 
 const SLOW_STREAMING_PHASE_MS = 1000;
 
@@ -659,7 +660,7 @@ async function runBatchWithSharedOrchestrator(
             })),
             delivery: params.mode === 'streaming' ? 'streaming' : 'buffered',
             connectionMode: params.documentUri && keepConnectionOpen ? 'persistent' : 'transient',
-            maxRows: params.maxRows ?? getQueryConfig().rowLimit,
+            maxRows: resolveQueryMaxRows(getQueryConfig().rowLimit, params.maxRows),
             timeoutSeconds: getQueryConfig().queryTimeout,
             readOnly: false,
             retryPolicy: params.batchOptions.retryOnBrokenConnection === false || hasExecutableMacro

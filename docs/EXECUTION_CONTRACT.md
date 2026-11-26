@@ -354,7 +354,8 @@ See [SQL_RESULTS_FILTERING.md](./SQL_RESULTS_FILTERING.md) for how **Loaded rows
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `justybase.query.executionTimeout` | 3600 | Query execution timeout in seconds |
-| `justybase.query.rowLimit` | 200000 | Maximum rows to fetch per execution |
+| `justybase.query.rowLimit` | 200000 | Maximum rows to fetch per execution without disk-backed storage |
+| `justybase.query.enforceRowLimitWhenDiskBacked` | false | Keep the row cap for user queries even when disk-backed results are available |
 | `justybase.results.diskBackedResults.memoryRowThreshold` | 25000 | Host RAM spill trigger |
 | `justybase.results.diskBackedResults.rowThreshold` | 500000 | Hard upper spill bound |
 | `justybase.results.diskBackedResults.idleSpillMinutes` | 0 | Idle spill (0 = off) |

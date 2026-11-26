@@ -15,7 +15,7 @@ The result panel supports **three complementary execution layers**. They are not
 ## Loaded rows (client / TanStack)
 
 - Filters, sort, grouping, and footer aggregations (`scope: visible`) run on rows **already loaded** in the webview.
-- Bounded by `justybase.query.rowLimit` (default 200,000).
+- Bounded by `justybase.query.rowLimit` (default 200,000) for memory-only results. When disk-backed results are available, user queries are streamed in full to SQLite and the cap is not applied.
 - Best for small and medium results; supports **inline cell editing**.
 - Global search scans loaded rows (or a background worker when ≥20,000 rows).
 
@@ -69,7 +69,8 @@ Both scopes can be pinned on different columns in the same result set.
 
 | Setting | Default | Role |
 |---------|---------|------|
-| `justybase.query.rowLimit` | 200000 | Max rows fetched from DB |
+| `justybase.query.rowLimit` | 200000 | Max rows fetched from DB when disk-backed results are not available |
+| `justybase.query.enforceRowLimitWhenDiskBacked` | false | Keep applying the row cap to user queries even with disk-backed results enabled |
 | `justybase.results.diskBackedResults.enabled` | true | Enable SQLite spill |
 | `justybase.results.diskBackedResults.memoryRowThreshold` | 25000 | Spill trigger |
 | `justybase.results.diskBackedResults.rowThreshold` | 500000 | Upper spill bound |
